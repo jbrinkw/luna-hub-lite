@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(10);
+SELECT plan(11);
 
 -- Setup: create two test users
 SELECT tests.create_supabase_user('key_owner', 'keyowner@test.com');
@@ -95,7 +95,20 @@ SELECT throws_ok(
   'User B cannot INSERT api_key with User A''s user_id'
 );
 
--- Test 9: User A can DELETE own key
+-- Test 9: User B cannot UPDATE (revoke) User A's keys
+SELECT tests.authenticate_as('key_other');
+UPDATE hub.api_keys SET revoked_at = now()
+WHERE user_id = tests.get_supabase_uid('key_owner');
+
+SELECT tests.authenticate_as('key_owner');
+SELECT is(
+  (SELECT count(*)::integer FROM hub.api_keys
+   WHERE user_id = tests.get_supabase_uid('key_owner') AND revoked_at IS NULL),
+  2,
+  'User B cannot revoke User A''s api_keys'
+);
+
+-- Test 10: User A can DELETE own key
 SELECT tests.authenticate_as('key_owner');
 
 DELETE FROM hub.api_keys WHERE api_key_hash = 'hash_jkl012';
@@ -106,7 +119,7 @@ SELECT is(
   'User A can DELETE own api_key'
 );
 
--- Test 10: User B cannot DELETE User A's keys
+-- Test 11: User B cannot DELETE User A's keys
 SELECT tests.authenticate_as('key_other');
 
 DELETE FROM hub.api_keys WHERE user_id = tests.get_supabase_uid('key_owner');

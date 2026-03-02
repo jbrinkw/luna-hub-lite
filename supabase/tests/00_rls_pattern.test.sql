@@ -5,7 +5,7 @@
 
 BEGIN;
 
-SELECT plan(6);
+SELECT plan(8);
 
 -- Create test users via Supabase Auth
 -- These will auto-create profiles via the handle_new_user trigger
@@ -67,6 +67,26 @@ SELECT throws_ok(
   '42501',
   NULL,
   'Anon role cannot UPDATE profiles (permission denied)'
+);
+
+-- Test 7: Authenticated user cannot INSERT into profiles (no INSERT policy)
+SELECT tests.authenticate_as('user_a');
+SELECT throws_ok(
+  format(
+    'INSERT INTO hub.profiles (user_id, display_name, timezone, day_start_hour) VALUES (%L, ''Fake'', ''UTC'', 6)',
+    tests.get_supabase_uid('user_a')
+  ),
+  '42501',
+  NULL,
+  'Authenticated user cannot INSERT directly into profiles'
+);
+
+-- Test 8: Authenticated user cannot DELETE their own profile (no DELETE policy)
+-- With no DELETE policy, RLS silently filters all rows (0 affected, no error).
+DELETE FROM hub.profiles WHERE user_id = tests.get_supabase_uid('user_a');
+SELECT ok(
+  EXISTS (SELECT 1 FROM hub.profiles WHERE user_id = tests.get_supabase_uid('user_a')),
+  'Authenticated user cannot DELETE their own profile (row still exists)'
 );
 
 -- Cleanup
