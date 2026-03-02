@@ -8,3 +8,4 @@ dist/
 .vite/
 .wrangler/
 supabase/.temp/
+.worktrees/
