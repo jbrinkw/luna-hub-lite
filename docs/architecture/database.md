@@ -5,11 +5,40 @@
 | Schema | Owner | Purpose |
 |--------|-------|---------|
 | `hub` | Luna Hub | User profiles (including `day_start_hour`, timezone), app activation records, MCP API keys (SHA-256 hashed), user tool toggles, extension settings (encrypted via Vault) |
-| `coachbyte` | CoachByte | Exercises, daily logs, planned/completed sets, splits, PRs, timers |
+| `coachbyte` | CoachByte | Exercises, daily logs, planned/completed sets, splits, timers |
 | `chefbyte` | ChefByte | Products, `stock_lots` (lot-based inventory + expiration), recipes, meal plans, shopping lists, macros, LiquidTrack device IDs/import keys, liquid events |
 | `private` | Platform | All SECURITY DEFINER functions (not exposed via API). Each function includes `SET search_path = ''`. |
 
-Cross-schema queries from the frontend use RPC functions in the `private` schema. The Supabase JS client `.from()` defaults to one schema; use `.schema('name')` for cross-schema access.
+The `private` schema is **not exposed via PostgREST** — it has no REST API endpoints. The `authenticated` role has no USAGE on `private`; only `service_role` does. Functions in `private` are called only by triggers, other DB functions, and the MCP Worker (which uses `service_role`).
+
+**Frontend-callable RPC pattern:** For multi-step operations the frontend needs to trigger, each module schema has thin wrapper functions that delegate to private. The wrapper authenticates via `auth.uid()` and delegates to the private implementation:
+
+```sql
+CREATE FUNCTION coachbyte.ensure_daily_plan(p_day DATE)
+RETURNS JSONB LANGUAGE sql SECURITY DEFINER SET search_path = ''
+AS $$ SELECT private.ensure_daily_plan((SELECT auth.uid()), p_day); $$;
+GRANT EXECUTE ON FUNCTION coachbyte.ensure_daily_plan(DATE) TO authenticated;
+```
+
+The Supabase JS client calls wrappers: `supabase.schema('coachbyte').rpc('ensure_daily_plan', { p_day })`.
+
+**Frontend-callable wrappers needed:**
+
+| Wrapper Schema | Function | Delegates To |
+|----------------|----------|-------------|
+| `hub` | `activate_app(p_app_name)` | `private.activate_app(uid, p_app_name)` |
+| `hub` | `deactivate_app(p_app_name)` | `private.deactivate_app(uid, p_app_name)` |
+| `coachbyte` | `ensure_daily_plan(p_day)` | `private.ensure_daily_plan(uid, p_day)` |
+| `coachbyte` | `complete_next_set(p_plan_id, p_reps, p_load)` | `private.complete_next_set(uid, ...)` |
+| `chefbyte` | `get_daily_macros(p_logical_date)` | `private.get_daily_macros(uid, p_date)` |
+| `chefbyte` | `mark_meal_done(p_meal_id)` | `private.mark_meal_done(uid, p_meal_id)` |
+| `chefbyte` | `consume_product(p_product_id, p_qty, p_unit, p_log_macros)` | `private.consume_product(uid, ...)` |
+| `chefbyte` | `sync_meal_plan_to_shopping(p_days)` | `private.sync_meal_plan_to_shopping(uid, p_days)` |
+| `chefbyte` | `import_shopping_to_inventory()` | `private.import_shopping_to_inventory(uid)` |
+
+**Internal-only (no wrapper):** `private.handle_new_user()` (trigger), `private.get_logical_date()` (utility called by other functions).
+
+The Supabase JS client `.from()` defaults to one schema; use `.schema('name')` for cross-schema table access.
 
 ## Per-User Isolation
 
@@ -37,9 +66,16 @@ CREATE FUNCTION private.get_logical_date(
   ts TIMESTAMPTZ,
   tz TEXT,
   day_start_hour INTEGER
-) RETURNS DATE AS $$
-  SELECT (ts AT TIME ZONE tz - (day_start_hour || ' hours')::INTERVAL)::DATE;
-$$ LANGUAGE SQL IMMUTABLE;
+) RETURNS DATE
+LANGUAGE plpgsql
+IMMUTABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+BEGIN
+  RETURN (ts AT TIME ZONE tz - (day_start_hour || ' hours')::INTERVAL)::DATE;
+END;
+$$;
 ```
 
 Every date-sensitive table stores a `logical_date DATE` column computed at insert time using this function. All queries filter on `logical_date` for fast indexed access. The function is the source of truth at write time; the stored column is the source of truth at read time.
@@ -69,8 +105,8 @@ All quantity columns (stock, servings, recipe amounts, shopping quantities) use 
 
 | Logic Type | Runs In | Examples |
 |------------|---------|---------|
-| Simple CRUD | Supabase client SDK (direct from frontend) | Add a planned set, update a product name, mark a meal done |
-| Multi-step transactions | Database functions (plpgsql, SECURITY DEFINER in `private` schema) | Ensure today's plan + clone from split, complete a set + set timer + update queue, consume product + log macros + update stock |
+| Simple CRUD | Supabase client SDK (direct from frontend) | Add a planned set, update a product name, toggle a tool |
+| Multi-step transactions | Database functions (plpgsql, SECURITY DEFINER in `private` schema, exposed via thin wrappers in module schemas) | Ensure today's plan + clone from split, complete a set + return rest_seconds, mark meal done (consume ingredients + log macros or create [MEAL] lot), consume product (nearest-expiry lot depletion + optional macro log), import shopping to inventory (bulk lot creation + clear items), sync meal plan to shopping |
 | External API calls | Supabase Edge Functions | Walmart scraping (via third-party scraper API, already implemented), OpenFoodFacts + Claude Haiku 4.5 product analysis, LiquidTrack ingestion |
 | MCP tool execution | Cloudflare Worker → Supabase RPC via Supavisor (for app tools) or direct API call (for extension tools) | All tool calls from external AI clients |
 

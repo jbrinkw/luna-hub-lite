@@ -45,11 +45,12 @@ Strength training copilot: workout programming, set tracking, PR monitoring, res
 - Split notes field for freeform programming context
 
 ### PR Tracker
-- Tracked exercises list (user selects which to monitor)
-- Actual PRs aggregated from completed sets (best load at each rep count per exercise)
-- Epley 1RM calculation rules: 1-rep sets use actual weight (not Epley), failed sets (0 reps) excluded, e1RM capped at 10 reps (accuracy degrades beyond 10)
-- PR update uses atomic improvement guard: `UPDATE exercise_prs SET e1rm = $1 WHERE user_id = $2 AND exercise_id = $3 AND e1rm < $1`
-- PR alerts when a new best is logged
+- PRs derived from completed_sets — no separate PR storage table
+- For each exercise with completed sets, the best load at each rep count is computed
+- Epley 1RM formula: `load × (1 + reps/30)`. All reps feed the formula (no rep cap). 1-rep sets use actual weight (not Epley). Failed sets (0 reps) excluded.
+- UI displays estimated 1RM through 10RM as rep-range pills
+- Any exercise with completed sets appears in the PR tracker automatically — no separate tracking management
+- PR alerts when a computed best exceeds previous session's best
 
 ### History
 - Keyset pagination: `WHERE user_id = $1 AND plan_date < $cursor ORDER BY plan_date DESC LIMIT 20`
@@ -65,7 +66,6 @@ Strength training copilot: workout programming, set tracking, PR monitoring, res
 
 ### Settings
 - Default rest duration
-- Tracked exercise management
 
 ## CoachByte UX (Ionic)
 
@@ -78,7 +78,7 @@ Desktop-first with responsive design.
 - **Today's Workout** (default landing page): Next-in-queue completion section at top showing current exercise, target reps/load, override inputs, complete button, and inline countdown timer (seeded from next set's rest duration). Timer controls: pause/resume, reset, start custom duration. Below: two-column layout — set queue on left (remaining planned sets with exercise, reps, load, rest), completed sets on right (read-only log of finished sets). Ad-hoc set button. Summary textarea at bottom for session notes. Relative loads show both percentage and calculated weight (e.g., "85% of 371").
 - **History**: Day list table with Date, Summary, Sets (completed/total) columns. Filter by exercise dropdown. Click a day to open its detail (same layout as Today's Workout, read-only for past days). Keyset pagination with Load More.
 - **Split Planner**: Vertical day-by-day layout (Sunday through Saturday). Each day has a label and editable table: Exercise, Reps, Load, Relative (% checkbox), Rest, Order. Add Exercise button per day. Split notes textarea at bottom.
-- **PR Tracker**: Exercise cards — each card shows exercise name, estimated 1RM, and rep-range pills (e.g., "5 rep: 225 lb", "3 rep: 235 lb"). Tracked exercise management section below: text input to add exercises, existing tracked exercises shown as removable pills. PR alerts as toast notifications.
+- **PR Tracker**: Exercise cards for every exercise with history — each card shows exercise name, estimated 1RM, and rep-range pills (1RM through 10RM, e.g., "5RM: 225 lb", "3RM: 235 lb"). PR alerts as toast notifications.
 - **Settings**: Default rest duration input. Plate calculator settings (bar weight, available plate sizes). Exercise library with search, showing global and custom exercises with delete for custom.
 
 **Shared across layouts:**
@@ -104,7 +104,7 @@ Desktop-first with responsive design.
 ## CoachByte Technical Notes
 
 - **No edge functions required.** All operations are Supabase client SDK calls or database function RPCs via Supavisor.
-- **Realtime subscriptions** on `planned_sets`, `completed_sets`, and `timer` tables filtered by `user_id`. Additional filtering (today's log) applied client-side.
+- **Realtime subscriptions** on `planned_sets`, `completed_sets`, and `timers` tables filtered by `user_id`. Additional filtering (today's log) applied client-side.
 - **Bootstrap function** is idempotent and safe for concurrent calls (UNIQUE constraint + ON CONFLICT).
 - **Day boundary** computed via `private.get_logical_date()`, stored as `logical_date` on daily plans and completed sets.
 - **Global exercise seed** runs as part of CoachByte activation.
