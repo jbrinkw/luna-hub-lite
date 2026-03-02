@@ -63,6 +63,11 @@ AS $$
 $$;
 
 -- Grant table permissions
-GRANT ALL ON ALL TABLES IN SCHEMA hub TO authenticated;
-GRANT ALL ON ALL TABLES IN SCHEMA coachbyte TO authenticated;
-GRANT ALL ON ALL TABLES IN SCHEMA chefbyte TO authenticated;
+GRANT ALL ON ALL TABLES IN SCHEMA hub TO authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA coachbyte TO authenticated, service_role;
+GRANT ALL ON ALL TABLES IN SCHEMA chefbyte TO authenticated, service_role;
+
+-- Default grants for future tables in these schemas
+ALTER DEFAULT PRIVILEGES IN SCHEMA hub GRANT ALL ON TABLES TO authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA coachbyte GRANT ALL ON TABLES TO authenticated, service_role;
+ALTER DEFAULT PRIVILEGES IN SCHEMA chefbyte GRANT ALL ON TABLES TO authenticated, service_role;

@@ -10,6 +10,9 @@
     "build": "turbo run build",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
+    "test:integration": "pnpm --filter @luna-hub/web test:integration",
+    "test:e2e": "pnpm --filter @luna-hub/web test:e2e",
+    "test:db": "npx supabase test db",
     "db:types": "pnpm --filter @luna-hub/db-types generate",
     "clean": "turbo run clean"
   },

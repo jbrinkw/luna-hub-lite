@@ -9,3 +9,5 @@ dist/
 .wrangler/
 supabase/.temp/
 .worktrees/
+playwright-report/
+test-results/
