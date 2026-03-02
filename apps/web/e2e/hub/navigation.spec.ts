@@ -41,7 +41,7 @@ test.describe('Hub navigation', () => {
   test('click Account in side nav -> /hub/account', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'account');
     try {
-      await page.getByText('Account').click();
+      await page.getByLabel('Hub navigation').getByText('Account').click();
       await expect(page).toHaveURL(/\/hub\/account/);
     } finally {
       await cleanup();
@@ -102,7 +102,7 @@ test.describe('Hub navigation', () => {
   test('module switcher: click CoachByte -> /coach', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'coach-switch');
     try {
-      await page.getByText('CoachByte').click();
+      await page.locator('ion-segment-button[value="/coach"]').click();
       await expect(page).toHaveURL(/\/coach/, { timeout: 5000 });
     } finally {
       await cleanup();
@@ -112,7 +112,7 @@ test.describe('Hub navigation', () => {
   test('module switcher: click ChefByte -> /chef', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'chef-switch');
     try {
-      await page.getByText('ChefByte').click();
+      await page.locator('ion-segment-button[value="/chef"]').click();
       await expect(page).toHaveURL(/\/chef/, { timeout: 5000 });
     } finally {
       await cleanup();

@@ -73,7 +73,7 @@ test.describe('App activation', () => {
 
       // Click Deactivate
       await page.getByRole('button', { name: /deactivate/i }).first().click();
-      await expect(page.getByText(/are you sure/i)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('Are you sure you want to deactivate CoachByte?')).toBeVisible({ timeout: 5000 });
     } finally {
       await cleanup();
     }
