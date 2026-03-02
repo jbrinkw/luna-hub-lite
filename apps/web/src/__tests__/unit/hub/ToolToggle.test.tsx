@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ToolToggle } from '@/components/hub/ToolToggle';
@@ -9,6 +9,10 @@ const tools = [
 ];
 
 describe('ToolToggle', () => {
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
   it('renders tool names and descriptions', () => {
     render(<ToolToggle tools={tools} onToggle={vi.fn()} />);
     expect(screen.getByText('COACHBYTE_LOG_SET')).toBeInTheDocument();
@@ -39,7 +43,7 @@ describe('ToolToggle', () => {
   });
 
   it('shows spinner when loading', () => {
-    render(<ToolToggle tools={[]} loading onToggle={vi.fn()} />);
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    const { container } = render(<ToolToggle tools={[]} loading onToggle={vi.fn()} />);
+    expect(container.querySelector('ion-spinner')).toBeInTheDocument();
   });
 });

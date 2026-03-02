@@ -89,7 +89,7 @@ vi.mock('@ionic/react', () => {
           }, typeof btn === 'string' ? btn : btn.text),
         ),
       ) : null,
-    IonSpinner: () => React.createElement('span', { 'aria-label': 'loading' }, 'Loading...'),
+    IonSpinner: () => React.createElement('ion-spinner', { 'aria-label': 'loading' }),
     IonChip: wrap('span'),
     IonNote: wrap('span'),
     IonTextarea: React.forwardRef(({ label, value, onIonInput, ...props }: any, ref: any) =>
