@@ -33,11 +33,13 @@ describe('Profile CRUD', () => {
     const { userId, client } = await createTestUser('prof-name');
     userIds.push(userId);
 
-    await client
+    const { error: updateError } = await client
       .schema('hub')
       .from('profiles')
       .update({ display_name: 'Updated Name' })
       .eq('user_id', userId);
+
+    expect(updateError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -53,11 +55,13 @@ describe('Profile CRUD', () => {
     const { userId, client } = await createTestUser('prof-tz');
     userIds.push(userId);
 
-    await client
+    const { error: updateError } = await client
       .schema('hub')
       .from('profiles')
       .update({ timezone: 'Europe/London' })
       .eq('user_id', userId);
+
+    expect(updateError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -73,11 +77,13 @@ describe('Profile CRUD', () => {
     const { userId, client } = await createTestUser('prof-dsh');
     userIds.push(userId);
 
-    await client
+    const { error: updateError } = await client
       .schema('hub')
       .from('profiles')
       .update({ day_start_hour: 0 })
       .eq('user_id', userId);
+
+    expect(updateError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -93,11 +99,13 @@ describe('Profile CRUD', () => {
     const { userId, client } = await createTestUser('prof-reload');
     userIds.push(userId);
 
-    await client
+    const { error: updateError } = await client
       .schema('hub')
       .from('profiles')
       .update({ display_name: 'Reloaded', timezone: 'Asia/Tokyo', day_start_hour: 22 })
       .eq('user_id', userId);
+
+    expect(updateError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -117,11 +125,13 @@ describe('Profile CRUD', () => {
     const { userId, client } = await createTestUser('prof-multi');
     userIds.push(userId);
 
-    await client
+    const { error: updateError } = await client
       .schema('hub')
       .from('profiles')
       .update({ display_name: 'Multi', timezone: 'UTC', day_start_hour: 12 })
       .eq('user_id', userId);
+
+    expect(updateError).toBeNull();
 
     const { data } = await client
       .schema('hub')

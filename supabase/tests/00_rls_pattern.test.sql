@@ -32,10 +32,12 @@ SELECT is(
 );
 
 -- Test 3: User A can UPDATE their own profile
+-- Use Asia/Tokyo (not the default America/New_York) to prove UPDATE actually took effect
 SELECT tests.authenticate_as('user_a');
-UPDATE hub.profiles SET timezone = 'America/New_York' WHERE user_id = :'user_a_id';
-SELECT ok(
-  (SELECT timezone FROM hub.profiles WHERE user_id = :'user_a_id') = 'America/New_York',
+UPDATE hub.profiles SET timezone = 'Asia/Tokyo' WHERE user_id = :'user_a_id';
+SELECT is(
+  (SELECT timezone FROM hub.profiles WHERE user_id = :'user_a_id'),
+  'Asia/Tokyo',
   'User A can UPDATE their own profile'
 );
 
@@ -46,7 +48,7 @@ UPDATE hub.profiles SET timezone = 'Europe/London' WHERE user_id = :'user_a_id';
 SELECT tests.authenticate_as('user_a');
 SELECT is(
   (SELECT timezone FROM hub.profiles WHERE user_id = :'user_a_id'),
-  'America/New_York',
+  'Asia/Tokyo',
   'User B cannot UPDATE User A''s profile (value unchanged)'
 );
 

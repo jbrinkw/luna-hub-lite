@@ -15,13 +15,15 @@ describe('Extension settings', () => {
     const { userId, client } = await createTestUser('ext-enable');
     userIds.push(userId);
 
-    await client
+    const { error: upsertError } = await client
       .schema('hub')
       .from('extension_settings')
       .upsert(
         { user_id: userId, extension_name: 'obsidian', enabled: true },
         { onConflict: 'user_id,extension_name' },
       );
+
+    expect(upsertError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -34,11 +36,11 @@ describe('Extension settings', () => {
     expect(data?.enabled).toBe(true);
   });
 
-  it('save credentials stores encrypted value', async () => {
+  it('save credentials stores value', async () => {
     const { userId, client } = await createTestUser('ext-creds');
     userIds.push(userId);
 
-    await client
+    const { error: upsertError } = await client
       .schema('hub')
       .from('extension_settings')
       .upsert(
@@ -50,6 +52,8 @@ describe('Extension settings', () => {
         },
         { onConflict: 'user_id,extension_name' },
       );
+
+    expect(upsertError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -68,7 +72,7 @@ describe('Extension settings', () => {
     const { userId, client } = await createTestUser('ext-load');
     userIds.push(userId);
 
-    await client
+    const { error: upsertError } = await client
       .schema('hub')
       .from('extension_settings')
       .upsert(
@@ -81,6 +85,8 @@ describe('Extension settings', () => {
         { onConflict: 'user_id,extension_name' },
       );
 
+    expect(upsertError).toBeNull();
+
     const { data } = await client
       .schema('hub')
       .from('extension_settings')
@@ -90,13 +96,16 @@ describe('Extension settings', () => {
 
     expect(data?.enabled).toBe(true);
     expect(data?.credentials_encrypted).toBeTruthy();
+    // Verify actual credential content, not just truthiness
+    const parsed = JSON.parse(data!.credentials_encrypted!);
+    expect(parsed).toEqual({ url: 'http://ha.local', token: 'tok' });
   });
 
   it('disable extension updates row', async () => {
     const { userId, client } = await createTestUser('ext-disable');
     userIds.push(userId);
 
-    await client
+    const { error: enableError } = await client
       .schema('hub')
       .from('extension_settings')
       .upsert(
@@ -104,13 +113,17 @@ describe('Extension settings', () => {
         { onConflict: 'user_id,extension_name' },
       );
 
-    await client
+    expect(enableError).toBeNull();
+
+    const { error: disableError } = await client
       .schema('hub')
       .from('extension_settings')
       .upsert(
         { user_id: userId, extension_name: 'obsidian', enabled: false },
         { onConflict: 'user_id,extension_name' },
       );
+
+    expect(disableError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -127,7 +140,7 @@ describe('Extension settings', () => {
     const { userId, client } = await createTestUser('ext-disabled-creds');
     userIds.push(userId);
 
-    await client
+    const { error: upsertError } = await client
       .schema('hub')
       .from('extension_settings')
       .upsert(
@@ -140,6 +153,8 @@ describe('Extension settings', () => {
         { onConflict: 'user_id,extension_name' },
       );
 
+    expect(upsertError).toBeNull();
+
     const { data } = await client
       .schema('hub')
       .from('extension_settings')
@@ -149,7 +164,9 @@ describe('Extension settings', () => {
       .single();
 
     expect(data?.enabled).toBe(false);
-    expect(data?.credentials_encrypted).toBeTruthy();
+    // Verify actual content, not just truthiness
+    const parsed = JSON.parse(data!.credentials_encrypted!);
+    expect(parsed.api_token).toBe('pre_enable');
   });
 
   it('clear credentials removes credential value', async () => {
@@ -157,7 +174,7 @@ describe('Extension settings', () => {
     userIds.push(userId);
 
     // Set credentials first
-    await client
+    const { error: upsertError } = await client
       .schema('hub')
       .from('extension_settings')
       .upsert(
@@ -170,13 +187,17 @@ describe('Extension settings', () => {
         { onConflict: 'user_id,extension_name' },
       );
 
+    expect(upsertError).toBeNull();
+
     // Clear credentials
-    await client
+    const { error: clearError } = await client
       .schema('hub')
       .from('extension_settings')
       .update({ credentials_encrypted: null })
       .eq('user_id', userId)
       .eq('extension_name', 'obsidian');
+
+    expect(clearError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -194,13 +215,15 @@ describe('Extension settings', () => {
     const { userId: userB, client: clientB } = await createTestUser('ext-rls-b');
     userIds.push(userA, userB);
 
-    await clientA
+    const { error: upsertError } = await clientA
       .schema('hub')
       .from('extension_settings')
       .upsert(
         { user_id: userA, extension_name: 'obsidian', enabled: true },
         { onConflict: 'user_id,extension_name' },
       );
+
+    expect(upsertError).toBeNull();
 
     const { data } = await clientB
       .schema('hub')

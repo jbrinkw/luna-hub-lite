@@ -29,12 +29,21 @@ async function seedAndLogin(page: import('@playwright/test').Page, suffix: strin
   return { userId, email, password, cleanup: () => admin.auth.admin.deleteUser(userId) };
 }
 
+/** Navigate to account page and wait for the profile form to load */
+async function gotoAccountPage(page: import('@playwright/test').Page) {
+  await page.goto('/hub/account');
+  // Wait for form to render (loading spinner replaced by content)
+  await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
+}
+
 test.describe('Profile management', () => {
   test('account page shows profile form with current values', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'view');
     try {
-      await page.goto('/hub/account');
-      await expect(page.getByLabel('Display Name')).toBeVisible({ timeout: 5000 });
+      await gotoAccountPage(page);
+      const nameInput = page.getByLabel('Display Name');
+      await expect(nameInput).toBeVisible();
+      await expect(nameInput).toHaveValue('E2E view');
     } finally {
       await cleanup();
     }
@@ -43,12 +52,12 @@ test.describe('Profile management', () => {
   test('edit display_name and save shows success', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'edit-name');
     try {
-      await page.goto('/hub/account');
+      await gotoAccountPage(page);
       const nameInput = page.getByLabel('Display Name');
       await nameInput.clear();
       await nameInput.fill('New Display Name');
       await page.getByRole('button', { name: /save profile/i }).click();
-      await expect(page.getByText(/profile updated/i)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/profile updated/i)).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -57,28 +66,38 @@ test.describe('Profile management', () => {
   test('reload after edit shows updated display_name', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'reload');
     try {
-      await page.goto('/hub/account');
+      await gotoAccountPage(page);
       const nameInput = page.getByLabel('Display Name');
       await nameInput.clear();
       await nameInput.fill('Persisted Name');
       await page.getByRole('button', { name: /save profile/i }).click();
-      await expect(page.getByText(/profile updated/i)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/profile updated/i)).toBeVisible();
 
       await page.reload();
-      await expect(page.getByLabel('Display Name')).toHaveValue('Persisted Name', { timeout: 5000 });
+      // Wait for form to re-render after reload restores auth session + fetches profile
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
+      await expect(page.getByLabel('Display Name')).toHaveValue('Persisted Name');
     } finally {
       await cleanup();
     }
   });
 
-  test('change password succeeds', async ({ page }) => {
-    const { cleanup } = await seedAndLogin(page, 'pw-change');
+  test('change password succeeds and new password works', async ({ page }) => {
+    const { email, cleanup } = await seedAndLogin(page, 'pw-change');
     try {
-      await page.goto('/hub/account');
+      await gotoAccountPage(page);
       await page.getByLabel('New Password').fill('newpassword123');
       await page.getByLabel('Confirm Password').fill('newpassword123');
       await page.getByRole('button', { name: /change password/i }).click();
-      await expect(page.getByText(/password updated/i)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/password updated/i)).toBeVisible();
+
+      // Verify: logout and re-login with new password
+      await page.getByRole('button', { name: /logout/i }).click();
+      await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
+      await page.getByLabel('Email').fill(email);
+      await page.getByLabel('Password').fill('newpassword123');
+      await page.getByRole('button', { name: /sign in/i }).click();
+      await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
     } finally {
       await cleanup();
     }

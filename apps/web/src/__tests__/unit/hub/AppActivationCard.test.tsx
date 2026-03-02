@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { AppActivationCard } from '@/components/hub/AppActivationCard';
@@ -11,6 +11,8 @@ describe('AppActivationCard', () => {
     onActivate: vi.fn(),
     onDeactivate: vi.fn(),
   };
+
+  afterEach(() => { vi.clearAllMocks(); });
 
   it('shows app name and inactive status', () => {
     render(<AppActivationCard {...defaultProps} />);

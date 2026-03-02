@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ExtensionCard } from '@/components/hub/ExtensionCard';
@@ -17,6 +17,7 @@ const defaultProps = {
 };
 
 describe('ExtensionCard', () => {
+  afterEach(() => { vi.clearAllMocks(); });
   it('renders extension name and description', () => {
     render(<ExtensionCard {...defaultProps} />);
     expect(screen.getByText('Obsidian')).toBeInTheDocument();

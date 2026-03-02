@@ -33,18 +33,21 @@ test.describe('API key management', () => {
     const { cleanup } = await seedAndLogin(page, 'endpoint');
     try {
       await page.goto('/hub/mcp');
-      await expect(page.getByText('https://mcp.lunahub.dev/sse')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('https://mcp.lunahub.dev/sse')).toBeVisible({ timeout: 15000 });
     } finally {
       await cleanup();
     }
   });
 
-  test('generate API key displays key', async ({ page }) => {
+  test('generate API key displays key with lh_ prefix', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'gen');
     try {
       await page.goto('/hub/mcp');
       await page.getByRole('button', { name: /generate/i }).click();
-      await expect(page.getByTestId('key-plaintext')).toBeVisible({ timeout: 5000 });
+      const keyEl = page.getByTestId('key-plaintext');
+      await expect(keyEl).toBeVisible({ timeout: 5000 });
+      // Verify the key actually has content starting with lh_ prefix
+      await expect(keyEl).toHaveText(/^lh_[a-f0-9]{32}$/);
     } finally {
       await cleanup();
     }

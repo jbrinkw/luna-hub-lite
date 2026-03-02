@@ -40,6 +40,8 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Password').fill(password);
       await page.getByRole('button', { name: /sign in/i }).click();
       await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+      // Verify the hub page actually rendered (not just URL)
+      await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
     } finally {
       await cleanupUser(userId);
     }
@@ -79,7 +81,7 @@ test.describe('Auth flow', () => {
     }
   });
 
-  test('signup with duplicate email shows error', async ({ page }) => {
+  test('signup with duplicate email does not create second account', async ({ page }) => {
     const { email, userId } = await seedUser('dup-signup');
     try {
       await page.goto('/signup');
@@ -87,9 +89,12 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill('testpass123');
       await page.getByRole('button', { name: /sign up/i }).click();
-      // Supabase may auto-login with existing user or show error
-      // Either way, we should end up somewhere valid
+      // Supabase local dev with email confirmation disabled may silently succeed
+      // but should NOT create a second user. Verify only 1 user with this email exists.
       await page.waitForTimeout(2000);
+      const { data } = await admin.auth.admin.listUsers();
+      const matches = data.users.filter((u) => u.email === email);
+      expect(matches.length).toBe(1);
     } finally {
       await cleanupUser(userId);
     }

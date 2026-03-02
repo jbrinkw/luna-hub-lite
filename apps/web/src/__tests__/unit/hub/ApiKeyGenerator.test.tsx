@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { ApiKeyGenerator } from '@/components/hub/ApiKeyGenerator';
@@ -9,6 +9,8 @@ describe('ApiKeyGenerator', () => {
     onGenerate: vi.fn().mockResolvedValue('sk-test-key-123'),
     onRevoke: vi.fn(),
   };
+
+  afterEach(() => { vi.clearAllMocks(); });
 
   it('click generate calls onGenerate and displays key', async () => {
     const onGenerate = vi.fn().mockResolvedValue('sk-plaintext-key');

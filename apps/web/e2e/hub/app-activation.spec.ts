@@ -44,8 +44,8 @@ test.describe('App activation', () => {
     const { cleanup } = await seedAndLogin(page, 'initial');
     try {
       await page.goto('/hub/apps');
-      const inactiveChips = page.getByText('Inactive');
-      await expect(inactiveChips.first()).toBeVisible({ timeout: 5000 });
+      // Verify BOTH apps show Inactive chip (not just one)
+      await expect(page.getByText('Inactive', { exact: true })).toHaveCount(2, { timeout: 5000 });
     } finally {
       await cleanup();
     }
@@ -55,9 +55,14 @@ test.describe('App activation', () => {
     const { cleanup } = await seedAndLogin(page, 'activate');
     try {
       await page.goto('/hub/apps');
-      // Click first Activate button (CoachByte)
-      await page.getByRole('button', { name: /activate/i }).first().click();
-      await expect(page.getByText('Active').first()).toBeVisible({ timeout: 5000 });
+      // Find the CoachByte card specifically, then click its Activate button
+      const coachCard = page.locator('ion-card', { hasText: 'CoachByte' });
+      await coachCard.getByRole('button', { name: /activate/i }).click();
+      // Verify CoachByte card now shows Active chip
+      await expect(coachCard.getByText('Active', { exact: true })).toBeVisible({ timeout: 5000 });
+      // ChefByte should still be Inactive
+      const chefCard = page.locator('ion-card', { hasText: 'ChefByte' });
+      await expect(chefCard.getByText('Inactive', { exact: true })).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -67,12 +72,13 @@ test.describe('App activation', () => {
     const { cleanup } = await seedAndLogin(page, 'confirm');
     try {
       await page.goto('/hub/apps');
-      // Activate first
-      await page.getByRole('button', { name: /activate/i }).first().click();
-      await expect(page.getByText('Active').first()).toBeVisible({ timeout: 5000 });
+      // Activate CoachByte specifically
+      const coachCard = page.locator('ion-card', { hasText: 'CoachByte' });
+      await coachCard.getByRole('button', { name: /activate/i }).click();
+      await expect(coachCard.getByText('Active', { exact: true })).toBeVisible({ timeout: 5000 });
 
-      // Click Deactivate
-      await page.getByRole('button', { name: /deactivate/i }).first().click();
+      // Click Deactivate on CoachByte
+      await coachCard.getByRole('button', { name: /deactivate/i }).click();
       await expect(page.getByText('Are you sure you want to deactivate CoachByte?')).toBeVisible({ timeout: 5000 });
     } finally {
       await cleanup();

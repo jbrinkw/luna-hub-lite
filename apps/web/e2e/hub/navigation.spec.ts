@@ -51,7 +51,7 @@ test.describe('Hub navigation', () => {
   test('click Apps in side nav -> /hub/apps', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'apps');
     try {
-      await page.getByText('Apps').click();
+      await page.getByLabel('Hub navigation').getByText('Apps').click();
       await expect(page).toHaveURL(/\/hub\/apps/);
     } finally {
       await cleanup();
@@ -61,7 +61,7 @@ test.describe('Hub navigation', () => {
   test('click Tools in side nav -> /hub/tools', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'tools');
     try {
-      await page.getByText('Tools').click();
+      await page.getByLabel('Hub navigation').getByText('Tools').click();
       await expect(page).toHaveURL(/\/hub\/tools/);
     } finally {
       await cleanup();
@@ -71,7 +71,7 @@ test.describe('Hub navigation', () => {
   test('click Extensions in side nav -> /hub/extensions', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'ext');
     try {
-      await page.getByText('Extensions').click();
+      await page.getByLabel('Hub navigation').getByText('Extensions').click();
       await expect(page).toHaveURL(/\/hub\/extensions/);
     } finally {
       await cleanup();
@@ -81,7 +81,7 @@ test.describe('Hub navigation', () => {
   test('click MCP Settings in side nav -> /hub/mcp', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'mcp');
     try {
-      await page.getByText('MCP Settings').click();
+      await page.getByLabel('Hub navigation').getByText('MCP Settings').click();
       await expect(page).toHaveURL(/\/hub\/mcp/);
     } finally {
       await cleanup();
@@ -91,8 +91,9 @@ test.describe('Hub navigation', () => {
   test('active page highlighted in nav', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'active');
     try {
-      // On /hub/account, Account should be highlighted
-      const accountItem = page.locator('[aria-current="page"]');
+      // On /hub/account, Account should be highlighted in the side nav
+      const nav = page.getByLabel('Hub navigation');
+      const accountItem = nav.locator('[aria-current="page"]');
       await expect(accountItem).toContainText('Account');
     } finally {
       await cleanup();
