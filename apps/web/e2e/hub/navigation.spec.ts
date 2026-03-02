@@ -33,6 +33,7 @@ test.describe('Hub navigation', () => {
     const { cleanup } = await seedAndLogin(page, 'default');
     try {
       await expect(page).toHaveURL(/\/hub\/account/);
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -43,6 +44,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Account').click();
       await expect(page).toHaveURL(/\/hub\/account/);
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -53,6 +55,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Apps').click();
       await expect(page).toHaveURL(/\/hub\/apps/);
+      await expect(page.getByText('CoachByte')).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -63,6 +66,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Tools').click();
       await expect(page).toHaveURL(/\/hub\/tools/);
+      await expect(page.locator('ion-toggle').first()).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -73,6 +77,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Extensions').click();
       await expect(page).toHaveURL(/\/hub\/extensions/);
+      await expect(page.getByText(/obsidian|todoist|home assistant/i)).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -83,6 +88,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('MCP Settings').click();
       await expect(page).toHaveURL(/\/hub\/mcp/);
+      await expect(page.getByText('https://mcp.lunahub.dev/sse')).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -95,6 +101,12 @@ test.describe('Hub navigation', () => {
       const nav = page.getByLabel('Hub navigation');
       const accountItem = nav.locator('[aria-current="page"]');
       await expect(accountItem).toContainText('Account');
+
+      // Navigate to Apps and verify highlight changes
+      await nav.getByText('Apps').click();
+      await expect(page).toHaveURL(/\/hub\/apps/);
+      const appsItem = nav.locator('[aria-current="page"]');
+      await expect(appsItem).toContainText('Apps');
     } finally {
       await cleanup();
     }
