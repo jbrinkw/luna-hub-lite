@@ -37,9 +37,10 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 BEGIN
-  INSERT INTO hub.profiles (user_id, timezone)
+  INSERT INTO hub.profiles (user_id, display_name, timezone)
   VALUES (
     NEW.id,
+    NEW.raw_user_meta_data->>'display_name',
     COALESCE(NEW.raw_user_meta_data->>'timezone', 'America/New_York')
   );
   RETURN NEW;
