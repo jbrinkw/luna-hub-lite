@@ -15,13 +15,14 @@ describe('Tool config', () => {
     const { userId, client } = await createTestUser('tool-enable');
     userIds.push(userId);
 
-    await client
+    const { error: upsertError } = await client
       .schema('hub')
       .from('user_tool_config')
       .upsert(
         { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true },
         { onConflict: 'user_id,tool_name' },
       );
+    expect(upsertError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -38,21 +39,23 @@ describe('Tool config', () => {
     const { userId, client } = await createTestUser('tool-disable');
     userIds.push(userId);
 
-    await client
+    const { error: enableError } = await client
       .schema('hub')
       .from('user_tool_config')
       .upsert(
         { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true },
         { onConflict: 'user_id,tool_name' },
       );
+    expect(enableError).toBeNull();
 
-    await client
+    const { error: disableError } = await client
       .schema('hub')
       .from('user_tool_config')
       .upsert(
         { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: false },
         { onConflict: 'user_id,tool_name' },
       );
+    expect(disableError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -69,13 +72,14 @@ describe('Tool config', () => {
     const { userId, client } = await createTestUser('tool-load');
     userIds.push(userId);
 
-    await client
+    const { error: upsertError } = await client
       .schema('hub')
       .from('user_tool_config')
       .upsert([
         { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true },
         { user_id: userId, tool_name: 'CHEFBYTE_SCAN_BARCODE', enabled: false },
       ], { onConflict: 'user_id,tool_name' });
+    expect(upsertError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -94,13 +98,14 @@ describe('Tool config', () => {
     const { userId: userB, client: clientB } = await createTestUser('tool-rls-b');
     userIds.push(userA, userB);
 
-    await clientA
+    const { error: upsertError } = await clientA
       .schema('hub')
       .from('user_tool_config')
       .upsert(
         { user_id: userA, tool_name: 'SECRET_TOOL', enabled: true },
         { onConflict: 'user_id,tool_name' },
       );
+    expect(upsertError).toBeNull();
 
     const { data } = await clientB
       .schema('hub')

@@ -53,10 +53,11 @@ describe('API key lifecycle', () => {
     userIds.push(userId);
 
     const hash = await sha256('key-1');
-    await client
+    const { error: insertError } = await client
       .schema('hub')
       .from('api_keys')
       .insert({ user_id: userId, api_key_hash: hash, label: 'Active Key' });
+    expect(insertError).toBeNull();
 
     const { data } = await client
       .schema('hub')
@@ -74,19 +75,21 @@ describe('API key lifecycle', () => {
     userIds.push(userId);
 
     const hash = await sha256('key-to-revoke');
-    const { data: inserted } = await client
+    const { data: inserted, error: insertError } = await client
       .schema('hub')
       .from('api_keys')
       .insert({ user_id: userId, api_key_hash: hash, label: 'Revokable' })
       .select('id')
       .single();
+    expect(insertError).toBeNull();
 
     // Revoke
-    await client
+    const { error: revokeError } = await client
       .schema('hub')
       .from('api_keys')
       .update({ revoked_at: new Date().toISOString() })
       .eq('id', inserted!.id);
+    expect(revokeError).toBeNull();
 
     // Verify revoked_at set
     const { data } = await adminClient
@@ -104,18 +107,20 @@ describe('API key lifecycle', () => {
     userIds.push(userId);
 
     const hash = await sha256('key-excluded');
-    const { data: inserted } = await client
+    const { data: inserted, error: insertError } = await client
       .schema('hub')
       .from('api_keys')
       .insert({ user_id: userId, api_key_hash: hash, label: 'Will Revoke' })
       .select('id')
       .single();
+    expect(insertError).toBeNull();
 
-    await client
+    const { error: revokeError } = await client
       .schema('hub')
       .from('api_keys')
       .update({ revoked_at: new Date().toISOString() })
       .eq('id', inserted!.id);
+    expect(revokeError).toBeNull();
 
     const { data: active } = await client
       .schema('hub')
@@ -133,10 +138,11 @@ describe('API key lifecycle', () => {
 
     for (let i = 0; i < 3; i++) {
       const hash = await sha256(`multi-key-${i}`);
-      await client
+      const { error: insertError } = await client
         .schema('hub')
         .from('api_keys')
         .insert({ user_id: userId, api_key_hash: hash, label: `Key ${i}` });
+      expect(insertError).toBeNull();
     }
 
     const { data } = await client
@@ -156,21 +162,23 @@ describe('API key lifecycle', () => {
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
       const hash = await sha256(`partial-key-${i}`);
-      const { data } = await client
+      const { data, error: insertError } = await client
         .schema('hub')
         .from('api_keys')
         .insert({ user_id: userId, api_key_hash: hash, label: `PKey ${i}` })
         .select('id')
         .single();
+      expect(insertError).toBeNull();
       ids.push(data!.id);
     }
 
     // Revoke the middle one
-    await client
+    const { error: revokeError } = await client
       .schema('hub')
       .from('api_keys')
       .update({ revoked_at: new Date().toISOString() })
       .eq('id', ids[1]);
+    expect(revokeError).toBeNull();
 
     const { data: active } = await client
       .schema('hub')

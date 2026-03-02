@@ -16,7 +16,8 @@ describe('App activation lifecycle', () => {
     const { userId, client } = await createTestUser('act-create');
     userIds.push(userId);
 
-    await client.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
+    const { error: activateError } = await client.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
+    expect(activateError).toBeNull();
 
     const { data } = await adminClient
       .schema('hub')
@@ -32,8 +33,10 @@ describe('App activation lifecycle', () => {
     const { userId, client } = await createTestUser('act-delete');
     userIds.push(userId);
 
-    await client.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
-    await client.schema('hub').rpc('deactivate_app', { p_app_name: 'coachbyte' });
+    const { error: activateError } = await client.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
+    expect(activateError).toBeNull();
+    const { error: deactivateError } = await client.schema('hub').rpc('deactivate_app', { p_app_name: 'coachbyte' });
+    expect(deactivateError).toBeNull();
 
     const { data } = await adminClient
       .schema('hub')
@@ -48,8 +51,10 @@ describe('App activation lifecycle', () => {
     const { userId, client } = await createTestUser('act-profile');
     userIds.push(userId);
 
-    await client.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
-    await client.schema('hub').rpc('deactivate_app', { p_app_name: 'coachbyte' });
+    const { error: activateError } = await client.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
+    expect(activateError).toBeNull();
+    const { error: deactivateError } = await client.schema('hub').rpc('deactivate_app', { p_app_name: 'coachbyte' });
+    expect(deactivateError).toBeNull();
 
     const { data: profile } = await adminClient
       .schema('hub')
@@ -66,9 +71,12 @@ describe('App activation lifecycle', () => {
     const { userId, client } = await createTestUser('act-cycle');
     userIds.push(userId);
 
-    await client.schema('hub').rpc('activate_app', { p_app_name: 'chefbyte' });
-    await client.schema('hub').rpc('deactivate_app', { p_app_name: 'chefbyte' });
-    await client.schema('hub').rpc('activate_app', { p_app_name: 'chefbyte' });
+    const { error: activateError } = await client.schema('hub').rpc('activate_app', { p_app_name: 'chefbyte' });
+    expect(activateError).toBeNull();
+    const { error: deactivateError } = await client.schema('hub').rpc('deactivate_app', { p_app_name: 'chefbyte' });
+    expect(deactivateError).toBeNull();
+    const { error: reactivateError } = await client.schema('hub').rpc('activate_app', { p_app_name: 'chefbyte' });
+    expect(reactivateError).toBeNull();
 
     const { data } = await adminClient
       .schema('hub')
