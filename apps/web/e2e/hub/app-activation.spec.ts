@@ -33,8 +33,8 @@ test.describe('App activation', () => {
     const { cleanup } = await seedAndLogin(page, 'cards');
     try {
       await page.goto('/hub/apps');
-      await expect(page.getByText('CoachByte')).toBeVisible({ timeout: 5000 });
-      await expect(page.getByText('ChefByte')).toBeVisible();
+      await expect(page.locator('ion-card', { hasText: 'CoachByte' })).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('ion-card', { hasText: 'ChefByte' })).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -45,7 +45,10 @@ test.describe('App activation', () => {
     try {
       await page.goto('/hub/apps');
       // Verify BOTH apps show Inactive chip (not just one)
-      await expect(page.getByText('Inactive', { exact: true })).toHaveCount(2, { timeout: 5000 });
+      const cards = page.locator('ion-card');
+      await expect(cards).toHaveCount(2, { timeout: 5000 });
+      await expect(cards.nth(0).getByText('Inactive', { exact: true })).toBeVisible();
+      await expect(cards.nth(1).getByText('Inactive', { exact: true })).toBeVisible();
     } finally {
       await cleanup();
     }

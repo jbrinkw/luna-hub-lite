@@ -54,7 +54,7 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill('wrongpassword');
       await page.getByRole('button', { name: /sign in/i }).click();
-      await expect(page.getByText(/invalid/i)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/invalid.*credentials/i)).toBeVisible();
       await expect(page).toHaveURL(/\/login/);
     } finally {
       await cleanupUser(userId);
@@ -91,7 +91,8 @@ test.describe('Auth flow', () => {
       await page.getByRole('button', { name: /sign up/i }).click();
       // Supabase local dev with email confirmation disabled may silently succeed
       // but should NOT create a second user. Verify only 1 user with this email exists.
-      await page.waitForTimeout(2000);
+      // Wait for signup to process (either redirect or stay on page)
+      await page.waitForURL(/\/(hub|signup)/, { timeout: 5000 });
       const { data } = await admin.auth.admin.listUsers();
       const matches = data.users.filter((u) => u.email === email);
       expect(matches.length).toBe(1);
