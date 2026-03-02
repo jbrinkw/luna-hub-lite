@@ -1,0 +1,12 @@
+name = "luna-hub-mcp"
+main = "src/index.ts"
+compatibility_date = "2025-01-01"
+
+[durable_objects]
+bindings = [
+  { name = "MCP_SESSION", class_name = "McpSession" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["McpSession"]

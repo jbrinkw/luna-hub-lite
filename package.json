@@ -1,0 +1,21 @@
+{
+  "name": "luna-hub-lite",
+  "private": true,
+  "packageManager": "pnpm@10.30.3",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "turbo run dev",
+    "build": "turbo run build",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "db:types": "pnpm --filter @luna-hub/db-types generate",
+    "clean": "turbo run clean"
+  },
+  "devDependencies": {
+    "turbo": "^2.8.12",
+    "typescript": "~5.7.0",
+    "supabase": "^2.76.15"
+  }
+}
