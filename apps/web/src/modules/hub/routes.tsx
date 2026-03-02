@@ -1,31 +1,19 @@
-import { Routes, Route } from 'react-router-dom';
-import { IonContent, IonHeader, IonPage, IonTitle, IonToolbar, IonButton, IonButtons } from '@ionic/react';
-import { useAuth } from '@/shared/auth/AuthProvider';
-
-function HubHome() {
-  const { signOut } = useAuth();
-
-  return (
-    <IonPage>
-      <IonHeader>
-        <IonToolbar>
-          <IonTitle>Luna Hub</IonTitle>
-          <IonButtons slot="end">
-            <IonButton onClick={() => signOut()}>Logout</IonButton>
-          </IonButtons>
-        </IonToolbar>
-      </IonHeader>
-      <IonContent className="ion-padding">
-        <p>Account management, MCP config, extensions</p>
-      </IonContent>
-    </IonPage>
-  );
-}
+import { Routes, Route, Navigate } from 'react-router-dom';
+import { AccountPage } from '@/pages/hub/AccountPage';
+import { AppsPage } from '@/pages/hub/AppsPage';
+import { ToolsPage } from '@/pages/hub/ToolsPage';
+import { ExtensionsPage } from '@/pages/hub/ExtensionsPage';
+import { McpSettingsPage } from '@/pages/hub/McpSettingsPage';
 
 export function HubRoutes() {
   return (
     <Routes>
-      <Route index element={<HubHome />} />
+      <Route index element={<Navigate to="/hub/account" replace />} />
+      <Route path="account" element={<AccountPage />} />
+      <Route path="apps" element={<AppsPage />} />
+      <Route path="tools" element={<ToolsPage />} />
+      <Route path="extensions" element={<ExtensionsPage />} />
+      <Route path="mcp" element={<McpSettingsPage />} />
     </Routes>
   );
 }

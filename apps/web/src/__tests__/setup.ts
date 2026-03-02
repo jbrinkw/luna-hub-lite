@@ -46,8 +46,69 @@ vi.mock('@ionic/react', () => {
     IonIcon: ({ icon, ...props }: any) => React.createElement('span', props),
     IonLabel: wrap('label'),
     IonList: wrap('div'),
+    IonGrid: wrap('div'),
+    IonRow: wrap('div'),
+    IonCol: wrap('div'),
+    IonSegment: ({ children, value, onIonChange, ...props }: any) =>
+      React.createElement('div', { role: 'tablist', ...props }, children),
+    IonSegmentButton: ({ children, value, ...props }: any) =>
+      React.createElement('button', { role: 'tab', 'data-value': value, ...props }, children),
+    IonToggle: React.forwardRef(({ checked, onIonChange, ...props }: any, ref: any) =>
+      React.createElement('input', {
+        ref,
+        type: 'checkbox',
+        checked: checked ?? false,
+        onChange: (e: any) => onIonChange?.({ detail: { checked: e.target.checked } }),
+        ...props,
+      }),
+    ),
+    IonSelect: React.forwardRef(({ children, value, onIonChange, label, placeholder, ...props }: any, ref: any) =>
+      React.createElement('div', null,
+        label && React.createElement('label', { htmlFor: label }, label),
+        React.createElement('select', {
+          ref,
+          id: label,
+          value: value ?? '',
+          onChange: (e: any) => onIonChange?.({ detail: { value: e.target.value } }),
+          ...props,
+        }, children),
+      ),
+    ),
+    IonSelectOption: ({ children, value, ...props }: any) =>
+      React.createElement('option', { value, ...props }, children),
+    IonAlert: ({ isOpen, header, message, buttons, onDidDismiss }: any) =>
+      isOpen ? React.createElement('div', { role: 'alertdialog', 'aria-label': header },
+        React.createElement('p', null, message),
+        buttons?.map((btn: any, i: number) =>
+          React.createElement('button', {
+            key: i,
+            onClick: () => {
+              if (typeof btn === 'string') { onDidDismiss?.(); }
+              else { btn.handler?.(); onDidDismiss?.(); }
+            },
+          }, typeof btn === 'string' ? btn : btn.text),
+        ),
+      ) : null,
+    IonSpinner: () => React.createElement('span', { 'aria-label': 'loading' }, 'Loading...'),
+    IonChip: wrap('span'),
+    IonNote: wrap('span'),
+    IonTextarea: React.forwardRef(({ label, value, onIonInput, ...props }: any, ref: any) =>
+      React.createElement('div', null,
+        label && React.createElement('label', { htmlFor: label }, label),
+        React.createElement('textarea', {
+          ref,
+          id: label,
+          value: value ?? '',
+          onChange: (e: any) => onIonInput?.({ detail: { value: e.target.value } }),
+          ...props,
+        }),
+      ),
+    ),
   };
 });
+
+// Mock ionicons
+vi.mock('ionicons/icons', () => new Proxy({}, { get: (_t, prop) => prop }));
 
 // Mock Supabase client for unit tests
 vi.mock('@/shared/supabase', () => {

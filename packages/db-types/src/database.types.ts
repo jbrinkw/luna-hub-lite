@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
   chefbyte: {
     Tables: {
       [_ in never]: never
@@ -48,6 +43,75 @@ export type Database = {
   }
   hub: {
     Tables: {
+      api_keys: {
+        Row: {
+          api_key_hash: string
+          created_at: string
+          id: string
+          label: string | null
+          revoked_at: string | null
+          user_id: string
+        }
+        Insert: {
+          api_key_hash: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          revoked_at?: string | null
+          user_id: string
+        }
+        Update: {
+          api_key_hash?: string
+          created_at?: string
+          id?: string
+          label?: string | null
+          revoked_at?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      app_activations: {
+        Row: {
+          activated_at: string
+          app_name: string
+          user_id: string
+        }
+        Insert: {
+          activated_at?: string
+          app_name: string
+          user_id: string
+        }
+        Update: {
+          activated_at?: string
+          app_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      extension_settings: {
+        Row: {
+          credentials_encrypted: string | null
+          enabled: boolean
+          extension_name: string
+          id: string
+          user_id: string
+        }
+        Insert: {
+          credentials_encrypted?: string | null
+          enabled?: boolean
+          extension_name: string
+          id?: string
+          user_id: string
+        }
+        Update: {
+          credentials_encrypted?: string | null
+          enabled?: boolean
+          extension_name?: string
+          id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -72,12 +136,34 @@ export type Database = {
         }
         Relationships: []
       }
+      user_tool_config: {
+        Row: {
+          enabled: boolean
+          id: string
+          tool_name: string
+          user_id: string
+        }
+        Insert: {
+          enabled?: boolean
+          id?: string
+          tool_name: string
+          user_id: string
+        }
+        Update: {
+          enabled?: boolean
+          id?: string
+          tool_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      activate_app: { Args: { p_app_name: string }; Returns: undefined }
+      deactivate_app: { Args: { p_app_name: string }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never
@@ -94,6 +180,14 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      activate_app: {
+        Args: { p_app_name: string; p_user_id: string }
+        Returns: undefined
+      }
+      deactivate_app: {
+        Args: { p_app_name: string; p_user_id: string }
+        Returns: undefined
+      }
       get_logical_date: {
         Args: { day_start_hour: number; ts: string; tz: string }
         Returns: string
@@ -239,3 +333,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

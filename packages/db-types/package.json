@@ -6,7 +6,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
-    "generate": "supabase gen types typescript --project-id btlfsxammjzkyluophgr --schema hub,coachbyte,chefbyte,private > src/database.types.ts",
+    "generate": "supabase gen types typescript --local --schema hub,coachbyte,chefbyte,private > src/database.types.ts",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
