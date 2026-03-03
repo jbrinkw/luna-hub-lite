@@ -66,7 +66,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Tools').click();
       await expect(page).toHaveURL(/\/hub\/tools/);
-      await expect(page.locator('ion-toggle').first()).toBeVisible();
+      await expect(page.getByText('COACHBYTE_LOG_SET')).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -99,12 +99,14 @@ test.describe('Hub navigation', () => {
     try {
       // On /hub/account, Account should be highlighted in the side nav
       const nav = page.getByLabel('Hub navigation');
+      await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
       const accountItem = nav.locator('[aria-current="page"]');
       await expect(accountItem).toContainText('Account');
 
       // Navigate to Apps and verify highlight changes
       await nav.getByText('Apps').click();
       await expect(page).toHaveURL(/\/hub\/apps/);
+      await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
       const appsItem = nav.locator('[aria-current="page"]');
       await expect(appsItem).toContainText('Apps');
     } finally {
@@ -112,6 +114,7 @@ test.describe('Hub navigation', () => {
     }
   });
 
+  // Note: CoachByte page not yet built (Phase 5). URL assertion is sufficient until then.
   test('module switcher: click CoachByte -> /coach', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'coach-switch');
     try {
@@ -122,6 +125,7 @@ test.describe('Hub navigation', () => {
     }
   });
 
+  // Note: ChefByte page not yet built (Phase 7). URL assertion is sufficient until then.
   test('module switcher: click ChefByte -> /chef', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'chef-switch');
     try {
