@@ -166,6 +166,10 @@ CREATE TABLE chefbyte.user_config (
 -- INDEXES
 ------------------------------------------------------------
 
+-- Locations: unique name per user (prevents duplicate seeds on re-activation)
+CREATE UNIQUE INDEX locations_user_name_unique
+  ON chefbyte.locations (user_id, name);
+
 -- Products: unique barcode per user (partial — only where barcode exists)
 CREATE UNIQUE INDEX products_user_barcode_unique
   ON chefbyte.products (user_id, barcode)
@@ -463,7 +467,7 @@ BEGIN
       (p_user_id, 'Fridge'),
       (p_user_id, 'Pantry'),
       (p_user_id, 'Freezer')
-    ON CONFLICT DO NOTHING;
+    ON CONFLICT (user_id, name) DO NOTHING;
   END IF;
 END;
 $$;
