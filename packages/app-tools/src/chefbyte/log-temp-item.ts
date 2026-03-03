@@ -1,0 +1,44 @@
+import type { ToolDefinition } from '../types';
+import { toolSuccess, toolError, getLogicalDate } from '../shared';
+
+export const logTempItem: ToolDefinition = {
+  name: 'CHEFBYTE_log_temp_item',
+  description: 'Log a temporary food item (not linked to a product) for macro tracking.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      name: { type: 'string', description: 'Item name/description' },
+      calories: { type: 'number', description: 'Calories' },
+      carbs: { type: 'number', description: 'Carbs in grams (optional)' },
+      protein: { type: 'number', description: 'Protein in grams (optional)' },
+      fat: { type: 'number', description: 'Fat in grams (optional)' },
+    },
+    required: ['name', 'calories'],
+  },
+  handler: async (args, ctx) => {
+    const { name, calories, carbs, protein, fat } = args;
+
+    const logicalDate = await getLogicalDate(ctx.supabase, ctx.userId);
+
+    const row: Record<string, any> = {
+      user_id: ctx.userId,
+      name,
+      calories,
+      logical_date: logicalDate,
+    };
+    if (carbs !== undefined) row.carbs = carbs;
+    if (protein !== undefined) row.protein = protein;
+    if (fat !== undefined) row.fat = fat;
+
+    const { data, error } = await ctx.supabase
+      .schema('chefbyte')
+      .from('temp_items')
+      .insert(row)
+      .select('id, name, calories, carbs, protein, fat, logical_date')
+      .single();
+
+    if (error) return toolError(`Failed to log temp item: ${error.message}`);
+
+    return toolSuccess({ message: `Logged "${name}" (${calories} cal)`, item: data });
+  },
+};

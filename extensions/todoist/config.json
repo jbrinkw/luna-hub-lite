@@ -1,0 +1,6 @@
+{
+  "name": "todoist",
+  "displayName": "Todoist",
+  "description": "Integration with Todoist task management via REST API v2",
+  "credentialFields": ["todoist_api_key"]
+}

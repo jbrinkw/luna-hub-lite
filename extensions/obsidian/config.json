@@ -1,0 +1,6 @@
+{
+  "name": "obsidian",
+  "displayName": "Obsidian",
+  "description": "Integration with Obsidian vault via Local REST API",
+  "credentialFields": ["obsidian_api_key", "obsidian_url"]
+}

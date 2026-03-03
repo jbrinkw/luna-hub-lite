@@ -6,6 +6,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "scripts": {
+    "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "clean": "rm -rf dist"
   },
@@ -13,6 +14,7 @@
     "@luna-hub/db-types": "workspace:*"
   },
   "devDependencies": {
-    "typescript": "~5.7.0"
+    "typescript": "~5.7.0",
+    "vitest": "^4.0.18"
   }
 }

@@ -1,0 +1,6 @@
+{
+  "name": "homeassistant",
+  "displayName": "Home Assistant",
+  "description": "Integration with Home Assistant smart home platform via REST API",
+  "credentialFields": ["ha_api_key", "ha_url"]
+}
