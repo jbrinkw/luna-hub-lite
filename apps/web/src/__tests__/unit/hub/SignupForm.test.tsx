@@ -80,20 +80,6 @@ describe('Signup', () => {
     expect(mockSignUp).toHaveBeenCalledWith('test@test.com', 'password123', 'Test User');
   });
 
-  it('passes display_name as user metadata', async () => {
-    mockSignUp.mockResolvedValue({ error: null });
-    renderSignup();
-    const user = userEvent.setup();
-
-    await user.type(screen.getByLabelText(/display name/i), 'My Display Name');
-    await user.type(screen.getByLabelText(/email/i), 'test@test.com');
-    await user.type(screen.getByLabelText(/password/i), 'password123');
-    await user.click(screen.getByRole('button', { name: /sign up/i }));
-
-    // display_name is the 3rd arg to signUp
-    expect(mockSignUp).toHaveBeenCalledWith('test@test.com', 'password123', 'My Display Name');
-  });
-
   it('displays error message on duplicate email', async () => {
     mockSignUp.mockResolvedValue({ error: new Error('User already registered') });
     renderSignup();
@@ -122,5 +108,22 @@ describe('Signup', () => {
     await waitFor(() => {
       expect(mockNavigate).toHaveBeenCalledWith('/hub');
     });
+  });
+
+  it('loading state disables submit and shows creating text', async () => {
+    // Never-resolving promise to keep the component in loading state
+    mockSignUp.mockReturnValue(new Promise(() => {}));
+    renderSignup();
+    const user = userEvent.setup();
+
+    await user.type(screen.getByLabelText(/display name/i), 'Test User');
+    await user.type(screen.getByLabelText(/email/i), 'test@test.com');
+    await user.type(screen.getByLabelText(/password/i), 'password123');
+    await user.click(screen.getByRole('button', { name: /sign up/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Creating account...')).toBeInTheDocument();
+    });
+    expect(screen.getByRole('button', { name: /creating account/i })).toBeDisabled();
   });
 });

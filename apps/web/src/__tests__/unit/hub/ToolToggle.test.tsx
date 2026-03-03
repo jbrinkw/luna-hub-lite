@@ -46,4 +46,13 @@ describe('ToolToggle', () => {
     const { container } = render(<ToolToggle tools={[]} loading onToggle={vi.fn()} />);
     expect(container.querySelector('ion-spinner')).toBeInTheDocument();
   });
+
+  it('toggle enabled tool off', async () => {
+    const onToggle = vi.fn();
+    render(<ToolToggle tools={tools} onToggle={onToggle} />);
+
+    const toggles = screen.getAllByRole('checkbox');
+    await userEvent.click(toggles[0]); // Toggle COACHBYTE_LOG_SET (currently enabled)
+    expect(onToggle).toHaveBeenCalledWith('COACHBYTE_LOG_SET', false);
+  });
 });

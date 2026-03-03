@@ -61,4 +61,12 @@ describe('AppActivationCard', () => {
     await userEvent.click(screen.getByText('Cancel'));
     expect(onDeactivate).not.toHaveBeenCalled();
   });
+
+  it('loading disables buttons', () => {
+    const { rerender } = render(<AppActivationCard {...defaultProps} loading={true} />);
+    expect(screen.getByRole('button', { name: /activate/i })).toBeDisabled();
+
+    rerender(<AppActivationCard {...defaultProps} active={true} loading={true} />);
+    expect(screen.getByRole('button', { name: /deactivate/i })).toBeDisabled();
+  });
 });

@@ -62,4 +62,30 @@ describe('ExtensionCard', () => {
     render(<ExtensionCard {...defaultProps} enabled={false} />);
     expect(screen.queryByText('Save Credentials')).not.toBeInTheDocument();
   });
+
+  it('hasCredentials shows configured text', () => {
+    render(<ExtensionCard {...defaultProps} enabled hasCredentials />);
+    expect(screen.getByText('Credentials configured')).toBeInTheDocument();
+  });
+
+  it('server error from onSaveCredentials', async () => {
+    const onSaveCredentials = vi.fn().mockResolvedValue({ error: 'Network error' });
+    render(<ExtensionCard {...defaultProps} enabled onSaveCredentials={onSaveCredentials} />);
+
+    const input = screen.getByLabelText('Vault Path');
+    await userEvent.type(input, '/some/path');
+    await userEvent.click(screen.getByText('Save Credentials'));
+
+    await waitFor(() => {
+      expect(screen.getByText('Network error')).toBeInTheDocument();
+    });
+  });
+
+  it('toggle off calls onToggle(false)', async () => {
+    const onToggle = vi.fn();
+    render(<ExtensionCard {...defaultProps} enabled={true} onToggle={onToggle} />);
+
+    await userEvent.click(screen.getByRole('checkbox'));
+    expect(onToggle).toHaveBeenCalledWith(false);
+  });
 });
