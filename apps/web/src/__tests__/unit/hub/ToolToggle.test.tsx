@@ -43,8 +43,8 @@ describe('ToolToggle', () => {
   });
 
   it('shows spinner when loading', () => {
-    const { container } = render(<ToolToggle tools={[]} loading onToggle={vi.fn()} />);
-    expect(container.querySelector('ion-spinner')).toBeInTheDocument();
+    render(<ToolToggle tools={[]} loading onToggle={vi.fn()} />);
+    expect(screen.getByLabelText('loading')).toBeInTheDocument();
   });
 
   it('toggle enabled tool off', async () => {

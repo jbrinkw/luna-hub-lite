@@ -89,7 +89,19 @@ vi.mock('@ionic/react', () => {
           }, typeof btn === 'string' ? btn : btn.text),
         ),
       ) : null,
-    IonSpinner: () => React.createElement('ion-spinner', { 'aria-label': 'loading' }),
+    IonCheckbox: React.forwardRef(({ checked, onIonChange, children, ...props }: any, ref: any) =>
+      React.createElement('label', null,
+        React.createElement('input', {
+          ref,
+          type: 'checkbox',
+          checked: checked ?? false,
+          onChange: (e: any) => onIonChange?.({ detail: { checked: e.target.checked } }),
+          ...props,
+        }),
+        children && React.createElement('span', null, children),
+      ),
+    ),
+    IonSpinner: (props: any) => React.createElement('div', { 'aria-label': 'loading', ...props }),
     IonChip: wrap('span'),
     IonNote: wrap('span'),
     IonTextarea: React.forwardRef(({ label, value, onIonInput, ...props }: any, ref: any) =>
