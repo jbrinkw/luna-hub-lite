@@ -127,9 +127,10 @@ DELETE FROM hub.api_keys WHERE user_id = tests.get_supabase_uid('key_owner');
 -- Verify User A's keys still exist
 SELECT tests.authenticate_as('key_owner');
 
-SELECT ok(
-  (SELECT count(*)::integer FROM hub.api_keys WHERE user_id = tests.get_supabase_uid('key_owner')) > 0,
-  'User B cannot DELETE User A''s api_keys'
+SELECT is(
+  (SELECT count(*)::integer FROM hub.api_keys WHERE user_id = tests.get_supabase_uid('key_owner')),
+  3,
+  'User B cannot delete User A keys (3 remain)'
 );
 
 -- Cleanup

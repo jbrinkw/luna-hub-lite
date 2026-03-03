@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(7);
+SELECT plan(8);
 
 -- Setup: create two test users
 SELECT tests.create_supabase_user('act_user', 'actuser@test.com');
@@ -30,6 +30,13 @@ SELECT is(
 SELECT lives_ok(
   $$SELECT hub.deactivate_app('coachbyte')$$,
   'Deactivate unactivated app does not throw'
+);
+
+SELECT is(
+  (SELECT count(*)::integer FROM hub.app_activations
+    WHERE user_id = tests.get_supabase_uid('act_user')),
+  0,
+  'Deactivate unactivated app has no side effects'
 );
 
 -- Test 4: Activate + deactivate + reactivate -> clean cycle
