@@ -36,7 +36,10 @@ describe('Extension settings', () => {
     expect(data?.enabled).toBe(true);
   });
 
-  it('save credentials stores value', async () => {
+  // Note: credentials_encrypted stores plaintext JSON. The column is TEXT with no
+  // encryption trigger, pgcrypto, or Supabase Vault integration. The name is aspirational.
+  // Encryption via Supabase Vault is deferred to post-MVP.
+  it('save credentials stores value (plaintext — encryption deferred to post-MVP)', async () => {
     const { userId, client } = await createTestUser('ext-creds');
     userIds.push(userId);
 
@@ -63,7 +66,8 @@ describe('Extension settings', () => {
       .eq('extension_name', 'todoist')
       .single();
 
-    expect(data?.credentials_encrypted).toBeTruthy();
+    // Value is stored as-is (plaintext JSON) — no encryption transformation
+    expect(data?.credentials_encrypted).toBe(JSON.stringify({ api_token: 'tok_123' }));
     const parsed = JSON.parse(data!.credentials_encrypted!);
     expect(parsed.api_token).toBe('tok_123');
   });

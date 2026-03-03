@@ -9,6 +9,15 @@ import { markDone } from '../chefbyte/mark-done';
 import { belowMinStock } from '../chefbyte/below-min-stock';
 import { getCookable } from '../chefbyte/get-cookable';
 import { createRecipe } from '../chefbyte/create-recipe';
+import { getProductLots } from '../chefbyte/get-product-lots';
+import { getShoppingList } from '../chefbyte/get-shopping-list';
+import { addToShopping } from '../chefbyte/add-to-shopping';
+import { clearShopping } from '../chefbyte/clear-shopping';
+import { getMealPlan } from '../chefbyte/get-meal-plan';
+import { addMeal } from '../chefbyte/add-meal';
+import { getRecipes } from '../chefbyte/get-recipes';
+import { logTempItem } from '../chefbyte/log-temp-item';
+import { setPrice } from '../chefbyte/set-price';
 
 // ---------------------------------------------------------------------------
 // Mock factory — same pattern as coachbyte tests
@@ -634,6 +643,26 @@ describe('CHEFBYTE_below_min_stock', () => {
     expect(parsed.total).toBe(0);
     expect(parsed.message).toContain('No products have minimum stock set');
   });
+
+  it('returns error when stock lots query fails (lotError path)', async () => {
+    const productsChain = createChain();
+    productsChain.data = [
+      { product_id: 'p-1', name: 'Chicken', min_stock_amount: 5, category: 'Protein' },
+    ];
+
+    const lotsChain = createChain();
+    lotsChain.data = null;
+    lotsChain.error = { message: 'stock query timeout' };
+
+    mock.cbFrom
+      .mockReturnValueOnce(productsChain)
+      .mockReturnValueOnce(lotsChain);
+
+    const result = await belowMinStock.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('stock query timeout');
+  });
 });
 
 describe('CHEFBYTE_get_cookable', () => {
@@ -709,6 +738,63 @@ describe('CHEFBYTE_get_cookable', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('query timeout');
+  });
+
+  it('returns error when stock lots query fails (lotError path)', async () => {
+    const recipesChain = createChain();
+    recipesChain.data = [
+      {
+        recipe_id: 'r-1', name: 'Some Recipe', servings: 2,
+        recipe_ingredients: [{ product_id: 'p-1', qty_containers: 1 }],
+      },
+    ];
+
+    const lotsChain = createChain();
+    lotsChain.data = null;
+    lotsChain.error = { message: 'stock connection lost' };
+
+    mock.cbFrom
+      .mockReturnValueOnce(recipesChain)
+      .mockReturnValueOnce(lotsChain);
+
+    const result = await getCookable.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('stock connection lost');
+  });
+
+  it('excludes recipes with zero ingredients', async () => {
+    const recipesChain = createChain();
+    recipesChain.data = [
+      {
+        recipe_id: 'r-empty', name: 'Empty Recipe', servings: 1,
+        recipe_ingredients: [],
+      },
+      {
+        recipe_id: 'r-has-ing', name: 'Full Recipe', servings: 2,
+        recipe_ingredients: [
+          { product_id: 'p-1', qty_containers: 1 },
+        ],
+      },
+    ];
+
+    const lotsChain = createChain();
+    lotsChain.data = [
+      { product_id: 'p-1', qty_containers: 5 },
+    ];
+
+    mock.cbFrom
+      .mockReturnValueOnce(recipesChain)
+      .mockReturnValueOnce(lotsChain);
+
+    const result = await getCookable.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    // Empty Recipe should be excluded because it has no ingredients
+    expect(parsed.total).toBe(1);
+    expect(parsed.cookable).toHaveLength(1);
+    expect(parsed.cookable[0].name).toBe('Full Recipe');
   });
 });
 
@@ -821,5 +907,581 @@ describe('CHEFBYTE_create_recipe', () => {
     expect(mock.cbFrom).toHaveBeenCalledWith('recipes');
     expect(deleteChain.delete).toHaveBeenCalled();
     expect(deleteChain.eq).toHaveBeenCalledWith('recipe_id', 'r-orphan');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 1. CHEFBYTE_get_product_lots
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_get_product_lots', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+  });
+
+  it('returns lots for a product with location join data', async () => {
+    mock.cbChain.data = [
+      {
+        lot_id: 'lot-1', qty_containers: 3, expires_on: '2026-04-01',
+        meal_label: null, location_id: 'loc-1', created_at: '2026-03-01T00:00:00Z',
+        locations: { name: 'Fridge' },
+      },
+      {
+        lot_id: 'lot-2', qty_containers: 1.5, expires_on: null,
+        meal_label: '[MEAL] prep', location_id: null, created_at: '2026-03-02T00:00:00Z',
+        locations: null,
+      },
+    ];
+    mock.cbChain.error = null;
+
+    const result = await getProductLots.handler({ product_id: 'p-1' }, ctx(mock.supabase));
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.product_id).toBe('p-1');
+    expect(parsed.total_lots).toBe(2);
+    expect(parsed.lots).toHaveLength(2);
+    expect(parsed.lots[0].lot_id).toBe('lot-1');
+    expect(parsed.lots[0].qty_containers).toBe(3);
+    expect(parsed.lots[0].location).toBe('Fridge');
+    expect(parsed.lots[1].lot_id).toBe('lot-2');
+    expect(parsed.lots[1].qty_containers).toBe(1.5);
+    expect(parsed.lots[1].location).toBeNull();
+    expect(parsed.lots[1].meal_label).toBe('[MEAL] prep');
+
+    // Verify correct table and filters
+    expect(mock.cbFrom).toHaveBeenCalledWith('stock_lots');
+    expect(mock.cbChain.eq).toHaveBeenCalledWith('user_id', USER_ID);
+    expect(mock.cbChain.eq).toHaveBeenCalledWith('product_id', 'p-1');
+    expect(mock.cbChain.gt).toHaveBeenCalledWith('qty_containers', 0);
+  });
+
+  it('returns error when query fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'lots fetch failed' };
+
+    const result = await getProductLots.handler({ product_id: 'p-1' }, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('lots fetch failed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 2. CHEFBYTE_get_shopping_list
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_get_shopping_list', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+  });
+
+  it('returns shopping list items with product join and cost calculation', async () => {
+    mock.cbChain.data = [
+      {
+        id: 'sl-1', product_id: 'p-1', qty_containers: 3, notes: 'Need soon',
+        products: { name: 'Chicken Breast', price: '4.99' },
+      },
+      {
+        id: 'sl-2', product_id: 'p-2', qty_containers: 2, notes: null,
+        products: { name: 'Rice', price: null },
+      },
+    ];
+    mock.cbChain.error = null;
+
+    const result = await getShoppingList.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.total_items).toBe(2);
+    expect(parsed.items).toHaveLength(2);
+
+    // First item: has price, cost calculated
+    expect(parsed.items[0].product_name).toBe('Chicken Breast');
+    expect(parsed.items[0].qty_containers).toBe(3);
+    expect(parsed.items[0].price).toBe(4.99);
+    expect(parsed.items[0].estimated_cost).toBeCloseTo(14.97);
+    expect(parsed.items[0].notes).toBe('Need soon');
+
+    // Second item: no price, cost null
+    expect(parsed.items[1].product_name).toBe('Rice');
+    expect(parsed.items[1].price).toBeNull();
+    expect(parsed.items[1].estimated_cost).toBeNull();
+
+    // Total cost should only include items with prices
+    expect(parsed.estimated_total).toBeCloseTo(14.97);
+
+    expect(mock.cbFrom).toHaveBeenCalledWith('shopping_list');
+  });
+
+  it('returns error when query fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'shopping list unavailable' };
+
+    const result = await getShoppingList.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('shopping list unavailable');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 3. CHEFBYTE_add_to_shopping
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_add_to_shopping', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+  });
+
+  it('upserts item to shopping list and returns success', async () => {
+    mock.cbChain.data = {
+      id: 'sl-new', product_id: 'p-1', qty_containers: 5, notes: 'stock up',
+    };
+    mock.cbChain.error = null;
+
+    const result = await addToShopping.handler(
+      { product_id: 'p-1', qty_containers: 5, notes: 'stock up' },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.message).toContain('5 container(s)');
+    expect(parsed.item.id).toBe('sl-new');
+
+    expect(mock.cbFrom).toHaveBeenCalledWith('shopping_list');
+    expect(mock.cbChain.upsert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: USER_ID,
+        product_id: 'p-1',
+        qty_containers: 5,
+        notes: 'stock up',
+      }),
+      { onConflict: 'user_id,product_id' },
+    );
+  });
+
+  it('rejects non-positive qty_containers', async () => {
+    const result = await addToShopping.handler(
+      { product_id: 'p-1', qty_containers: 0 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('qty_containers must be positive');
+  });
+
+  it('returns error when upsert fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'upsert conflict error' };
+
+    const result = await addToShopping.handler(
+      { product_id: 'p-1', qty_containers: 2 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('upsert conflict error');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 4. CHEFBYTE_clear_shopping
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_clear_shopping', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+  });
+
+  it('deletes all shopping list items and returns success', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = null;
+
+    const result = await clearShopping.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.message).toContain('Shopping list cleared');
+
+    expect(mock.cbFrom).toHaveBeenCalledWith('shopping_list');
+    expect(mock.cbChain.delete).toHaveBeenCalled();
+    expect(mock.cbChain.eq).toHaveBeenCalledWith('user_id', USER_ID);
+  });
+
+  it('returns error when delete fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'delete permission denied' };
+
+    const result = await clearShopping.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('delete permission denied');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 5. CHEFBYTE_get_meal_plan
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_get_meal_plan', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+  });
+
+  it('returns meal plan entries with recipe/product joins', async () => {
+    mock.cbChain.data = [
+      {
+        meal_id: 'm-1', plan_date: '2026-03-01', meal_type: 'breakfast',
+        recipe_id: 'r-1', product_id: null, servings: 2,
+        completed_at: '2026-03-01T12:00:00Z', logical_date: '2026-03-01',
+        recipes: { name: 'Oatmeal Bowl' }, products: null,
+      },
+      {
+        meal_id: 'm-2', plan_date: '2026-03-01', meal_type: 'lunch',
+        recipe_id: null, product_id: 'p-1', servings: null,
+        completed_at: null, logical_date: '2026-03-01',
+        recipes: null, products: { name: 'Protein Bar' },
+      },
+    ];
+    mock.cbChain.error = null;
+
+    const result = await getMealPlan.handler(
+      { start_date: '2026-03-01', end_date: '2026-03-07' },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.total).toBe(2);
+    expect(parsed.entries).toHaveLength(2);
+
+    // First entry: recipe-based, completed
+    expect(parsed.entries[0].meal_id).toBe('m-1');
+    expect(parsed.entries[0].recipe_name).toBe('Oatmeal Bowl');
+    expect(parsed.entries[0].product_name).toBeNull();
+    expect(parsed.entries[0].servings).toBe(2);
+    expect(parsed.entries[0].completed).toBe(true);
+
+    // Second entry: product-based, not completed
+    expect(parsed.entries[1].recipe_name).toBeNull();
+    expect(parsed.entries[1].product_name).toBe('Protein Bar');
+    expect(parsed.entries[1].completed).toBe(false);
+
+    expect(mock.cbFrom).toHaveBeenCalledWith('meal_plan_entries');
+    expect(mock.cbChain.gte).toHaveBeenCalledWith('plan_date', '2026-03-01');
+    expect(mock.cbChain.lte).toHaveBeenCalledWith('plan_date', '2026-03-07');
+  });
+
+  it('returns error when query fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'meal plan query failed' };
+
+    const result = await getMealPlan.handler(
+      { start_date: '2026-03-01', end_date: '2026-03-07' },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('meal plan query failed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 6. CHEFBYTE_add_meal
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_add_meal', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+  });
+
+  it('inserts meal plan entry and returns success', async () => {
+    mock.cbChain.data = {
+      meal_id: 'm-new', plan_date: '2026-03-05', meal_type: 'dinner',
+      recipe_id: 'r-1', product_id: null, servings: 3,
+    };
+    mock.cbChain.error = null;
+
+    const result = await addMeal.handler(
+      { plan_date: '2026-03-05', meal_type: 'dinner', recipe_id: 'r-1', servings: 3 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.message).toContain('Meal plan entry added');
+    expect(parsed.meal.meal_id).toBe('m-new');
+    expect(parsed.meal.meal_type).toBe('dinner');
+
+    expect(mock.cbFrom).toHaveBeenCalledWith('meal_plan_entries');
+    expect(mock.cbChain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: USER_ID,
+        plan_date: '2026-03-05',
+        meal_type: 'dinner',
+        recipe_id: 'r-1',
+        servings: 3,
+      }),
+    );
+  });
+
+  it('rejects when neither recipe_id nor product_id is provided', async () => {
+    const result = await addMeal.handler(
+      { plan_date: '2026-03-05', meal_type: 'lunch' },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('At least one of recipe_id or product_id is required');
+  });
+
+  it('returns error when insert fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'FK violation: recipe not found' };
+
+    const result = await addMeal.handler(
+      { plan_date: '2026-03-05', meal_type: 'dinner', recipe_id: 'bad-id' },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('FK violation: recipe not found');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 7. CHEFBYTE_get_recipes
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_get_recipes', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+  });
+
+  it('returns recipes with ingredients and computed macros', async () => {
+    mock.cbChain.data = [
+      {
+        recipe_id: 'r-1', name: 'Chicken Stir Fry', instructions: 'Cook it',
+        servings: 4, prep_time: 30, created_at: '2026-03-01T00:00:00Z',
+        recipe_ingredients: [
+          {
+            id: 'ri-1', product_id: 'p-1', qty_containers: 2,
+            products: {
+              name: 'Chicken Breast',
+              calories_per_serving: 165, carbs_per_serving: 0,
+              protein_per_serving: 31, fat_per_serving: 3.6,
+              servings_per_container: 4,
+            },
+          },
+          {
+            id: 'ri-2', product_id: 'p-2', qty_containers: 1,
+            products: {
+              name: 'Rice',
+              calories_per_serving: 200, carbs_per_serving: 45,
+              protein_per_serving: 4, fat_per_serving: 0.5,
+              servings_per_container: 8,
+            },
+          },
+        ],
+      },
+    ];
+    mock.cbChain.error = null;
+
+    const result = await getRecipes.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.total).toBe(1);
+    expect(parsed.recipes).toHaveLength(1);
+
+    const recipe = parsed.recipes[0];
+    expect(recipe.name).toBe('Chicken Stir Fry');
+    expect(recipe.ingredients).toHaveLength(2);
+
+    // Verify macros_per_container = per_serving * servings_per_container
+    const chickenIng = recipe.ingredients[0];
+    expect(chickenIng.product_name).toBe('Chicken Breast');
+    expect(chickenIng.macros_per_container.calories).toBe(165 * 4);
+    expect(chickenIng.macros_per_container.protein).toBe(31 * 4);
+
+    expect(mock.cbFrom).toHaveBeenCalledWith('recipes');
+  });
+
+  it('applies search filter when provided', async () => {
+    mock.cbChain.data = [];
+    mock.cbChain.error = null;
+
+    await getRecipes.handler({ search: 'pasta' }, ctx(mock.supabase));
+
+    expect(mock.cbChain.ilike).toHaveBeenCalledWith('name', '%pasta%');
+  });
+
+  it('returns error when query fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'recipes table locked' };
+
+    const result = await getRecipes.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('recipes table locked');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 8. CHEFBYTE_log_temp_item
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_log_temp_item', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+    // getLogicalDate reads hub.profiles
+    mock.hubChain.data = { timezone: 'America/New_York', day_start_hour: 6 };
+    mock.hubChain.error = null;
+  });
+
+  it('inserts temp item with logical date and returns success', async () => {
+    mock.cbChain.data = {
+      id: 'ti-new', name: 'Pizza slice', calories: 300,
+      carbs: 35, protein: 12, fat: 14, logical_date: '2026-03-03',
+    };
+    mock.cbChain.error = null;
+
+    const result = await logTempItem.handler(
+      { name: 'Pizza slice', calories: 300, carbs: 35, protein: 12, fat: 14 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.message).toContain('Pizza slice');
+    expect(parsed.message).toContain('300 cal');
+    expect(parsed.item.id).toBe('ti-new');
+
+    // Verify hub profiles was queried for getLogicalDate
+    expect(mock.hubFrom).toHaveBeenCalledWith('profiles');
+
+    // Verify insert on temp_items
+    expect(mock.cbFrom).toHaveBeenCalledWith('temp_items');
+    expect(mock.cbChain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        user_id: USER_ID,
+        name: 'Pizza slice',
+        calories: 300,
+        carbs: 35,
+        protein: 12,
+        fat: 14,
+      }),
+    );
+  });
+
+  it('only includes provided optional macro fields', async () => {
+    mock.cbChain.data = {
+      id: 'ti-min', name: 'Apple', calories: 95,
+      carbs: null, protein: null, fat: null, logical_date: '2026-03-03',
+    };
+    mock.cbChain.error = null;
+
+    await logTempItem.handler(
+      { name: 'Apple', calories: 95 },
+      ctx(mock.supabase),
+    );
+
+    // Insert should NOT include carbs/protein/fat since they were not provided
+    expect(mock.cbChain.insert).toHaveBeenCalledWith(
+      expect.not.objectContaining({
+        carbs: expect.anything(),
+        protein: expect.anything(),
+        fat: expect.anything(),
+      }),
+    );
+  });
+
+  it('returns error when insert fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'temp_items insert failed' };
+
+    const result = await logTempItem.handler(
+      { name: 'Bad Item', calories: 100 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('temp_items insert failed');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 9. CHEFBYTE_set_price
+// ---------------------------------------------------------------------------
+
+describe('CHEFBYTE_set_price', () => {
+  let mock: ReturnType<typeof createMockSupabase>;
+
+  beforeEach(() => {
+    mock = createMockSupabase();
+  });
+
+  it('updates product price and returns success', async () => {
+    mock.cbChain.data = {
+      product_id: 'p-1', name: 'Chicken Breast', price: '4.99',
+    };
+    mock.cbChain.error = null;
+
+    const result = await setPrice.handler(
+      { product_id: 'p-1', price: 4.99 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.message).toContain('Chicken Breast');
+    expect(parsed.message).toContain('$4.99');
+    expect(parsed.product.product_id).toBe('p-1');
+
+    expect(mock.cbFrom).toHaveBeenCalledWith('products');
+    expect(mock.cbChain.update).toHaveBeenCalledWith({ price: 4.99 });
+    expect(mock.cbChain.eq).toHaveBeenCalledWith('product_id', 'p-1');
+    expect(mock.cbChain.eq).toHaveBeenCalledWith('user_id', USER_ID);
+  });
+
+  it('rejects negative price', async () => {
+    const result = await setPrice.handler(
+      { product_id: 'p-1', price: -5 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Price cannot be negative');
+  });
+
+  it('returns error when update fails', async () => {
+    mock.cbChain.data = null;
+    mock.cbChain.error = { message: 'product not found for update' };
+
+    const result = await setPrice.handler(
+      { product_id: 'nonexistent', price: 9.99 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('product not found for update');
   });
 });

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(10);
+SELECT plan(16);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -81,7 +81,29 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 6: Goal = 0 when no config exists
+-- Test 6: get_daily_macros returns fat consumed = 7
+-- (5 from food_log + 2 from temp_item)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'fat'->>'consumed')::numeric),
+  7::numeric,
+  'fat consumed = 7 (5 food_log + 2 temp_item)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 7: get_daily_macros returns carbs consumed = 15
+-- (10 from food_log + 5 from temp_item)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'carbs'->>'consumed')::numeric),
+  15::numeric,
+  'carbs consumed = 15 (10 food_log + 5 temp_item)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 8: Goal = 0 when no config exists
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
@@ -135,10 +157,85 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
+-- Test 13: Insert liquidtrack device + event with known macros
+-- Device with product, event with 100cal/8p/4f/12c
+-- ─────────────────────────────────────────────────────────────
+
+INSERT INTO chefbyte.liquidtrack_devices (
+  device_id, user_id, device_name, product_id, import_key_hash
+) VALUES (
+  '70000000-0000-0000-0000-000000000001',
+  tests.get_supabase_uid('macro_tester'),
+  'Kitchen Scale',
+  '60000000-0000-0000-0000-000000000001',
+  'testhash123'
+);
+
+INSERT INTO chefbyte.liquidtrack_events (
+  user_id, device_id, weight_before, weight_after, consumption,
+  calories, carbs, protein, fat, logical_date
+) VALUES (
+  tests.get_supabase_uid('macro_tester'),
+  '70000000-0000-0000-0000-000000000001',
+  500, 400, 100,
+  100, 12, 8, 4,
+  '2026-03-03'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 14: Daily macros now include liquidtrack event
+-- Total calories: 250 (food+temp) + 100 (lt) = 350
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'calories'->>'consumed')::numeric),
+  350::numeric,
+  'calories consumed = 350 after adding liquidtrack event (250 + 100)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 15: Protein includes liquidtrack contribution
+-- Total protein: 30 (food+temp) + 8 (lt) = 38
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'protein'->>'consumed')::numeric),
+  38::numeric,
+  'protein consumed = 38 after adding liquidtrack event (30 + 8)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 16: Fat includes liquidtrack contribution
+-- Total fat: 7 (food+temp) + 4 (lt) = 11
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'fat'->>'consumed')::numeric),
+  11::numeric,
+  'fat consumed = 11 after adding liquidtrack event (7 + 4)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 17: Cross-user isolation — User B sees no macros from User A
+-- ─────────────────────────────────────────────────────────────
+
+SELECT tests.clear_authentication();
+SELECT tests.create_supabase_user('macro_intruder');
+SELECT tests.authenticate_as('macro_intruder');
+SELECT hub.activate_app('chefbyte');
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'calories'->>'consumed')::numeric),
+  0::numeric,
+  'User B sees 0 calories consumed — cannot see User A macros (cross-user isolation)'
+);
+
+-- ─────────────────────────────────────────────────────────────
 -- Teardown
 -- ─────────────────────────────────────────────────────────────
 
 SELECT tests.clear_authentication();
+SELECT tests.delete_supabase_user('macro_intruder');
 SELECT tests.delete_supabase_user('macro_tester');
 
 SELECT * FROM finish();

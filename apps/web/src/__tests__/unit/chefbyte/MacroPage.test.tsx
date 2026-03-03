@@ -187,13 +187,38 @@ describe('MacroPage', () => {
       expect(screen.getByTestId('date-nav')).toBeInTheDocument();
     });
 
-    const dateBefore = screen.getByTestId('current-date').textContent;
+    // First go forward so we have a known reference, then go backward
+    fireEvent.click(screen.getByTestId('next-date-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('current-date')).toBeInTheDocument();
+    });
+
+    // Capture the "tomorrow" date text, then click Prev to go back to today
+    const tomorrowText = screen.getByTestId('current-date').textContent!;
     fireEvent.click(screen.getByTestId('prev-date-btn'));
 
     await waitFor(() => {
-      const dateAfter = screen.getByTestId('current-date').textContent;
-      expect(dateAfter).not.toBe(dateBefore);
+      const afterPrev = screen.getByTestId('current-date').textContent;
+      expect(afterPrev).not.toBe(tomorrowText);
     });
+
+    // Parse the day numbers from the displayed date strings to verify backward direction.
+    // formatDateDisplay outputs e.g. "Tue, Mar 3" — extract the numeric day.
+    const dayMatch = (text: string) => {
+      const m = text.match(/(\d+)/);
+      return m ? parseInt(m[1], 10) : NaN;
+    };
+    const tomorrowDay = dayMatch(tomorrowText);
+    const currentDay = dayMatch(screen.getByTestId('current-date').textContent!);
+    // The day after Prev should be less than the day before Prev (handles month boundaries by checking != )
+    // More precisely, Prev from tomorrow should return to today
+    expect(currentDay).not.toBe(tomorrowDay);
+    // The date should have gone backward: today's day number is less than tomorrow's
+    // (unless month boundary, in which case they're simply different, which we already asserted)
+    if (tomorrowDay > 1) {
+      expect(currentDay).toBe(tomorrowDay - 1);
+    }
   });
 
   it('navigates to next date when Next is clicked', async () => {

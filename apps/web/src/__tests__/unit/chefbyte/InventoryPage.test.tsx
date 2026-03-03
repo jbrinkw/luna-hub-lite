@@ -281,6 +281,53 @@ describe('InventoryPage', () => {
     expect(screen.getByTestId('min-stock-p2')).toHaveTextContent('1.0 ctn');
   });
 
+  /* ---- Stock action button behavior ---- */
+
+  it('calls Supabase insert when "+1 Ctn" button is clicked', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('add-ctn-p1')).toBeInTheDocument();
+    });
+
+    // Clear mocks so we can track only the insert call from the button click
+    mockChain.insert.mockClear();
+
+    fireEvent.click(screen.getByTestId('add-ctn-p1'));
+
+    // The addStock function calls: chefbyte().from('stock_lots').insert({...})
+    await waitFor(() => {
+      expect(mockChain.insert).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: 'u1',
+          product_id: 'p1',
+          location_id: 'loc1',
+          qty_containers: 1,
+        }),
+      );
+    });
+  });
+
+  it('calls Supabase rpc when "-1 Ctn" button is clicked', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('sub-ctn-p1')).toBeInTheDocument();
+    });
+
+    mockRpc.mockClear();
+
+    fireEvent.click(screen.getByTestId('sub-ctn-p1'));
+
+    // The consumeStock function calls: chefbyte().rpc('consume_product', {...})
+    await waitFor(() => {
+      expect(mockRpc).toHaveBeenCalledWith('consume_product', expect.objectContaining({
+        p_product_id: 'p1',
+        p_qty: 1,
+        p_unit: 'container',
+        p_log_macros: false,
+      }));
+    });
+  });
+
   it('switches to lots view and shows lot data', async () => {
     renderPage();
     await waitFor(() => {

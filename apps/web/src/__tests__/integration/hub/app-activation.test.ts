@@ -91,6 +91,47 @@ describe('App activation lifecycle', () => {
     expect(data![0].app_name).toBe('chefbyte');
   });
 
+  it('double activation is idempotent (ON CONFLICT DO NOTHING)', async () => {
+    const { userId, client } = await createTestUser('act-idempotent');
+    userIds.push(userId);
+
+    const { error: firstError } = await client.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
+    expect(firstError).toBeNull();
+
+    // Second activation of same app — should succeed silently (no error, no duplicate)
+    const { error: secondError } = await client.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
+    expect(secondError).toBeNull();
+
+    // Verify still exactly one row (not duplicated)
+    const { data, error: readError } = await client
+      .schema('hub')
+      .from('app_activations')
+      .select('app_name')
+      .eq('user_id', userId);
+    expect(readError).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data![0].app_name).toBe('coachbyte');
+  });
+
+  it('activate_app accepts arbitrary app name (no CHECK constraint on app_name)', async () => {
+    const { userId, client } = await createTestUser('act-invalid');
+    userIds.push(userId);
+
+    // The function uses INSERT with ON CONFLICT — there's no CHECK constraint on app_name,
+    // so any text value is accepted. This documents current behavior.
+    const { error } = await client.schema('hub').rpc('activate_app', { p_app_name: 'nonexistent_app' });
+    expect(error).toBeNull();
+
+    const { data, error: readError } = await client
+      .schema('hub')
+      .from('app_activations')
+      .select('app_name')
+      .eq('user_id', userId);
+    expect(readError).toBeNull();
+    expect(data).toHaveLength(1);
+    expect(data![0].app_name).toBe('nonexistent_app');
+  });
+
   it('RLS: user B cannot see user A activations', async () => {
     const { userId: userAId, client: clientA } = await createTestUser('act-rls-a');
     userIds.push(userAId);

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(11);
+SELECT plan(14);
 
 -- Setup: create user and activate CoachByte
 SELECT tests.create_supabase_user('cb_activator');
@@ -100,14 +100,37 @@ SELECT is(
   'daily_plans deleted after deactivation'
 );
 
+-- Test 9: Timers deleted after deactivation
+SELECT is(
+  (SELECT count(*)::integer FROM coachbyte.timers
+    WHERE user_id = tests.get_supabase_uid('cb_activator')),
+  0,
+  'timers deleted after deactivation'
+);
+
 ------------------------------------------------------------
 -- Reactivation
 ------------------------------------------------------------
 
--- Test 8: Reactivate CoachByte → clean slate
+-- Test 10: Reactivate CoachByte → clean slate
 SELECT lives_ok(
   $$ SELECT hub.activate_app('coachbyte') $$,
   'Reactivate CoachByte succeeds'
+);
+
+-- Test 11: Reactivation re-seeds user_settings with defaults
+SELECT is(
+  (SELECT default_rest_seconds FROM coachbyte.user_settings
+    WHERE user_id = tests.get_supabase_uid('cb_activator')),
+  90,
+  'Reactivation re-seeds user_settings default_rest_seconds = 90'
+);
+
+SELECT is(
+  (SELECT bar_weight_lbs FROM coachbyte.user_settings
+    WHERE user_id = tests.get_supabase_uid('cb_activator')),
+  45::numeric,
+  'Reactivation re-seeds user_settings bar_weight_lbs = 45'
 );
 
 -- Cleanup

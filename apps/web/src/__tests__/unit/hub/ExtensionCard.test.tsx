@@ -88,4 +88,23 @@ describe('ExtensionCard', () => {
     await userEvent.click(screen.getByRole('checkbox'));
     expect(onToggle).toHaveBeenCalledWith(false);
   });
+
+  it('save button is disabled while save is in progress', async () => {
+    // Create a promise that never resolves to keep the saving state active
+    const onSaveCredentials = vi.fn().mockReturnValue(new Promise(() => {}));
+    render(<ExtensionCard {...defaultProps} enabled onSaveCredentials={onSaveCredentials} />);
+
+    // Fill in the required credential field to pass validation
+    const input = screen.getByLabelText('Vault Path');
+    await userEvent.type(input, '/some/path');
+
+    // Click save — this will set saving=true and await the never-resolving promise
+    await userEvent.click(screen.getByText('Save Credentials'));
+
+    // The button should now show "Saving..." and be disabled
+    await waitFor(() => {
+      const savingButton = screen.getByText('Saving...');
+      expect(savingButton).toBeDisabled();
+    });
+  });
 });

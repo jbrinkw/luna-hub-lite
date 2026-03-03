@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(8);
+SELECT plan(9);
 
 -- Setup: create two test users
 SELECT tests.create_supabase_user('act_user', 'actuser@test.com');
@@ -80,6 +80,18 @@ SELECT is(
   1,
   'User B cannot deactivate User A apps'
 );
+
+-- Test 8: Invalid app name — still inserts a row (no CHECK constraint)
+SELECT hub.activate_app('nonexistent_app');
+SELECT is(
+  (SELECT count(*)::integer FROM hub.app_activations
+    WHERE user_id = tests.get_supabase_uid('act_user') AND app_name = 'nonexistent_app'),
+  1,
+  'Activating invalid app name creates activation row (no CHECK constraint)'
+);
+
+-- Cleanup: deactivate invalid app to leave clean state
+SELECT hub.deactivate_app('nonexistent_app');
 
 -- Cleanup
 SELECT tests.clear_authentication();

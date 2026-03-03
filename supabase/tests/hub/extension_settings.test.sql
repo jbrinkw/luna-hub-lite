@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(8);
+SELECT plan(9);
 
 -- Setup
 SELECT tests.create_supabase_user('ext_owner');
@@ -56,7 +56,19 @@ SELECT is(
   'User B cannot update User A extension_settings'
 );
 
--- Test 7: User can DELETE own extension_settings
+-- Test 7: User B cannot DELETE User A extension_settings
+SELECT tests.authenticate_as('ext_intruder');
+DELETE FROM hub.extension_settings
+  WHERE user_id = tests.get_supabase_uid('ext_owner');
+SELECT tests.authenticate_as('ext_owner');
+SELECT is(
+  (SELECT count(*)::integer FROM hub.extension_settings
+    WHERE user_id = tests.get_supabase_uid('ext_owner') AND extension_name = 'obsidian'),
+  1,
+  'User B cannot delete User A extension_settings'
+);
+
+-- Test 8: User can DELETE own extension_settings
 DELETE FROM hub.extension_settings WHERE extension_name = 'obsidian';
 SELECT is(
   (SELECT count(*)::integer FROM hub.extension_settings
@@ -65,7 +77,7 @@ SELECT is(
   'User can delete own extension_settings'
 );
 
--- Test 8: Anon cannot access extension_settings
+-- Test 9: Anon cannot access extension_settings
 SELECT tests.clear_authentication();
 SELECT throws_ok(
   $$ SELECT * FROM hub.extension_settings $$,

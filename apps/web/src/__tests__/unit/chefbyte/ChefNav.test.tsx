@@ -1,7 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ChefNav } from '@/components/chefbyte/ChefNav';
+
+const mockNavigate = vi.fn();
+vi.mock('react-router-dom', async () => {
+  const actual = await vi.importActual('react-router-dom');
+  return {
+    ...actual,
+    useNavigate: () => mockNavigate,
+  };
+});
 
 vi.mock('@/shared/auth/AuthProvider', () => ({
   useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
@@ -52,5 +61,30 @@ describe('ChefNav', () => {
     renderNav('/chef/unknown');
     const segment = screen.getByRole('tablist');
     expect(segment).toHaveAttribute('data-value', '/chef');
+  });
+
+  it('calls navigate when a different tab is clicked', () => {
+    renderNav('/chef');
+    mockNavigate.mockClear();
+
+    // Click the "Inventory" tab
+    const inventoryTab = screen.getByText('Inventory').closest('[role="tab"]');
+    expect(inventoryTab).toBeTruthy();
+    fireEvent.click(inventoryTab!);
+
+    expect(mockNavigate).toHaveBeenCalledWith('/chef/inventory');
+  });
+
+  it('does not call navigate when clicking the already-active tab', () => {
+    renderNav('/chef/recipes');
+    mockNavigate.mockClear();
+
+    // Click the "Recipes" tab which is already active
+    const recipesTab = screen.getByText('Recipes').closest('[role="tab"]');
+    expect(recipesTab).toBeTruthy();
+    fireEvent.click(recipesTab!);
+
+    // The component checks `val !== current` before navigating, so navigate should not be called
+    expect(mockNavigate).not.toHaveBeenCalled();
   });
 });

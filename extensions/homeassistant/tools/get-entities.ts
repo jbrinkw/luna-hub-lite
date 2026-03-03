@@ -17,24 +17,28 @@ export const HOMEASSISTANT_get_entities: ExtensionToolDefinition = {
       return toolError('Missing Home Assistant credentials (ha_api_key, ha_url)');
     }
 
-    const resp = await fetch(`${ha_url}/api/states`, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${ha_api_key}`,
-        'Content-Type': 'application/json',
-      },
-    });
+    try {
+      const resp = await fetch(`${ha_url}/api/states`, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${ha_api_key}`,
+          'Content-Type': 'application/json',
+        },
+      });
 
-    if (!resp.ok) return toolError(`Home Assistant API error: ${resp.status} ${resp.statusText}`);
+      if (!resp.ok) return toolError(`Home Assistant API error: ${resp.status} ${resp.statusText}`);
 
-    let data: any[] = await resp.json();
+      let data: any[] = await resp.json();
 
-    // Filter by domain prefix if provided
-    if (args.domain) {
-      const prefix = `${args.domain}.`;
-      data = data.filter((entity: any) => entity.entity_id?.startsWith(prefix));
+      // Filter by domain prefix if provided
+      if (args.domain) {
+        const prefix = `${args.domain}.`;
+        data = data.filter((entity: any) => entity.entity_id?.startsWith(prefix));
+      }
+
+      return toolSuccess(data);
+    } catch (e) {
+      return toolError(`Network error: ${(e as Error).message}`);
     }
-
-    return toolSuccess(data);
   },
 };

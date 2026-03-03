@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(14);
 
 -- Setup: create two users
 SELECT tests.create_supabase_user('ex_owner');
@@ -62,6 +62,31 @@ SELECT is(
     WHERE user_id = tests.get_supabase_uid('ex_owner')),
   0,
   'User B cannot see User A custom exercises'
+);
+
+-- Test 6b: User B cannot UPDATE User A's custom exercise (silently affects 0 rows)
+UPDATE coachbyte.exercises SET name = 'HACKED'
+  WHERE user_id = tests.get_supabase_uid('ex_owner') AND name = 'Custom Press V2';
+
+SELECT tests.authenticate_as('ex_owner');
+SELECT is(
+  (SELECT name FROM coachbyte.exercises
+    WHERE user_id = tests.get_supabase_uid('ex_owner')),
+  'Custom Press V2',
+  'User B UPDATE on User A''s exercise silently affects 0 rows'
+);
+
+-- Test 6c: User B cannot DELETE User A's custom exercise (silently affects 0 rows)
+SELECT tests.authenticate_as('ex_intruder');
+DELETE FROM coachbyte.exercises
+  WHERE user_id = tests.get_supabase_uid('ex_owner') AND name = 'Custom Press V2';
+
+SELECT tests.authenticate_as('ex_owner');
+SELECT is(
+  (SELECT count(*)::integer FROM coachbyte.exercises
+    WHERE user_id = tests.get_supabase_uid('ex_owner') AND name = 'Custom Press V2'),
+  1,
+  'User B DELETE on User A''s exercise silently affects 0 rows'
 );
 
 ------------------------------------------------------------

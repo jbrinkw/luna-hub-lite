@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(14);
+SELECT plan(20);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -77,7 +77,46 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 3: Nearest-expiry lot (A) reduced from 1.5 to 0.5
+-- Test 3: food_log protein = 1 container x 4 servings x 31 = 124
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT protein FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = '10000000-0000-0000-0000-000000000001'
+    ORDER BY created_at ASC LIMIT 1),
+  124.000::numeric,
+  'food_log protein = 1 container x 4 servings x 31 = 124'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 4: food_log fat = 1 container x 4 servings x 3.6 = 14.4
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT fat FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = '10000000-0000-0000-0000-000000000001'
+    ORDER BY created_at ASC LIMIT 1),
+  14.400::numeric,
+  'food_log fat = 1 container x 4 servings x 3.6 = 14.4'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 5: food_log carbs = 1 container x 4 servings x 0 = 0
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT carbs FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = '10000000-0000-0000-0000-000000000001'
+    ORDER BY created_at ASC LIMIT 1),
+  0.000::numeric,
+  'food_log carbs = 1 container x 4 servings x 0 = 0'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 6: Nearest-expiry lot (A) reduced from 1.5 to 0.5
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
@@ -249,10 +288,71 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
+-- Test 18: Consuming a non-existent product raises exception
+-- ─────────────────────────────────────────────────────────────
+
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.consume_product(
+      '99999999-9999-9999-9999-999999999999'::uuid,
+      1, 'container', true, '2026-03-03'::date
+    )
+  $$,
+  'Product not found or not owned by user',
+  'consuming a non-existent product raises exception'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 19-20: Consuming another user's product raises exception
+-- ─────────────────────────────────────────────────────────────
+
+SELECT tests.clear_authentication();
+SELECT tests.create_supabase_user('cf_intruder');
+SELECT tests.authenticate_as('cf_intruder');
+SELECT hub.activate_app('chefbyte');
+
+-- Create a product owned by cf_intruder
+INSERT INTO chefbyte.products (
+  product_id, user_id, name,
+  servings_per_container, calories_per_serving,
+  protein_per_serving, fat_per_serving, carbs_per_serving
+) VALUES (
+  '10000000-0000-0000-0000-000000000099',
+  tests.get_supabase_uid('cf_intruder'),
+  'Intruder Chicken',
+  4, 165, 31, 3.6, 0
+);
+
+-- Switch to cf_tester and attempt to consume cf_intruder's product
+SELECT tests.clear_authentication();
+SELECT tests.authenticate_as('cf_tester');
+
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.consume_product(
+      '10000000-0000-0000-0000-000000000099'::uuid,
+      1, 'container', true, '2026-03-03'::date
+    )
+  $$,
+  'Product not found or not owned by user',
+  'consuming another user product raises Product not found exception'
+);
+
+-- Verify no food_log was created for the intruder product
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = '10000000-0000-0000-0000-000000000099'),
+  0,
+  'no food_log created when attempting to consume another user product'
+);
+
+-- ─────────────────────────────────────────────────────────────
 -- Teardown
 -- ─────────────────────────────────────────────────────────────
 
 SELECT tests.clear_authentication();
+SELECT tests.delete_supabase_user('cf_intruder');
 SELECT tests.delete_supabase_user('cf_tester');
 
 SELECT * FROM finish();

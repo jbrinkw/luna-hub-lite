@@ -13,19 +13,23 @@ describe('SkeletonScreen', () => {
     expect(container.querySelectorAll('div[data-animated]')).toHaveLength(5);
   });
 
-  it('CardSkeleton renders skeleton elements', () => {
+  it('CardSkeleton renders exactly 3 skeleton elements', () => {
     const { container } = render(<CardSkeleton />);
-    expect(container.querySelectorAll('div[data-animated]').length).toBeGreaterThanOrEqual(2);
+    expect(container.querySelectorAll('div[data-animated]')).toHaveLength(3);
   });
 
-  it('MacroBarSkeleton renders 4 groups', () => {
+  it('MacroBarSkeleton renders 4 groups × 2 = 8 skeleton elements', () => {
     const { container } = render(<MacroBarSkeleton />);
-    // 4 macro groups × 2 skeleton lines each = 8
-    expect(container.querySelectorAll('div[data-animated]').length).toBeGreaterThanOrEqual(4);
+    expect(container.querySelectorAll('div[data-animated]')).toHaveLength(8);
   });
 
   it('TableSkeleton renders rows × cols skeleton items', () => {
     const { container } = render(<TableSkeleton rows={3} cols={4} />);
     expect(container.querySelectorAll('div[data-animated]')).toHaveLength(12);
+  });
+
+  it('TableSkeleton defaults to 5 rows × 4 cols = 20 skeleton items', () => {
+    const { container } = render(<TableSkeleton />);
+    expect(container.querySelectorAll('div[data-animated]')).toHaveLength(20);
   });
 });

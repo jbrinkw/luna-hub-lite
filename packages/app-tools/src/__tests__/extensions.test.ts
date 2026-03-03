@@ -105,6 +105,24 @@ describe('OBSIDIAN_search_notes', () => {
     expect(result.content[0].text).toContain('Missing Obsidian credentials');
     expect(mockFetch).not.toHaveBeenCalled();
   });
+
+  it('returns toolError when API returns error', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('Server Error', false, 500));
+
+    const result = await handler({ query: 'test' }, obsidianCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Obsidian API error: 500');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({ query: 'test' }, obsidianCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
+  });
 });
 
 describe('OBSIDIAN_create_note', () => {
@@ -142,6 +160,18 @@ describe('OBSIDIAN_create_note', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Obsidian API error: 500');
   });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler(
+      { path: 'folder/note.md', content: 'content' },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
+  });
 });
 
 describe('OBSIDIAN_get_note', () => {
@@ -171,6 +201,24 @@ describe('OBSIDIAN_get_note', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Obsidian credentials');
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns toolError when API returns error', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('Not Found', false, 404));
+
+    const result = await handler({ path: 'missing.md' }, obsidianCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Obsidian API error: 404');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({ path: 'note.md' }, obsidianCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
   });
 });
 
@@ -209,6 +257,18 @@ describe('OBSIDIAN_update_note', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Obsidian API error: 404');
   });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler(
+      { path: 'note.md', content: 'content' },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
+  });
 });
 
 // ===========================================================================
@@ -246,6 +306,24 @@ describe('TODOIST_get_tasks', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Todoist credentials');
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns toolError when API returns error', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('Forbidden', false, 403));
+
+    const result = await handler({}, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Todoist API error: 403');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({}, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
   });
 });
 
@@ -287,6 +365,15 @@ describe('TODOIST_create_task', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Todoist API error: 500');
   });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({ content: 'Fail task' }, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
+  });
 });
 
 describe('TODOIST_complete_task', () => {
@@ -315,6 +402,15 @@ describe('TODOIST_complete_task', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Todoist API error: 404');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({ task_id: 'task-abc' }, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
   });
 });
 
@@ -347,6 +443,24 @@ describe('TODOIST_get_projects', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Todoist credentials');
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns toolError when API returns error', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('Server Error', false, 500));
+
+    const result = await handler({}, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Todoist API error: 500');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({}, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
   });
 });
 
@@ -381,6 +495,24 @@ describe('HOMEASSISTANT_get_entity_state', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Home Assistant credentials');
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns toolError when API returns error', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('Not Found', false, 404));
+
+    const result = await handler({ entity_id: 'light.missing' }, haCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Home Assistant API error: 404');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({ entity_id: 'light.test' }, haCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
   });
 });
 
@@ -427,6 +559,18 @@ describe('HOMEASSISTANT_call_service', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Home Assistant API error: 500');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler(
+      { domain: 'light', service: 'turn_on' },
+      haCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
   });
 });
 
@@ -478,5 +622,23 @@ describe('HOMEASSISTANT_get_entities', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Home Assistant credentials');
     expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns toolError when API returns error', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('Server Error', false, 500));
+
+    const result = await handler({}, haCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Home Assistant API error: 500');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({}, haCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
   });
 });

@@ -110,6 +110,9 @@ function parseResult(result: any) {
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
+// NOTE: Handlers intentionally do not have try/catch — unhandled exceptions
+// propagate to the MCP worker's top-level error handling layer. This is by
+// design, so we do not test for uncaught exception behavior here.
 
 describe('COACHBYTE_get_today_plan', () => {
   let mock: ReturnType<typeof createMockSupabase>;
@@ -164,6 +167,15 @@ describe('COACHBYTE_get_today_plan', () => {
     expect(result.content[0].text).toContain('rpc boom');
   });
 
+  it('returns toolError when rpc returns null plan_id', async () => {
+    mock.rpc.mockReturnValue({ data: { plan_id: null }, error: null });
+
+    const result = await getTodayPlan.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('No plan_id returned');
+  });
+
   it('returns toolError when plan fetch fails', async () => {
     mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
@@ -176,6 +188,114 @@ describe('COACHBYTE_get_today_plan', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('plan not found');
+  });
+
+  it('returns toolError when planned_sets query fails', async () => {
+    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+
+    const planChain = createChain();
+    planChain.data = { plan_id: 'plan-1', plan_date: '2026-03-03', summary: 'Push day', logical_date: '2026-03-03' };
+
+    const psChain = createChain();
+    psChain.data = null;
+    psChain.error = { message: 'planned sets query boom' };
+
+    mock.cbFrom
+      .mockReturnValueOnce(planChain)
+      .mockReturnValueOnce(psChain);
+
+    const result = await getTodayPlan.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('planned sets query boom');
+  });
+
+  it('returns toolError when completed_sets query fails', async () => {
+    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+
+    const planChain = createChain();
+    planChain.data = { plan_id: 'plan-1', plan_date: '2026-03-03', summary: 'Push day', logical_date: '2026-03-03' };
+
+    const psChain = createChain();
+    psChain.data = [
+      { planned_set_id: 'ps-1', exercise_id: 'ex-1', target_reps: 8, target_load: 135, rest_seconds: 90, order: 1, exercises: { name: 'Bench Press' } },
+    ];
+
+    const csChain = createChain();
+    csChain.data = null;
+    csChain.error = { message: 'completed sets query boom' };
+
+    mock.cbFrom
+      .mockReturnValueOnce(planChain)
+      .mockReturnValueOnce(psChain)
+      .mockReturnValueOnce(csChain);
+
+    const result = await getTodayPlan.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('completed sets query boom');
+  });
+
+  it('includes ad_hoc_sets for completed sets with no planned_set_id', async () => {
+    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+
+    const planChain = createChain();
+    planChain.data = { plan_id: 'plan-1', plan_date: '2026-03-03', summary: 'Push day', logical_date: '2026-03-03' };
+
+    const psChain = createChain();
+    psChain.data = [
+      { planned_set_id: 'ps-1', exercise_id: 'ex-1', target_reps: 8, target_load: 135, rest_seconds: 90, order: 1, exercises: { name: 'Bench Press' } },
+    ];
+
+    const csChain = createChain();
+    csChain.data = [
+      { completed_set_id: 'cs-1', planned_set_id: 'ps-1', exercise_id: 'ex-1', actual_reps: 8, actual_load: 135, completed_at: '2026-03-03T10:00:00Z', exercises: { name: 'Bench Press' } },
+      { completed_set_id: 'cs-2', planned_set_id: null, exercise_id: 'ex-2', actual_reps: 12, actual_load: 50, completed_at: '2026-03-03T10:30:00Z', exercises: { name: 'Curls' } },
+    ];
+
+    mock.cbFrom
+      .mockReturnValueOnce(planChain)
+      .mockReturnValueOnce(psChain)
+      .mockReturnValueOnce(csChain);
+
+    const result = await getTodayPlan.handler({}, ctx(mock.supabase));
+
+    expect(result.isError).toBeUndefined();
+    const parsed = parseResult(result);
+    expect(parsed.ad_hoc_sets).toHaveLength(1);
+    expect(parsed.ad_hoc_sets[0].completed_set_id).toBe('cs-2');
+    expect(parsed.ad_hoc_sets[0].exercise_name).toBe('Curls');
+    expect(parsed.ad_hoc_sets[0].ad_hoc).toBe(true);
+    expect(parsed.ad_hoc_sets[0].actual_reps).toBe(12);
+    expect(parsed.ad_hoc_sets[0].actual_load).toBe(50);
+    expect(parsed.ad_hoc_count).toBe(1);
+    // The planned set should be marked as completed
+    expect(parsed.sets[0].completed).toBe(true);
+    expect(parsed.completed_count).toBe(1);
+  });
+
+  it('queries the correct tables (daily_plans, planned_sets, completed_sets)', async () => {
+    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+
+    const planChain = createChain();
+    planChain.data = { plan_id: 'plan-1', plan_date: '2026-03-03', summary: 'Push day', logical_date: '2026-03-03' };
+
+    const psChain = createChain();
+    psChain.data = [];
+
+    const csChain = createChain();
+    csChain.data = [];
+
+    mock.cbFrom
+      .mockReturnValueOnce(planChain)
+      .mockReturnValueOnce(psChain)
+      .mockReturnValueOnce(csChain);
+
+    await getTodayPlan.handler({}, ctx(mock.supabase));
+
+    expect(mock.cbFrom).toHaveBeenCalledWith('daily_plans');
+    expect(mock.cbFrom).toHaveBeenCalledWith('planned_sets');
+    expect(mock.cbFrom).toHaveBeenCalledWith('completed_sets');
   });
 });
 
@@ -277,6 +397,18 @@ describe('COACHBYTE_log_set', () => {
     expect(result.content[0].text).toContain('rpc fail');
   });
 
+  it('returns error when rpc returns null plan_id', async () => {
+    mock.rpc.mockReturnValue({ data: { plan_id: null }, error: null });
+
+    const result = await logSet.handler(
+      { exercise_id: 'ex-1', reps: 10, load: 100 },
+      ctx(mock.supabase),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('No plan_id returned');
+  });
+
   it('returns error when insert fails', async () => {
     mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
@@ -356,18 +488,20 @@ describe('COACHBYTE_update_summary', () => {
     mock = createMockSupabase();
   });
 
-  it('updates summary and returns success', async () => {
-    mock.cbChain.data = { plan_id: 'plan-1', summary: 'Leg day' };
+  it('updates summary and returns the DB value (not the input)', async () => {
+    // Mock returns a DIFFERENT summary than input to prove handler returns data.summary
+    mock.cbChain.data = { plan_id: 'plan-1', summary: 'Leg day (trimmed by DB)' };
     mock.cbChain.error = null;
 
     const result = await updateSummary.handler(
-      { plan_id: 'plan-1', summary: 'Leg day' },
+      { plan_id: 'plan-1', summary: '  Leg day (trimmed by DB)  ' },
       ctx(mock.supabase),
     );
 
     expect(result.isError).toBeUndefined();
     const parsed = parseResult(result);
-    expect(parsed.summary).toBe('Leg day');
+    // The handler returns data.summary from the DB, not the input args.summary
+    expect(parsed.summary).toBe('Leg day (trimmed by DB)');
     expect(parsed.message).toBe('Summary updated');
   });
 
@@ -440,7 +574,7 @@ describe('COACHBYTE_get_history', () => {
     expect(parsed.message).toContain('No workout history');
   });
 
-  it('returns error when query fails', async () => {
+  it('returns error when plans query fails', async () => {
     const plansChain = createChain();
     plansChain.data = null;
     plansChain.error = { message: 'query failed' };
@@ -450,6 +584,26 @@ describe('COACHBYTE_get_history', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('query failed');
+  });
+
+  it('returns error when completed_sets query fails', async () => {
+    const plansChain = createChain();
+    plansChain.data = [
+      { plan_id: 'p1', plan_date: '2026-03-02', summary: 'Push', logical_date: '2026-03-02' },
+    ];
+
+    const csChain = createChain();
+    csChain.data = null;
+    csChain.error = { message: 'completed sets fetch failed' };
+
+    mock.cbFrom
+      .mockReturnValueOnce(plansChain)
+      .mockReturnValueOnce(csChain);
+
+    const result = await getHistory.handler({ days: 7 }, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('completed sets fetch failed');
   });
 });
 

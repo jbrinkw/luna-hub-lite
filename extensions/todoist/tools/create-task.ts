@@ -21,23 +21,27 @@ export const TODOIST_create_task: ExtensionToolDefinition = {
     const { todoist_api_key } = (ctx as ExtensionToolContext).credentials;
     if (!todoist_api_key) return toolError('Missing Todoist credentials (todoist_api_key)');
 
-    const body: Record<string, unknown> = { content: args.content };
-    if (args.project_id) body.project_id = args.project_id;
-    if (args.due_string) body.due_string = args.due_string;
-    if (args.priority) body.priority = args.priority;
+    try {
+      const body: Record<string, unknown> = { content: args.content };
+      if (args.project_id) body.project_id = args.project_id;
+      if (args.due_string) body.due_string = args.due_string;
+      if (args.priority) body.priority = args.priority;
 
-    const resp = await fetch(`${TODOIST_BASE}/tasks`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${todoist_api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
+      const resp = await fetch(`${TODOIST_BASE}/tasks`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${todoist_api_key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
 
-    if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
+      if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
 
-    const data = await resp.json();
-    return toolSuccess(data);
+      const data = await resp.json();
+      return toolSuccess(data);
+    } catch (e) {
+      return toolError(`Network error: ${(e as Error).message}`);
+    }
   },
 };

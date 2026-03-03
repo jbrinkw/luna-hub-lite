@@ -3,7 +3,7 @@
 
 BEGIN;
 
-SELECT plan(23);
+SELECT plan(28);
 
 -- ============================================================
 -- Setup: create test users
@@ -138,6 +138,18 @@ SELECT is(
     1,
     'running → expired succeeds when end_time <= now()'
 );
+
+-- ============================================================
+-- DESIGN NOTE: Tests 5-8 verify application-level state transition guards.
+--
+-- The timer state machine is enforced at the APPLICATION layer, not the DB.
+-- The DB has no trigger or CHECK constraint preventing arbitrary state
+-- transitions. The WHERE clauses in these UPDATE statements simulate
+-- the guards the frontend/RPC layer applies. Tests 5-8 prove the
+-- application-level pattern works (0 rows updated when guard fails).
+-- Tests 5b-8b (below) prove the DB itself allows free state updates,
+-- making this architectural choice explicit and tested.
+-- ============================================================
 
 -- ============================================================
 -- 5. paused → paused: no-op (0 rows updated, WHERE guard)
@@ -280,6 +292,90 @@ SELECT is(
     'paused',
     'timer remains paused after rejected paused → expired attempt'
 );
+
+-- ============================================================
+-- 5b-8b. POSITIVE: DB allows free state updates without guards
+-- Proves the state machine is NOT enforced at DB level (by design).
+-- ============================================================
+
+-- 5b. DB allows paused → paused (no WHERE guard)
+UPDATE coachbyte.timers
+SET state = 'paused', paused_at = now()
+WHERE timer_id = '00000000-0000-0000-0000-000000000002';
+
+SELECT is(
+    (SELECT state FROM coachbyte.timers
+     WHERE timer_id = '00000000-0000-0000-0000-000000000002'),
+    'paused',
+    'DB allows paused → paused without guards (state machine is app-level)'
+);
+
+-- 6b. DB allows expired → running (no WHERE guard)
+SELECT tests.authenticate_as('timer_user2');
+
+UPDATE coachbyte.timers
+SET state = 'running', end_time = now() + interval '60 seconds'
+WHERE timer_id = '00000000-0000-0000-0000-000000000003';
+
+SELECT is(
+    (SELECT state FROM coachbyte.timers
+     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
+    'running',
+    'DB allows expired → running without guards (state machine is app-level)'
+);
+
+-- 7b. DB allows running → expired even when end_time is in the future (no WHERE guard)
+UPDATE coachbyte.timers
+SET state = 'expired'
+WHERE timer_id = '00000000-0000-0000-0000-000000000003';
+
+SELECT is(
+    (SELECT state FROM coachbyte.timers
+     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
+    'expired',
+    'DB allows running → expired without end_time check (state machine is app-level)'
+);
+
+-- 8b. DB allows expired → paused (no WHERE guard)
+UPDATE coachbyte.timers
+SET state = 'paused', paused_at = now()
+WHERE timer_id = '00000000-0000-0000-0000-000000000003';
+
+SELECT is(
+    (SELECT state FROM coachbyte.timers
+     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
+    'paused',
+    'DB allows expired → paused without guards (state machine is app-level)'
+);
+
+-- ============================================================
+-- DELETE: owner can delete their own timer
+-- ============================================================
+
+SELECT tests.authenticate_as('timer_user2');
+
+DELETE FROM coachbyte.timers
+WHERE timer_id = '00000000-0000-0000-0000-000000000003';
+
+SELECT is(
+    (SELECT count(*)::INTEGER FROM coachbyte.timers
+     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
+    0,
+    'Owner can DELETE their own timer'
+);
+
+-- Re-insert timer_user2's timer so the UNIQUE constraint test still works
+INSERT INTO coachbyte.timers (
+    timer_id, user_id, state, end_time, duration_seconds, elapsed_before_pause
+) VALUES (
+    '00000000-0000-0000-0000-000000000003',
+    tests.get_supabase_uid('timer_user2'),
+    'expired',
+    now() - interval '10 seconds',
+    60, 60
+);
+
+SELECT tests.authenticate_as('timer_user');
 
 -- ============================================================
 -- 9. Only one timer per user (UNIQUE constraint)

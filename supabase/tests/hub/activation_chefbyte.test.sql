@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(23);
 
 -- Setup: create user
 SELECT tests.create_supabase_user('cf_activator');
@@ -92,6 +92,53 @@ VALUES (
   'serving'
 );
 
+-- Add a food_log
+INSERT INTO chefbyte.food_logs (user_id, product_id, logical_date, qty_consumed, unit, calories, carbs, protein, fat)
+VALUES (
+  tests.get_supabase_uid('cf_activator'),
+  (SELECT product_id FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('cf_activator') AND name = 'Test Rice'),
+  '2026-03-01', 1, 'serving', 200, 40, 5, 1
+);
+
+-- Add a temp_item
+INSERT INTO chefbyte.temp_items (user_id, name, logical_date, calories, carbs, protein, fat)
+VALUES (tests.get_supabase_uid('cf_activator'), 'Quick Snack', '2026-03-01', 150, 20, 5, 3);
+
+-- Add a shopping_list item
+INSERT INTO chefbyte.shopping_list (user_id, product_id, qty_containers)
+VALUES (
+  tests.get_supabase_uid('cf_activator'),
+  (SELECT product_id FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('cf_activator') AND name = 'Test Rice'),
+  2
+);
+
+-- Add a meal_plan_entry
+INSERT INTO chefbyte.meal_plan_entries (user_id, product_id, logical_date, servings)
+VALUES (
+  tests.get_supabase_uid('cf_activator'),
+  (SELECT product_id FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('cf_activator') AND name = 'Test Rice'),
+  '2026-03-01', 1
+);
+
+-- Add a user_config entry
+INSERT INTO chefbyte.user_config (user_id, key, value)
+VALUES (tests.get_supabase_uid('cf_activator'), 'daily_calorie_goal', '2000');
+
+-- Add a liquidtrack_device + event
+INSERT INTO chefbyte.liquidtrack_devices (user_id, device_name, import_key_hash)
+VALUES (tests.get_supabase_uid('cf_activator'), 'Water Bottle', 'hash_test_123');
+
+INSERT INTO chefbyte.liquidtrack_events (user_id, device_id, weight_before, weight_after, consumption, logical_date)
+VALUES (
+  tests.get_supabase_uid('cf_activator'),
+  (SELECT device_id FROM chefbyte.liquidtrack_devices
+    WHERE user_id = tests.get_supabase_uid('cf_activator') AND device_name = 'Water Bottle'),
+  500, 400, 100, '2026-03-01'
+);
+
 ------------------------------------------------------------
 -- Deactivation
 ------------------------------------------------------------
@@ -110,19 +157,68 @@ SELECT is(
   'Activation row removed after deactivation'
 );
 
--- Test 10: All chefbyte data deleted (products, stock_lots, locations, recipes, ingredients)
-SELECT ok(
+-- Test 10: Verify each chefbyte table is empty after deactivation (separate assertions)
+SELECT is(
   (SELECT count(*)::integer FROM chefbyte.products
-    WHERE user_id = tests.get_supabase_uid('cf_activator')) = 0
-  AND (SELECT count(*)::integer FROM chefbyte.stock_lots
-    WHERE user_id = tests.get_supabase_uid('cf_activator')) = 0
-  AND (SELECT count(*)::integer FROM chefbyte.locations
-    WHERE user_id = tests.get_supabase_uid('cf_activator')) = 0
-  AND (SELECT count(*)::integer FROM chefbyte.recipes
-    WHERE user_id = tests.get_supabase_uid('cf_activator')) = 0
-  AND (SELECT count(*)::integer FROM chefbyte.recipe_ingredients
-    WHERE user_id = tests.get_supabase_uid('cf_activator')) = 0,
-  'All chefbyte data deleted after deactivation'
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'products deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'stock_lots deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.locations
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'locations deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.recipes
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'recipes deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.recipe_ingredients
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'recipe_ingredients deleted after deactivation'
+);
+
+-- Test 11: Verify remaining 7 tables also empty after deactivation
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'food_logs deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.temp_items
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'temp_items deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.shopping_list
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'shopping_list deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.meal_plan_entries
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'meal_plan_entries deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.user_config
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'user_config deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.liquidtrack_devices
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'liquidtrack_devices deleted after deactivation'
+);
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.liquidtrack_events
+    WHERE user_id = tests.get_supabase_uid('cf_activator')),
+  0, 'liquidtrack_events deleted after deactivation'
 );
 
 ------------------------------------------------------------

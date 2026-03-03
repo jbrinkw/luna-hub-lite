@@ -190,5 +190,52 @@ describe('RecipeFormPage', () => {
       expect(screen.getByTestId('recipe-fields')).toBeInTheDocument();
       expect(screen.getByTestId('recipe-name')).toBeInTheDocument();
     });
+
+    it('pre-fills form inputs with the loaded recipe values', async () => {
+      renderEditMode();
+      await waitFor(() => {
+        expect(screen.getByText('EDIT RECIPE')).toBeInTheDocument();
+      });
+
+      // IonInput mock renders: <div data-testid="..."><label>Name</label><input aria-label="Name" .../></div>
+      // IonTextarea mock renders: <div><label>Description</label><textarea id="Description" .../></div>
+      // Use aria-label or id to find the actual input/textarea elements.
+
+      // The recipe name input should contain "Chicken Stir Fry"
+      const nameInput = screen.getByLabelText('Name') as HTMLInputElement;
+      expect(nameInput.value).toBe('Chicken Stir Fry');
+
+      // The description textarea should contain "Quick stir fry"
+      const descInput = screen.getByLabelText('Description') as HTMLTextAreaElement;
+      expect(descInput.value).toBe('Quick stir fry');
+
+      // Base servings should be 2
+      const servingsInput = screen.getByLabelText('Base Servings') as HTMLInputElement;
+      expect(servingsInput.value).toBe('2');
+
+      // Active time should be 15
+      const activeTimeInput = screen.getByLabelText('Active Time (min)') as HTMLInputElement;
+      expect(activeTimeInput.value).toBe('15');
+
+      // Total time should be 25
+      const totalTimeInput = screen.getByLabelText('Total Time (min)') as HTMLInputElement;
+      expect(totalTimeInput.value).toBe('25');
+
+      // Instructions should contain "Cook it all together"
+      const instructionsInput = screen.getByLabelText('Instructions') as HTMLTextAreaElement;
+      expect(instructionsInput.value).toBe('Cook it all together');
+    });
+
+    it('pre-fills ingredient list from loaded recipe', async () => {
+      renderEditMode();
+      await waitFor(() => {
+        expect(screen.getByText('EDIT RECIPE')).toBeInTheDocument();
+      });
+
+      // Should show the ingredients table with the loaded ingredient
+      expect(screen.getByTestId('ingredients-table')).toBeInTheDocument();
+      expect(screen.getByTestId('ingredient-row-0')).toBeInTheDocument();
+      expect(screen.getByTestId('ingredient-row-0')).toHaveTextContent('Chicken Breast');
+    });
   });
 });

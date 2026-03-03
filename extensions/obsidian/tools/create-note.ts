@@ -19,18 +19,22 @@ export const OBSIDIAN_create_note: ExtensionToolDefinition = {
       return toolError('Missing Obsidian credentials (obsidian_api_key, obsidian_url)');
     }
 
-    const url = `${obsidian_url}/vault/${encodeURIComponent(args.path)}`;
-    const resp = await fetch(url, {
-      method: 'PUT',
-      headers: {
-        Authorization: `Bearer ${obsidian_api_key}`,
-        'Content-Type': 'text/markdown',
-      },
-      body: args.content,
-    });
+    try {
+      const url = `${obsidian_url}/vault/${encodeURIComponent(args.path)}`;
+      const resp = await fetch(url, {
+        method: 'PUT',
+        headers: {
+          Authorization: `Bearer ${obsidian_api_key}`,
+          'Content-Type': 'text/markdown',
+        },
+        body: args.content,
+      });
 
-    if (!resp.ok) return toolError(`Obsidian API error: ${resp.status} ${resp.statusText}`);
+      if (!resp.ok) return toolError(`Obsidian API error: ${resp.status} ${resp.statusText}`);
 
-    return toolSuccess({ path: args.path, created: true });
+      return toolSuccess({ path: args.path, created: true });
+    } catch (e) {
+      return toolError(`Network error: ${(e as Error).message}`);
+    }
   },
 };

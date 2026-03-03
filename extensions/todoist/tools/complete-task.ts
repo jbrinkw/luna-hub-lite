@@ -18,13 +18,17 @@ export const TODOIST_complete_task: ExtensionToolDefinition = {
     const { todoist_api_key } = (ctx as ExtensionToolContext).credentials;
     if (!todoist_api_key) return toolError('Missing Todoist credentials (todoist_api_key)');
 
-    const resp = await fetch(`${TODOIST_BASE}/tasks/${encodeURIComponent(args.task_id)}/close`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${todoist_api_key}` },
-    });
+    try {
+      const resp = await fetch(`${TODOIST_BASE}/tasks/${encodeURIComponent(args.task_id)}/close`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${todoist_api_key}` },
+      });
 
-    if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
+      if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
 
-    return toolSuccess({ task_id: args.task_id, completed: true });
+      return toolSuccess({ task_id: args.task_id, completed: true });
+    } catch (e) {
+      return toolError(`Network error: ${(e as Error).message}`);
+    }
   },
 };

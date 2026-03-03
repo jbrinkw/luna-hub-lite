@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ShoppingPage } from '@/pages/chefbyte/ShoppingPage';
 
@@ -155,6 +155,31 @@ describe('ShoppingPage', () => {
       expect(screen.getByTestId('auto-add-btn')).toBeInTheDocument();
     });
     expect(screen.getByTestId('auto-add-btn')).toHaveTextContent('Auto-Add Below Min Stock');
+  });
+
+  /* ---- Toggle purchased ---- */
+
+  it('calls Supabase update when a shopping item checkbox is toggled', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('item-c1')).toBeInTheDocument();
+    });
+
+    // Clear mocks so we only track the toggle call
+    mockChain.update.mockClear();
+    mockChain.eq.mockClear();
+
+    // IonCheckbox mock renders the data-testid directly on the <input type="checkbox">.
+    // c1 is unpurchased (purchased=false); toggling sets purchased to true.
+    const checkbox = screen.getByTestId('check-c1');
+    fireEvent.click(checkbox);
+
+    // The togglePurchased function calls:
+    // chefbyte().from('shopping_list').update({ purchased: true }).eq('cart_item_id', 'c1')
+    await waitFor(() => {
+      expect(mockChain.update).toHaveBeenCalledWith({ purchased: true });
+    });
+    expect(mockChain.eq).toHaveBeenCalledWith('cart_item_id', 'c1');
   });
 
   /* ---- Remove buttons ---- */

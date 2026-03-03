@@ -21,26 +21,30 @@ export const HOMEASSISTANT_call_service: ExtensionToolDefinition = {
       return toolError('Missing Home Assistant credentials (ha_api_key, ha_url)');
     }
 
-    const url = `${ha_url}/api/services/${encodeURIComponent(args.domain)}/${encodeURIComponent(args.service)}`;
+    try {
+      const url = `${ha_url}/api/services/${encodeURIComponent(args.domain)}/${encodeURIComponent(args.service)}`;
 
-    const body: Record<string, unknown> = {};
-    if (args.entity_id) body.entity_id = args.entity_id;
-    if (args.data && typeof args.data === 'object') {
-      Object.assign(body, args.data);
+      const body: Record<string, unknown> = {};
+      if (args.entity_id) body.entity_id = args.entity_id;
+      if (args.data && typeof args.data === 'object') {
+        Object.assign(body, args.data);
+      }
+
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${ha_api_key}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(body),
+      });
+
+      if (!resp.ok) return toolError(`Home Assistant API error: ${resp.status} ${resp.statusText}`);
+
+      const data = await resp.json();
+      return toolSuccess(data);
+    } catch (e) {
+      return toolError(`Network error: ${(e as Error).message}`);
     }
-
-    const resp = await fetch(url, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${ha_api_key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    });
-
-    if (!resp.ok) return toolError(`Home Assistant API error: ${resp.status} ${resp.statusText}`);
-
-    const data = await resp.json();
-    return toolSuccess(data);
   },
 };

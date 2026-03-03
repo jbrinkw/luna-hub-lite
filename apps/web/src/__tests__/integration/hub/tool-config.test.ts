@@ -93,6 +93,23 @@ describe('Tool config', () => {
     expect(map.get('CHEFBYTE_SCAN_BARCODE')).toBe(false);
   });
 
+  it('querying a tool with no config row returns empty (no row = no explicit config)', async () => {
+    const { userId, client } = await createTestUser('tool-default');
+    userIds.push(userId);
+
+    // No rows have been inserted for this user — query should return empty array.
+    // This documents that "no row" means "no explicit config" (defaults are app-side).
+    const { data, error } = await client
+      .schema('hub')
+      .from('user_tool_config')
+      .select('tool_name, enabled')
+      .eq('user_id', userId)
+      .eq('tool_name', 'NEVER_CONFIGURED_TOOL');
+
+    expect(error).toBeNull();
+    expect(data).toHaveLength(0);
+  });
+
   it('RLS: user B cannot see user A tool config', async () => {
     const { userId: userA, client: clientA } = await createTestUser('tool-rls-a');
     const { userId: userB, client: clientB } = await createTestUser('tool-rls-b');

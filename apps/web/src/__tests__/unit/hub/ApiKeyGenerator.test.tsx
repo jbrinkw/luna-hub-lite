@@ -146,4 +146,16 @@ describe('ApiKeyGenerator', () => {
     });
     expect(screen.queryByTestId('key-plaintext')).not.toBeInTheDocument();
   });
+
+  it('empty label defaults to Untitled', async () => {
+    const onGenerate = vi.fn().mockResolvedValue('sk-key');
+    render(<ApiKeyGenerator {...defaultProps} onGenerate={onGenerate} />);
+
+    // Click Generate without typing a label
+    await userEvent.click(screen.getByText('Generate'));
+
+    await waitFor(() => {
+      expect(onGenerate).toHaveBeenCalledWith('Untitled');
+    });
+  });
 });

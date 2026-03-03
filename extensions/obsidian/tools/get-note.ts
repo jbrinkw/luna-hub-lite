@@ -18,18 +18,22 @@ export const OBSIDIAN_get_note: ExtensionToolDefinition = {
       return toolError('Missing Obsidian credentials (obsidian_api_key, obsidian_url)');
     }
 
-    const url = `${obsidian_url}/vault/${encodeURIComponent(args.path)}`;
-    const resp = await fetch(url, {
-      method: 'GET',
-      headers: {
-        Authorization: `Bearer ${obsidian_api_key}`,
-        Accept: 'text/markdown',
-      },
-    });
+    try {
+      const url = `${obsidian_url}/vault/${encodeURIComponent(args.path)}`;
+      const resp = await fetch(url, {
+        method: 'GET',
+        headers: {
+          Authorization: `Bearer ${obsidian_api_key}`,
+          Accept: 'text/markdown',
+        },
+      });
 
-    if (!resp.ok) return toolError(`Obsidian API error: ${resp.status} ${resp.statusText}`);
+      if (!resp.ok) return toolError(`Obsidian API error: ${resp.status} ${resp.statusText}`);
 
-    const content = await resp.text();
-    return toolSuccess({ path: args.path, content });
+      const content = await resp.text();
+      return toolSuccess({ path: args.path, content });
+    } catch (e) {
+      return toolError(`Network error: ${(e as Error).message}`);
+    }
   },
 };

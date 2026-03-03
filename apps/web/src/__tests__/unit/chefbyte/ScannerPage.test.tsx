@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { ScannerPage, autoScaleNutrition } from '@/pages/chefbyte/ScannerPage';
 
@@ -8,20 +8,40 @@ vi.mock('@/shared/auth/AuthProvider', () => {
   return { useAuth: () => ({ user: mockUser, signOut: vi.fn() }) };
 });
 
+/* ------------------------------------------------------------------ */
+/*  Mock product data for barcode lookup                               */
+/* ------------------------------------------------------------------ */
+
+const mockProduct = {
+  product_id: 'prod-1',
+  name: 'Test Cereal',
+  barcode: '049000000443',
+  is_placeholder: false,
+  calories_per_serving: 120,
+  protein_per_serving: 3,
+  carbs_per_serving: 25,
+  fat_per_serving: 1.5,
+  servings_per_container: 10,
+};
+
+const mockChain: any = {};
+const chainMethods = [
+  'select', 'eq', 'neq', 'order', 'or', 'single', 'update',
+  'insert', 'delete', 'limit', 'is', 'in', 'gt', 'lt', 'upsert',
+];
+chainMethods.forEach(m => { mockChain[m] = vi.fn(() => mockChain); });
+// Default: return null (no product found)
+mockChain.then = vi.fn((cb: any) => cb({ data: null, error: null }));
+
+const mockRpc = vi.fn(() => Promise.resolve({ data: null, error: null }));
+
+const mockFrom = vi.fn(() => mockChain);
+
 vi.mock('@/shared/supabase', () => ({
   supabase: {
     schema: () => ({
-      from: () => {
-        const chain: any = {};
-        const methods = [
-          'select', 'eq', 'neq', 'order', 'or', 'single', 'update',
-          'insert', 'delete', 'limit', 'is', 'in', 'gt', 'lt', 'upsert',
-        ];
-        methods.forEach(m => { chain[m] = vi.fn(() => chain); });
-        chain.then = vi.fn((cb: any) => cb({ data: null, error: null }));
-        return chain;
-      },
-      rpc: vi.fn(() => Promise.resolve({ data: null, error: null })),
+      from: mockFrom,
+      rpc: mockRpc,
     }),
     channel: () => ({ on: vi.fn().mockReturnThis(), subscribe: vi.fn() }),
     removeChannel: vi.fn(),
@@ -239,6 +259,62 @@ describe('ScannerPage', () => {
 
     fireEvent.click(screen.getByTestId('unit-toggle'));
     expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Servings');
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  Barcode submission                                               */
+  /* ---------------------------------------------------------------- */
+
+  it('submits a barcode and populates the queue with the found product', async () => {
+    // Make the single() call resolve with a known product
+    mockChain.then = vi.fn((cb: any) => cb({ data: mockProduct, error: null }));
+
+    renderPage();
+
+    const input = screen.getByTestId('barcode-input');
+    fireEvent.change(input, { target: { value: '049000000443' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    // The queue should get a pending item first, then update to success with the product name.
+    // The product name appears in both the queue item and the active-item-display, so
+    // verify via the queue-list container and active-item-display.
+    await waitFor(() => {
+      expect(screen.getByTestId('queue-list')).toHaveTextContent('Test Cereal');
+    });
+
+    // Verify the active item display also shows the product name
+    expect(screen.getByTestId('active-item-display')).toHaveTextContent('Test Cereal');
+
+    // Verify the queue item shows "Purchased 1 containers" (default mode is purchase)
+    expect(screen.getByTestId('queue-list')).toHaveTextContent('Purchased');
+    expect(screen.getByTestId('queue-list')).toHaveTextContent('1 containers');
+
+    // Empty queue message should be gone
+    expect(screen.queryByTestId('queue-empty')).not.toBeInTheDocument();
+  });
+
+  it('submits a barcode for unknown product and creates placeholder', async () => {
+    // First call returns null (product not found), second returns the new placeholder
+    let callIdx = 0;
+    mockChain.then = vi.fn((cb: any) => {
+      callIdx++;
+      if (callIdx === 1) return cb({ data: null, error: null }); // product lookup
+      return cb({ data: { product_id: 'new-1', name: 'Unknown (999999)' }, error: null }); // insert
+    });
+
+    renderPage();
+
+    const input = screen.getByTestId('barcode-input');
+    fireEvent.change(input, { target: { value: '999999' } });
+    fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
+
+    // Verify via the queue-list container (name appears in both queue item and active display)
+    await waitFor(() => {
+      expect(screen.getByTestId('queue-list')).toHaveTextContent('Unknown (999999)');
+    });
+
+    // Verify insert was called (the from mock was invoked for products insert)
+    expect(mockFrom).toHaveBeenCalled();
   });
 });
 

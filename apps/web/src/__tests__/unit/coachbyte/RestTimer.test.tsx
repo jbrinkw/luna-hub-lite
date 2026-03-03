@@ -109,6 +109,22 @@ describe('RestTimer', () => {
     expect(onReset).toHaveBeenCalled();
   });
 
+  it('countdown tick decrements the display after 1 second', async () => {
+    const endTime = new Date(Date.now() + 90_000).toISOString();
+    render(
+      <RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={90} />,
+    );
+    expect(screen.getByTestId('timer-display')).toHaveTextContent('1:30');
+
+    // Advance by 1 second — the interval fires and remaining should drop
+    // Use act to flush React state updates triggered by the interval
+    const { act } = await import('@testing-library/react');
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByTestId('timer-display')).toHaveTextContent('1:29');
+  });
+
   it('custom duration input calls onStart with seconds', async () => {
     vi.useRealTimers();
     const onStart = vi.fn();

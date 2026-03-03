@@ -211,14 +211,19 @@ describe('RecipesPage', () => {
 
   /* ---- Stock status badges ---- */
 
-  it('shows stock status badge on cards', async () => {
+  // NOTE: `canMake` is hardcoded to `true` in RecipesPage.tsx (line ~233: `const canMake = true`).
+  // This test is asserting a constant, not real stock-checking logic. It serves as a
+  // placeholder to verify the badge renders correctly. Once stock checking against
+  // inventory is implemented, this test should be updated to mock stock data and verify
+  // that recipes with insufficient stock show "MISSING" instead of "CAN MAKE".
+  it('shows stock status badge on cards (placeholder — canMake is hardcoded true)', async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByTestId('stock-status-r1')).toBeInTheDocument();
     });
-    // r1 has ingredients; stock check returns CAN MAKE for now (simplified)
+    // r1 has ingredients; stock check returns CAN MAKE for now (canMake hardcoded true)
     expect(screen.getByTestId('stock-status-r1')).toHaveTextContent('CAN MAKE');
-    // r3 has no ingredients — CAN MAKE
+    // r3 has no ingredients — CAN MAKE (canMake hardcoded true)
     expect(screen.getByTestId('stock-status-r3')).toHaveTextContent('CAN MAKE');
   });
 

@@ -15,14 +15,18 @@ export const TODOIST_get_projects: ExtensionToolDefinition = {
     const { todoist_api_key } = (ctx as ExtensionToolContext).credentials;
     if (!todoist_api_key) return toolError('Missing Todoist credentials (todoist_api_key)');
 
-    const resp = await fetch(`${TODOIST_BASE}/projects`, {
-      method: 'GET',
-      headers: { Authorization: `Bearer ${todoist_api_key}` },
-    });
+    try {
+      const resp = await fetch(`${TODOIST_BASE}/projects`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${todoist_api_key}` },
+      });
 
-    if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
+      if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
 
-    const data = await resp.json();
-    return toolSuccess(data);
+      const data = await resp.json();
+      return toolSuccess(data);
+    } catch (e) {
+      return toolError(`Network error: ${(e as Error).message}`);
+    }
   },
 };

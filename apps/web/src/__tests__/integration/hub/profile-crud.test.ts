@@ -147,6 +147,60 @@ describe('Profile CRUD', () => {
     });
   });
 
+  it('rejects day_start_hour = 25 (CHECK constraint: BETWEEN 0 AND 23)', async () => {
+    const { userId, client } = await createTestUser('prof-dsh-high');
+    userIds.push(userId);
+
+    const { error } = await client
+      .schema('hub')
+      .from('profiles')
+      .update({ day_start_hour: 25 })
+      .eq('user_id', userId);
+
+    // Postgres CHECK constraint violation
+    expect(error).not.toBeNull();
+    expect(error!.code).toBe('23514'); // check_violation
+  });
+
+  it('rejects day_start_hour = -1 (CHECK constraint: BETWEEN 0 AND 23)', async () => {
+    const { userId, client } = await createTestUser('prof-dsh-neg');
+    userIds.push(userId);
+
+    const { error } = await client
+      .schema('hub')
+      .from('profiles')
+      .update({ day_start_hour: -1 })
+      .eq('user_id', userId);
+
+    // Postgres CHECK constraint violation
+    expect(error).not.toBeNull();
+    expect(error!.code).toBe('23514'); // check_violation
+  });
+
+  it('accepts invalid timezone string (no DB constraint on timezone column)', async () => {
+    const { userId, client } = await createTestUser('prof-tz-bad');
+    userIds.push(userId);
+
+    // The timezone column is TEXT with no CHECK constraint, so any string is accepted.
+    // Validation is the application's responsibility. This documents current behavior.
+    const { error: updateError } = await client
+      .schema('hub')
+      .from('profiles')
+      .update({ timezone: 'Not/A/Timezone' })
+      .eq('user_id', userId);
+
+    expect(updateError).toBeNull();
+
+    const { data } = await client
+      .schema('hub')
+      .from('profiles')
+      .select('timezone')
+      .eq('user_id', userId)
+      .single();
+
+    expect(data?.timezone).toBe('Not/A/Timezone');
+  });
+
   it('RLS: user B cannot read user A profile', async () => {
     const { userId: userAId, client: clientA } = await createTestUser('prof-rls-a');
     userIds.push(userAId);

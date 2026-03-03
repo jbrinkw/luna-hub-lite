@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(5);
+SELECT plan(7);
 
 -- Test 1: Afternoon → same date
 SELECT is(
@@ -54,6 +54,33 @@ SELECT is(
   ),
   '2026-03-02'::date,
   'UTC 2am = Tokyo 11am, with day_start=6 returns Mar 2'
+);
+
+-- Test 6: day_start_hour = 23 edge case — 11:30pm is already "next day"
+-- At 11:30pm ET on Mar 2 with day_start=23, local time is 23:30.
+-- Formula: (23:30 - 23 hours) = 00:30 on Mar 2 → logical date = Mar 2
+SELECT is(
+  private.get_logical_date(
+    '2026-03-02 23:30:00-05'::timestamptz,
+    'America/New_York',
+    23
+  ),
+  '2026-03-02'::date,
+  'day_start=23 at 11:30pm returns current date (new logical day started)'
+);
+
+-- Test 7: DST spring-forward boundary — 2026-03-08 America/New_York
+-- Clocks spring forward at 2am → 3am. At 2:30am EST (which doesn't exist,
+-- but 7:30 UTC = 3:30am EDT after spring forward) with day_start=6,
+-- local time 3:30am < 6 → previous logical date (Mar 7)
+SELECT is(
+  private.get_logical_date(
+    '2026-03-08 07:30:00+00'::timestamptz,
+    'America/New_York',
+    6
+  ),
+  '2026-03-07'::date,
+  'DST spring-forward: 3:30am EDT (after jump) with day_start=6 returns Mar 7'
 );
 
 SELECT * FROM finish();

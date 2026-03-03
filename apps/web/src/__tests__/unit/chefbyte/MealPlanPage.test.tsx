@@ -235,6 +235,27 @@ describe('MealPlanPage', () => {
     expect(screen.queryByTestId('mark-done-m1')).not.toBeInTheDocument();
   });
 
+  it('calls mark_meal_done RPC when Mark Done is clicked', async () => {
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('week-grid')).toBeInTheDocument();
+    });
+
+    // Select the day with planned meal m2
+    fireEvent.click(screen.getByTestId('day-col-2026-03-02'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mark-done-m2')).toBeInTheDocument();
+    });
+
+    mockRpc.mockClear();
+    fireEvent.click(screen.getByTestId('mark-done-m2'));
+
+    await waitFor(() => {
+      expect(mockRpc).toHaveBeenCalledWith('mark_meal_done', { p_meal_id: 'm2' });
+    });
+  });
+
   /* ---------------------------------------------------------------- */
   /*  Delete button for planned entries                                */
   /* ---------------------------------------------------------------- */

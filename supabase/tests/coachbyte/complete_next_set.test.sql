@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(13);
+SELECT plan(15);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -327,11 +327,50 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
+-- Test 9: Cross-user isolation — User B cannot complete User A's plan
+-- ─────────────────────────────────────────────────────────────
+
+SELECT tests.create_supabase_user('coach_intruder');
+SELECT tests.authenticate_as('coach_intruder');
+SELECT hub.activate_app('coachbyte');
+
+SELECT throws_ok(
+    $$
+        SELECT rest_seconds
+        FROM coachbyte.complete_next_set(
+            '00000000-0000-0000-0000-000000000003',
+            5,
+            100.0
+        )
+    $$,
+    'Plan not found or not owned by user',
+    'User B calling complete_next_set on User A''s plan raises ownership error'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 10: Non-existent plan_id raises error
+-- ─────────────────────────────────────────────────────────────
+
+SELECT throws_ok(
+    $$
+        SELECT rest_seconds
+        FROM coachbyte.complete_next_set(
+            '00000000-0000-0000-FFFF-FFFFFFFFFFFF',
+            5,
+            100.0
+        )
+    $$,
+    'Plan not found or not owned by user',
+    'complete_next_set with non-existent plan_id raises ownership error'
+);
+
+-- ─────────────────────────────────────────────────────────────
 -- Teardown
 -- ─────────────────────────────────────────────────────────────
 
 SELECT tests.clear_authentication();
 SELECT tests.delete_supabase_user('coach_user');
+SELECT tests.delete_supabase_user('coach_intruder');
 
 SELECT * FROM finish();
 

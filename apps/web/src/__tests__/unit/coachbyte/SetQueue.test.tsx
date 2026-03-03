@@ -121,4 +121,16 @@ describe('SetQueue', () => {
     expect(screen.getByTestId('complete-set-btn')).toBeDisabled();
     expect(screen.getByTestId('adhoc-btn')).toBeDisabled();
   });
+
+  it('shows "All sets completed!" when every set has completed: true', () => {
+    const allDone = makeSets([
+      { completed: true },
+      { completed: true },
+      { completed: true },
+    ]);
+    render(<SetQueue sets={allDone} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
+    expect(screen.getByText('All sets completed!')).toBeInTheDocument();
+    // The NEXT IN QUEUE card should not appear
+    expect(screen.queryByTestId('next-in-queue')).not.toBeInTheDocument();
+  });
 });

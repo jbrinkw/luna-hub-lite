@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(14);
 
 -- Setup: create users, activate chefbyte, create product + get a location
 SELECT tests.create_supabase_user('lot_owner');
@@ -188,6 +188,36 @@ SELECT throws_ok(
   '42501',
   NULL,
   'Anon cannot access stock lots'
+);
+
+------------------------------------------------------------
+-- CASCADE DELETE: deleting product removes its stock_lots
+------------------------------------------------------------
+
+-- Test 13: Re-authenticate as owner, count lots for the product before delete
+SELECT tests.authenticate_as('lot_owner');
+
+-- Count remaining lots for this product (should be > 0)
+SELECT ok(
+  EXISTS (
+    SELECT 1 FROM chefbyte.stock_lots
+      WHERE user_id = tests.get_supabase_uid('lot_owner')
+        AND product_id = :'product_id'
+  ),
+  'stock_lots exist for product before cascade delete'
+);
+
+-- Test 14: Delete the product, verify stock_lots cascade-deleted
+DELETE FROM chefbyte.products
+  WHERE product_id = :'product_id'
+    AND user_id = tests.get_supabase_uid('lot_owner');
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('lot_owner')
+      AND product_id = :'product_id'),
+  0,
+  'all stock_lots for product deleted after product cascade delete'
 );
 
 ------------------------------------------------------------

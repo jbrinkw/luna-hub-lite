@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(27);
+SELECT plan(29);
 
 -- Setup
 SELECT tests.create_supabase_user('edp_user');
@@ -345,6 +345,54 @@ SELECT is(
   (SELECT count(*)::integer FROM coachbyte.daily_plans WHERE plan_date = '2026-03-02'),
   1,
   'First user still sees only their own Monday plan (RLS)'
+);
+
+------------------------------------------------------------
+-- TEST 28-29: 0-rep completed sets excluded from PR calculation
+------------------------------------------------------------
+-- Seed a 0-rep completed set with a high load for Squat.
+-- If included, Epley would give 500*(1+0/30) = 500, 80% = 400, rounded = 400.
+-- With the 0-rep excluded, the existing PR (275 x 3 = 302.5) should still
+-- resolve to 80% = 242, rounded to 240.
+SELECT tests.authenticate_as('edp_user');
+
+DO $$
+DECLARE v_squat UUID; v_uid UUID; v_plan UUID;
+BEGIN
+  SELECT exercise_id INTO v_squat FROM _ex WHERE ex_name = 'squat';
+  v_uid := tests.get_supabase_uid('edp_user');
+
+  -- Use a past plan for the 0-rep set
+  INSERT INTO coachbyte.daily_plans (user_id, plan_date, logical_date)
+  VALUES (v_uid, '2026-01-02', '2026-01-02')
+  RETURNING plan_id INTO v_plan;
+
+  INSERT INTO coachbyte.completed_sets (plan_id, user_id, exercise_id, actual_reps, actual_load, logical_date)
+  VALUES (v_plan, v_uid, v_squat, 0, 500, '2026-01-02');
+END $$;
+
+-- Generate a plan for a new Monday that hasn't been bootstrapped yet
+-- 2026-03-16 is a Monday
+SELECT coachbyte.ensure_daily_plan('2026-03-16'::date);
+
+SELECT is(
+  (SELECT count(*)::integer FROM coachbyte.planned_sets ps
+   JOIN coachbyte.daily_plans dp ON dp.plan_id = ps.plan_id
+   WHERE dp.plan_date = '2026-03-16'
+     AND dp.user_id = tests.get_supabase_uid('edp_user')
+     AND ps.exercise_id = (SELECT exercise_id FROM _ex WHERE ex_name = 'squat')),
+  3,
+  '3 Squat planned_sets created for 2026-03-16'
+);
+
+SELECT is(
+  (SELECT DISTINCT target_load FROM coachbyte.planned_sets ps
+   JOIN coachbyte.daily_plans dp ON dp.plan_id = ps.plan_id
+   WHERE dp.plan_date = '2026-03-16'
+     AND dp.user_id = tests.get_supabase_uid('edp_user')
+     AND ps.exercise_id = (SELECT exercise_id FROM _ex WHERE ex_name = 'squat')),
+  240::numeric,
+  'Squat load is 240 (0-rep set at 500lb excluded from PR calculation)'
 );
 
 -- Cleanup
