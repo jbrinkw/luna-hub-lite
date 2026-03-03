@@ -33,14 +33,18 @@ describe('OfflineIndicator', () => {
   });
 
   it('shows last synced time when offline', () => {
+    const syncDate = new Date('2026-03-03T10:00:00Z');
     mockUseAppContext.mockReturnValue({
       activations: {},
       online: false,
-      lastSynced: new Date('2026-03-03T10:00:00Z'),
+      lastSynced: syncDate,
       refreshActivations: vi.fn(),
     });
     render(<OfflineIndicator />);
+    // Verify both the prefix and the actual formatted time value
+    const expectedTime = syncDate.toLocaleTimeString();
     expect(screen.getByText(/last synced/i)).toBeInTheDocument();
+    expect(screen.getByText(new RegExp(expectedTime))).toBeInTheDocument();
   });
 
   it('shows never synced when lastSynced is null', () => {

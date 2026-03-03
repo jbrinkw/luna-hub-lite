@@ -3,8 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { SettingsPage } from '@/pages/coachbyte/SettingsPage';
 
+const mockUser = { id: 'u1' };
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
+  useAuth: () => ({ user: mockUser, signOut: vi.fn() }),
 }));
 
 const mockSettings = {
@@ -19,16 +20,36 @@ const mockExercises = [
   { exercise_id: 'ex-3', name: 'My Custom Lift', user_id: 'u1' },
 ];
 
-const mockChain: any = {};
-const chainMethods = ['select', 'eq', 'order', 'or', 'single', 'update', 'insert', 'delete'];
-chainMethods.forEach(m => { mockChain[m] = vi.fn(() => mockChain); });
-mockChain.then = vi.fn((cb: any) => cb({ data: mockExercises }));
-mockChain.single.mockReturnValue({ data: mockSettings, error: null });
+/* ------------------------------------------------------------------ */
+/*  Supabase mock — per-table chain routing                            */
+/* ------------------------------------------------------------------ */
+
+function getDataForTable(table: string) {
+  if (table === 'user_settings') return mockSettings;
+  if (table === 'exercises') return mockExercises;
+  return null;
+}
+
+function makeChain(table: string) {
+  const chain: any = {};
+  const methods = ['select', 'eq', 'order', 'or', 'single', 'update', 'insert', 'delete'];
+  methods.forEach(m => { chain[m] = vi.fn(() => chain); });
+  chain.then = (resolve: any, _reject?: any) => {
+    const data = getDataForTable(table);
+    return resolve({ data, error: null });
+  };
+  // single() returns { data, error } directly — used by user_settings
+  chain.single = vi.fn(() => {
+    const data = getDataForTable(table);
+    return { data, error: null };
+  });
+  return chain;
+}
 
 vi.mock('@/shared/supabase', () => ({
   supabase: {
     schema: () => ({
-      from: () => mockChain,
+      from: (table: string) => makeChain(table),
     }),
     channel: () => ({ on: vi.fn().mockReturnThis(), subscribe: vi.fn() }),
     removeChannel: vi.fn(),
@@ -49,18 +70,20 @@ describe('SettingsPage', () => {
     expect(screen.getByTestId('exercise-library-card')).toBeInTheDocument();
   });
 
-  it('renders default rest duration input', async () => {
+  it('renders default rest duration input with correct mock value (90)', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>);
     await waitFor(() => {
       expect(screen.getByTestId('default-rest-input')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('default-rest-input')).toHaveValue(90);
   });
 
-  it('renders bar weight input', async () => {
+  it('renders bar weight input with correct mock value (45)', async () => {
     render(<MemoryRouter><SettingsPage /></MemoryRouter>);
     await waitFor(() => {
       expect(screen.getByTestId('bar-weight-input')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('bar-weight-input')).toHaveValue(45);
   });
 
   it('renders exercise library with global and custom exercises', async () => {

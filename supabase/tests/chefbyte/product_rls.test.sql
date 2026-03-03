@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(13);
 
 -- Setup: create two users and activate chefbyte for both
 SELECT tests.create_supabase_user('prod_owner');
@@ -97,10 +97,26 @@ SELECT lives_ok(
 );
 
 ------------------------------------------------------------
+-- Cross-user DELETE isolation
+------------------------------------------------------------
+
+-- Test: User B cannot DELETE User A's product
+SELECT tests.authenticate_as('prod_intruder');
+DELETE FROM chefbyte.products
+  WHERE user_id = tests.get_supabase_uid('prod_owner');
+SELECT tests.authenticate_as('prod_owner');
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('prod_owner') AND name = 'Chicken Breast (Grilled)'),
+  1,
+  'User B cannot delete User A product (still exists after attempted delete)'
+);
+
+------------------------------------------------------------
 -- User A: DELETE own product
 ------------------------------------------------------------
 
--- Test 10: User A can DELETE own product
+-- Test: User A can DELETE own product
 DELETE FROM chefbyte.products
   WHERE user_id = tests.get_supabase_uid('prod_owner') AND name = 'No Barcode Item 2';
 SELECT is(

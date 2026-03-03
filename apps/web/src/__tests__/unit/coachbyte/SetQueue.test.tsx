@@ -67,6 +67,15 @@ describe('SetQueue', () => {
     expect(loadInput).toHaveValue(225);
   });
 
+  it('calls onComplete with target (pre-filled) values when Complete Set is clicked without overriding', async () => {
+    const onComplete = vi.fn();
+    render(<SetQueue sets={makeSets()} onComplete={onComplete} onAdHoc={vi.fn()} />);
+
+    // Click Complete without modifying the pre-filled inputs
+    await userEvent.click(screen.getByTestId('complete-set-btn'));
+    expect(onComplete).toHaveBeenCalledWith(5, 225);
+  });
+
   it('calls onComplete with override values when Complete Set is clicked', async () => {
     const onComplete = vi.fn();
     render(<SetQueue sets={makeSets()} onComplete={onComplete} onAdHoc={vi.fn()} />);

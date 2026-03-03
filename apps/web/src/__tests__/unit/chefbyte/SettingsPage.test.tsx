@@ -3,8 +3,9 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { SettingsPage } from '@/pages/chefbyte/SettingsPage';
 
+const mockUser = { id: 'u1' };
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
+  useAuth: () => ({ user: mockUser, signOut: vi.fn() }),
 }));
 
 /* ------------------------------------------------------------------ */

@@ -3,8 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { HistoryPage } from '@/pages/coachbyte/HistoryPage';
 
+const mockUser = { id: 'u1' };
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
+  useAuth: () => ({ user: mockUser, signOut: vi.fn() }),
 }));
 
 /* ------------------------------------------------------------------ */

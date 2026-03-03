@@ -1,10 +1,11 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { MacroPage, calcCaloriesFromMacros } from '@/pages/chefbyte/MacroPage';
 
+const mockUser = { id: 'u1' };
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
+  useAuth: () => ({ user: mockUser, signOut: vi.fn() }),
 }));
 
 /* ------------------------------------------------------------------ */
@@ -138,7 +139,14 @@ function renderPage() {
 }
 
 describe('MacroPage', () => {
+  beforeEach(() => {
+    // Fix the system clock to 2026-03-15T12:00:00Z (a Sunday) for deterministic date tests.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-03-15T12:00:00Z'));
+  });
+
   afterEach(() => {
+    vi.useRealTimers();
     vi.clearAllMocks();
     // Restore implementations after clearAllMocks (prevents hanging awaits in pending loadData)
     mockRpc.mockImplementation(rpcImpl);
@@ -171,68 +179,44 @@ describe('MacroPage', () => {
     expect(screen.getByTestId('current-date')).toBeInTheDocument();
   });
 
-  it('displays the current date', async () => {
+  it('displays the current date as Sun, Mar 15', async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByTestId('current-date')).toBeInTheDocument();
     });
-    const dateText = screen.getByTestId('current-date').textContent;
-    expect(dateText).toBeTruthy();
-    expect(dateText!.length).toBeGreaterThan(0);
+    // formatDateDisplay produces e.g. "Sun, Mar 15" for 2026-03-15
+    expect(screen.getByTestId('current-date')).toHaveTextContent('Sun, Mar 15');
   });
 
-  it('navigates to previous date when Prev is clicked', async () => {
+  it('navigates to previous date (Sat, Mar 14) when Prev is clicked', async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByTestId('date-nav')).toBeInTheDocument();
     });
 
-    // First go forward so we have a known reference, then go backward
-    fireEvent.click(screen.getByTestId('next-date-btn'));
+    // Initially showing Sun, Mar 15
+    expect(screen.getByTestId('current-date')).toHaveTextContent('Sun, Mar 15');
 
-    await waitFor(() => {
-      expect(screen.getByTestId('current-date')).toBeInTheDocument();
-    });
-
-    // Capture the "tomorrow" date text, then click Prev to go back to today
-    const tomorrowText = screen.getByTestId('current-date').textContent!;
     fireEvent.click(screen.getByTestId('prev-date-btn'));
 
     await waitFor(() => {
-      const afterPrev = screen.getByTestId('current-date').textContent;
-      expect(afterPrev).not.toBe(tomorrowText);
+      expect(screen.getByTestId('current-date')).toHaveTextContent('Sat, Mar 14');
     });
-
-    // Parse the day numbers from the displayed date strings to verify backward direction.
-    // formatDateDisplay outputs e.g. "Tue, Mar 3" — extract the numeric day.
-    const dayMatch = (text: string) => {
-      const m = text.match(/(\d+)/);
-      return m ? parseInt(m[1], 10) : NaN;
-    };
-    const tomorrowDay = dayMatch(tomorrowText);
-    const currentDay = dayMatch(screen.getByTestId('current-date').textContent!);
-    // The day after Prev should be less than the day before Prev (handles month boundaries by checking != )
-    // More precisely, Prev from tomorrow should return to today
-    expect(currentDay).not.toBe(tomorrowDay);
-    // The date should have gone backward: today's day number is less than tomorrow's
-    // (unless month boundary, in which case they're simply different, which we already asserted)
-    if (tomorrowDay > 1) {
-      expect(currentDay).toBe(tomorrowDay - 1);
-    }
   });
 
-  it('navigates to next date when Next is clicked', async () => {
+  it('navigates to next date (Mon, Mar 16) when Next is clicked', async () => {
     renderPage();
     await waitFor(() => {
       expect(screen.getByTestId('date-nav')).toBeInTheDocument();
     });
 
-    const dateBefore = screen.getByTestId('current-date').textContent;
+    // Initially showing Sun, Mar 15
+    expect(screen.getByTestId('current-date')).toHaveTextContent('Sun, Mar 15');
+
     fireEvent.click(screen.getByTestId('next-date-btn'));
 
     await waitFor(() => {
-      const dateAfter = screen.getByTestId('current-date').textContent;
-      expect(dateAfter).not.toBe(dateBefore);
+      expect(screen.getByTestId('current-date')).toHaveTextContent('Mon, Mar 16');
     });
   });
 

@@ -24,6 +24,16 @@ function TestConsumer() {
   );
 }
 
+function RefreshConsumer() {
+  const { refreshActivations, activations } = useAppContext();
+  return (
+    <div>
+      <span data-testid="activations">{JSON.stringify(activations)}</span>
+      <button data-testid="refresh" onClick={() => refreshActivations()}>Refresh</button>
+    </div>
+  );
+}
+
 describe('AppProvider', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -122,5 +132,88 @@ describe('AppProvider', () => {
 
     // schema('hub') should not be called since user is null
     expect(mockSchema).not.toHaveBeenCalled();
+  });
+
+  it('exposes refreshActivations that triggers a new Supabase fetch', async () => {
+    const mockFromFn = (supabase as any).schema('hub').from;
+    mockFromFn.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn((resolve: any) =>
+        resolve({ data: [{ app_name: 'chefbyte' }], error: null }),
+      ),
+    });
+
+    render(
+      <AppProvider>
+        <RefreshConsumer />
+      </AppProvider>,
+    );
+
+    // Wait for initial load
+    await waitFor(() => {
+      expect(screen.getByTestId('activations').textContent).toContain('chefbyte');
+    });
+
+    // Record call count after initial load
+    const callsAfterInit = mockFromFn.mock.calls.length;
+
+    // Click refresh — should trigger a new Supabase call
+    await act(async () => {
+      screen.getByTestId('refresh').click();
+    });
+
+    // Verify a new Supabase from('app_activations') call was made
+    expect(mockFromFn.mock.calls.length).toBeGreaterThan(callsAfterInit);
+    expect(screen.getByTestId('activations').textContent).toContain('chefbyte');
+  });
+
+  it('keeps activations empty when supabase returns an error', async () => {
+    const mockFromFn = (supabase as any).schema('hub').from;
+    mockFromFn.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn((resolve: any) =>
+        resolve({ data: null, error: { message: 'test error' } }),
+      ),
+    });
+
+    render(
+      <AppProvider>
+        <TestConsumer />
+      </AppProvider>,
+    );
+
+    // Even after async effects fire, activations should remain empty
+    await waitFor(() => {
+      expect(screen.getByTestId('activations').textContent).toBe('{}');
+    });
+  });
+
+  it('calls supabase.schema with hub', async () => {
+    const mockSchema = (supabase as any).schema;
+    mockSchema.mockClear();
+
+    const mockFromFn = mockSchema('hub').from;
+    mockFromFn.mockReturnValue({
+      select: vi.fn().mockReturnThis(),
+      eq: vi.fn().mockReturnThis(),
+      then: vi.fn((resolve: any) =>
+        resolve({ data: [], error: null }),
+      ),
+    });
+
+    // Clear again after the setup call above
+    mockSchema.mockClear();
+
+    render(
+      <AppProvider>
+        <TestConsumer />
+      </AppProvider>,
+    );
+
+    await waitFor(() => {
+      expect(mockSchema).toHaveBeenCalledWith('hub');
+    });
   });
 });

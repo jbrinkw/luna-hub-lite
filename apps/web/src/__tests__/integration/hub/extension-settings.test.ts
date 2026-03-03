@@ -236,4 +236,50 @@ describe('Extension settings', () => {
 
     expect(data).toHaveLength(0);
   });
+
+  it('RLS: user B cannot UPDATE user A extension settings', async () => {
+    const { userId: userA, client: clientA } = await createTestUser('ext-rls-upd-a');
+    const { userId: userB, client: clientB } = await createTestUser('ext-rls-upd-b');
+    userIds.push(userA, userB);
+
+    // User A saves extension settings with enabled: true and credentials
+    const { error: upsertError } = await clientA
+      .schema('hub')
+      .from('extension_settings')
+      .upsert(
+        {
+          user_id: userA,
+          extension_name: 'obsidian',
+          enabled: true,
+          credentials_encrypted: JSON.stringify({ vault_path: '/my/vault' }),
+        },
+        { onConflict: 'user_id,extension_name' },
+      );
+    expect(upsertError).toBeNull();
+
+    // User B attempts to update User A's extension settings
+    const { data: updateData } = await clientB
+      .schema('hub')
+      .from('extension_settings')
+      .update({ enabled: false })
+      .eq('user_id', userA)
+      .eq('extension_name', 'obsidian')
+      .select();
+
+    // RLS blocks the update — no rows matched for User B
+    expect(updateData).toHaveLength(0);
+
+    // Verify User A's settings are still enabled: true with credentials intact
+    const { data } = await clientA
+      .schema('hub')
+      .from('extension_settings')
+      .select('enabled, credentials_encrypted')
+      .eq('user_id', userA)
+      .eq('extension_name', 'obsidian')
+      .single();
+
+    expect(data?.enabled).toBe(true);
+    const parsed = JSON.parse(data!.credentials_encrypted!);
+    expect(parsed.vault_path).toBe('/my/vault');
+  });
 });

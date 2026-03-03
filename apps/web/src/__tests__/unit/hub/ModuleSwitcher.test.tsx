@@ -84,6 +84,20 @@ describe('ModuleSwitcher', () => {
     expect(mockNavigate).toHaveBeenCalledWith('/coach');
   });
 
+  it('does not navigate when clicking the already-active tab', () => {
+    render(
+      <MemoryRouter initialEntries={['/hub']}>
+        <ModuleSwitcher />
+      </MemoryRouter>,
+    );
+
+    // Click the Hub tab which is already active (current === '/hub')
+    const hubTab = screen.getByText('Hub').closest('[role="tab"]')!;
+    fireEvent.click(hubTab);
+
+    expect(mockNavigate).not.toHaveBeenCalled();
+  });
+
   it('highlights the current segment based on route', () => {
     render(
       <MemoryRouter initialEntries={['/coach/today']}>

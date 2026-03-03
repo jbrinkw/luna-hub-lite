@@ -383,6 +383,14 @@ describe('COACHBYTE_log_set', () => {
     const parsed = parseResult(result);
     expect(parsed.completed_set_id).toBe('cs-1');
     expect(parsed.message).toContain('10 reps @ 100 lbs');
+
+    // Verify insert was called with correct fields (matches log-set.ts handler)
+    expect(insertChain.insert).toHaveBeenCalledWith(expect.objectContaining({
+      planned_set_id: null,
+      exercise_id: 'ex-1',
+      actual_reps: 10,
+      actual_load: 100,
+    }));
   });
 
   it('returns error when ensure_daily_plan rpc fails', async () => {
@@ -463,6 +471,22 @@ describe('COACHBYTE_update_plan', () => {
     const parsed = parseResult(result);
     expect(parsed.message).toContain('1 sets');
     expect(parsed.plan_id).toBe('plan-1');
+
+    // Verify delete().eq() was called on planned_sets before insert
+    expect(deleteChain.delete).toHaveBeenCalled();
+    expect(deleteChain.eq).toHaveBeenCalledWith('plan_id', 'plan-1');
+
+    // Verify insert was called with the new sets
+    expect(insertChain.insert).toHaveBeenCalledWith([
+      expect.objectContaining({
+        plan_id: 'plan-1',
+        exercise_id: 'ex-1',
+        target_reps: 10,
+        target_load: 100,
+        rest_seconds: 60,
+        order: 1,
+      }),
+    ]);
   });
 
   it('returns error when plan not owned by user', async () => {

@@ -59,9 +59,10 @@ END $$;
 -- TEST 1-2: ensure_daily_plan for Monday creates plan
 -- 2026-03-02 is a Monday
 ------------------------------------------------------------
-SELECT ok(
-  (SELECT coachbyte.ensure_daily_plan('2026-03-02'::date) IS NOT NULL),
-  'ensure_daily_plan returns non-null for Monday'
+SELECT is(
+  (SELECT (coachbyte.ensure_daily_plan('2026-03-02'::date))->>'status'),
+  'created',
+  'ensure_daily_plan returns status=created for new Monday plan'
 );
 
 SELECT is(
@@ -129,9 +130,10 @@ SELECT is(
 ------------------------------------------------------------
 -- TEST 8-10: Idempotency
 ------------------------------------------------------------
-SELECT ok(
-  (SELECT coachbyte.ensure_daily_plan('2026-03-02'::date) IS NOT NULL),
-  'Second call returns non-null (idempotent)'
+SELECT is(
+  (SELECT (coachbyte.ensure_daily_plan('2026-03-02'::date))->>'status'),
+  'existing',
+  'Second call returns status=existing (idempotent)'
 );
 
 SELECT is(
@@ -154,9 +156,10 @@ SELECT is(
 -- TEST 11-13: Tuesday with no split → empty plan
 -- 2026-03-03 is a Tuesday
 ------------------------------------------------------------
-SELECT ok(
-  (SELECT coachbyte.ensure_daily_plan('2026-03-03'::date) IS NOT NULL),
-  'ensure_daily_plan returns non-null for Tuesday (no split)'
+SELECT is(
+  (SELECT (coachbyte.ensure_daily_plan('2026-03-03'::date))->>'status'),
+  'empty',
+  'ensure_daily_plan returns status=empty for Tuesday (no split)'
 );
 
 SELECT is(

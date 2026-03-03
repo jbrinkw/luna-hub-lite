@@ -663,6 +663,34 @@ describe('CHEFBYTE_below_min_stock', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('stock query timeout');
   });
+
+  it('returns error when auto_add upsert to shopping_list fails', async () => {
+    const productsChain = createChain();
+    productsChain.data = [
+      { product_id: 'p-1', name: 'Chicken', min_stock_amount: 5, category: 'Protein' },
+      { product_id: 'p-2', name: 'Rice', min_stock_amount: 3, category: 'Grain' },
+    ];
+
+    const lotsChain = createChain();
+    lotsChain.data = [
+      { product_id: 'p-1', qty_containers: 2 },
+    ];
+
+    // Upsert fails
+    const upsertChain = createChain();
+    upsertChain.data = null;
+    upsertChain.error = { message: 'upsert constraint violation' };
+
+    mock.cbFrom
+      .mockReturnValueOnce(productsChain)
+      .mockReturnValueOnce(lotsChain)
+      .mockReturnValueOnce(upsertChain);
+
+    const result = await belowMinStock.handler({ auto_add: true }, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Found 2 below-min products but failed to add to shopping list: upsert constraint violation');
+  });
 });
 
 describe('CHEFBYTE_get_cookable', () => {

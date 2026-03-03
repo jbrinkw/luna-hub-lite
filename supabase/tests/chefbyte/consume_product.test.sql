@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(20);
+SELECT plan(22);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -285,6 +285,42 @@ SELECT is(
       AND product_id = '10000000-0000-0000-0000-000000000001'),
   :log_count_before,
   'no food_log created when log_macros=false'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Stock IS deducted even when log_macros=false
+-- The lot had 0.5 containers; consuming 0.5 should deplete it
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.stock_lots
+    WHERE lot_id = '20000000-0000-0000-0000-000000000003'),
+  0,
+  'stock lot depleted even when log_macros=false (0.5 consumed from 0.5)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Return value verification — success=true, qty_consumed > 0
+-- Create a fresh lot and consume, capturing the JSONB return
+-- ─────────────────────────────────────────────────────────────
+
+INSERT INTO chefbyte.stock_lots (lot_id, user_id, product_id, location_id, qty_containers, expires_on)
+VALUES (
+  '20000000-0000-0000-0000-000000000004',
+  tests.get_supabase_uid('cf_tester'),
+  '10000000-0000-0000-0000-000000000001',
+  :'fridge_id',
+  1.0,
+  '2026-03-25'
+);
+
+SELECT is(
+  (SELECT (chefbyte.consume_product(
+    '10000000-0000-0000-0000-000000000001'::uuid,
+    1, 'container', true, '2026-03-03'::date
+  ))->>'success'),
+  'true',
+  'consume_product return value has success=true'
 );
 
 -- ─────────────────────────────────────────────────────────────

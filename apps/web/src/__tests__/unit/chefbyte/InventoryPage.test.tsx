@@ -3,8 +3,12 @@ import { render, screen, waitFor, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { InventoryPage } from '@/pages/chefbyte/InventoryPage';
 
+// Stable reference — a new { id: 'u1' } on every render would invalidate
+// useCallback([user]) in the component, causing infinite re-renders.
+const mockUser = { id: 'u1' };
+const mockSignOut = vi.fn();
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
+  useAuth: () => ({ user: mockUser, signOut: mockSignOut }),
 }));
 
 /* ------------------------------------------------------------------ */
@@ -113,6 +117,14 @@ describe('InventoryPage', () => {
   afterEach(() => {
     vi.clearAllMocks();
     callCount = 0;
+    // Restore chain methods after tests that override them (e.g. empty inventory)
+    chainMethods.forEach(m => { mockChain[m] = vi.fn(() => mockChain); });
+    mockChain.then = vi.fn((cb: any) => {
+      callCount++;
+      if (callCount % 3 === 1) return cb({ data: mockProducts, error: null });
+      if (callCount % 3 === 2) return cb({ data: mockLots, error: null });
+      return cb({ data: mockLocations, error: null });
+    });
   });
 
   /* ---- Loading ---- */
@@ -344,5 +356,25 @@ describe('InventoryPage', () => {
     expect(screen.getByText('Fridge')).toBeInTheDocument();
     expect(screen.getByText('Freezer')).toBeInTheDocument();
     expect(screen.getByText('Pantry')).toBeInTheDocument();
+  });
+
+  /* ---- Empty inventory state ---- */
+
+  it('shows "No products in inventory" when products list is empty', async () => {
+    // Override then to return empty arrays for all 3 sequential calls
+    callCount = 0;
+    mockChain.then = vi.fn((cb: any) => {
+      callCount++;
+      // products, stock_lots, locations — all empty
+      return cb({ data: [], error: null });
+    });
+
+    renderPage();
+    await waitFor(() => {
+      expect(screen.getByTestId('grouped-view')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('no-products')).toBeInTheDocument();
+    expect(screen.getByTestId('no-products')).toHaveTextContent('No products in inventory.');
   });
 });

@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(15);
+SELECT plan(18);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -66,16 +66,15 @@ END $$;
 -- Test 1: Complete first set → completed_set row created
 -- ─────────────────────────────────────────────────────────────
 
-SELECT lives_ok(
-    $$
-        SELECT rest_seconds
-        FROM coachbyte.complete_next_set(
-            '00000000-0000-0000-0000-000000000001',
-            5,
-            100.0
-        )
-    $$,
-    'complete_next_set executes without error on first call'
+SELECT is(
+    (SELECT rest_seconds
+     FROM coachbyte.complete_next_set(
+         '00000000-0000-0000-0000-000000000001',
+         5,
+         100.0
+     )),
+    60,
+    'completing order 1 returns rest_seconds of order 2 (Bench = 60s)'
 );
 
 SELECT is(
@@ -94,6 +93,35 @@ SELECT is(
      LIMIT 1),
     '00000000-0000-0000-0000-000000000011'::UUID,
     'completed_set is linked to planned_set with order 1 (Squat)'
+);
+
+SELECT is(
+    (SELECT cs.exercise_id
+     FROM coachbyte.completed_sets cs
+     JOIN coachbyte.planned_sets ps ON ps.planned_set_id = cs.planned_set_id
+     WHERE cs.plan_id = '00000000-0000-0000-0000-000000000001'
+     ORDER BY cs.completed_at ASC
+     LIMIT 1),
+    (SELECT ps.exercise_id
+     FROM coachbyte.planned_sets ps
+     WHERE ps.planned_set_id = '00000000-0000-0000-0000-000000000011'),
+    'completed_set exercise_id matches the planned_set exercise (Squat)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: logical_date on completed_set matches the plan's logical_date
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+    (SELECT cs.logical_date
+     FROM coachbyte.completed_sets cs
+     WHERE cs.plan_id = '00000000-0000-0000-0000-000000000001'
+     ORDER BY cs.completed_at ASC
+     LIMIT 1),
+    (SELECT dp.logical_date
+     FROM coachbyte.daily_plans dp
+     WHERE dp.plan_id = '00000000-0000-0000-0000-000000000001'),
+    'completed_set logical_date matches the plan logical_date'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -178,6 +206,14 @@ SELECT is(
     'returns NULL rest_seconds when no more planned sets remain'
 );
 
+SELECT is(
+    (SELECT COUNT(*)::INTEGER
+     FROM coachbyte.completed_sets
+     WHERE plan_id = '00000000-0000-0000-0000-000000000001'),
+    3,
+    'completed_sets count is still 3 after calling complete_next_set with no remaining sets'
+);
+
 -- ─────────────────────────────────────────────────────────────
 -- Test 6: Failed set (0 reps) → completed_set created and tracked
 -- ─────────────────────────────────────────────────────────────
@@ -221,17 +257,16 @@ BEGIN
          v_uid, v_bench_id, 2, 1, 80.0, 90);
 END $$;
 
--- Complete with 0 reps (failed set)
-SELECT lives_ok(
-    $$
-        SELECT rest_seconds
-        FROM coachbyte.complete_next_set(
-            '00000000-0000-0000-0000-000000000002',
-            0,
-            100.0
-        )
-    $$,
-    'complete_next_set accepts 0 reps (failed set) without error'
+-- Complete with 0 reps (failed set) — next set (order 2) has rest_seconds=90
+SELECT is(
+    (SELECT rest_seconds
+     FROM coachbyte.complete_next_set(
+         '00000000-0000-0000-0000-000000000002',
+         0,
+         100.0
+     )),
+    90,
+    'completing failed set (0 reps) returns rest_seconds of next set (order 2 = 90s)'
 );
 
 SELECT is(

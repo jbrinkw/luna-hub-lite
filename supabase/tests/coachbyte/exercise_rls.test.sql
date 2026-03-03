@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(14);
+SELECT plan(15);
 
 -- Setup: create two users
 SELECT tests.create_supabase_user('ex_owner');
@@ -62,6 +62,15 @@ SELECT is(
     WHERE user_id = tests.get_supabase_uid('ex_owner')),
   0,
   'User B cannot see User A custom exercises'
+);
+
+-- Test 6a: User B INSERT with User A's user_id — RLS rejects
+SELECT throws_ok(
+  $$ INSERT INTO coachbyte.exercises (user_id, name)
+     VALUES (tests.get_supabase_uid('ex_owner'), 'Injected Exercise') $$,
+  '42501',
+  NULL,
+  'User B cannot insert exercise with User A''s user_id (RLS rejection)'
 );
 
 -- Test 6b: User B cannot UPDATE User A's custom exercise (silently affects 0 rows)

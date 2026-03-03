@@ -12,8 +12,9 @@ vi.mock('react-router-dom', async () => {
   };
 });
 
+const mockUser = { id: 'u1' };
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
+  useAuth: () => ({ user: mockUser, signOut: vi.fn() }),
 }));
 
 const allLabels = ['Scanner', 'Home', 'Inventory', 'Shopping', 'Meal Plan', 'Recipes', 'Macros', 'Walmart', 'Settings'];

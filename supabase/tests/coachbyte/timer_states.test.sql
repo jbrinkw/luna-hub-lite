@@ -3,7 +3,7 @@
 
 BEGIN;
 
-SELECT plan(28);
+SELECT plan(31);
 
 -- ============================================================
 -- Setup: create test users
@@ -491,6 +491,54 @@ SELECT is(
     (SELECT count(*)::INTEGER FROM update_result),
     0,
     'RLS: timer_user2 cannot update timer_user''s timer'
+);
+
+-- ============================================================
+-- RLS: User B INSERT with User A's user_id — should fail
+-- ============================================================
+
+SELECT tests.authenticate_as('timer_user2');
+
+SELECT throws_ok(
+    $$
+        INSERT INTO coachbyte.timers (
+            timer_id, user_id, state, end_time, duration_seconds, elapsed_before_pause
+        ) VALUES (
+            '00000000-0000-0000-0000-000000000099',
+            tests.get_supabase_uid('timer_user'),
+            'running',
+            now() + interval '60 seconds',
+            60,
+            0
+        )
+    $$,
+    '42501',
+    NULL,
+    'RLS: User B cannot insert timer with User A''s user_id'
+);
+
+-- ============================================================
+-- RLS: User B DELETE on User A's timer — should affect 0 rows
+-- ============================================================
+
+DELETE FROM coachbyte.timers
+WHERE user_id = tests.get_supabase_uid('timer_user');
+
+-- Verify User A's timer still exists by switching back
+SELECT tests.authenticate_as('timer_user');
+
+SELECT is(
+    (SELECT count(*)::INTEGER FROM coachbyte.timers
+     WHERE user_id = tests.get_supabase_uid('timer_user')),
+    1,
+    'RLS: User A''s timer still exists after User B''s DELETE attempt'
+);
+
+SELECT is(
+    (SELECT state FROM coachbyte.timers
+     WHERE user_id = tests.get_supabase_uid('timer_user')),
+    'running',
+    'RLS: User A''s timer state unchanged after User B''s DELETE attempt'
 );
 
 -- ============================================================

@@ -8,11 +8,11 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
   useAuth: () => mockUseAuth(),
 }));
 
-// Track navigation
+// Track navigation — capture all props to verify `replace`
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
-  return { ...actual, Navigate: (props: { to: string }) => { mockNavigate(props.to); return null; } };
+  return { ...actual, Navigate: (props: { to: string; replace?: boolean }) => { mockNavigate(props); return null; } };
 });
 
 import { AuthGuard } from '@/components/AuthGuard';
@@ -43,7 +43,7 @@ describe('AuthGuard', () => {
       </MemoryRouter>,
     );
 
-    expect(mockNavigate).toHaveBeenCalledWith('/login');
+    expect(mockNavigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/login' }));
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
   });
 
@@ -81,6 +81,20 @@ describe('AuthGuard', () => {
       </MemoryRouter>,
     );
 
-    expect(mockNavigate).toHaveBeenCalledWith('/login');
+    expect(mockNavigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/login' }));
+  });
+
+  it('passes replace prop to Navigate for history replacement', () => {
+    mockUseAuth.mockReturnValue({ user: null, loading: false });
+
+    render(
+      <MemoryRouter>
+        <AuthGuard><div>Protected Content</div></AuthGuard>
+      </MemoryRouter>,
+    );
+
+    expect(mockNavigate).toHaveBeenCalledWith(
+      expect.objectContaining({ to: '/login', replace: true }),
+    );
   });
 });

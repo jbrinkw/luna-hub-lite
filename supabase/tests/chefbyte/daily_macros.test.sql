@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(16);
+SELECT plan(27);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -29,8 +29,36 @@ SELECT is(
   'no data returns calories consumed = 0'
 );
 
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'protein'->>'consumed')::numeric),
+  0::numeric,
+  'no data returns protein consumed = 0'
+);
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'fat'->>'consumed')::numeric),
+  0::numeric,
+  'no data returns fat consumed = 0'
+);
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'carbs'->>'consumed')::numeric),
+  0::numeric,
+  'no data returns carbs consumed = 0'
+);
+
 -- ─────────────────────────────────────────────────────────────
--- Test 2: Insert food_log (product, 200cal/30p/5f/10c)
+-- Test: Remaining is 0 (not NULL) in zero-data case
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'calories'->>'remaining')::numeric),
+  0::numeric,
+  'calories remaining = 0 (not NULL) when no data and no goal'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Insert food_log (product, 200cal/30p/5f/10c)
 -- ─────────────────────────────────────────────────────────────
 
 SELECT lives_ok(
@@ -136,6 +164,63 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
+-- Test: goal_protein config key
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  format(
+    'INSERT INTO chefbyte.user_config (user_id, key, value)
+     VALUES (%L, ''goal_protein'', ''150'')',
+    tests.get_supabase_uid('macro_tester')
+  ),
+  'insert user_config goal_protein=150 succeeds'
+);
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'protein'->>'goal')::numeric),
+  150::numeric,
+  'protein goal = 150 after setting goal_protein config'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: goal_carbs config key
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  format(
+    'INSERT INTO chefbyte.user_config (user_id, key, value)
+     VALUES (%L, ''goal_carbs'', ''250'')',
+    tests.get_supabase_uid('macro_tester')
+  ),
+  'insert user_config goal_carbs=250 succeeds'
+);
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'carbs'->>'goal')::numeric),
+  250::numeric,
+  'carbs goal = 250 after setting goal_carbs config'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: goal_fats config key (note: key is goal_fats, output is fat)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  format(
+    'INSERT INTO chefbyte.user_config (user_id, key, value)
+     VALUES (%L, ''goal_fats'', ''65'')',
+    tests.get_supabase_uid('macro_tester')
+  ),
+  'insert user_config goal_fats=65 succeeds'
+);
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'fat'->>'goal')::numeric),
+  65::numeric,
+  'fat goal = 65 after setting goal_fats config'
+);
+
+-- ─────────────────────────────────────────────────────────────
 -- Test 9: get_daily_macros returns calories remaining = 1750
 -- (2000 goal - 250 consumed)
 -- ─────────────────────────────────────────────────────────────
@@ -216,7 +301,18 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 17: Cross-user isolation — User B sees no macros from User A
+-- Test: Carbs includes liquidtrack contribution
+-- Total carbs: 15 (food+temp) + 12 (lt) = 27
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'carbs'->>'consumed')::numeric),
+  27::numeric,
+  'carbs consumed = 27 after adding liquidtrack event (15 + 12)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Cross-user isolation — User B sees no macros from User A
 -- ─────────────────────────────────────────────────────────────
 
 SELECT tests.clear_authentication();

@@ -149,6 +149,17 @@ describe('OBSIDIAN_create_note', () => {
     expect(opts.body).toBe('# Hello World');
   });
 
+  it('returns toolError when credentials are missing', async () => {
+    const result = await handler(
+      { path: 'folder/note.md', content: 'content' },
+      emptyCredentialsCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing Obsidian credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('returns toolError when API returns error', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('Server Error', false, 500));
 
@@ -244,6 +255,17 @@ describe('OBSIDIAN_update_note', () => {
     expect(opts.headers['Content-Type']).toBe('text/markdown');
     expect(opts.headers.Authorization).toBe('Bearer obs-key-123');
     expect(opts.body).toBe('# Updated Content');
+  });
+
+  it('returns toolError when credentials are missing', async () => {
+    const result = await handler(
+      { path: 'note.md', content: 'content' },
+      emptyCredentialsCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing Obsidian credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('returns toolError when API returns error', async () => {
@@ -357,6 +379,14 @@ describe('TODOIST_create_task', () => {
     expect(body.priority).toBe(3);
   });
 
+  it('returns toolError when credentials are missing', async () => {
+    const result = await handler({ content: 'Fail task' }, emptyCredentialsCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing Todoist credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
   it('returns toolError when API returns error', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('Server Error', false, 500));
 
@@ -393,6 +423,14 @@ describe('TODOIST_complete_task', () => {
     expect(url).toBe('https://api.todoist.com/rest/v2/tasks/task-abc/close');
     expect(opts.method).toBe('POST');
     expect(opts.headers.Authorization).toBe('Bearer todoist-key-456');
+  });
+
+  it('returns toolError when credentials are missing', async () => {
+    const result = await handler({ task_id: 'task-abc' }, emptyCredentialsCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing Todoist credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('returns toolError when API returns error', async () => {
@@ -547,6 +585,17 @@ describe('HOMEASSISTANT_call_service', () => {
     const body = JSON.parse(opts.body);
     expect(body.entity_id).toBe('light.living_room');
     expect(body.brightness).toBe(200);
+  });
+
+  it('returns toolError when credentials are missing', async () => {
+    const result = await handler(
+      { domain: 'light', service: 'turn_on' },
+      emptyCredentialsCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing Home Assistant credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('returns toolError when API returns error', async () => {

@@ -132,4 +132,43 @@ describe('Tool config', () => {
 
     expect(data).toHaveLength(0);
   });
+
+  it('RLS: user B cannot UPDATE user A tool config', async () => {
+    const { userId: userA, client: clientA } = await createTestUser('tool-rls-upd-a');
+    const { userId: userB, client: clientB } = await createTestUser('tool-rls-upd-b');
+    userIds.push(userA, userB);
+
+    // User A creates a tool config with enabled: true
+    const { error: upsertError } = await clientA
+      .schema('hub')
+      .from('user_tool_config')
+      .upsert(
+        { user_id: userA, tool_name: 'COACHBYTE_get_today_plan', enabled: true },
+        { onConflict: 'user_id,tool_name' },
+      );
+    expect(upsertError).toBeNull();
+
+    // User B attempts to update User A's tool config
+    const { data: updateData } = await clientB
+      .schema('hub')
+      .from('user_tool_config')
+      .update({ enabled: false })
+      .eq('user_id', userA)
+      .eq('tool_name', 'COACHBYTE_get_today_plan')
+      .select();
+
+    // RLS blocks the update — no rows matched for User B
+    expect(updateData).toHaveLength(0);
+
+    // Verify User A's config is still enabled: true
+    const { data } = await clientA
+      .schema('hub')
+      .from('user_tool_config')
+      .select('enabled')
+      .eq('user_id', userA)
+      .eq('tool_name', 'COACHBYTE_get_today_plan')
+      .single();
+
+    expect(data?.enabled).toBe(true);
+  });
 });

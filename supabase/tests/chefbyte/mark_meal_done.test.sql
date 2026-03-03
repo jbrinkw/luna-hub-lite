@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(27);
+SELECT plan(34);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -73,20 +73,17 @@ INSERT INTO chefbyte.meal_plan_entries (
   '2026-03-03', 1, false
 );
 
-SELECT lives_ok(
-  $$
-    SELECT chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000001'::uuid)
-  $$,
-  'mark_meal_done on regular recipe meal succeeds'
+-- Capture the return value from the first call to verify success=true
+SELECT is(
+  (SELECT (chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000001'::uuid))->>'success'),
+  'true',
+  'first mark_meal_done call returns success=true'
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 2: Returns success=true
+-- Test 2: Calling again on already-completed meal returns success=false
 -- ─────────────────────────────────────────────────────────────
 
--- Already called above; verify completed_at is set instead
--- We re-call to check the return, but it was already completed.
--- Instead, check the state left behind.
 SELECT is(
   (SELECT (chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000001'::uuid))->>'success'),
   'false',
@@ -273,6 +270,20 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
+-- Test: [MEAL] stock lot expires_on = logical_date + 7
+-- logical_date = 2026-03-03, so expires_on = 2026-03-10
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT sl.expires_on FROM chefbyte.stock_lots sl
+    JOIN chefbyte.products p ON sl.product_id = p.product_id
+    WHERE p.user_id = tests.get_supabase_uid('meal_tester')
+      AND p.name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
+  '2026-03-10'::date,
+  '[MEAL] stock lot expires_on = logical_date + 7 (2026-03-10)'
+);
+
+-- ─────────────────────────────────────────────────────────────
 -- Test 12: No food_logs created for meal prep
 -- (still only the 2 from the regular meal)
 -- ─────────────────────────────────────────────────────────────
@@ -286,7 +297,76 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 18: Product-based meal path (no recipe)
+-- Test: Verify [MEAL] product per-serving macro values
+-- NOTE on base_servings: The mark_meal_done function intentionally
+-- ignores recipe.base_servings. It uses ingredient.quantity * meal.servings
+-- directly for consumption. This means base_servings is a UI hint only;
+-- the function treats each meal entry's servings field as the multiplier.
+--
+-- Chicken: 1 container * 2 servings = 2 containers → 2*4*165=1320cal,
+--          2*4*31=248p, 2*4*3.6=28.8f, 2*4*0=0c
+-- Rice:    1 container * 2 servings = 2 containers → 2*3*130=780cal,
+--          2*3*2.7=16.2p, 2*3*0.3=1.8f, 2*3*28=168c
+-- Total: 2100cal, 264.2p, 30.6f, 168c
+-- Per serving (servings_per_container=2): 1050cal, 132.1p, 15.3f, 84c
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT calories_per_serving FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
+  1050.000::numeric,
+  '[MEAL] product calories_per_serving = 2100 / 2 = 1050'
+);
+
+SELECT is(
+  (SELECT protein_per_serving FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
+  132.100::numeric,
+  '[MEAL] product protein_per_serving = 264.2 / 2 = 132.1'
+);
+
+SELECT is(
+  (SELECT fat_per_serving FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
+  15.300::numeric,
+  '[MEAL] product fat_per_serving = 30.6 / 2 = 15.3'
+);
+
+SELECT is(
+  (SELECT carbs_per_serving FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
+  84.000::numeric,
+  '[MEAL] product carbs_per_serving = 168 / 2 = 84'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Verify ingredient stock deducted after meal-prep
+-- Both chicken and rice: started 2.0, regular meal took 1.0 (→1.0),
+-- meal-prep takes 2.0 more → floors at 0 (lots deleted)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND product_id = '30000000-0000-0000-0000-000000000001'),
+  0,
+  'chicken stock fully depleted after meal-prep (2.0 - 1.0 regular - 2.0 prep = 0)'
+);
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND product_id = '30000000-0000-0000-0000-000000000002'),
+  0,
+  'rice stock fully depleted after meal-prep (2.0 - 1.0 regular - 2.0 prep = 0)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Product-based meal path (no recipe)
 -- Create a product-based meal_plan_entry (product_id, no recipe_id)
 -- Oats: 2 spc, 150cal/5p/3f/27c per serving, stock 1 container in Fridge
 -- ─────────────────────────────────────────────────────────────

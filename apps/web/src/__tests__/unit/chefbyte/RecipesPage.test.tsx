@@ -3,8 +3,9 @@ import { render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { RecipesPage, computeRecipeMacros } from '@/pages/chefbyte/RecipesPage';
 
+const mockUser = { id: 'u1' };
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'u1' }, signOut: vi.fn() }),
+  useAuth: () => ({ user: mockUser, signOut: vi.fn() }),
 }));
 
 /* ------------------------------------------------------------------ */
@@ -216,6 +217,7 @@ describe('RecipesPage', () => {
   // placeholder to verify the badge renders correctly. Once stock checking against
   // inventory is implemented, this test should be updated to mock stock data and verify
   // that recipes with insufficient stock show "MISSING" instead of "CAN MAKE".
+  // TODO: Replace with real stock-check tests when canMake is wired to inventory data.
   it('shows stock status badge on cards (placeholder — canMake is hardcoded true)', async () => {
     renderPage();
     await waitFor(() => {
@@ -226,6 +228,11 @@ describe('RecipesPage', () => {
     // r3 has no ingredients — CAN MAKE (canMake hardcoded true)
     expect(screen.getByTestId('stock-status-r3')).toHaveTextContent('CAN MAKE');
   });
+
+  // Placeholder: real stock-checking logic is not yet implemented.
+  // This todo tracks the need for a test that verifies "MISSING" badge
+  // when a recipe's ingredients are out of stock.
+  it.todo('shows MISSING badge when recipe ingredients are out of stock (needs stock-check wiring)');
 
   /* ---- Meal Plan button ---- */
 
