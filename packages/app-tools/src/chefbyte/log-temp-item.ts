@@ -24,17 +24,17 @@ export const logTempItem: ToolDefinition = {
       user_id: ctx.userId,
       name,
       calories,
+      carbs: carbs ?? 0,
+      protein: protein ?? 0,
+      fat: fat ?? 0,
       logical_date: logicalDate,
     };
-    if (carbs !== undefined) row.carbs = carbs;
-    if (protein !== undefined) row.protein = protein;
-    if (fat !== undefined) row.fat = fat;
 
     const { data, error } = await ctx.supabase
       .schema('chefbyte')
       .from('temp_items')
       .insert(row)
-      .select('id, name, calories, carbs, protein, fat, logical_date')
+      .select('temp_id, name, calories, carbs, protein, fat, logical_date')
       .single();
 
     if (error) return toolError(`Failed to log temp item: ${error.message}`);

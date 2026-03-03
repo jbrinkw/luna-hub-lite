@@ -13,11 +13,9 @@ export const getTodayPlan: ToolDefinition = {
     const logicalDate = await getLogicalDate(ctx.supabase, ctx.userId);
 
     // Ensure a plan exists (creates from split template if needed)
-    const { data: rpcResult, error: rpcError } = await ctx.supabase.rpc(
-      'ensure_daily_plan_admin',
-      { p_user_id: ctx.userId, p_day: logicalDate },
-      { schema: 'coachbyte' },
-    );
+    const { data: rpcResult, error: rpcError } = await ctx.supabase
+      .schema('coachbyte')
+      .rpc('ensure_daily_plan_admin', { p_user_id: ctx.userId, p_day: logicalDate });
 
     if (rpcError) return toolError(`Failed to ensure daily plan: ${rpcError.message}`);
 
@@ -55,9 +53,7 @@ export const getTodayPlan: ToolDefinition = {
     if (csError) return toolError(`Failed to fetch completed sets: ${csError.message}`);
 
     const completedPlannedIds = new Set(
-      (completedSets || [])
-        .filter((cs: any) => cs.planned_set_id)
-        .map((cs: any) => cs.planned_set_id),
+      (completedSets || []).filter((cs: any) => cs.planned_set_id).map((cs: any) => cs.planned_set_id),
     );
 
     const sets = (plannedSets || []).map((ps: any) => ({

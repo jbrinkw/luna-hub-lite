@@ -17,7 +17,6 @@ export const createProduct: ToolDefinition = {
       fat_per_serving: { type: 'number', description: 'Fat per serving (g)' },
       price: { type: 'number', description: 'Price per container' },
       min_stock_amount: { type: 'number', description: 'Minimum stock threshold (containers)' },
-      category: { type: 'string', description: 'Product category' },
     },
     required: ['name'],
   },
@@ -25,9 +24,15 @@ export const createProduct: ToolDefinition = {
     const row: Record<string, any> = { user_id: ctx.userId, name: args.name };
 
     const optionalFields = [
-      'barcode', 'description', 'servings_per_container',
-      'calories_per_serving', 'carbs_per_serving', 'protein_per_serving',
-      'fat_per_serving', 'price', 'min_stock_amount', 'category',
+      'barcode',
+      'description',
+      'servings_per_container',
+      'calories_per_serving',
+      'carbs_per_serving',
+      'protein_per_serving',
+      'fat_per_serving',
+      'price',
+      'min_stock_amount',
     ];
 
     for (const field of optionalFields) {
@@ -40,7 +45,7 @@ export const createProduct: ToolDefinition = {
       .schema('chefbyte')
       .from('products')
       .insert(row)
-      .select('product_id, name, barcode, category')
+      .select('product_id, name, barcode')
       .single();
 
     if (error) return toolError(`Failed to create product: ${error.message}`);

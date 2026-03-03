@@ -18,11 +18,9 @@ export const logSet: ToolDefinition = {
     const logicalDate = await getLogicalDate(ctx.supabase, ctx.userId);
 
     // Ensure a plan exists for today (need plan_id as FK)
-    const { data: rpcResult, error: rpcError } = await ctx.supabase.rpc(
-      'ensure_daily_plan_admin',
-      { p_user_id: ctx.userId, p_day: logicalDate },
-      { schema: 'coachbyte' },
-    );
+    const { data: rpcResult, error: rpcError } = await ctx.supabase
+      .schema('coachbyte')
+      .rpc('ensure_daily_plan_admin', { p_user_id: ctx.userId, p_day: logicalDate });
 
     if (rpcError) return toolError(`Failed to ensure daily plan: ${rpcError.message}`);
 

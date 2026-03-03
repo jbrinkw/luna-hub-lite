@@ -7,20 +7,16 @@ export const getMacros: ToolDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      date: { type: 'string', description: 'Date YYYY-MM-DD (defaults to today\'s logical date)' },
+      date: { type: 'string', description: "Date YYYY-MM-DD (defaults to today's logical date)" },
     },
   },
   handler: async (args, ctx) => {
-    const date = args.date || await getLogicalDate(ctx.supabase, ctx.userId);
+    const date = args.date || (await getLogicalDate(ctx.supabase, ctx.userId));
 
-    const { data, error } = await ctx.supabase.rpc(
-      'get_daily_macros_admin',
-      {
-        p_user_id: ctx.userId,
-        p_logical_date: date,
-      },
-      { schema: 'chefbyte' },
-    );
+    const { data, error } = await ctx.supabase.schema('chefbyte').rpc('get_daily_macros_admin', {
+      p_user_id: ctx.userId,
+      p_logical_date: date,
+    });
 
     if (error) return toolError(`Failed to fetch macros: ${error.message}`);
 

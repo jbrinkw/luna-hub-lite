@@ -3,8 +3,7 @@ import { toolSuccess, toolError } from '../shared';
 
 export const belowMinStock: ToolDefinition = {
   name: 'CHEFBYTE_below_min_stock',
-  description:
-    'Find products below minimum stock level. Optionally auto-add deficits to shopping list.',
+  description: 'Find products below minimum stock level. Optionally auto-add deficits to shopping list.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -21,7 +20,7 @@ export const belowMinStock: ToolDefinition = {
     const { data: products, error: prodError } = await ctx.supabase
       .schema('chefbyte')
       .from('products')
-      .select('product_id, name, min_stock_amount, category')
+      .select('product_id, name, min_stock_amount')
       .eq('user_id', ctx.userId)
       .not('min_stock_amount', 'is', null)
       .gt('min_stock_amount', 0);
@@ -55,7 +54,6 @@ export const belowMinStock: ToolDefinition = {
         belowMin.push({
           product_id: prod.product_id,
           product_name: prod.name,
-          category: prod.category,
           min_stock: min,
           current_stock: current,
           deficit,
@@ -68,7 +66,6 @@ export const belowMinStock: ToolDefinition = {
         user_id: ctx.userId,
         product_id: item.product_id,
         qty_containers: item.deficit,
-        notes: 'Auto-added: below minimum stock',
       }));
 
       const { error: upsertError } = await ctx.supabase
@@ -76,7 +73,10 @@ export const belowMinStock: ToolDefinition = {
         .from('shopping_list')
         .upsert(rows, { onConflict: 'user_id,product_id' });
 
-      if (upsertError) return toolError(`Found ${belowMin.length} below-min products but failed to add to shopping list: ${upsertError.message}`);
+      if (upsertError)
+        return toolError(
+          `Found ${belowMin.length} below-min products but failed to add to shopping list: ${upsertError.message}`,
+        );
     }
 
     return toolSuccess({

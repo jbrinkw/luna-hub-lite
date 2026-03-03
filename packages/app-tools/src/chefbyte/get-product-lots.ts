@@ -17,7 +17,7 @@ export const getProductLots: ToolDefinition = {
     const { data: lots, error } = await ctx.supabase
       .schema('chefbyte')
       .from('stock_lots')
-      .select('lot_id, qty_containers, expires_on, meal_label, location_id, created_at, locations(name)')
+      .select('lot_id, qty_containers, expires_on, location_id, created_at, locations(name)')
       .eq('user_id', ctx.userId)
       .eq('product_id', product_id)
       .gt('qty_containers', 0)
@@ -29,7 +29,6 @@ export const getProductLots: ToolDefinition = {
       lot_id: lot.lot_id,
       qty_containers: Number(lot.qty_containers),
       expires_on: lot.expires_on,
-      meal_label: lot.meal_label,
       location: lot.locations?.name ?? null,
       location_id: lot.location_id,
       created_at: lot.created_at,

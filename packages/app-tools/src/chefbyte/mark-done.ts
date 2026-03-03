@@ -14,14 +14,10 @@ export const markDone: ToolDefinition = {
   handler: async (args, ctx) => {
     const { meal_id } = args;
 
-    const { data, error } = await ctx.supabase.rpc(
-      'mark_meal_done_admin',
-      {
-        p_user_id: ctx.userId,
-        p_meal_id: meal_id,
-      },
-      { schema: 'chefbyte' },
-    );
+    const { data, error } = await ctx.supabase.schema('chefbyte').rpc('mark_meal_done_admin', {
+      p_user_id: ctx.userId,
+      p_meal_id: meal_id,
+    });
 
     if (error) return toolError(`Failed to mark meal done: ${error.message}`);
 

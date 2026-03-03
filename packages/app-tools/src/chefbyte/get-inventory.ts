@@ -3,8 +3,7 @@ import { toolSuccess, toolError } from '../shared';
 
 export const getInventory: ToolDefinition = {
   name: 'CHEFBYTE_get_inventory',
-  description:
-    'Get current inventory grouped by product with total stock and nearest expiration.',
+  description: 'Get current inventory grouped by product with total stock and nearest expiration.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -20,7 +19,9 @@ export const getInventory: ToolDefinition = {
     const { data: lots, error } = await ctx.supabase
       .schema('chefbyte')
       .from('stock_lots')
-      .select('lot_id, product_id, qty_containers, expires_on, meal_label, location_id, created_at, products(name, category), locations(name)')
+      .select(
+        'lot_id, product_id, qty_containers, expires_on, location_id, created_at, products(name), locations(name)',
+      )
       .eq('user_id', ctx.userId)
       .gt('qty_containers', 0)
       .order('expires_on', { ascending: true, nullsFirst: false });
@@ -35,7 +36,6 @@ export const getInventory: ToolDefinition = {
         grouped[pid] = {
           product_id: pid,
           product_name: lot.products?.name ?? null,
-          category: lot.products?.category ?? null,
           total_containers: 0,
           nearest_expiry: null as string | null,
           lots: [] as any[],
@@ -54,7 +54,6 @@ export const getInventory: ToolDefinition = {
           lot_id: lot.lot_id,
           qty_containers: Number(lot.qty_containers),
           expires_on: lot.expires_on,
-          meal_label: lot.meal_label,
           location: lot.locations?.name ?? null,
           location_id: lot.location_id,
         });
@@ -65,7 +64,6 @@ export const getInventory: ToolDefinition = {
       const result: any = {
         product_id: g.product_id,
         product_name: g.product_name,
-        category: g.category,
         total_containers: g.total_containers,
         nearest_expiry: g.nearest_expiry,
       };

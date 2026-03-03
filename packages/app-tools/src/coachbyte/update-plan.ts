@@ -52,6 +52,7 @@ export const updatePlan: ToolDefinition = {
     // Insert new planned sets
     const rows = sets.map((s: any) => ({
       plan_id,
+      user_id: ctx.userId,
       exercise_id: s.exercise_id,
       target_reps: s.target_reps,
       target_load: s.target_load,

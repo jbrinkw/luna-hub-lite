@@ -51,9 +51,25 @@ interface ChainMock {
 function createChain(): ChainMock {
   const chain: any = {};
   const methods = [
-    'select', 'eq', 'neq', 'in', 'is', 'not', 'order', 'limit',
-    'single', 'maybeSingle', 'insert', 'update', 'delete', 'upsert',
-    'gte', 'lte', 'gt', 'lt', 'ilike',
+    'select',
+    'eq',
+    'neq',
+    'in',
+    'is',
+    'not',
+    'order',
+    'limit',
+    'single',
+    'maybeSingle',
+    'insert',
+    'update',
+    'delete',
+    'upsert',
+    'gte',
+    'lte',
+    'gt',
+    'lt',
+    'ilike',
   ];
   methods.forEach((m) => {
     chain[m] = vi.fn(() => chain);
@@ -61,10 +77,7 @@ function createChain(): ChainMock {
   chain.data = null;
   chain.error = null;
   // Make the chain thenable so `await chain` resolves to { data, error }
-  chain.then = function (
-    resolve: (v: any) => void,
-    _reject?: (e: any) => void,
-  ) {
+  chain.then = function (resolve: (v: any) => void, _reject?: (e: any) => void) {
     return Promise.resolve({ data: chain.data, error: chain.error }).then(resolve, _reject);
   };
   return chain;
@@ -131,22 +144,34 @@ describe('CHEFBYTE_get_inventory', () => {
   it('returns grouped inventory on success', async () => {
     mock.cbChain.data = [
       {
-        lot_id: 'lot-1', product_id: 'p-1', qty_containers: 3,
-        expires_on: '2026-04-01', meal_label: null, location_id: 'loc-1',
+        lot_id: 'lot-1',
+        product_id: 'p-1',
+        qty_containers: 3,
+        expires_on: '2026-04-01',
+        meal_label: null,
+        location_id: 'loc-1',
         created_at: '2026-03-01T00:00:00Z',
         products: { name: 'Chicken Breast', category: 'Protein' },
         locations: { name: 'Fridge' },
       },
       {
-        lot_id: 'lot-2', product_id: 'p-1', qty_containers: 2,
-        expires_on: '2026-03-20', meal_label: null, location_id: 'loc-1',
+        lot_id: 'lot-2',
+        product_id: 'p-1',
+        qty_containers: 2,
+        expires_on: '2026-03-20',
+        meal_label: null,
+        location_id: 'loc-1',
         created_at: '2026-03-01T00:00:00Z',
         products: { name: 'Chicken Breast', category: 'Protein' },
         locations: { name: 'Fridge' },
       },
       {
-        lot_id: 'lot-3', product_id: 'p-2', qty_containers: 1,
-        expires_on: null, meal_label: null, location_id: null,
+        lot_id: 'lot-3',
+        product_id: 'p-2',
+        qty_containers: 1,
+        expires_on: null,
+        meal_label: null,
+        location_id: null,
         created_at: '2026-03-01T00:00:00Z',
         products: { name: 'Rice', category: 'Grain' },
         locations: null,
@@ -173,8 +198,12 @@ describe('CHEFBYTE_get_inventory', () => {
   it('includes lot details when include_lots is true', async () => {
     mock.cbChain.data = [
       {
-        lot_id: 'lot-1', product_id: 'p-1', qty_containers: 3,
-        expires_on: '2026-04-01', meal_label: null, location_id: 'loc-1',
+        lot_id: 'lot-1',
+        product_id: 'p-1',
+        qty_containers: 3,
+        expires_on: '2026-04-01',
+        meal_label: null,
+        location_id: 'loc-1',
         created_at: '2026-03-01T00:00:00Z',
         products: { name: 'Oats', category: 'Grain' },
         locations: { name: 'Pantry' },
@@ -213,22 +242,19 @@ describe('CHEFBYTE_consume', () => {
   });
 
   it('calls consume_product_admin RPC with correct args', async () => {
-    mock.rpc.mockReturnValue({
+    mock.cbRpc.mockReturnValue({
       data: { consumed: 2, remaining_stock: 3, macros_logged: true },
       error: null,
     });
 
-    const result = await consume.handler(
-      { product_id: 'p-1', qty: 2, unit: 'container' },
-      ctx(mock.supabase),
-    );
+    const result = await consume.handler({ product_id: 'p-1', qty: 2, unit: 'container' }, ctx(mock.supabase));
 
     expect(result.isError).toBeUndefined();
     const parsed = parseResult(result);
     expect(parsed.consumed).toBe(2);
     expect(parsed.macros_logged).toBe(true);
 
-    expect(mock.rpc).toHaveBeenCalledWith(
+    expect(mock.cbRpc).toHaveBeenCalledWith(
       'consume_product_admin',
       expect.objectContaining({
         p_user_id: USER_ID,
@@ -237,27 +263,20 @@ describe('CHEFBYTE_consume', () => {
         p_unit: 'container',
         p_log_macros: true,
       }),
-      { schema: 'chefbyte' },
     );
   });
 
   it('rejects non-positive qty', async () => {
-    const result = await consume.handler(
-      { product_id: 'p-1', qty: 0, unit: 'serving' },
-      ctx(mock.supabase),
-    );
+    const result = await consume.handler({ product_id: 'p-1', qty: 0, unit: 'serving' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('qty must be positive');
   });
 
   it('returns error when RPC fails', async () => {
-    mock.rpc.mockReturnValue({ data: null, error: { message: 'insufficient stock' } });
+    mock.cbRpc.mockReturnValue({ data: null, error: { message: 'insufficient stock' } });
 
-    const result = await consume.handler(
-      { product_id: 'p-1', qty: 100, unit: 'container' },
-      ctx(mock.supabase),
-    );
+    const result = await consume.handler({ product_id: 'p-1', qty: 100, unit: 'container' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('insufficient stock');
@@ -289,21 +308,14 @@ describe('CHEFBYTE_get_products', () => {
     expect(mock.cbFrom).toHaveBeenCalledWith('products');
   });
 
-  it('applies search and category filters', async () => {
-    mock.cbChain.data = [
-      { product_id: 'p-1', name: 'Chicken Breast', category: 'Protein' },
-    ];
+  it('applies search filter', async () => {
+    mock.cbChain.data = [{ product_id: 'p-1', name: 'Chicken Breast' }];
     mock.cbChain.error = null;
 
-    const result = await getProducts.handler(
-      { search: 'chicken', category: 'Protein' },
-      ctx(mock.supabase),
-    );
+    const result = await getProducts.handler({ search: 'chicken' }, ctx(mock.supabase));
 
     expect(result.isError).toBeUndefined();
     expect(mock.cbChain.ilike).toHaveBeenCalledWith('name', '%chicken%');
-    // eq is called twice: once for user_id, once for category
-    expect(mock.cbChain.eq).toHaveBeenCalledWith('category', 'Protein');
   });
 
   it('returns error when query fails', async () => {
@@ -329,7 +341,6 @@ describe('CHEFBYTE_create_product', () => {
       product_id: 'p-new',
       name: 'Greek Yogurt',
       barcode: '1234567890',
-      category: 'Dairy',
     };
     mock.cbChain.error = null;
 
@@ -339,7 +350,6 @@ describe('CHEFBYTE_create_product', () => {
         barcode: '1234567890',
         calories_per_serving: 100,
         protein_per_serving: 17,
-        category: 'Dairy',
       },
       ctx(mock.supabase),
     );
@@ -358,7 +368,6 @@ describe('CHEFBYTE_create_product', () => {
         barcode: '1234567890',
         calories_per_serving: 100,
         protein_per_serving: 17,
-        category: 'Dairy',
       }),
     );
   });
@@ -380,10 +389,7 @@ describe('CHEFBYTE_create_product', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'duplicate barcode' };
 
-    const result = await createProduct.handler(
-      { name: 'Duplicate Product' },
-      ctx(mock.supabase),
-    );
+    const result = await createProduct.handler({ name: 'Duplicate Product' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('duplicate barcode');
@@ -429,10 +435,7 @@ describe('CHEFBYTE_add_stock', () => {
   });
 
   it('rejects non-positive qty_containers', async () => {
-    const result = await addStock.handler(
-      { product_id: 'p-1', qty_containers: 0 },
-      ctx(mock.supabase),
-    );
+    const result = await addStock.handler({ product_id: 'p-1', qty_containers: 0 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('qty_containers must be positive');
@@ -442,10 +445,7 @@ describe('CHEFBYTE_add_stock', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'FK violation: product not found' };
 
-    const result = await addStock.handler(
-      { product_id: 'nonexistent', qty_containers: 1 },
-      ctx(mock.supabase),
-    );
+    const result = await addStock.handler({ product_id: 'nonexistent', qty_containers: 1 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('FK violation');
@@ -463,7 +463,7 @@ describe('CHEFBYTE_get_macros', () => {
   });
 
   it('calls get_daily_macros_admin RPC and returns data', async () => {
-    mock.rpc.mockReturnValue({
+    mock.cbRpc.mockReturnValue({
       data: { calories: 1800, protein: 150, carbs: 200, fat: 60 },
       error: null,
     });
@@ -475,17 +475,16 @@ describe('CHEFBYTE_get_macros', () => {
     expect(parsed.calories).toBe(1800);
     expect(parsed.protein).toBe(150);
 
-    expect(mock.rpc).toHaveBeenCalledWith(
+    expect(mock.cbRpc).toHaveBeenCalledWith(
       'get_daily_macros_admin',
       expect.objectContaining({
         p_user_id: USER_ID,
       }),
-      { schema: 'chefbyte' },
     );
   });
 
   it('uses explicit date when provided', async () => {
-    mock.rpc.mockReturnValue({
+    mock.cbRpc.mockReturnValue({
       data: { calories: 2000, protein: 160, carbs: 220, fat: 70 },
       error: null,
     });
@@ -493,18 +492,17 @@ describe('CHEFBYTE_get_macros', () => {
     const result = await getMacros.handler({ date: '2026-03-01' }, ctx(mock.supabase));
 
     expect(result.isError).toBeUndefined();
-    expect(mock.rpc).toHaveBeenCalledWith(
+    expect(mock.cbRpc).toHaveBeenCalledWith(
       'get_daily_macros_admin',
       expect.objectContaining({
         p_user_id: USER_ID,
         p_logical_date: '2026-03-01',
       }),
-      { schema: 'chefbyte' },
     );
   });
 
   it('returns error when RPC fails', async () => {
-    mock.rpc.mockReturnValue({ data: null, error: { message: 'function not found' } });
+    mock.cbRpc.mockReturnValue({ data: null, error: { message: 'function not found' } });
 
     const result = await getMacros.handler({}, ctx(mock.supabase));
 
@@ -521,7 +519,7 @@ describe('CHEFBYTE_mark_done', () => {
   });
 
   it('calls mark_meal_done_admin RPC with correct args', async () => {
-    mock.rpc.mockReturnValue({
+    mock.cbRpc.mockReturnValue({
       data: { meal_id: 'meal-1', status: 'done', stock_deducted: true },
       error: null,
     });
@@ -532,18 +530,14 @@ describe('CHEFBYTE_mark_done', () => {
     const parsed = parseResult(result);
     expect(parsed.status).toBe('done');
 
-    expect(mock.rpc).toHaveBeenCalledWith(
-      'mark_meal_done_admin',
-      {
-        p_user_id: USER_ID,
-        p_meal_id: 'meal-1',
-      },
-      { schema: 'chefbyte' },
-    );
+    expect(mock.cbRpc).toHaveBeenCalledWith('mark_meal_done_admin', {
+      p_user_id: USER_ID,
+      p_meal_id: 'meal-1',
+    });
   });
 
   it('returns error when RPC fails', async () => {
-    mock.rpc.mockReturnValue({ data: null, error: { message: 'meal not found' } });
+    mock.cbRpc.mockReturnValue({ data: null, error: { message: 'meal not found' } });
 
     const result = await markDone.handler({ meal_id: 'nonexistent' }, ctx(mock.supabase));
 
@@ -574,9 +568,7 @@ describe('CHEFBYTE_below_min_stock', () => {
       { product_id: 'p-2', qty_containers: 4 },
     ];
 
-    mock.cbFrom
-      .mockReturnValueOnce(productsChain)
-      .mockReturnValueOnce(lotsChain);
+    mock.cbFrom.mockReturnValueOnce(productsChain).mockReturnValueOnce(lotsChain);
 
     const result = await belowMinStock.handler({}, ctx(mock.supabase));
 
@@ -592,24 +584,17 @@ describe('CHEFBYTE_below_min_stock', () => {
 
   it('auto-adds deficit to shopping list when auto_add is true', async () => {
     const productsChain = createChain();
-    productsChain.data = [
-      { product_id: 'p-1', name: 'Eggs', min_stock_amount: 4, category: 'Dairy' },
-    ];
+    productsChain.data = [{ product_id: 'p-1', name: 'Eggs', min_stock_amount: 4, category: 'Dairy' }];
 
     const lotsChain = createChain();
-    lotsChain.data = [
-      { product_id: 'p-1', qty_containers: 1 },
-    ];
+    lotsChain.data = [{ product_id: 'p-1', qty_containers: 1 }];
 
     // Third call: upsert into shopping_list
     const upsertChain = createChain();
     upsertChain.data = null;
     upsertChain.error = null;
 
-    mock.cbFrom
-      .mockReturnValueOnce(productsChain)
-      .mockReturnValueOnce(lotsChain)
-      .mockReturnValueOnce(upsertChain);
+    mock.cbFrom.mockReturnValueOnce(productsChain).mockReturnValueOnce(lotsChain).mockReturnValueOnce(upsertChain);
 
     const result = await belowMinStock.handler({ auto_add: true }, ctx(mock.supabase));
 
@@ -620,12 +605,13 @@ describe('CHEFBYTE_below_min_stock', () => {
 
     // Verify upsert was called on shopping_list
     expect(upsertChain.upsert).toHaveBeenCalledWith(
-      [expect.objectContaining({
-        user_id: USER_ID,
-        product_id: 'p-1',
-        qty_containers: 3,
-        notes: 'Auto-added: below minimum stock',
-      })],
+      [
+        expect.objectContaining({
+          user_id: USER_ID,
+          product_id: 'p-1',
+          qty_containers: 3,
+        }),
+      ],
       { onConflict: 'user_id,product_id' },
     );
   });
@@ -646,17 +632,13 @@ describe('CHEFBYTE_below_min_stock', () => {
 
   it('returns error when stock lots query fails (lotError path)', async () => {
     const productsChain = createChain();
-    productsChain.data = [
-      { product_id: 'p-1', name: 'Chicken', min_stock_amount: 5, category: 'Protein' },
-    ];
+    productsChain.data = [{ product_id: 'p-1', name: 'Chicken', min_stock_amount: 5, category: 'Protein' }];
 
     const lotsChain = createChain();
     lotsChain.data = null;
     lotsChain.error = { message: 'stock query timeout' };
 
-    mock.cbFrom
-      .mockReturnValueOnce(productsChain)
-      .mockReturnValueOnce(lotsChain);
+    mock.cbFrom.mockReturnValueOnce(productsChain).mockReturnValueOnce(lotsChain);
 
     const result = await belowMinStock.handler({}, ctx(mock.supabase));
 
@@ -672,24 +654,21 @@ describe('CHEFBYTE_below_min_stock', () => {
     ];
 
     const lotsChain = createChain();
-    lotsChain.data = [
-      { product_id: 'p-1', qty_containers: 2 },
-    ];
+    lotsChain.data = [{ product_id: 'p-1', qty_containers: 2 }];
 
     // Upsert fails
     const upsertChain = createChain();
     upsertChain.data = null;
     upsertChain.error = { message: 'upsert constraint violation' };
 
-    mock.cbFrom
-      .mockReturnValueOnce(productsChain)
-      .mockReturnValueOnce(lotsChain)
-      .mockReturnValueOnce(upsertChain);
+    mock.cbFrom.mockReturnValueOnce(productsChain).mockReturnValueOnce(lotsChain).mockReturnValueOnce(upsertChain);
 
     const result = await belowMinStock.handler({ auto_add: true }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Found 2 below-min products but failed to add to shopping list: upsert constraint violation');
+    expect(result.content[0].text).toContain(
+      'Found 2 below-min products but failed to add to shopping list: upsert constraint violation',
+    );
   });
 });
 
@@ -705,17 +684,19 @@ describe('CHEFBYTE_get_cookable', () => {
     const recipesChain = createChain();
     recipesChain.data = [
       {
-        recipe_id: 'r-1', name: 'Chicken Rice Bowl', servings: 2,
+        recipe_id: 'r-1',
+        name: 'Chicken Rice Bowl',
+        servings: 2,
         recipe_ingredients: [
           { product_id: 'p-1', qty_containers: 1 },
           { product_id: 'p-2', qty_containers: 0.5 },
         ],
       },
       {
-        recipe_id: 'r-2', name: 'Pasta', servings: 4,
-        recipe_ingredients: [
-          { product_id: 'p-3', qty_containers: 2 },
-        ],
+        recipe_id: 'r-2',
+        name: 'Pasta',
+        servings: 4,
+        recipe_ingredients: [{ product_id: 'p-3', qty_containers: 2 }],
       },
     ];
 
@@ -727,9 +708,7 @@ describe('CHEFBYTE_get_cookable', () => {
       // p-3 has no stock, so Pasta should not be cookable
     ];
 
-    mock.cbFrom
-      .mockReturnValueOnce(recipesChain)
-      .mockReturnValueOnce(lotsChain);
+    mock.cbFrom.mockReturnValueOnce(recipesChain).mockReturnValueOnce(lotsChain);
 
     const result = await getCookable.handler({}, ctx(mock.supabase));
 
@@ -772,7 +751,9 @@ describe('CHEFBYTE_get_cookable', () => {
     const recipesChain = createChain();
     recipesChain.data = [
       {
-        recipe_id: 'r-1', name: 'Some Recipe', servings: 2,
+        recipe_id: 'r-1',
+        name: 'Some Recipe',
+        servings: 2,
         recipe_ingredients: [{ product_id: 'p-1', qty_containers: 1 }],
       },
     ];
@@ -781,9 +762,7 @@ describe('CHEFBYTE_get_cookable', () => {
     lotsChain.data = null;
     lotsChain.error = { message: 'stock connection lost' };
 
-    mock.cbFrom
-      .mockReturnValueOnce(recipesChain)
-      .mockReturnValueOnce(lotsChain);
+    mock.cbFrom.mockReturnValueOnce(recipesChain).mockReturnValueOnce(lotsChain);
 
     const result = await getCookable.handler({}, ctx(mock.supabase));
 
@@ -795,25 +774,23 @@ describe('CHEFBYTE_get_cookable', () => {
     const recipesChain = createChain();
     recipesChain.data = [
       {
-        recipe_id: 'r-empty', name: 'Empty Recipe', servings: 1,
+        recipe_id: 'r-empty',
+        name: 'Empty Recipe',
+        servings: 1,
         recipe_ingredients: [],
       },
       {
-        recipe_id: 'r-has-ing', name: 'Full Recipe', servings: 2,
-        recipe_ingredients: [
-          { product_id: 'p-1', qty_containers: 1 },
-        ],
+        recipe_id: 'r-has-ing',
+        name: 'Full Recipe',
+        servings: 2,
+        recipe_ingredients: [{ product_id: 'p-1', qty_containers: 1 }],
       },
     ];
 
     const lotsChain = createChain();
-    lotsChain.data = [
-      { product_id: 'p-1', qty_containers: 5 },
-    ];
+    lotsChain.data = [{ product_id: 'p-1', qty_containers: 5 }];
 
-    mock.cbFrom
-      .mockReturnValueOnce(recipesChain)
-      .mockReturnValueOnce(lotsChain);
+    mock.cbFrom.mockReturnValueOnce(recipesChain).mockReturnValueOnce(lotsChain);
 
     const result = await getCookable.handler({}, ctx(mock.supabase));
 
@@ -848,9 +825,7 @@ describe('CHEFBYTE_create_recipe', () => {
     ingredientInsertChain.data = null;
     ingredientInsertChain.error = null;
 
-    mock.cbFrom
-      .mockReturnValueOnce(recipeInsertChain)
-      .mockReturnValueOnce(ingredientInsertChain);
+    mock.cbFrom.mockReturnValueOnce(recipeInsertChain).mockReturnValueOnce(ingredientInsertChain);
 
     const result = await createRecipe.handler(
       {
@@ -891,10 +866,7 @@ describe('CHEFBYTE_create_recipe', () => {
   });
 
   it('rejects empty ingredients list', async () => {
-    const result = await createRecipe.handler(
-      { name: 'Empty Recipe', ingredients: [] },
-      ctx(mock.supabase),
-    );
+    const result = await createRecipe.handler({ name: 'Empty Recipe', ingredients: [] }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('At least one ingredient is required');
@@ -952,13 +924,19 @@ describe('CHEFBYTE_get_product_lots', () => {
   it('returns lots for a product with location join data', async () => {
     mock.cbChain.data = [
       {
-        lot_id: 'lot-1', qty_containers: 3, expires_on: '2026-04-01',
-        meal_label: null, location_id: 'loc-1', created_at: '2026-03-01T00:00:00Z',
+        lot_id: 'lot-1',
+        qty_containers: 3,
+        expires_on: '2026-04-01',
+        location_id: 'loc-1',
+        created_at: '2026-03-01T00:00:00Z',
         locations: { name: 'Fridge' },
       },
       {
-        lot_id: 'lot-2', qty_containers: 1.5, expires_on: null,
-        meal_label: '[MEAL] prep', location_id: null, created_at: '2026-03-02T00:00:00Z',
+        lot_id: 'lot-2',
+        qty_containers: 1.5,
+        expires_on: null,
+        location_id: null,
+        created_at: '2026-03-02T00:00:00Z',
         locations: null,
       },
     ];
@@ -977,7 +955,6 @@ describe('CHEFBYTE_get_product_lots', () => {
     expect(parsed.lots[1].lot_id).toBe('lot-2');
     expect(parsed.lots[1].qty_containers).toBe(1.5);
     expect(parsed.lots[1].location).toBeNull();
-    expect(parsed.lots[1].meal_label).toBe('[MEAL] prep');
 
     // Verify correct table and filters
     expect(mock.cbFrom).toHaveBeenCalledWith('stock_lots');
@@ -1011,11 +988,15 @@ describe('CHEFBYTE_get_shopping_list', () => {
   it('returns shopping list items with product join and cost calculation', async () => {
     mock.cbChain.data = [
       {
-        id: 'sl-1', product_id: 'p-1', qty_containers: 3, notes: 'Need soon',
+        cart_item_id: 'sl-1',
+        product_id: 'p-1',
+        qty_containers: 3,
         products: { name: 'Chicken Breast', price: '4.99' },
       },
       {
-        id: 'sl-2', product_id: 'p-2', qty_containers: 2, notes: null,
+        cart_item_id: 'sl-2',
+        product_id: 'p-2',
+        qty_containers: 2,
         products: { name: 'Rice', price: null },
       },
     ];
@@ -1029,11 +1010,11 @@ describe('CHEFBYTE_get_shopping_list', () => {
     expect(parsed.items).toHaveLength(2);
 
     // First item: has price, cost calculated
+    expect(parsed.items[0].id).toBe('sl-1');
     expect(parsed.items[0].product_name).toBe('Chicken Breast');
     expect(parsed.items[0].qty_containers).toBe(3);
     expect(parsed.items[0].price).toBe(4.99);
     expect(parsed.items[0].estimated_cost).toBeCloseTo(14.97);
-    expect(parsed.items[0].notes).toBe('Need soon');
 
     // Second item: no price, cost null
     expect(parsed.items[1].product_name).toBe('Rice');
@@ -1070,14 +1051,13 @@ describe('CHEFBYTE_add_to_shopping', () => {
 
   it('upserts item to shopping list and returns success', async () => {
     mock.cbChain.data = {
-      id: 'sl-new', product_id: 'p-1', qty_containers: 5, notes: 'stock up',
+      cart_item_id: 'sl-new',
+      product_id: 'p-1',
+      qty_containers: 5,
     };
     mock.cbChain.error = null;
 
-    const result = await addToShopping.handler(
-      { product_id: 'p-1', qty_containers: 5, notes: 'stock up' },
-      ctx(mock.supabase),
-    );
+    const result = await addToShopping.handler({ product_id: 'p-1', qty_containers: 5 }, ctx(mock.supabase));
 
     expect(result.isError).toBeUndefined();
     const parsed = parseResult(result);
@@ -1090,17 +1070,13 @@ describe('CHEFBYTE_add_to_shopping', () => {
         user_id: USER_ID,
         product_id: 'p-1',
         qty_containers: 5,
-        notes: 'stock up',
       }),
       { onConflict: 'user_id,product_id' },
     );
   });
 
   it('rejects non-positive qty_containers', async () => {
-    const result = await addToShopping.handler(
-      { product_id: 'p-1', qty_containers: 0 },
-      ctx(mock.supabase),
-    );
+    const result = await addToShopping.handler({ product_id: 'p-1', qty_containers: 0 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('qty_containers must be positive');
@@ -1110,10 +1086,7 @@ describe('CHEFBYTE_add_to_shopping', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'upsert conflict error' };
 
-    const result = await addToShopping.handler(
-      { product_id: 'p-1', qty_containers: 2 },
-      ctx(mock.supabase),
-    );
+    const result = await addToShopping.handler({ product_id: 'p-1', qty_containers: 2 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('upsert conflict error');
@@ -1171,24 +1144,33 @@ describe('CHEFBYTE_get_meal_plan', () => {
   it('returns meal plan entries with recipe/product joins', async () => {
     mock.cbChain.data = [
       {
-        meal_id: 'm-1', plan_date: '2026-03-01', meal_type: 'breakfast',
-        recipe_id: 'r-1', product_id: null, servings: 2,
-        completed_at: '2026-03-01T12:00:00Z', logical_date: '2026-03-01',
-        recipes: { name: 'Oatmeal Bowl' }, products: null,
+        meal_id: 'm-1',
+        plan_date: '2026-03-01',
+        meal_type: 'breakfast',
+        recipe_id: 'r-1',
+        product_id: null,
+        servings: 2,
+        completed_at: '2026-03-01T12:00:00Z',
+        logical_date: '2026-03-01',
+        recipes: { name: 'Oatmeal Bowl' },
+        products: null,
       },
       {
-        meal_id: 'm-2', plan_date: '2026-03-01', meal_type: 'lunch',
-        recipe_id: null, product_id: 'p-1', servings: null,
-        completed_at: null, logical_date: '2026-03-01',
-        recipes: null, products: { name: 'Protein Bar' },
+        meal_id: 'm-2',
+        plan_date: '2026-03-01',
+        meal_type: 'lunch',
+        recipe_id: null,
+        product_id: 'p-1',
+        servings: null,
+        completed_at: null,
+        logical_date: '2026-03-01',
+        recipes: null,
+        products: { name: 'Protein Bar' },
       },
     ];
     mock.cbChain.error = null;
 
-    const result = await getMealPlan.handler(
-      { start_date: '2026-03-01', end_date: '2026-03-07' },
-      ctx(mock.supabase),
-    );
+    const result = await getMealPlan.handler({ start_date: '2026-03-01', end_date: '2026-03-07' }, ctx(mock.supabase));
 
     expect(result.isError).toBeUndefined();
     const parsed = parseResult(result);
@@ -1216,10 +1198,7 @@ describe('CHEFBYTE_get_meal_plan', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'meal plan query failed' };
 
-    const result = await getMealPlan.handler(
-      { start_date: '2026-03-01', end_date: '2026-03-07' },
-      ctx(mock.supabase),
-    );
+    const result = await getMealPlan.handler({ start_date: '2026-03-01', end_date: '2026-03-07' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('meal plan query failed');
@@ -1239,8 +1218,12 @@ describe('CHEFBYTE_add_meal', () => {
 
   it('inserts meal plan entry and returns success', async () => {
     mock.cbChain.data = {
-      meal_id: 'm-new', plan_date: '2026-03-05', meal_type: 'dinner',
-      recipe_id: 'r-1', product_id: null, servings: 3,
+      meal_id: 'm-new',
+      plan_date: '2026-03-05',
+      meal_type: 'dinner',
+      recipe_id: 'r-1',
+      product_id: null,
+      servings: 3,
     };
     mock.cbChain.error = null;
 
@@ -1268,10 +1251,7 @@ describe('CHEFBYTE_add_meal', () => {
   });
 
   it('rejects when neither recipe_id nor product_id is provided', async () => {
-    const result = await addMeal.handler(
-      { plan_date: '2026-03-05', meal_type: 'lunch' },
-      ctx(mock.supabase),
-    );
+    const result = await addMeal.handler({ plan_date: '2026-03-05', meal_type: 'lunch' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('At least one of recipe_id or product_id is required');
@@ -1305,24 +1285,36 @@ describe('CHEFBYTE_get_recipes', () => {
   it('returns recipes with ingredients and computed macros', async () => {
     mock.cbChain.data = [
       {
-        recipe_id: 'r-1', name: 'Chicken Stir Fry', instructions: 'Cook it',
-        servings: 4, prep_time: 30, created_at: '2026-03-01T00:00:00Z',
+        recipe_id: 'r-1',
+        name: 'Chicken Stir Fry',
+        instructions: 'Cook it',
+        servings: 4,
+        prep_time: 30,
+        created_at: '2026-03-01T00:00:00Z',
         recipe_ingredients: [
           {
-            id: 'ri-1', product_id: 'p-1', qty_containers: 2,
+            id: 'ri-1',
+            product_id: 'p-1',
+            qty_containers: 2,
             products: {
               name: 'Chicken Breast',
-              calories_per_serving: 165, carbs_per_serving: 0,
-              protein_per_serving: 31, fat_per_serving: 3.6,
+              calories_per_serving: 165,
+              carbs_per_serving: 0,
+              protein_per_serving: 31,
+              fat_per_serving: 3.6,
               servings_per_container: 4,
             },
           },
           {
-            id: 'ri-2', product_id: 'p-2', qty_containers: 1,
+            id: 'ri-2',
+            product_id: 'p-2',
+            qty_containers: 1,
             products: {
               name: 'Rice',
-              calories_per_serving: 200, carbs_per_serving: 45,
-              protein_per_serving: 4, fat_per_serving: 0.5,
+              calories_per_serving: 200,
+              carbs_per_serving: 45,
+              protein_per_serving: 4,
+              fat_per_serving: 0.5,
               servings_per_container: 8,
             },
           },
@@ -1387,8 +1379,13 @@ describe('CHEFBYTE_log_temp_item', () => {
 
   it('inserts temp item with logical date and returns success', async () => {
     mock.cbChain.data = {
-      id: 'ti-new', name: 'Pizza slice', calories: 300,
-      carbs: 35, protein: 12, fat: 14, logical_date: '2026-03-03',
+      id: 'ti-new',
+      name: 'Pizza slice',
+      calories: 300,
+      carbs: 35,
+      protein: 12,
+      fat: 14,
+      logical_date: '2026-03-03',
     };
     mock.cbChain.error = null;
 
@@ -1420,24 +1417,26 @@ describe('CHEFBYTE_log_temp_item', () => {
     );
   });
 
-  it('only includes provided optional macro fields', async () => {
+  it('defaults optional macro fields to zero when not provided', async () => {
     mock.cbChain.data = {
-      id: 'ti-min', name: 'Apple', calories: 95,
-      carbs: null, protein: null, fat: null, logical_date: '2026-03-03',
+      temp_id: 'ti-min',
+      name: 'Apple',
+      calories: 95,
+      carbs: 0,
+      protein: 0,
+      fat: 0,
+      logical_date: '2026-03-03',
     };
     mock.cbChain.error = null;
 
-    await logTempItem.handler(
-      { name: 'Apple', calories: 95 },
-      ctx(mock.supabase),
-    );
+    await logTempItem.handler({ name: 'Apple', calories: 95 }, ctx(mock.supabase));
 
-    // Insert should NOT include carbs/protein/fat since they were not provided
+    // Insert should include carbs/protein/fat defaulted to 0
     expect(mock.cbChain.insert).toHaveBeenCalledWith(
-      expect.not.objectContaining({
-        carbs: expect.anything(),
-        protein: expect.anything(),
-        fat: expect.anything(),
+      expect.objectContaining({
+        carbs: 0,
+        protein: 0,
+        fat: 0,
       }),
     );
   });
@@ -1446,10 +1445,7 @@ describe('CHEFBYTE_log_temp_item', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'temp_items insert failed' };
 
-    const result = await logTempItem.handler(
-      { name: 'Bad Item', calories: 100 },
-      ctx(mock.supabase),
-    );
+    const result = await logTempItem.handler({ name: 'Bad Item', calories: 100 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('temp_items insert failed');
@@ -1469,14 +1465,13 @@ describe('CHEFBYTE_set_price', () => {
 
   it('updates product price and returns success', async () => {
     mock.cbChain.data = {
-      product_id: 'p-1', name: 'Chicken Breast', price: '4.99',
+      product_id: 'p-1',
+      name: 'Chicken Breast',
+      price: '4.99',
     };
     mock.cbChain.error = null;
 
-    const result = await setPrice.handler(
-      { product_id: 'p-1', price: 4.99 },
-      ctx(mock.supabase),
-    );
+    const result = await setPrice.handler({ product_id: 'p-1', price: 4.99 }, ctx(mock.supabase));
 
     expect(result.isError).toBeUndefined();
     const parsed = parseResult(result);
@@ -1491,10 +1486,7 @@ describe('CHEFBYTE_set_price', () => {
   });
 
   it('rejects negative price', async () => {
-    const result = await setPrice.handler(
-      { product_id: 'p-1', price: -5 },
-      ctx(mock.supabase),
-    );
+    const result = await setPrice.handler({ product_id: 'p-1', price: -5 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Price cannot be negative');
@@ -1504,10 +1496,7 @@ describe('CHEFBYTE_set_price', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'product not found for update' };
 
-    const result = await setPrice.handler(
-      { product_id: 'nonexistent', price: 9.99 },
-      ctx(mock.supabase),
-    );
+    const result = await setPrice.handler({ product_id: 'nonexistent', price: 9.99 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('product not found for update');

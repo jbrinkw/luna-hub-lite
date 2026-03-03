@@ -60,9 +60,15 @@ importers:
       '@cloudflare/workers-types':
         specifier: ^4.20260305.0
         version: 4.20260305.0
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.13
       typescript:
         specifier: ~5.7.0
         version: 5.7.3
+      vitest:
+        specifier: ^4.0.18
+        version: 4.0.18(@types/node@22.19.13)(jsdom@27.4.0)(yaml@2.8.2)
       wrangler:
         specifier: ^4.0.0
         version: 4.69.0(@cloudflare/workers-types@4.20260305.0)
@@ -146,6 +152,9 @@ importers:
         specifier: workspace:*
         version: link:../db-types
     devDependencies:
+      '@supabase/supabase-js':
+        specifier: ^2.98.0
+        version: 2.98.0
       '@vitest/coverage-v8':
         specifier: ^4.0.18
         version: 4.0.18(vitest@4.0.18(@types/node@25.3.3)(jsdom@27.4.0)(yaml@2.8.2))
@@ -1304,6 +1313,9 @@ packages:
   '@types/json-schema@7.0.15':
     resolution: {integrity: sha512-5+fP8P8MFNC+AyZCDxrB2pkZFPGzqQWUzpSeuuVLvm8VMcorNYavBqoFcxK8bQz4Qsbn4oUEEem4wDLfcysGHA==}
 
+  '@types/node@22.19.13':
+    resolution: {integrity: sha512-akNQMv0wW5uyRpD2v2IEyRSZiR+BeGuoB6L310EgGObO44HSMNT8z1xzio28V8qOrgYaopIDNA18YgdXd+qTiw==}
+
   '@types/node@25.3.3':
     resolution: {integrity: sha512-DpzbrH7wIcBaJibpKo9nnSQL0MTRdnWttGyE5haGwK86xgMOkFLp7vEyfQPGLOJh5wNYiJ3V9PmUMDhV9u8kkQ==}
 
@@ -2398,6 +2410,9 @@ packages:
     engines: {node: '>=14.17'}
     hasBin: true
 
+  undici-types@6.21.0:
+    resolution: {integrity: sha512-iwDZqg0QAGrg9Rav5H4n0M64c3mkR59cJ6wQp+7C4nI0gsmExaedaYLNO44eT4AtBBwjbTiGPMlt2Md0T9H9JQ==}
+
   undici-types@7.18.2:
     resolution: {integrity: sha512-AsuCzffGHJybSaRrmr5eHr81mwJU3kjw6M+uprWvCXiNeN9SOGwQ3Jn8jb8m3Z6izVgknn1R0FTCEAP2QrLY/w==}
 
@@ -3447,9 +3462,14 @@ snapshots:
 
   '@types/json-schema@7.0.15': {}
 
+  '@types/node@22.19.13':
+    dependencies:
+      undici-types: 6.21.0
+
   '@types/node@25.3.3':
     dependencies:
       undici-types: 7.18.2
+    optional: true
 
   '@types/phoenix@1.6.7': {}
 
@@ -3466,7 +3486,7 @@ snapshots:
 
   '@types/ws@8.18.1':
     dependencies:
-      '@types/node': 25.3.3
+      '@types/node': 22.19.13
 
   '@typescript-eslint/eslint-plugin@8.56.1(@typescript-eslint/parser@8.56.1(eslint@9.39.3)(typescript@5.7.3))(eslint@9.39.3)(typescript@5.7.3)':
     dependencies:
@@ -3593,6 +3613,14 @@ snapshots:
       '@vitest/utils': 4.0.18
       chai: 6.2.2
       tinyrainbow: 3.0.3
+
+  '@vitest/mocker@4.0.18(vite@6.4.1(@types/node@22.19.13)(yaml@2.8.2))':
+    dependencies:
+      '@vitest/spy': 4.0.18
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 6.4.1(@types/node@22.19.13)(yaml@2.8.2)
 
   '@vitest/mocker@4.0.18(vite@6.4.1(@types/node@25.3.3)(yaml@2.8.2))':
     dependencies:
@@ -4617,7 +4645,10 @@ snapshots:
 
   typescript@5.7.3: {}
 
-  undici-types@7.18.2: {}
+  undici-types@6.21.0: {}
+
+  undici-types@7.18.2:
+    optional: true
 
   undici@7.18.2: {}
 
@@ -4635,6 +4666,19 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
+  vite@6.4.1(@types/node@22.19.13)(yaml@2.8.2):
+    dependencies:
+      esbuild: 0.25.12
+      fdir: 6.5.0(picomatch@4.0.3)
+      picomatch: 4.0.3
+      postcss: 8.5.6
+      rollup: 4.59.0
+      tinyglobby: 0.2.15
+    optionalDependencies:
+      '@types/node': 22.19.13
+      fsevents: 2.3.3
+      yaml: 2.8.2
+
   vite@6.4.1(@types/node@25.3.3)(yaml@2.8.2):
     dependencies:
       esbuild: 0.25.12
@@ -4647,6 +4691,44 @@ snapshots:
       '@types/node': 25.3.3
       fsevents: 2.3.3
       yaml: 2.8.2
+
+  vitest@4.0.18(@types/node@22.19.13)(jsdom@27.4.0)(yaml@2.8.2):
+    dependencies:
+      '@vitest/expect': 4.0.18
+      '@vitest/mocker': 4.0.18(vite@6.4.1(@types/node@22.19.13)(yaml@2.8.2))
+      '@vitest/pretty-format': 4.0.18
+      '@vitest/runner': 4.0.18
+      '@vitest/snapshot': 4.0.18
+      '@vitest/spy': 4.0.18
+      '@vitest/utils': 4.0.18
+      es-module-lexer: 1.7.0
+      expect-type: 1.3.0
+      magic-string: 0.30.21
+      obug: 2.1.1
+      pathe: 2.0.3
+      picomatch: 4.0.3
+      std-env: 3.10.0
+      tinybench: 2.9.0
+      tinyexec: 1.0.2
+      tinyglobby: 0.2.15
+      tinyrainbow: 3.0.3
+      vite: 6.4.1(@types/node@22.19.13)(yaml@2.8.2)
+      why-is-node-running: 2.3.0
+    optionalDependencies:
+      '@types/node': 22.19.13
+      jsdom: 27.4.0
+    transitivePeerDependencies:
+      - jiti
+      - less
+      - lightningcss
+      - msw
+      - sass
+      - sass-embedded
+      - stylus
+      - sugarss
+      - terser
+      - tsx
+      - yaml
 
   vitest@4.0.18(@types/node@25.3.3)(jsdom@27.4.0)(yaml@2.8.2):
     dependencies:

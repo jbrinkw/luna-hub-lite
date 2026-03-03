@@ -41,9 +41,21 @@ interface ChainMock {
 function createChain(): ChainMock {
   const chain: any = {};
   const methods = [
-    'select', 'eq', 'neq', 'in', 'is', 'order', 'limit',
-    'single', 'maybeSingle', 'insert', 'update', 'delete', 'upsert',
-    'gte', 'lte',
+    'select',
+    'eq',
+    'neq',
+    'in',
+    'is',
+    'order',
+    'limit',
+    'single',
+    'maybeSingle',
+    'insert',
+    'update',
+    'delete',
+    'upsert',
+    'gte',
+    'lte',
   ];
   methods.forEach((m) => {
     chain[m] = vi.fn(() => chain);
@@ -51,10 +63,7 @@ function createChain(): ChainMock {
   chain.data = null;
   chain.error = null;
   // Make the chain thenable so `await chain` resolves to { data, error }
-  chain.then = function (
-    resolve: (v: any) => void,
-    _reject?: (e: any) => void,
-  ) {
+  chain.then = function (resolve: (v: any) => void, _reject?: (e: any) => void) {
     return Promise.resolve({ data: chain.data, error: chain.error }).then(resolve, _reject);
   };
   return chain;
@@ -76,7 +85,7 @@ function createMockSupabase() {
 
   const schema = vi.fn((name: string) => schemaMap[name] ?? { from: vi.fn(), rpc: vi.fn() });
 
-  // Top-level rpc (used when handler calls supabase.rpc() directly, without .schema())
+  // Top-level rpc (kept for backward compat with any handler that still uses supabase.rpc() directly)
   const rpc = vi.fn((): any => ({ data: null, error: null }));
 
   return {
@@ -125,8 +134,8 @@ describe('COACHBYTE_get_today_plan', () => {
   });
 
   it('returns plan with sets on success', async () => {
-    // rpc ensure_daily_plan_admin
-    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+    // rpc ensure_daily_plan_admin (now called via .schema('coachbyte').rpc())
+    mock.cbRpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
     // Three chained queries: daily_plans, planned_sets, completed_sets
     // Because all three use cbChain, we need to cycle data per call.
@@ -136,16 +145,21 @@ describe('COACHBYTE_get_today_plan', () => {
 
     const psChain = createChain();
     psChain.data = [
-      { planned_set_id: 'ps-1', exercise_id: 'ex-1', target_reps: 8, target_load: 135, rest_seconds: 90, order: 1, exercises: { name: 'Bench Press' } },
+      {
+        planned_set_id: 'ps-1',
+        exercise_id: 'ex-1',
+        target_reps: 8,
+        target_load: 135,
+        rest_seconds: 90,
+        order: 1,
+        exercises: { name: 'Bench Press' },
+      },
     ];
 
     const csChain = createChain();
     csChain.data = [];
 
-    mock.cbFrom
-      .mockReturnValueOnce(planChain)
-      .mockReturnValueOnce(psChain)
-      .mockReturnValueOnce(csChain);
+    mock.cbFrom.mockReturnValueOnce(planChain).mockReturnValueOnce(psChain).mockReturnValueOnce(csChain);
 
     const result = await getTodayPlan.handler({}, ctx(mock.supabase));
 
@@ -159,7 +173,7 @@ describe('COACHBYTE_get_today_plan', () => {
   });
 
   it('returns toolError when rpc fails', async () => {
-    mock.rpc.mockReturnValue({ data: null, error: { message: 'rpc boom' } });
+    mock.cbRpc.mockReturnValue({ data: null, error: { message: 'rpc boom' } });
 
     const result = await getTodayPlan.handler({}, ctx(mock.supabase));
 
@@ -168,7 +182,7 @@ describe('COACHBYTE_get_today_plan', () => {
   });
 
   it('returns toolError when rpc returns null plan_id', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: null }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: null }, error: null });
 
     const result = await getTodayPlan.handler({}, ctx(mock.supabase));
 
@@ -177,7 +191,7 @@ describe('COACHBYTE_get_today_plan', () => {
   });
 
   it('returns toolError when plan fetch fails', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
     const planChain = createChain();
     planChain.data = null;
@@ -191,7 +205,7 @@ describe('COACHBYTE_get_today_plan', () => {
   });
 
   it('returns toolError when planned_sets query fails', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
     const planChain = createChain();
     planChain.data = { plan_id: 'plan-1', plan_date: '2026-03-03', summary: 'Push day', logical_date: '2026-03-03' };
@@ -200,9 +214,7 @@ describe('COACHBYTE_get_today_plan', () => {
     psChain.data = null;
     psChain.error = { message: 'planned sets query boom' };
 
-    mock.cbFrom
-      .mockReturnValueOnce(planChain)
-      .mockReturnValueOnce(psChain);
+    mock.cbFrom.mockReturnValueOnce(planChain).mockReturnValueOnce(psChain);
 
     const result = await getTodayPlan.handler({}, ctx(mock.supabase));
 
@@ -211,24 +223,29 @@ describe('COACHBYTE_get_today_plan', () => {
   });
 
   it('returns toolError when completed_sets query fails', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
     const planChain = createChain();
     planChain.data = { plan_id: 'plan-1', plan_date: '2026-03-03', summary: 'Push day', logical_date: '2026-03-03' };
 
     const psChain = createChain();
     psChain.data = [
-      { planned_set_id: 'ps-1', exercise_id: 'ex-1', target_reps: 8, target_load: 135, rest_seconds: 90, order: 1, exercises: { name: 'Bench Press' } },
+      {
+        planned_set_id: 'ps-1',
+        exercise_id: 'ex-1',
+        target_reps: 8,
+        target_load: 135,
+        rest_seconds: 90,
+        order: 1,
+        exercises: { name: 'Bench Press' },
+      },
     ];
 
     const csChain = createChain();
     csChain.data = null;
     csChain.error = { message: 'completed sets query boom' };
 
-    mock.cbFrom
-      .mockReturnValueOnce(planChain)
-      .mockReturnValueOnce(psChain)
-      .mockReturnValueOnce(csChain);
+    mock.cbFrom.mockReturnValueOnce(planChain).mockReturnValueOnce(psChain).mockReturnValueOnce(csChain);
 
     const result = await getTodayPlan.handler({}, ctx(mock.supabase));
 
@@ -237,26 +254,47 @@ describe('COACHBYTE_get_today_plan', () => {
   });
 
   it('includes ad_hoc_sets for completed sets with no planned_set_id', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
     const planChain = createChain();
     planChain.data = { plan_id: 'plan-1', plan_date: '2026-03-03', summary: 'Push day', logical_date: '2026-03-03' };
 
     const psChain = createChain();
     psChain.data = [
-      { planned_set_id: 'ps-1', exercise_id: 'ex-1', target_reps: 8, target_load: 135, rest_seconds: 90, order: 1, exercises: { name: 'Bench Press' } },
+      {
+        planned_set_id: 'ps-1',
+        exercise_id: 'ex-1',
+        target_reps: 8,
+        target_load: 135,
+        rest_seconds: 90,
+        order: 1,
+        exercises: { name: 'Bench Press' },
+      },
     ];
 
     const csChain = createChain();
     csChain.data = [
-      { completed_set_id: 'cs-1', planned_set_id: 'ps-1', exercise_id: 'ex-1', actual_reps: 8, actual_load: 135, completed_at: '2026-03-03T10:00:00Z', exercises: { name: 'Bench Press' } },
-      { completed_set_id: 'cs-2', planned_set_id: null, exercise_id: 'ex-2', actual_reps: 12, actual_load: 50, completed_at: '2026-03-03T10:30:00Z', exercises: { name: 'Curls' } },
+      {
+        completed_set_id: 'cs-1',
+        planned_set_id: 'ps-1',
+        exercise_id: 'ex-1',
+        actual_reps: 8,
+        actual_load: 135,
+        completed_at: '2026-03-03T10:00:00Z',
+        exercises: { name: 'Bench Press' },
+      },
+      {
+        completed_set_id: 'cs-2',
+        planned_set_id: null,
+        exercise_id: 'ex-2',
+        actual_reps: 12,
+        actual_load: 50,
+        completed_at: '2026-03-03T10:30:00Z',
+        exercises: { name: 'Curls' },
+      },
     ];
 
-    mock.cbFrom
-      .mockReturnValueOnce(planChain)
-      .mockReturnValueOnce(psChain)
-      .mockReturnValueOnce(csChain);
+    mock.cbFrom.mockReturnValueOnce(planChain).mockReturnValueOnce(psChain).mockReturnValueOnce(csChain);
 
     const result = await getTodayPlan.handler({}, ctx(mock.supabase));
 
@@ -275,7 +313,7 @@ describe('COACHBYTE_get_today_plan', () => {
   });
 
   it('queries the correct tables (daily_plans, planned_sets, completed_sets)', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
     const planChain = createChain();
     planChain.data = { plan_id: 'plan-1', plan_date: '2026-03-03', summary: 'Push day', logical_date: '2026-03-03' };
@@ -286,10 +324,7 @@ describe('COACHBYTE_get_today_plan', () => {
     const csChain = createChain();
     csChain.data = [];
 
-    mock.cbFrom
-      .mockReturnValueOnce(planChain)
-      .mockReturnValueOnce(psChain)
-      .mockReturnValueOnce(csChain);
+    mock.cbFrom.mockReturnValueOnce(planChain).mockReturnValueOnce(psChain).mockReturnValueOnce(csChain);
 
     await getTodayPlan.handler({}, ctx(mock.supabase));
 
@@ -307,46 +342,36 @@ describe('COACHBYTE_complete_next_set', () => {
   });
 
   it('returns success with rest_seconds', async () => {
-    mock.rpc.mockReturnValue({
+    mock.cbRpc.mockReturnValue({
       data: [{ rest_seconds: 90 }],
       error: null,
     });
 
-    const result = await completeNextSet.handler(
-      { plan_id: 'plan-1', reps: 8, load: 135 },
-      ctx(mock.supabase),
-    );
+    const result = await completeNextSet.handler({ plan_id: 'plan-1', reps: 8, load: 135 }, ctx(mock.supabase));
 
     expect(result.isError).toBeUndefined();
     const parsed = parseResult(result);
     expect(parsed.rest_seconds).toBe(90);
     expect(parsed.message).toContain('8 reps @ 135 lbs');
-    expect(mock.rpc).toHaveBeenCalledWith(
+    expect(mock.cbRpc).toHaveBeenCalledWith(
       'complete_next_set_admin',
       expect.objectContaining({ p_plan_id: 'plan-1', p_actual_reps: 8, p_actual_load: 135 }),
-      { schema: 'coachbyte' },
     );
   });
 
   it('returns error when no incomplete sets remain', async () => {
-    mock.rpc.mockReturnValue({ data: [], error: null });
+    mock.cbRpc.mockReturnValue({ data: [], error: null });
 
-    const result = await completeNextSet.handler(
-      { plan_id: 'plan-1', reps: 8, load: 135 },
-      ctx(mock.supabase),
-    );
+    const result = await completeNextSet.handler({ plan_id: 'plan-1', reps: 8, load: 135 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('No incomplete sets');
   });
 
   it('returns error on rpc failure', async () => {
-    mock.rpc.mockReturnValue({ data: null, error: { message: 'db error' } });
+    mock.cbRpc.mockReturnValue({ data: null, error: { message: 'db error' } });
 
-    const result = await completeNextSet.handler(
-      { plan_id: 'plan-1', reps: 8, load: 135 },
-      ctx(mock.supabase),
-    );
+    const result = await completeNextSet.handler({ plan_id: 'plan-1', reps: 8, load: 135 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('db error');
@@ -363,7 +388,7 @@ describe('COACHBYTE_log_set', () => {
   });
 
   it('inserts an ad-hoc set and returns success', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
     const insertChain = createChain();
     insertChain.data = {
@@ -374,10 +399,7 @@ describe('COACHBYTE_log_set', () => {
     };
     mock.cbFrom.mockReturnValueOnce(insertChain);
 
-    const result = await logSet.handler(
-      { exercise_id: 'ex-1', reps: 10, load: 100 },
-      ctx(mock.supabase),
-    );
+    const result = await logSet.handler({ exercise_id: 'ex-1', reps: 10, load: 100 }, ctx(mock.supabase));
 
     expect(result.isError).toBeUndefined();
     const parsed = parseResult(result);
@@ -385,50 +407,43 @@ describe('COACHBYTE_log_set', () => {
     expect(parsed.message).toContain('10 reps @ 100 lbs');
 
     // Verify insert was called with correct fields (matches log-set.ts handler)
-    expect(insertChain.insert).toHaveBeenCalledWith(expect.objectContaining({
-      planned_set_id: null,
-      exercise_id: 'ex-1',
-      actual_reps: 10,
-      actual_load: 100,
-    }));
+    expect(insertChain.insert).toHaveBeenCalledWith(
+      expect.objectContaining({
+        planned_set_id: null,
+        exercise_id: 'ex-1',
+        actual_reps: 10,
+        actual_load: 100,
+      }),
+    );
   });
 
   it('returns error when ensure_daily_plan rpc fails', async () => {
-    mock.rpc.mockReturnValue({ data: null, error: { message: 'rpc fail' } });
+    mock.cbRpc.mockReturnValue({ data: null, error: { message: 'rpc fail' } });
 
-    const result = await logSet.handler(
-      { exercise_id: 'ex-1', reps: 10, load: 100 },
-      ctx(mock.supabase),
-    );
+    const result = await logSet.handler({ exercise_id: 'ex-1', reps: 10, load: 100 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('rpc fail');
   });
 
   it('returns error when rpc returns null plan_id', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: null }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: null }, error: null });
 
-    const result = await logSet.handler(
-      { exercise_id: 'ex-1', reps: 10, load: 100 },
-      ctx(mock.supabase),
-    );
+    const result = await logSet.handler({ exercise_id: 'ex-1', reps: 10, load: 100 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('No plan_id returned');
   });
 
   it('returns error when insert fails', async () => {
-    mock.rpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
+    mock.cbRpc.mockReturnValue({ data: { plan_id: 'plan-1' }, error: null });
 
     const insertChain = createChain();
     insertChain.data = null;
     insertChain.error = { message: 'insert error' };
     mock.cbFrom.mockReturnValueOnce(insertChain);
 
-    const result = await logSet.handler(
-      { exercise_id: 'ex-1', reps: 10, load: 100 },
-      ctx(mock.supabase),
-    );
+    const result = await logSet.handler({ exercise_id: 'ex-1', reps: 10, load: 100 }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('insert error');
@@ -456,14 +471,9 @@ describe('COACHBYTE_update_plan', () => {
       { planned_set_id: 'ps-new', exercise_id: 'ex-1', target_reps: 10, target_load: 100, rest_seconds: 60, order: 1 },
     ];
 
-    mock.cbFrom
-      .mockReturnValueOnce(verifyChain)
-      .mockReturnValueOnce(deleteChain)
-      .mockReturnValueOnce(insertChain);
+    mock.cbFrom.mockReturnValueOnce(verifyChain).mockReturnValueOnce(deleteChain).mockReturnValueOnce(insertChain);
 
-    const sets = [
-      { exercise_id: 'ex-1', target_reps: 10, target_load: 100, rest_seconds: 60, order: 1 },
-    ];
+    const sets = [{ exercise_id: 'ex-1', target_reps: 10, target_load: 100, rest_seconds: 60, order: 1 }];
 
     const result = await updatePlan.handler({ plan_id: 'plan-1', sets }, ctx(mock.supabase));
 
@@ -495,10 +505,7 @@ describe('COACHBYTE_update_plan', () => {
     verifyChain.error = { message: 'not found' };
     mock.cbFrom.mockReturnValueOnce(verifyChain);
 
-    const result = await updatePlan.handler(
-      { plan_id: 'plan-1', sets: [] },
-      ctx(mock.supabase),
-    );
+    const result = await updatePlan.handler({ plan_id: 'plan-1', sets: [] }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('not found');
@@ -533,10 +540,7 @@ describe('COACHBYTE_update_summary', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'update failed' };
 
-    const result = await updateSummary.handler(
-      { plan_id: 'plan-1', summary: 'whatever' },
-      ctx(mock.supabase),
-    );
+    const result = await updateSummary.handler({ plan_id: 'plan-1', summary: 'whatever' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('update failed');
@@ -546,10 +550,7 @@ describe('COACHBYTE_update_summary', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = null;
 
-    const result = await updateSummary.handler(
-      { plan_id: 'plan-x', summary: 'test' },
-      ctx(mock.supabase),
-    );
+    const result = await updateSummary.handler({ plan_id: 'plan-x', summary: 'test' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('not owned by user');
@@ -565,18 +566,22 @@ describe('COACHBYTE_get_history', () => {
 
   it('returns grouped history on success', async () => {
     const plansChain = createChain();
-    plansChain.data = [
-      { plan_id: 'p1', plan_date: '2026-03-02', summary: 'Push', logical_date: '2026-03-02' },
-    ];
+    plansChain.data = [{ plan_id: 'p1', plan_date: '2026-03-02', summary: 'Push', logical_date: '2026-03-02' }];
 
     const csChain = createChain();
     csChain.data = [
-      { completed_set_id: 'cs-1', plan_id: 'p1', exercise_id: 'ex-1', actual_reps: 8, actual_load: 135, completed_at: '2026-03-02T10:00:00Z', exercises: { name: 'Bench' } },
+      {
+        completed_set_id: 'cs-1',
+        plan_id: 'p1',
+        exercise_id: 'ex-1',
+        actual_reps: 8,
+        actual_load: 135,
+        completed_at: '2026-03-02T10:00:00Z',
+        exercises: { name: 'Bench' },
+      },
     ];
 
-    mock.cbFrom
-      .mockReturnValueOnce(plansChain)
-      .mockReturnValueOnce(csChain);
+    mock.cbFrom.mockReturnValueOnce(plansChain).mockReturnValueOnce(csChain);
 
     const result = await getHistory.handler({ days: 7 }, ctx(mock.supabase));
 
@@ -612,17 +617,13 @@ describe('COACHBYTE_get_history', () => {
 
   it('returns error when completed_sets query fails', async () => {
     const plansChain = createChain();
-    plansChain.data = [
-      { plan_id: 'p1', plan_date: '2026-03-02', summary: 'Push', logical_date: '2026-03-02' },
-    ];
+    plansChain.data = [{ plan_id: 'p1', plan_date: '2026-03-02', summary: 'Push', logical_date: '2026-03-02' }];
 
     const csChain = createChain();
     csChain.data = null;
     csChain.error = { message: 'completed sets fetch failed' };
 
-    mock.cbFrom
-      .mockReturnValueOnce(plansChain)
-      .mockReturnValueOnce(csChain);
+    mock.cbFrom.mockReturnValueOnce(plansChain).mockReturnValueOnce(csChain);
 
     const result = await getHistory.handler({ days: 7 }, ctx(mock.supabase));
 
@@ -641,15 +642,17 @@ describe('COACHBYTE_get_split', () => {
   it('returns splits with exercise names resolved', async () => {
     const splitsChain = createChain();
     splitsChain.data = [
-      { split_id: 's1', weekday: 1, template_sets: [{ exercise_id: 'ex-1', target_reps: 8, target_load: 135, rest_seconds: 90 }] },
+      {
+        split_id: 's1',
+        weekday: 1,
+        template_sets: [{ exercise_id: 'ex-1', target_reps: 8, target_load: 135, rest_seconds: 90 }],
+      },
     ];
 
     const exercisesChain = createChain();
     exercisesChain.data = [{ exercise_id: 'ex-1', name: 'Bench Press' }];
 
-    mock.cbFrom
-      .mockReturnValueOnce(splitsChain)
-      .mockReturnValueOnce(exercisesChain);
+    mock.cbFrom.mockReturnValueOnce(splitsChain).mockReturnValueOnce(exercisesChain);
 
     const result = await getSplit.handler({}, ctx(mock.supabase));
 
@@ -674,9 +677,7 @@ describe('COACHBYTE_get_split', () => {
 
   it('filters by weekday when provided', async () => {
     const splitsChain = createChain();
-    splitsChain.data = [
-      { split_id: 's1', weekday: 3, template_sets: [] },
-    ];
+    splitsChain.data = [{ split_id: 's1', weekday: 3, template_sets: [] }];
     mock.cbFrom.mockReturnValueOnce(splitsChain);
 
     const result = await getSplit.handler({ weekday: 3 }, ctx(mock.supabase));
@@ -719,10 +720,7 @@ describe('COACHBYTE_update_split', () => {
   });
 
   it('rejects invalid weekday', async () => {
-    const result = await updateSplit.handler(
-      { weekday: 7, template_sets: [] },
-      ctx(mock.supabase),
-    );
+    const result = await updateSplit.handler({ weekday: 7, template_sets: [] }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('weekday must be between');
@@ -732,10 +730,7 @@ describe('COACHBYTE_update_split', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'upsert failed' };
 
-    const result = await updateSplit.handler(
-      { weekday: 0, template_sets: [] },
-      ctx(mock.supabase),
-    );
+    const result = await updateSplit.handler({ weekday: 0, template_sets: [] }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('upsert failed');
@@ -851,8 +846,22 @@ describe('COACHBYTE_get_prs', () => {
 
   it('calculates Epley 1RM and returns PR table', async () => {
     mock.cbChain.data = [
-      { completed_set_id: 'cs-1', exercise_id: 'ex-1', actual_reps: 8, actual_load: 200, completed_at: '2026-03-01T10:00:00Z', exercises: { name: 'Squat' } },
-      { completed_set_id: 'cs-2', exercise_id: 'ex-1', actual_reps: 5, actual_load: 225, completed_at: '2026-03-02T10:00:00Z', exercises: { name: 'Squat' } },
+      {
+        completed_set_id: 'cs-1',
+        exercise_id: 'ex-1',
+        actual_reps: 8,
+        actual_load: 200,
+        completed_at: '2026-03-01T10:00:00Z',
+        exercises: { name: 'Squat' },
+      },
+      {
+        completed_set_id: 'cs-2',
+        exercise_id: 'ex-1',
+        actual_reps: 5,
+        actual_load: 225,
+        completed_at: '2026-03-02T10:00:00Z',
+        exercises: { name: 'Squat' },
+      },
     ];
     mock.cbChain.error = null;
 
@@ -893,8 +902,22 @@ describe('COACHBYTE_get_prs', () => {
 
   it('skips sets with zero load or reps', async () => {
     mock.cbChain.data = [
-      { completed_set_id: 'cs-1', exercise_id: 'ex-1', actual_reps: 0, actual_load: 200, completed_at: '2026-03-01T10:00:00Z', exercises: { name: 'Squat' } },
-      { completed_set_id: 'cs-2', exercise_id: 'ex-1', actual_reps: 8, actual_load: 0, completed_at: '2026-03-02T10:00:00Z', exercises: { name: 'Squat' } },
+      {
+        completed_set_id: 'cs-1',
+        exercise_id: 'ex-1',
+        actual_reps: 0,
+        actual_load: 200,
+        completed_at: '2026-03-01T10:00:00Z',
+        exercises: { name: 'Squat' },
+      },
+      {
+        completed_set_id: 'cs-2',
+        exercise_id: 'ex-1',
+        actual_reps: 8,
+        actual_load: 0,
+        completed_at: '2026-03-02T10:00:00Z',
+        exercises: { name: 'Squat' },
+      },
     ];
     mock.cbChain.error = null;
 

@@ -3,8 +3,7 @@ import { toolSuccess, toolError, getLogicalDate } from '../shared';
 
 export const consume: ToolDefinition = {
   name: 'CHEFBYTE_consume',
-  description:
-    'Consume product stock (deducts from oldest lots first). Optionally logs macros.',
+  description: 'Consume product stock (deducts from oldest lots first). Optionally logs macros.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -30,18 +29,14 @@ export const consume: ToolDefinition = {
 
     const logicalDate = await getLogicalDate(ctx.supabase, ctx.userId);
 
-    const { data, error } = await ctx.supabase.rpc(
-      'consume_product_admin',
-      {
-        p_user_id: ctx.userId,
-        p_product_id: product_id,
-        p_qty: qty,
-        p_unit: unit,
-        p_log_macros: logMacros,
-        p_logical_date: logicalDate,
-      },
-      { schema: 'chefbyte' },
-    );
+    const { data, error } = await ctx.supabase.schema('chefbyte').rpc('consume_product_admin', {
+      p_user_id: ctx.userId,
+      p_product_id: product_id,
+      p_qty: qty,
+      p_unit: unit,
+      p_log_macros: logMacros,
+      p_logical_date: logicalDate,
+    });
 
     if (error) return toolError(`Failed to consume: ${error.message}`);
 
