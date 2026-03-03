@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { seedFullAndLogin } from '../helpers/seed';
 import { createClient } from '@supabase/supabase-js';
 
 const SUPABASE_URL = 'http://127.0.0.1:54321';
@@ -9,6 +10,7 @@ const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
 
+/** Lightweight seed for tests that don't need activated modules */
 async function seedAndLogin(page: import('@playwright/test').Page, suffix: string) {
   const email = `e2e-nav-${suffix}-${Date.now()}@test.com`;
   const password = 'testpass123';
@@ -114,23 +116,22 @@ test.describe('Hub navigation', () => {
     }
   });
 
-  // Note: CoachByte page not yet built (Phase 5). URL assertion is sufficient until then.
   test('module switcher: click CoachByte -> /coach', async ({ page }) => {
-    const { cleanup } = await seedAndLogin(page, 'coach-switch');
+    // Must use seedFullAndLogin to activate modules (ModuleSwitcher filters by activation)
+    const { cleanup } = await seedFullAndLogin(page, 'coach-switch');
     try {
       await page.locator('ion-segment-button[value="/coach"]').click();
-      await expect(page).toHaveURL(/\/coach/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/coach/, { timeout: 10000 });
     } finally {
       await cleanup();
     }
   });
 
-  // Note: ChefByte page not yet built (Phase 7). URL assertion is sufficient until then.
   test('module switcher: click ChefByte -> /chef', async ({ page }) => {
-    const { cleanup } = await seedAndLogin(page, 'chef-switch');
+    const { cleanup } = await seedFullAndLogin(page, 'chef-switch');
     try {
       await page.locator('ion-segment-button[value="/chef"]').click();
-      await expect(page).toHaveURL(/\/chef/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/chef/, { timeout: 10000 });
     } finally {
       await cleanup();
     }

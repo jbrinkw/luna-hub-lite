@@ -12,9 +12,12 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
 /*  Mock data                                                          */
 /* ------------------------------------------------------------------ */
 
+// Mock data matches the actual RPC response shape from get_daily_macros
 const mockMacroData = {
-  consumed: { calories: 1200, protein: 80, carbs: 150, fat: 40 },
-  goals: { calories: 2000, protein: 150, carbs: 250, fats: 65 },
+  calories: { consumed: 1200, goal: 2000, remaining: 800 },
+  protein: { consumed: 80, goal: 150, remaining: 70 },
+  carbs: { consumed: 150, goal: 250, remaining: 100 },
+  fat: { consumed: 40, goal: 65, remaining: 25 },
 };
 
 const mockFoodLogs = [
@@ -101,15 +104,31 @@ const mockRpc = vi.fn(rpcImpl);
 
 const mockChain: any = {};
 const chainMethods = [
-  'select', 'eq', 'neq', 'order', 'or', 'single', 'update',
-  'insert', 'delete', 'limit', 'is', 'in', 'gt', 'lt',
-  'gte', 'lte', 'upsert',
+  'select',
+  'eq',
+  'neq',
+  'order',
+  'or',
+  'single',
+  'update',
+  'insert',
+  'delete',
+  'limit',
+  'is',
+  'in',
+  'gt',
+  'lt',
+  'gte',
+  'lte',
+  'upsert',
 ];
 const thenImpl = (cb: any) => {
   const data = tableData[lastTable] ?? null;
   return cb({ data, error: null });
 };
-chainMethods.forEach(m => { mockChain[m] = vi.fn(() => mockChain); });
+chainMethods.forEach((m) => {
+  mockChain[m] = vi.fn(() => mockChain);
+});
 mockChain.then = vi.fn(thenImpl);
 
 vi.mock('@/shared/supabase', () => ({
@@ -150,7 +169,9 @@ describe('MacroPage', () => {
     vi.clearAllMocks();
     // Restore implementations after clearAllMocks (prevents hanging awaits in pending loadData)
     mockRpc.mockImplementation(rpcImpl);
-    chainMethods.forEach(m => { mockChain[m] = vi.fn(() => mockChain); });
+    chainMethods.forEach((m) => {
+      mockChain[m] = vi.fn(() => mockChain);
+    });
     mockChain.then = vi.fn(thenImpl);
     lastTable = '';
   });
@@ -506,9 +527,12 @@ describe('MacroPage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('macro-summary')).toBeInTheDocument();
     });
-    expect(mockRpc).toHaveBeenCalledWith('get_daily_macros', expect.objectContaining({
-      p_logical_date: expect.any(String),
-    }));
+    expect(mockRpc).toHaveBeenCalledWith(
+      'get_daily_macros',
+      expect.objectContaining({
+        p_logical_date: expect.any(String),
+      }),
+    );
   });
 });
 

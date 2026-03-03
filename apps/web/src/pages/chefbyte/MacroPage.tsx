@@ -101,10 +101,30 @@ export function MacroPage() {
     if (!userId) return;
 
     // 1. Fetch daily macro summary via RPC
+    // RPC returns: { calories: { consumed, goal, remaining }, protein: {...}, carbs: {...}, fat: {...} }
     const { data: macroData } = await (chefbyte() as any).rpc('get_daily_macros', {
       p_logical_date: currentDate,
     });
-    setMacros(macroData as MacroTotals | null);
+
+    if (macroData) {
+      const rpc = macroData as Record<string, { consumed: number; goal: number; remaining: number }>;
+      setMacros({
+        consumed: {
+          calories: Number(rpc.calories?.consumed) || 0,
+          protein: Number(rpc.protein?.consumed) || 0,
+          carbs: Number(rpc.carbs?.consumed) || 0,
+          fat: Number(rpc.fat?.consumed) || 0,
+        },
+        goals: {
+          calories: Number(rpc.calories?.goal) || 0,
+          protein: Number(rpc.protein?.goal) || 0,
+          carbs: Number(rpc.carbs?.goal) || 0,
+          fats: Number(rpc.fat?.goal) || 0,
+        },
+      });
+    } else {
+      setMacros(null);
+    }
 
     // 2. Fetch consumed items from 3 sources
     const items: ConsumedItem[] = [];
@@ -112,7 +132,9 @@ export function MacroPage() {
     // food_logs (from meal plan completions and scanner)
     const { data: foodLogs } = await chefbyte()
       .from('food_logs')
-      .select('log_id, product_id, recipe_id, calories, protein, carbs, fat, products:product_id(name), recipes:recipe_id(name)')
+      .select(
+        'log_id, product_id, recipe_id, calories, protein, carbs, fat, products:product_id(name), recipes:recipe_id(name)',
+      )
       .eq('user_id', userId)
       .eq('logical_date', currentDate)
       .order('logged_at');
@@ -174,7 +196,9 @@ export function MacroPage() {
     // 3. Planned items: meal_plan_entries for date where completed_at IS NULL and meal_prep=false
     const { data: plannedData } = await chefbyte()
       .from('meal_plan_entries')
-      .select('meal_id, servings, recipes:recipe_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving)')
+      .select(
+        'meal_id, servings, recipes:recipe_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving)',
+      )
       .eq('user_id', userId)
       .eq('logical_date', currentDate)
       .eq('meal_prep', false)
@@ -199,6 +223,8 @@ export function MacroPage() {
   }, [userId, currentDate]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
@@ -207,7 +233,7 @@ export function MacroPage() {
   /* ---------------------------------------------------------------- */
 
   const prevDate = () => {
-    setCurrentDate(prev => {
+    setCurrentDate((prev) => {
       const d = new Date(prev + 'T00:00:00');
       d.setDate(d.getDate() - 1);
       return toDateStr(d);
@@ -215,7 +241,7 @@ export function MacroPage() {
   };
 
   const nextDate = () => {
-    setCurrentDate(prev => {
+    setCurrentDate((prev) => {
       const d = new Date(prev + 'T00:00:00');
       d.setDate(d.getDate() + 1);
       return toDateStr(d);
@@ -290,9 +316,7 @@ export function MacroPage() {
     ];
 
     for (const { key, value } of keys) {
-      await chefbyte()
-        .from('user_config')
-        .upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
+      await chefbyte().from('user_config').upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
     }
 
     setShowTargetModal(false);
@@ -320,10 +344,7 @@ export function MacroPage() {
     if (!user) return;
     await chefbyte()
       .from('user_config')
-      .upsert(
-        { user_id: user.id, key: 'taste_profile', value: tasteProfile },
-        { onConflict: 'user_id,key' },
-      );
+      .upsert({ user_id: user.id, key: 'taste_profile', value: tasteProfile }, { onConflict: 'user_id,key' });
     setShowTasteModal(false);
   };
 
@@ -349,10 +370,7 @@ export function MacroPage() {
       {/* ============================================================ */}
       {/*  DATE NAVIGATION                                              */}
       {/* ============================================================ */}
-      <div
-        data-testid="date-nav"
-        style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}
-      >
+      <div data-testid="date-nav" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
         <IonButton size="small" fill="outline" onClick={prevDate} data-testid="prev-date-btn">
           Prev
         </IonButton>
@@ -462,10 +480,7 @@ export function MacroPage() {
         {consumed.length === 0 ? (
           <p data-testid="no-consumed">No consumed items for this day.</p>
         ) : (
-          <table
-            data-testid="consumed-table"
-            style={{ width: '100%', borderCollapse: 'collapse' }}
-          >
+          <table data-testid="consumed-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
               <tr>
                 <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Source</th>
@@ -477,12 +492,16 @@ export function MacroPage() {
               </tr>
             </thead>
             <tbody>
-              {consumed.map(item => (
+              {consumed.map((item) => (
                 <tr key={item.id} data-testid={`consumed-row-${item.id}`}>
                   <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.source}</td>
                   <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.name}</td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.calories}</td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.protein}g</td>
+                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
+                    {item.calories}
+                  </td>
+                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
+                    {item.protein}g
+                  </td>
                   <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.carbs}g</td>
                   <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.fat}g</td>
                 </tr>
@@ -511,11 +530,15 @@ export function MacroPage() {
               </tr>
             </thead>
             <tbody>
-              {planned.map(item => (
+              {planned.map((item) => (
                 <tr key={item.meal_id} data-testid={`planned-row-${item.meal_id}`}>
                   <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.name}</td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.calories}</td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.protein}g</td>
+                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
+                    {item.calories}
+                  </td>
+                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
+                    {item.protein}g
+                  </td>
                   <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.carbs}g</td>
                   <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.fat}g</td>
                 </tr>
@@ -568,51 +591,43 @@ export function MacroPage() {
                 <IonInput
                   label="Name"
                   value={tempName}
-                  onIonInput={e => setTempName(e.detail.value ?? '')}
+                  onIonInput={(e) => setTempName(e.detail.value ?? '')}
                   data-testid="temp-name"
                 />
                 <IonInput
                   label="Calories"
                   type="number"
                   value={tempCalories}
-                  onIonInput={e => setTempCalories(Number(e.detail.value) || 0)}
+                  onIonInput={(e) => setTempCalories(Number(e.detail.value) || 0)}
                   data-testid="temp-calories"
                 />
                 <IonInput
                   label="Protein"
                   type="number"
                   value={tempProtein}
-                  onIonInput={e => setTempProtein(Number(e.detail.value) || 0)}
+                  onIonInput={(e) => setTempProtein(Number(e.detail.value) || 0)}
                   data-testid="temp-protein"
                 />
                 <IonInput
                   label="Carbs"
                   type="number"
                   value={tempCarbs}
-                  onIonInput={e => setTempCarbs(Number(e.detail.value) || 0)}
+                  onIonInput={(e) => setTempCarbs(Number(e.detail.value) || 0)}
                   data-testid="temp-carbs"
                 />
                 <IonInput
                   label="Fat"
                   type="number"
                   value={tempFat}
-                  onIonInput={e => setTempFat(Number(e.detail.value) || 0)}
+                  onIonInput={(e) => setTempFat(Number(e.detail.value) || 0)}
                   data-testid="temp-fat"
                 />
               </div>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton
-                  fill="clear"
-                  onClick={() => setShowTempModal(false)}
-                  data-testid="temp-cancel-btn"
-                >
+                <IonButton fill="clear" onClick={() => setShowTempModal(false)} data-testid="temp-cancel-btn">
                   Cancel
                 </IonButton>
-                <IonButton
-                  onClick={saveTempItem}
-                  disabled={!tempName.trim()}
-                  data-testid="temp-save-btn"
-                >
+                <IonButton onClick={saveTempItem} disabled={!tempName.trim()} data-testid="temp-save-btn">
                   Log Item
                 </IonButton>
               </div>
@@ -650,21 +665,21 @@ export function MacroPage() {
                   label="Protein (g)"
                   type="number"
                   value={targetProtein}
-                  onIonInput={e => setTargetProtein(Number(e.detail.value) || 0)}
+                  onIonInput={(e) => setTargetProtein(Number(e.detail.value) || 0)}
                   data-testid="target-protein"
                 />
                 <IonInput
                   label="Carbs (g)"
                   type="number"
                   value={targetCarbs}
-                  onIonInput={e => setTargetCarbs(Number(e.detail.value) || 0)}
+                  onIonInput={(e) => setTargetCarbs(Number(e.detail.value) || 0)}
                   data-testid="target-carbs"
                 />
                 <IonInput
                   label="Fats (g)"
                   type="number"
                   value={targetFats}
-                  onIonInput={e => setTargetFats(Number(e.detail.value) || 0)}
+                  onIonInput={(e) => setTargetFats(Number(e.detail.value) || 0)}
                   data-testid="target-fats"
                 />
                 <div
@@ -673,23 +688,14 @@ export function MacroPage() {
                 >
                   <strong>Calories (auto): </strong>
                   {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFats)}
-                  <div style={{ fontSize: '0.8em', color: '#666' }}>
-                    (protein*4 + carbs*4 + fats*9)
-                  </div>
+                  <div style={{ fontSize: '0.8em', color: '#666' }}>(protein*4 + carbs*4 + fats*9)</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton
-                  fill="clear"
-                  onClick={() => setShowTargetModal(false)}
-                  data-testid="target-cancel-btn"
-                >
+                <IonButton fill="clear" onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">
                   Cancel
                 </IonButton>
-                <IonButton
-                  onClick={saveTargets}
-                  data-testid="target-save-btn"
-                >
+                <IonButton onClick={saveTargets} data-testid="target-save-btn">
                   Save
                 </IonButton>
               </div>
@@ -727,22 +733,15 @@ export function MacroPage() {
               </p>
               <IonTextarea
                 value={tasteProfile}
-                onIonInput={e => setTasteProfile(e.detail.value ?? '')}
+                onIonInput={(e) => setTasteProfile(e.detail.value ?? '')}
                 data-testid="taste-textarea"
                 rows={5}
               />
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton
-                  fill="clear"
-                  onClick={() => setShowTasteModal(false)}
-                  data-testid="taste-cancel-btn"
-                >
+                <IonButton fill="clear" onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">
                   Cancel
                 </IonButton>
-                <IonButton
-                  onClick={saveTasteProfile}
-                  data-testid="taste-save-btn"
-                >
+                <IonButton onClick={saveTasteProfile} data-testid="taste-save-btn">
                   Save
                 </IonButton>
               </div>
