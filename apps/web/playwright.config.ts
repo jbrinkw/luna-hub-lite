@@ -19,9 +19,17 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'] },
     },
   ],
-  webServer: {
-    command: 'pnpm dev',
-    url: 'http://localhost:5173',
-    reuseExistingServer: !process.env.CI,
-  },
+  webServer: [
+    {
+      command: 'pnpm dev',
+      url: 'http://localhost:5173',
+      reuseExistingServer: !process.env.CI,
+    },
+    {
+      command: 'pnpm --filter @luna-hub/mcp-worker dev',
+      url: 'http://localhost:8787/health',
+      reuseExistingServer: !process.env.CI,
+      cwd: '../../',
+    },
+  ],
 });
