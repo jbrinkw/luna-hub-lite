@@ -9,13 +9,524 @@ export type Json =
 export type Database = {
   chefbyte: {
     Tables: {
-      [_ in never]: never
+      food_logs: {
+        Row: {
+          calories: number
+          carbs: number
+          created_at: string
+          fat: number
+          log_id: string
+          logical_date: string
+          meal_id: string | null
+          product_id: string
+          protein: number
+          qty_consumed: number
+          unit: string
+          user_id: string
+        }
+        Insert: {
+          calories: number
+          carbs: number
+          created_at?: string
+          fat: number
+          log_id?: string
+          logical_date: string
+          meal_id?: string | null
+          product_id: string
+          protein: number
+          qty_consumed: number
+          unit: string
+          user_id: string
+        }
+        Update: {
+          calories?: number
+          carbs?: number
+          created_at?: string
+          fat?: number
+          log_id?: string
+          logical_date?: string
+          meal_id?: string | null
+          product_id?: string
+          protein?: number
+          qty_consumed?: number
+          unit?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "food_logs_meal_id_fkey"
+            columns: ["meal_id"]
+            isOneToOne: false
+            referencedRelation: "meal_plan_entries"
+            referencedColumns: ["meal_id"]
+          },
+          {
+            foreignKeyName: "food_logs_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      liquidtrack_devices: {
+        Row: {
+          created_at: string
+          device_id: string
+          device_name: string
+          import_key_hash: string
+          is_active: boolean
+          product_id: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_id?: string
+          device_name: string
+          import_key_hash: string
+          is_active?: boolean
+          product_id?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string
+          device_name?: string
+          import_key_hash?: string
+          is_active?: boolean
+          product_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "liquidtrack_devices_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      liquidtrack_events: {
+        Row: {
+          calories: number | null
+          carbs: number | null
+          consumption: number
+          created_at: string
+          device_id: string
+          event_id: string
+          fat: number | null
+          is_refill: boolean
+          logical_date: string
+          protein: number | null
+          user_id: string
+          weight_after: number
+          weight_before: number
+        }
+        Insert: {
+          calories?: number | null
+          carbs?: number | null
+          consumption: number
+          created_at?: string
+          device_id: string
+          event_id?: string
+          fat?: number | null
+          is_refill?: boolean
+          logical_date: string
+          protein?: number | null
+          user_id: string
+          weight_after: number
+          weight_before: number
+        }
+        Update: {
+          calories?: number | null
+          carbs?: number | null
+          consumption?: number
+          created_at?: string
+          device_id?: string
+          event_id?: string
+          fat?: number | null
+          is_refill?: boolean
+          logical_date?: string
+          protein?: number | null
+          user_id?: string
+          weight_after?: number
+          weight_before?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "liquidtrack_events_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "liquidtrack_devices"
+            referencedColumns: ["device_id"]
+          },
+        ]
+      }
+      locations: {
+        Row: {
+          created_at: string
+          location_id: string
+          name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          location_id?: string
+          name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          location_id?: string
+          name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      meal_plan_entries: {
+        Row: {
+          completed_at: string | null
+          created_at: string
+          logical_date: string
+          meal_id: string
+          meal_prep: boolean
+          product_id: string | null
+          recipe_id: string | null
+          servings: number
+          user_id: string
+        }
+        Insert: {
+          completed_at?: string | null
+          created_at?: string
+          logical_date: string
+          meal_id?: string
+          meal_prep?: boolean
+          product_id?: string | null
+          recipe_id?: string | null
+          servings?: number
+          user_id: string
+        }
+        Update: {
+          completed_at?: string | null
+          created_at?: string
+          logical_date?: string
+          meal_id?: string
+          meal_prep?: boolean
+          product_id?: string | null
+          recipe_id?: string | null
+          servings?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "meal_plan_entries_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "meal_plan_entries_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "recipes"
+            referencedColumns: ["recipe_id"]
+          },
+        ]
+      }
+      products: {
+        Row: {
+          barcode: string | null
+          calories_per_serving: number
+          carbs_per_serving: number
+          created_at: string
+          description: string | null
+          fat_per_serving: number
+          is_placeholder: boolean
+          min_stock_amount: number
+          name: string
+          price: number | null
+          product_id: string
+          protein_per_serving: number
+          servings_per_container: number
+          user_id: string
+          walmart_link: string | null
+        }
+        Insert: {
+          barcode?: string | null
+          calories_per_serving?: number
+          carbs_per_serving?: number
+          created_at?: string
+          description?: string | null
+          fat_per_serving?: number
+          is_placeholder?: boolean
+          min_stock_amount?: number
+          name: string
+          price?: number | null
+          product_id?: string
+          protein_per_serving?: number
+          servings_per_container?: number
+          user_id: string
+          walmart_link?: string | null
+        }
+        Update: {
+          barcode?: string | null
+          calories_per_serving?: number
+          carbs_per_serving?: number
+          created_at?: string
+          description?: string | null
+          fat_per_serving?: number
+          is_placeholder?: boolean
+          min_stock_amount?: number
+          name?: string
+          price?: number | null
+          product_id?: string
+          protein_per_serving?: number
+          servings_per_container?: number
+          user_id?: string
+          walmart_link?: string | null
+        }
+        Relationships: []
+      }
+      recipe_ingredients: {
+        Row: {
+          created_at: string
+          ingredient_id: string
+          note: string | null
+          product_id: string
+          quantity: number
+          recipe_id: string
+          unit: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          ingredient_id?: string
+          note?: string | null
+          product_id: string
+          quantity: number
+          recipe_id: string
+          unit: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          ingredient_id?: string
+          note?: string | null
+          product_id?: string
+          quantity?: number
+          recipe_id?: string
+          unit?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "recipe_ingredients_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "recipe_ingredients_recipe_id_fkey"
+            columns: ["recipe_id"]
+            isOneToOne: false
+            referencedRelation: "recipes"
+            referencedColumns: ["recipe_id"]
+          },
+        ]
+      }
+      recipes: {
+        Row: {
+          active_time: number | null
+          base_servings: number
+          created_at: string
+          description: string | null
+          name: string
+          recipe_id: string
+          total_time: number | null
+          user_id: string
+        }
+        Insert: {
+          active_time?: number | null
+          base_servings?: number
+          created_at?: string
+          description?: string | null
+          name: string
+          recipe_id?: string
+          total_time?: number | null
+          user_id: string
+        }
+        Update: {
+          active_time?: number | null
+          base_servings?: number
+          created_at?: string
+          description?: string | null
+          name?: string
+          recipe_id?: string
+          total_time?: number | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      shopping_list: {
+        Row: {
+          cart_item_id: string
+          created_at: string
+          product_id: string
+          purchased: boolean
+          qty_containers: number
+          user_id: string
+        }
+        Insert: {
+          cart_item_id?: string
+          created_at?: string
+          product_id: string
+          purchased?: boolean
+          qty_containers: number
+          user_id: string
+        }
+        Update: {
+          cart_item_id?: string
+          created_at?: string
+          product_id?: string
+          purchased?: boolean
+          qty_containers?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shopping_list_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      stock_lots: {
+        Row: {
+          created_at: string
+          expires_on: string | null
+          location_id: string
+          lot_id: string
+          product_id: string
+          qty_containers: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          expires_on?: string | null
+          location_id: string
+          lot_id?: string
+          product_id: string
+          qty_containers?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          expires_on?: string | null
+          location_id?: string
+          lot_id?: string
+          product_id?: string
+          qty_containers?: number
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "stock_lots_location_id_fkey"
+            columns: ["location_id"]
+            isOneToOne: false
+            referencedRelation: "locations"
+            referencedColumns: ["location_id"]
+          },
+          {
+            foreignKeyName: "stock_lots_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      temp_items: {
+        Row: {
+          calories: number
+          carbs: number
+          created_at: string
+          fat: number
+          logical_date: string
+          name: string
+          protein: number
+          temp_id: string
+          user_id: string
+        }
+        Insert: {
+          calories: number
+          carbs: number
+          created_at?: string
+          fat: number
+          logical_date: string
+          name: string
+          protein: number
+          temp_id?: string
+          user_id: string
+        }
+        Update: {
+          calories?: number
+          carbs?: number
+          created_at?: string
+          fat?: number
+          logical_date?: string
+          name?: string
+          protein?: number
+          temp_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_config: {
+        Row: {
+          config_id: string
+          created_at: string
+          key: string
+          user_id: string
+          value: string
+        }
+        Insert: {
+          config_id?: string
+          created_at?: string
+          key: string
+          user_id: string
+          value: string
+        }
+        Update: {
+          config_id?: string
+          created_at?: string
+          key?: string
+          user_id?: string
+          value?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      consume_product: {
+        Args: {
+          p_log_macros: boolean
+          p_logical_date: string
+          p_product_id: string
+          p_qty: number
+          p_unit: string
+        }
+        Returns: Json
+      }
+      get_daily_macros: { Args: { p_logical_date: string }; Returns: Json }
+      mark_meal_done: { Args: { p_meal_id: string }; Returns: Json }
     }
     Enums: {
       [_ in never]: never
