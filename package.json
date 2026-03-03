@@ -14,11 +14,34 @@
     "test:e2e": "pnpm --filter @luna-hub/web test:e2e",
     "test:db": "npx supabase test db",
     "db:types": "pnpm --filter @luna-hub/db-types generate",
-    "clean": "turbo run clean"
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "clean": "turbo run clean",
+    "prepare": "husky"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.3",
+    "eslint": "^9.39.3",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-react-refresh": "^0.5.2",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.3.1",
+    "prettier": "^3.8.1",
+    "supabase": "^2.76.15",
     "turbo": "^2.8.12",
     "typescript": "~5.7.0",
-    "supabase": "^2.76.15"
+    "typescript-eslint": "^8.56.1"
+  },
+  "lint-staged": {
+    "*.{ts,tsx,js,mjs}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,md,css,html}": [
+      "prettier --write"
+    ]
   }
 }

@@ -1,0 +1,7 @@
+dist/
+node_modules/
+.turbo/
+legacy/
+pnpm-lock.yaml
+packages/db-types/src/
+supabase/.temp/
