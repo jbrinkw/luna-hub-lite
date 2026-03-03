@@ -55,7 +55,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Apps').click();
       await expect(page).toHaveURL(/\/hub\/apps/);
-      await expect(page.getByText('CoachByte')).toBeVisible();
+      await expect(page.locator('ion-card', { hasText: 'CoachByte' })).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -77,7 +77,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Extensions').click();
       await expect(page).toHaveURL(/\/hub\/extensions/);
-      await expect(page.getByText(/obsidian|todoist|home assistant/i)).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible();
     } finally {
       await cleanup();
     }
