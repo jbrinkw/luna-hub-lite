@@ -116,16 +116,34 @@ vi.mock('@/shared/supabase', () => {
     select: vi.fn().mockReturnThis(),
     insert: vi.fn().mockReturnThis(),
     update: vi.fn().mockReturnThis(),
+    upsert: vi.fn().mockReturnThis(),
     delete: vi.fn().mockReturnThis(),
     eq: vi.fn().mockReturnThis(),
+    neq: vi.fn().mockReturnThis(),
+    is: vi.fn().mockReturnThis(),
+    or: vi.fn().mockReturnThis(),
+    in: vi.fn().mockReturnThis(),
+    lt: vi.fn().mockReturnThis(),
+    gt: vi.fn().mockReturnThis(),
     single: vi.fn().mockReturnThis(),
+    maybeSingle: vi.fn().mockReturnThis(),
     order: vi.fn().mockReturnThis(),
     limit: vi.fn().mockReturnThis(),
+    then: vi.fn(),
+  }));
+
+  const mockRpc = vi.fn().mockResolvedValue({ data: null, error: null });
+
+  const mockSchema = vi.fn(() => ({
+    from: mockFrom,
+    rpc: mockRpc,
   }));
 
   return {
     supabase: {
       from: mockFrom,
+      schema: mockSchema,
+      rpc: mockRpc,
       auth: {
         getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
         onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
