@@ -231,7 +231,7 @@ describe('ChefByte meal & macro flow', () => {
     userIds.push(userId);
 
     const { chickenId, today } = await setupMealScenario(client, userId);
-    const chef = client.schema('chefbyte');
+    const chef = client.schema('chefbyte') as any;
 
     // Manually insert a food_log: 1 serving of chicken = 165cal, 31p, 0c, 3.6f
     const { error: logErr } = await chef.from('food_logs').insert({
@@ -288,7 +288,7 @@ describe('ChefByte meal & macro flow', () => {
     userIds.push(userId);
 
     const { recipeId, chickenId, riceId, today } = await setupMealScenario(client, userId);
-    const chef = client.schema('chefbyte');
+    const chef = client.schema('chefbyte') as any;
 
     // Create a meal_prep entry with servings=2
     const { data: prepMeal, error: prepErr } = await chef
