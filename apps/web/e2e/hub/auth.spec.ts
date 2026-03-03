@@ -30,6 +30,7 @@ test.describe('Auth flow', () => {
   test('visit / redirects to /login (auth guard)', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/login/);
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
   });
 
   test('login with valid credentials redirects to /hub', async ({ page }) => {
@@ -56,6 +57,9 @@ test.describe('Auth flow', () => {
       await page.getByRole('button', { name: /sign in/i }).click();
       await expect(page.getByText(/invalid.*credentials/i)).toBeVisible();
       await expect(page).toHaveURL(/\/login/);
+      // Verify no session — attempting hub should redirect back
+      await page.goto('/hub');
+      await expect(page).toHaveURL(/\/login/);
     } finally {
       await cleanupUser(userId);
     }
@@ -71,6 +75,7 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Password').fill('testpass123');
       await page.getByRole('button', { name: /sign up/i }).click();
       await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+      await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
 
       // Get userId for cleanup
       const { data } = await admin.auth.admin.listUsers();
@@ -114,6 +119,7 @@ test.describe('Auth flow', () => {
       // Click logout
       await page.getByRole('button', { name: /logout/i }).click();
       await expect(page).toHaveURL(/\/login/, { timeout: 5000 });
+      await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
     } finally {
       await cleanupUser(userId);
     }
@@ -144,10 +150,12 @@ test.describe('Auth flow', () => {
   test('visit /coach without login redirects to /login', async ({ page }) => {
     await page.goto('/coach');
     await expect(page).toHaveURL(/\/login/);
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
   });
 
   test('visit /chef without login redirects to /login', async ({ page }) => {
     await page.goto('/chef');
     await expect(page).toHaveURL(/\/login/);
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
   });
 });
