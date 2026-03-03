@@ -149,8 +149,10 @@ Desktop-first with responsive design. Matching the legacy ChefByte layout.
 
 ## ChefByte Edge Functions
 
-| Function | Purpose | Auth Method |
-|----------|---------|-------------|
-| `walmart-scrape` | Search and scrape Walmart product data via third-party API | Supabase JWT, per-user rate limiting |
-| `liquidtrack` | Ingest ESP8266 scale events | `verify_jwt = false`, runtime lookup by device ID (import key validated once during provisioning) |
-| `analyze-product` | OpenFoodFacts lookup + Claude Haiku 4.5 normalization | Supabase JWT, per-user daily quota (100/day), LLM cost paid by platform |
+All three Edge Functions are implemented as Supabase Edge Functions (Deno/TypeScript) in `supabase/functions/`.
+
+| Function | Purpose | Auth Method | Env Vars |
+|----------|---------|-------------|----------|
+| `walmart-scrape` | SerpApi Walmart search — returns up to 6 results with price/URL/image | Supabase JWT | `SERPAPI_KEY` |
+| `liquidtrack` | Ingest ESP8266 scale events with server-side macro calculation | `verify_jwt = false`, API key auth (`x-api-key` header, SHA-256 hashed, lookup in `liquidtrack_devices.import_key_hash`) | `SUPABASE_SERVICE_ROLE_KEY` (auto) |
+| `analyze-product` | OpenFoodFacts lookup + Claude Haiku 4.5 normalization + 4-4-9 calorie validation | Supabase JWT, per-user daily quota (100/day) tracked in `user_config` | `ANTHROPIC_API_KEY` |
