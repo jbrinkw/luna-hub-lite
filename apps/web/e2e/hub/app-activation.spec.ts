@@ -87,4 +87,69 @@ test.describe('App activation', () => {
       await cleanup();
     }
   });
+
+  test('confirm deactivation returns to Inactive', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'deact-confirm');
+    try {
+      await page.goto('/hub/apps');
+      const coachCard = page.locator('ion-card', { hasText: 'CoachByte' });
+
+      // Activate
+      await coachCard.getByRole('button', { name: /activate/i }).click();
+      await expect(coachCard.getByText('Active', { exact: true })).toBeVisible({ timeout: 5000 });
+
+      // Deactivate — click confirm in the alert
+      await coachCard.getByRole('button', { name: /deactivate/i }).click();
+      await expect(page.getByText('Are you sure you want to deactivate CoachByte?')).toBeVisible({ timeout: 5000 });
+      await page.getByRole('button', { name: /confirm/i }).click();
+
+      // Should be back to Inactive
+      await expect(coachCard.getByText('Inactive', { exact: true })).toBeVisible({ timeout: 5000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('cancel deactivation keeps app Active', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'deact-cancel');
+    try {
+      await page.goto('/hub/apps');
+      const coachCard = page.locator('ion-card', { hasText: 'CoachByte' });
+
+      // Activate
+      await coachCard.getByRole('button', { name: /activate/i }).click();
+      await expect(coachCard.getByText('Active', { exact: true })).toBeVisible({ timeout: 5000 });
+
+      // Deactivate — click cancel in the alert
+      await coachCard.getByRole('button', { name: /deactivate/i }).click();
+      await expect(page.getByText('Are you sure you want to deactivate CoachByte?')).toBeVisible({ timeout: 5000 });
+      await page.getByRole('button', { name: /cancel/i }).click();
+
+      // Should still be Active
+      await expect(coachCard.getByText('Active', { exact: true })).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('activation persists after page reload', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'persist');
+    try {
+      await page.goto('/hub/apps');
+      const coachCard = page.locator('ion-card', { hasText: 'CoachByte' });
+
+      // Activate CoachByte
+      await coachCard.getByRole('button', { name: /activate/i }).click();
+      await expect(coachCard.getByText('Active', { exact: true })).toBeVisible({ timeout: 5000 });
+
+      // Reload
+      await page.reload();
+      await expect(page.locator('ion-card', { hasText: 'CoachByte' }).getByText('Active', { exact: true })).toBeVisible({ timeout: 15000 });
+
+      // ChefByte should still be Inactive
+      await expect(page.locator('ion-card', { hasText: 'ChefByte' }).getByText('Inactive', { exact: true })).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
 });
