@@ -5,9 +5,7 @@ import React from 'react';
 // Mock Ionic React components as simple HTML wrappers (jsdom has no Custom Elements)
 vi.mock('@ionic/react', () => {
   const wrap = (tag: string) =>
-    React.forwardRef(({ children, ...props }: any, ref: any) =>
-      React.createElement(tag, { ...props, ref }, children),
-    );
+    React.forwardRef(({ children, ...props }: any, ref: any) => React.createElement(tag, { ...props, ref }, children));
   return {
     setupIonicReact: vi.fn(),
     IonApp: wrap('div'),
@@ -21,28 +19,33 @@ vi.mock('@ionic/react', () => {
     IonCardTitle: wrap('h2'),
     IonCardContent: wrap('div'),
     IonItem: wrap('div'),
-    IonInput: React.forwardRef(({ label, value, onIonInput, type, labelPlacement, autocomplete, required, ...props }: any, ref: any) =>
-      React.createElement('div', null,
-        React.createElement('label', { htmlFor: label }, label),
-        React.createElement('input', {
-          ref,
-          id: label,
-          'aria-label': label,
-          type: type ?? 'text',
-          value: value ?? '',
-          autoComplete: autocomplete,
-          onChange: (e: any) => onIonInput?.({ detail: { value: e.target.value } }),
-          ...props,
-        }),
-      ),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    IonInput: React.forwardRef(
+      ({ label, value, onIonInput, type, labelPlacement, autocomplete, required, ...props }: any, ref: any) =>
+        React.createElement(
+          'div',
+          null,
+          React.createElement('label', { htmlFor: label }, label),
+          React.createElement('input', {
+            ref,
+            id: label,
+            'aria-label': label,
+            type: type ?? 'text',
+            value: value ?? '',
+            autoComplete: autocomplete,
+            onChange: (e: any) => onIonInput?.({ detail: { value: e.target.value } }),
+            ...props,
+          }),
+        ),
     ),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     IonButton: React.forwardRef(({ children, expand, ...props }: any, ref: any) =>
       React.createElement('button', { ...props, ref }, children),
     ),
     IonText: wrap('span'),
-    IonLoading: ({ isOpen, message }: any) =>
-      isOpen ? React.createElement('div', null, message) : null,
+    IonLoading: ({ isOpen, message }: any) => (isOpen ? React.createElement('div', null, message) : null),
     IonButtons: wrap('div'),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     IonIcon: ({ icon, ...props }: any) => React.createElement('span', props),
     IonLabel: wrap('label'),
     IonList: wrap('div'),
@@ -50,15 +53,19 @@ vi.mock('@ionic/react', () => {
     IonRow: wrap('div'),
     IonCol: wrap('div'),
     IonSegment: ({ children, value, onIonChange, ...props }: any) =>
-      React.createElement('div', {
-        role: 'tablist',
-        'data-value': value,
-        onClick: (e: any) => {
-          const btn = (e.target as HTMLElement).closest('[role="tab"]');
-          if (btn && onIonChange) onIonChange({ detail: { value: btn.getAttribute('data-value') } });
+      React.createElement(
+        'div',
+        {
+          role: 'tablist',
+          'data-value': value,
+          onClick: (e: any) => {
+            const btn = (e.target as HTMLElement).closest('[role="tab"]');
+            if (btn && onIonChange) onIonChange({ detail: { value: btn.getAttribute('data-value') } });
+          },
+          ...props,
         },
-        ...props,
-      }, children),
+        children,
+      ),
     IonSegmentButton: ({ children, value, ...props }: any) =>
       React.createElement('button', { role: 'tab', 'data-value': value, ...props }, children),
     IonToggle: React.forwardRef(({ checked, onIonChange, ...props }: any, ref: any) =>
@@ -70,35 +77,56 @@ vi.mock('@ionic/react', () => {
         ...props,
       }),
     ),
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     IonSelect: React.forwardRef(({ children, value, onIonChange, label, placeholder, ...props }: any, ref: any) =>
-      React.createElement('div', null,
+      React.createElement(
+        'div',
+        null,
         label && React.createElement('label', { htmlFor: label }, label),
-        React.createElement('select', {
-          ref,
-          id: label,
-          value: value ?? '',
-          onChange: (e: any) => onIonChange?.({ detail: { value: e.target.value } }),
-          ...props,
-        }, children),
+        React.createElement(
+          'select',
+          {
+            ref,
+            id: label,
+            value: value ?? '',
+            onChange: (e: any) => onIonChange?.({ detail: { value: e.target.value } }),
+            ...props,
+          },
+          children,
+        ),
       ),
     ),
     IonSelectOption: ({ children, value, ...props }: any) =>
       React.createElement('option', { value, ...props }, children),
     IonAlert: ({ isOpen, header, message, buttons, onDidDismiss }: any) =>
-      isOpen ? React.createElement('div', { role: 'alertdialog', 'aria-label': header },
-        React.createElement('p', null, message),
-        buttons?.map((btn: any, i: number) =>
-          React.createElement('button', {
-            key: i,
-            onClick: () => {
-              if (typeof btn === 'string') { onDidDismiss?.(); }
-              else { btn.handler?.(); onDidDismiss?.(); }
-            },
-          }, typeof btn === 'string' ? btn : btn.text),
-        ),
-      ) : null,
+      isOpen
+        ? React.createElement(
+            'div',
+            { role: 'alertdialog', 'aria-label': header },
+            React.createElement('p', null, message),
+            buttons?.map((btn: any, i: number) =>
+              React.createElement(
+                'button',
+                {
+                  key: i,
+                  onClick: () => {
+                    if (typeof btn === 'string') {
+                      onDidDismiss?.();
+                    } else {
+                      btn.handler?.();
+                      onDidDismiss?.();
+                    }
+                  },
+                },
+                typeof btn === 'string' ? btn : btn.text,
+              ),
+            ),
+          )
+        : null,
     IonCheckbox: React.forwardRef(({ checked, onIonChange, children, ...props }: any, ref: any) =>
-      React.createElement('label', null,
+      React.createElement(
+        'label',
+        null,
         React.createElement('input', {
           ref,
           type: 'checkbox',
@@ -117,7 +145,9 @@ vi.mock('@ionic/react', () => {
     IonSkeletonText: ({ animated, ...props }: any) =>
       React.createElement('div', { 'data-animated': animated, ...props }),
     IonTextarea: React.forwardRef(({ label, value, onIonInput, ...props }: any, ref: any) =>
-      React.createElement('div', null,
+      React.createElement(
+        'div',
+        null,
         label && React.createElement('label', { htmlFor: label }, label),
         React.createElement('textarea', {
           ref,
@@ -144,54 +174,3 @@ vi.mock('@/shared/AppProvider', () => ({
   })),
   AppProvider: ({ children }: any) => children,
 }));
-
-// Mock Supabase client for unit tests
-vi.mock('@/shared/supabase', () => {
-  const mockFrom = vi.fn(() => ({
-    select: vi.fn().mockReturnThis(),
-    insert: vi.fn().mockReturnThis(),
-    update: vi.fn().mockReturnThis(),
-    upsert: vi.fn().mockReturnThis(),
-    delete: vi.fn().mockReturnThis(),
-    eq: vi.fn().mockReturnThis(),
-    neq: vi.fn().mockReturnThis(),
-    is: vi.fn().mockReturnThis(),
-    or: vi.fn().mockReturnThis(),
-    in: vi.fn().mockReturnThis(),
-    lt: vi.fn().mockReturnThis(),
-    gt: vi.fn().mockReturnThis(),
-    single: vi.fn().mockReturnThis(),
-    maybeSingle: vi.fn().mockReturnThis(),
-    order: vi.fn().mockReturnThis(),
-    limit: vi.fn().mockReturnThis(),
-    then: vi.fn(),
-  }));
-
-  const mockRpc = vi.fn().mockResolvedValue({ data: null, error: null });
-
-  const mockSchema = vi.fn(() => ({
-    from: mockFrom,
-    rpc: mockRpc,
-  }));
-
-  return {
-    supabase: {
-      from: mockFrom,
-      schema: mockSchema,
-      rpc: mockRpc,
-      auth: {
-        getSession: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
-        onAuthStateChange: vi.fn().mockReturnValue({ data: { subscription: { unsubscribe: vi.fn() } } }),
-        signInWithPassword: vi.fn(),
-        signUp: vi.fn(),
-        signOut: vi.fn(),
-      },
-      channel: vi.fn(() => ({
-        on: vi.fn().mockReturnThis(),
-        subscribe: vi.fn(),
-        unsubscribe: vi.fn(),
-      })),
-      removeChannel: vi.fn(),
-    },
-  };
-});

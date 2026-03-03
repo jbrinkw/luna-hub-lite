@@ -9,7 +9,6 @@
     }
   },
   "include": ["src", "vite-env.d.ts"],
-  "references": [
-    { "path": "./tsconfig.node.json" }
-  ]
+  "exclude": ["src/__tests__/integration"],
+  "references": [{ "path": "./tsconfig.node.json" }]
 }

@@ -1,0 +1,332 @@
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import {
+  createPageTestContext,
+  chefbyte,
+  seedProducts,
+  getDefaultLocation,
+  seedMacroGoals,
+  assertQuerySucceeds,
+  todayDate,
+  type PageTestContext,
+} from './helpers';
+
+describe('ChefByte ScannerPage queries', () => {
+  let ctx: PageTestContext;
+  let productMap: Record<string, string>;
+  let locationId: string;
+
+  beforeAll(async () => {
+    ctx = await createPageTestContext('chef-scanner');
+    productMap = await seedProducts(ctx);
+    locationId = await getDefaultLocation(ctx);
+    await seedMacroGoals(ctx);
+
+    // Seed stock for consume_product to work
+    const chickenId = productMap['Chicken Breast'];
+    await chefbyte(ctx.client).from('stock_lots').insert({
+      user_id: ctx.userId,
+      product_id: chickenId,
+      location_id: locationId,
+      qty_containers: 5,
+    });
+  });
+
+  afterAll(async () => {
+    await ctx.cleanup();
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: product lookup by barcode
+  // Source: ScannerPage.tsx line 141-148
+  //   .from('products')
+  //     .select('product_id, name, barcode, is_placeholder, calories_per_serving,
+  //       protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container')
+  //     .eq('user_id', user.id).eq('barcode', barcode).single()
+  // -------------------------------------------------------------------
+  it('product lookup by barcode returns null for unknown barcode', async () => {
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .select(
+        'product_id, name, barcode, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+      )
+      .eq('user_id', ctx.userId)
+      .eq('barcode', '9999999999999')
+      .single();
+
+    // .single() returns error PGRST116 for no rows
+    expect(result.data).toBeNull();
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: product upsert — insert new placeholder by barcode
+  // Source: ScannerPage.tsx line 186-195
+  //   .from('products').insert({
+  //     user_id, barcode, name: `Unknown (${barcode})`, is_placeholder: true
+  //   }).select('product_id, name').single()
+  // -------------------------------------------------------------------
+  it('product insert as placeholder by barcode works', async () => {
+    const barcode = `TEST-${Date.now()}`;
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: `Unknown (${barcode})`,
+        is_placeholder: true,
+      })
+      .select('product_id, name')
+      .single();
+
+    const data = assertQuerySucceeds(result, 'insert placeholder');
+    expect(data).toHaveProperty('product_id');
+    expect(data.name).toBe(`Unknown (${barcode})`);
+
+    // Verify it's now findable by barcode (EXACT query from ScannerPage)
+    const lookupResult = await chefbyte(ctx.client)
+      .from('products')
+      .select(
+        'product_id, name, barcode, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+      )
+      .eq('user_id', ctx.userId)
+      .eq('barcode', barcode)
+      .single();
+
+    const lookupData = assertQuerySucceeds(lookupResult, 'barcode lookup after insert');
+    expect(lookupData.is_placeholder).toBe(true);
+    expect(lookupData.barcode).toBe(barcode);
+    expect(lookupData).toHaveProperty('calories_per_serving');
+    expect(lookupData).toHaveProperty('protein_per_serving');
+    expect(lookupData).toHaveProperty('carbs_per_serving');
+    expect(lookupData).toHaveProperty('fat_per_serving');
+    expect(lookupData).toHaveProperty('servings_per_container');
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: product nutrition update after purchase scan
+  // Source: ScannerPage.tsx line 258-266
+  //   .from('products').update({
+  //     calories_per_serving, protein_per_serving, carbs_per_serving,
+  //     fat_per_serving, servings_per_container
+  //   }).eq('product_id', product.product_id)
+  // -------------------------------------------------------------------
+  it('product nutrition update by product_id works', async () => {
+    const chickenId = productMap['Chicken Breast'];
+
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .update({
+        calories_per_serving: 170,
+        protein_per_serving: 32,
+        carbs_per_serving: 0,
+        fat_per_serving: 3.8,
+        servings_per_container: 4,
+      })
+      .eq('product_id', chickenId);
+    expect(result.error).toBeNull();
+
+    // Verify the update
+    const readResult = await chefbyte(ctx.client)
+      .from('products')
+      .select('calories_per_serving, protein_per_serving')
+      .eq('product_id', chickenId)
+      .single();
+
+    const data = assertQuerySucceeds(readResult, 'nutrition update verify');
+    expect(Number(data.calories_per_serving)).toBe(170);
+    expect(Number(data.protein_per_serving)).toBe(32);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: purchase mode — stock_lots insert with location_id
+  // Source: ScannerPage.tsx line 250-255
+  //   .from('stock_lots').insert({
+  //     user_id, product_id, qty_containers, location_id
+  //   })
+  // NOTE: location_id is NOT NULL — must always provide
+  // -------------------------------------------------------------------
+  it('stock_lots insert with explicit location_id (purchase mode)', async () => {
+    const eggsId = productMap['Eggs'];
+    const result = await chefbyte(ctx.client).from('stock_lots').insert({
+      user_id: ctx.userId,
+      product_id: eggsId,
+      qty_containers: 2,
+      location_id: locationId,
+    });
+    expect(result.error).toBeNull();
+
+    // Verify stock exists
+    const readResult = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers, location_id')
+      .eq('user_id', ctx.userId)
+      .eq('product_id', eggsId);
+
+    const data = assertQuerySucceeds(readResult, 'stock lot readback');
+    expect(data.length).toBeGreaterThanOrEqual(1);
+    expect(Number(data[0].qty_containers)).toBe(2);
+    expect(data[0].location_id).toBe(locationId);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: locations query for default location
+  // Source: ScannerPage.tsx line 240-245
+  //   .from('locations').select('location_id')
+  //     .eq('user_id', user.id).order('created_at').limit(1)
+  // -------------------------------------------------------------------
+  it('locations query for default location (EXACT from ScannerPage)', async () => {
+    const result = await chefbyte(ctx.client)
+      .from('locations')
+      .select('location_id')
+      .eq('user_id', ctx.userId)
+      .order('created_at')
+      .limit(1);
+
+    const data = assertQuerySucceeds(result, 'default location');
+    expect(data.length).toBe(1);
+    expect(data[0]).toHaveProperty('location_id');
+    expect(typeof data[0].location_id).toBe('string');
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: consume_product RPC — consume_macros mode
+  // Source: ScannerPage.tsx line 273-279
+  //   .rpc('consume_product', {
+  //     p_product_id, p_qty, p_unit: unitType,
+  //     p_log_macros: true, p_logical_date: today
+  //   })
+  // NOTE: p_unit = 'serving' (singular, NOT 'servings')
+  // -------------------------------------------------------------------
+  it('consume_product RPC with p_unit=serving and p_log_macros=true', async () => {
+    const chickenId = productMap['Chicken Breast'];
+    const today = todayDate();
+
+    const result = await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: chickenId,
+      p_qty: 1,
+      p_unit: 'serving',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+
+    const data = assertQuerySucceeds(result, 'consume_product macros');
+    expect(data).toHaveProperty('success');
+    expect(data.success).toBe(true);
+
+    // Verify a food_log was created
+    const logResult = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id, calories, protein')
+      .eq('user_id', ctx.userId)
+      .eq('product_id', chickenId)
+      .eq('logical_date', today);
+
+    const logs = assertQuerySucceeds(logResult, 'food log after consume');
+    expect(logs.length).toBeGreaterThanOrEqual(1);
+    expect(Number(logs[0].calories)).toBeGreaterThan(0);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: consume_product RPC — consume_no_macros mode
+  // Source: ScannerPage.tsx line 283-289
+  //   .rpc('consume_product', {
+  //     p_product_id, p_qty, p_unit: unitType,
+  //     p_log_macros: false, p_logical_date: today
+  //   })
+  // -------------------------------------------------------------------
+  it('consume_product RPC with p_log_macros=false skips food_log', async () => {
+    const riceId = productMap['Brown Rice'];
+    const today = todayDate();
+
+    // First add stock for rice
+    await chefbyte(ctx.client).from('stock_lots').insert({
+      user_id: ctx.userId,
+      product_id: riceId,
+      qty_containers: 3,
+      location_id: locationId,
+    });
+
+    // Count food_logs before
+    const beforeResult = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('user_id', ctx.userId)
+      .eq('product_id', riceId)
+      .eq('logical_date', today);
+    const beforeCount = (beforeResult.data ?? []).length;
+
+    const result = await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: riceId,
+      p_qty: 1,
+      p_unit: 'serving',
+      p_log_macros: false,
+      p_logical_date: today,
+    });
+
+    const data = assertQuerySucceeds(result, 'consume_product no macros');
+    expect(data).toHaveProperty('success');
+    expect(data.success).toBe(true);
+
+    // Verify no NEW food_log was created
+    const afterResult = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('user_id', ctx.userId)
+      .eq('product_id', riceId)
+      .eq('logical_date', today);
+    const afterCount = (afterResult.data ?? []).length;
+    expect(afterCount).toBe(beforeCount);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: shopping mode — shopping_list insert
+  // Source: ScannerPage.tsx line 294-299
+  //   .from('shopping_list').insert({
+  //     user_id, product_id, qty_containers, purchased: false
+  //   })
+  // -------------------------------------------------------------------
+  it('shopping_list insert for shopping mode works', async () => {
+    const bananaId = productMap['Bananas'];
+
+    const result = await chefbyte(ctx.client).from('shopping_list').insert({
+      user_id: ctx.userId,
+      product_id: bananaId,
+      qty_containers: 5,
+      purchased: false,
+    });
+    expect(result.error).toBeNull();
+
+    // Verify it was added
+    const readResult = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .select('cart_item_id, qty_containers, purchased')
+      .eq('user_id', ctx.userId)
+      .eq('product_id', bananaId)
+      .single();
+
+    const data = assertQuerySucceeds(readResult, 'shopping list item');
+    expect(data).toHaveProperty('cart_item_id');
+    expect(Number(data.qty_containers)).toBe(5);
+    expect(data.purchased).toBe(false);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: consume_product with container unit
+  // Source: ScannerPage.tsx line 273-279 (unitType can be 'container')
+  // -------------------------------------------------------------------
+  it('consume_product RPC with p_unit=container works', async () => {
+    const eggsId = productMap['Eggs'];
+    const today = todayDate();
+
+    const result = await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: eggsId,
+      p_qty: 1,
+      p_unit: 'container',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+
+    const data = assertQuerySucceeds(result, 'consume_product container');
+    expect(data).toHaveProperty('success');
+    expect(data.success).toBe(true);
+  });
+});
