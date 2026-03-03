@@ -1,0 +1,324 @@
+/**
+ * MCP Worker E2E Protocol Tests
+ *
+ * Tests the full SSE/JSON-RPC protocol against a locally running wrangler dev.
+ * Requires: local Supabase running (supabase start) + wrangler dev (spawned by globalSetup).
+ */
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { McpTestClient } from './helpers/mcp-client';
+import { generateTestApiKey } from './helpers/api-key';
+
+const SUPABASE_URL = 'http://127.0.0.1:54321';
+const SERVICE_ROLE_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
+const ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+
+const WORKER_BASE = 'http://localhost:8787';
+
+/**
+ * Helper: create a test user, activate apps, generate API key.
+ * Returns cleanup function.
+ */
+async function createTestUser(
+  admin: SupabaseClient,
+  opts: { email: string; activateApps: string[] },
+): Promise<{ userId: string; apiKey: string; cleanup: () => Promise<void> }> {
+  const password = 'TestPassword123!';
+
+  // Create user via admin API
+  const { data: userData, error: createError } = await admin.auth.admin.createUser({
+    email: opts.email,
+    password,
+    email_confirm: true,
+  });
+  if (createError) throw new Error(`Failed to create user: ${createError.message}`);
+  const userId = userData.user!.id;
+
+  // Sign in as the user to activate apps (requires auth.uid())
+  if (opts.activateApps.length > 0) {
+    const anonClient = createClient(SUPABASE_URL, ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    await anonClient.auth.signInWithPassword({ email: opts.email, password });
+
+    for (const appName of opts.activateApps) {
+      const { error: activateError } = await (anonClient as any)
+        .schema('hub')
+        .rpc('activate_app', { p_app_name: appName });
+      if (activateError) {
+        throw new Error(`Failed to activate ${appName}: ${activateError.message}`);
+      }
+    }
+  }
+
+  // Generate API key (via service role — bypasses RLS)
+  const apiKey = await generateTestApiKey(admin, userId);
+
+  const cleanup = async () => {
+    await admin.auth.admin.deleteUser(userId);
+  };
+
+  return { userId, apiKey, cleanup };
+}
+
+describe('MCP Worker E2E', () => {
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+    auth: { autoRefreshToken: false, persistSession: false },
+  });
+
+  // Primary test user with both apps activated
+  let userId: string;
+  let apiKey: string;
+  let primaryCleanup: () => Promise<void>;
+
+  // Shared connected client for tests 3-8
+  let client: McpTestClient;
+
+  beforeAll(async () => {
+    const result = await createTestUser(admin, {
+      email: `mcp-e2e-${Date.now()}@test.local`,
+      activateApps: ['coachbyte', 'chefbyte'],
+    });
+    userId = result.userId;
+    apiKey = result.apiKey;
+    primaryCleanup = result.cleanup;
+  });
+
+  afterAll(async () => {
+    if (client?.isConnected) await client.disconnect();
+    await primaryCleanup();
+  });
+
+  // ─── Test 1: Health endpoint ──────────────────────────────────────────
+
+  it('health endpoint returns 200 with "ok" body', async () => {
+    const response = await fetch(`${WORKER_BASE}/health`);
+    expect(response.status).toBe(200);
+    const body = await response.text();
+    expect(body).toBe('ok');
+  });
+
+  // ─── Test 2: Invalid API key returns 401 ──────────────────────────────
+
+  it('SSE connection with invalid key returns 401', async () => {
+    const response = await fetch(`${WORKER_BASE}/sse?apiKey=lh_badbadbadbadbadbadbadbadbadbadba`, {
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/invalid/i);
+  });
+
+  // ─── Test 3: SSE connection establishes session ───────────────────────
+
+  it('SSE connection with valid key establishes session', async () => {
+    client = new McpTestClient(WORKER_BASE);
+    await client.connect(apiKey);
+
+    expect(client.isConnected).toBe(true);
+    expect(client.currentSessionId).toBeTruthy();
+    expect(client.currentSessionId.length).toBeGreaterThan(10);
+  });
+
+  // ─── Test 4: Initialize returns protocol info ─────────────────────────
+
+  it('initialize returns protocol version and server info', async () => {
+    const result = await client.initialize();
+
+    expect(result).toMatchObject({
+      protocolVersion: '2024-11-05',
+      capabilities: { tools: {} },
+      serverInfo: {
+        name: 'luna-hub-mcp',
+        version: '1.0.0',
+      },
+    });
+  });
+
+  // ─── Test 5: tools/list returns filtered tools ────────────────────────
+
+  it('tools/list returns all app + extension tools when both apps active', async () => {
+    const tools = await client.listTools();
+
+    // 11 CoachByte + 19 ChefByte + 11 Extension = 41 total
+    expect(tools.length).toBeGreaterThanOrEqual(30);
+
+    const toolNames = tools.map((t: any) => t.name);
+
+    // Verify specific app tools exist
+    expect(toolNames).toContain('CHEFBYTE_create_product');
+    expect(toolNames).toContain('COACHBYTE_get_today_plan');
+
+    // Verify extension tools are included
+    expect(toolNames).toContain('OBSIDIAN_search_notes');
+    expect(toolNames).toContain('TODOIST_get_tasks');
+    expect(toolNames).toContain('HOMEASSISTANT_get_entities');
+
+    // Each tool should have name, description, inputSchema
+    for (const tool of tools) {
+      expect(tool).toHaveProperty('name');
+      expect(tool).toHaveProperty('description');
+      expect(tool).toHaveProperty('inputSchema');
+      expect(typeof tool.name).toBe('string');
+      expect(typeof tool.description).toBe('string');
+    }
+  });
+
+  // ─── Test 6: Unknown tool returns error ───────────────────────────────
+
+  it('tools/call with unknown tool returns isError result', async () => {
+    const result = await client.callTool('FAKE_NONEXISTENT_TOOL', {});
+
+    expect(result.isError).toBe(true);
+    expect(result.content).toBeInstanceOf(Array);
+    expect(result.content.length).toBeGreaterThan(0);
+    expect(result.content[0].text).toMatch(/unknown tool/i);
+  });
+
+  // ─── Test 7: CHEFBYTE_create_product end-to-end ───────────────────────
+
+  it('tools/call CHEFBYTE_create_product works end-to-end', async () => {
+    const productName = `MCP Test Product ${Date.now()}`;
+    const result = await client.callTool('CHEFBYTE_create_product', {
+      name: productName,
+      calories_per_serving: 200,
+      protein_per_serving: 25,
+    });
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toBeInstanceOf(Array);
+    expect(result.content.length).toBeGreaterThan(0);
+
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+
+    expect(parsed.product).toBeDefined();
+    expect(parsed.product.product_id).toBeTruthy();
+    expect(parsed.product.name).toBe(productName);
+    expect(parsed.message).toContain(productName);
+  });
+
+  // ─── Test 8: COACHBYTE_get_today_plan end-to-end ──────────────────────
+
+  it('tools/call COACHBYTE_get_today_plan works end-to-end', async () => {
+    // Seed a split for today's weekday so ensure_daily_plan can create a plan
+    const todayWeekday = new Date().getDay(); // 0=Sun, 6=Sat
+
+    // Get a global exercise to use in the split template
+    const { data: exercises } = await (admin as any)
+      .schema('coachbyte')
+      .from('exercises')
+      .select('exercise_id, name')
+      .is('user_id', null)
+      .limit(1);
+
+    const exerciseId = exercises?.[0]?.exercise_id;
+
+    // Insert a split for today's weekday (service role bypasses RLS)
+    const templateSets = exerciseId
+      ? [{ exercise_id: exerciseId, target_reps: 10, target_load: 135, rest_seconds: 90 }]
+      : [];
+
+    await (admin as any).schema('coachbyte').from('splits').insert({
+      user_id: userId,
+      weekday: todayWeekday,
+      template_sets: templateSets,
+      split_notes: 'E2E test split',
+    });
+
+    const result = await client.callTool('COACHBYTE_get_today_plan', {});
+
+    expect(result.isError).toBeUndefined();
+    expect(result.content).toBeInstanceOf(Array);
+    expect(result.content.length).toBeGreaterThan(0);
+
+    const text = result.content[0].text;
+    const parsed = JSON.parse(text);
+
+    expect(parsed.plan_id).toBeTruthy();
+    expect(parsed.logical_date).toBeTruthy();
+    expect(typeof parsed.total_planned).toBe('number');
+  });
+
+  // ─── Test 9: Tool filtering — deactivated app ─────────────────────────
+
+  it('tool filtering respects deactivated app (coachbyte only = no CHEFBYTE tools)', async () => {
+    // Create a user with ONLY coachbyte active
+    const { apiKey: apiKey2, cleanup } = await createTestUser(admin, {
+      email: `mcp-e2e-coachonly-${Date.now()}@test.local`,
+      activateApps: ['coachbyte'],
+    });
+
+    let client2: McpTestClient | null = null;
+    try {
+      client2 = new McpTestClient(WORKER_BASE);
+      await client2.connect(apiKey2);
+      await client2.initialize();
+
+      const tools = await client2.listTools();
+      const toolNames = tools.map((t: any) => t.name);
+
+      // CHEFBYTE tools should be absent
+      const chefbyteTools = toolNames.filter((n: string) => n.startsWith('CHEFBYTE_'));
+      expect(chefbyteTools).toHaveLength(0);
+
+      // COACHBYTE tools should be present
+      const coachbyteTools = toolNames.filter((n: string) => n.startsWith('COACHBYTE_'));
+      expect(coachbyteTools.length).toBeGreaterThan(0);
+      expect(toolNames).toContain('COACHBYTE_get_today_plan');
+
+      // Extension tools should still be present
+      expect(toolNames).toContain('OBSIDIAN_search_notes');
+    } finally {
+      if (client2?.isConnected) await client2.disconnect();
+      await cleanup();
+    }
+  });
+
+  // ─── Test 10: Tool filtering — disabled tool ──────────────────────────
+
+  it('tool filtering respects disabled tool in user_tool_config', async () => {
+    // Create a fresh user with both apps active
+    const {
+      userId: userId3,
+      apiKey: apiKey3,
+      cleanup,
+    } = await createTestUser(admin, {
+      email: `mcp-e2e-disabled-${Date.now()}@test.local`,
+      activateApps: ['coachbyte', 'chefbyte'],
+    });
+
+    let client3: McpTestClient | null = null;
+    try {
+      // Disable CHEFBYTE_create_product for this user (service role bypasses RLS)
+      const { error: configError } = await (admin as any).schema('hub').from('user_tool_config').insert({
+        user_id: userId3,
+        tool_name: 'CHEFBYTE_create_product',
+        enabled: false,
+      });
+      if (configError) throw new Error(`Failed to insert tool config: ${configError.message}`);
+
+      client3 = new McpTestClient(WORKER_BASE);
+      await client3.connect(apiKey3);
+      await client3.initialize();
+
+      const tools = await client3.listTools();
+      const toolNames = tools.map((t: any) => t.name);
+
+      // The disabled tool should NOT be in the list
+      expect(toolNames).not.toContain('CHEFBYTE_create_product');
+
+      // Other CHEFBYTE tools should still be present
+      expect(toolNames).toContain('CHEFBYTE_get_products');
+      expect(toolNames).toContain('CHEFBYTE_get_inventory');
+
+      // COACHBYTE tools should be unaffected
+      expect(toolNames).toContain('COACHBYTE_get_today_plan');
+    } finally {
+      if (client3?.isConnected) await client3.disconnect();
+      await cleanup();
+    }
+  });
+});
