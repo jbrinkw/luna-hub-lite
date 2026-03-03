@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 import { useAuth } from '../auth/AuthProvider';
 import { IonLoading } from '@ionic/react';
+import { OfflineIndicator } from '../../components/OfflineIndicator';
 
 interface AppLayoutProps {
   children: ReactNode;
@@ -13,5 +14,10 @@ export function AppLayout({ children }: AppLayoutProps) {
     return <IonLoading isOpen message="Loading..." />;
   }
 
-  return <>{children}</>;
+  return (
+    <>
+      <OfflineIndicator />
+      {children}
+    </>
+  );
 }

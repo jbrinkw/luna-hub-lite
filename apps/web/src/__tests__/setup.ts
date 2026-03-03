@@ -114,6 +114,8 @@ vi.mock('@ionic/react', () => {
       React.createElement('span', { 'data-color': color, ...props }, children),
     IonChip: wrap('span'),
     IonNote: wrap('span'),
+    IonSkeletonText: ({ animated, ...props }: any) =>
+      React.createElement('div', { 'data-animated': animated, ...props }),
     IonTextarea: React.forwardRef(({ label, value, onIonInput, ...props }: any, ref: any) =>
       React.createElement('div', null,
         label && React.createElement('label', { htmlFor: label }, label),
@@ -131,6 +133,17 @@ vi.mock('@ionic/react', () => {
 
 // Mock ionicons
 vi.mock('ionicons/icons', () => new Proxy({}, { get: (_t, prop) => prop }));
+
+// Mock AppProvider (provides default activation + online state for all tests)
+vi.mock('@/shared/AppProvider', () => ({
+  useAppContext: vi.fn(() => ({
+    activations: { coachbyte: true, chefbyte: true },
+    online: true,
+    lastSynced: new Date(),
+    refreshActivations: vi.fn(),
+  })),
+  AppProvider: ({ children }: any) => children,
+}));
 
 // Mock Supabase client for unit tests
 vi.mock('@/shared/supabase', () => {

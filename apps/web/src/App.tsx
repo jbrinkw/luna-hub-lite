@@ -2,7 +2,9 @@ import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from '@luna-hub/ui-kit';
 import { AuthProvider } from './shared/auth/AuthProvider';
 import { AppLayout } from './shared/layout/AppLayout';
+import { AppProvider } from './shared/AppProvider';
 import { AuthGuard } from './components/AuthGuard';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { HubRoutes } from './modules/hub/routes';
@@ -24,14 +26,16 @@ export default function App() {
               path="/*"
               element={
                 <AuthGuard>
-                  <AppLayout>
-                    <Routes>
-                      <Route path="/" element={<Navigate to="/hub" replace />} />
-                      <Route path="/hub/*" element={<HubRoutes />} />
-                      <Route path="/coach/*" element={<CoachRoutes />} />
-                      <Route path="/chef/*" element={<ChefRoutes />} />
-                    </Routes>
-                  </AppLayout>
+                  <AppProvider>
+                    <AppLayout>
+                      <Routes>
+                        <Route path="/" element={<Navigate to="/hub" replace />} />
+                        <Route path="/hub/*" element={<ErrorBoundary module="Hub"><HubRoutes /></ErrorBoundary>} />
+                        <Route path="/coach/*" element={<ErrorBoundary module="CoachByte"><CoachRoutes /></ErrorBoundary>} />
+                        <Route path="/chef/*" element={<ErrorBoundary module="ChefByte"><ChefRoutes /></ErrorBoundary>} />
+                      </Routes>
+                    </AppLayout>
+                  </AppProvider>
                 </AuthGuard>
               }
             />
