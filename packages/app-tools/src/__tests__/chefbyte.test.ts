@@ -445,10 +445,24 @@ describe('CHEFBYTE_add_stock', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'FK violation: product not found' };
 
-    const result = await addStock.handler({ product_id: 'nonexistent', qty_containers: 1 }, ctx(mock.supabase));
+    // Provide location_id to skip location lookup (which would also hit the mock chain)
+    const result = await addStock.handler(
+      { product_id: 'nonexistent', qty_containers: 1, location_id: 'loc-1' },
+      ctx(mock.supabase),
+    );
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('FK violation');
+  });
+
+  it('returns error when no locations found and location_id not provided', async () => {
+    mock.cbChain.data = [];
+    mock.cbChain.error = null;
+
+    const result = await addStock.handler({ product_id: 'p-1', qty_containers: 1 }, ctx(mock.supabase));
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('No storage locations found');
   });
 });
 

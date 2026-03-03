@@ -26,10 +26,25 @@ const mockProduct = {
 
 const mockChain: any = {};
 const chainMethods = [
-  'select', 'eq', 'neq', 'order', 'or', 'single', 'update',
-  'insert', 'delete', 'limit', 'is', 'in', 'gt', 'lt', 'upsert',
+  'select',
+  'eq',
+  'neq',
+  'order',
+  'or',
+  'single',
+  'update',
+  'insert',
+  'delete',
+  'limit',
+  'is',
+  'in',
+  'gt',
+  'lt',
+  'upsert',
 ];
-chainMethods.forEach(m => { mockChain[m] = vi.fn(() => mockChain); });
+chainMethods.forEach((m) => {
+  mockChain[m] = vi.fn(() => mockChain);
+});
 // Default: return null (no product found)
 mockChain.then = vi.fn((cb: any) => cb({ data: null, error: null }));
 
@@ -229,7 +244,7 @@ describe('ScannerPage', () => {
     renderPage();
     fireEvent.click(screen.getByTestId('mode-consume_macros'));
     expect(screen.getByTestId('unit-toggle')).toBeInTheDocument();
-    expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Servings');
+    expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Serving');
   });
 
   it('shows unit toggle in consume-no-macros mode', () => {
@@ -252,13 +267,13 @@ describe('ScannerPage', () => {
   it('toggles unit between Servings and Containers', () => {
     renderPage();
     fireEvent.click(screen.getByTestId('mode-consume_macros'));
-    expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Servings');
+    expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Serving');
 
     fireEvent.click(screen.getByTestId('unit-toggle'));
-    expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Containers');
+    expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Container');
 
     fireEvent.click(screen.getByTestId('unit-toggle'));
-    expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Servings');
+    expect(screen.getByTestId('unit-toggle')).toHaveTextContent('Serving');
   });
 
   /* ---------------------------------------------------------------- */
@@ -287,7 +302,7 @@ describe('ScannerPage', () => {
 
     // Verify the queue item shows "Purchased 1 containers" (default mode is purchase)
     expect(screen.getByTestId('queue-list')).toHaveTextContent('Purchased');
-    expect(screen.getByTestId('queue-list')).toHaveTextContent('1 containers');
+    expect(screen.getByTestId('queue-list')).toHaveTextContent('1 container');
 
     // Empty queue message should be gone
     expect(screen.queryByTestId('queue-empty')).not.toBeInTheDocument();

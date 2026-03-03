@@ -83,11 +83,7 @@ export function HomePage() {
     if (!userId) return;
 
     // 1. Status cards — missing prices
-    const { data: mp } = await chefbyte()
-      .from('products')
-      .select('product_id')
-      .eq('user_id', userId)
-      .is('price', null);
+    const { data: mp } = await chefbyte().from('products').select('product_id').eq('user_id', userId).is('price', null);
     setMissingPrices((mp ?? []).length);
 
     // 2. Placeholders
@@ -133,7 +129,25 @@ export function HomePage() {
     const { data: macroData } = await (chefbyte() as any).rpc('get_daily_macros', {
       p_logical_date: today,
     });
-    setMacros(macroData as MacroTotals | null);
+    if (macroData) {
+      const rpc = macroData as Record<string, { consumed: number; goal: number; remaining: number }>;
+      setMacros({
+        consumed: {
+          calories: Number(rpc.calories?.consumed) || 0,
+          protein: Number(rpc.protein?.consumed) || 0,
+          carbs: Number(rpc.carbs?.consumed) || 0,
+          fat: Number(rpc.fat?.consumed) || 0,
+        },
+        goals: {
+          calories: Number(rpc.calories?.goal) || 0,
+          protein: Number(rpc.protein?.goal) || 0,
+          carbs: Number(rpc.carbs?.goal) || 0,
+          fats: Number(rpc.fat?.goal) || 0,
+        },
+      });
+    } else {
+      setMacros(null);
+    }
 
     // 6. Today's meal prep
     const { data: prepData } = await chefbyte()
@@ -149,6 +163,8 @@ export function HomePage() {
   }, [userId, today]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
@@ -175,9 +191,7 @@ export function HomePage() {
       { key: 'goal_fats', value: String(targetFats) },
     ];
     for (const { key, value } of keys) {
-      await chefbyte()
-        .from('user_config')
-        .upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
+      await chefbyte().from('user_config').upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
     }
     setShowTargetModal(false);
     await loadData();
@@ -203,10 +217,7 @@ export function HomePage() {
     if (!user) return;
     await chefbyte()
       .from('user_config')
-      .upsert(
-        { user_id: user.id, key: 'taste_profile', value: tasteProfile },
-        { onConflict: 'user_id,key' },
-      );
+      .upsert({ user_id: user.id, key: 'taste_profile', value: tasteProfile }, { onConflict: 'user_id,key' });
     setShowTasteModal(false);
   };
 
@@ -216,6 +227,17 @@ export function HomePage() {
 
   const importShopping = async () => {
     if (!user) return;
+
+    // Get user's default location (first by created_at)
+    const { data: locations } = await chefbyte()
+      .from('locations')
+      .select('location_id')
+      .eq('user_id', user.id)
+      .order('created_at')
+      .limit(1);
+    const defaultLocationId = (locations?.[0] as any)?.location_id;
+    if (!defaultLocationId) return; // No locations — can't import
+
     // Get non-placeholder items from shopping list
     const { data: items } = await chefbyte()
       .from('shopping_list')
@@ -223,20 +245,19 @@ export function HomePage() {
       .eq('user_id', user.id)
       .eq('purchased', false);
 
-    let imported = 0;
     for (const item of (items ?? []) as any[]) {
       if (item.products?.is_placeholder) continue;
       // Insert stock lot for each shopping item
-      await chefbyte().from('stock_lots').insert({
-        user_id: user.id,
-        product_id: item.product_id,
-        qty_containers: Number(item.qty_containers),
-        location_id: null,
-        expires_on: null,
-      });
+      await chefbyte()
+        .from('stock_lots')
+        .insert({
+          user_id: user.id,
+          product_id: item.product_id,
+          qty_containers: Number(item.qty_containers),
+          location_id: defaultLocationId,
+        });
       // Remove from shopping list
-      await chefbyte().from('shopping_list').delete().eq('item_id', item.item_id);
-      imported++;
+      await chefbyte().from('shopping_list').delete().eq('cart_item_id', item.cart_item_id);
     }
     await loadData();
   };
@@ -275,19 +296,55 @@ export function HomePage() {
         data-testid="status-cards"
         style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}
       >
-        <div data-testid="card-missing-prices" style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+        <div
+          data-testid="card-missing-prices"
+          style={{
+            background: '#f7f7f9',
+            border: '1px solid #eee',
+            borderRadius: '8px',
+            padding: '12px',
+            textAlign: 'center',
+          }}
+        >
           <div style={{ fontSize: '24px', fontWeight: 700 }}>{missingPrices}</div>
           <div style={{ fontSize: '12px', color: '#666' }}>Missing Prices</div>
         </div>
-        <div data-testid="card-placeholders" style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+        <div
+          data-testid="card-placeholders"
+          style={{
+            background: '#f7f7f9',
+            border: '1px solid #eee',
+            borderRadius: '8px',
+            padding: '12px',
+            textAlign: 'center',
+          }}
+        >
           <div style={{ fontSize: '24px', fontWeight: 700 }}>{placeholders}</div>
           <div style={{ fontSize: '12px', color: '#666' }}>Placeholders</div>
         </div>
-        <div data-testid="card-below-min" style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+        <div
+          data-testid="card-below-min"
+          style={{
+            background: '#f7f7f9',
+            border: '1px solid #eee',
+            borderRadius: '8px',
+            padding: '12px',
+            textAlign: 'center',
+          }}
+        >
           <div style={{ fontSize: '24px', fontWeight: 700 }}>{belowMinStock}</div>
           <div style={{ fontSize: '12px', color: '#666' }}>Below Min Stock</div>
         </div>
-        <div data-testid="card-cart-value" style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px', textAlign: 'center' }}>
+        <div
+          data-testid="card-cart-value"
+          style={{
+            background: '#f7f7f9',
+            border: '1px solid #eee',
+            borderRadius: '8px',
+            padding: '12px',
+            textAlign: 'center',
+          }}
+        >
           <div style={{ fontSize: '24px', fontWeight: 700 }}>${cartValue.toFixed(2)}</div>
           <div style={{ fontSize: '12px', color: '#666' }}>Cart Value</div>
         </div>
@@ -302,33 +359,69 @@ export function HomePage() {
           {/* Calories */}
           <div data-testid="compact-calories" style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '0.8em', color: '#666' }}>Calories</div>
-            <div style={{ fontWeight: 700 }}>{consumed.calories}/{goals.calories}</div>
+            <div style={{ fontWeight: 700 }}>
+              {consumed.calories}/{goals.calories}
+            </div>
             <div style={{ background: '#eee', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-              <div style={{ width: `${pctOf(consumed.calories, goals.calories)}%`, height: '100%', background: '#3880ff', borderRadius: '4px' }} />
+              <div
+                style={{
+                  width: `${pctOf(consumed.calories, goals.calories)}%`,
+                  height: '100%',
+                  background: '#3880ff',
+                  borderRadius: '4px',
+                }}
+              />
             </div>
           </div>
           {/* Protein */}
           <div data-testid="compact-protein" style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '0.8em', color: '#666' }}>Protein</div>
-            <div style={{ fontWeight: 700 }}>{consumed.protein}g/{goals.protein}g</div>
+            <div style={{ fontWeight: 700 }}>
+              {consumed.protein}g/{goals.protein}g
+            </div>
             <div style={{ background: '#eee', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-              <div style={{ width: `${pctOf(consumed.protein, goals.protein)}%`, height: '100%', background: '#2dd36f', borderRadius: '4px' }} />
+              <div
+                style={{
+                  width: `${pctOf(consumed.protein, goals.protein)}%`,
+                  height: '100%',
+                  background: '#2dd36f',
+                  borderRadius: '4px',
+                }}
+              />
             </div>
           </div>
           {/* Carbs */}
           <div data-testid="compact-carbs" style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '0.8em', color: '#666' }}>Carbs</div>
-            <div style={{ fontWeight: 700 }}>{consumed.carbs}g/{goals.carbs}g</div>
+            <div style={{ fontWeight: 700 }}>
+              {consumed.carbs}g/{goals.carbs}g
+            </div>
             <div style={{ background: '#eee', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-              <div style={{ width: `${pctOf(consumed.carbs, goals.carbs)}%`, height: '100%', background: '#ffc409', borderRadius: '4px' }} />
+              <div
+                style={{
+                  width: `${pctOf(consumed.carbs, goals.carbs)}%`,
+                  height: '100%',
+                  background: '#ffc409',
+                  borderRadius: '4px',
+                }}
+              />
             </div>
           </div>
           {/* Fats */}
           <div data-testid="compact-fats" style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '0.8em', color: '#666' }}>Fats</div>
-            <div style={{ fontWeight: 700 }}>{consumed.fat}g/{goals.fats}g</div>
+            <div style={{ fontWeight: 700 }}>
+              {consumed.fat}g/{goals.fats}g
+            </div>
             <div style={{ background: '#eee', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-              <div style={{ width: `${pctOf(consumed.fat, goals.fats)}%`, height: '100%', background: '#eb445a', borderRadius: '4px' }} />
+              <div
+                style={{
+                  width: `${pctOf(consumed.fat, goals.fats)}%`,
+                  height: '100%',
+                  background: '#eb445a',
+                  borderRadius: '4px',
+                }}
+              />
             </div>
           </div>
         </div>
@@ -363,7 +456,7 @@ export function HomePage() {
           </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {mealPrep.map(entry => (
+            {mealPrep.map((entry) => (
               <div
                 key={entry.meal_id}
                 data-testid={`prep-entry-${entry.meal_id}`}
@@ -378,9 +471,7 @@ export function HomePage() {
                   alignItems: 'center',
                 }}
               >
-                <span style={{ fontWeight: 600 }}>
-                  {entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}
-                </span>
+                <span style={{ fontWeight: 600 }}>{entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}</span>
                 <span style={{ color: '#666', fontSize: '0.9em' }}>
                   {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
                 </span>
@@ -397,9 +488,16 @@ export function HomePage() {
         <div
           data-testid="target-macros-modal"
           style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.5)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', zIndex: 100,
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
           }}
         >
           <IonCard style={{ width: '100%', maxWidth: '500px', margin: '16px' }}>
@@ -409,28 +507,41 @@ export function HomePage() {
             <IonCardContent>
               <div style={{ display: 'grid', gap: '8px' }}>
                 <IonInput
-                  label="Protein (g)" type="number" value={targetProtein}
-                  onIonInput={e => setTargetProtein(Number(e.detail.value) || 0)}
+                  label="Protein (g)"
+                  type="number"
+                  value={targetProtein}
+                  onIonInput={(e) => setTargetProtein(Number(e.detail.value) || 0)}
                   data-testid="target-protein"
                 />
                 <IonInput
-                  label="Carbs (g)" type="number" value={targetCarbs}
-                  onIonInput={e => setTargetCarbs(Number(e.detail.value) || 0)}
+                  label="Carbs (g)"
+                  type="number"
+                  value={targetCarbs}
+                  onIonInput={(e) => setTargetCarbs(Number(e.detail.value) || 0)}
                   data-testid="target-carbs"
                 />
                 <IonInput
-                  label="Fats (g)" type="number" value={targetFats}
-                  onIonInput={e => setTargetFats(Number(e.detail.value) || 0)}
+                  label="Fats (g)"
+                  type="number"
+                  value={targetFats}
+                  onIonInput={(e) => setTargetFats(Number(e.detail.value) || 0)}
                   data-testid="target-fats"
                 />
-                <div data-testid="target-calories" style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}>
+                <div
+                  data-testid="target-calories"
+                  style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}
+                >
                   <strong>Calories (auto): </strong>
                   {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFats)}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton fill="clear" onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">Cancel</IonButton>
-                <IonButton onClick={saveTargets} data-testid="target-save-btn">Save</IonButton>
+                <IonButton fill="clear" onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">
+                  Cancel
+                </IonButton>
+                <IonButton onClick={saveTargets} data-testid="target-save-btn">
+                  Save
+                </IonButton>
               </div>
             </IonCardContent>
           </IonCard>
@@ -444,9 +555,16 @@ export function HomePage() {
         <div
           data-testid="taste-modal"
           style={{
-            position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
-            background: 'rgba(0,0,0,0.5)', display: 'flex',
-            alignItems: 'center', justifyContent: 'center', zIndex: 100,
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
           }}
         >
           <IonCard style={{ width: '100%', maxWidth: '500px', margin: '16px' }}>
@@ -456,13 +574,17 @@ export function HomePage() {
             <IonCardContent>
               <IonTextarea
                 value={tasteProfile}
-                onIonInput={e => setTasteProfile(e.detail.value ?? '')}
+                onIonInput={(e) => setTasteProfile(e.detail.value ?? '')}
                 data-testid="taste-textarea"
                 rows={5}
               />
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton fill="clear" onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">Cancel</IonButton>
-                <IonButton onClick={saveTasteProfile} data-testid="taste-save-btn">Save</IonButton>
+                <IonButton fill="clear" onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">
+                  Cancel
+                </IonButton>
+                <IonButton onClick={saveTasteProfile} data-testid="taste-save-btn">
+                  Save
+                </IonButton>
               </div>
             </IonCardContent>
           </IonCard>

@@ -13,8 +13,10 @@ vi.mock('@/shared/auth/AuthProvider', () => {
 /* ------------------------------------------------------------------ */
 
 const mockMacroData = {
-  consumed: { calories: 1200, protein: 80, carbs: 150, fat: 40 },
-  goals: { calories: 2000, protein: 150, carbs: 250, fats: 65 },
+  calories: { consumed: 1200, goal: 2000, remaining: 800 },
+  protein: { consumed: 80, goal: 150, remaining: 70 },
+  carbs: { consumed: 150, goal: 250, remaining: 100 },
+  fat: { consumed: 40, goal: 65, remaining: 25 },
 };
 
 const mockMealPrep = [
@@ -51,7 +53,7 @@ const tableData: Record<string, any> = {
   // Shopping list for cart value
   shopping_list: [
     { qty_containers: 2, products: { price: 4.99 } },
-    { qty_containers: 1, products: { price: 12.50 } },
+    { qty_containers: 1, products: { price: 12.5 } },
   ],
   // Meal prep entries
   meal_plan_entries: mockMealPrep,
@@ -71,9 +73,23 @@ const mockRpc = vi.fn(rpcImpl);
 
 const mockChain: any = {};
 const chainMethods = [
-  'select', 'eq', 'neq', 'order', 'or', 'single', 'update',
-  'insert', 'delete', 'limit', 'is', 'in', 'gt', 'lt',
-  'gte', 'lte', 'upsert',
+  'select',
+  'eq',
+  'neq',
+  'order',
+  'or',
+  'single',
+  'update',
+  'insert',
+  'delete',
+  'limit',
+  'is',
+  'in',
+  'gt',
+  'lt',
+  'gte',
+  'lte',
+  'upsert',
 ];
 const thenImpl = (cb: any) => {
   let data: any = null;
@@ -91,7 +107,7 @@ const thenImpl = (cb: any) => {
   return cb({ data, error: null });
 };
 
-chainMethods.forEach(m => {
+chainMethods.forEach((m) => {
   mockChain[m] = vi.fn((...args: any[]) => {
     // Track query context based on filter args
     if (m === 'is' && args[0] === 'price') queryCtx = 'prices';
@@ -134,7 +150,7 @@ describe('HomePage', () => {
     vi.clearAllMocks();
     // Restore implementations
     mockRpc.mockImplementation(rpcImpl);
-    chainMethods.forEach(m => {
+    chainMethods.forEach((m) => {
       mockChain[m] = vi.fn((...args: any[]) => {
         if (m === 'is' && args[0] === 'price') queryCtx = 'prices';
         if (m === 'eq' && args[0] === 'is_placeholder' && args[1] === true) queryCtx = 'placeholders';
@@ -326,9 +342,12 @@ describe('HomePage', () => {
     await waitFor(() => {
       expect(screen.getByTestId('macro-summary')).toBeInTheDocument();
     });
-    expect(mockRpc).toHaveBeenCalledWith('get_daily_macros', expect.objectContaining({
-      p_logical_date: expect.any(String),
-    }));
+    expect(mockRpc).toHaveBeenCalledWith(
+      'get_daily_macros',
+      expect.objectContaining({
+        p_logical_date: expect.any(String),
+      }),
+    );
   });
 });
 

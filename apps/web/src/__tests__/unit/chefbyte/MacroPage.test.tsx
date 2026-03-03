@@ -23,24 +23,20 @@ const mockMacroData = {
 const mockFoodLogs = [
   {
     log_id: 'fl-1',
-    product_id: null,
-    recipe_id: 'r1',
+    product_id: 'p2',
     calories: 310,
     protein: 28,
     carbs: 22,
     fat: 8,
-    recipes: { name: 'Yogurt Bowl' },
-    products: null,
+    products: { name: 'Yogurt Bowl' },
   },
   {
     log_id: 'fl-2',
     product_id: 'p1',
-    recipe_id: null,
     calories: 500,
     protein: 24,
     carbs: 60,
     fat: 20,
-    recipes: null,
     products: { name: 'Protein Bar' },
   },
 ];
@@ -72,10 +68,20 @@ const mockPlannedMeals = [
     servings: 2,
     recipes: {
       name: 'Chicken Stir Fry',
-      calories_per_serving: 210,
-      protein_per_serving: 19,
-      carbs_per_serving: 16,
-      fat_per_serving: 7,
+      base_servings: 1,
+      recipe_ingredients: [
+        {
+          quantity: 1,
+          unit: 'serving',
+          products: {
+            calories_per_serving: 210,
+            protein_per_serving: 19,
+            carbs_per_serving: 16,
+            fat_per_serving: 7,
+            servings_per_container: 1,
+          },
+        },
+      ],
     },
     products: null,
   },

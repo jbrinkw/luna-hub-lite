@@ -19,12 +19,26 @@ export const addStock: ToolDefinition = {
 
     if (qty_containers <= 0) return toolError('qty_containers must be positive');
 
+    // Resolve location_id: use provided, or fetch default (first by created_at)
+    let resolvedLocationId = location_id;
+    if (!resolvedLocationId) {
+      const { data: locs, error: locError } = await ctx.supabase
+        .schema('chefbyte')
+        .from('locations')
+        .select('location_id')
+        .eq('user_id', ctx.userId)
+        .order('created_at', { ascending: true })
+        .limit(1);
+      if (locError || !locs?.length) return toolError('No storage locations found. Activate ChefByte first.');
+      resolvedLocationId = (locs[0] as any).location_id;
+    }
+
     const row: Record<string, any> = {
       user_id: ctx.userId,
       product_id,
       qty_containers,
+      location_id: resolvedLocationId,
     };
-    if (location_id) row.location_id = location_id;
     if (expires_on) row.expires_on = expires_on;
 
     const { data, error } = await ctx.supabase

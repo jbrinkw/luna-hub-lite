@@ -12,6 +12,7 @@ import {
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { computeRecipeMacros } from './RecipesPage';
 
 // Cast needed: chefbyte schema types not yet generated
 const chefbyte = () => supabase.schema('chefbyte') as any;
@@ -132,18 +133,16 @@ export function MacroPage() {
     // food_logs (from meal plan completions and scanner)
     const { data: foodLogs } = await chefbyte()
       .from('food_logs')
-      .select(
-        'log_id, product_id, recipe_id, calories, protein, carbs, fat, products:product_id(name), recipes:recipe_id(name)',
-      )
+      .select('log_id, product_id, calories, protein, carbs, fat, products:product_id(name)')
       .eq('user_id', userId)
       .eq('logical_date', currentDate)
-      .order('logged_at');
+      .order('created_at');
 
     for (const log of (foodLogs ?? []) as any[]) {
       items.push({
         id: log.log_id,
         source: 'Meal Plan',
-        name: log.recipes?.name ?? log.products?.name ?? 'Unknown',
+        name: log.products?.name ?? 'Unknown',
         calories: Number(log.calories) || 0,
         protein: Number(log.protein) || 0,
         carbs: Number(log.carbs) || 0,
@@ -177,7 +176,7 @@ export function MacroPage() {
       .select('event_id, calories, protein, carbs, fat')
       .eq('user_id', userId)
       .eq('logical_date', currentDate)
-      .order('logged_at');
+      .order('created_at');
 
     for (const ev of (ltEvents ?? []) as any[]) {
       items.push({
@@ -197,7 +196,7 @@ export function MacroPage() {
     const { data: plannedData } = await chefbyte()
       .from('meal_plan_entries')
       .select(
-        'meal_id, servings, recipes:recipe_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving)',
+        'meal_id, servings, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving)',
       )
       .eq('user_id', userId)
       .eq('logical_date', currentDate)
@@ -206,16 +205,32 @@ export function MacroPage() {
 
     const plannedItems: PlannedItem[] = [];
     for (const entry of (plannedData ?? []) as any[]) {
-      const src = entry.recipes ?? entry.products;
       const servings = Number(entry.servings) || 1;
-      plannedItems.push({
-        meal_id: entry.meal_id,
-        name: src?.name ?? 'Unknown',
-        calories: Math.round((Number(src?.calories_per_serving) || 0) * servings),
-        protein: Math.round((Number(src?.protein_per_serving) || 0) * servings),
-        carbs: Math.round((Number(src?.carbs_per_serving) || 0) * servings),
-        fat: Math.round((Number(src?.fat_per_serving) || 0) * servings),
-      });
+      if (entry.recipes) {
+        // Recipe-based entry: compute macros from ingredients
+        const recipeMacros = computeRecipeMacros(
+          entry.recipes.recipe_ingredients ?? [],
+          Number(entry.recipes.base_servings) || 1,
+        );
+        plannedItems.push({
+          meal_id: entry.meal_id,
+          name: entry.recipes.name ?? 'Unknown',
+          calories: Math.round(recipeMacros.calories * servings),
+          protein: Math.round(recipeMacros.protein * servings),
+          carbs: Math.round(recipeMacros.carbs * servings),
+          fat: Math.round(recipeMacros.fat * servings),
+        });
+      } else if (entry.products) {
+        // Product-based entry: use per-serving macros directly
+        plannedItems.push({
+          meal_id: entry.meal_id,
+          name: entry.products.name ?? 'Unknown',
+          calories: Math.round((Number(entry.products.calories_per_serving) || 0) * servings),
+          protein: Math.round((Number(entry.products.protein_per_serving) || 0) * servings),
+          carbs: Math.round((Number(entry.products.carbs_per_serving) || 0) * servings),
+          fat: Math.round((Number(entry.products.fat_per_serving) || 0) * servings),
+        });
+      }
     }
     setPlanned(plannedItems);
 
