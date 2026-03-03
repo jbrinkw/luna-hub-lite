@@ -686,17 +686,17 @@ describe('CHEFBYTE_get_cookable', () => {
       {
         recipe_id: 'r-1',
         name: 'Chicken Rice Bowl',
-        servings: 2,
+        base_servings: 2,
         recipe_ingredients: [
-          { product_id: 'p-1', qty_containers: 1 },
-          { product_id: 'p-2', qty_containers: 0.5 },
+          { product_id: 'p-1', quantity: 1, unit: 'container' },
+          { product_id: 'p-2', quantity: 0.5, unit: 'container' },
         ],
       },
       {
         recipe_id: 'r-2',
         name: 'Pasta',
-        servings: 4,
-        recipe_ingredients: [{ product_id: 'p-3', qty_containers: 2 }],
+        base_servings: 4,
+        recipe_ingredients: [{ product_id: 'p-3', quantity: 2, unit: 'container' }],
       },
     ];
 
@@ -753,8 +753,8 @@ describe('CHEFBYTE_get_cookable', () => {
       {
         recipe_id: 'r-1',
         name: 'Some Recipe',
-        servings: 2,
-        recipe_ingredients: [{ product_id: 'p-1', qty_containers: 1 }],
+        base_servings: 2,
+        recipe_ingredients: [{ product_id: 'p-1', quantity: 1, unit: 'container' }],
       },
     ];
 
@@ -776,14 +776,14 @@ describe('CHEFBYTE_get_cookable', () => {
       {
         recipe_id: 'r-empty',
         name: 'Empty Recipe',
-        servings: 1,
+        base_servings: 1,
         recipe_ingredients: [],
       },
       {
         recipe_id: 'r-has-ing',
         name: 'Full Recipe',
-        servings: 2,
-        recipe_ingredients: [{ product_id: 'p-1', qty_containers: 1 }],
+        base_servings: 2,
+        recipe_ingredients: [{ product_id: 'p-1', quantity: 1, unit: 'container' }],
       },
     ];
 
@@ -816,8 +816,9 @@ describe('CHEFBYTE_create_recipe', () => {
     recipeInsertChain.data = {
       recipe_id: 'r-new',
       name: 'Stir Fry',
-      servings: 3,
-      prep_time: 20,
+      base_servings: 3,
+      active_time: 20,
+      total_time: null,
     };
 
     // Second call: insert ingredients
@@ -830,11 +831,11 @@ describe('CHEFBYTE_create_recipe', () => {
     const result = await createRecipe.handler(
       {
         name: 'Stir Fry',
-        servings: 3,
-        prep_time: 20,
+        base_servings: 3,
+        active_time: 20,
         ingredients: [
-          { product_id: 'p-1', qty_containers: 1 },
-          { product_id: 'p-2', qty_containers: 0.5 },
+          { product_id: 'p-1', quantity: 1 },
+          { product_id: 'p-2', quantity: 0.5 },
         ],
       },
       ctx(mock.supabase),
@@ -852,16 +853,16 @@ describe('CHEFBYTE_create_recipe', () => {
       expect.objectContaining({
         user_id: USER_ID,
         name: 'Stir Fry',
-        servings: 3,
-        prep_time: 20,
+        base_servings: 3,
+        active_time: 20,
       }),
     );
 
     // Verify ingredient insert
     expect(mock.cbFrom).toHaveBeenCalledWith('recipe_ingredients');
     expect(ingredientInsertChain.insert).toHaveBeenCalledWith([
-      { recipe_id: 'r-new', product_id: 'p-1', qty_containers: 1 },
-      { recipe_id: 'r-new', product_id: 'p-2', qty_containers: 0.5 },
+      { recipe_id: 'r-new', product_id: 'p-1', user_id: USER_ID, quantity: 1, unit: 'container' },
+      { recipe_id: 'r-new', product_id: 'p-2', user_id: USER_ID, quantity: 0.5, unit: 'container' },
     ]);
   });
 
@@ -1145,25 +1146,23 @@ describe('CHEFBYTE_get_meal_plan', () => {
     mock.cbChain.data = [
       {
         meal_id: 'm-1',
-        plan_date: '2026-03-01',
-        meal_type: 'breakfast',
+        logical_date: '2026-03-01',
+        meal_prep: false,
         recipe_id: 'r-1',
         product_id: null,
         servings: 2,
         completed_at: '2026-03-01T12:00:00Z',
-        logical_date: '2026-03-01',
         recipes: { name: 'Oatmeal Bowl' },
         products: null,
       },
       {
         meal_id: 'm-2',
-        plan_date: '2026-03-01',
-        meal_type: 'lunch',
+        logical_date: '2026-03-01',
+        meal_prep: false,
         recipe_id: null,
         product_id: 'p-1',
         servings: null,
         completed_at: null,
-        logical_date: '2026-03-01',
         recipes: null,
         products: { name: 'Protein Bar' },
       },
@@ -1190,8 +1189,8 @@ describe('CHEFBYTE_get_meal_plan', () => {
     expect(parsed.entries[1].completed).toBe(false);
 
     expect(mock.cbFrom).toHaveBeenCalledWith('meal_plan_entries');
-    expect(mock.cbChain.gte).toHaveBeenCalledWith('plan_date', '2026-03-01');
-    expect(mock.cbChain.lte).toHaveBeenCalledWith('plan_date', '2026-03-07');
+    expect(mock.cbChain.gte).toHaveBeenCalledWith('logical_date', '2026-03-01');
+    expect(mock.cbChain.lte).toHaveBeenCalledWith('logical_date', '2026-03-07');
   });
 
   it('returns error when query fails', async () => {
@@ -1219,8 +1218,8 @@ describe('CHEFBYTE_add_meal', () => {
   it('inserts meal plan entry and returns success', async () => {
     mock.cbChain.data = {
       meal_id: 'm-new',
-      plan_date: '2026-03-05',
-      meal_type: 'dinner',
+      logical_date: '2026-03-05',
+      meal_prep: false,
       recipe_id: 'r-1',
       product_id: null,
       servings: 3,
@@ -1228,7 +1227,7 @@ describe('CHEFBYTE_add_meal', () => {
     mock.cbChain.error = null;
 
     const result = await addMeal.handler(
-      { plan_date: '2026-03-05', meal_type: 'dinner', recipe_id: 'r-1', servings: 3 },
+      { logical_date: '2026-03-05', recipe_id: 'r-1', servings: 3 },
       ctx(mock.supabase),
     );
 
@@ -1236,14 +1235,13 @@ describe('CHEFBYTE_add_meal', () => {
     const parsed = parseResult(result);
     expect(parsed.message).toContain('Meal plan entry added');
     expect(parsed.meal.meal_id).toBe('m-new');
-    expect(parsed.meal.meal_type).toBe('dinner');
 
     expect(mock.cbFrom).toHaveBeenCalledWith('meal_plan_entries');
     expect(mock.cbChain.insert).toHaveBeenCalledWith(
       expect.objectContaining({
         user_id: USER_ID,
-        plan_date: '2026-03-05',
-        meal_type: 'dinner',
+        logical_date: '2026-03-05',
+        meal_prep: false,
         recipe_id: 'r-1',
         servings: 3,
       }),
@@ -1251,7 +1249,7 @@ describe('CHEFBYTE_add_meal', () => {
   });
 
   it('rejects when neither recipe_id nor product_id is provided', async () => {
-    const result = await addMeal.handler({ plan_date: '2026-03-05', meal_type: 'lunch' }, ctx(mock.supabase));
+    const result = await addMeal.handler({ logical_date: '2026-03-05' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('At least one of recipe_id or product_id is required');
@@ -1261,10 +1259,7 @@ describe('CHEFBYTE_add_meal', () => {
     mock.cbChain.data = null;
     mock.cbChain.error = { message: 'FK violation: recipe not found' };
 
-    const result = await addMeal.handler(
-      { plan_date: '2026-03-05', meal_type: 'dinner', recipe_id: 'bad-id' },
-      ctx(mock.supabase),
-    );
+    const result = await addMeal.handler({ logical_date: '2026-03-05', recipe_id: 'bad-id' }, ctx(mock.supabase));
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('FK violation: recipe not found');

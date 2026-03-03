@@ -8,9 +8,10 @@ export const createRecipe: ToolDefinition = {
     type: 'object',
     properties: {
       name: { type: 'string', description: 'Recipe name' },
-      instructions: { type: 'string', description: 'Cooking instructions (optional)' },
-      servings: { type: 'integer', description: 'Number of servings (optional)' },
-      prep_time: { type: 'integer', description: 'Prep time in minutes (optional)' },
+      description: { type: 'string', description: 'Recipe description (optional)' },
+      base_servings: { type: 'number', description: 'Number of servings (optional)' },
+      active_time: { type: 'integer', description: 'Active/prep time in minutes (optional)' },
+      total_time: { type: 'integer', description: 'Total time in minutes (optional)' },
       ingredients: {
         type: 'array',
         description: 'List of ingredients',
@@ -18,16 +19,21 @@ export const createRecipe: ToolDefinition = {
           type: 'object',
           properties: {
             product_id: { type: 'string', description: 'Product UUID' },
-            qty_containers: { type: 'number', description: 'Quantity in containers' },
+            quantity: { type: 'number', description: 'Quantity value' },
+            unit: {
+              type: 'string',
+              enum: ['container', 'serving'],
+              description: 'Unit of measure (default: container)',
+            },
           },
-          required: ['product_id', 'qty_containers'],
+          required: ['product_id', 'quantity'],
         },
       },
     },
     required: ['name', 'ingredients'],
   },
   handler: async (args, ctx) => {
-    const { name, instructions, servings, prep_time, ingredients } = args;
+    const { name, description, base_servings, active_time, total_time, ingredients } = args;
 
     if (!ingredients || ingredients.length === 0) {
       return toolError('At least one ingredient is required');
@@ -35,15 +41,16 @@ export const createRecipe: ToolDefinition = {
 
     // Insert recipe
     const recipeRow: Record<string, any> = { user_id: ctx.userId, name };
-    if (instructions !== undefined) recipeRow.instructions = instructions;
-    if (servings !== undefined) recipeRow.servings = servings;
-    if (prep_time !== undefined) recipeRow.prep_time = prep_time;
+    if (description !== undefined) recipeRow.description = description;
+    if (base_servings !== undefined) recipeRow.base_servings = base_servings;
+    if (active_time !== undefined) recipeRow.active_time = active_time;
+    if (total_time !== undefined) recipeRow.total_time = total_time;
 
     const { data: recipe, error: recipeError } = await ctx.supabase
       .schema('chefbyte')
       .from('recipes')
       .insert(recipeRow)
-      .select('recipe_id, name, servings, prep_time')
+      .select('recipe_id, name, base_servings, active_time, total_time')
       .single();
 
     if (recipeError) return toolError(`Failed to create recipe: ${recipeError.message}`);
@@ -52,21 +59,16 @@ export const createRecipe: ToolDefinition = {
     const ingredientRows = ingredients.map((ing: any) => ({
       recipe_id: recipe.recipe_id,
       product_id: ing.product_id,
-      qty_containers: ing.qty_containers,
+      user_id: ctx.userId,
+      quantity: ing.quantity,
+      unit: ing.unit || 'container',
     }));
 
-    const { error: ingError } = await ctx.supabase
-      .schema('chefbyte')
-      .from('recipe_ingredients')
-      .insert(ingredientRows);
+    const { error: ingError } = await ctx.supabase.schema('chefbyte').from('recipe_ingredients').insert(ingredientRows);
 
     if (ingError) {
       // Clean up the recipe if ingredients fail
-      await ctx.supabase
-        .schema('chefbyte')
-        .from('recipes')
-        .delete()
-        .eq('recipe_id', recipe.recipe_id);
+      await ctx.supabase.schema('chefbyte').from('recipes').delete().eq('recipe_id', recipe.recipe_id);
       return toolError(`Failed to add ingredients: ${ingError.message}`);
     }
 

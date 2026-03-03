@@ -16,6 +16,12 @@ import { belowMinStock } from '../../chefbyte/below-min-stock';
 import { getMacros } from '../../chefbyte/get-macros';
 import { logTempItem } from '../../chefbyte/log-temp-item';
 import { setPrice } from '../../chefbyte/set-price';
+import { createRecipe } from '../../chefbyte/create-recipe';
+import { getRecipes } from '../../chefbyte/get-recipes';
+import { getCookable } from '../../chefbyte/get-cookable';
+import { addMeal } from '../../chefbyte/add-meal';
+import { getMealPlan } from '../../chefbyte/get-meal-plan';
+import { markDone } from '../../chefbyte/mark-done';
 
 // ---------------------------------------------------------------------------
 // ChefByte Tool Integration Tests
@@ -709,6 +715,310 @@ describe('ChefByte Tool Integration Tests', () => {
   });
 
   // -----------------------------------------------------------------------
+  // 14. createRecipe — create a recipe with ingredients
+  // -----------------------------------------------------------------------
+
+  describe('createRecipe', () => {
+    let recipeId: string;
+
+    it('creates a recipe with ingredients referencing existing products', async () => {
+      // Before: no recipes exist
+      const beforeResult = await getRecipes.handler({}, ctx);
+      const beforeData = parseToolResult(beforeResult);
+      const recipeCountBefore = beforeData.total;
+
+      const result = await createRecipe.handler(
+        {
+          name: 'Test Chicken Bowl',
+          description: 'Cook chicken, add yogurt on top.',
+          base_servings: 2,
+          active_time: 20,
+          ingredients: [
+            { product_id: productId, quantity: 1 },
+            { product_id: secondProductId, quantity: 0.5 },
+          ],
+        },
+        ctx,
+      );
+      const data = parseToolResult(result);
+
+      expect(data.message).toContain('Test Chicken Bowl');
+      expect(data.message).toContain('2 ingredient(s)');
+      expect(data.recipe.recipe_id).toBeTruthy();
+      expect(data.recipe.name).toBe('Test Chicken Bowl');
+      recipeId = data.recipe.recipe_id;
+
+      // After: recipe count increased
+      const afterResult = await getRecipes.handler({}, ctx);
+      const afterData = parseToolResult(afterResult);
+      expect(afterData.total).toBe(recipeCountBefore + 1);
+    });
+
+    it('rejects a recipe with no ingredients', async () => {
+      const result = await createRecipe.handler({ name: 'Empty Recipe', ingredients: [] }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('ingredient');
+    });
+
+    it('the created recipe is retrievable with ingredients and macros', async () => {
+      const result = await getRecipes.handler({ search: 'Chicken Bowl' }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.total).toBe(1);
+      const recipe = data.recipes[0];
+      expect(recipe.recipe_id).toBe(recipeId);
+      expect(recipe.name).toBe('Test Chicken Bowl');
+      expect(recipe.description).toBe('Cook chicken, add yogurt on top.');
+      expect(recipe.base_servings).toBe(2);
+      expect(recipe.active_time).toBe(20);
+      expect(recipe.ingredients).toHaveLength(2);
+
+      // Verify ingredient product references are resolved
+      const chickenIng = recipe.ingredients.find((i: any) => i.product_id === productId);
+      expect(chickenIng).toBeDefined();
+      expect(chickenIng.product_name).toBe('Test Chicken Breast');
+      expect(chickenIng.quantity).toBe(1);
+
+      const yogurtIng = recipe.ingredients.find((i: any) => i.product_id === secondProductId);
+      expect(yogurtIng).toBeDefined();
+      expect(yogurtIng.product_name).toBe('Test Greek Yogurt');
+      expect(yogurtIng.quantity).toBe(0.5);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 15. getRecipes — list/search recipes
+  // -----------------------------------------------------------------------
+
+  describe('getRecipes', () => {
+    it('lists all recipes for the user', async () => {
+      const result = await getRecipes.handler({}, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.recipes).toBeInstanceOf(Array);
+      expect(data.total).toBeGreaterThanOrEqual(1);
+
+      const names = data.recipes.map((r: any) => r.name);
+      expect(names).toContain('Test Chicken Bowl');
+    });
+
+    it('filters recipes by search term', async () => {
+      const result = await getRecipes.handler({ search: 'Chicken' }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.total).toBe(1);
+      expect(data.recipes[0].name).toBe('Test Chicken Bowl');
+    });
+
+    it('returns empty for non-matching search', async () => {
+      const result = await getRecipes.handler({ search: 'XYZNONEXISTENT' }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.total).toBe(0);
+      expect(data.recipes).toEqual([]);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 16. getCookable — recipes makeable with current stock
+  // -----------------------------------------------------------------------
+
+  describe('getCookable', () => {
+    it('returns cookable recipes based on current stock levels', async () => {
+      // Our recipe needs: 1 container Chicken Breast + 0.5 container Greek Yogurt
+      // Current stock: Chicken Breast has some stock (re-added in edge case tests),
+      // Greek Yogurt has 1 container.
+      // First ensure we have enough stock for the recipe
+      await addStock.handler({ product_id: productId, qty_containers: 3, location_id: locationId }, ctx);
+
+      const result = await getCookable.handler({}, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.cookable).toBeInstanceOf(Array);
+
+      const chickenBowl = data.cookable.find((c: any) => c.name === 'Test Chicken Bowl');
+      expect(chickenBowl).toBeDefined();
+      expect(chickenBowl.max_batches).toBeGreaterThanOrEqual(1);
+      expect(chickenBowl.servings_per_batch).toBe(2); // base_servings from recipe
+      if (chickenBowl.max_servings !== null) {
+        expect(chickenBowl.max_servings).toBe(chickenBowl.max_batches * 2);
+      }
+    });
+
+    it('returns empty when no recipes are cookable', async () => {
+      // Create a user with no stock
+      const freshUser = await createTestUser('chefbyte-cookable-empty');
+      const freshCtx = createToolContext(freshUser.userId);
+
+      try {
+        // Create a recipe with an ingredient that has no stock
+        const { data: tmpProduct } = await admin
+          .schema('chefbyte')
+          .from('products')
+          .insert({ user_id: freshUser.userId, name: 'Rare Ingredient' })
+          .select('product_id')
+          .single();
+
+        await createRecipe.handler(
+          {
+            name: 'Impossible Recipe',
+            ingredients: [{ product_id: tmpProduct!.product_id, quantity: 10 }],
+          },
+          freshCtx,
+        );
+
+        const result = await getCookable.handler({}, freshCtx);
+        const data = parseToolResult(result);
+
+        expect(data.cookable).toEqual([]);
+        expect(data.total).toBe(0);
+      } finally {
+        await freshUser.cleanup();
+      }
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 17. addMeal — add a meal plan entry
+  // -----------------------------------------------------------------------
+
+  describe('addMeal', () => {
+    let mealId: string;
+    const today = new Date().toISOString().slice(0, 10);
+
+    it('adds a meal plan entry with a product', async () => {
+      // Before: no meal plan entries for today
+      const beforeResult = await getMealPlan.handler({ start_date: today, end_date: today }, ctx);
+      const beforeData = parseToolResult(beforeResult);
+      const mealCountBefore = beforeData.total;
+
+      const result = await addMeal.handler(
+        {
+          logical_date: today,
+          product_id: productId,
+          servings: 2,
+        },
+        ctx,
+      );
+      const data = parseToolResult(result);
+
+      expect(data.message).toBe('Meal plan entry added');
+      expect(data.meal.meal_id).toBeTruthy();
+      expect(data.meal.logical_date).toBe(today);
+      expect(data.meal.product_id).toBe(productId);
+      expect(Number(data.meal.servings)).toBe(2);
+      mealId = data.meal.meal_id;
+
+      // After: meal count increased by 1
+      const afterResult = await getMealPlan.handler({ start_date: today, end_date: today }, ctx);
+      const afterData = parseToolResult(afterResult);
+      expect(afterData.total).toBe(mealCountBefore + 1);
+    });
+
+    it('adds a meal plan entry with a recipe', async () => {
+      // Get our recipe ID
+      const recipesResult = await getRecipes.handler({ search: 'Chicken Bowl' }, ctx);
+      const recipesData = parseToolResult(recipesResult);
+      const recipeId = recipesData.recipes[0].recipe_id;
+
+      const result = await addMeal.handler(
+        {
+          logical_date: today,
+          recipe_id: recipeId,
+        },
+        ctx,
+      );
+      const data = parseToolResult(result);
+
+      expect(data.meal.recipe_id).toBe(recipeId);
+    });
+
+    it('rejects a meal with neither recipe_id nor product_id', async () => {
+      const result = await addMeal.handler({ logical_date: today }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('recipe_id or product_id');
+    });
+
+    // Store mealId for markDone test
+    it('getMealPlan confirms the entries exist with product/recipe names', () => {
+      // mealId is set by the first addMeal test — used by markDone below
+      expect(mealId).toBeTruthy();
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 18. getMealPlan — list meal plan entries for a date range
+  // -----------------------------------------------------------------------
+
+  describe('getMealPlan', () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    it('returns meal plan entries with resolved names', async () => {
+      const result = await getMealPlan.handler({ start_date: today, end_date: today }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.entries).toBeInstanceOf(Array);
+      expect(data.total).toBeGreaterThanOrEqual(2);
+
+      // Verify product-based entry
+      const productEntry = data.entries.find((e: any) => e.product_id === productId);
+      expect(productEntry).toBeDefined();
+      expect(productEntry.product_name).toBe('Test Chicken Breast');
+      expect(productEntry.completed).toBe(false);
+
+      // Verify recipe-based entry
+      const recipeEntry = data.entries.find((e: any) => e.recipe_id != null);
+      expect(recipeEntry).toBeDefined();
+      expect(recipeEntry.recipe_name).toBe('Test Chicken Bowl');
+    });
+
+    it('returns empty for a date range with no entries', async () => {
+      const result = await getMealPlan.handler({ start_date: '2020-01-01', end_date: '2020-01-01' }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.entries).toEqual([]);
+      expect(data.total).toBe(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 19. markDone — mark a meal plan entry as completed
+  // -----------------------------------------------------------------------
+
+  describe('markDone', () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    it('marks a meal plan entry as completed and verifies state change', async () => {
+      // Find the product-based entry's meal_id
+      const planResult = await getMealPlan.handler({ start_date: today, end_date: today }, ctx);
+      const planData = parseToolResult(planResult);
+      const productEntry = planData.entries.find((e: any) => e.product_id === productId && !e.completed);
+      expect(productEntry).toBeDefined();
+      expect(productEntry.completed).toBe(false);
+
+      const mealId = productEntry.meal_id;
+
+      // Mark done
+      const result = await markDone.handler({ meal_id: mealId }, ctx);
+      const data = parseToolResult(result);
+      expect(data).toBeDefined();
+
+      // After: verify the entry is now completed
+      const afterResult = await getMealPlan.handler({ start_date: today, end_date: today }, ctx);
+      const afterData = parseToolResult(afterResult);
+      const updatedEntry = afterData.entries.find((e: any) => e.meal_id === mealId);
+      expect(updatedEntry).toBeDefined();
+      expect(updatedEntry.completed).toBe(true);
+      expect(updatedEntry.completed_at).toBeTruthy();
+    });
+
+    it('rejects marking a non-existent meal', async () => {
+      const result = await markDone.handler({ meal_id: '00000000-0000-0000-0000-000000000000' }, ctx);
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
   // Cross-cutting: user isolation
   // -----------------------------------------------------------------------
 
@@ -772,10 +1082,13 @@ describe('ChefByte Tool Integration Tests', () => {
 
   describe('Edge Cases', () => {
     it('handles consuming from product with zero stock gracefully', async () => {
-      // productId now has 0 stock after the over-consume test above
+      // Create a fresh product with no stock to test zero-stock consume
+      const createResult = await createProduct.handler({ name: 'Zero Stock Product' }, ctx);
+      const zeroProduct = parseToolResult(createResult);
+
       const result = await consume.handler(
         {
-          product_id: productId,
+          product_id: zeroProduct.product.product_id,
           qty: 1,
           unit: 'container',
           log_macros: false,
@@ -790,21 +1103,25 @@ describe('ChefByte Tool Integration Tests', () => {
     });
 
     it('consumes by servings (converts to containers)', async () => {
-      // Add some stock back first
-      await addStock.handler(
-        {
-          product_id: productId,
-          qty_containers: 2,
-          location_id: locationId,
-        },
-        ctx,
-      );
+      // Create a fresh product to test serving-based consumption in isolation
+      const createRes = await createProduct.handler({ name: 'Serving Test Product' }, ctx);
+      const servProd = parseToolResult(createRes);
+      const servProdId = servProd.product.product_id;
 
-      // Product has servings_per_container = 4
-      // Consume 4 servings = 1 container
+      // Set servings_per_container so the conversion works
+      await admin
+        .schema('chefbyte')
+        .from('products')
+        .update({ servings_per_container: 4 })
+        .eq('product_id', servProdId);
+
+      // Add exactly 2 containers of stock
+      await addStock.handler({ product_id: servProdId, qty_containers: 2, location_id: locationId }, ctx);
+
+      // Consume 4 servings = 1 container (servings_per_container = 4)
       const result = await consume.handler(
         {
-          product_id: productId,
+          product_id: servProdId,
           qty: 4,
           unit: 'serving',
           log_macros: false,

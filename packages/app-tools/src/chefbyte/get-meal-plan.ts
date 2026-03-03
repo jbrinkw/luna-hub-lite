@@ -18,19 +18,21 @@ export const getMealPlan: ToolDefinition = {
     const { data, error } = await ctx.supabase
       .schema('chefbyte')
       .from('meal_plan_entries')
-      .select('meal_id, plan_date, meal_type, recipe_id, product_id, servings, completed_at, logical_date, recipes(name), products(name)')
+      .select(
+        'meal_id, logical_date, meal_prep, recipe_id, product_id, servings, completed_at, recipes(name), products(name)',
+      )
       .eq('user_id', ctx.userId)
-      .gte('plan_date', start_date)
-      .lte('plan_date', end_date)
-      .order('plan_date', { ascending: true })
-      .order('meal_type', { ascending: true });
+      .gte('logical_date', start_date)
+      .lte('logical_date', end_date)
+      .order('logical_date', { ascending: true })
+      .order('created_at', { ascending: true });
 
     if (error) return toolError(`Failed to fetch meal plan: ${error.message}`);
 
     const entries = (data || []).map((e: any) => ({
       meal_id: e.meal_id,
-      plan_date: e.plan_date,
-      meal_type: e.meal_type,
+      logical_date: e.logical_date,
+      meal_prep: e.meal_prep,
       recipe_id: e.recipe_id,
       recipe_name: e.recipes?.name ?? null,
       product_id: e.product_id,

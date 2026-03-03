@@ -13,7 +13,7 @@ export const getCookable: ToolDefinition = {
     const { data: recipes, error: recipeError } = await ctx.supabase
       .schema('chefbyte')
       .from('recipes')
-      .select('recipe_id, name, servings, recipe_ingredients(product_id, qty_containers)')
+      .select('recipe_id, name, base_servings, recipe_ingredients(product_id, quantity, unit)')
       .eq('user_id', ctx.userId);
 
     if (recipeError) return toolError(`Failed to fetch recipes: ${recipeError.message}`);
@@ -46,7 +46,7 @@ export const getCookable: ToolDefinition = {
       let canCook = true;
 
       for (const ing of ingredients) {
-        const needed = Number(ing.qty_containers);
+        const needed = Number(ing.quantity);
         const available = stockMap[ing.product_id] || 0;
 
         if (needed <= 0) continue;
@@ -61,12 +61,13 @@ export const getCookable: ToolDefinition = {
       }
 
       if (canCook && maxBatches > 0 && maxBatches < Infinity) {
+        const baseServings = recipe.base_servings ? Number(recipe.base_servings) : null;
         cookable.push({
           recipe_id: recipe.recipe_id,
           name: recipe.name,
-          servings_per_batch: recipe.servings,
+          servings_per_batch: baseServings,
           max_batches: maxBatches,
-          max_servings: recipe.servings ? maxBatches * recipe.servings : null,
+          max_servings: baseServings ? maxBatches * baseServings : null,
         });
       }
     }

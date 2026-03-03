@@ -7,20 +7,16 @@ export const addMeal: ToolDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      plan_date: { type: 'string', description: 'Plan date YYYY-MM-DD' },
-      meal_type: {
-        type: 'string',
-        enum: ['breakfast', 'lunch', 'dinner', 'snack'],
-        description: 'Meal type',
-      },
+      logical_date: { type: 'string', description: 'Plan date YYYY-MM-DD' },
+      meal_prep: { type: 'boolean', description: 'Whether this is a meal prep entry (default: false)' },
       recipe_id: { type: 'string', description: 'Recipe UUID (optional if product_id given)' },
       product_id: { type: 'string', description: 'Product UUID (optional if recipe_id given)' },
       servings: { type: 'number', description: 'Number of servings (optional)' },
     },
-    required: ['plan_date', 'meal_type'],
+    required: ['logical_date'],
   },
   handler: async (args, ctx) => {
-    const { plan_date, meal_type, recipe_id, product_id, servings } = args;
+    const { logical_date, meal_prep, recipe_id, product_id, servings } = args;
 
     if (!recipe_id && !product_id) {
       return toolError('At least one of recipe_id or product_id is required');
@@ -28,8 +24,8 @@ export const addMeal: ToolDefinition = {
 
     const row: Record<string, any> = {
       user_id: ctx.userId,
-      plan_date,
-      meal_type,
+      logical_date,
+      meal_prep: meal_prep ?? false,
     };
     if (recipe_id) row.recipe_id = recipe_id;
     if (product_id) row.product_id = product_id;
@@ -39,7 +35,7 @@ export const addMeal: ToolDefinition = {
       .schema('chefbyte')
       .from('meal_plan_entries')
       .insert(row)
-      .select('meal_id, plan_date, meal_type, recipe_id, product_id, servings')
+      .select('meal_id, logical_date, meal_prep, recipe_id, product_id, servings')
       .single();
 
     if (error) return toolError(`Failed to add meal: ${error.message}`);
