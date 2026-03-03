@@ -2,7 +2,7 @@
 > Previous: phase-05b.md | Next: phase-06b.md
 
 ## Skills
-test-driven-development, context7 (Supabase, pgTAP)
+test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 
 ## Build
 - Migration: `supabase/migrations/YYYYMMDD_chefbyte_products_stock.sql`
@@ -52,6 +52,9 @@ test-driven-development, context7 (Supabase, pgTAP)
 - Mutations accept servings (p_unit='servings') -> converted via servings_per_container
 - Inventory adjustments are stock-only: consume with p_log_macros=false -> no food_log row created
 - Consume with p_log_macros=true -> food_log row created with correct macros
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/chefbyte-vercel/apps/web/src/lib/api-supabase.ts` — product/stock Supabase queries, lot merge patterns

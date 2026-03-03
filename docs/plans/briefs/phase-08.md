@@ -2,7 +2,7 @@
 > Previous: phase-07c.md | Next: phase-09a.md
 
 ## Skills
-test-driven-development, context7 (Supabase Edge Functions, Deno)
+test-driven-development, test-quality-review, context7 (Supabase Edge Functions, Deno)
 
 ## Build
 - `supabase/functions/walmart-scrape/index.ts`:
@@ -41,6 +41,9 @@ test-driven-development, context7 (Supabase Edge Functions, Deno)
 - Weight delta = 0 (weight_before == weight_after) -> no event logged, success response with zero delta note
 - Device with linked product -> macros calculated correctly from weight delta * product nutrition per gram
 - POST without device_id -> 400 Bad Request
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna-ext-chefbyte/lib/integrations/walmart.py` — Walmart scraping logic, URL parsing, response normalization

@@ -2,7 +2,7 @@
 > Previous: phase-06e.md | Next: phase-07b.md
 
 ## Skills
-test-driven-development, frontend-design, context7 (Ionic React, Supabase)
+test-driven-development, test-quality-review, frontend-design, context7 (Ionic React, Supabase)
 
 ## Build
 - ChefByte layout shell with top nav: Scanner (default) / Home / Inventory / Shopping / Meal Plan / Recipes / Walmart / Settings
@@ -64,6 +64,9 @@ test-driven-development, frontend-design, context7 (Ionic React, Supabase)
 - Submit with valid data calls onLog callback with name + macros
 - Cancel button calls onCancel and closes form
 - Protein/carbs/fats default to 0
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/chefbyte-vercel/apps/web/src/pages/Scanner.tsx` — 4-mode scanner layout, queue rendering

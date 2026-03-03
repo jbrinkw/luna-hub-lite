@@ -2,7 +2,7 @@
 > Previous: phase-05a.md | Next: phase-06a.md
 
 ## Skills
-test-driven-development, frontend-design, requesting-code-review (phase boundary)
+test-driven-development, test-quality-review, frontend-design, requesting-code-review (phase boundary)
 
 ## Build
 
@@ -119,6 +119,9 @@ test-driven-development, frontend-design, requesting-code-review (phase boundary
 - Plate calculator: bar weight and available plates editable
 - Exercise library: search works, global + custom exercises listed
 - Custom exercise CRUD (add, delete), global exercises not deletable
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna_ext_coachbyte/services/api/server.py` — REST routes for history, splits, timer (port logic to React)

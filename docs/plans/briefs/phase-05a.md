@@ -2,7 +2,7 @@
 > Previous: phase-04b.md | Next: phase-05b.md
 
 ## Skills
-test-driven-development, frontend-design, context7 (Ionic React, Supabase Realtime)
+test-driven-development, test-quality-review, frontend-design, context7 (Ionic React, Supabase Realtime)
 
 ## Build
 
@@ -65,6 +65,9 @@ test-driven-development, frontend-design, context7 (Ionic React, Supabase Realti
 - Subscribe to completed_sets → complete a set via RPC → subscriber receives INSERT event
 - Subscribe to planned_sets → add planned set → subscriber receives INSERT event
 - Verify subscription filters by user_id (User B changes don't trigger User A's subscription)
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna_ext_coachbyte/services/api/server.py` — REST routes for plan, set completion, timer (port logic)

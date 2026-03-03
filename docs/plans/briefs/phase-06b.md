@@ -2,7 +2,7 @@
 > Previous: phase-06a.md | Next: phase-06c.md
 
 ## Skills
-test-driven-development, context7 (Supabase)
+test-driven-development, test-quality-review, context7 (Supabase)
 
 ## Build
 - Migration: `supabase/migrations/YYYYMMDD_chefbyte_recipes_mealplan.sql`
@@ -60,6 +60,9 @@ test-driven-development, context7 (Supabase)
    - [MEAL] lot qty: 1 -> 0.5
    - food_log created with 200cal (half of frozen 400cal)
    - get_daily_macros returns correct totals (200cal)
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/chefbyte-vercel/apps/web/src/lib/api-supabase.ts` — recipe/meal plan Supabase queries

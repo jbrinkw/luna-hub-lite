@@ -2,7 +2,7 @@
 > Previous: phase-07a.md | Next: phase-07c.md
 
 ## Skills
-test-driven-development, frontend-design, context7 (Ionic React, Supabase Realtime)
+test-driven-development, test-quality-review, frontend-design, context7 (Ionic React, Supabase Realtime)
 
 ## Build
 - `apps/web/src/pages/chefbyte/Inventory.tsx`:
@@ -58,6 +58,9 @@ test-driven-development, frontend-design, context7 (Ionic React, Supabase Realti
 - Subscribe to temp_items channel -> insert temp_item -> callback fires
 - Subscribe to meal_plan channel -> update status to 'done' -> callback fires with updated row
 - Unsubscribe -> insert row -> callback does NOT fire
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/chefbyte-vercel/apps/web/src/pages/Inventory.tsx` — grouped-by-product table, lot toggle, stock adjustments

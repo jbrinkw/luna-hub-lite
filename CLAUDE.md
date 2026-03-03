@@ -2,6 +2,19 @@
 
 Serverless refactor of the original self-hosted Luna Hub ecosystem. Replaces heavy Python/FastAPI/Docker services with a free-tier serverless stack: Supabase + Vercel + Cloudflare Workers.
 
+## Execution Mode — Continuous Build
+
+**Build the project continuously until completion or until stopped.** On session start, read `~/.claude/projects/-home-jeremy-luna-hub-lite/memory/MEMORY.md` and `current-task.md` to determine current phase and next action. Then:
+
+1. If mid-task: resume from the exact stopping point in `current-task.md`
+2. If idle: start the next phase in the Development Order (see MEMORY.md)
+3. After completing a phase: immediately start the next one — do not stop to ask permission
+4. Use the full skills chain per phase: brainstorm → writing-plans → subagent-driven-development → test-quality-review → verification → code-review
+5. Commit after each phase, update `current-task.md` and `MEMORY.md`, then continue
+6. If blocked (missing info, ambiguous spec, failing tests after reasonable debugging): ask the user, then resume
+
+**Do not pause between phases.** Keep building through the Development Order (Phases 4 → 10) until the project is complete or the user stops you.
+
 ## Tech Stack
 
 - **Frontend:** React 18 + TypeScript + Vite, Ionic React (UI components), React Router (path-based: `/hub/*`, `/coach/*`, `/chef/*`)
@@ -69,6 +82,10 @@ The `legacy/` folder contains the old repos. Use these as reference — copy wha
 ## Documentation Rule
 
 **Always update docs after making changes.** When you add, modify, or remove functionality — update the relevant file in `docs/` to reflect the change. This includes new pages, schema changes, new edge functions, changed behavior, or anything that makes the existing docs inaccurate. Docs must stay in sync with the code at all times.
+
+## Test Quality Gate
+
+After all implementation tasks in a test layer batch (pgTAP, unit, integration, or E2E) pass spec + code quality review, dispatch the `test-quality-review` skill (`~/.claude/skills/test-quality-review/`) before marking the batch complete. The reviewer mentally traces each test: "if I broke the feature, would this test fail?" Catches false positives, weak assertions, tautologies, and coverage gaps. See `reviewer-prompt.md` in the skill directory for the full per-layer checklist.
 
 ## Conventions
 

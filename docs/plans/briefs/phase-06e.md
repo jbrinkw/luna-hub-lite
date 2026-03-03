@@ -2,7 +2,7 @@
 > Previous: phase-06d.md | Next: phase-07a.md
 
 ## Skills
-test-driven-development, claude-developer-platform (Claude Haiku 4.5 call), context7 (Supabase Edge Functions)
+test-driven-development, test-quality-review, claude-developer-platform (Claude Haiku 4.5 call), context7 (Supabase Edge Functions)
 
 ## Build
 - `supabase/functions/analyze-product/index.ts` — Deno Edge Function
@@ -39,6 +39,9 @@ Tests run against locally-served Edge Function (`http://localhost:54321/function
 - Missing barcode in request body -> 400 Bad Request
 - 4-4-9 validation: response includes whether reported calories match computed (protein*4 + carbs*4 + fats*9) within tolerance
 - Response does NOT auto-create a product row (caller decides whether to create)
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna-ext-chefbyte/lib/api.py` — full pipeline: OFF lookup -> GPT-4 normalize -> 4-4-9 validate (rewrite GPT-4 to Claude Haiku 4.5)

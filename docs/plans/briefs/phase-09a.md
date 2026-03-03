@@ -2,7 +2,7 @@
 > Previous: phase-08.md | Next: phase-09b.md
 
 ## Skills
-test-driven-development, context7 (Cloudflare Workers, MCP SDK, Supabase, Durable Objects)
+test-driven-development, test-quality-review, context7 (Cloudflare Workers, MCP SDK, Supabase, Durable Objects)
 
 ## Build
 - `apps/mcp-worker/src/index.ts` — Worker entry point, SSE transport at `/sse` endpoint
@@ -76,6 +76,9 @@ test-driven-development, context7 (Cloudflare Workers, MCP SDK, Supabase, Durabl
 - SSE connection with invalid API key -> 401 response (no SSE stream)
 - SSE connection with revoked API key -> 401 response
 - Tool list matches user's enabled tools from config
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna-hub/core/utils/mcp_server.py` — FastMCP server pattern, tool registration

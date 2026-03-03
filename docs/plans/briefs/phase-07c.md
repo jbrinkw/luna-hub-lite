@@ -2,7 +2,7 @@
 > Previous: phase-07b.md | Next: phase-08.md
 
 ## Skills
-test-driven-development, frontend-design, requesting-code-review (phase boundary)
+test-driven-development, test-quality-review, frontend-design, requesting-code-review (phase boundary)
 
 ## Build
 - `apps/web/src/pages/chefbyte/Recipes.tsx`:
@@ -100,6 +100,9 @@ test-driven-development, frontend-design, requesting-code-review (phase boundary
 ### Browser: `apps/web/e2e/chefbyte/settings.spec.ts`
 - Products tab: create product -> appears in list, edit -> updated, delete -> removed
 - LiquidTrack tab: add device -> ID generated, revoke -> device removed
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/chefbyte-vercel/apps/web/src/pages/Recipes.tsx` — card grid, search

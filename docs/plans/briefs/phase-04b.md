@@ -2,7 +2,7 @@
 > Previous: phase-04a.md | Next: phase-05a.md
 
 ## Skills
-test-driven-development, context7 (Supabase)
+test-driven-development, test-quality-review, context7 (Supabase)
 
 ## Build
 
@@ -83,6 +83,9 @@ test-driven-development, context7 (Supabase)
 3. Resume → verify state=running, new end_time = now + 60s (remaining)
 4. Advance 60s → expire (via atomic WHERE guard) → verify state=expired
 5. Start new timer (60s) → verify replaces expired timer (one timer per user)
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna_ext_coachbyte/tools/coachbyte_tools.py` — tool handlers with plan bootstrap + set completion logic

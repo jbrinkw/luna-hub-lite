@@ -2,7 +2,7 @@
 > Previous: phase-06b.md | Next: phase-06d.md
 
 ## Skills
-test-driven-development, context7 (Supabase)
+test-driven-development, test-quality-review, context7 (Supabase)
 
 ## Build
 - Migration: `supabase/migrations/YYYYMMDD_chefbyte_shopping_macros.sql`
@@ -76,6 +76,9 @@ test-driven-development, context7 (Supabase)
    - Broccoli flagged as placeholder
 6. Manually add unrelated product to shopping list (qty=2)
 7. Re-sync -> verify manual item preserved, meal plan items updated correctly
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/chefbyte-vercel/apps/web/src/lib/api-supabase.ts` — shopping list queries, macro aggregation, import flow

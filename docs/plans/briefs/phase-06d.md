@@ -2,7 +2,7 @@
 > Previous: phase-06c.md | Next: phase-06e.md
 
 ## Skills
-test-driven-development, context7 (Supabase)
+test-driven-development, test-quality-review, context7 (Supabase)
 
 ## Build
 - Migration: `supabase/migrations/YYYYMMDD_chefbyte_liquidtrack_activation.sql`
@@ -46,6 +46,9 @@ test-driven-development, context7 (Supabase)
 - get_daily_macros includes liquidtrack_events in aggregate
 - Liquid Log entry (device_id='manual') included in get_daily_macros
 - Delete device -> events NOT cascade deleted (events have historical value)
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna-ext-chefbyte/services/liquidtrack/init_schema.sql` — LiquidTrack table schemas

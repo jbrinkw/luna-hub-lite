@@ -2,7 +2,7 @@
 > Previous: phase-09b.md | Next: (done)
 
 ## Skills
-test-driven-development, frontend-design, requesting-code-review (final phase)
+test-driven-development, test-quality-review, frontend-design, requesting-code-review (final phase)
 
 ## Build
 - `apps/web/src/components/ModuleSwitcher.tsx` — cross-module navigation:
@@ -60,6 +60,9 @@ test-driven-development, frontend-design, requesting-code-review (final phase)
 - ChefByte module still functional (scanner loads)
 - Click retry in CoachByte -> module attempts recovery
 - Error in one module's component does not crash sibling modules
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 N/A — cross-cutting concerns with no direct legacy equivalent.

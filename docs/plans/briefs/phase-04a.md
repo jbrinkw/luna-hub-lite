@@ -2,7 +2,7 @@
 > Previous: phase-03e.md | Next: phase-04b.md
 
 ## Skills
-test-driven-development, context7 (Supabase, pgTAP)
+test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 
 ## Build
 
@@ -49,6 +49,9 @@ Single migration file — order: tables, indexes, RLS, seeds.
 - Activate CoachByte → global exercises accessible, user_settings row created with defaults (rest=90, bar=45, plates=[45,35,25,10,5,2.5])
 - Deactivate CoachByte → all user's CoachByte data deleted (plans, sets, splits, timer, user_settings)
 - Reactivate → clean slate, fresh seeds, no leftover data
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna_ext_coachbyte/services/api/server.py` — DB schema definitions (embedded SQL)

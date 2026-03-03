@@ -2,7 +2,7 @@
 > Previous: phase-09a.md | Next: phase-10.md
 
 ## Skills
-test-driven-development, context7 (Cloudflare Workers, Supabase)
+test-driven-development, test-quality-review, context7 (Cloudflare Workers, Supabase)
 
 ## Build
 - `apps/mcp-worker/src/tools/coachbyte/` — 11 CoachByte tool handlers:
@@ -74,6 +74,9 @@ test-driven-development, context7 (Cloudflare Workers, Supabase)
 8. Verify ChefByte data still intact (products, stock_lots, food_logs)
 9. Verify Hub profile still intact (display_name, timezone, day_start_hour)
 10. Reactivate CoachByte -> verify clean slate (no plans, no PRs), global exercises still accessible
+
+### Quality gate
+After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
 - `legacy/luna-hub/core/utils/extension_discovery.py` — extension scanning and tool loading
