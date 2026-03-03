@@ -146,4 +146,54 @@ describe('Profile CRUD', () => {
       day_start_hour: 12,
     });
   });
+
+  it('RLS: user B cannot read user A profile', async () => {
+    const { userId: userAId, client: clientA } = await createTestUser('prof-rls-a');
+    userIds.push(userAId);
+    const { userId: userBId, client: clientB } = await createTestUser('prof-rls-b');
+    userIds.push(userBId);
+
+    // User A has a profile (created by trigger)
+    const { data: ownProfile, error: ownError } = await clientA
+      .schema('hub')
+      .from('profiles')
+      .select('user_id')
+      .eq('user_id', userAId)
+      .single();
+    expect(ownError).toBeNull();
+    expect(ownProfile).not.toBeNull();
+
+    // User B cannot see User A's profile
+    const { data, error } = await clientB
+      .schema('hub')
+      .from('profiles')
+      .select('user_id')
+      .eq('user_id', userAId);
+    expect(error).toBeNull();
+    expect(data).toHaveLength(0);
+  });
+
+  it('RLS: user B cannot update user A profile', async () => {
+    const { userId: userAId, client: clientA } = await createTestUser('prof-rls-upd-a');
+    userIds.push(userAId);
+    const { userId: userBId, client: clientB } = await createTestUser('prof-rls-upd-b');
+    userIds.push(userBId);
+
+    // User B tries to update User A's profile
+    await clientB
+      .schema('hub')
+      .from('profiles')
+      .update({ display_name: 'HACKED' })
+      .eq('user_id', userAId);
+
+    // Verify User A's profile is unchanged
+    const { data, error } = await clientA
+      .schema('hub')
+      .from('profiles')
+      .select('display_name')
+      .eq('user_id', userAId)
+      .single();
+    expect(error).toBeNull();
+    expect(data!.display_name).not.toBe('HACKED');
+  });
 });

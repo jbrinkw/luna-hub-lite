@@ -193,4 +193,53 @@ describe('API key lifecycle', () => {
     expect(activeIds).toContain(ids[2]);
     expect(activeIds).not.toContain(ids[1]);
   });
+
+  it('RLS: user B cannot read user A api keys', async () => {
+    const { userId: userAId, client: clientA } = await createTestUser('key-rls-a');
+    userIds.push(userAId);
+    const { userId: userBId, client: clientB } = await createTestUser('key-rls-b');
+    userIds.push(userBId);
+
+    const { error: insertError } = await clientA
+      .schema('hub')
+      .from('api_keys')
+      .insert({ user_id: userAId, api_key_hash: 'hash_rls_test', label: 'RLS test' });
+    expect(insertError).toBeNull();
+
+    const { data, error } = await clientB
+      .schema('hub')
+      .from('api_keys')
+      .select('*')
+      .eq('user_id', userAId);
+    expect(error).toBeNull();
+    expect(data).toHaveLength(0);
+  });
+
+  it('RLS: user B cannot revoke user A api keys', async () => {
+    const { userId: userAId, client: clientA } = await createTestUser('key-rls-rev-a');
+    userIds.push(userAId);
+    const { userId: userBId, client: clientB } = await createTestUser('key-rls-rev-b');
+    userIds.push(userBId);
+
+    const { error: insertError } = await clientA
+      .schema('hub')
+      .from('api_keys')
+      .insert({ user_id: userAId, api_key_hash: 'hash_rls_revoke', label: 'Revoke test' });
+    expect(insertError).toBeNull();
+
+    await clientB
+      .schema('hub')
+      .from('api_keys')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('user_id', userAId);
+
+    const { data, error } = await clientA
+      .schema('hub')
+      .from('api_keys')
+      .select('revoked_at')
+      .eq('api_key_hash', 'hash_rls_revoke')
+      .single();
+    expect(error).toBeNull();
+    expect(data!.revoked_at).toBeNull();
+  });
 });

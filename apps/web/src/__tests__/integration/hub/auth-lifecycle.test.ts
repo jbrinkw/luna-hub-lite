@@ -109,7 +109,8 @@ describe('Auth lifecycle', () => {
     });
     userIds.push(created.user!.id);
 
-    await client.auth.signInWithPassword({ email, password: 'password123' });
+    const { error: signInError } = await client.auth.signInWithPassword({ email, password: 'password123' });
+    expect(signInError).toBeNull();
 
     // Verify logged in
     const { data: before } = await client.auth.getSession();
@@ -133,10 +134,9 @@ describe('Auth lifecycle', () => {
     userIds.push(data.user!.id);
 
     // Second signup with same email
-    await client2.auth.signUp({ email, password: 'password456' });
-    // Supabase may return a fake success (to prevent email enumeration) or an error
-    // In local dev with email confirmations disabled, it returns the existing user
-    // The key assertion: we don't get a second user created
+    const { error: _dupError } = await client2.auth.signUp({ email, password: 'password456' });
+    // Supabase may return success (anti-enumeration) or error — either is acceptable
+    // The important thing is only 1 user exists
     const { data: users } = await adminClient.auth.admin.listUsers();
     const matching = users.users.filter((u) => u.email === email);
     expect(matching.length).toBe(1);
