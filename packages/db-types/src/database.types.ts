@@ -26,7 +26,238 @@ export type Database = {
   }
   coachbyte: {
     Tables: {
-      [_ in never]: never
+      completed_sets: {
+        Row: {
+          actual_load: number
+          actual_reps: number
+          completed_at: string
+          completed_set_id: string
+          exercise_id: string
+          logical_date: string | null
+          plan_id: string
+          planned_set_id: string | null
+          user_id: string
+        }
+        Insert: {
+          actual_load: number
+          actual_reps: number
+          completed_at?: string
+          completed_set_id?: string
+          exercise_id: string
+          logical_date?: string | null
+          plan_id: string
+          planned_set_id?: string | null
+          user_id: string
+        }
+        Update: {
+          actual_load?: number
+          actual_reps?: number
+          completed_at?: string
+          completed_set_id?: string
+          exercise_id?: string
+          logical_date?: string | null
+          plan_id?: string
+          planned_set_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "completed_sets_exercise_id_fkey"
+            columns: ["exercise_id"]
+            isOneToOne: false
+            referencedRelation: "exercises"
+            referencedColumns: ["exercise_id"]
+          },
+          {
+            foreignKeyName: "completed_sets_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "daily_plans"
+            referencedColumns: ["plan_id"]
+          },
+          {
+            foreignKeyName: "completed_sets_planned_set_id_fkey"
+            columns: ["planned_set_id"]
+            isOneToOne: false
+            referencedRelation: "planned_sets"
+            referencedColumns: ["planned_set_id"]
+          },
+        ]
+      }
+      daily_plans: {
+        Row: {
+          created_at: string
+          logical_date: string | null
+          plan_date: string
+          plan_id: string
+          summary: string | null
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          logical_date?: string | null
+          plan_date: string
+          plan_id?: string
+          summary?: string | null
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          logical_date?: string | null
+          plan_date?: string
+          plan_id?: string
+          summary?: string | null
+          user_id?: string
+        }
+        Relationships: []
+      }
+      exercises: {
+        Row: {
+          created_at: string
+          exercise_id: string
+          name: string
+          user_id: string | null
+        }
+        Insert: {
+          created_at?: string
+          exercise_id?: string
+          name: string
+          user_id?: string | null
+        }
+        Update: {
+          created_at?: string
+          exercise_id?: string
+          name?: string
+          user_id?: string | null
+        }
+        Relationships: []
+      }
+      planned_sets: {
+        Row: {
+          exercise_id: string
+          order: number
+          plan_id: string
+          planned_set_id: string
+          rest_seconds: number | null
+          target_load: number | null
+          target_load_percentage: number | null
+          target_reps: number | null
+          user_id: string
+        }
+        Insert: {
+          exercise_id: string
+          order: number
+          plan_id: string
+          planned_set_id?: string
+          rest_seconds?: number | null
+          target_load?: number | null
+          target_load_percentage?: number | null
+          target_reps?: number | null
+          user_id: string
+        }
+        Update: {
+          exercise_id?: string
+          order?: number
+          plan_id?: string
+          planned_set_id?: string
+          rest_seconds?: number | null
+          target_load?: number | null
+          target_load_percentage?: number | null
+          target_reps?: number | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "planned_sets_exercise_id_fkey"
+            columns: ["exercise_id"]
+            isOneToOne: false
+            referencedRelation: "exercises"
+            referencedColumns: ["exercise_id"]
+          },
+          {
+            foreignKeyName: "planned_sets_plan_id_fkey"
+            columns: ["plan_id"]
+            isOneToOne: false
+            referencedRelation: "daily_plans"
+            referencedColumns: ["plan_id"]
+          },
+        ]
+      }
+      splits: {
+        Row: {
+          split_id: string
+          split_notes: string | null
+          template_sets: Json | null
+          user_id: string
+          weekday: number
+        }
+        Insert: {
+          split_id?: string
+          split_notes?: string | null
+          template_sets?: Json | null
+          user_id: string
+          weekday: number
+        }
+        Update: {
+          split_id?: string
+          split_notes?: string | null
+          template_sets?: Json | null
+          user_id?: string
+          weekday?: number
+        }
+        Relationships: []
+      }
+      timers: {
+        Row: {
+          duration_seconds: number
+          elapsed_before_pause: number
+          end_time: string | null
+          paused_at: string | null
+          state: string
+          timer_id: string
+          user_id: string
+        }
+        Insert: {
+          duration_seconds: number
+          elapsed_before_pause?: number
+          end_time?: string | null
+          paused_at?: string | null
+          state: string
+          timer_id?: string
+          user_id: string
+        }
+        Update: {
+          duration_seconds?: number
+          elapsed_before_pause?: number
+          end_time?: string | null
+          paused_at?: string | null
+          state?: string
+          timer_id?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
+      user_settings: {
+        Row: {
+          available_plates: Json
+          bar_weight_lbs: number
+          default_rest_seconds: number
+          user_id: string
+        }
+        Insert: {
+          available_plates?: Json
+          bar_weight_lbs?: number
+          default_rest_seconds?: number
+          user_id: string
+        }
+        Update: {
+          available_plates?: Json
+          bar_weight_lbs?: number
+          default_rest_seconds?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
