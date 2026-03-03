@@ -4,16 +4,16 @@ Serverless refactor of the original self-hosted Luna Hub ecosystem. Replaces hea
 
 ## Execution Mode — Continuous Build
 
-**Build the project continuously until completion or until stopped.** On session start, read `~/.claude/projects/-home-jeremy-luna-hub-lite/memory/MEMORY.md` and `current-task.md` to determine current phase and next action. Then:
+**Build the project continuously until completion or until stopped.** Do NOT ask questions — you have everything you need. On session start, read `~/.claude/projects/-home-jeremy-luna-hub-lite/memory/MEMORY.md` and `current-task.md` to determine current phase and next action. Then:
 
 1. If mid-task: resume from the exact stopping point in `current-task.md`
 2. If idle: start the next phase in the Development Order (see MEMORY.md)
 3. After completing a phase: immediately start the next one — do not stop to ask permission
 4. Use the full skills chain per phase: brainstorm → writing-plans → subagent-driven-development → test-quality-review → verification → code-review
 5. Commit after each phase, update `current-task.md` and `MEMORY.md`, then continue
-6. If blocked (missing info, ambiguous spec, failing tests after reasonable debugging): ask the user, then resume
+6. If blocked on tests after reasonable debugging: ask the user. Otherwise, make the call and keep going.
 
-**Do not pause between phases.** Keep building through the Development Order (Phases 4 → 10) until the project is complete or the user stops you.
+**Do not pause between phases.** Do not ask clarifying questions. Do not present designs for approval. The specs in `docs/` + legacy code in `legacy/` + ASCII layouts in `docs/ascii-layouts.md` contain all the information needed. When in doubt, check the legacy code first (especially `legacy/chefbyte-vercel/` for ChefByte UI). Make autonomous decisions, flag them in `decisions.md`, and keep building.
 
 ## Tech Stack
 

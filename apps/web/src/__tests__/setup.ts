@@ -50,7 +50,15 @@ vi.mock('@ionic/react', () => {
     IonRow: wrap('div'),
     IonCol: wrap('div'),
     IonSegment: ({ children, value, onIonChange, ...props }: any) =>
-      React.createElement('div', { role: 'tablist', ...props }, children),
+      React.createElement('div', {
+        role: 'tablist',
+        'data-value': value,
+        onClick: (e: any) => {
+          const btn = (e.target as HTMLElement).closest('[role="tab"]');
+          if (btn && onIonChange) onIonChange({ detail: { value: btn.getAttribute('data-value') } });
+        },
+        ...props,
+      }, children),
     IonSegmentButton: ({ children, value, ...props }: any) =>
       React.createElement('button', { role: 'tab', 'data-value': value, ...props }, children),
     IonToggle: React.forwardRef(({ checked, onIonChange, ...props }: any, ref: any) =>
@@ -102,6 +110,8 @@ vi.mock('@ionic/react', () => {
       ),
     ),
     IonSpinner: (props: any) => React.createElement('div', { 'aria-label': 'loading', ...props }),
+    IonBadge: ({ children, color, ...props }: any) =>
+      React.createElement('span', { 'data-color': color, ...props }, children),
     IonChip: wrap('span'),
     IonNote: wrap('span'),
     IonTextarea: React.forwardRef(({ label, value, onIonInput, ...props }: any, ref: any) =>
