@@ -22,9 +22,9 @@ const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Frida
 interface TemplateSet {
   exercise_id: string;
   exercise_name: string;
-  reps: number | null;
-  load: number | null;
-  load_percentage: number | null;
+  target_reps: number | null;
+  target_load: number | null;
+  target_load_percentage: number | null;
   rest_seconds: number;
   order: number;
 }
@@ -154,9 +154,9 @@ export function SplitPage() {
         const newSet: TemplateSet = {
           exercise_id: exercises[0]?.exercise_id ?? '',
           exercise_name: exercises[0]?.name ?? '',
-          reps: 5,
-          load: null,
-          load_percentage: null,
+          target_reps: 5,
+          target_load: null,
+          target_load_percentage: null,
           rest_seconds: 90,
           order: s.template_sets.length + 1,
         };
@@ -240,23 +240,36 @@ export function SplitPage() {
                       <td>
                         <IonInput
                           type="number"
-                          value={set.reps}
+                          value={set.target_reps}
                           onIonInput={(e) =>
-                            updateSet(day.weekday, i, 'reps', e.detail.value ? Number(e.detail.value) : null)
+                            updateSet(day.weekday, i, 'target_reps', e.detail.value ? Number(e.detail.value) : null)
                           }
                           data-testid={`day-${day.weekday}-set-${i}-reps`}
                           style={{ width: '60px' }}
                         />
                       </td>
                       <td>
-                        {set.load_percentage ? (
-                          <span>{set.load_percentage}%</span>
+                        {set.target_load_percentage ? (
+                          <IonInput
+                            type="number"
+                            value={set.target_load_percentage}
+                            onIonInput={(e) =>
+                              updateSet(
+                                day.weekday,
+                                i,
+                                'target_load_percentage',
+                                e.detail.value ? Number(e.detail.value) : null,
+                              )
+                            }
+                            data-testid={`day-${day.weekday}-set-${i}-load-pct`}
+                            style={{ width: '70px' }}
+                          />
                         ) : (
                           <IonInput
                             type="number"
-                            value={set.load}
+                            value={set.target_load}
                             onIonInput={(e) =>
-                              updateSet(day.weekday, i, 'load', e.detail.value ? Number(e.detail.value) : null)
+                              updateSet(day.weekday, i, 'target_load', e.detail.value ? Number(e.detail.value) : null)
                             }
                             data-testid={`day-${day.weekday}-set-${i}-load`}
                             style={{ width: '80px' }}
@@ -265,13 +278,13 @@ export function SplitPage() {
                       </td>
                       <td>
                         <IonCheckbox
-                          checked={set.load_percentage !== null}
+                          checked={set.target_load_percentage !== null}
                           onIonChange={(e) => {
                             if (e.detail.checked) {
-                              updateSet(day.weekday, i, 'load_percentage', 80);
-                              updateSet(day.weekday, i, 'load', null);
+                              updateSet(day.weekday, i, 'target_load_percentage', set.target_load_percentage ?? 80);
+                              updateSet(day.weekday, i, 'target_load', null);
                             } else {
-                              updateSet(day.weekday, i, 'load_percentage', null);
+                              updateSet(day.weekday, i, 'target_load_percentage', null);
                             }
                           }}
                           data-testid={`day-${day.weekday}-set-${i}-rel`}

@@ -404,11 +404,22 @@ BEGIN
   INSERT INTO coachbyte.splits (split_id, user_id, weekday, template_sets, split_notes) VALUES
     ('aaaaaaaa-9001-0000-0000-000000000000', v_user_id, 1,
      jsonb_build_array(
-       jsonb_build_object('exercise_id', v_bench,      'sets', 4, 'reps', 8,  'load', 185),
-       jsonb_build_object('exercise_id', v_ohp,        'sets', 3, 'reps', 10, 'load', 95),
-       jsonb_build_object('exercise_id', v_dip,        'sets', 3, 'reps', 12, 'load', 0),
-       jsonb_build_object('exercise_id', v_tricep_ext, 'sets', 3, 'reps', 12, 'load', 40),
-       jsonb_build_object('exercise_id', v_lateral,    'sets', 3, 'reps', 15, 'load', 20)
+       jsonb_build_object('exercise_id', v_bench,      'target_reps', 8,  'target_load', 185, 'rest_seconds', 120, 'order', 1),
+       jsonb_build_object('exercise_id', v_bench,      'target_reps', 8,  'target_load', 185, 'rest_seconds', 120, 'order', 2),
+       jsonb_build_object('exercise_id', v_bench,      'target_reps', 8,  'target_load', 185, 'rest_seconds', 120, 'order', 3),
+       jsonb_build_object('exercise_id', v_bench,      'target_reps', 8,  'target_load', 185, 'rest_seconds', 120, 'order', 4),
+       jsonb_build_object('exercise_id', v_ohp,        'target_reps', 10, 'target_load', 95,  'rest_seconds', 90,  'order', 5),
+       jsonb_build_object('exercise_id', v_ohp,        'target_reps', 10, 'target_load', 95,  'rest_seconds', 90,  'order', 6),
+       jsonb_build_object('exercise_id', v_ohp,        'target_reps', 10, 'target_load', 95,  'rest_seconds', 90,  'order', 7),
+       jsonb_build_object('exercise_id', v_dip,        'target_reps', 12, 'target_load', 0,   'rest_seconds', 60,  'order', 8),
+       jsonb_build_object('exercise_id', v_dip,        'target_reps', 12, 'target_load', 0,   'rest_seconds', 60,  'order', 9),
+       jsonb_build_object('exercise_id', v_dip,        'target_reps', 12, 'target_load', 0,   'rest_seconds', 60,  'order', 10),
+       jsonb_build_object('exercise_id', v_tricep_ext, 'target_reps', 12, 'target_load', 40,  'rest_seconds', 60,  'order', 11),
+       jsonb_build_object('exercise_id', v_tricep_ext, 'target_reps', 12, 'target_load', 40,  'rest_seconds', 60,  'order', 12),
+       jsonb_build_object('exercise_id', v_tricep_ext, 'target_reps', 12, 'target_load', 40,  'rest_seconds', 60,  'order', 13),
+       jsonb_build_object('exercise_id', v_lateral,    'target_reps', 15, 'target_load', 20,  'rest_seconds', 60,  'order', 14),
+       jsonb_build_object('exercise_id', v_lateral,    'target_reps', 15, 'target_load', 20,  'rest_seconds', 60,  'order', 15),
+       jsonb_build_object('exercise_id', v_lateral,    'target_reps', 15, 'target_load', 20,  'rest_seconds', 60,  'order', 16)
      ),
      'Push A — Bench focus')
   ON CONFLICT (user_id, weekday) DO NOTHING;
@@ -417,11 +428,22 @@ BEGIN
   INSERT INTO coachbyte.splits (split_id, user_id, weekday, template_sets, split_notes) VALUES
     ('aaaaaaaa-9002-0000-0000-000000000000', v_user_id, 2,
      jsonb_build_array(
-       jsonb_build_object('exercise_id', v_deadlift,  'sets', 4, 'reps', 5,  'load', 315),
-       jsonb_build_object('exercise_id', v_pullup,    'sets', 3, 'reps', 8,  'load', 0),
-       jsonb_build_object('exercise_id', v_row,       'sets', 3, 'reps', 10, 'load', 155),
-       jsonb_build_object('exercise_id', v_curl,      'sets', 3, 'reps', 12, 'load', 65),
-       jsonb_build_object('exercise_id', v_face_pull, 'sets', 3, 'reps', 15, 'load', 30)
+       jsonb_build_object('exercise_id', v_deadlift,  'target_reps', 5,  'target_load', 315, 'rest_seconds', 180, 'order', 1),
+       jsonb_build_object('exercise_id', v_deadlift,  'target_reps', 5,  'target_load', 315, 'rest_seconds', 180, 'order', 2),
+       jsonb_build_object('exercise_id', v_deadlift,  'target_reps', 5,  'target_load', 315, 'rest_seconds', 180, 'order', 3),
+       jsonb_build_object('exercise_id', v_deadlift,  'target_reps', 5,  'target_load', 315, 'rest_seconds', 180, 'order', 4),
+       jsonb_build_object('exercise_id', v_pullup,    'target_reps', 8,  'target_load', 0,   'rest_seconds', 90,  'order', 5),
+       jsonb_build_object('exercise_id', v_pullup,    'target_reps', 8,  'target_load', 0,   'rest_seconds', 90,  'order', 6),
+       jsonb_build_object('exercise_id', v_pullup,    'target_reps', 8,  'target_load', 0,   'rest_seconds', 90,  'order', 7),
+       jsonb_build_object('exercise_id', v_row,       'target_reps', 10, 'target_load', 155, 'rest_seconds', 90,  'order', 8),
+       jsonb_build_object('exercise_id', v_row,       'target_reps', 10, 'target_load', 155, 'rest_seconds', 90,  'order', 9),
+       jsonb_build_object('exercise_id', v_row,       'target_reps', 10, 'target_load', 155, 'rest_seconds', 90,  'order', 10),
+       jsonb_build_object('exercise_id', v_curl,      'target_reps', 12, 'target_load', 65,  'rest_seconds', 60,  'order', 11),
+       jsonb_build_object('exercise_id', v_curl,      'target_reps', 12, 'target_load', 65,  'rest_seconds', 60,  'order', 12),
+       jsonb_build_object('exercise_id', v_curl,      'target_reps', 12, 'target_load', 65,  'rest_seconds', 60,  'order', 13),
+       jsonb_build_object('exercise_id', v_face_pull, 'target_reps', 15, 'target_load', 30,  'rest_seconds', 60,  'order', 14),
+       jsonb_build_object('exercise_id', v_face_pull, 'target_reps', 15, 'target_load', 30,  'rest_seconds', 60,  'order', 15),
+       jsonb_build_object('exercise_id', v_face_pull, 'target_reps', 15, 'target_load', 30,  'rest_seconds', 60,  'order', 16)
      ),
      'Pull A — Deadlift focus')
   ON CONFLICT (user_id, weekday) DO NOTHING;
@@ -430,11 +452,23 @@ BEGIN
   INSERT INTO coachbyte.splits (split_id, user_id, weekday, template_sets, split_notes) VALUES
     ('aaaaaaaa-9003-0000-0000-000000000000', v_user_id, 3,
      jsonb_build_array(
-       jsonb_build_object('exercise_id', v_squat,     'sets', 4, 'reps', 6,  'load', 275),
-       jsonb_build_object('exercise_id', v_leg_press, 'sets', 3, 'reps', 12, 'load', 360),
-       jsonb_build_object('exercise_id', v_rdl,       'sets', 3, 'reps', 10, 'load', 185),
-       jsonb_build_object('exercise_id', v_leg_curl,  'sets', 3, 'reps', 12, 'load', 90),
-       jsonb_build_object('exercise_id', v_calf,      'sets', 4, 'reps', 15, 'load', 135)
+       jsonb_build_object('exercise_id', v_squat,     'target_reps', 6,  'target_load', 275, 'rest_seconds', 180, 'order', 1),
+       jsonb_build_object('exercise_id', v_squat,     'target_reps', 6,  'target_load', 275, 'rest_seconds', 180, 'order', 2),
+       jsonb_build_object('exercise_id', v_squat,     'target_reps', 6,  'target_load', 275, 'rest_seconds', 180, 'order', 3),
+       jsonb_build_object('exercise_id', v_squat,     'target_reps', 6,  'target_load', 275, 'rest_seconds', 180, 'order', 4),
+       jsonb_build_object('exercise_id', v_leg_press, 'target_reps', 12, 'target_load', 360, 'rest_seconds', 90,  'order', 5),
+       jsonb_build_object('exercise_id', v_leg_press, 'target_reps', 12, 'target_load', 360, 'rest_seconds', 90,  'order', 6),
+       jsonb_build_object('exercise_id', v_leg_press, 'target_reps', 12, 'target_load', 360, 'rest_seconds', 90,  'order', 7),
+       jsonb_build_object('exercise_id', v_rdl,       'target_reps', 10, 'target_load', 185, 'rest_seconds', 90,  'order', 8),
+       jsonb_build_object('exercise_id', v_rdl,       'target_reps', 10, 'target_load', 185, 'rest_seconds', 90,  'order', 9),
+       jsonb_build_object('exercise_id', v_rdl,       'target_reps', 10, 'target_load', 185, 'rest_seconds', 90,  'order', 10),
+       jsonb_build_object('exercise_id', v_leg_curl,  'target_reps', 12, 'target_load', 90,  'rest_seconds', 60,  'order', 11),
+       jsonb_build_object('exercise_id', v_leg_curl,  'target_reps', 12, 'target_load', 90,  'rest_seconds', 60,  'order', 12),
+       jsonb_build_object('exercise_id', v_leg_curl,  'target_reps', 12, 'target_load', 90,  'rest_seconds', 60,  'order', 13),
+       jsonb_build_object('exercise_id', v_calf,      'target_reps', 15, 'target_load', 135, 'rest_seconds', 60,  'order', 14),
+       jsonb_build_object('exercise_id', v_calf,      'target_reps', 15, 'target_load', 135, 'rest_seconds', 60,  'order', 15),
+       jsonb_build_object('exercise_id', v_calf,      'target_reps', 15, 'target_load', 135, 'rest_seconds', 60,  'order', 16),
+       jsonb_build_object('exercise_id', v_calf,      'target_reps', 15, 'target_load', 135, 'rest_seconds', 60,  'order', 17)
      ),
      'Legs A — Squat focus')
   ON CONFLICT (user_id, weekday) DO NOTHING;
@@ -443,11 +477,22 @@ BEGIN
   INSERT INTO coachbyte.splits (split_id, user_id, weekday, template_sets, split_notes) VALUES
     ('aaaaaaaa-9005-0000-0000-000000000000', v_user_id, 5,
      jsonb_build_array(
-       jsonb_build_object('exercise_id', v_incline,    'sets', 4, 'reps', 8,  'load', 155),
-       jsonb_build_object('exercise_id', v_ohp,        'sets', 3, 'reps', 8,  'load', 105),
-       jsonb_build_object('exercise_id', v_bench,      'sets', 3, 'reps', 10, 'load', 165),
-       jsonb_build_object('exercise_id', v_tricep_ext, 'sets', 3, 'reps', 15, 'load', 35),
-       jsonb_build_object('exercise_id', v_lateral,    'sets', 3, 'reps', 15, 'load', 25)
+       jsonb_build_object('exercise_id', v_incline,    'target_reps', 8,  'target_load', 155, 'rest_seconds', 120, 'order', 1),
+       jsonb_build_object('exercise_id', v_incline,    'target_reps', 8,  'target_load', 155, 'rest_seconds', 120, 'order', 2),
+       jsonb_build_object('exercise_id', v_incline,    'target_reps', 8,  'target_load', 155, 'rest_seconds', 120, 'order', 3),
+       jsonb_build_object('exercise_id', v_incline,    'target_reps', 8,  'target_load', 155, 'rest_seconds', 120, 'order', 4),
+       jsonb_build_object('exercise_id', v_ohp,        'target_reps', 8,  'target_load', 105, 'rest_seconds', 90,  'order', 5),
+       jsonb_build_object('exercise_id', v_ohp,        'target_reps', 8,  'target_load', 105, 'rest_seconds', 90,  'order', 6),
+       jsonb_build_object('exercise_id', v_ohp,        'target_reps', 8,  'target_load', 105, 'rest_seconds', 90,  'order', 7),
+       jsonb_build_object('exercise_id', v_bench,      'target_reps', 10, 'target_load', 165, 'rest_seconds', 90,  'order', 8),
+       jsonb_build_object('exercise_id', v_bench,      'target_reps', 10, 'target_load', 165, 'rest_seconds', 90,  'order', 9),
+       jsonb_build_object('exercise_id', v_bench,      'target_reps', 10, 'target_load', 165, 'rest_seconds', 90,  'order', 10),
+       jsonb_build_object('exercise_id', v_tricep_ext, 'target_reps', 15, 'target_load', 35,  'rest_seconds', 60,  'order', 11),
+       jsonb_build_object('exercise_id', v_tricep_ext, 'target_reps', 15, 'target_load', 35,  'rest_seconds', 60,  'order', 12),
+       jsonb_build_object('exercise_id', v_tricep_ext, 'target_reps', 15, 'target_load', 35,  'rest_seconds', 60,  'order', 13),
+       jsonb_build_object('exercise_id', v_lateral,    'target_reps', 15, 'target_load', 25,  'rest_seconds', 60,  'order', 14),
+       jsonb_build_object('exercise_id', v_lateral,    'target_reps', 15, 'target_load', 25,  'rest_seconds', 60,  'order', 15),
+       jsonb_build_object('exercise_id', v_lateral,    'target_reps', 15, 'target_load', 25,  'rest_seconds', 60,  'order', 16)
      ),
      'Push B — Incline focus')
   ON CONFLICT (user_id, weekday) DO NOTHING;
@@ -456,12 +501,25 @@ BEGIN
   INSERT INTO coachbyte.splits (split_id, user_id, weekday, template_sets, split_notes) VALUES
     ('aaaaaaaa-9006-0000-0000-000000000000', v_user_id, 6,
      jsonb_build_array(
-       jsonb_build_object('exercise_id', v_row,       'sets', 4, 'reps', 8,  'load', 165),
-       jsonb_build_object('exercise_id', v_lat_pull,  'sets', 3, 'reps', 10, 'load', 140),
-       jsonb_build_object('exercise_id', v_cable_row, 'sets', 3, 'reps', 12, 'load', 120),
-       jsonb_build_object('exercise_id', v_pullup,    'sets', 3, 'reps', 8,  'load', 0),
-       jsonb_build_object('exercise_id', v_curl,      'sets', 3, 'reps', 12, 'load', 70),
-       jsonb_build_object('exercise_id', v_face_pull, 'sets', 3, 'reps', 15, 'load', 35)
+       jsonb_build_object('exercise_id', v_row,       'target_reps', 8,  'target_load', 165, 'rest_seconds', 120, 'order', 1),
+       jsonb_build_object('exercise_id', v_row,       'target_reps', 8,  'target_load', 165, 'rest_seconds', 120, 'order', 2),
+       jsonb_build_object('exercise_id', v_row,       'target_reps', 8,  'target_load', 165, 'rest_seconds', 120, 'order', 3),
+       jsonb_build_object('exercise_id', v_row,       'target_reps', 8,  'target_load', 165, 'rest_seconds', 120, 'order', 4),
+       jsonb_build_object('exercise_id', v_lat_pull,  'target_reps', 10, 'target_load', 140, 'rest_seconds', 90,  'order', 5),
+       jsonb_build_object('exercise_id', v_lat_pull,  'target_reps', 10, 'target_load', 140, 'rest_seconds', 90,  'order', 6),
+       jsonb_build_object('exercise_id', v_lat_pull,  'target_reps', 10, 'target_load', 140, 'rest_seconds', 90,  'order', 7),
+       jsonb_build_object('exercise_id', v_cable_row, 'target_reps', 12, 'target_load', 120, 'rest_seconds', 90,  'order', 8),
+       jsonb_build_object('exercise_id', v_cable_row, 'target_reps', 12, 'target_load', 120, 'rest_seconds', 90,  'order', 9),
+       jsonb_build_object('exercise_id', v_cable_row, 'target_reps', 12, 'target_load', 120, 'rest_seconds', 90,  'order', 10),
+       jsonb_build_object('exercise_id', v_pullup,    'target_reps', 8,  'target_load', 0,   'rest_seconds', 90,  'order', 11),
+       jsonb_build_object('exercise_id', v_pullup,    'target_reps', 8,  'target_load', 0,   'rest_seconds', 90,  'order', 12),
+       jsonb_build_object('exercise_id', v_pullup,    'target_reps', 8,  'target_load', 0,   'rest_seconds', 90,  'order', 13),
+       jsonb_build_object('exercise_id', v_curl,      'target_reps', 12, 'target_load', 70,  'rest_seconds', 60,  'order', 14),
+       jsonb_build_object('exercise_id', v_curl,      'target_reps', 12, 'target_load', 70,  'rest_seconds', 60,  'order', 15),
+       jsonb_build_object('exercise_id', v_curl,      'target_reps', 12, 'target_load', 70,  'rest_seconds', 60,  'order', 16),
+       jsonb_build_object('exercise_id', v_face_pull, 'target_reps', 15, 'target_load', 35,  'rest_seconds', 60,  'order', 17),
+       jsonb_build_object('exercise_id', v_face_pull, 'target_reps', 15, 'target_load', 35,  'rest_seconds', 60,  'order', 18),
+       jsonb_build_object('exercise_id', v_face_pull, 'target_reps', 15, 'target_load', 35,  'rest_seconds', 60,  'order', 19)
      ),
      'Pull B — Row focus')
   ON CONFLICT (user_id, weekday) DO NOTHING;
