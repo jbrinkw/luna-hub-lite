@@ -343,6 +343,7 @@ export type Database = {
           base_servings: number
           created_at: string
           description: string | null
+          instructions: string | null
           name: string
           recipe_id: string
           total_time: number | null
@@ -353,6 +354,7 @@ export type Database = {
           base_servings?: number
           created_at?: string
           description?: string | null
+          instructions?: string | null
           name: string
           recipe_id?: string
           total_time?: number | null
@@ -363,6 +365,7 @@ export type Database = {
           base_servings?: number
           created_at?: string
           description?: string | null
+          instructions?: string | null
           name?: string
           recipe_id?: string
           total_time?: number | null
@@ -525,8 +528,31 @@ export type Database = {
         }
         Returns: Json
       }
+      consume_product_admin: {
+        Args: {
+          p_log_macros: boolean
+          p_logical_date: string
+          p_product_id: string
+          p_qty: number
+          p_unit: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
       get_daily_macros: { Args: { p_logical_date: string }; Returns: Json }
+      get_daily_macros_admin: {
+        Args: { p_logical_date: string; p_user_id: string }
+        Returns: Json
+      }
       mark_meal_done: { Args: { p_meal_id: string }; Returns: Json }
+      mark_meal_done_admin: {
+        Args: { p_meal_id: string; p_user_id: string }
+        Returns: Json
+      }
+      save_recipe_ingredients: {
+        Args: { p_ingredients: Json; p_recipe_id: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
@@ -753,18 +779,21 @@ export type Database = {
           available_plates: Json
           bar_weight_lbs: number
           default_rest_seconds: number
+          pr_tracked_exercise_ids: Json | null
           user_id: string
         }
         Insert: {
           available_plates?: Json
           bar_weight_lbs?: number
           default_rest_seconds?: number
+          pr_tracked_exercise_ids?: Json | null
           user_id: string
         }
         Update: {
           available_plates?: Json
           bar_weight_lbs?: number
           default_rest_seconds?: number
+          pr_tracked_exercise_ids?: Json | null
           user_id?: string
         }
         Relationships: []
@@ -780,7 +809,22 @@ export type Database = {
           rest_seconds: number
         }[]
       }
+      complete_next_set_admin: {
+        Args: {
+          p_actual_load: number
+          p_actual_reps: number
+          p_plan_id: string
+          p_user_id: string
+        }
+        Returns: {
+          rest_seconds: number
+        }[]
+      }
       ensure_daily_plan: { Args: { p_day: string }; Returns: Json }
+      ensure_daily_plan_admin: {
+        Args: { p_day: string; p_user_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
@@ -846,16 +890,19 @@ export type Database = {
       app_activations: {
         Row: {
           activated_at: string
+          activation_id: string
           app_name: string
           user_id: string
         }
         Insert: {
           activated_at?: string
+          activation_id?: string
           app_name: string
           user_id: string
         }
         Update: {
           activated_at?: string
+          activation_id?: string
           app_name?: string
           user_id?: string
         }
@@ -942,11 +989,12 @@ export type Database = {
         Returns: string
       }
       get_extension_credentials_admin: {
-        Args: { p_user_id: string; p_extension_name: string }
+        Args: { p_extension_name: string; p_user_id: string }
         Returns: string
       }
+      reset_demo_dates: { Args: never; Returns: undefined }
       save_extension_credentials: {
-        Args: { p_extension_name: string; p_credentials_json: string }
+        Args: { p_credentials_json: string; p_extension_name: string }
         Returns: undefined
       }
     }

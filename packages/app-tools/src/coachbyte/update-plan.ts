@@ -51,8 +51,18 @@ export const updatePlan: ToolDefinition = {
       order: s.order,
     }));
 
-    // Insert new sets first, then delete old ones to avoid data loss
-    // if insert fails. The brief overlap of old+new rows is harmless.
+    // Delete old planned sets first, then insert new ones.
+    // The FK on completed_sets.planned_set_id uses ON DELETE SET NULL,
+    // so deleting planned_sets safely nullifies the reference on any
+    // completed_sets that pointed to them (they become ad-hoc).
+    const { error: deleteError } = await ctx.supabase
+      .schema('coachbyte')
+      .from('planned_sets')
+      .delete()
+      .eq('plan_id', plan_id);
+
+    if (deleteError) return toolError(`Failed to clear old sets: ${deleteError.message}`);
+
     const { data: inserted, error: insertError } = await ctx.supabase
       .schema('coachbyte')
       .from('planned_sets')
@@ -60,17 +70,6 @@ export const updatePlan: ToolDefinition = {
       .select('planned_set_id, exercise_id, target_reps, target_load, rest_seconds, order');
 
     if (insertError) return toolError(`Failed to insert new sets: ${insertError.message}`);
-
-    // Delete old planned sets (those not in the newly inserted set)
-    const newIds = inserted.map((s: any) => s.planned_set_id);
-    const { error: deleteError } = await ctx.supabase
-      .schema('coachbyte')
-      .from('planned_sets')
-      .delete()
-      .eq('plan_id', plan_id)
-      .not('planned_set_id', 'in', `(${newIds.join(',')})`);
-
-    if (deleteError) return toolError(`Failed to clear old sets: ${deleteError.message}`);
 
     return toolSuccess({
       message: `Plan updated with ${inserted.length} sets`,

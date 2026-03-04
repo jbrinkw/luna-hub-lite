@@ -35,15 +35,25 @@ export function PrsPage() {
   const [trackedExercises, setTrackedExercises] = useState<{ exercise_id: string; name: string }[]>([]);
   const [allExercises, setAllExercises] = useState<{ exercise_id: string; name: string }[]>([]);
   const [searchText, setSearchText] = useState('');
+  const [dateRange, setDateRange] = useState<number>(90);
 
   const computePRs = useCallback(async () => {
     if (!user) return;
 
-    const { data: completedSets } = await supabase
+    let query = supabase
       .schema('coachbyte')
       .from('completed_sets')
       .select('exercise_id, actual_reps, actual_load, exercises(name)')
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .order('completed_at', { ascending: false });
+
+    if (dateRange < 9999) {
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - dateRange);
+      query = query.gte('completed_at', cutoffDate.toISOString());
+    }
+
+    const { data: completedSets } = await query;
 
     if (!completedSets || completedSets.length === 0) {
       setPrs([]);
@@ -94,7 +104,7 @@ export function PrsPage() {
     result.sort((a, b) => a.exercise_name.localeCompare(b.exercise_name));
     setPrs(result);
     setLoading(false);
-  }, [user]);
+  }, [user, dateRange]);
 
   useEffect(() => {
     // Async data fetching with setState is the standard pattern for this use case
@@ -206,6 +216,25 @@ export function PrsPage() {
           </IonCard>
         ))
       )}
+
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '8px 0' }}>
+        <p data-testid="date-range-info" style={{ margin: 0, fontSize: '0.9em', color: 'var(--ion-color-medium)' }}>
+          {dateRange < 9999 ? `Showing PRs from last ${dateRange} days` : 'Showing PRs from all history'}
+        </p>
+        {dateRange < 9999 && (
+          <IonButton
+            size="small"
+            fill="outline"
+            data-testid="load-all-history-btn"
+            onClick={() => {
+              setLoading(true);
+              setDateRange(9999);
+            }}
+          >
+            Load All History
+          </IonButton>
+        )}
+      </div>
 
       <IonCard data-testid="tracked-exercises-card">
         <IonCardHeader>
