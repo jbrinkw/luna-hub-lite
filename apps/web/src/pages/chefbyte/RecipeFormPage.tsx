@@ -131,6 +131,8 @@ export function RecipeFormPage() {
 
   useEffect(() => {
     if (isEdit) {
+      // Async data fetching with setState is the standard pattern for this use case
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       loadRecipe();
     }
   }, [isEdit, loadRecipe]);
@@ -154,7 +156,7 @@ export function RecipeFormPage() {
         .eq('user_id', user.id)
         .order('name');
 
-      const filtered = ((data ?? []) as ProductSearchResult[]).filter(p =>
+      const filtered = ((data ?? []) as ProductSearchResult[]).filter((p) =>
         p.name.toLowerCase().includes(text.toLowerCase()),
       );
       setSearchResults(filtered);
@@ -196,7 +198,7 @@ export function RecipeFormPage() {
       servings_per_container: Number(selectedProduct.servings_per_container),
     };
 
-    setIngredients(prev => [...prev, newIng]);
+    setIngredients((prev) => [...prev, newIng]);
     setSearchText('');
     setSelectedProduct(null);
     setIngQuantity(1);
@@ -205,7 +207,7 @@ export function RecipeFormPage() {
   };
 
   const removeIngredient = (index: number) => {
-    setIngredients(prev => prev.filter((_, i) => i !== index));
+    setIngredients((prev) => prev.filter((_, i) => i !== index));
   };
 
   /* ---------------------------------------------------------------- */
@@ -213,7 +215,7 @@ export function RecipeFormPage() {
   /* ---------------------------------------------------------------- */
 
   const macros = useMemo(() => {
-    const mapped = ingredients.map(ing => ({
+    const mapped = ingredients.map((ing) => ({
       quantity: ing.quantity,
       unit: ing.unit,
       products: {
@@ -228,7 +230,7 @@ export function RecipeFormPage() {
   }, [ingredients, baseServings]);
 
   const totalMacros = useMemo(() => {
-    const mapped = ingredients.map(ing => ({
+    const mapped = ingredients.map((ing) => ({
       quantity: ing.quantity,
       unit: ing.unit,
       products: {
@@ -263,18 +265,19 @@ export function RecipeFormPage() {
         })
         .eq('recipe_id', id);
 
-      // Delete old ingredients, insert new
+      // Delete old ingredients, batch insert new
       await chefbyte().from('recipe_ingredients').delete().eq('recipe_id', id);
 
-      for (const ing of ingredients) {
-        await chefbyte().from('recipe_ingredients').insert({
+      if (ingredients.length > 0) {
+        const ingredientRows = ingredients.map((ing) => ({
           user_id: user.id,
           recipe_id: id,
           product_id: ing.product_id,
           quantity: ing.quantity,
           unit: ing.unit,
           note: ing.note || null,
-        });
+        }));
+        await chefbyte().from('recipe_ingredients').insert(ingredientRows);
       }
     } else {
       // Create recipe
@@ -292,17 +295,16 @@ export function RecipeFormPage() {
         .select('recipe_id')
         .single();
 
-      if (newRecipe) {
-        for (const ing of ingredients) {
-          await chefbyte().from('recipe_ingredients').insert({
-            user_id: user.id,
-            recipe_id: newRecipe.recipe_id,
-            product_id: ing.product_id,
-            quantity: ing.quantity,
-            unit: ing.unit,
-            note: ing.note || null,
-          });
-        }
+      if (newRecipe && ingredients.length > 0) {
+        const ingredientRows = ingredients.map((ing) => ({
+          user_id: user.id,
+          recipe_id: newRecipe.recipe_id,
+          product_id: ing.product_id,
+          quantity: ing.quantity,
+          unit: ing.unit,
+          note: ing.note || null,
+        }));
+        await chefbyte().from('recipe_ingredients').insert(ingredientRows);
       }
     }
 
@@ -345,14 +347,14 @@ export function RecipeFormPage() {
             <IonInput
               label="Name"
               value={name}
-              onIonInput={e => setName(e.detail.value ?? '')}
+              onIonInput={(e) => setName(e.detail.value ?? '')}
               data-testid="recipe-name"
               required
             />
             <IonTextarea
               label="Description"
               value={description}
-              onIonInput={e => setDescription(e.detail.value ?? '')}
+              onIonInput={(e) => setDescription(e.detail.value ?? '')}
               data-testid="recipe-description"
             />
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '8px' }}>
@@ -360,32 +362,28 @@ export function RecipeFormPage() {
                 label="Base Servings"
                 type="number"
                 value={baseServings}
-                onIonInput={e => setBaseServings(Number(e.detail.value) || 1)}
+                onIonInput={(e) => setBaseServings(Number(e.detail.value) || 1)}
                 data-testid="recipe-base-servings"
               />
               <IonInput
                 label="Active Time (min)"
                 type="number"
                 value={activeTime ?? ''}
-                onIonInput={e =>
-                  setActiveTime(e.detail.value ? Number(e.detail.value) : null)
-                }
+                onIonInput={(e) => setActiveTime(e.detail.value ? Number(e.detail.value) : null)}
                 data-testid="recipe-active-time"
               />
               <IonInput
                 label="Total Time (min)"
                 type="number"
                 value={totalTime ?? ''}
-                onIonInput={e =>
-                  setTotalTime(e.detail.value ? Number(e.detail.value) : null)
-                }
+                onIonInput={(e) => setTotalTime(e.detail.value ? Number(e.detail.value) : null)}
                 data-testid="recipe-total-time"
               />
             </div>
             <IonTextarea
               label="Instructions"
               value={instructions}
-              onIonInput={e => setInstructions(e.detail.value ?? '')}
+              onIonInput={(e) => setInstructions(e.detail.value ?? '')}
               data-testid="recipe-instructions"
             />
           </div>
@@ -415,7 +413,7 @@ export function RecipeFormPage() {
               <IonInput
                 label="Product"
                 value={searchText}
-                onIonInput={e => handleSearchInput(e.detail.value ?? '')}
+                onIonInput={(e) => handleSearchInput(e.detail.value ?? '')}
                 data-testid="ingredient-product-search"
               />
               {showDropdown && (
@@ -434,7 +432,7 @@ export function RecipeFormPage() {
                     overflow: 'auto',
                   }}
                 >
-                  {searchResults.map(p => (
+                  {searchResults.map((p) => (
                     <div
                       key={p.product_id}
                       onClick={() => selectProduct(p)}
@@ -452,7 +450,7 @@ export function RecipeFormPage() {
                 label="Qty"
                 type="number"
                 value={ingQuantity}
-                onIonInput={e => setIngQuantity(Number(e.detail.value) || 1)}
+                onIonInput={(e) => setIngQuantity(Number(e.detail.value) || 1)}
                 data-testid="ingredient-qty"
               />
             </div>
@@ -460,7 +458,7 @@ export function RecipeFormPage() {
               <IonSelect
                 label="Unit"
                 value={ingUnit}
-                onIonChange={e => setIngUnit(e.detail.value ?? 'serving')}
+                onIonChange={(e) => setIngUnit(e.detail.value ?? 'serving')}
                 data-testid="ingredient-unit"
               >
                 <IonSelectOption value="serving">Serving</IonSelectOption>
@@ -471,7 +469,7 @@ export function RecipeFormPage() {
               <IonInput
                 label="Note"
                 value={ingNote}
-                onIonInput={e => setIngNote(e.detail.value ?? '')}
+                onIonInput={(e) => setIngNote(e.detail.value ?? '')}
                 data-testid="ingredient-note"
               />
             </div>
@@ -504,7 +502,9 @@ export function RecipeFormPage() {
                 {ingredients.map((ing, idx) => (
                   <tr key={`${ing.product_id}-${idx}`} data-testid={`ingredient-row-${idx}`}>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{ing.product_name}</td>
-                    <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{ing.quantity}</td>
+                    <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
+                      {ing.quantity}
+                    </td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{ing.unit}</td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{ing.note || '\u2014'}</td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
@@ -534,12 +534,12 @@ export function RecipeFormPage() {
           <div data-testid="macro-display" style={{ marginTop: '12px' }}>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.9em' }}>
               <div data-testid="total-macros">
-                <strong>Total:</strong>{' '}
-                {totalMacros.calories} cal | {totalMacros.protein}g P | {totalMacros.carbs}g C | {totalMacros.fat}g F
+                <strong>Total:</strong> {totalMacros.calories} cal | {totalMacros.protein}g P | {totalMacros.carbs}g C |{' '}
+                {totalMacros.fat}g F
               </div>
               <div data-testid="per-serving-macros">
-                <strong>Per Serving ({baseServings}):</strong>{' '}
-                {macros.calories} cal | {macros.protein}g P | {macros.carbs}g C | {macros.fat}g F
+                <strong>Per Serving ({baseServings}):</strong> {macros.calories} cal | {macros.protein}g P |{' '}
+                {macros.carbs}g C | {macros.fat}g F
               </div>
             </div>
           </div>

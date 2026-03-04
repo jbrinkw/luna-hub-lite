@@ -51,7 +51,6 @@ interface Recipe {
   recipe_ingredients: RecipeIngredient[];
 }
 
-
 /* ------------------------------------------------------------------ */
 /*  Macro computation helper (exported for testing)                    */
 /* ------------------------------------------------------------------ */
@@ -77,9 +76,7 @@ export function computeRecipeMacros(
 
   for (const ing of ingredients) {
     const multiplier =
-      ing.unit === 'serving'
-        ? ing.quantity
-        : ing.quantity * (ing.products?.servings_per_container ?? 1);
+      ing.unit === 'serving' ? ing.quantity : ing.quantity * (ing.products?.servings_per_container ?? 1);
     totalCal += multiplier * (ing.products?.calories_per_serving ?? 0);
     totalCarbs += multiplier * (ing.products?.carbs_per_serving ?? 0);
     totalProtein += multiplier * (ing.products?.protein_per_serving ?? 0);
@@ -95,7 +92,6 @@ export function computeRecipeMacros(
   };
 }
 
-
 /* ================================================================== */
 /*  RecipesPage                                                        */
 /* ================================================================== */
@@ -109,7 +105,6 @@ export function RecipesPage() {
 
   /* ---- Filter state ---- */
   const [searchText, setSearchText] = useState('');
-  const [canBeMadeOnly, setCanBeMadeOnly] = useState(false);
   const [maxActiveTime, setMaxActiveTime] = useState<number | null>(null);
 
   /* ---------------------------------------------------------------- */
@@ -132,6 +127,8 @@ export function RecipesPage() {
   }, [user]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
@@ -145,23 +142,18 @@ export function RecipesPage() {
     // Search filter
     if (searchText.trim()) {
       const lower = searchText.toLowerCase();
-      result = result.filter(r => r.name.toLowerCase().includes(lower));
+      result = result.filter((r) => r.name.toLowerCase().includes(lower));
     }
 
     // Active time filter
     if (maxActiveTime !== null) {
-      result = result.filter(
-        r => r.active_time !== null && r.active_time <= maxActiveTime,
-      );
+      result = result.filter((r) => r.active_time !== null && r.active_time <= maxActiveTime);
     }
 
-    // Can be made filter — placeholder until stock check is fully wired
-    if (canBeMadeOnly) {
-      result = result.filter(r => r.recipe_ingredients.length === 0 || true);
-    }
+    // Can be made filter — disabled until stock check is fully wired
 
     return result;
-  }, [recipes, searchText, maxActiveTime, canBeMadeOnly]);
+  }, [recipes, searchText, maxActiveTime]);
 
   /* ================================================================ */
   /*  RENDER                                                           */
@@ -186,16 +178,12 @@ export function RecipesPage() {
         <IonInput
           placeholder="Search recipes..."
           value={searchText}
-          onIonInput={e => setSearchText(e.detail.value ?? '')}
+          onIonInput={(e) => setSearchText(e.detail.value ?? '')}
           data-testid="recipe-search"
           style={{ marginBottom: '8px' }}
         />
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <IonChip
-            color={canBeMadeOnly ? 'primary' : undefined}
-            onClick={() => setCanBeMadeOnly(!canBeMadeOnly)}
-            data-testid="can-be-made-filter"
-          >
+          <IonChip disabled title="Coming soon" data-testid="can-be-made-filter">
             Can Be Made
           </IonChip>
           <IonChip
@@ -205,11 +193,7 @@ export function RecipesPage() {
           >
             &lt; 30 min
           </IonChip>
-          <IonButton
-            size="small"
-            onClick={() => navigate('/chef/recipes/new')}
-            data-testid="new-recipe-btn"
-          >
+          <IonButton size="small" onClick={() => navigate('/chef/recipes/new')} data-testid="new-recipe-btn">
             + New Recipe
           </IonButton>
         </div>
@@ -219,24 +203,13 @@ export function RecipesPage() {
       {/*  RECIPE CARDS                                                 */}
       {/* ============================================================ */}
       <div data-testid="recipe-list">
-        {filteredRecipes.length === 0 && (
-          <p data-testid="no-recipes">No recipes found.</p>
-        )}
+        {filteredRecipes.length === 0 && <p data-testid="no-recipes">No recipes found.</p>}
 
-        {filteredRecipes.map(recipe => {
-          const macros = computeRecipeMacros(
-            recipe.recipe_ingredients,
-            Number(recipe.base_servings),
-          );
-
-          // Stock status — placeholder until full stock check is wired
-          const canMake = true;
+        {filteredRecipes.map((recipe) => {
+          const macros = computeRecipeMacros(recipe.recipe_ingredients, Number(recipe.base_servings));
 
           return (
-            <IonCard
-              key={recipe.recipe_id}
-              data-testid={`recipe-card-${recipe.recipe_id}`}
-            >
+            <IonCard key={recipe.recipe_id} data-testid={`recipe-card-${recipe.recipe_id}`}>
               <IonCardHeader>
                 <IonCardTitle
                   onClick={() => navigate(`/chef/recipes/${recipe.recipe_id}`)}
@@ -250,15 +223,11 @@ export function RecipesPage() {
                 {/* Time info */}
                 <div style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>
                   {recipe.active_time != null && (
-                    <span data-testid={`active-time-${recipe.recipe_id}`}>
-                      Active: {recipe.active_time} min
-                    </span>
+                    <span data-testid={`active-time-${recipe.recipe_id}`}>Active: {recipe.active_time} min</span>
                   )}
                   {recipe.active_time != null && recipe.total_time != null && ' / '}
                   {recipe.total_time != null && (
-                    <span data-testid={`total-time-${recipe.recipe_id}`}>
-                      Total: {recipe.total_time} min
-                    </span>
+                    <span data-testid={`total-time-${recipe.recipe_id}`}>Total: {recipe.total_time} min</span>
                   )}
                 </div>
 
@@ -279,13 +248,10 @@ export function RecipesPage() {
                   <span>{macros.fat}g F</span>
                 </div>
 
-                {/* Stock status */}
+                {/* Stock status — disabled until stock check is wired */}
                 <div style={{ marginBottom: '8px' }}>
-                  <IonBadge
-                    color={canMake ? 'success' : 'warning'}
-                    data-testid={`stock-status-${recipe.recipe_id}`}
-                  >
-                    {canMake ? 'CAN MAKE' : 'MISSING'}
+                  <IonBadge color="medium" title="Coming soon" data-testid={`stock-status-${recipe.recipe_id}`}>
+                    STOCK N/A
                   </IonBadge>
                 </div>
 

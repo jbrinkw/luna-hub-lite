@@ -68,6 +68,8 @@ export function ShoppingPage() {
   }, [user]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadItems();
   }, [loadItems]);
 
@@ -75,31 +77,34 @@ export function ShoppingPage() {
   /*  Derived state                                                    */
   /* ---------------------------------------------------------------- */
 
-  const toBuy = useMemo(() => items.filter(i => !i.purchased), [items]);
-  const purchased = useMemo(() => items.filter(i => i.purchased), [items]);
+  const toBuy = useMemo(() => items.filter((i) => !i.purchased), [items]);
+  const purchased = useMemo(() => items.filter((i) => i.purchased), [items]);
 
   /* ---------------------------------------------------------------- */
   /*  Product search                                                   */
   /* ---------------------------------------------------------------- */
 
-  const searchProducts = useCallback(async (text: string) => {
-    if (!user || text.trim().length < 1) {
-      setSearchResults([]);
-      setShowDropdown(false);
-      return;
-    }
-    const { data } = await chefbyte()
-      .from('products')
-      .select('product_id, name')
-      .eq('user_id', user.id)
-      .order('name');
-    // Client-side filter since ilike may not work with schema cast
-    const filtered = ((data ?? []) as ProductSearchResult[]).filter(p =>
-      p.name.toLowerCase().includes(text.toLowerCase()),
-    );
-    setSearchResults(filtered);
-    setShowDropdown(filtered.length > 0);
-  }, [user]);
+  const searchProducts = useCallback(
+    async (text: string) => {
+      if (!user || text.trim().length < 1) {
+        setSearchResults([]);
+        setShowDropdown(false);
+        return;
+      }
+      const { data } = await chefbyte()
+        .from('products')
+        .select('product_id, name')
+        .eq('user_id', user.id)
+        .order('name');
+      // Client-side filter since ilike may not work with schema cast
+      const filtered = ((data ?? []) as ProductSearchResult[]).filter((p) =>
+        p.name.toLowerCase().includes(text.toLowerCase()),
+      );
+      setSearchResults(filtered);
+      setShowDropdown(filtered.length > 0);
+    },
+    [user],
+  );
 
   const handleSearchInput = (value: string) => {
     setSearchText(value);
@@ -152,18 +157,12 @@ export function ShoppingPage() {
   };
 
   const togglePurchased = async (item: ShoppingItem) => {
-    await chefbyte()
-      .from('shopping_list')
-      .update({ purchased: !item.purchased })
-      .eq('cart_item_id', item.cart_item_id);
+    await chefbyte().from('shopping_list').update({ purchased: !item.purchased }).eq('cart_item_id', item.cart_item_id);
     await loadItems();
   };
 
   const removeItem = async (cartItemId: string) => {
-    await chefbyte()
-      .from('shopping_list')
-      .delete()
-      .eq('cart_item_id', cartItemId);
+    await chefbyte().from('shopping_list').delete().eq('cart_item_id', cartItemId);
     await loadItems();
   };
 
@@ -180,19 +179,18 @@ export function ShoppingPage() {
     const locationId = locs?.[0]?.location_id;
     if (!locationId) return;
 
-    // Insert stock lots for each purchased item
-    for (const item of purchased) {
-      await chefbyte().from('stock_lots').insert({
-        user_id: user.id,
-        product_id: item.product_id,
-        location_id: locationId,
-        qty_containers: item.qty_containers,
-        expires_on: null,
-      });
-    }
+    // Batch insert stock lots for all purchased items
+    const stockRows = purchased.map((item) => ({
+      user_id: user.id,
+      product_id: item.product_id,
+      location_id: locationId,
+      qty_containers: item.qty_containers,
+      expires_on: null,
+    }));
+    await chefbyte().from('stock_lots').insert(stockRows);
 
     // Delete purchased items from shopping list
-    const ids = purchased.map(i => i.cart_item_id);
+    const ids = purchased.map((i) => i.cart_item_id);
     await chefbyte().from('shopping_list').delete().in('cart_item_id', ids);
 
     await loadItems();
@@ -218,27 +216,31 @@ export function ShoppingPage() {
 
     // Calculate current stock per product
     const stockByProduct = new Map<string, number>();
-    for (const lot of (stockLots ?? [])) {
+    for (const lot of stockLots ?? []) {
       const current = stockByProduct.get(lot.product_id) ?? 0;
       stockByProduct.set(lot.product_id, current + Number(lot.qty_containers));
     }
 
     // Find products already on the shopping list
-    const existingProductIds = new Set(items.map(i => i.product_id));
+    const existingProductIds = new Set(items.map((i) => i.product_id));
 
-    // Insert deficient products
+    // Collect deficient products, then batch insert
+    const rowsToInsert: Array<{ user_id: string; product_id: string; qty_containers: number }> = [];
     for (const product of products) {
       if (existingProductIds.has(product.product_id)) continue;
       const currentStock = stockByProduct.get(product.product_id) ?? 0;
       const minStock = Number(product.min_stock_amount);
       if (currentStock < minStock) {
         const qtyNeeded = Math.ceil(minStock - currentStock);
-        await chefbyte().from('shopping_list').insert({
+        rowsToInsert.push({
           user_id: user.id,
           product_id: product.product_id,
           qty_containers: qtyNeeded,
         });
       }
+    }
+    if (rowsToInsert.length > 0) {
+      await chefbyte().from('shopping_list').insert(rowsToInsert);
     }
 
     await loadItems();
@@ -282,7 +284,7 @@ export function ShoppingPage() {
               <IonInput
                 label="Item name"
                 value={searchText}
-                onIonInput={e => handleSearchInput(e.detail.value ?? '')}
+                onIonInput={(e) => handleSearchInput(e.detail.value ?? '')}
                 data-testid="add-item-name"
               />
               {/* Autocomplete dropdown */}
@@ -302,7 +304,7 @@ export function ShoppingPage() {
                     overflow: 'auto',
                   }}
                 >
-                  {searchResults.map(p => (
+                  {searchResults.map((p) => (
                     <div
                       key={p.product_id}
                       onClick={() => selectProduct(p)}
@@ -323,15 +325,11 @@ export function ShoppingPage() {
                 label="Qty"
                 type="number"
                 value={addQty}
-                onIonInput={e => setAddQty(Number(e.detail.value) || 1)}
+                onIonInput={(e) => setAddQty(Number(e.detail.value) || 1)}
                 data-testid="add-item-qty"
               />
             </div>
-            <IonButton
-              onClick={addItem}
-              disabled={!searchText.trim()}
-              data-testid="add-item-btn"
-            >
+            <IonButton onClick={addItem} disabled={!searchText.trim()} data-testid="add-item-btn">
               Add
             </IonButton>
           </div>
@@ -342,12 +340,7 @@ export function ShoppingPage() {
       {/*  AUTO-ADD BUTTON                                              */}
       {/* ============================================================ */}
       <div style={{ margin: '12px 0' }}>
-        <IonButton
-          expand="block"
-          fill="outline"
-          onClick={autoAddBelowMinStock}
-          data-testid="auto-add-btn"
-        >
+        <IonButton expand="block" fill="outline" onClick={autoAddBelowMinStock} data-testid="auto-add-btn">
           Auto-Add Below Min Stock
         </IonButton>
       </div>
@@ -364,7 +357,7 @@ export function ShoppingPage() {
             <p data-testid="no-to-buy">No items to buy.</p>
           ) : (
             <IonList data-testid="to-buy-list">
-              {toBuy.map(item => (
+              {toBuy.map((item) => (
                 <div
                   key={item.cart_item_id}
                   data-testid={`item-${item.cart_item_id}`}
@@ -381,12 +374,8 @@ export function ShoppingPage() {
                     onIonChange={() => togglePurchased(item)}
                     data-testid={`check-${item.cart_item_id}`}
                   />
-                  <span style={{ flex: 1 }}>
-                    {item.products?.name ?? 'Unknown Product'}
-                  </span>
-                  <span style={{ color: '#666', fontSize: '0.9em' }}>
-                    {formatQty(item.qty_containers)}
-                  </span>
+                  <span style={{ flex: 1 }}>{item.products?.name ?? 'Unknown Product'}</span>
+                  <span style={{ color: '#666', fontSize: '0.9em' }}>{formatQty(item.qty_containers)}</span>
                   <IonButton
                     size="small"
                     color="danger"
@@ -411,11 +400,7 @@ export function ShoppingPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <IonCardTitle>Purchased ({purchased.length})</IonCardTitle>
             {purchased.length > 0 && (
-              <IonButton
-                size="small"
-                onClick={importToInventory}
-                data-testid="import-inventory-btn"
-              >
+              <IonButton size="small" onClick={importToInventory} data-testid="import-inventory-btn">
                 Import to Inventory
               </IonButton>
             )}
@@ -426,7 +411,7 @@ export function ShoppingPage() {
             <p data-testid="no-purchased">No purchased items.</p>
           ) : (
             <IonList data-testid="purchased-list">
-              {purchased.map(item => (
+              {purchased.map((item) => (
                 <div
                   key={item.cart_item_id}
                   data-testid={`item-${item.cart_item_id}`}
@@ -446,9 +431,7 @@ export function ShoppingPage() {
                   <span style={{ flex: 1, textDecoration: 'line-through', color: '#888' }}>
                     {item.products?.name ?? 'Unknown Product'}
                   </span>
-                  <span style={{ color: '#999', fontSize: '0.9em' }}>
-                    {formatQty(item.qty_containers)}
-                  </span>
+                  <span style={{ color: '#999', fontSize: '0.9em' }}>{formatQty(item.qty_containers)}</span>
                   <IonButton
                     size="small"
                     color="danger"

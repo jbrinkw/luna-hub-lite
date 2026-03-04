@@ -95,7 +95,7 @@ export function HomePage() {
       .eq('is_placeholder', true);
     setPlaceholders((ph ?? []).length);
 
-    // 3. Below min stock — fetch products with min_stock_amount > 0, then compare with stock_lots
+    // 3. Below min stock — fetch products with min_stock_amount > 0, then batch-fetch stock_lots
     const { data: stockProducts } = await chefbyte()
       .from('products')
       .select('product_id, min_stock_amount')
@@ -103,13 +103,25 @@ export function HomePage() {
       .gt('min_stock_amount', 0);
 
     let belowCount = 0;
-    for (const p of (stockProducts ?? []) as any[]) {
-      const { data: lots } = await chefbyte()
+    const spArr = (stockProducts ?? []) as any[];
+    if (spArr.length > 0) {
+      const productIds = spArr.map((p: any) => p.product_id);
+      const { data: allLots } = await chefbyte()
         .from('stock_lots')
-        .select('qty_containers')
-        .eq('product_id', p.product_id);
-      const totalStock = (lots ?? []).reduce((s: number, l: any) => s + Number(l.qty_containers), 0);
-      if (totalStock < Number(p.min_stock_amount)) belowCount++;
+        .select('product_id, qty_containers')
+        .in('product_id', productIds);
+
+      // Group stock by product_id
+      const stockByProduct = new Map<string, number>();
+      for (const lot of (allLots ?? []) as any[]) {
+        const current = stockByProduct.get(lot.product_id) ?? 0;
+        stockByProduct.set(lot.product_id, current + Number(lot.qty_containers));
+      }
+
+      for (const p of spArr) {
+        const totalStock = stockByProduct.get(p.product_id) ?? 0;
+        if (totalStock < Number(p.min_stock_amount)) belowCount++;
+      }
     }
     setBelowMinStock(belowCount);
 
@@ -246,19 +258,18 @@ export function HomePage() {
       .eq('user_id', user.id)
       .eq('purchased', false);
 
-    for (const item of (items ?? []) as any[]) {
-      if (item.products?.is_placeholder) continue;
-      // Insert stock lot for each shopping item
-      await chefbyte()
-        .from('stock_lots')
-        .insert({
-          user_id: user.id,
-          product_id: item.product_id,
-          qty_containers: Number(item.qty_containers),
-          location_id: defaultLocationId,
-        });
-      // Remove from shopping list
-      await chefbyte().from('shopping_list').delete().eq('cart_item_id', item.cart_item_id);
+    const validItems = ((items ?? []) as any[]).filter((item) => !item.products?.is_placeholder);
+    if (validItems.length > 0) {
+      const stockRows = validItems.map((item) => ({
+        user_id: user.id,
+        product_id: item.product_id,
+        qty_containers: Number(item.qty_containers),
+        location_id: defaultLocationId,
+      }));
+      await chefbyte().from('stock_lots').insert(stockRows);
+
+      const cartIds = validItems.map((item: any) => item.cart_item_id);
+      await chefbyte().from('shopping_list').delete().in('cart_item_id', cartIds);
     }
     await loadData();
   };
