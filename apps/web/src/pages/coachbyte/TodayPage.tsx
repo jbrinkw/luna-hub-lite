@@ -1,11 +1,23 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonGrid, IonRow, IonCol, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonTextarea, IonText } from '@ionic/react';
+import {
+  IonSpinner,
+  IonGrid,
+  IonRow,
+  IonCol,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonTextarea,
+  IonText,
+} from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
 import { RestTimer } from '@/components/coachbyte/RestTimer';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { todayStr } from '@/shared/dates';
 
 interface CompletedSet {
   completed_set_id: string;
@@ -41,7 +53,7 @@ export function TodayPage() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [error, setError] = useState<string | null>(null);
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
 
   const loadPlan = useCallback(async () => {
     if (!user) return;
@@ -49,8 +61,7 @@ export function TodayPage() {
 
     // Ensure daily plan exists (cast needed: supabase-js typing doesn't fully support cross-schema rpc)
     const coachbyte = supabase.schema('coachbyte') as any;
-    const { data: planResult, error: planErr } = await coachbyte
-      .rpc('ensure_daily_plan', { p_day: today });
+    const { data: planResult, error: planErr } = await coachbyte.rpc('ensure_daily_plan', { p_day: today });
 
     if (planErr) {
       setError(planErr.message);
@@ -65,7 +76,9 @@ export function TodayPage() {
     const { data: plannedData } = await supabase
       .schema('coachbyte')
       .from('planned_sets')
-      .select('planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)')
+      .select(
+        'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)',
+      )
       .eq('plan_id', result.plan_id)
       .order('"order"');
 
@@ -77,9 +90,7 @@ export function TodayPage() {
       .eq('plan_id', result.plan_id)
       .order('completed_at');
 
-    const completedPlanIds = new Set(
-      completedData?.map((cs: any) => cs.planned_set_id).filter(Boolean) ?? [],
-    );
+    const completedPlanIds = new Set(completedData?.map((cs: any) => cs.planned_set_id).filter(Boolean) ?? []);
 
     const mapped: PlannedSet[] = (plannedData ?? []).map((ps: any) => ({
       planned_set_id: ps.planned_set_id,
@@ -155,6 +166,8 @@ export function TodayPage() {
 
   // Initial load
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPlan();
     loadTimer();
   }, [loadPlan, loadTimer]);
@@ -165,20 +178,37 @@ export function TodayPage() {
 
     const channel = supabase
       .channel('coach-today')
-      .on('postgres_changes', { event: '*', schema: 'coachbyte', table: 'planned_sets', filter: `user_id=eq.${user.id}` }, () => loadPlan())
-      .on('postgres_changes', { event: '*', schema: 'coachbyte', table: 'completed_sets', filter: `user_id=eq.${user.id}` }, () => loadPlan())
-      .on('postgres_changes', { event: '*', schema: 'coachbyte', table: 'timers', filter: `user_id=eq.${user.id}` }, () => loadTimer())
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'coachbyte', table: 'planned_sets', filter: `user_id=eq.${user.id}` },
+        () => loadPlan(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'coachbyte', table: 'completed_sets', filter: `user_id=eq.${user.id}` },
+        () => loadPlan(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'coachbyte', table: 'timers', filter: `user_id=eq.${user.id}` },
+        () => loadTimer(),
+      )
       .subscribe();
 
-    return () => { supabase.removeChannel(channel); };
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [user, loadPlan, loadTimer]);
 
   const handleCompleteSet = async (reps: number, load: number) => {
     if (!planId) return;
 
     const coachbyte = supabase.schema('coachbyte') as any;
-    const { data, error: err } = await coachbyte
-      .rpc('complete_next_set', { p_plan_id: planId, p_reps: reps, p_load: load });
+    const { data, error: err } = await coachbyte.rpc('complete_next_set', {
+      p_plan_id: planId,
+      p_reps: reps,
+      p_load: load,
+    });
 
     if (err) {
       setError(err.message);
@@ -213,7 +243,9 @@ export function TodayPage() {
 
   const pauseTimer = async () => {
     if (!user || !timer.end_time) return;
-    const elapsed = Math.floor((Date.now() - (new Date(timer.end_time).getTime() - timer.duration_seconds * 1000)) / 1000);
+    const elapsed = Math.floor(
+      (Date.now() - (new Date(timer.end_time).getTime() - timer.duration_seconds * 1000)) / 1000,
+    );
     await supabase
       .schema('coachbyte')
       .from('timers')
@@ -266,11 +298,7 @@ export function TodayPage() {
   const handleSummaryChange = async (value: string) => {
     setSummary(value);
     if (!planId) return;
-    await supabase
-      .schema('coachbyte')
-      .from('daily_plans')
-      .update({ summary: value })
-      .eq('plan_id', planId);
+    await supabase.schema('coachbyte').from('daily_plans').update({ summary: value }).eq('plan_id', planId);
   };
 
   const timerDisplay =
@@ -290,7 +318,9 @@ export function TodayPage() {
 
   return (
     <CoachLayout title="Today">
-      <h2>TODAY'S WORKOUT <span style={{ float: 'right', fontWeight: 'normal', fontSize: '1rem' }}>{today}</span></h2>
+      <h2>
+        TODAY'S WORKOUT <span style={{ float: 'right', fontWeight: 'normal', fontSize: '1rem' }}>{today}</span>
+      </h2>
 
       {error && (
         <IonText color="danger">
@@ -311,11 +341,7 @@ export function TodayPage() {
             />
 
             {showAdHoc && (
-              <AdHocSetForm
-                exercises={exercises}
-                onSubmit={handleAdHocSubmit}
-                onCancel={() => setShowAdHoc(false)}
-              />
+              <AdHocSetForm exercises={exercises} onSubmit={handleAdHocSubmit} onCancel={() => setShowAdHoc(false)} />
             )}
           </IonCol>
 

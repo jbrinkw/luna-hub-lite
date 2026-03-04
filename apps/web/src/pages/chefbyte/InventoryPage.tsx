@@ -15,6 +15,7 @@ import {
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { todayStr } from '@/shared/dates';
 
 // Cast needed: chefbyte schema types not yet generated
 const chefbyte = () => supabase.schema('chefbyte') as any;
@@ -95,6 +96,8 @@ export function InventoryPage() {
   }, [user]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
@@ -110,16 +113,13 @@ export function InventoryPage() {
       lotsByProduct.set(lot.product_id, existing);
     }
 
-    return products.map(product => {
+    return products.map((product) => {
       const productLots = lotsByProduct.get(product.product_id) ?? [];
-      const totalStock = productLots.reduce(
-        (sum, l) => sum + Number(l.qty_containers),
-        0,
-      );
+      const totalStock = productLots.reduce((sum, l) => sum + Number(l.qty_containers), 0);
 
       // Find nearest expiry (excluding null)
       const expiries = productLots
-        .map(l => l.expires_on)
+        .map((l) => l.expires_on)
         .filter((e): e is string => e !== null)
         .sort();
       const nearestExpiry = expiries[0] ?? null;
@@ -138,9 +138,9 @@ export function InventoryPage() {
   /* ---------------------------------------------------------------- */
 
   const sortedLots = useMemo(() => {
-    const productMap = new Map(products.map(p => [p.product_id, p]));
+    const productMap = new Map(products.map((p) => [p.product_id, p]));
     return [...lots]
-      .map(lot => ({ ...lot, productName: productMap.get(lot.product_id)?.name ?? 'Unknown' }))
+      .map((lot) => ({ ...lot, productName: productMap.get(lot.product_id)?.name ?? 'Unknown' }))
       .sort((a, b) => {
         // Primary: expires_on ASC NULLS LAST
         if (!a.expires_on && !b.expires_on) return a.productName.localeCompare(b.productName);
@@ -156,19 +156,17 @@ export function InventoryPage() {
   /*  Actions                                                          */
   /* ---------------------------------------------------------------- */
 
-  const getLogicalDate = () => new Date().toISOString().slice(0, 10);
+  const getLogicalDate = () => todayStr();
 
   const addStock = async (productId: string, qtyContainers: number) => {
     if (!user || !locationId) return;
-    await chefbyte()
-      .from('stock_lots')
-      .insert({
-        user_id: user.id,
-        product_id: productId,
-        location_id: locationId,
-        qty_containers: qtyContainers,
-        expires_on: null,
-      });
+    await chefbyte().from('stock_lots').insert({
+      user_id: user.id,
+      product_id: productId,
+      location_id: locationId,
+      qty_containers: qtyContainers,
+      expires_on: null,
+    });
     await loadData();
   };
 
@@ -184,7 +182,7 @@ export function InventoryPage() {
   };
 
   const consumeAll = async (productId: string) => {
-    const item = grouped.find(g => g.product.product_id === productId);
+    const item = grouped.find((g) => g.product.product_id === productId);
     if (!item || item.totalStock <= 0) return;
     await consumeStock(productId, item.totalStock, 'container');
     setConsumeAllTarget(null);
@@ -218,7 +216,7 @@ export function InventoryPage() {
 
       <IonSegment
         value={viewMode}
-        onIonChange={e => setViewMode(e.detail.value as ViewMode)}
+        onIonChange={(e) => setViewMode(e.detail.value as ViewMode)}
         data-testid="inventory-view-toggle"
       >
         <IonSegmentButton value="grouped">
@@ -234,9 +232,7 @@ export function InventoryPage() {
       {/* ========================================================== */}
       {viewMode === 'grouped' && (
         <div data-testid="grouped-view">
-          {grouped.length === 0 && (
-            <p data-testid="no-products">No products in inventory.</p>
-          )}
+          {grouped.length === 0 && <p data-testid="no-products">No products in inventory.</p>}
 
           {grouped.map(({ product, totalStock, nearestExpiry, lotCount }) => (
             <IonCard key={product.product_id} data-testid={`inv-product-${product.product_id}`}>
@@ -252,7 +248,15 @@ export function InventoryPage() {
                 </span>
               </IonCardHeader>
               <IonCardContent>
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '8px', alignItems: 'center', marginBottom: '12px' }}>
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: '1fr 1fr 1fr 1fr',
+                    gap: '8px',
+                    alignItems: 'center',
+                    marginBottom: '12px',
+                  }}
+                >
                   <div>
                     <span style={{ fontSize: '0.85em', color: '#888' }}>Total Stock</span>
                     <br />
@@ -266,9 +270,7 @@ export function InventoryPage() {
                   <div>
                     <span style={{ fontSize: '0.85em', color: '#888' }}>Nearest Expiry</span>
                     <br />
-                    <span data-testid={`expiry-${product.product_id}`}>
-                      {nearestExpiry ?? '\u2014'}
-                    </span>
+                    <span data-testid={`expiry-${product.product_id}`}>{nearestExpiry ?? '\u2014'}</span>
                   </div>
                   <div>
                     <span style={{ fontSize: '0.85em', color: '#888' }}>Min Stock</span>
@@ -341,9 +343,7 @@ export function InventoryPage() {
       {/* ========================================================== */}
       {viewMode === 'lots' && (
         <div data-testid="lots-view">
-          {sortedLots.length === 0 && (
-            <p data-testid="no-lots">No stock lots.</p>
-          )}
+          {sortedLots.length === 0 && <p data-testid="no-lots">No stock lots.</p>}
 
           {sortedLots.length > 0 && (
             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '12px' }} data-testid="lots-table">
@@ -356,10 +356,12 @@ export function InventoryPage() {
                 </tr>
               </thead>
               <tbody>
-                {sortedLots.map(lot => (
+                {sortedLots.map((lot) => (
                   <tr key={lot.lot_id} data-testid={`lot-row-${lot.lot_id}`}>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{lot.productName}</td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{lot.locations?.name ?? '\u2014'}</td>
+                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                      {lot.locations?.name ?? '\u2014'}
+                    </td>
                     <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
                       {Number(lot.qty_containers).toFixed(1)}
                     </td>
@@ -379,7 +381,12 @@ export function InventoryPage() {
         message="Are you sure you want to consume all remaining stock for this product?"
         buttons={[
           { text: 'Cancel', role: 'cancel', handler: () => setConsumeAllTarget(null) },
-          { text: 'Consume All', handler: () => { if (consumeAllTarget) consumeAll(consumeAllTarget); } },
+          {
+            text: 'Consume All',
+            handler: () => {
+              if (consumeAllTarget) consumeAll(consumeAllTarget);
+            },
+          },
         ]}
         onDidDismiss={() => setConsumeAllTarget(null)}
       />

@@ -12,6 +12,7 @@ import {
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { todayStr } from '@/shared/dates';
 import { calcCaloriesFromMacros } from '@/pages/chefbyte/MacroPage';
 
 const chefbyte = () => supabase.schema('chefbyte') as any;
@@ -77,7 +78,7 @@ export function HomePage() {
   /*  Data loading                                                     */
   /* ---------------------------------------------------------------- */
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayStr();
 
   const loadData = useCallback(async () => {
     if (!userId) return;

@@ -3,6 +3,7 @@ import { IonButton } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { todayStr } from '@/shared/dates';
 
 const chefbyte = () => supabase.schema('chefbyte') as any;
 
@@ -269,24 +270,22 @@ export function ScannerPage() {
         break;
       }
       case 'consume_macros': {
-        const today = new Date().toISOString().slice(0, 10);
         await (chefbyte() as any).rpc('consume_product', {
           p_product_id: product.product_id,
           p_qty: qty,
           p_unit: unitType,
           p_log_macros: true,
-          p_logical_date: today,
+          p_logical_date: todayStr(),
         });
         break;
       }
       case 'consume_no_macros': {
-        const today = new Date().toISOString().slice(0, 10);
         await (chefbyte() as any).rpc('consume_product', {
           p_product_id: product.product_id,
           p_qty: qty,
           p_unit: unitType,
           p_log_macros: false,
-          p_logical_date: today,
+          p_logical_date: todayStr(),
         });
         break;
       }

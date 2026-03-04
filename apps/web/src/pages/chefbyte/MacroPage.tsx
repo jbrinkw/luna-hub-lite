@@ -12,6 +12,7 @@ import {
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { toDateStr, formatDateDisplay } from '@/shared/dates';
 import { computeRecipeMacros } from './RecipesPage';
 
 // Cast needed: chefbyte schema types not yet generated
@@ -51,15 +52,6 @@ interface PlannedItem {
 
 export function calcCaloriesFromMacros(protein: number, carbs: number, fat: number): number {
   return protein * 4 + carbs * 4 + fat * 9;
-}
-
-function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
-}
-
-function formatDateDisplay(dateStr: string): string {
-  const d = new Date(dateStr + 'T00:00:00');
-  return d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
 }
 
 /* ================================================================== */
@@ -703,7 +695,7 @@ export function MacroPage() {
                 >
                   <strong>Calories (auto): </strong>
                   {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
-                  <div style={{ fontSize: '0.8em', color: '#666' }}>(protein*4 + carbs*4 + fats*9)</div>
+                  <div style={{ fontSize: '0.8em', color: '#666' }}>(protein*4 + carbs*4 + fat*9)</div>
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>

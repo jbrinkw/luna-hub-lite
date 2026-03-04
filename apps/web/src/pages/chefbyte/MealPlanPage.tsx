@@ -13,6 +13,7 @@ import {
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { toDateStr } from '@/shared/dates';
 
 // Cast needed: chefbyte schema types not yet generated
 const chefbyte = () => supabase.schema('chefbyte') as any;
@@ -57,13 +58,8 @@ const DAY_NAMES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
 
 function formatWeekRange(monday: Date): string {
   const sunday = new Date(monday.getTime() + 6 * 86400000);
-  const fmt = (d: Date) =>
-    d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+  const fmt = (d: Date) => d.toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
   return `${fmt(monday)} \u2014 ${fmt(sunday)}`;
-}
-
-function toDateStr(d: Date): string {
-  return d.toISOString().slice(0, 10);
 }
 
 function formatTime(iso: string): string {
@@ -119,6 +115,8 @@ export function MealPlanPage() {
   }, [userId, weekStart]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadMeals();
   }, [loadMeals]);
 
@@ -127,12 +125,12 @@ export function MealPlanPage() {
   /* ---------------------------------------------------------------- */
 
   const prevWeek = () => {
-    setWeekStart(prev => new Date(prev.getTime() - 7 * 86400000));
+    setWeekStart((prev) => new Date(prev.getTime() - 7 * 86400000));
     setSelectedDay(null);
   };
 
   const nextWeek = () => {
-    setWeekStart(prev => new Date(prev.getTime() + 7 * 86400000));
+    setWeekStart((prev) => new Date(prev.getTime() + 7 * 86400000));
     setSelectedDay(null);
   };
 
@@ -146,9 +144,7 @@ export function MealPlanPage() {
   /* ---------------------------------------------------------------- */
 
   const dayDates = useMemo(() => {
-    return Array.from({ length: 7 }, (_, i) =>
-      toDateStr(new Date(weekStart.getTime() + i * 86400000)),
-    );
+    return Array.from({ length: 7 }, (_, i) => toDateStr(new Date(weekStart.getTime() + i * 86400000)));
   }, [weekStart]);
 
   const mealsByDay = useMemo(() => {
@@ -172,8 +168,7 @@ export function MealPlanPage() {
   /*  Entry name helper                                                */
   /* ---------------------------------------------------------------- */
 
-  const entryName = (meal: MealEntry): string =>
-    meal.recipes?.name ?? meal.products?.name ?? 'Unknown';
+  const entryName = (meal: MealEntry): string => meal.recipes?.name ?? meal.products?.name ?? 'Unknown';
 
   /* ---------------------------------------------------------------- */
   /*  Actions                                                          */
@@ -199,42 +194,45 @@ export function MealPlanPage() {
   /*  Add meal: search recipes + products                              */
   /* ---------------------------------------------------------------- */
 
-  const searchItems = useCallback(async (text: string) => {
-    if (!user || text.trim().length < 1) {
-      setAddSearchResults([]);
-      setAddShowDropdown(false);
-      return;
-    }
-
-    const lower = text.toLowerCase();
-
-    const { data: recipes } = await chefbyte()
-      .from('recipes')
-      .select('recipe_id, name')
-      .eq('user_id', user.id)
-      .order('name');
-
-    const { data: products } = await chefbyte()
-      .from('products')
-      .select('product_id, name')
-      .eq('user_id', user.id)
-      .order('name');
-
-    const results: SearchResult[] = [];
-    for (const r of (recipes ?? []) as { recipe_id: string; name: string }[]) {
-      if (r.name.toLowerCase().includes(lower)) {
-        results.push({ id: r.recipe_id, name: r.name, type: 'recipe' });
+  const searchItems = useCallback(
+    async (text: string) => {
+      if (!user || text.trim().length < 1) {
+        setAddSearchResults([]);
+        setAddShowDropdown(false);
+        return;
       }
-    }
-    for (const p of (products ?? []) as { product_id: string; name: string }[]) {
-      if (p.name.toLowerCase().includes(lower)) {
-        results.push({ id: p.product_id, name: p.name, type: 'product' });
-      }
-    }
 
-    setAddSearchResults(results);
-    setAddShowDropdown(results.length > 0);
-  }, [user]);
+      const lower = text.toLowerCase();
+
+      const { data: recipes } = await chefbyte()
+        .from('recipes')
+        .select('recipe_id, name')
+        .eq('user_id', user.id)
+        .order('name');
+
+      const { data: products } = await chefbyte()
+        .from('products')
+        .select('product_id, name')
+        .eq('user_id', user.id)
+        .order('name');
+
+      const results: SearchResult[] = [];
+      for (const r of (recipes ?? []) as { recipe_id: string; name: string }[]) {
+        if (r.name.toLowerCase().includes(lower)) {
+          results.push({ id: r.recipe_id, name: r.name, type: 'recipe' });
+        }
+      }
+      for (const p of (products ?? []) as { product_id: string; name: string }[]) {
+        if (p.name.toLowerCase().includes(lower)) {
+          results.push({ id: p.product_id, name: p.name, type: 'product' });
+        }
+      }
+
+      setAddSearchResults(results);
+      setAddShowDropdown(results.length > 0);
+    },
+    [user],
+  );
 
   const handleAddSearchInput = (value: string) => {
     setAddSearchText(value);
@@ -262,14 +260,16 @@ export function MealPlanPage() {
   const addMeal = async () => {
     if (!user || !addSelected || !selectedDay) return;
 
-    await chefbyte().from('meal_plan_entries').insert({
-      user_id: user.id,
-      recipe_id: addSelected.type === 'recipe' ? addSelected.id : null,
-      product_id: addSelected.type === 'product' ? addSelected.id : null,
-      logical_date: selectedDay,
-      servings: addServings,
-      meal_prep: addMealPrep,
-    });
+    await chefbyte()
+      .from('meal_plan_entries')
+      .insert({
+        user_id: user.id,
+        recipe_id: addSelected.type === 'recipe' ? addSelected.id : null,
+        product_id: addSelected.type === 'product' ? addSelected.id : null,
+        logical_date: selectedDay,
+        servings: addServings,
+        meal_prep: addMealPrep,
+      });
 
     setShowAddModal(false);
     await loadMeals();
@@ -294,10 +294,7 @@ export function MealPlanPage() {
       {/* ============================================================ */}
       {/*  WEEK NAVIGATION                                              */}
       {/* ============================================================ */}
-      <div
-        data-testid="week-nav"
-        style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}
-      >
+      <div data-testid="week-nav" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
         <IonButton size="small" fill="outline" onClick={prevWeek} data-testid="prev-week-btn">
           Prev
         </IonButton>
@@ -346,10 +343,8 @@ export function MealPlanPage() {
               <div style={{ fontWeight: 'bold', fontSize: '0.85em', marginBottom: '4px' }}>
                 {DAY_NAMES[i]} {dayNum}
               </div>
-              {dayMeals.length === 0 && (
-                <span style={{ color: '#aaa', fontSize: '0.8em' }}>(empty)</span>
-              )}
-              {dayMeals.map(meal => (
+              {dayMeals.length === 0 && <span style={{ color: '#aaa', fontSize: '0.8em' }}>(empty)</span>}
+              {dayMeals.map((meal) => (
                 <div
                   key={meal.meal_id}
                   data-testid={`grid-meal-${meal.meal_id}`}
@@ -406,10 +401,7 @@ export function MealPlanPage() {
           {selectedDayMeals.length === 0 ? (
             <p data-testid="no-meals">No meals planned for this day.</p>
           ) : (
-            <table
-              style={{ width: '100%', borderCollapse: 'collapse' }}
-              data-testid="day-detail-table"
-            >
+            <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="day-detail-table">
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Entry</th>
@@ -419,18 +411,14 @@ export function MealPlanPage() {
                 </tr>
               </thead>
               <tbody>
-                {selectedDayMeals.map(meal => (
+                {selectedDayMeals.map((meal) => (
                   <tr key={meal.meal_id} data-testid={`detail-row-${meal.meal_id}`}>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                      {entryName(meal)}
-                    </td>
+                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{entryName(meal)}</td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
                       {meal.meal_prep ? 'Prep' : 'Regular'}
                     </td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                      {meal.completed_at
-                        ? `DONE (${formatTime(meal.completed_at)})`
-                        : 'Planned'}
+                      {meal.completed_at ? `DONE (${formatTime(meal.completed_at)})` : 'Planned'}
                     </td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
                       {!meal.completed_at && (
@@ -502,7 +490,7 @@ export function MealPlanPage() {
                 <IonInput
                   label="Search recipe or product"
                   value={addSearchText}
-                  onIonInput={e => handleAddSearchInput(e.detail.value ?? '')}
+                  onIonInput={(e) => handleAddSearchInput(e.detail.value ?? '')}
                   data-testid="add-meal-search"
                 />
                 {addShowDropdown && (
@@ -521,7 +509,7 @@ export function MealPlanPage() {
                       overflow: 'auto',
                     }}
                   >
-                    {addSearchResults.map(item => (
+                    {addSearchResults.map((item) => (
                       <div
                         key={`${item.type}-${item.id}`}
                         onClick={() => selectAddItem(item)}
@@ -539,7 +527,7 @@ export function MealPlanPage() {
                   label="Servings"
                   type="number"
                   value={addServings}
-                  onIonInput={e => setAddServings(Number(e.detail.value) || 1)}
+                  onIonInput={(e) => setAddServings(Number(e.detail.value) || 1)}
                   data-testid="add-meal-servings"
                 />
               </div>
@@ -547,26 +535,16 @@ export function MealPlanPage() {
                 <label>Meal Prep</label>
                 <IonToggle
                   checked={addMealPrep}
-                  onIonChange={e => setAddMealPrep(e.detail.checked)}
+                  onIonChange={(e) => setAddMealPrep(e.detail.checked)}
                   data-testid="add-meal-prep-toggle"
                 />
               </div>
-              <div style={{ marginBottom: '8px', fontSize: '0.85em', color: '#666' }}>
-                Date: {selectedDay}
-              </div>
+              <div style={{ marginBottom: '8px', fontSize: '0.85em', color: '#666' }}>Date: {selectedDay}</div>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <IonButton
-                  fill="clear"
-                  onClick={() => setShowAddModal(false)}
-                  data-testid="add-meal-cancel"
-                >
+                <IonButton fill="clear" onClick={() => setShowAddModal(false)} data-testid="add-meal-cancel">
                   Cancel
                 </IonButton>
-                <IonButton
-                  onClick={addMeal}
-                  disabled={!addSelected}
-                  data-testid="add-meal-confirm"
-                >
+                <IonButton onClick={addMeal} disabled={!addSelected} data-testid="add-meal-confirm">
                   Add
                 </IonButton>
               </div>
@@ -607,18 +585,10 @@ export function MealPlanPage() {
                 Macros will not be logged until the [MEAL] lot is consumed.
               </p>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton
-                  fill="clear"
-                  onClick={() => setPrepTarget(null)}
-                  data-testid="prep-cancel-btn"
-                >
+                <IonButton fill="clear" onClick={() => setPrepTarget(null)} data-testid="prep-cancel-btn">
                   Cancel
                 </IonButton>
-                <IonButton
-                  color="tertiary"
-                  onClick={executePrepConfirmed}
-                  data-testid="prep-execute-btn"
-                >
+                <IonButton color="tertiary" onClick={executePrepConfirmed} data-testid="prep-execute-btn">
                   Execute
                 </IonButton>
               </div>
