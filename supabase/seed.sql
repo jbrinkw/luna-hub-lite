@@ -23,7 +23,12 @@ INSERT INTO auth.users (
   created_at,
   updated_at,
   confirmation_token,
-  recovery_token
+  recovery_token,
+  email_change,
+  email_change_token_new,
+  email_change_token_current,
+  phone_change,
+  phone_change_token
 ) VALUES (
   '00000000-0000-0000-0000-000000000000',
   '11111111-1111-1111-1111-111111111111',
@@ -36,6 +41,11 @@ INSERT INTO auth.users (
   '{"display_name": "Demo User", "timezone": "America/New_York"}',
   now(),
   now(),
+  '',
+  '',
+  '',
+  '',
+  '',
   '',
   ''
 ) ON CONFLICT (id) DO NOTHING;

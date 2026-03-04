@@ -146,7 +146,7 @@ export function TodayPage() {
       .from('timers')
       .select('state, end_time, duration_seconds, elapsed_before_pause')
       .eq('user_id', user.id)
-      .single();
+      .maybeSingle();
 
     if (data) {
       setTimer({
