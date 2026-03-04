@@ -90,12 +90,11 @@ describe('ChefByte ShoppingPage queries', () => {
     expect(Number(item.qty_containers)).toBe(2);
     expect(item.purchased).toBe(false);
 
-    // Verify products join shape
-    expect(item.products).toBeDefined();
-    expect(item.products).toHaveProperty('name');
-    expect(item.products).toHaveProperty('barcode');
-    expect(item.products).toHaveProperty('price');
+    // Verify products join with exact seed values
+    expect(item.products).not.toBeNull();
     expect(item.products.name).toBe('Chicken Breast');
+    expect(item.products.barcode).toBeNull();
+    expect(item.products.price).toBeNull();
   });
 
   // -----------------------------------------------------------------------
@@ -108,8 +107,8 @@ describe('ChefByte ShoppingPage queries', () => {
       .select('cart_item_id, purchased')
       .eq('user_id', ctx.userId);
 
-    expect(items).toBeDefined();
-    expect(items!.length).toBeGreaterThanOrEqual(1);
+    expect(items).not.toBeNull();
+    expect(items!.length).toBe(1);
 
     const cartItemId = items![0].cart_item_id;
     const currentPurchased = items![0].purchased;
@@ -150,7 +149,7 @@ describe('ChefByte ShoppingPage queries', () => {
       .eq('user_id', ctx.userId)
       .eq('product_id', productId);
 
-    expect(items).toBeDefined();
+    expect(items).not.toBeNull();
     expect(items!.length).toBe(1);
     const cartItemId = items![0].cart_item_id;
 
@@ -282,8 +281,8 @@ describe('ChefByte ShoppingPage queries', () => {
       .select('product_id')
       .single();
 
-    assertQuerySucceeds(result, 'placeholder product');
-    expect(result.data).toHaveProperty('product_id');
-    expect(typeof result.data!.product_id).toBe('string');
+    const data = assertQuerySucceeds(result, 'placeholder product');
+    expect(typeof data.product_id).toBe('string');
+    expect(data.product_id.length).toBeGreaterThan(0);
   });
 });

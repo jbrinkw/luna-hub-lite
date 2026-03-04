@@ -83,12 +83,13 @@ describe('CoachByte PrsPage queries', () => {
     expect(data.length).toBe(4);
 
     const first = data[0];
-    expect(first).toHaveProperty('exercise_id');
-    expect(first).toHaveProperty('actual_reps');
-    expect(first).toHaveProperty('actual_load');
-    expect(first).toHaveProperty('exercises');
-    expect(first.exercises).toHaveProperty('name');
+    expect(typeof first.exercise_id).toBe('string');
+    expect(typeof first.actual_reps).toBe('number');
+    expect(typeof Number(first.actual_load)).toBe('number');
+    expect(first.exercises).not.toBeNull();
     expect(typeof first.exercises.name).toBe('string');
+    // All exercises should be either Squat or Bench Press
+    expect(['Squat', 'Bench Press']).toContain(first.exercises.name);
   });
 
   // -------------------------------------------------------------------

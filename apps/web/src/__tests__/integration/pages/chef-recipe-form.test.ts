@@ -52,26 +52,34 @@ describe('ChefByte RecipeFormPage queries', () => {
     expect(Number(recipe.base_servings)).toBe(2);
     expect(Number(recipe.active_time)).toBe(15);
     expect(Number(recipe.total_time)).toBe(30);
-    // instructions may be null for seeded recipe
-    expect(recipe).toHaveProperty('instructions');
+    // instructions is null for seeded recipe
+    expect(recipe.instructions).toBeNull();
 
     // Verify recipe_ingredients with products sub-join
-    expect(recipe.recipe_ingredients).toBeDefined();
+    expect(recipe.recipe_ingredients).not.toBeNull();
     expect(recipe.recipe_ingredients.length).toBe(2);
 
-    for (const ri of recipe.recipe_ingredients) {
-      expect(ri).toHaveProperty('product_id');
-      expect(ri).toHaveProperty('quantity');
-      expect(ri).toHaveProperty('unit');
-      expect(ri).toHaveProperty('note');
-      expect(ri.products).toBeTruthy();
-      expect(ri.products.name).toBeDefined();
-      expect(ri.products.calories_per_serving).toBeDefined();
-      expect(ri.products.carbs_per_serving).toBeDefined();
-      expect(ri.products.protein_per_serving).toBeDefined();
-      expect(ri.products.fat_per_serving).toBeDefined();
-      expect(ri.products.servings_per_container).toBeDefined();
-    }
+    // Verify Chicken Breast ingredient (0.5 container)
+    const chickenIng = recipe.recipe_ingredients.find((ri: any) => ri.product_id === productMap['Chicken Breast']);
+    expect(chickenIng).toBeDefined();
+    expect(Number(chickenIng.quantity)).toBe(0.5);
+    expect(chickenIng.unit).toBe('container');
+    expect(chickenIng.note).toBeNull();
+    expect(chickenIng.products.name).toBe('Chicken Breast');
+    expect(Number(chickenIng.products.calories_per_serving)).toBe(165);
+    expect(Number(chickenIng.products.protein_per_serving)).toBe(31);
+    expect(Number(chickenIng.products.carbs_per_serving)).toBe(0);
+    expect(Number(chickenIng.products.fat_per_serving)).toBeCloseTo(3.6, 1);
+    expect(Number(chickenIng.products.servings_per_container)).toBe(4);
+
+    // Verify Brown Rice ingredient (0.25 container)
+    const riceIng = recipe.recipe_ingredients.find((ri: any) => ri.product_id === productMap['Brown Rice']);
+    expect(riceIng).toBeDefined();
+    expect(Number(riceIng.quantity)).toBe(0.25);
+    expect(riceIng.unit).toBe('container');
+    expect(riceIng.products.name).toBe('Brown Rice');
+    expect(Number(riceIng.products.calories_per_serving)).toBe(216);
+    expect(Number(riceIng.products.servings_per_container)).toBe(8);
   });
 
   /* ---------------------------------------------------------------- */
@@ -108,11 +116,14 @@ describe('ChefByte RecipeFormPage queries', () => {
       expect(p).toHaveProperty('servings_per_container');
     }
 
-    // Check a specific product
+    // Check a specific product with exact seed values
     const chicken = products.find((p: any) => p.name === 'Chicken Breast');
-    expect(chicken).toBeTruthy();
+    expect(chicken).toBeDefined();
     expect(Number(chicken.calories_per_serving)).toBe(165);
     expect(Number(chicken.protein_per_serving)).toBe(31);
+    expect(Number(chicken.carbs_per_serving)).toBe(0);
+    expect(Number(chicken.fat_per_serving)).toBeCloseTo(3.6, 1);
+    expect(Number(chicken.servings_per_container)).toBe(4);
   });
 
   /* ---------------------------------------------------------------- */
@@ -136,8 +147,8 @@ describe('ChefByte RecipeFormPage queries', () => {
       .single();
 
     const newRecipe = assertQuerySucceeds(result, 'recipe insert');
-    expect(newRecipe.recipe_id).toBeDefined();
     expect(typeof newRecipe.recipe_id).toBe('string');
+    expect(newRecipe.recipe_id.length).toBeGreaterThan(0);
 
     // Insert ingredients — exact from RecipeFormPage.tsx handleSave()
     const ingResult = await chefbyte(ctx.client).from('recipe_ingredients').insert({
@@ -189,7 +200,8 @@ describe('ChefByte RecipeFormPage queries', () => {
       })
       .select('recipe_id')
       .single();
-    expect(created).toBeTruthy();
+    expect(created).not.toBeNull();
+    expect(typeof created!.recipe_id).toBe('string');
     const updateId = created!.recipe_id;
 
     // Exact update query from RecipeFormPage.tsx handleSave() edit path
@@ -208,7 +220,7 @@ describe('ChefByte RecipeFormPage queries', () => {
 
     // Verify
     const { data: fetched } = await chefbyte(ctx.client).from('recipes').select('*').eq('recipe_id', updateId).single();
-    expect(fetched).toBeTruthy();
+    expect(fetched).not.toBeNull();
     expect(fetched!.name).toBe('Updated Recipe');
     expect(fetched!.description).toBe('Now has a description');
     expect(Number(fetched!.base_servings)).toBe(3);
@@ -235,7 +247,8 @@ describe('ChefByte RecipeFormPage queries', () => {
       })
       .select('recipe_id')
       .single();
-    expect(r).toBeTruthy();
+    expect(r).not.toBeNull();
+    expect(typeof r!.recipe_id).toBe('string');
     const rid = r!.recipe_id;
 
     await chefbyte(ctx.client).from('recipe_ingredients').insert({
@@ -280,13 +293,13 @@ describe('ChefByte RecipeFormPage queries', () => {
     expect(ings).toHaveLength(2);
 
     const banana = ings!.find((i: any) => i.product_id === productMap['Bananas']);
-    expect(banana).toBeTruthy();
+    expect(banana).toBeDefined();
     expect(Number(banana!.quantity)).toBe(1);
     expect(banana!.unit).toBe('container');
     expect(banana!.note).toBe('ripe');
 
     const protein = ings!.find((i: any) => i.product_id === productMap['Protein Powder']);
-    expect(protein).toBeTruthy();
+    expect(protein).toBeDefined();
     expect(Number(protein!.quantity)).toBe(1);
     expect(protein!.unit).toBe('serving');
 
@@ -310,7 +323,8 @@ describe('ChefByte RecipeFormPage queries', () => {
       })
       .select('recipe_id')
       .single();
-    expect(r).toBeTruthy();
+    expect(r).not.toBeNull();
+    expect(typeof r!.recipe_id).toBe('string');
     const deleteId = r!.recipe_id;
 
     await chefbyte(ctx.client).from('recipe_ingredients').insert({
@@ -365,7 +379,9 @@ describe('ChefByte RecipeFormPage queries', () => {
       .eq('recipe_id', created.recipe_id)
       .single();
 
-    expect(fetched).toBeTruthy();
+    expect(fetched).not.toBeNull();
+    expect(fetched!.name).toBe('Minimal Recipe');
+    expect(Number(fetched!.base_servings)).toBe(1);
     expect(fetched!.description).toBeNull();
     expect(fetched!.active_time).toBeNull();
     expect(fetched!.total_time).toBeNull();

@@ -18,10 +18,7 @@ describe('Extension settings', () => {
     const { error: upsertError } = await client
       .schema('hub')
       .from('extension_settings')
-      .upsert(
-        { user_id: userId, extension_name: 'obsidian', enabled: true },
-        { onConflict: 'user_id,extension_name' },
-      );
+      .upsert({ user_id: userId, extension_name: 'obsidian', enabled: true }, { onConflict: 'user_id,extension_name' });
 
     expect(upsertError).toBeNull();
 
@@ -99,7 +96,8 @@ describe('Extension settings', () => {
       .single();
 
     expect(data?.enabled).toBe(true);
-    expect(data?.credentials_encrypted).toBeTruthy();
+    expect(typeof data?.credentials_encrypted).toBe('string');
+    expect(data!.credentials_encrypted!.length).toBeGreaterThan(0);
     // Verify actual credential content, not just truthiness
     const parsed = JSON.parse(data!.credentials_encrypted!);
     expect(parsed).toEqual({ url: 'http://ha.local', token: 'tok' });
@@ -112,10 +110,7 @@ describe('Extension settings', () => {
     const { error: enableError } = await client
       .schema('hub')
       .from('extension_settings')
-      .upsert(
-        { user_id: userId, extension_name: 'obsidian', enabled: true },
-        { onConflict: 'user_id,extension_name' },
-      );
+      .upsert({ user_id: userId, extension_name: 'obsidian', enabled: true }, { onConflict: 'user_id,extension_name' });
 
     expect(enableError).toBeNull();
 
@@ -222,17 +217,11 @@ describe('Extension settings', () => {
     const { error: upsertError } = await clientA
       .schema('hub')
       .from('extension_settings')
-      .upsert(
-        { user_id: userA, extension_name: 'obsidian', enabled: true },
-        { onConflict: 'user_id,extension_name' },
-      );
+      .upsert({ user_id: userA, extension_name: 'obsidian', enabled: true }, { onConflict: 'user_id,extension_name' });
 
     expect(upsertError).toBeNull();
 
-    const { data } = await clientB
-      .schema('hub')
-      .from('extension_settings')
-      .select('*');
+    const { data } = await clientB.schema('hub').from('extension_settings').select('*');
 
     expect(data).toHaveLength(0);
   });

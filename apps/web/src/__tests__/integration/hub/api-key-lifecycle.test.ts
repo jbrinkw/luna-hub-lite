@@ -99,7 +99,7 @@ describe('API key lifecycle', () => {
       .eq('id', inserted!.id)
       .single();
 
-    expect(data!.revoked_at).not.toBeNull();
+    expect(typeof data!.revoked_at).toBe('string');
   });
 
   it('revoked key excluded from active query', async () => {
@@ -206,11 +206,7 @@ describe('API key lifecycle', () => {
       .insert({ user_id: userAId, api_key_hash: 'hash_rls_test', label: 'RLS test' });
     expect(insertError).toBeNull();
 
-    const { data, error } = await clientB
-      .schema('hub')
-      .from('api_keys')
-      .select('*')
-      .eq('user_id', userAId);
+    const { data, error } = await clientB.schema('hub').from('api_keys').select('*').eq('user_id', userAId);
     expect(error).toBeNull();
     expect(data).toHaveLength(0);
   });

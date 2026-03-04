@@ -30,10 +30,6 @@ describe('CoachByte SettingsPage queries', () => {
       .single();
 
     const data = assertQuerySucceeds(result, 'user_settings');
-    expect(data).toHaveProperty('default_rest_seconds');
-    expect(data).toHaveProperty('bar_weight_lbs');
-    expect(data).toHaveProperty('available_plates');
-
     // Verify defaults from schema
     expect(data.default_rest_seconds).toBe(90);
     expect(Number(data.bar_weight_lbs)).toBe(45);
@@ -93,9 +89,8 @@ describe('CoachByte SettingsPage queries', () => {
     expect(data.length).toBeGreaterThanOrEqual(20); // 20 global seeds
 
     const first = data[0];
-    expect(first).toHaveProperty('exercise_id');
-    expect(first).toHaveProperty('name');
-    expect(first).toHaveProperty('user_id');
+    expect(typeof first.exercise_id).toBe('string');
+    expect(typeof first.name).toBe('string');
     // Global exercises have null user_id
     expect(first.user_id).toBeNull();
 

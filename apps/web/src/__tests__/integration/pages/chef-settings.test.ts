@@ -31,22 +31,22 @@ describe('ChefByte SettingsPage queries', () => {
     const data = assertQuerySucceeds(result, 'products *');
     expect(data.length).toBeGreaterThanOrEqual(5);
 
-    // Verify shape matches SettingsPage Product interface (all fields)
+    // Verify first product (alphabetically: Bananas) with exact seed values
     const first = data[0];
-    expect(first).toHaveProperty('product_id');
-    expect(first).toHaveProperty('user_id');
-    expect(first).toHaveProperty('name');
-    expect(first).toHaveProperty('barcode');
-    expect(first).toHaveProperty('description');
-    expect(first).toHaveProperty('servings_per_container');
-    expect(first).toHaveProperty('calories_per_serving');
-    expect(first).toHaveProperty('carbs_per_serving');
-    expect(first).toHaveProperty('protein_per_serving');
-    expect(first).toHaveProperty('fat_per_serving');
-    expect(first).toHaveProperty('min_stock_amount');
-    expect(first).toHaveProperty('is_placeholder');
-    expect(first).toHaveProperty('walmart_link');
-    expect(first).toHaveProperty('price');
+    expect(typeof first.product_id).toBe('string');
+    expect(first.user_id).toBe(ctx.userId);
+    expect(first.name).toBe('Bananas');
+    expect(first.barcode).toBeNull();
+    expect(first.description).toBeNull();
+    expect(Number(first.servings_per_container)).toBe(1);
+    expect(Number(first.calories_per_serving)).toBe(105);
+    expect(Number(first.carbs_per_serving)).toBe(27);
+    expect(Number(first.protein_per_serving)).toBeCloseTo(1.3, 1);
+    expect(Number(first.fat_per_serving)).toBeCloseTo(0.4, 1);
+    expect(Number(first.min_stock_amount)).toBe(3);
+    expect(first.is_placeholder).toBe(false);
+    expect(first.walmart_link).toBeNull();
+    expect(first.price).toBeNull();
 
     // Verify alphabetical sort
     const names = data.map((p: any) => p.name);
@@ -202,7 +202,7 @@ describe('ChefByte SettingsPage queries', () => {
 
     const data = assertQuerySucceeds(insertResult, 'location create');
     expect(data.name).toBe('Garage');
-    expect(data).toHaveProperty('location_id');
+    expect(typeof data.location_id).toBe('string');
   });
 
   // -----------------------------------------------------------------------
@@ -276,8 +276,8 @@ describe('ChefByte SettingsPage queries', () => {
     expect(device.is_active).toBe(true);
     expect(device.import_key_hash).toBe(keyHash);
 
-    // Verify products join
-    expect(device.products).toBeDefined();
+    // Verify products join with exact values
+    expect(device.products).not.toBeNull();
     expect(device.products.name).toBe('Protein Powder');
   });
 
@@ -381,19 +381,17 @@ describe('ChefByte SettingsPage queries', () => {
     expect(data).toHaveLength(1);
 
     const event = data[0];
-    expect(event).toHaveProperty('event_id');
-    expect(event).toHaveProperty('created_at');
-    expect(event).toHaveProperty('weight_before');
-    expect(event).toHaveProperty('weight_after');
-    expect(event).toHaveProperty('consumption');
-    expect(event).toHaveProperty('calories');
-    expect(event).toHaveProperty('carbs');
-    expect(event).toHaveProperty('protein');
-    expect(event).toHaveProperty('fat');
-    expect(event).toHaveProperty('is_refill');
+    expect(typeof event.event_id).toBe('string');
+    expect(typeof event.created_at).toBe('string');
+    expect(event.is_refill).toBe(false);
 
-    expect(Number(event.weight_before)).toBeCloseTo(500, 1);
-    expect(Number(event.weight_after)).toBeCloseTo(350, 1);
-    expect(Number(event.consumption)).toBeCloseTo(150, 1);
+    // Verify exact values from insert
+    expect(Number(event.weight_before)).toBe(500);
+    expect(Number(event.weight_after)).toBe(350);
+    expect(Number(event.consumption)).toBe(150);
+    expect(Number(event.calories)).toBe(0);
+    expect(Number(event.carbs)).toBe(0);
+    expect(Number(event.protein)).toBe(0);
+    expect(Number(event.fat)).toBe(0);
   });
 });

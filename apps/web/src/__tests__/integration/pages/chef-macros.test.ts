@@ -101,23 +101,36 @@ describe('ChefByte MacroPage queries', () => {
 
     const data = assertQuerySucceeds(result, 'get_daily_macros');
 
-    // Structure check
-    expect(data).toHaveProperty('calories');
-    expect(data).toHaveProperty('protein');
-    expect(data).toHaveProperty('carbs');
-    expect(data).toHaveProperty('fat');
+    // Structure check with exact values
+    expect(data.calories).not.toBeNull();
+    expect(data.protein).not.toBeNull();
+    expect(data.carbs).not.toBeNull();
+    expect(data.fat).not.toBeNull();
 
     for (const key of ['calories', 'protein', 'carbs', 'fat']) {
-      expect(data[key]).toHaveProperty('consumed');
-      expect(data[key]).toHaveProperty('goal');
-      expect(data[key]).toHaveProperty('remaining');
+      expect(typeof Number(data[key].consumed)).toBe('number');
+      expect(typeof Number(data[key].goal)).toBe('number');
+      expect(typeof Number(data[key].remaining)).toBe('number');
     }
 
     // Consumed should include food_log (165cal) + temp_item (50cal) + lt_event (30cal) = 245
-    expect(Number(data.calories.consumed)).toBeGreaterThanOrEqual(165);
+    expect(Number(data.calories.consumed)).toBeCloseTo(245, 0);
+    // Protein: food_log (31) + temp_item (1) + lt_event (0) = 32
+    expect(Number(data.protein.consumed)).toBeCloseTo(32, 0);
+    // Carbs: food_log (0) + temp_item (5) + lt_event (8) = 13
+    expect(Number(data.carbs.consumed)).toBeCloseTo(13, 0);
+    // Fat: food_log (3.6) + temp_item (2) + lt_event (0) = 5.6
+    expect(Number(data.fat.consumed)).toBeCloseTo(5.6, 1);
+
     // Goals from seedMacroGoals
     expect(Number(data.calories.goal)).toBe(2200);
     expect(Number(data.protein.goal)).toBe(180);
+    expect(Number(data.carbs.goal)).toBe(220);
+    expect(Number(data.fat.goal)).toBe(73);
+
+    // Remaining = goal - consumed
+    expect(Number(data.calories.remaining)).toBeCloseTo(2200 - 245, 0);
+    expect(Number(data.protein.remaining)).toBeCloseTo(180 - 32, 0);
   });
 
   // -------------------------------------------------------------------
@@ -143,19 +156,16 @@ describe('ChefByte MacroPage queries', () => {
     expect(data.length).toBeGreaterThanOrEqual(1);
 
     const log = data[0];
-    expect(log).toHaveProperty('log_id');
-    expect(log).toHaveProperty('product_id');
-    expect(log).toHaveProperty('calories');
-    expect(log).toHaveProperty('protein');
-    expect(log).toHaveProperty('carbs');
-    expect(log).toHaveProperty('fat');
-    expect(log).toHaveProperty('products');
-    expect(log.products).toHaveProperty('name');
+    expect(typeof log.log_id).toBe('string');
+    expect(log.product_id).toBe(seeds.productMap['Chicken Breast']);
+    expect(log.products).not.toBeNull();
     expect(log.products.name).toBe('Chicken Breast');
 
-    // Verify correct values
+    // Verify exact macro values from seed (1 serving of Chicken Breast)
     expect(Number(log.calories)).toBe(165);
     expect(Number(log.protein)).toBe(31);
+    expect(Number(log.carbs)).toBe(0);
+    expect(Number(log.fat)).toBeCloseTo(3.6, 1);
   });
 
   // -------------------------------------------------------------------
@@ -180,8 +190,7 @@ describe('ChefByte MacroPage queries', () => {
     expect(data.length).toBeGreaterThanOrEqual(1);
 
     const item = data[0];
-    expect(item).toHaveProperty('temp_id');
-    expect(item).toHaveProperty('name');
+    expect(typeof item.temp_id).toBe('string');
     expect(item.name).toBe('Morning Coffee');
     expect(Number(item.calories)).toBe(50);
     expect(Number(item.protein)).toBe(1);
@@ -212,13 +221,12 @@ describe('ChefByte MacroPage queries', () => {
     expect(data.length).toBeGreaterThanOrEqual(1);
 
     const event = data[0];
-    expect(event).toHaveProperty('event_id');
-    expect(event).toHaveProperty('calories');
-    expect(event).toHaveProperty('protein');
-    expect(event).toHaveProperty('carbs');
-    expect(event).toHaveProperty('fat');
+    expect(typeof event.event_id).toBe('string');
+    // Verify exact values from seed
     expect(Number(event.calories)).toBe(30);
+    expect(Number(event.protein)).toBe(0);
     expect(Number(event.carbs)).toBe(8);
+    expect(Number(event.fat)).toBe(0);
   });
 
   // -------------------------------------------------------------------
@@ -252,24 +260,24 @@ describe('ChefByte MacroPage queries', () => {
 
     // Find the recipe-based entry
     const recipeEntry = data.find((e: any) => e.recipes !== null);
-    expect(recipeEntry).toBeTruthy();
-    expect(recipeEntry.recipes).toHaveProperty('name');
+    expect(recipeEntry).toBeDefined();
     expect(recipeEntry.recipes.name).toBe('Chicken & Rice');
-    expect(recipeEntry.recipes).toHaveProperty('base_servings');
-    expect(recipeEntry.recipes).toHaveProperty('recipe_ingredients');
+    expect(Number(recipeEntry.recipes.base_servings)).toBe(2);
     expect(Array.isArray(recipeEntry.recipes.recipe_ingredients)).toBe(true);
-    expect(recipeEntry.recipes.recipe_ingredients.length).toBeGreaterThanOrEqual(1);
+    expect(recipeEntry.recipes.recipe_ingredients.length).toBe(2);
 
-    // Check ingredient structure
-    const ingredient = recipeEntry.recipes.recipe_ingredients[0];
-    expect(ingredient).toHaveProperty('quantity');
-    expect(ingredient).toHaveProperty('unit');
-    expect(ingredient).toHaveProperty('products');
-    expect(ingredient.products).toHaveProperty('calories_per_serving');
-    expect(ingredient.products).toHaveProperty('carbs_per_serving');
-    expect(ingredient.products).toHaveProperty('protein_per_serving');
-    expect(ingredient.products).toHaveProperty('fat_per_serving');
-    expect(ingredient.products).toHaveProperty('servings_per_container');
+    // Check ingredient structure with exact seed values
+    const chickenIngr = recipeEntry.recipes.recipe_ingredients.find(
+      (i: any) => i.products.calories_per_serving !== null && Number(i.products.calories_per_serving) === 165,
+    );
+    expect(chickenIngr).toBeDefined();
+    expect(Number(chickenIngr.quantity)).toBe(0.5);
+    expect(chickenIngr.unit).toBe('container');
+    expect(Number(chickenIngr.products.calories_per_serving)).toBe(165);
+    expect(Number(chickenIngr.products.protein_per_serving)).toBe(31);
+    expect(Number(chickenIngr.products.carbs_per_serving)).toBe(0);
+    expect(Number(chickenIngr.products.fat_per_serving)).toBeCloseTo(3.6, 1);
+    expect(Number(chickenIngr.products.servings_per_container)).toBe(4);
   });
 
   // -------------------------------------------------------------------

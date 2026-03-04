@@ -68,9 +68,8 @@ describe('Hub AppProvider queries', () => {
 
     const data = assertQuerySucceeds(result, 'profiles');
     expect(data.user_id).toBe(ctx.userId);
-    expect(data).toHaveProperty('display_name');
-    expect(data).toHaveProperty('timezone');
-    expect(data).toHaveProperty('day_start_hour');
+    // Verify default values from schema
+    expect(data.display_name).toBeNull();
     // Defaults from schema
     expect(data.timezone).toBe('America/New_York');
     expect(data.day_start_hour).toBe(6);

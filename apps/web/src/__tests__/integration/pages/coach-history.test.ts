@@ -61,10 +61,8 @@ describe('CoachByte HistoryPage queries', () => {
     expect(data.length).toBeGreaterThanOrEqual(1);
 
     const first = data[0];
-    expect(first).toHaveProperty('plan_id');
-    expect(first).toHaveProperty('plan_date');
-    expect(first).toHaveProperty('summary');
     expect(first.plan_id).toBe(planId);
+    expect(first.plan_date).toBe(todayDate());
     expect(first.summary).toBe('Test history day');
   });
 
@@ -155,8 +153,8 @@ describe('CoachByte HistoryPage queries', () => {
 
     const data = assertQuerySucceeds(result, 'exercises filter');
     expect(data.length).toBeGreaterThanOrEqual(1);
-    expect(data[0]).toHaveProperty('exercise_id');
-    expect(data[0]).toHaveProperty('name');
+    expect(typeof data[0].exercise_id).toBe('string');
+    expect(typeof data[0].name).toBe('string');
   });
 
   // -------------------------------------------------------------------
@@ -178,13 +176,10 @@ describe('CoachByte HistoryPage queries', () => {
     expect(data.length).toBeGreaterThanOrEqual(1);
 
     const first = data[0];
-    expect(first).toHaveProperty('actual_reps');
-    expect(first).toHaveProperty('actual_load');
-    expect(first).toHaveProperty('completed_at');
-    expect(first).toHaveProperty('exercises');
-    expect(first.exercises).toHaveProperty('name');
-    expect(typeof first.exercises.name).toBe('string');
     expect(first.actual_reps).toBe(5);
     expect(Number(first.actual_load)).toBe(225);
+    expect(typeof first.completed_at).toBe('string');
+    expect(first.exercises).not.toBeNull();
+    expect(first.exercises.name).toBe('Squat');
   });
 });

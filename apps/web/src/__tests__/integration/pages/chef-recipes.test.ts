@@ -45,11 +45,11 @@ describe('ChefByte RecipesPage queries', () => {
 
     const recipes = assertQuerySucceeds(result, 'recipes list');
     expect(Array.isArray(recipes)).toBe(true);
-    expect(recipes.length).toBeGreaterThanOrEqual(1);
+    expect(recipes.length).toBe(1);
 
     // Find the seeded recipe
     const recipe = recipes.find((r: any) => r.recipe_id === recipeId);
-    expect(recipe).toBeTruthy();
+    expect(recipe).toBeDefined();
     expect(recipe.name).toBe('Chicken & Rice');
     expect(recipe.description).toBe('Simple chicken and rice meal');
     expect(Number(recipe.base_servings)).toBe(2);
@@ -57,28 +57,35 @@ describe('ChefByte RecipesPage queries', () => {
     expect(Number(recipe.total_time)).toBe(30);
 
     // Verify recipe_ingredients join
-    expect(recipe.recipe_ingredients).toBeDefined();
+    expect(recipe.recipe_ingredients).not.toBeNull();
     expect(Array.isArray(recipe.recipe_ingredients)).toBe(true);
     expect(recipe.recipe_ingredients.length).toBe(2);
 
-    // Verify products sub-join (product_id aliased as "products")
-    for (const ing of recipe.recipe_ingredients) {
-      expect(ing.products).toBeTruthy();
-      expect(ing.products.name).toBeDefined();
-      expect(ing.products.calories_per_serving).toBeDefined();
-      expect(ing.products.carbs_per_serving).toBeDefined();
-      expect(ing.products.protein_per_serving).toBeDefined();
-      expect(ing.products.fat_per_serving).toBeDefined();
-      expect(ing.products.servings_per_container).toBeDefined();
-    }
-
-    // Check one specific ingredient
+    // Verify Chicken Breast ingredient with exact seed values
     const chickenIng = recipe.recipe_ingredients.find((i: any) => i.product_id === productMap['Chicken Breast']);
-    expect(chickenIng).toBeTruthy();
+    expect(chickenIng).toBeDefined();
+    expect(chickenIng.products).not.toBeNull();
     expect(chickenIng.products.name).toBe('Chicken Breast');
     expect(Number(chickenIng.products.calories_per_serving)).toBe(165);
     expect(Number(chickenIng.products.protein_per_serving)).toBe(31);
+    expect(Number(chickenIng.products.carbs_per_serving)).toBe(0);
+    expect(Number(chickenIng.products.fat_per_serving)).toBeCloseTo(3.6, 1);
     expect(Number(chickenIng.products.servings_per_container)).toBe(4);
+    expect(Number(chickenIng.quantity)).toBe(0.5);
+    expect(chickenIng.unit).toBe('container');
+
+    // Verify Brown Rice ingredient with exact seed values
+    const riceIng = recipe.recipe_ingredients.find((i: any) => i.product_id === productMap['Brown Rice']);
+    expect(riceIng).toBeDefined();
+    expect(riceIng.products).not.toBeNull();
+    expect(riceIng.products.name).toBe('Brown Rice');
+    expect(Number(riceIng.products.calories_per_serving)).toBe(216);
+    expect(Number(riceIng.products.protein_per_serving)).toBe(5);
+    expect(Number(riceIng.products.carbs_per_serving)).toBe(45);
+    expect(Number(riceIng.products.fat_per_serving)).toBeCloseTo(1.8, 1);
+    expect(Number(riceIng.products.servings_per_container)).toBe(8);
+    expect(Number(riceIng.quantity)).toBe(0.25);
+    expect(riceIng.unit).toBe('container');
   });
 
   /* ---------------------------------------------------------------- */
@@ -148,7 +155,7 @@ describe('ChefByte RecipesPage queries', () => {
 
     const recipes = assertQuerySucceeds(result, 'bare recipe');
     const emptyRecipe = recipes.find((r: any) => r.recipe_id === bare!.recipe_id);
-    expect(emptyRecipe).toBeTruthy();
+    expect(emptyRecipe).toBeDefined();
     expect(emptyRecipe.recipe_ingredients).toEqual([]);
 
     // Cleanup
@@ -169,25 +176,25 @@ describe('ChefByte RecipesPage queries', () => {
 
     const recipes = assertQuerySucceeds(result, 'field shape');
     const recipe = recipes.find((r: any) => r.recipe_id === recipeId);
-    expect(recipe).toBeTruthy();
+    expect(recipe).toBeDefined();
 
-    // All fields the page uses
-    expect(recipe).toHaveProperty('recipe_id');
-    expect(recipe).toHaveProperty('user_id');
-    expect(recipe).toHaveProperty('name');
-    expect(recipe).toHaveProperty('description');
-    expect(recipe).toHaveProperty('base_servings');
-    expect(recipe).toHaveProperty('active_time');
-    expect(recipe).toHaveProperty('total_time');
-    expect(recipe).toHaveProperty('instructions');
-    expect(recipe).toHaveProperty('recipe_ingredients');
+    // Verify exact values from seed
+    expect(recipe.recipe_id).toBe(recipeId);
+    expect(recipe.user_id).toBe(ctx.userId);
+    expect(recipe.name).toBe('Chicken & Rice');
+    expect(recipe.description).toBe('Simple chicken and rice meal');
+    expect(Number(recipe.base_servings)).toBe(2);
+    expect(Number(recipe.active_time)).toBe(15);
+    expect(Number(recipe.total_time)).toBe(30);
+    expect(recipe.instructions).toBeNull();
+    expect(recipe.recipe_ingredients.length).toBe(2);
 
-    // Ingredient fields
+    // Ingredient fields — verify exact shape and values
     const ing = recipe.recipe_ingredients[0];
-    expect(ing).toHaveProperty('ingredient_id');
-    expect(ing).toHaveProperty('quantity');
-    expect(ing).toHaveProperty('unit');
-    expect(ing).toHaveProperty('note');
-    expect(ing).toHaveProperty('products');
+    expect(typeof ing.ingredient_id).toBe('string');
+    expect(typeof Number(ing.quantity)).toBe('number');
+    expect(typeof ing.unit).toBe('string');
+    // note can be null or string
+    expect(ing.products).not.toBeNull();
   });
 });

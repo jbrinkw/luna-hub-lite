@@ -43,15 +43,20 @@ describe('CoachByte SplitPage queries', () => {
     expect(data.length).toBeGreaterThanOrEqual(1);
 
     const split = data[0];
-    expect(split).toHaveProperty('split_id');
-    expect(split).toHaveProperty('weekday');
-    expect(split).toHaveProperty('template_sets');
-    expect(split).toHaveProperty('split_notes');
-    expect(typeof split.weekday).toBe('number');
-    expect(split.weekday).toBeGreaterThanOrEqual(0);
-    expect(split.weekday).toBeLessThanOrEqual(6);
+    expect(typeof split.split_id).toBe('string');
+    const todayWeekday = new Date().getDay();
+    expect(split.weekday).toBe(todayWeekday);
     expect(Array.isArray(split.template_sets)).toBe(true);
+    expect(split.template_sets.length).toBe(3);
     expect(split.split_notes).toBe('Integration test split');
+
+    // Validate JSONB template_sets shape
+    for (const s of split.template_sets as any[]) {
+      expect(typeof s.exercise_id).toBe('string');
+      expect(typeof s.target_reps).toBe('number');
+      expect(typeof s.target_load).toBe('number');
+      expect(typeof s.order).toBe('number');
+    }
 
     splitId = split.split_id;
   });
@@ -65,13 +70,22 @@ describe('CoachByte SplitPage queries', () => {
 
     const data = assertQuerySucceeds(result, 'template_sets');
     const sets = data.template_sets as any[];
-    expect(sets.length).toBeGreaterThanOrEqual(1);
+    expect(sets.length).toBe(3); // seedSplit creates 3 template sets
 
-    const first = sets[0];
-    expect(first).toHaveProperty('exercise_id');
-    expect(first).toHaveProperty('target_reps');
-    expect(first).toHaveProperty('target_load');
-    expect(first).toHaveProperty('order');
+    // Validate JSONB shape: each template_set must have exercise_id, target_reps, target_load, order
+    for (const s of sets) {
+      expect(typeof s.exercise_id).toBe('string');
+      expect(typeof s.target_reps).toBe('number');
+      expect(typeof s.target_load).toBe('number');
+      expect(typeof s.order).toBe('number');
+    }
+
+    // Verify exact values from seedSplit
+    const squat = seeds.exerciseMap['Squat'];
+    const bench = seeds.exerciseMap['Bench Press'];
+    expect(sets[0]).toEqual({ exercise_id: squat, target_reps: 5, target_load: 225, order: 1 });
+    expect(sets[1]).toEqual({ exercise_id: squat, target_reps: 5, target_load: 225, order: 2 });
+    expect(sets[2]).toEqual({ exercise_id: bench, target_reps: 5, target_load: 185, order: 3 });
   });
 
   // -------------------------------------------------------------------
@@ -160,8 +174,8 @@ describe('CoachByte SplitPage queries', () => {
       .single();
 
     const data = assertQuerySucceeds(insertResult, 'split insert');
-    expect(data).toHaveProperty('split_id');
     expect(typeof data.split_id).toBe('string');
+    expect(data.split_id.length).toBeGreaterThan(0);
 
     // Verify the new split appears in the full list
     const allResult = await coachbyte(ctx.client)

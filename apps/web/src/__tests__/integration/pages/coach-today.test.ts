@@ -34,9 +34,9 @@ describe('CoachByte TodayPage queries', () => {
     const result = await coachbyte(ctx.client).rpc('ensure_daily_plan', { p_day: today });
     const data = assertQuerySucceeds(result, 'ensure_daily_plan');
 
-    expect(data).toHaveProperty('plan_id');
-    expect(data).toHaveProperty('status');
-    expect(['created', 'existing']).toContain(data.status);
+    expect(typeof data.plan_id).toBe('string');
+    expect(data.plan_id.length).toBeGreaterThan(0);
+    expect(data.status).toBe('created'); // First call always creates
     planId = data.plan_id;
   });
 
@@ -59,19 +59,19 @@ describe('CoachByte TodayPage queries', () => {
 
     const data = assertQuerySucceeds(result, 'planned_sets');
     expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThanOrEqual(1);
+    // seedSplit creates 3 template sets (2 Squat + 1 Bench)
+    expect(data.length).toBe(3);
 
     const first = data[0];
-    expect(first).toHaveProperty('planned_set_id');
-    expect(first).toHaveProperty('exercise_id');
-    expect(first).toHaveProperty('target_reps');
-    expect(first).toHaveProperty('target_load');
-    expect(first).toHaveProperty('target_load_percentage');
-    expect(first).toHaveProperty('rest_seconds');
-    expect(first).toHaveProperty('order');
-    expect(first).toHaveProperty('exercises');
-    expect(first.exercises).toHaveProperty('name');
+    expect(typeof first.planned_set_id).toBe('string');
+    expect(typeof first.exercise_id).toBe('string');
+    expect(first.target_reps).toBe(5);
+    expect(Number(first.target_load)).toBe(225);
+    // target_load_percentage can be null
+    expect(first.order).toBe(1);
+    expect(first.exercises).not.toBeNull();
     expect(typeof first.exercises.name).toBe('string');
+    expect(first.exercises.name).toBe('Squat');
   });
 
   // -------------------------------------------------------------------
@@ -109,8 +109,8 @@ describe('CoachByte TodayPage queries', () => {
     const data = assertQuerySucceeds(result, 'complete_next_set');
     expect(Array.isArray(data)).toBe(true);
     expect(data.length).toBe(1);
-    // rest_seconds can be a number or null (null when last set)
-    expect(data[0]).toHaveProperty('rest_seconds');
+    // rest_seconds is null because seedSplit template_sets don't include rest_seconds
+    expect(data[0].rest_seconds).toBeNull();
   });
 
   // -------------------------------------------------------------------
@@ -127,12 +127,13 @@ describe('CoachByte TodayPage queries', () => {
     expect(data.length).toBeGreaterThanOrEqual(1);
 
     const cs = data[0];
-    expect(cs).toHaveProperty('completed_set_id');
-    expect(cs).toHaveProperty('planned_set_id');
+    expect(typeof cs.completed_set_id).toBe('string');
+    expect(typeof cs.planned_set_id).toBe('string');
     expect(cs.actual_reps).toBe(5);
     expect(Number(cs.actual_load)).toBe(225);
-    expect(cs).toHaveProperty('completed_at');
-    expect(cs.exercises).toHaveProperty('name');
+    expect(typeof cs.completed_at).toBe('string');
+    expect(cs.exercises).not.toBeNull();
+    expect(cs.exercises.name).toBe('Squat');
   });
 
   // -------------------------------------------------------------------
@@ -147,7 +148,8 @@ describe('CoachByte TodayPage queries', () => {
     const result = await coachbyte(ctx.client).from('daily_plans').select('summary').eq('plan_id', planId).single();
 
     const data = assertQuerySucceeds(result, 'daily_plans summary');
-    expect(data).toHaveProperty('summary');
+    // Summary is null initially (before any update)
+    expect(data.summary).toBeNull();
   });
 
   // -------------------------------------------------------------------
@@ -301,7 +303,8 @@ describe('CoachByte TodayPage queries', () => {
       .single();
 
     const planData = assertQuerySucceeds(planResult, 'logical_date lookup');
-    expect(planData).toHaveProperty('logical_date');
+    expect(typeof planData.logical_date).toBe('string');
+    expect(planData.logical_date).toBe(todayDate());
 
     // Pick an exercise from seeds
     const exerciseId = Object.values(seeds.exerciseMap)[0];

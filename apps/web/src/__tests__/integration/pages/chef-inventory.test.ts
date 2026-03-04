@@ -32,21 +32,20 @@ describe('ChefByte InventoryPage queries', () => {
       .order('name');
 
     const data = assertQuerySucceeds(result, 'products');
-    expect(data.length).toBeGreaterThanOrEqual(5);
+    expect(data.length).toBe(5);
+
+    // Verify exact seeded product names in alphabetical order
+    const names = data.map((p: any) => p.name);
+    expect(names).toEqual(['Bananas', 'Brown Rice', 'Chicken Breast', 'Eggs', 'Protein Powder']);
 
     // Verify shape of returned rows matches InventoryPage Product interface
     const first = data[0];
-    expect(first).toHaveProperty('product_id');
-    expect(first).toHaveProperty('user_id');
-    expect(first).toHaveProperty('name');
-    expect(first).toHaveProperty('barcode');
-    expect(first).toHaveProperty('servings_per_container');
-    expect(first).toHaveProperty('min_stock_amount');
-
-    // Verify ordering is alphabetical by name
-    const names = data.map((p: any) => p.name);
-    const sorted = [...names].sort((a: string, b: string) => a.localeCompare(b));
-    expect(names).toEqual(sorted);
+    expect(typeof first.product_id).toBe('string');
+    expect(first.user_id).toBe(ctx.userId);
+    expect(first.name).toBe('Bananas');
+    expect(first.barcode).toBeNull();
+    expect(Number(first.servings_per_container)).toBe(1);
+    expect(Number(first.min_stock_amount)).toBe(3);
   });
 
   // -----------------------------------------------------------------------
@@ -59,21 +58,28 @@ describe('ChefByte InventoryPage queries', () => {
       .eq('user_id', ctx.userId);
 
     const data = assertQuerySucceeds(result, 'stock_lots');
-    expect(data.length).toBeGreaterThanOrEqual(3);
+    expect(data.length).toBe(3); // Chicken=3, Rice=2, Eggs=0.5
 
     // Verify shape matches InventoryPage StockLot interface
     const first = data[0];
-    expect(first).toHaveProperty('lot_id');
-    expect(first).toHaveProperty('product_id');
-    expect(first).toHaveProperty('qty_containers');
-    expect(first).toHaveProperty('expires_on');
-    expect(first).toHaveProperty('locations');
+    expect(typeof first.lot_id).toBe('string');
+    expect(typeof first.product_id).toBe('string');
+    expect(first.expires_on).not.toBeUndefined();
 
     // Verify the foreign-key join returns location name
     const withLocation = data.find((l: any) => l.locations !== null);
     expect(withLocation).toBeDefined();
-    expect(withLocation.locations).toHaveProperty('name');
-    expect(typeof withLocation.locations.name).toBe('string');
+    expect(withLocation.locations.name).toBe('Fridge');
+
+    // Verify exact stock quantities from seed data
+    const qtyByProduct = new Map<string, number>();
+    for (const lot of data) {
+      const existing = qtyByProduct.get(lot.product_id) ?? 0;
+      qtyByProduct.set(lot.product_id, existing + Number(lot.qty_containers));
+    }
+    expect(Number(qtyByProduct.get(seeds.productMap['Chicken Breast']))).toBeCloseTo(3.0, 1);
+    expect(Number(qtyByProduct.get(seeds.productMap['Brown Rice']))).toBeCloseTo(2.0, 1);
+    expect(Number(qtyByProduct.get(seeds.productMap['Eggs']))).toBeCloseTo(0.5, 1);
   });
 
   // -----------------------------------------------------------------------
@@ -109,8 +115,10 @@ describe('ChefByte InventoryPage queries', () => {
       .select('lot_id,product_id,qty_containers,expires_on,locations:location_id(name)')
       .eq('user_id', ctx.userId);
 
-    expect(prods).toBeDefined();
-    expect(stockLots).toBeDefined();
+    expect(prods).not.toBeNull();
+    expect(prods!.length).toBe(5);
+    expect(stockLots).not.toBeNull();
+    expect(stockLots!.length).toBe(3);
 
     // Replicate page-side aggregation logic
     const lotsByProduct = new Map<string, any[]>();
@@ -135,12 +143,30 @@ describe('ChefByte InventoryPage queries', () => {
       };
     });
 
-    // "Chicken Breast" should have 3 containers seeded
+    // Verify exact stock values for each seeded product
     const chicken = grouped.find((g: any) => g.product.name === 'Chicken Breast');
     expect(chicken).toBeDefined();
-    expect(chicken!.totalStock).toBeCloseTo(3, 1);
+    expect(chicken!.totalStock).toBeCloseTo(3.0, 1);
     expect(chicken!.lotCount).toBe(1);
-    expect(chicken!.nearestExpiry).not.toBeNull();
+    expect(typeof chicken!.nearestExpiry).toBe('string');
+
+    const rice = grouped.find((g: any) => g.product.name === 'Brown Rice');
+    expect(rice).toBeDefined();
+    expect(rice!.totalStock).toBeCloseTo(2.0, 1);
+    expect(rice!.lotCount).toBe(1);
+    expect(typeof rice!.nearestExpiry).toBe('string');
+
+    const eggs = grouped.find((g: any) => g.product.name === 'Eggs');
+    expect(eggs).toBeDefined();
+    expect(eggs!.totalStock).toBeCloseTo(0.5, 1);
+    expect(eggs!.lotCount).toBe(1);
+    expect(typeof eggs!.nearestExpiry).toBe('string');
+
+    const bananas = grouped.find((g: any) => g.product.name === 'Bananas');
+    expect(bananas).toBeDefined();
+    expect(bananas!.totalStock).toBe(0);
+    expect(bananas!.lotCount).toBe(0);
+    expect(bananas!.nearestExpiry).toBeNull();
 
     // "Protein Powder" has no stock lots
     const protein = grouped.find((g: any) => g.product.name === 'Protein Powder');
@@ -181,7 +207,7 @@ describe('ChefByte InventoryPage queries', () => {
         return a.productName.localeCompare(b.productName);
       });
 
-    expect(sortedLots.length).toBeGreaterThanOrEqual(3);
+    expect(sortedLots.length).toBe(3);
 
     // Verify sorting: all dated lots come before null-expiry lots
     let lastDate: string | null = null;
@@ -225,9 +251,8 @@ describe('ChefByte InventoryPage queries', () => {
       .eq('product_id', productId)
       .eq('user_id', ctx.userId);
 
-    expect(lots).toBeDefined();
-    expect(lots!.length).toBeGreaterThanOrEqual(1);
-    const addedLot = lots!.find((l: any) => Number(l.qty_containers) === 1);
-    expect(addedLot).toBeDefined();
+    expect(lots).not.toBeNull();
+    expect(lots!.length).toBe(1);
+    expect(Number(lots![0].qty_containers)).toBe(1);
   });
 });

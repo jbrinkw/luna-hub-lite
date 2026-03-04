@@ -74,7 +74,8 @@ describe('ChefByte MealPlanPage queries', () => {
       .select('meal_id')
       .single();
     expect(mealErr).toBeNull();
-    expect(meal).toBeTruthy();
+    expect(meal).not.toBeNull();
+    expect(typeof meal!.meal_id).toBe('string');
 
     // Exact query from MealPlanPage.tsx loadMeals()
     const result = await chefbyte(ctx.client)
@@ -91,21 +92,21 @@ describe('ChefByte MealPlanPage queries', () => {
 
     // Find our seeded entry
     const entry = meals.find((m: any) => m.meal_id === meal!.meal_id);
-    expect(entry).toBeTruthy();
+    expect(entry).toBeDefined();
 
-    // Verify all fields the page uses
-    expect(entry).toHaveProperty('meal_id');
-    expect(entry).toHaveProperty('user_id');
-    expect(entry).toHaveProperty('recipe_id');
-    expect(entry).toHaveProperty('product_id');
-    expect(entry).toHaveProperty('logical_date');
-    expect(entry).toHaveProperty('servings');
-    expect(entry).toHaveProperty('meal_prep');
-    expect(entry).toHaveProperty('completed_at');
-    expect(entry).toHaveProperty('created_at');
+    // Verify exact field values
+    expect(entry.meal_id).toBe(meal!.meal_id);
+    expect(entry.user_id).toBe(ctx.userId);
+    expect(entry.recipe_id).toBe(recipeId);
+    expect(entry.product_id).toBeNull();
+    expect(entry.logical_date).toBe(today);
+    expect(Number(entry.servings)).toBe(2);
+    expect(entry.meal_prep).toBe(false);
+    expect(entry.completed_at).toBeNull();
+    expect(typeof entry.created_at).toBe('string');
 
     // Verify recipe join (recipe_id aliased as "recipes")
-    expect(entry.recipes).toBeTruthy();
+    expect(entry.recipes).not.toBeNull();
     expect(entry.recipes.name).toBe('Chicken & Rice');
 
     // Product join is null since this entry has recipe_id
@@ -156,11 +157,11 @@ describe('ChefByte MealPlanPage queries', () => {
 
     const meals = assertQuerySucceeds(result, 'product meal entry');
     const entry = meals.find((m: any) => m.meal_id === meal!.meal_id);
-    expect(entry).toBeTruthy();
+    expect(entry).toBeDefined();
 
     // Recipe join is null, product join has name
     expect(entry.recipes).toBeNull();
-    expect(entry.products).toBeTruthy();
+    expect(entry.products).not.toBeNull();
     expect(entry.products.name).toBe('Protein Powder');
 
     // Cleanup
@@ -194,8 +195,8 @@ describe('ChefByte MealPlanPage queries', () => {
       .eq('logical_date', today)
       .eq('meal_prep', false);
 
-    expect(verify).toBeTruthy();
-    expect(verify!.length).toBeGreaterThanOrEqual(1);
+    expect(verify).not.toBeNull();
+    expect(verify!.length).toBe(1);
 
     // Cleanup
     for (const m of verify!) {
@@ -228,8 +229,8 @@ describe('ChefByte MealPlanPage queries', () => {
       .eq('product_id', productMap['Eggs'])
       .eq('logical_date', today)
       .eq('meal_prep', true);
-    expect(verify).toBeTruthy();
-    expect(verify!.length).toBeGreaterThanOrEqual(1);
+    expect(verify).not.toBeNull();
+    expect(verify!.length).toBe(1);
     expect(Number(verify![0].servings)).toBe(3);
     expect(verify![0].meal_prep).toBe(true);
 
@@ -262,16 +263,17 @@ describe('ChefByte MealPlanPage queries', () => {
       })
       .select('meal_id')
       .single();
-    expect(meal).toBeTruthy();
+    expect(meal).not.toBeNull();
+    expect(typeof meal!.meal_id).toBe('string');
 
     // Exact RPC call from MealPlanPage.tsx markDone()
     const { data: result, error: rpcErr } = await (chefbyte(ctx.client) as any).rpc('mark_meal_done', {
       p_meal_id: meal!.meal_id,
     });
     expect(rpcErr).toBeNull();
-    expect(result).toBeTruthy();
+    expect(result).not.toBeNull();
     expect(result.success).toBe(true);
-    expect(result.completed_at).toBeTruthy();
+    expect(typeof result.completed_at).toBe('string');
 
     // Verify completed_at is set
     const { data: verify } = await chefbyte(ctx.client)
@@ -279,8 +281,8 @@ describe('ChefByte MealPlanPage queries', () => {
       .select('completed_at')
       .eq('meal_id', meal!.meal_id)
       .single();
-    expect(verify).toBeTruthy();
-    expect(verify!.completed_at).toBeTruthy();
+    expect(verify).not.toBeNull();
+    expect(typeof verify!.completed_at).toBe('string');
 
     // Cleanup: meal entry stays but food_logs were created
     await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
@@ -306,7 +308,8 @@ describe('ChefByte MealPlanPage queries', () => {
       })
       .select('meal_id')
       .single();
-    expect(meal).toBeTruthy();
+    expect(meal).not.toBeNull();
+    expect(typeof meal!.meal_id).toBe('string');
 
     // Exact delete query from MealPlanPage.tsx deleteMeal()
     const delResult = await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
@@ -342,7 +345,8 @@ describe('ChefByte MealPlanPage queries', () => {
       })
       .select('meal_id')
       .single();
-    expect(oldMeal).toBeTruthy();
+    expect(oldMeal).not.toBeNull();
+    expect(typeof oldMeal!.meal_id).toBe('string');
 
     // Insert entry for this week
     const thisWeekDate = toDateStr(new Date(monday.getTime() + 2 * 86400000));
@@ -358,7 +362,8 @@ describe('ChefByte MealPlanPage queries', () => {
       })
       .select('meal_id')
       .single();
-    expect(currentMeal).toBeTruthy();
+    expect(currentMeal).not.toBeNull();
+    expect(typeof currentMeal!.meal_id).toBe('string');
 
     // Exact query from MealPlanPage.tsx loadMeals()
     const result = await chefbyte(ctx.client)
@@ -373,7 +378,8 @@ describe('ChefByte MealPlanPage queries', () => {
 
     // Current week entry should be present
     const found = meals.find((m: any) => m.meal_id === currentMeal!.meal_id);
-    expect(found).toBeTruthy();
+    expect(found).toBeDefined();
+    expect(found.logical_date).toBe(thisWeekDate);
 
     // Last week entry should NOT be present
     const excluded = meals.find((m: any) => m.meal_id === oldMeal!.meal_id);
@@ -398,10 +404,10 @@ describe('ChefByte MealPlanPage queries', () => {
 
     const recipes = assertQuerySucceeds(result, 'recipe search');
     expect(Array.isArray(recipes)).toBe(true);
-    expect(recipes.length).toBeGreaterThanOrEqual(1);
+    expect(recipes.length).toBe(1);
 
     const seeded = recipes.find((r: any) => r.recipe_id === recipeId);
-    expect(seeded).toBeTruthy();
+    expect(seeded).toBeDefined();
     expect(seeded.name).toBe('Chicken & Rice');
 
     // Only recipe_id and name selected

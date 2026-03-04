@@ -78,7 +78,7 @@ describe('ChefByte ScannerPage queries', () => {
       .single();
 
     const data = assertQuerySucceeds(result, 'insert placeholder');
-    expect(data).toHaveProperty('product_id');
+    expect(typeof data.product_id).toBe('string');
     expect(data.name).toBe(`Unknown (${barcode})`);
 
     // Verify it's now findable by barcode (EXACT query from ScannerPage)
@@ -94,11 +94,12 @@ describe('ChefByte ScannerPage queries', () => {
     const lookupData = assertQuerySucceeds(lookupResult, 'barcode lookup after insert');
     expect(lookupData.is_placeholder).toBe(true);
     expect(lookupData.barcode).toBe(barcode);
-    expect(lookupData).toHaveProperty('calories_per_serving');
-    expect(lookupData).toHaveProperty('protein_per_serving');
-    expect(lookupData).toHaveProperty('carbs_per_serving');
-    expect(lookupData).toHaveProperty('fat_per_serving');
-    expect(lookupData).toHaveProperty('servings_per_container');
+    // Placeholder products have 0 as default for nutrition values
+    expect(Number(lookupData.calories_per_serving)).toBe(0);
+    expect(Number(lookupData.protein_per_serving)).toBe(0);
+    expect(Number(lookupData.carbs_per_serving)).toBe(0);
+    expect(Number(lookupData.fat_per_serving)).toBe(0);
+    expect(Number(lookupData.servings_per_container)).toBe(1);
   });
 
   // -------------------------------------------------------------------
@@ -162,7 +163,7 @@ describe('ChefByte ScannerPage queries', () => {
       .eq('product_id', eggsId);
 
     const data = assertQuerySucceeds(readResult, 'stock lot readback');
-    expect(data.length).toBeGreaterThanOrEqual(1);
+    expect(data.length).toBe(1);
     expect(Number(data[0].qty_containers)).toBe(2);
     expect(data[0].location_id).toBe(locationId);
   });
@@ -212,17 +213,22 @@ describe('ChefByte ScannerPage queries', () => {
     expect(data).toHaveProperty('success');
     expect(data.success).toBe(true);
 
-    // Verify a food_log was created
+    // Verify a food_log was created with exact macro values
+    // 1 serving of Chicken Breast: 165 cal, 31g protein (after update: 170 cal, 32g protein)
     const logResult = await chefbyte(ctx.client)
       .from('food_logs')
-      .select('log_id, calories, protein')
+      .select('log_id, calories, protein, carbs, fat')
       .eq('user_id', ctx.userId)
       .eq('product_id', chickenId)
       .eq('logical_date', today);
 
     const logs = assertQuerySucceeds(logResult, 'food log after consume');
-    expect(logs.length).toBeGreaterThanOrEqual(1);
-    expect(Number(logs[0].calories)).toBeGreaterThan(0);
+    expect(logs.length).toBe(1);
+    // Values reflect the update from the earlier test (170 cal, 32 pro, 0 carbs, 3.8 fat)
+    expect(Number(logs[0].calories)).toBe(170);
+    expect(Number(logs[0].protein)).toBe(32);
+    expect(Number(logs[0].carbs)).toBe(0);
+    expect(Number(logs[0].fat)).toBeCloseTo(3.8, 1);
   });
 
   // -------------------------------------------------------------------
@@ -304,7 +310,7 @@ describe('ChefByte ScannerPage queries', () => {
       .single();
 
     const data = assertQuerySucceeds(readResult, 'shopping list item');
-    expect(data).toHaveProperty('cart_item_id');
+    expect(typeof data.cart_item_id).toBe('string');
     expect(Number(data.qty_containers)).toBe(5);
     expect(data.purchased).toBe(false);
   });

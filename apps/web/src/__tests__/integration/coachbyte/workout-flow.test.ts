@@ -78,9 +78,10 @@ describe('CoachByte workout flow (real Supabase)', () => {
       p_day: todayDate,
     });
     expect(planError).toBeNull();
-    expect(planResult).toBeDefined();
+    expect(planResult).not.toBeNull();
     expect(planResult.status).toBe('created');
-    expect(planResult.plan_id).toBeDefined();
+    expect(typeof planResult.plan_id).toBe('string');
+    expect(planResult.plan_id.length).toBeGreaterThan(0);
 
     // Verify planned_sets were created from the split template
     const { data: plannedSets, error: psError } = await (client.schema('coachbyte') as any)
@@ -174,7 +175,7 @@ describe('CoachByte workout flow (real Supabase)', () => {
     });
     expect(err1).toBeNull();
     expect(first.status).toBe('created');
-    expect(first.plan_id).toBeDefined();
+    expect(typeof first.plan_id).toBe('string');
 
     // Second call → returns the same plan
     const { data: second, error: err2 } = await (client.schema('coachbyte') as any).rpc('ensure_daily_plan', {
@@ -219,7 +220,8 @@ describe('CoachByte workout flow (real Supabase)', () => {
       .eq('plan_id', planId)
       .single();
     expect(planReadError).toBeNull();
-    expect(plan).toBeDefined();
+    expect(plan).not.toBeNull();
+    expect(typeof plan!.logical_date).toBe('string');
 
     // Query the completed set's logical_date
     const { data: completed, error: csError } = await (client.schema('coachbyte') as any)

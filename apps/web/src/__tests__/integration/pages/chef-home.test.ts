@@ -76,8 +76,8 @@ describe('ChefByte HomePage queries', () => {
     expect(data.length).toBe(4);
 
     const first = data[0];
-    expect(first).toHaveProperty('product_id');
-    expect(first).toHaveProperty('min_stock_amount');
+    expect(typeof first.product_id).toBe('string');
+    expect(Number(first.min_stock_amount)).toBeGreaterThan(0);
   });
 
   // -------------------------------------------------------------------
@@ -91,9 +91,9 @@ describe('ChefByte HomePage queries', () => {
 
     const data = assertQuerySucceeds(result, 'stock lots for product');
     expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThanOrEqual(1);
-    expect(data[0]).toHaveProperty('qty_containers');
-    expect(Number(data[0].qty_containers)).toBeGreaterThan(0);
+    expect(data.length).toBe(1);
+    // Chicken Breast seeded with 3.0 containers
+    expect(Number(data[0].qty_containers)).toBeCloseTo(3.0, 1);
   });
 
   // -------------------------------------------------------------------
@@ -136,7 +136,8 @@ describe('ChefByte HomePage queries', () => {
     const data = assertQuerySucceeds(result, 'shopping list with item');
     expect(data.length).toBe(1);
     expect(Number(data[0].qty_containers)).toBe(2);
-    expect(data[0].products).toHaveProperty('price');
+    // Price is null since no price set on seeded products
+    expect(data[0].products.price).toBeNull();
 
     // Cleanup: delete from shopping list using cart_item_id
     const { data: items } = await chefbyte(ctx.client)
@@ -160,15 +161,16 @@ describe('ChefByte HomePage queries', () => {
     });
 
     const data = assertQuerySucceeds(result, 'get_daily_macros');
-    expect(data).toHaveProperty('calories');
-    expect(data).toHaveProperty('protein');
-    expect(data).toHaveProperty('carbs');
-    expect(data).toHaveProperty('fat');
+    // Verify macro structure with exact values
+    expect(data.calories).not.toBeNull();
+    expect(data.protein).not.toBeNull();
+    expect(data.carbs).not.toBeNull();
+    expect(data.fat).not.toBeNull();
 
     // Each macro should have consumed, goal, remaining
-    expect(data.calories).toHaveProperty('consumed');
-    expect(data.calories).toHaveProperty('goal');
-    expect(data.calories).toHaveProperty('remaining');
+    expect(typeof Number(data.calories.consumed)).toBe('number');
+    expect(typeof Number(data.calories.goal)).toBe('number');
+    expect(typeof Number(data.calories.remaining)).toBe('number');
 
     // Goals should match what we seeded (2200 cal)
     expect(Number(data.calories.goal)).toBe(2200);
@@ -212,13 +214,13 @@ describe('ChefByte HomePage queries', () => {
 
     const data = assertQuerySucceeds(result, 'meal prep entries');
     expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThanOrEqual(1);
+    expect(data.length).toBe(1);
 
     const entry = data[0];
-    expect(entry).toHaveProperty('meal_id');
-    expect(entry).toHaveProperty('servings');
-    expect(entry).toHaveProperty('recipes');
-    expect(entry.recipes).toHaveProperty('name');
+    expect(typeof entry.meal_id).toBe('string');
+    expect(Number(entry.servings)).toBe(2);
+    expect(entry.recipes).not.toBeNull();
+    expect(entry.recipes.name).toBe('Chicken & Rice');
     expect(entry.recipes.name).toBe('Chicken & Rice');
   });
 
@@ -314,7 +316,7 @@ describe('ChefByte HomePage queries', () => {
     expect(shopData.length).toBeGreaterThanOrEqual(1);
 
     const item = shopData[0] as any;
-    expect(item.products).toHaveProperty('is_placeholder');
+    expect(item.products.is_placeholder).toBe(false);
 
     // Insert stock lot (EXACT pattern from HomePage)
     const stockResult = await chefbyte(ctx.client)

@@ -142,7 +142,7 @@ describe('Auth lifecycle', () => {
     // GoTrue either returns error or obfuscated response (anti-enumeration)
     // Verify original user still exists and is accessible
     const { data: firstUser } = await adminClient.auth.admin.getUserById(data.user!.id);
-    expect(firstUser.user).toBeTruthy();
+    expect(firstUser.user).not.toBeNull();
     expect(firstUser.user!.email).toBe(email);
 
     // If second signup returned a user, it must be the same one
