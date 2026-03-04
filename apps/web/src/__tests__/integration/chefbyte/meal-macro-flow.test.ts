@@ -146,7 +146,7 @@ async function setupMealScenario(client: any, userId: string) {
     { user_id: userId, key: 'goal_calories', value: '2000' },
     { user_id: userId, key: 'goal_protein', value: '150' },
     { user_id: userId, key: 'goal_carbs', value: '200' },
-    { user_id: userId, key: 'goal_fats', value: '65' },
+    { user_id: userId, key: 'goal_fat', value: '65' },
   ];
   const { error: configErr } = await chef.from('user_config').insert(goalEntries);
   if (configErr) throw new Error(`user_config insert failed: ${configErr.message}`);

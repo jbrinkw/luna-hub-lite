@@ -23,7 +23,7 @@ const chefbyte = () => supabase.schema('chefbyte') as any;
 
 interface MacroTotals {
   consumed: { calories: number; protein: number; carbs: number; fat: number };
-  goals: { calories: number; protein: number; carbs: number; fats: number };
+  goals: { calories: number; protein: number; carbs: number; fat: number };
 }
 
 interface ConsumedItem {
@@ -86,7 +86,7 @@ export function MacroPage() {
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [targetProtein, setTargetProtein] = useState(0);
   const [targetCarbs, setTargetCarbs] = useState(0);
-  const [targetFats, setTargetFats] = useState(0);
+  const [targetFat, setTargetFat] = useState(0);
 
   /* ---- Taste Profile modal ---- */
   const [showTasteModal, setShowTasteModal] = useState(false);
@@ -120,7 +120,7 @@ export function MacroPage() {
           calories: Number(rpc.calories?.goal) || 0,
           protein: Number(rpc.protein?.goal) || 0,
           carbs: Number(rpc.carbs?.goal) || 0,
-          fats: Number(rpc.fat?.goal) || 0,
+          fat: Number(rpc.fat?.goal) || 0,
         },
       });
     } else {
@@ -313,21 +313,21 @@ export function MacroPage() {
     if (macros?.goals) {
       setTargetProtein(macros.goals.protein || 0);
       setTargetCarbs(macros.goals.carbs || 0);
-      setTargetFats(macros.goals.fats || 0);
+      setTargetFat(macros.goals.fat || 0);
     }
     setShowTargetModal(true);
   };
 
   const saveTargets = async () => {
     if (!user) return;
-    const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFats);
+    const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat);
 
     // Upsert each config key
     const keys = [
       { key: 'goal_calories', value: String(calories) },
       { key: 'goal_protein', value: String(targetProtein) },
       { key: 'goal_carbs', value: String(targetCarbs) },
-      { key: 'goal_fats', value: String(targetFats) },
+      { key: 'goal_fat', value: String(targetFat) },
     ];
 
     for (const { key, value } of keys) {
@@ -376,7 +376,7 @@ export function MacroPage() {
   }
 
   const consumedTotals = macros?.consumed ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
-  const goals = macros?.goals ?? { calories: 2000, protein: 150, carbs: 250, fats: 65 };
+  const goals = macros?.goals ?? { calories: 2000, protein: 150, carbs: 250, fat: 65 };
 
   return (
     <ChefLayout title="Macros">
@@ -471,13 +471,13 @@ export function MacroPage() {
           <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9em' }}>
             <span>Fats</span>
             <span>
-              {consumedTotals.fat}g / {goals.fats}g ({pct(consumedTotals.fat, goals.fats)}%)
+              {consumedTotals.fat}g / {goals.fat}g ({pct(consumedTotals.fat, goals.fat)}%)
             </span>
           </div>
           <div style={{ background: '#eee', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
             <div
               style={{
-                width: `${pct(consumedTotals.fat, goals.fats)}%`,
+                width: `${pct(consumedTotals.fat, goals.fat)}%`,
                 height: '100%',
                 background: '#eb445a',
                 borderRadius: '4px',
@@ -693,8 +693,8 @@ export function MacroPage() {
                 <IonInput
                   label="Fats (g)"
                   type="number"
-                  value={targetFats}
-                  onIonInput={(e) => setTargetFats(Number(e.detail.value) || 0)}
+                  value={targetFat}
+                  onIonInput={(e) => setTargetFat(Number(e.detail.value) || 0)}
                   data-testid="target-fats"
                 />
                 <div
@@ -702,7 +702,7 @@ export function MacroPage() {
                   style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}
                 >
                   <strong>Calories (auto): </strong>
-                  {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFats)}
+                  {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
                   <div style={{ fontSize: '0.8em', color: '#666' }}>(protein*4 + carbs*4 + fats*9)</div>
                 </div>
               </div>

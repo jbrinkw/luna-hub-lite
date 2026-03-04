@@ -22,7 +22,7 @@ const chefbyte = () => supabase.schema('chefbyte') as any;
 
 interface MacroTotals {
   consumed: { calories: number; protein: number; carbs: number; fat: number };
-  goals: { calories: number; protein: number; carbs: number; fats: number };
+  goals: { calories: number; protein: number; carbs: number; fat: number };
 }
 
 interface MealPrepEntry {
@@ -67,7 +67,7 @@ export function HomePage() {
   const [showTargetModal, setShowTargetModal] = useState(false);
   const [targetProtein, setTargetProtein] = useState(0);
   const [targetCarbs, setTargetCarbs] = useState(0);
-  const [targetFats, setTargetFats] = useState(0);
+  const [targetFat, setTargetFat] = useState(0);
 
   /* ---- Taste Profile modal ---- */
   const [showTasteModal, setShowTasteModal] = useState(false);
@@ -142,7 +142,7 @@ export function HomePage() {
           calories: Number(rpc.calories?.goal) || 0,
           protein: Number(rpc.protein?.goal) || 0,
           carbs: Number(rpc.carbs?.goal) || 0,
-          fats: Number(rpc.fat?.goal) || 0,
+          fat: Number(rpc.fat?.goal) || 0,
         },
       });
     } else {
@@ -176,19 +176,19 @@ export function HomePage() {
     if (macros?.goals) {
       setTargetProtein(macros.goals.protein || 0);
       setTargetCarbs(macros.goals.carbs || 0);
-      setTargetFats(macros.goals.fats || 0);
+      setTargetFat(macros.goals.fat || 0);
     }
     setShowTargetModal(true);
   };
 
   const saveTargets = async () => {
     if (!user) return;
-    const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFats);
+    const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat);
     const keys = [
       { key: 'goal_calories', value: String(calories) },
       { key: 'goal_protein', value: String(targetProtein) },
       { key: 'goal_carbs', value: String(targetCarbs) },
-      { key: 'goal_fats', value: String(targetFats) },
+      { key: 'goal_fat', value: String(targetFat) },
     ];
     for (const { key, value } of keys) {
       await chefbyte().from('user_config').upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
@@ -283,7 +283,7 @@ export function HomePage() {
   }
 
   const consumed = macros?.consumed ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
-  const goals = macros?.goals ?? { calories: 2000, protein: 150, carbs: 250, fats: 65 };
+  const goals = macros?.goals ?? { calories: 2000, protein: 150, carbs: 250, fat: 65 };
 
   return (
     <ChefLayout title="Home">
@@ -411,12 +411,12 @@ export function HomePage() {
           <div data-testid="compact-fats" style={{ textAlign: 'center' }}>
             <div style={{ fontSize: '0.8em', color: '#666' }}>Fats</div>
             <div style={{ fontWeight: 700 }}>
-              {consumed.fat}g/{goals.fats}g
+              {consumed.fat}g/{goals.fat}g
             </div>
             <div style={{ background: '#eee', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
               <div
                 style={{
-                  width: `${pctOf(consumed.fat, goals.fats)}%`,
+                  width: `${pctOf(consumed.fat, goals.fat)}%`,
                   height: '100%',
                   background: '#eb445a',
                   borderRadius: '4px',
@@ -523,8 +523,8 @@ export function HomePage() {
                 <IonInput
                   label="Fats (g)"
                   type="number"
-                  value={targetFats}
-                  onIonInput={(e) => setTargetFats(Number(e.detail.value) || 0)}
+                  value={targetFat}
+                  onIonInput={(e) => setTargetFat(Number(e.detail.value) || 0)}
                   data-testid="target-fats"
                 />
                 <div
@@ -532,7 +532,7 @@ export function HomePage() {
                   style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}
                 >
                   <strong>Calories (auto): </strong>
-                  {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFats)}
+                  {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
                 </div>
               </div>
               <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>

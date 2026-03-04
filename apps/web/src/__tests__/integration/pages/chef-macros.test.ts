@@ -316,7 +316,7 @@ describe('ChefByte MacroPage queries', () => {
       { key: 'goal_calories', value: '2500' },
       { key: 'goal_protein', value: '200' },
       { key: 'goal_carbs', value: '250' },
-      { key: 'goal_fats', value: '85' },
+      { key: 'goal_fat', value: '85' },
     ];
 
     for (const { key, value } of keys) {

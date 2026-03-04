@@ -425,7 +425,7 @@ BEGIN
 
   SELECT COALESCE(value::numeric, 0) INTO v_goal_fat
   FROM chefbyte.user_config
-  WHERE user_id = p_user_id AND key = 'goal_fats';
+  WHERE user_id = p_user_id AND key = 'goal_fat';
   v_goal_fat := COALESCE(v_goal_fat, 0);
 
   RETURN jsonb_build_object(

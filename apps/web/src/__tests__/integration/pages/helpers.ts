@@ -256,7 +256,7 @@ export async function seedMacroGoals(ctx: PageTestContext): Promise<void> {
     { user_id: ctx.userId, key: 'goal_calories', value: '2200' },
     { user_id: ctx.userId, key: 'goal_protein', value: '180' },
     { user_id: ctx.userId, key: 'goal_carbs', value: '220' },
-    { user_id: ctx.userId, key: 'goal_fats', value: '73' },
+    { user_id: ctx.userId, key: 'goal_fat', value: '73' },
   ];
 
   const { error } = await chefbyte(ctx.client).from('user_config').upsert(goals, { onConflict: 'user_id,key' });

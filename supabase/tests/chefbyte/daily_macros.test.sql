@@ -202,22 +202,22 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test: goal_fats config key (note: key is goal_fats, output is fat)
+-- Test: goal_fat config key (note: key is goal_fat, output is fat)
 -- ─────────────────────────────────────────────────────────────
 
 SELECT lives_ok(
   format(
     'INSERT INTO chefbyte.user_config (user_id, key, value)
-     VALUES (%L, ''goal_fats'', ''65'')',
+     VALUES (%L, ''goal_fat'', ''65'')',
     tests.get_supabase_uid('macro_tester')
   ),
-  'insert user_config goal_fats=65 succeeds'
+  'insert user_config goal_fat=65 succeeds'
 );
 
 SELECT is(
   (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'fat'->>'goal')::numeric),
   65::numeric,
-  'fat goal = 65 after setting goal_fats config'
+  'fat goal = 65 after setting goal_fat config'
 );
 
 -- ─────────────────────────────────────────────────────────────

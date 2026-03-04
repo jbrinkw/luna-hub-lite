@@ -270,13 +270,13 @@ export async function seedChefByteData(client: SupabaseClient, userId: string): 
   if (ingredErr) throw new Error(`Failed to insert recipe ingredients: ${ingredErr.message}`);
 
   // -- Macro goals (user_config key/value pairs) --
-  // Keys must match what get_daily_macros reads: goal_calories, goal_protein, goal_carbs, goal_fats
+  // Keys must match what get_daily_macros reads: goal_calories, goal_protein, goal_carbs, goal_fat
   // Use upsert since activate_app may seed defaults
   const macroGoals = [
     { user_id: userId, key: 'goal_calories', value: '2200' },
     { user_id: userId, key: 'goal_protein', value: '180' },
     { user_id: userId, key: 'goal_carbs', value: '220' },
-    { user_id: userId, key: 'goal_fats', value: '73' },
+    { user_id: userId, key: 'goal_fat', value: '73' },
   ];
 
   const { error: configErr } = await chef.from('user_config').upsert(macroGoals, { onConflict: 'user_id,key' });
