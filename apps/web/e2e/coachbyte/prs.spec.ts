@@ -119,4 +119,83 @@ test.describe('CoachByte PR Tracker', () => {
       await cleanup();
     }
   });
+
+  test('PR date range filter works', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'prs-daterange');
+    try {
+      await seedCoachByteData(client, userId);
+
+      // Complete a set first so there are PRs to display
+      await page.goto('/coach');
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+      await page.getByTestId('complete-set-btn').click();
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+
+      // Navigate to PRs
+      await page.goto('/coach/prs');
+      await expect(page.getByTestId('tracked-exercises-card')).toBeVisible({ timeout: 15000 });
+
+      // PR cards should be visible (default date range is 90 days)
+      const prCards = page.locator('[data-testid^="pr-card-"]');
+      await expect(prCards.first()).toBeVisible({ timeout: 10000 });
+
+      // Verify the date range info text is displayed
+      const dateRangeInfo = page.getByTestId('date-range-info');
+      await expect(dateRangeInfo).toBeVisible();
+      await expect(dateRangeInfo).toContainText('90 days');
+
+      // Click "Load All History" button to change the date range
+      const loadAllBtn = page.getByTestId('load-all-history-btn');
+      await expect(loadAllBtn).toBeVisible();
+      await loadAllBtn.click();
+
+      // Wait for data to reload
+      await expect(page.getByTestId('tracked-exercises-card')).toBeVisible({ timeout: 15000 });
+
+      // After loading all history, the info text should reflect "all history"
+      await expect(dateRangeInfo).toContainText('all history');
+
+      // The "Load All History" button should now be hidden
+      await expect(loadAllBtn).toBeHidden();
+
+      // PR cards should still be visible
+      await expect(prCards.first()).toBeVisible({ timeout: 10000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('rep records section displays for tracked exercise', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'prs-reprec');
+    try {
+      await seedCoachByteData(client, userId);
+
+      // Complete multiple sets to generate rep records at different rep counts
+      await page.goto('/coach');
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+
+      // Complete set 1 (Squat, 5 reps @ 225)
+      await page.getByTestId('complete-set-btn').click();
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+
+      // Navigate to PRs
+      await page.goto('/coach/prs');
+      await expect(page.getByTestId('tracked-exercises-card')).toBeVisible({ timeout: 15000 });
+
+      // Find the PR card for the exercise
+      const prCards = page.locator('[data-testid^="pr-card-"]');
+      await expect(prCards.first()).toBeVisible({ timeout: 10000 });
+
+      // Inside the PR card, there should be rep record chips (e.g. "5 rep: 225 lb")
+      // The data-testid format is pr-{exercise_id}-{reps}rep
+      const repChips = page.locator('[data-testid^="pr-"][data-testid$="rep"]');
+      await expect(repChips.first()).toBeVisible();
+
+      // Verify the chip contains rep and load information
+      const chipText = await repChips.first().textContent();
+      expect(chipText).toMatch(/\d+\s*rep.*\d+/);
+    } finally {
+      await cleanup();
+    }
+  });
 });

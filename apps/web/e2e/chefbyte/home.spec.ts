@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { seedFullAndLogin, seedChefByteData } from '../helpers/seed';
+import { seedFullAndLogin, seedChefByteData, seedMealEntry, seedShoppingItems, todayStr } from '../helpers/seed';
 
 test.describe('ChefByte Home Page', () => {
   test('home page loads with status cards and macro summary', async ({ page }) => {
@@ -147,6 +147,135 @@ test.describe('ChefByte Home Page', () => {
       const belowMinCard = page.getByTestId('card-below-min');
       await expect(belowMinCard).toBeVisible();
       await expect(belowMinCard).toContainText('2');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // Status cards are plain divs without click handlers/links — no navigation behavior exists
+  test.skip('status card click navigates to relevant page', async ({ page }) => {
+    // TODO: Status cards are currently static display-only divs. Once they become
+    // clickable links (e.g. below-min card -> /chef/inventory), enable this test.
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-home-card-nav');
+    try {
+      await seedChefByteData(client, userId);
+      await page.goto('/chef/home');
+
+      await expect(page.getByTestId('home-loading')).toBeHidden({ timeout: 10000 });
+
+      // Click the below-min status card
+      await page.getByTestId('card-below-min').click();
+
+      // Verify navigation to inventory page
+      await expect(page).toHaveURL(/\/chef\/inventory/);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('import shopping to inventory flow', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-home-import');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const chef = (client as any).schema('chefbyte');
+
+      // Seed purchased shopping items for two products
+      const chickenId = productMap['Chicken Breast'];
+      const riceId = productMap['Brown Rice'];
+
+      await seedShoppingItems(client, userId, [
+        { productId: chickenId, qtyContainers: 2, purchased: true },
+        { productId: riceId, qtyContainers: 1, purchased: true },
+      ]);
+
+      // Verify shopping items exist before import
+      const { data: beforeItems } = await chef
+        .from('shopping_list')
+        .select('cart_item_id')
+        .eq('user_id', userId)
+        .eq('purchased', true);
+      expect(beforeItems!.length).toBe(2);
+
+      // Get stock count before import for Chicken Breast
+      const { data: stockBefore } = await chef
+        .from('stock_lots')
+        .select('qty_containers')
+        .eq('product_id', chickenId)
+        .eq('user_id', userId);
+      const stockBeforeTotal = (stockBefore ?? []).reduce(
+        (sum: number, lot: any) => sum + Number(lot.qty_containers),
+        0,
+      );
+
+      await page.goto('/chef/home');
+      await expect(page.getByTestId('home-loading')).toBeHidden({ timeout: 10000 });
+
+      // Click the import shopping button
+      await page.getByTestId('import-shopping-btn').click();
+
+      // Wait for the import to process and data to reload
+      await page.waitForTimeout(2000);
+
+      // Verify purchased shopping items were removed from shopping_list
+      const { data: afterItems } = await chef
+        .from('shopping_list')
+        .select('cart_item_id')
+        .eq('user_id', userId)
+        .eq('purchased', true);
+      expect(afterItems?.length ?? 0).toBe(0);
+
+      // Verify stock increased for Chicken Breast
+      const { data: stockAfter } = await chef
+        .from('stock_lots')
+        .select('qty_containers')
+        .eq('product_id', chickenId)
+        .eq('user_id', userId);
+      const stockAfterTotal = (stockAfter ?? []).reduce((sum: number, lot: any) => sum + Number(lot.qty_containers), 0);
+      expect(stockAfterTotal).toBeGreaterThan(stockBeforeTotal);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('todays meals section shows seeded meals', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-home-meals');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+
+      // Seed a non-prep meal entry for today
+      const today = todayStr();
+      const mealId = await seedMealEntry(client, userId, recipeId, today, {
+        servings: 2,
+        mealType: 'dinner',
+        isMealPrep: false,
+      });
+
+      await page.goto('/chef/home');
+      await expect(page.getByTestId('home-loading')).toBeHidden({ timeout: 10000 });
+
+      // Today's meals section should be visible
+      const mealsSection = page.getByTestId('todays-meals-section');
+      await expect(mealsSection).toBeVisible();
+
+      // The "no meals" empty state should NOT be visible
+      await expect(page.getByTestId('no-todays-meals')).toBeHidden();
+
+      // The seeded meal entry should appear
+      const mealEntry = page.getByTestId(`meal-entry-${mealId}`);
+      await expect(mealEntry).toBeVisible();
+
+      // Verify the meal shows the recipe name
+      const entryText = await mealEntry.textContent();
+      expect(entryText).toContain('Chicken & Rice');
+
+      // Verify meal type is displayed
+      const mealType = page.getByTestId(`meal-type-${mealId}`);
+      await expect(mealType).toBeVisible();
+      await expect(mealType).toContainText('dinner');
+
+      // Verify status shows Pending (not completed)
+      const mealStatus = page.getByTestId(`meal-status-${mealId}`);
+      await expect(mealStatus).toContainText('Pending');
     } finally {
       await cleanup();
     }

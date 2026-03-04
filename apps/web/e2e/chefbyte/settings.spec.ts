@@ -130,4 +130,180 @@ test.describe('ChefByte Settings', () => {
       await cleanup();
     }
   });
+
+  test('add product via settings form', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-add-prod');
+    try {
+      await seedChefByteData(client, userId);
+      await page.goto('/chef/settings');
+
+      await page.getByTestId('product-list').waitFor({ state: 'visible' });
+
+      // Count initial products
+      const initialProducts = page.getByTestId('product-list').locator('[data-testid^="product-"]');
+      const initialCount = await initialProducts.count();
+
+      // Open the add product form
+      await page.getByTestId('toggle-add-product').click();
+      await expect(page.getByTestId('add-product-form')).toBeVisible();
+
+      // Fill in name and nutrition fields
+      const nameInput = page.getByTestId('add-name').locator('input');
+      await nameInput.fill('E2E Test Oatmeal');
+
+      const caloriesInput = page.getByTestId('add-calories').locator('input');
+      await caloriesInput.fill('150');
+
+      const proteinInput = page.getByTestId('add-protein').locator('input');
+      await proteinInput.fill('5');
+
+      const carbsInput = page.getByTestId('add-carbs').locator('input');
+      await carbsInput.fill('27');
+
+      const fatInput = page.getByTestId('add-fat').locator('input');
+      await fatInput.fill('3');
+
+      // Save the new product
+      await page.getByTestId('save-new-product').click();
+
+      // Form should close
+      await expect(page.getByTestId('add-product-form')).toBeHidden();
+
+      // Product list should now have one more product
+      await page.waitForTimeout(500);
+      const updatedProducts = page.getByTestId('product-list').locator('[data-testid^="product-"]');
+      const updatedCount = await updatedProducts.count();
+      expect(updatedCount).toBe(initialCount + 1);
+
+      // Verify the new product appears in the list by searching for it
+      const searchInput = page.getByTestId('product-search').locator('input');
+      await searchInput.fill('E2E Test Oatmeal');
+      await page.waitForTimeout(300);
+
+      const filtered = page.getByTestId('product-list').locator('[data-testid^="product-"]:visible');
+      const filteredCount = await filtered.count();
+      expect(filteredCount).toBeGreaterThanOrEqual(1);
+
+      const firstFiltered = filtered.first();
+      const text = await firstFiltered.textContent();
+      expect(text).toContain('E2E Test Oatmeal');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('delete product removes from list', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-del-prod');
+    try {
+      await seedChefByteData(client, userId);
+      const chef = (client as any).schema('chefbyte');
+
+      // Insert a standalone product with no stock/recipe deps so it can be deleted
+      const { data: newProduct } = await chef
+        .from('products')
+        .insert({
+          user_id: userId,
+          name: 'E2E Delete Target',
+          servings_per_container: 1,
+          calories_per_serving: 100,
+          protein_per_serving: 10,
+          carbs_per_serving: 10,
+          fat_per_serving: 5,
+          min_stock_amount: 0,
+        })
+        .select('product_id')
+        .single();
+      const deleteProductId = newProduct.product_id;
+
+      await page.goto('/chef/settings');
+      await page.getByTestId('product-list').waitFor({ state: 'visible' });
+
+      // Verify the product is in the list
+      const productCard = page.getByTestId(`product-${deleteProductId}`);
+      await expect(productCard).toBeVisible();
+
+      // Click delete
+      await page.getByTestId(`delete-product-${deleteProductId}`).click();
+
+      // IonAlert confirmation dialog should appear — click Delete inside the alert overlay
+      const alert = page.locator('ion-alert');
+      await expect(alert).toBeVisible({ timeout: 5000 });
+      const deleteBtnInAlert = alert.locator('button', { hasText: 'Delete' });
+      await deleteBtnInAlert.click();
+
+      // Product should be removed from the list
+      await expect(productCard).toBeHidden({ timeout: 5000 });
+
+      // Verify DB no longer has the product
+      const { data: check } = await chef.from('products').select('product_id').eq('product_id', deleteProductId);
+      expect(check?.length ?? 0).toBe(0);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('locations tab shows default locations', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-loc-default');
+    try {
+      await seedChefByteData(client, userId);
+      await page.goto('/chef/settings');
+
+      await page.getByTestId('products-tab').waitFor({ state: 'visible' });
+
+      // Switch to the locations tab
+      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="locations"]').click();
+      await expect(page.getByTestId('locations-tab')).toBeVisible({ timeout: 5000 });
+
+      // Verify default locations (Fridge, Pantry, Freezer) are listed
+      const locationList = page.getByTestId('location-list');
+      await expect(locationList).toBeVisible();
+
+      const locationText = await locationList.textContent();
+      expect(locationText).toContain('Fridge');
+      expect(locationText).toContain('Pantry');
+      expect(locationText).toContain('Freezer');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('add new location', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-add-loc');
+    try {
+      await seedChefByteData(client, userId);
+      await page.goto('/chef/settings');
+
+      await page.getByTestId('products-tab').waitFor({ state: 'visible' });
+
+      // Switch to the locations tab
+      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="locations"]').click();
+      await expect(page.getByTestId('locations-tab')).toBeVisible({ timeout: 5000 });
+
+      // Count initial locations
+      const locationList = page.getByTestId('location-list');
+      await expect(locationList).toBeVisible();
+      const initialItems = locationList.locator('[data-testid^="location-"]');
+      const initialCount = await initialItems.count();
+
+      // Type a new location name
+      const nameInput = page.getByTestId('location-name-input').locator('input');
+      await nameInput.fill('Garage Shelf');
+
+      // Click add
+      await page.getByTestId('add-location-btn').click();
+
+      // Wait for the list to update
+      await page.waitForTimeout(500);
+
+      // Verify new location is in the list
+      const updatedItems = locationList.locator('[data-testid^="location-"]');
+      const updatedCount = await updatedItems.count();
+      expect(updatedCount).toBe(initialCount + 1);
+
+      const listText = await locationList.textContent();
+      expect(listText).toContain('Garage Shelf');
+    } finally {
+      await cleanup();
+    }
+  });
 });

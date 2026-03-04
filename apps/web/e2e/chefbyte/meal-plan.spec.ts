@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { seedFullAndLogin, seedChefByteData } from '../helpers/seed';
+import { seedFullAndLogin, seedChefByteData, seedMealEntry, todayStr } from '../helpers/seed';
 
 test.describe('ChefByte Meal Plan Page', () => {
   test('meal plan page loads with week navigation', async ({ page }) => {
@@ -189,6 +189,109 @@ test.describe('ChefByte Meal Plan Page', () => {
 
       // Week range should match the initial week text
       await expect(weekRange).toHaveText(initialWeekText!, { timeout: 5000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('delete meal entry from day detail panel', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-mp-delete');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+      const today = todayStr();
+      const mealId = await seedMealEntry(client, userId, recipeId, today, { servings: 1, mealType: 'lunch' });
+
+      await page.goto('/chef/meal-plan');
+      await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
+
+      // Click today's column to open day detail
+      await page.getByTestId(`day-col-${today}`).click();
+      await expect(page.getByTestId('day-detail')).toBeVisible({ timeout: 5000 });
+
+      // Verify the meal entry row is visible
+      const detailRow = page.getByTestId(`detail-row-${mealId}`);
+      await expect(detailRow).toBeVisible({ timeout: 5000 });
+
+      // Click delete button on the meal entry
+      await page.getByTestId(`delete-meal-${mealId}`).click();
+
+      // Meal row should disappear
+      await expect(detailRow).not.toBeVisible({ timeout: 5000 });
+
+      // Should show "no meals" message since that was the only entry
+      await expect(page.getByTestId('no-meals')).toBeVisible({ timeout: 5000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('mark meal as completed changes appearance', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-mp-markdone');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+      const today = todayStr();
+      const mealId = await seedMealEntry(client, userId, recipeId, today, {
+        servings: 1,
+        mealType: 'dinner',
+        isMealPrep: false,
+      });
+
+      await page.goto('/chef/meal-plan');
+      await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
+
+      // Click today's column to open day detail
+      await page.getByTestId(`day-col-${today}`).click();
+      await expect(page.getByTestId('day-detail')).toBeVisible({ timeout: 5000 });
+
+      // Verify the Mark Done button exists before completing
+      const markDoneBtn = page.getByTestId(`mark-done-${mealId}`);
+      await expect(markDoneBtn).toBeVisible({ timeout: 5000 });
+
+      // Click Mark Done
+      await markDoneBtn.click();
+
+      // The Mark Done button should disappear (completed entries show a dash instead of action buttons)
+      await expect(markDoneBtn).not.toBeVisible({ timeout: 5000 });
+
+      // The grid cell should now show a "done" badge
+      const doneBadge = page.getByTestId(`done-badge-${mealId}`);
+      await expect(doneBadge).toBeVisible({ timeout: 5000 });
+      await expect(doneBadge).toContainText('done');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('day macro summary shows totals', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-mp-macrototal');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+      const today = todayStr();
+
+      // Seed two meal entries for today
+      await seedMealEntry(client, userId, recipeId, today, { servings: 1, mealType: 'lunch' });
+      await seedMealEntry(client, userId, recipeId, today, { servings: 2, mealType: 'dinner' });
+
+      await page.goto('/chef/meal-plan');
+      await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
+
+      // Click today's column to open day detail
+      await page.getByTestId(`day-col-${today}`).click();
+      await expect(page.getByTestId('day-detail')).toBeVisible({ timeout: 5000 });
+
+      // Verify day-detail-table is visible (has entries)
+      await expect(page.getByTestId('day-detail-table')).toBeVisible({ timeout: 5000 });
+
+      // The total row should be visible in the table footer
+      const totalRow = page.getByTestId('day-detail-total-row');
+      await expect(totalRow).toBeVisible();
+
+      // Total row should contain "TOTAL" label and macro values
+      await expect(totalRow).toContainText('TOTAL');
+      await expect(totalRow).toContainText('cal');
+      await expect(totalRow).toContainText('P');
+      await expect(totalRow).toContainText('C');
+      await expect(totalRow).toContainText('F');
     } finally {
       await cleanup();
     }

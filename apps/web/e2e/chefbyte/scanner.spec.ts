@@ -1,12 +1,13 @@
 import { test, expect } from '@playwright/test';
 import { seedFullAndLogin, seedChefByteData } from '../helpers/seed';
+import { expectDbRow, countDbRows } from '../helpers/assertions';
 
 test.describe('ChefByte Scanner', () => {
   test('scanner page loads with correct layout', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-layout');
     try {
       await seedChefByteData(client, userId);
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('scanner-container')).toBeVisible({ timeout: 15000 });
 
       await expect(page.getByTestId('queue-panel')).toBeVisible();
@@ -24,7 +25,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-modes');
     try {
       await seedChefByteData(client, userId);
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('mode-selector')).toBeVisible({ timeout: 15000 });
 
       // Purchase mode is default — nutrition editor should be visible
@@ -47,7 +48,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-keypad');
     try {
       await seedChefByteData(client, userId);
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('keypad-grid')).toBeVisible({ timeout: 15000 });
 
       // Initial screen value is "1"
@@ -81,20 +82,20 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-unit');
     try {
       await seedChefByteData(client, userId);
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('mode-selector')).toBeVisible({ timeout: 15000 });
 
       // Purchase mode: unit-toggle NOT visible
       await expect(page.getByTestId('unit-toggle')).not.toBeVisible();
 
-      // Switch to consume_macros → unit-toggle visible showing "Servings"
+      // Switch to consume_macros → unit-toggle visible showing "Serving"
       await page.getByTestId('mode-consume_macros').click();
       await expect(page.getByTestId('unit-toggle')).toBeVisible();
-      await expect(page.getByTestId('unit-toggle')).toContainText('Servings');
+      await expect(page.getByTestId('unit-toggle')).toContainText('Serving');
 
-      // Click it → shows "Containers"
+      // Click it → shows "Container"
       await page.getByTestId('unit-toggle').click();
-      await expect(page.getByTestId('unit-toggle')).toContainText('Containers');
+      await expect(page.getByTestId('unit-toggle')).toContainText('Container');
     } finally {
       await cleanup();
     }
@@ -104,7 +105,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-nutedit');
     try {
       await seedChefByteData(client, userId);
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('mode-selector')).toBeVisible({ timeout: 15000 });
 
       // Purchase mode: visible
@@ -136,7 +137,7 @@ test.describe('ChefByte Scanner', () => {
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '049000042566' }).eq('product_id', chickenId);
 
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 15000 });
 
       // Scan the barcode
@@ -158,16 +159,17 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-unknown');
     try {
       await seedChefByteData(client, userId);
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 15000 });
 
       // Scan a random unknown barcode
       await page.getByTestId('barcode-input').fill('9999999999999');
       await page.getByTestId('barcode-input').press('Enter');
 
-      // Wait for queue item to process (name changes from "Processing..." to actual name)
+      // Wait for queue item to process — the edge function will fail in test env,
+      // so it falls back to creating a placeholder product named "Unknown (barcode)"
       const queueList = page.getByTestId('queue-list');
-      await expect(queueList).toContainText('9999999999999', { timeout: 15000 });
+      await expect(queueList).toContainText('Unknown (9999999999999)', { timeout: 15000 });
 
       // The [!NEW] badge should be visible
       await expect(queueList).toContainText('[!NEW]');
@@ -186,7 +188,7 @@ test.describe('ChefByte Scanner', () => {
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '049000042566' }).eq('product_id', chickenId);
 
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('mode-selector')).toBeVisible({ timeout: 15000 });
 
       // Switch to consume_macros mode
@@ -223,7 +225,7 @@ test.describe('ChefByte Scanner', () => {
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '049000042566' }).eq('product_id', chickenId);
 
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('mode-selector')).toBeVisible({ timeout: 15000 });
 
       // Switch to shopping mode
@@ -257,7 +259,7 @@ test.describe('ChefByte Scanner', () => {
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '049000042566' }).eq('product_id', chickenId);
 
-      await page.goto('/chef');
+      await page.goto('/chef/scanner');
       await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 15000 });
 
       // Scan barcode to add item to queue
@@ -275,6 +277,324 @@ test.describe('ChefByte Scanner', () => {
 
       // Queue should show empty message again
       await expect(page.getByTestId('queue-empty')).toBeVisible({ timeout: 5000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  /* ================================================================== */
+  /*  New tests — Batch 5 additions                                      */
+  /* ================================================================== */
+
+  test('nutrition editor fields accept input in purchase mode', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-nutinput');
+    try {
+      await seedChefByteData(client, userId);
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('nutrition-editor')).toBeVisible({ timeout: 15000 });
+
+      // Clear and type values into each nutrition field
+      const caloriesInput = page.getByTestId('nut-calories');
+      const proteinInput = page.getByTestId('nut-protein');
+      const carbsInput = page.getByTestId('nut-carbs');
+      const fatInput = page.getByTestId('nut-fat');
+
+      await caloriesInput.fill('250');
+      await expect(caloriesInput).toHaveValue('250');
+
+      await proteinInput.fill('30');
+      await expect(proteinInput).toHaveValue('30');
+
+      await carbsInput.fill('20');
+      await expect(carbsInput).toHaveValue('20');
+
+      await fatInput.fill('10');
+      await expect(fatInput).toHaveValue('10');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('auto-scaling adjusts nutrition when servings_per_container changes', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-autoscale');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const chickenId = productMap['Chicken Breast'];
+
+      // Add barcode and scan to populate nutrition fields from the product
+      const chef = (client as any).schema('chefbyte');
+      await chef.from('products').update({ barcode: '000000111111' }).eq('product_id', chickenId);
+
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('nutrition-editor')).toBeVisible({ timeout: 15000 });
+
+      // Scan the barcode so nutrition fields populate from the product
+      await page.getByTestId('barcode-input').fill('000000111111');
+      await page.getByTestId('barcode-input').press('Enter');
+      await expect(page.getByTestId('queue-list')).toContainText('Chicken Breast', { timeout: 15000 });
+
+      // Nutrition editor should now have Chicken Breast values:
+      // calories=165, protein=31, carbs=0, fat=3.6
+      const caloriesInput = page.getByTestId('nut-calories');
+      const proteinInput = page.getByTestId('nut-protein');
+      await expect(caloriesInput).toHaveValue('165');
+      await expect(proteinInput).toHaveValue('31');
+
+      // Now change calories — auto-scaling should adjust macros proportionally
+      await caloriesInput.fill('330');
+
+      // Protein should scale: 31 * (330/165) = 62
+      await expect(proteinInput).toHaveValue('62');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('undo button removes last scanned item from queue', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-undo');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const riceId = productMap['Brown Rice'];
+
+      const chef = (client as any).schema('chefbyte');
+      await chef.from('products').update({ barcode: '000000222222' }).eq('product_id', riceId);
+
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 15000 });
+
+      // Scan barcode to add Brown Rice to queue
+      await page.getByTestId('barcode-input').fill('000000222222');
+      await page.getByTestId('barcode-input').press('Enter');
+
+      const queueList = page.getByTestId('queue-list');
+      await expect(queueList).toContainText('Brown Rice', { timeout: 15000 });
+
+      // Click the undo/delete button for that item
+      const undoBtn = page.locator('[data-testid^="delete-item-"]').first();
+      await expect(undoBtn).toBeVisible();
+      await undoBtn.click();
+
+      // Queue should be empty now
+      await expect(page.getByTestId('queue-empty')).toBeVisible({ timeout: 5000 });
+
+      // Verify the stock lot that was created during purchase mode was also removed
+      // (the undo handler deletes the lot from the DB)
+      const lotCount = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: riceId,
+        user_id: userId,
+      });
+      // Original seed has 1 lot for Brown Rice (qty 2). The scan added another, undo removed it.
+      // So we should be back to the original count of 1.
+      expect(lotCount).toBe(1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('process queue batch-commits all items to DB', async ({ page }) => {
+    // NOTE: The scanner auto-processes each scan immediately (no batch commit button).
+    // This test verifies that scanning multiple barcodes in purchase mode results in
+    // all corresponding DB rows being created.
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-batch');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const chickenId = productMap['Chicken Breast'];
+      const riceId = productMap['Brown Rice'];
+      const eggsId = productMap['Eggs'];
+
+      // Assign unique barcodes to 3 products
+      const chef = (client as any).schema('chefbyte');
+      await chef.from('products').update({ barcode: '000000333301' }).eq('product_id', chickenId);
+      await chef.from('products').update({ barcode: '000000333302' }).eq('product_id', riceId);
+      await chef.from('products').update({ barcode: '000000333303' }).eq('product_id', eggsId);
+
+      // Count existing stock lots before scanning
+      const chickenLotsBefore = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: chickenId,
+        user_id: userId,
+      });
+      const riceLotsBefore = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: riceId,
+        user_id: userId,
+      });
+      const eggsLotsBefore = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: eggsId,
+        user_id: userId,
+      });
+
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 15000 });
+
+      // Scan 3 barcodes in purchase mode
+      await page.getByTestId('barcode-input').fill('000000333301');
+      await page.getByTestId('barcode-input').press('Enter');
+      await expect(page.getByTestId('queue-list')).toContainText('Chicken Breast', { timeout: 15000 });
+
+      await page.getByTestId('barcode-input').fill('000000333302');
+      await page.getByTestId('barcode-input').press('Enter');
+      await expect(page.getByTestId('queue-list')).toContainText('Brown Rice', { timeout: 15000 });
+
+      await page.getByTestId('barcode-input').fill('000000333303');
+      await page.getByTestId('barcode-input').press('Enter');
+      await expect(page.getByTestId('queue-list')).toContainText('Eggs', { timeout: 15000 });
+
+      // Verify each product got a new stock lot in the DB
+      const chickenLotsAfter = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: chickenId,
+        user_id: userId,
+      });
+      const riceLotsAfter = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: riceId,
+        user_id: userId,
+      });
+      const eggsLotsAfter = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: eggsId,
+        user_id: userId,
+      });
+
+      expect(chickenLotsAfter).toBe(chickenLotsBefore + 1);
+      expect(riceLotsAfter).toBe(riceLotsBefore + 1);
+      expect(eggsLotsAfter).toBe(eggsLotsBefore + 1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('consume_no_macros mode processes without logging macros', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-nomacro');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const chickenId = productMap['Chicken Breast'];
+
+      const chef = (client as any).schema('chefbyte');
+      await chef.from('products').update({ barcode: '000000444444' }).eq('product_id', chickenId);
+
+      // Count food_logs before
+      const logsBefore = await countDbRows(client, 'chefbyte', 'food_logs', {
+        product_id: chickenId,
+        user_id: userId,
+      });
+
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('mode-selector')).toBeVisible({ timeout: 15000 });
+
+      // Switch to consume_no_macros mode
+      await page.getByTestId('mode-consume_no_macros').click();
+
+      // Scan barcode
+      await page.getByTestId('barcode-input').fill('000000444444');
+      await page.getByTestId('barcode-input').press('Enter');
+
+      // Wait for queue item to finish processing
+      await expect(page.getByTestId('queue-list')).toContainText('Chicken Breast', { timeout: 15000 });
+
+      // Verify no new food_log entry was created (consume_no_macros sets p_log_macros=false)
+      const logsAfter = await countDbRows(client, 'chefbyte', 'food_logs', {
+        product_id: chickenId,
+        user_id: userId,
+      });
+      expect(logsAfter).toBe(logsBefore);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('multiple rapid scans all queue correctly', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-rapid');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const chickenId = productMap['Chicken Breast'];
+      const riceId = productMap['Brown Rice'];
+      const eggsId = productMap['Eggs'];
+
+      // Assign unique barcodes
+      const chef = (client as any).schema('chefbyte');
+      await chef.from('products').update({ barcode: '000000555501' }).eq('product_id', chickenId);
+      await chef.from('products').update({ barcode: '000000555502' }).eq('product_id', riceId);
+      await chef.from('products').update({ barcode: '000000555503' }).eq('product_id', eggsId);
+
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 15000 });
+
+      // Rapid-fire 3 scans without waiting for processing between them
+      await page.getByTestId('barcode-input').fill('000000555501');
+      await page.getByTestId('barcode-input').press('Enter');
+
+      await page.getByTestId('barcode-input').fill('000000555502');
+      await page.getByTestId('barcode-input').press('Enter');
+
+      await page.getByTestId('barcode-input').fill('000000555503');
+      await page.getByTestId('barcode-input').press('Enter');
+
+      // Wait for all 3 items to finish processing in the queue
+      const queueList = page.getByTestId('queue-list');
+      await expect(queueList).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(queueList).toContainText('Brown Rice', { timeout: 15000 });
+      await expect(queueList).toContainText('Eggs', { timeout: 15000 });
+
+      // Verify exactly 3 queue items rendered
+      const queueItems = page.locator('[data-testid^="queue-item-"]');
+      await expect(queueItems).toHaveCount(3);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('verify DB state after scan in purchase mode', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-dbverify');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const proteinPowderId = productMap['Protein Powder'];
+
+      const chef = (client as any).schema('chefbyte');
+      await chef.from('products').update({ barcode: '000000666666' }).eq('product_id', proteinPowderId);
+
+      // Count stock lots before scan
+      const lotsBefore = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: proteinPowderId,
+        user_id: userId,
+      });
+
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 15000 });
+
+      // Ensure we're in purchase mode (default)
+      await expect(page.getByTestId('nutrition-editor')).toBeVisible();
+
+      // Set keypad to quantity 2 before scanning
+      await page.getByTestId('key-2').click();
+      await expect(page.getByTestId('screen-value')).toHaveText('2');
+
+      // Scan barcode
+      await page.getByTestId('barcode-input').fill('000000666666');
+      await page.getByTestId('barcode-input').press('Enter');
+
+      // Wait for queue item to finish
+      await expect(page.getByTestId('queue-list')).toContainText('Protein Powder', { timeout: 15000 });
+
+      // Verify DB: new stock_lot row was created
+      const lotsAfter = await countDbRows(client, 'chefbyte', 'stock_lots', {
+        product_id: proteinPowderId,
+        user_id: userId,
+      });
+      expect(lotsAfter).toBe(lotsBefore + 1);
+
+      // Verify the new lot has qty_containers = 2
+      // Get all lots sorted by created_at desc, the newest should be our scan
+      const { data: lots } = await chef
+        .from('stock_lots')
+        .select('lot_id, qty_containers')
+        .eq('product_id', proteinPowderId)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+
+      expect(lots).not.toBeNull();
+      expect(lots!.length).toBe(1);
+      expect(Number(lots![0].qty_containers)).toBe(2);
+
+      // Verify the product still exists and has correct barcode
+      await expectDbRow(client, 'chefbyte', 'products', { product_id: proteinPowderId }, { barcode: '000000666666' });
     } finally {
       await cleanup();
     }

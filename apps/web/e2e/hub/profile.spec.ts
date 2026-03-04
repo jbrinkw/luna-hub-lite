@@ -102,4 +102,96 @@ test.describe('Profile management', () => {
       await cleanup();
     }
   });
+
+  test('password mismatch on account page shows error', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'pw-mismatch');
+    try {
+      await gotoAccountPage(page);
+      await page.getByLabel('New Password').fill('password123');
+      await page.getByLabel('Confirm Password').fill('different456');
+      await page.getByRole('button', { name: /change password/i }).click();
+      await expect(page.getByText(/passwords do not match/i)).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('timezone selector changes and persists after reload', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'tz-persist');
+    try {
+      await gotoAccountPage(page);
+
+      // Change timezone to a known value different from the default (America/New_York)
+      // IonSelect opens an ion-alert overlay when clicked
+      await page.locator('ion-select[label="Timezone"]').click();
+      // Wait for alert overlay to appear, then select the option
+      const alert = page.locator('ion-alert');
+      await expect(alert).toBeVisible({ timeout: 5000 });
+      await alert.getByRole('radio', { name: 'America/Chicago' }).click();
+      await alert.locator('.alert-button-group button', { hasText: /^OK$/i }).click();
+
+      // Save profile
+      await page.getByRole('button', { name: /save profile/i }).click();
+      await expect(page.getByText(/profile updated/i)).toBeVisible();
+
+      // Reload and verify persistence
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
+      // The IonSelect should display the selected value in its shadow DOM
+      await expect(page.locator('ion-select[label="Timezone"]')).toContainText('America/Chicago');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('day start hour selector changes and persists after reload', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'dsh-persist');
+    try {
+      await gotoAccountPage(page);
+
+      // Change day start hour to 9:00 AM (value = 9)
+      // IonSelect opens an ion-alert overlay when clicked
+      await page.locator('ion-select[label="Day Start Hour"]').click();
+      const alert = page.locator('ion-alert');
+      await expect(alert).toBeVisible({ timeout: 5000 });
+      await alert.locator('button', { hasText: '9:00 AM' }).click();
+      await alert.locator('button', { hasText: /ok/i }).click();
+
+      // Save profile
+      await page.getByRole('button', { name: /save profile/i }).click();
+      await expect(page.getByText(/profile updated/i)).toBeVisible();
+
+      // Reload and verify persistence
+      await page.reload();
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
+      await expect(page.locator('ion-select[label="Day Start Hour"]')).toContainText('9:00 AM');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('profile form retains values during navigation away and back', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'nav-retain');
+    try {
+      await gotoAccountPage(page);
+
+      // Change display name and save
+      const nameInput = page.getByLabel('Display Name');
+      await nameInput.clear();
+      await nameInput.fill('Navigation Test Name');
+      await page.getByRole('button', { name: /save profile/i }).click();
+      await expect(page.getByText(/profile updated/i)).toBeVisible();
+
+      // Navigate away to /hub/apps
+      await page.goto('/hub/apps');
+      await expect(page).toHaveURL(/\/hub\/apps/);
+
+      // Navigate back to account page
+      await gotoAccountPage(page);
+      // The saved value should be loaded from the database
+      await expect(page.getByLabel('Display Name')).toHaveValue('Navigation Test Name');
+    } finally {
+      await cleanup();
+    }
+  });
 });

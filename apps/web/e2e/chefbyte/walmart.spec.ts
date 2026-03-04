@@ -102,4 +102,99 @@ test.describe('ChefByte Walmart', () => {
       await cleanup();
     }
   });
+
+  test('edit existing price updates value', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'walmart-edit-price');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const chef = (client as any).schema('chefbyte');
+
+      // Pick first product and set it up with no walmart_link and no price
+      // so it appears in the missing-prices section
+      const productName = Object.keys(productMap)[0];
+      const productId = productMap[productName];
+
+      // Ensure no walmart_link so it shows in missing-prices
+      await chef.from('products').update({ walmart_link: null, price: null }).eq('product_id', productId);
+
+      await page.goto('/chef/walmart');
+
+      const missingPrices = page.getByTestId('missing-prices-section');
+      await expect(missingPrices).toBeVisible();
+
+      // Fill in initial price of 3.49
+      const priceInput = page.getByTestId(`price-input-${productId}`).locator('input');
+      await priceInput.fill('3.49');
+      await page.getByTestId(`save-price-${productId}`).click();
+
+      // Product disappears from missing prices after save
+      await expect(page.getByTestId(`price-item-${productId}`)).toBeHidden();
+
+      // Verify DB has the price
+      const { data: afterFirst } = await chef.from('products').select('price').eq('product_id', productId).single();
+      expect(Number(afterFirst.price)).toBeCloseTo(3.49, 1);
+
+      // Now reset price to null via DB so it reappears in missing prices
+      await chef.from('products').update({ price: null }).eq('product_id', productId);
+
+      // Reload page to pick up the change
+      await page.goto('/chef/walmart');
+      await expect(page.getByTestId('missing-prices-section')).toBeVisible();
+
+      // Wait for the specific product's price item to reappear in missing-prices section
+      await expect(page.getByTestId(`price-item-${productId}`)).toBeVisible({ timeout: 10000 });
+
+      // Fill in new price of 5.99
+      const priceInput2 = page.getByTestId(`price-input-${productId}`).locator('input');
+      await expect(priceInput2).toBeVisible({ timeout: 5000 });
+      await priceInput2.fill('5.99');
+      await page.getByTestId(`save-price-${productId}`).click();
+
+      // Wait for the price item to disappear (confirming save completed)
+      await expect(page.getByTestId(`price-item-${productId}`)).toBeHidden({ timeout: 5000 });
+
+      // Verify DB has updated price
+      const { data: afterSecond } = await chef.from('products').select('price').eq('product_id', productId).single();
+      expect(Number(afterSecond.price)).toBeCloseTo(5.99, 1);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('link product to walmart URL', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'walmart-link-url');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+      const chef = (client as any).schema('chefbyte');
+
+      // All seeded products have no walmart_link, so they all appear in missing-links
+      const productName = Object.keys(productMap)[0];
+      const productId = productMap[productName];
+
+      await page.goto('/chef/walmart');
+
+      const missingLinks = page.getByTestId('missing-links-section');
+      await expect(missingLinks).toBeVisible();
+
+      // Verify the product is listed in missing links
+      const linkItem = page.getByTestId(`link-item-${productId}`);
+      await expect(linkItem).toBeVisible();
+
+      // Paste a Walmart URL into the input
+      const urlInput = page.getByTestId(`url-input-${productId}`).locator('input');
+      await urlInput.fill('https://www.walmart.com/ip/Great-Value-Chicken-Breast/123456789');
+
+      // Click save URL
+      await page.getByTestId(`save-url-${productId}`).click();
+
+      // Product should disappear from missing links
+      await expect(linkItem).toBeHidden();
+
+      // Verify DB has the cleaned walmart_link
+      const { data: product } = await chef.from('products').select('walmart_link').eq('product_id', productId).single();
+      expect(product.walmart_link).toBe('https://www.walmart.com/ip/Great-Value-Chicken-Breast/123456789');
+    } finally {
+      await cleanup();
+    }
+  });
 });

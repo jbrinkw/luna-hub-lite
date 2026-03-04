@@ -29,12 +29,12 @@ async function seedAndLogin(page: import('@playwright/test').Page, suffix: strin
 }
 
 test.describe('Tools page', () => {
-  test('shows all 10 tool toggles', async ({ page }) => {
+  test('shows all 41 tool toggles', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'list');
     try {
       await page.goto('/hub/tools');
-      await expect(page.getByText('COACHBYTE_LOG_SET')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator('ion-toggle')).toHaveCount(10);
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
+      await expect(page.locator('ion-toggle')).toHaveCount(41);
     } finally {
       await cleanup();
     }
@@ -44,7 +44,7 @@ test.describe('Tools page', () => {
     const { cleanup } = await seedAndLogin(page, 'toggle');
     try {
       await page.goto('/hub/tools');
-      await expect(page.getByText('COACHBYTE_LOG_SET')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
 
       // All tools start enabled — find the first toggle and click it off
       const firstToggle = page.locator('ion-toggle').first();
@@ -61,7 +61,7 @@ test.describe('Tools page', () => {
     const { cleanup } = await seedAndLogin(page, 'persist');
     try {
       await page.goto('/hub/tools');
-      await expect(page.getByText('COACHBYTE_LOG_SET')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
 
       // Toggle first tool off
       const firstToggle = page.locator('ion-toggle').first();
@@ -70,8 +70,42 @@ test.describe('Tools page', () => {
 
       // Reload and verify state persisted
       await page.reload();
-      await expect(page.getByText('COACHBYTE_LOG_SET')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 15000 });
       await expect(page.locator('ion-toggle').first()).not.toBeChecked();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('tool groups are organized by module', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'groups');
+    try {
+      await page.goto('/hub/tools');
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
+
+      // Verify all group section headers/dividers are present
+      // ToolsPage renders IonItemDivider with IonLabel for each group
+      await expect(page.locator('ion-item-divider', { hasText: 'CoachByte' })).toBeVisible();
+      await expect(page.locator('ion-item-divider', { hasText: 'ChefByte' })).toBeVisible();
+      await expect(page.locator('ion-item-divider', { hasText: 'Obsidian' })).toBeVisible();
+      await expect(page.locator('ion-item-divider', { hasText: 'Todoist' })).toBeVisible();
+      await expect(page.locator('ion-item-divider', { hasText: 'Home Assistant' })).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('tool descriptions are visible', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, 'desc');
+    try {
+      await page.goto('/hub/tools');
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
+
+      // Each tool renders a <p> with description text inside IonLabel.
+      // Verify at least a few known tool descriptions are visible.
+      await expect(page.getByText('Complete next planned set')).toBeVisible();
+      await expect(page.getByText("Get today's workout plan")).toBeVisible();
+      await expect(page.getByText('Consume stock from inventory')).toBeVisible();
     } finally {
       await cleanup();
     }

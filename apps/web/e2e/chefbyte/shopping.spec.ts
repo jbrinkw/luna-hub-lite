@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { seedFullAndLogin, seedChefByteData } from '../helpers/seed';
+import { seedFullAndLogin, seedChefByteData, seedShoppingItems } from '../helpers/seed';
 
 test.describe('ChefByte Shopping', () => {
   test('shopping page loads with add form and empty lists', async ({ page }) => {
@@ -118,6 +118,111 @@ test.describe('ChefByte Shopping', () => {
 
       // The empty purchased state should be gone
       await expect(page.getByTestId('no-purchased')).not.toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // TODO: No "Clear Purchased" button exists on the shopping page. Only "Import to Inventory" and "Clear All" are available.
+  test.skip('clear purchased button removes all purchased items', async () => {
+    // ShoppingPage has no dedicated "clear purchased" button.
+    // The closest functionality is "Import to Inventory" which moves purchased items to stock and removes them.
+  });
+
+  test('clear all button removes all items', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-clearall');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      // Seed shopping items so we have items to clear
+      await seedShoppingItems(client, userId, [
+        { productId: productMap['Chicken Breast'], qtyContainers: 2 },
+        { productId: productMap['Brown Rice'], qtyContainers: 1 },
+      ]);
+
+      await page.goto('/chef/shopping');
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+
+      // Verify items are in the to-buy list
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('to-buy-section')).toContainText('Chicken Breast');
+
+      // Click clear all button (this opens an IonAlert confirmation)
+      await page.getByTestId('clear-all-btn').click();
+
+      // Confirm the alert dialog — IonAlert renders buttons in the dialog overlay
+      const alert = page.locator('ion-alert');
+      await expect(alert).toBeVisible({ timeout: 5000 });
+      const clearAllConfirmBtn = alert.locator('button', { hasText: 'Clear All' });
+      await clearAllConfirmBtn.click();
+
+      // Both sections should now show empty states
+      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('no-purchased')).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('delete individual shopping item', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-delitem');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      // Seed a single shopping item
+      const [cartItemId] = await seedShoppingItems(client, userId, [
+        { productId: productMap['Eggs'], qtyContainers: 1 },
+      ]);
+
+      await page.goto('/chef/shopping');
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+
+      // Verify the item is visible in to-buy list
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
+      const itemRow = page.getByTestId(`item-${cartItemId}`);
+      await expect(itemRow).toBeVisible();
+      await expect(itemRow).toContainText('Eggs');
+
+      // Click the remove button for this specific item
+      await page.getByTestId(`remove-${cartItemId}`).click();
+
+      // Item should be removed; to-buy list should show empty state
+      await expect(itemRow).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 5000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('uncheck purchased item moves back to to-buy section', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-uncheck');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      // Seed one item already marked as purchased
+      const [cartItemId] = await seedShoppingItems(client, userId, [
+        { productId: productMap['Protein Powder'], qtyContainers: 1, purchased: true },
+      ]);
+
+      await page.goto('/chef/shopping');
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+
+      // Verify it starts in the purchased section
+      await expect(page.getByTestId('purchased-list')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('purchased-section')).toContainText('Protein Powder');
+
+      // To-buy section should be empty
+      await expect(page.getByTestId('no-to-buy')).toBeVisible();
+
+      // Click the checkbox on the purchased item to uncheck it
+      await page.getByTestId(`check-${cartItemId}`).click();
+
+      // Item should move back to the to-buy section
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('to-buy-section')).toContainText('Protein Powder');
+
+      // Purchased section should now be empty
+      await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 5000 });
     } finally {
       await cleanup();
     }

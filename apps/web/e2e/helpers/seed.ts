@@ -346,10 +346,10 @@ export async function seedMealEntry(
     .insert({
       user_id: userId,
       recipe_id: recipeId,
-      plan_date: date,
+      logical_date: date,
       servings: options?.servings ?? 1,
       meal_type: options?.mealType ?? 'lunch',
-      is_meal_prep: options?.isMealPrep ?? false,
+      meal_prep: options?.isMealPrep ?? false,
     })
     .select('meal_id')
     .single();

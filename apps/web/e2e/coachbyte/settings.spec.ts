@@ -108,4 +108,101 @@ test.describe('CoachByte Settings', () => {
       await cleanup();
     }
   });
+
+  test('edit default rest duration and verify save persists', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-rest-persist');
+    try {
+      await seedCoachByteData(client, userId);
+      await page.goto('/coach/settings');
+
+      await expect(page.getByTestId('defaults-card')).toBeVisible({ timeout: 15000 });
+
+      const restInput = page.getByTestId('default-rest-input').locator('input');
+      await expect(restInput).toBeVisible();
+
+      // Clear and set a new rest duration (120 seconds)
+      await restInput.fill('120');
+
+      // Trigger blur to save (the component saves onIonBlur)
+      await restInput.blur();
+      await page.waitForTimeout(1000);
+
+      // Reload the page to verify persistence
+      await page.goto('/coach/settings');
+      await expect(page.getByTestId('defaults-card')).toBeVisible({ timeout: 15000 });
+
+      const restInputAfter = page.getByTestId('default-rest-input').locator('input');
+      await expect(restInputAfter).toHaveValue('120');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('add custom exercise appears in library', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-add-ex');
+    try {
+      await seedCoachByteData(client, userId);
+      await page.goto('/coach/settings');
+
+      const exerciseList = page.getByTestId('exercise-list');
+      await expect(exerciseList).toBeVisible({ timeout: 15000 });
+
+      // Count exercises before adding
+      const itemsBefore = await exerciseList.locator('ion-item').count();
+
+      // Type a new custom exercise name
+      const newExInput = page.getByTestId('new-exercise-input').locator('input');
+      await newExInput.fill('Zercher Squat');
+
+      // Click the add button
+      await page.getByTestId('add-exercise-btn').click();
+
+      // Wait for the exercise to appear in the list
+      await page.waitForTimeout(1000);
+
+      // The list should now contain the new exercise
+      await expect(exerciseList).toContainText('Zercher Squat');
+
+      // The list should have one more item
+      const itemsAfter = await exerciseList.locator('ion-item').count();
+      expect(itemsAfter).toBe(itemsBefore + 1);
+
+      // The new exercise should be marked as "custom"
+      await expect(exerciseList).toContainText('custom');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('plate calculator bar weight config changes', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-barwt');
+    try {
+      await seedCoachByteData(client, userId);
+      await page.goto('/coach/settings');
+
+      await expect(page.getByTestId('plate-calc-card')).toBeVisible({ timeout: 15000 });
+
+      const barWeightInput = page.getByTestId('bar-weight-input').locator('input');
+      await expect(barWeightInput).toBeVisible();
+
+      // Verify default bar weight is 45
+      await expect(barWeightInput).toHaveValue('45');
+
+      // Change bar weight to 35
+      await barWeightInput.fill('35');
+
+      // Trigger blur to save
+      await barWeightInput.blur();
+      await page.waitForTimeout(1000);
+
+      // Reload to verify persistence
+      await page.goto('/coach/settings');
+      await expect(page.getByTestId('plate-calc-card')).toBeVisible({ timeout: 15000 });
+
+      const barWeightAfter = page.getByTestId('bar-weight-input').locator('input');
+      await expect(barWeightAfter).toHaveValue('35');
+    } finally {
+      await cleanup();
+    }
+  });
 });

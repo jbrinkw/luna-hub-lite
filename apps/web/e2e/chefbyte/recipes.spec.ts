@@ -83,4 +83,64 @@ test.describe('ChefByte Recipes', () => {
       await cleanup();
     }
   });
+
+  test('clicking recipe card navigates to edit form with pre-filled data', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'rec-card-nav');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+
+      await page.goto('/chef/recipes');
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+
+      // Click the recipe name link on the card
+      const recipeName = page.getByTestId(`recipe-name-${recipeId}`);
+      await expect(recipeName).toBeVisible();
+      await recipeName.click();
+
+      // Should navigate to the edit form for this recipe
+      await page.waitForURL(new RegExp(`/chef/recipes/${recipeId}`), { timeout: 5000 });
+
+      // Recipe form should load with pre-filled name
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      const nameInput = page.getByTestId('recipe-name').locator('input');
+      await expect(nameInput).toHaveValue('Chicken & Rice');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('delete recipe button removes recipe and redirects', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'rec-delete');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+
+      // Navigate directly to the edit form for the seeded recipe
+      await page.goto(`/chef/recipes/${recipeId}`);
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+
+      // Verify we are editing the correct recipe
+      const nameInput = page.getByTestId('recipe-name').locator('input');
+      await expect(nameInput).toHaveValue('Chicken & Rice');
+
+      // Click the delete button
+      const deleteBtn = page.getByTestId('delete-recipe-btn');
+      await expect(deleteBtn).toBeVisible();
+      await deleteBtn.click();
+
+      // Confirm the IonAlert dialog by clicking "Delete" inside the alert overlay
+      const alert = page.locator('ion-alert');
+      await expect(alert).toBeVisible({ timeout: 5000 });
+      const alertDelete = alert.locator('button', { hasText: 'Delete' });
+      await alertDelete.click();
+
+      // Should redirect back to recipe list
+      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 5000 });
+
+      // The deleted recipe should no longer appear in the list
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId(`recipe-card-${recipeId}`)).not.toBeVisible({ timeout: 5000 });
+    } finally {
+      await cleanup();
+    }
+  });
 });
