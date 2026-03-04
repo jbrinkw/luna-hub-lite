@@ -64,6 +64,15 @@ export function TodayPage() {
   const resetTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const isEditingRef = useRef(false);
 
+  // Cleanup debounce/timeout timers on unmount
+  useEffect(() => {
+    return () => {
+      if (summaryDebounceRef.current) clearTimeout(summaryDebounceRef.current);
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+      if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
+    };
+  }, []);
+
   const today = todayStr();
 
   const loadPlan = useCallback(async () => {

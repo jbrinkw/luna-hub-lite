@@ -5,6 +5,7 @@ import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 import { toDateStr } from '@/shared/dates';
+import { computeRecipeMacros } from './RecipesPage';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -19,8 +20,28 @@ interface MealEntry {
   servings: number;
   meal_prep: boolean;
   completed_at: string | null;
-  recipes: { name: string } | null;
-  products: { name: string } | null;
+  recipes: {
+    name: string;
+    base_servings: number;
+    recipe_ingredients: Array<{
+      quantity: number;
+      unit: string;
+      products: {
+        calories_per_serving: number;
+        carbs_per_serving: number;
+        protein_per_serving: number;
+        fat_per_serving: number;
+        servings_per_container: number;
+      } | null;
+    }>;
+  } | null;
+  products: {
+    name: string;
+    calories_per_serving: number;
+    carbs_per_serving: number;
+    protein_per_serving: number;
+    fat_per_serving: number;
+  } | null;
 }
 
 interface SearchResult {
@@ -93,7 +114,9 @@ export function MealPlanPage() {
 
     const { data } = await chefbyte()
       .from('meal_plan_entries')
-      .select('*, recipes:recipe_id(name), products:product_id(name)')
+      .select(
+        '*, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving)',
+      )
       .eq('user_id', userId)
       .gte('logical_date', startDate)
       .lte('logical_date', endDate)
@@ -158,6 +181,44 @@ export function MealPlanPage() {
   /* ---------------------------------------------------------------- */
 
   const entryName = (meal: MealEntry): string => meal.recipes?.name ?? meal.products?.name ?? 'Unknown';
+
+  const entryMacros = (meal: MealEntry): { calories: number; protein: number; carbs: number; fat: number } | null => {
+    if (meal.products) {
+      const s = meal.servings;
+      return {
+        calories: Math.round(Number(meal.products.calories_per_serving) * s),
+        protein: Math.round(Number(meal.products.protein_per_serving) * s),
+        carbs: Math.round(Number(meal.products.carbs_per_serving) * s),
+        fat: Math.round(Number(meal.products.fat_per_serving) * s),
+      };
+    }
+    if (meal.recipes && meal.recipes.recipe_ingredients?.length > 0) {
+      const perServing = computeRecipeMacros(
+        meal.recipes.recipe_ingredients.map((ri) => ({
+          quantity: Number(ri.quantity),
+          unit: ri.unit,
+          products: ri.products
+            ? {
+                calories_per_serving: Number(ri.products.calories_per_serving),
+                carbs_per_serving: Number(ri.products.carbs_per_serving),
+                protein_per_serving: Number(ri.products.protein_per_serving),
+                fat_per_serving: Number(ri.products.fat_per_serving),
+                servings_per_container: Number(ri.products.servings_per_container),
+              }
+            : null,
+        })),
+        Number(meal.recipes.base_servings) || 1,
+      );
+      const s = meal.servings;
+      return {
+        calories: Math.round(perServing.calories * s),
+        protein: Math.round(perServing.protein * s),
+        carbs: Math.round(perServing.carbs * s),
+        fat: Math.round(perServing.fat * s),
+      };
+    }
+    return null;
+  };
 
   /* ---------------------------------------------------------------- */
   /*  Actions                                                          */
@@ -230,6 +291,13 @@ export function MealPlanPage() {
   );
 
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, []);
 
   const handleAddSearchInput = (value: string) => {
     setAddSearchText(value);
@@ -353,33 +421,46 @@ export function MealPlanPage() {
                 {DAY_NAMES[i]} {dayNum}
               </div>
               {dayMeals.length === 0 && <span style={{ color: '#aaa', fontSize: '0.8em' }}>(empty)</span>}
-              {dayMeals.map((meal) => (
-                <div
-                  key={meal.meal_id}
-                  data-testid={`grid-meal-${meal.meal_id}`}
-                  style={{ fontSize: '0.8em', marginBottom: '2px' }}
-                >
-                  {entryName(meal)}
-                  {meal.completed_at && (
-                    <IonBadge
-                      color="success"
-                      style={{ marginLeft: '4px', fontSize: '0.7em' }}
-                      data-testid={`done-badge-${meal.meal_id}`}
-                    >
-                      done
-                    </IonBadge>
-                  )}
-                  {meal.meal_prep && !meal.completed_at && (
-                    <IonBadge
-                      color="tertiary"
-                      style={{ marginLeft: '4px', fontSize: '0.7em' }}
-                      data-testid={`prep-badge-${meal.meal_id}`}
-                    >
-                      PREP
-                    </IonBadge>
-                  )}
-                </div>
-              ))}
+              {dayMeals.map((meal) => {
+                const macros = entryMacros(meal);
+                return (
+                  <div
+                    key={meal.meal_id}
+                    data-testid={`grid-meal-${meal.meal_id}`}
+                    style={{ fontSize: '0.8em', marginBottom: '4px' }}
+                  >
+                    <div>
+                      {entryName(meal)}
+                      {meal.completed_at && (
+                        <IonBadge
+                          color="success"
+                          style={{ marginLeft: '4px', fontSize: '0.7em' }}
+                          data-testid={`done-badge-${meal.meal_id}`}
+                        >
+                          done
+                        </IonBadge>
+                      )}
+                      {meal.meal_prep && !meal.completed_at && (
+                        <IonBadge
+                          color="tertiary"
+                          style={{ marginLeft: '4px', fontSize: '0.7em' }}
+                          data-testid={`prep-badge-${meal.meal_id}`}
+                        >
+                          PREP
+                        </IonBadge>
+                      )}
+                    </div>
+                    {macros && (macros.calories > 0 || macros.protein > 0) && (
+                      <div
+                        data-testid={`grid-macros-${meal.meal_id}`}
+                        style={{ fontSize: '0.7em', color: '#888', lineHeight: 1.2 }}
+                      >
+                        {macros.calories}cal {macros.protein}P {macros.carbs}C {macros.fat}F
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           );
         })}

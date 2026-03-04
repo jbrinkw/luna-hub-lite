@@ -143,8 +143,11 @@ export function ScannerPage() {
       setQueue((prev) => [newItem, ...prev]);
       setActiveItemId(tempId);
 
-      // Reset input
-      if (barcodeRef.current) barcodeRef.current.value = '';
+      // Reset input and re-focus for next scan
+      if (barcodeRef.current) {
+        barcodeRef.current.value = '';
+        barcodeRef.current.focus();
+      }
       setScreenValue('1');
       setOverwriteNext(true);
 

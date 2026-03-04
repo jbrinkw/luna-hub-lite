@@ -31,6 +31,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const loadActivations = useCallback(async () => {
     if (!user) {
+      setActivations({});
       setActivationsLoading(false);
       return;
     }
@@ -45,9 +46,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setLastSynced(new Date());
   }, [user]);
 
-  // Async data fetching with setState is the standard pattern for this use case
-  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadActivations();
   }, [loadActivations]);
 

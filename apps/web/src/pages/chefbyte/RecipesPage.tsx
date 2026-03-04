@@ -216,6 +216,17 @@ export function RecipesPage() {
                 >
                   {recipe.name}
                 </IonCardTitle>
+                {recipe.description && (
+                  <p
+                    style={{ fontSize: '0.85em', color: '#666', margin: '4px 0 0' }}
+                    data-testid={`recipe-desc-${recipe.recipe_id}`}
+                  >
+                    {recipe.description.length > 60 ? recipe.description.slice(0, 60) + '...' : recipe.description}
+                  </p>
+                )}
+                <span style={{ fontSize: '0.8em', color: '#888' }} data-testid={`recipe-servings-${recipe.recipe_id}`}>
+                  Base servings: {Number(recipe.base_servings)}
+                </span>
               </IonCardHeader>
               <IonCardContent>
                 {/* Time info */}

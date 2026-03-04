@@ -166,8 +166,8 @@ export function HistoryPage() {
     setDetailLoading(false);
   };
 
-  // Exercise filter disabled — would need completed_sets data per day
-  const filteredDays = days;
+  // Filter out empty days (no completed sets) and apply exercise filter
+  const filteredDays = days.filter((d) => d.completed_count > 0);
 
   return (
     <CoachLayout title="History">

@@ -566,6 +566,25 @@ export function MacroPage() {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr data-testid="consumed-total-row" style={{ fontWeight: 'bold' }}>
+                <td style={{ padding: '8px', borderTop: '2px solid #999' }}></td>
+                <td style={{ padding: '8px', borderTop: '2px solid #999' }}>TOTAL</td>
+                <td style={{ textAlign: 'right', padding: '8px', borderTop: '2px solid #999' }}>
+                  {consumed.reduce((sum, i) => sum + i.calories, 0)}
+                </td>
+                <td style={{ textAlign: 'right', padding: '8px', borderTop: '2px solid #999' }}>
+                  {consumed.reduce((sum, i) => sum + i.protein, 0)}g
+                </td>
+                <td style={{ textAlign: 'right', padding: '8px', borderTop: '2px solid #999' }}>
+                  {consumed.reduce((sum, i) => sum + i.carbs, 0)}g
+                </td>
+                <td style={{ textAlign: 'right', padding: '8px', borderTop: '2px solid #999' }}>
+                  {consumed.reduce((sum, i) => sum + i.fat, 0)}g
+                </td>
+                <td style={{ borderTop: '2px solid #999' }}></td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </div>

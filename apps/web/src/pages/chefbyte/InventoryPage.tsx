@@ -65,6 +65,9 @@ export function InventoryPage() {
   const [locationId, setLocationId] = useState<string | null>(null);
   const [consumeAllTarget, setConsumeAllTarget] = useState<string | null>(null);
 
+  /* ---- Search filter state ---- */
+  const [searchText, setSearchText] = useState('');
+
   /* ---- Add-stock modal state ---- */
   const [addingStockFor, setAddingStockFor] = useState<string | null>(null);
   const [addStockQty, setAddStockQty] = useState<number>(1);
@@ -185,6 +188,16 @@ export function InventoryPage() {
       };
     });
   }, [products, lots]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Filtered grouped (by search text)                                */
+  /* ---------------------------------------------------------------- */
+
+  const filteredGrouped = useMemo(() => {
+    if (!searchText.trim()) return grouped;
+    const lower = searchText.toLowerCase();
+    return grouped.filter((g) => g.product.name.toLowerCase().includes(lower));
+  }, [grouped, searchText]);
 
   /* ---------------------------------------------------------------- */
   /*  Sorted lots for Lots view                                        */
@@ -357,13 +370,26 @@ export function InventoryPage() {
       </IonSegment>
 
       {/* ========================================================== */}
+      {/*  SEARCH FILTER                                               */}
+      {/* ========================================================== */}
+      <div style={{ margin: '12px 0' }}>
+        <IonInput
+          placeholder="Search products..."
+          aria-label="Search products"
+          value={searchText}
+          onIonInput={(e) => setSearchText(e.detail.value ?? '')}
+          data-testid="inventory-search"
+        />
+      </div>
+
+      {/* ========================================================== */}
       {/*  GROUPED VIEW                                                */}
       {/* ========================================================== */}
       {viewMode === 'grouped' && (
         <div data-testid="grouped-view">
-          {grouped.length === 0 && <p data-testid="no-products">No products in inventory.</p>}
+          {filteredGrouped.length === 0 && <p data-testid="no-products">No products in inventory.</p>}
 
-          {grouped.map(({ product, totalStock, nearestExpiry, lotCount }) => (
+          {filteredGrouped.map(({ product, totalStock, nearestExpiry, lotCount }) => (
             <IonCard key={product.product_id} data-testid={`inv-product-${product.product_id}`}>
               <IonCardHeader>
                 <IonCardTitle>{product.name}</IonCardTitle>
@@ -395,6 +421,13 @@ export function InventoryPage() {
                     >
                       {totalStock.toFixed(1)} ctn
                     </IonBadge>
+                    <br />
+                    <span
+                      style={{ fontSize: '0.8em', color: '#888' }}
+                      data-testid={`stock-servings-${product.product_id}`}
+                    >
+                      ({(totalStock * Number(product.servings_per_container)).toFixed(1)} svgs)
+                    </span>
                   </div>
                   <div>
                     <span style={{ fontSize: '0.85em', color: '#888' }}>Nearest Expiry</span>

@@ -143,6 +143,13 @@ export function RecipeFormPage() {
 
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, []);
+
   const searchProducts = useCallback(
     async (text: string) => {
       if (!user || text.trim().length < 1) {

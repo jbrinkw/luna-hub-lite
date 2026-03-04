@@ -10,6 +10,7 @@ import {
   IonCheckbox,
   IonList,
   IonText,
+  IonAlert,
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -44,6 +45,8 @@ export function ShoppingPage() {
   const [items, setItems] = useState<ShoppingItem[]>([]);
 
   const [error, setError] = useState<string | null>(null);
+
+  const [showClearAllAlert, setShowClearAllAlert] = useState(false);
 
   /* ---- Add item form state ---- */
   const [searchText, setSearchText] = useState('');
@@ -113,6 +116,13 @@ export function ShoppingPage() {
   /* ---------------------------------------------------------------- */
 
   const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  // Cleanup debounce timer on unmount
+  useEffect(() => {
+    return () => {
+      if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    };
+  }, []);
 
   const searchProducts = useCallback(
     async (text: string) => {
@@ -311,6 +321,17 @@ export function ShoppingPage() {
     await loadItems();
   };
 
+  const clearAll = async () => {
+    if (!user || items.length === 0) return;
+    setError(null);
+    const { error: delErr } = await chefbyte().from('shopping_list').delete().eq('user_id', user.id);
+    if (delErr) {
+      setError(delErr.message);
+      return;
+    }
+    await loadItems();
+  };
+
   /* ---------------------------------------------------------------- */
   /*  Helpers                                                          */
   /* ---------------------------------------------------------------- */
@@ -411,9 +432,26 @@ export function ShoppingPage() {
       {/* ============================================================ */}
       {/*  AUTO-ADD BUTTON                                              */}
       {/* ============================================================ */}
-      <div style={{ margin: '12px 0' }}>
-        <IonButton expand="block" fill="outline" onClick={autoAddBelowMinStock} data-testid="auto-add-btn">
+      <div style={{ margin: '12px 0', display: 'flex', gap: '8px' }}>
+        <IonButton
+          expand="block"
+          fill="outline"
+          onClick={autoAddBelowMinStock}
+          data-testid="auto-add-btn"
+          style={{ flex: 1 }}
+        >
           Auto-Add Below Min Stock
+        </IonButton>
+        <IonButton
+          expand="block"
+          fill="outline"
+          color="danger"
+          onClick={() => setShowClearAllAlert(true)}
+          disabled={items.length === 0}
+          data-testid="clear-all-btn"
+          style={{ flex: 1 }}
+        >
+          Clear All
         </IonButton>
       </div>
 
@@ -521,6 +559,24 @@ export function ShoppingPage() {
           )}
         </IonCardContent>
       </IonCard>
+
+      {/* Clear All confirmation */}
+      <IonAlert
+        isOpen={showClearAllAlert}
+        header="Clear All Items"
+        message="Are you sure you want to remove all items from the shopping list?"
+        buttons={[
+          { text: 'Cancel', role: 'cancel', handler: () => setShowClearAllAlert(false) },
+          {
+            text: 'Clear All',
+            handler: () => {
+              clearAll();
+              setShowClearAllAlert(false);
+            },
+          },
+        ]}
+        onDidDismiss={() => setShowClearAllAlert(false)}
+      />
     </ChefLayout>
   );
 }

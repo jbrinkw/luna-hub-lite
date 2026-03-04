@@ -59,13 +59,13 @@ export function WalmartPage() {
       })),
     );
 
-    // 2. Missing Prices: products where walmart_link IS NOT NULL and price IS NULL
+    // 2. Missing Prices: products with NO walmart_link that need manual price entry
     const { data: noPrices } = await chefbyte()
       .from('products')
       .select('product_id, name, walmart_link, price')
       .eq('user_id', userId)
       .is('price', null)
-      .not('walmart_link', 'is', null);
+      .is('walmart_link', null);
 
     setMissingPrices((noPrices ?? []) as MissingPriceProduct[]);
 
