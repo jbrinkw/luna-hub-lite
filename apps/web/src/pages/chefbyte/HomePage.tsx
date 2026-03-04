@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonButton, IonInput, IonTextarea } from '@ionic/react';
+import { IonSpinner, IonButton, IonInput, IonTextarea, IonCard, IonCardContent } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
@@ -43,6 +43,7 @@ export function HomePage() {
   const userId = user?.id;
 
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   /* ---- Status cards ---- */
   const [missingPrices, setMissingPrices] = useState(0);
@@ -74,9 +75,18 @@ export function HomePage() {
 
   const loadData = useCallback(async () => {
     if (!userId) return;
+    setLoadError(null);
 
     // 1. Status cards — missing prices
-    const { data: mp } = await chefbyte().from('products').select('product_id').eq('user_id', userId).is('price', null);
+    const { data: mp, error: mpErr } = await chefbyte()
+      .from('products')
+      .select('product_id')
+      .eq('user_id', userId)
+      .is('price', null);
+    if (mpErr) {
+      setLoadError(mpErr.message);
+      return;
+    }
     setMissingPrices((mp ?? []).length);
 
     // 2. Placeholders
@@ -287,6 +297,15 @@ export function HomePage() {
   return (
     <ChefLayout title="Home">
       <h2>CHEFBYTE</h2>
+
+      {loadError && (
+        <IonCard color="danger" data-testid="load-error">
+          <IonCardContent>
+            <p>Failed to load data: {loadError}</p>
+            <IonButton onClick={loadData}>Retry</IonButton>
+          </IonCardContent>
+        </IonCard>
+      )}
 
       {/* ============================================================ */}
       {/*  STATUS CARDS                                                 */}

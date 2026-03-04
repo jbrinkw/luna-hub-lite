@@ -31,6 +31,7 @@ export function epley1RM(load: number, reps: number): number {
 export function PrsPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [prs, setPrs] = useState<ExercisePR[]>([]);
   const [trackedExercises, setTrackedExercises] = useState<{ exercise_id: string; name: string }[]>([]);
   const [allExercises, setAllExercises] = useState<{ exercise_id: string; name: string }[]>([]);
@@ -39,6 +40,7 @@ export function PrsPage() {
 
   const computePRs = useCallback(async () => {
     if (!user) return;
+    setLoadError(null);
 
     let query = supabase
       .schema('coachbyte')
@@ -53,7 +55,13 @@ export function PrsPage() {
       query = query.gte('completed_at', cutoffDate.toISOString());
     }
 
-    const { data: completedSets } = await query;
+    const { data: completedSets, error: setsErr } = await query;
+
+    if (setsErr) {
+      setLoadError(setsErr.message);
+      setLoading(false);
+      return;
+    }
 
     if (!completedSets || completedSets.length === 0) {
       setPrs([]);
@@ -192,6 +200,15 @@ export function PrsPage() {
   return (
     <CoachLayout title="PRs">
       <h2>PR TRACKER</h2>
+
+      {loadError && (
+        <IonCard color="danger" data-testid="load-error">
+          <IonCardContent>
+            <p>Failed to load data: {loadError}</p>
+            <IonButton onClick={computePRs}>Retry</IonButton>
+          </IonCardContent>
+        </IonCard>
+      )}
 
       {filteredPRs.length === 0 ? (
         <p data-testid="no-prs">No PRs recorded yet. Complete some sets to see your records.</p>

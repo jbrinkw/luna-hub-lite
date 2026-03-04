@@ -55,6 +55,7 @@ export function TodayPage() {
   const [showAdHoc, setShowAdHoc] = useState(false);
   const [addingPlanned, setAddingPlanned] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
@@ -67,13 +68,13 @@ export function TodayPage() {
 
   const loadPlan = useCallback(async () => {
     if (!user) return;
-    setError(null);
+    setLoadError(null);
 
     // Ensure daily plan exists
     const { data: planResult, error: planErr } = await coachbyte().rpc('ensure_daily_plan', { p_day: today });
 
     if (planErr) {
-      setError(planErr.message);
+      setLoadError(planErr.message);
       setLoading(false);
       return;
     }
@@ -448,6 +449,15 @@ export function TodayPage() {
       <h2>
         TODAY'S WORKOUT <span style={{ float: 'right', fontWeight: 'normal', fontSize: '1rem' }}>{today}</span>
       </h2>
+
+      {loadError && (
+        <IonCard color="danger" data-testid="load-error">
+          <IonCardContent>
+            <p>Failed to load data: {loadError}</p>
+            <IonButton onClick={loadPlan}>Retry</IonButton>
+          </IonCardContent>
+        </IonCard>
+      )}
 
       {error && (
         <IonText color="danger">

@@ -59,6 +59,7 @@ export function InventoryPage() {
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
 
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [products, setProducts] = useState<Product[]>([]);
   const [lots, setLots] = useState<StockLot[]>([]);
   const [locationId, setLocationId] = useState<string | null>(null);
@@ -75,12 +76,19 @@ export function InventoryPage() {
 
   const loadData = useCallback(async () => {
     if (!user) return;
+    setLoadError(null);
 
-    const { data: prods } = await chefbyte()
+    const { data: prods, error: prodsErr } = await chefbyte()
       .from('products')
       .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount')
       .eq('user_id', user.id)
       .order('name');
+
+    if (prodsErr) {
+      setLoadError(prodsErr.message);
+      setLoading(false);
+      return;
+    }
 
     const { data: stockLots } = await chefbyte()
       .from('stock_lots')
@@ -281,6 +289,14 @@ export function InventoryPage() {
   return (
     <ChefLayout title="Inventory">
       <h2>INVENTORY</h2>
+      {loadError && (
+        <IonCard color="danger" data-testid="load-error">
+          <IonCardContent>
+            <p>Failed to load data: {loadError}</p>
+            <IonButton onClick={loadData}>Retry</IonButton>
+          </IonCardContent>
+        </IonCard>
+      )}
       {error && (
         <IonText color="danger">
           <p>{error}</p>

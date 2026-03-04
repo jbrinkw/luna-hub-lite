@@ -8,6 +8,7 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { ActivationGuard } from './components/ActivationGuard';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
+import { ResetPassword } from './pages/hub/ResetPassword';
 import { HubRoutes } from './modules/hub/routes';
 import { CoachRoutes } from './modules/coachbyte/routes';
 import { ChefRoutes } from './modules/chefbyte/routes';
@@ -21,6 +22,7 @@ export default function App() {
             {/* Public routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
+            <Route path="/hub/reset-password" element={<ResetPassword />} />
 
             {/* Protected routes */}
             <Route

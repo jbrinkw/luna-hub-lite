@@ -26,6 +26,10 @@ export function Login() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [demoLoading, setDemoLoading] = useState(false);
+  const [showForgot, setShowForgot] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
+  const [forgotLoading, setForgotLoading] = useState(false);
+  const [forgotMessage, setForgotMessage] = useState<string | null>(null);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -70,6 +74,31 @@ export function Login() {
     }
   };
 
+  const handleForgotPassword = async (e: FormEvent) => {
+    e.preventDefault();
+    setForgotMessage(null);
+    setError(null);
+
+    if (!forgotEmail.trim()) {
+      setError('Email is required');
+      return;
+    }
+
+    setForgotLoading(true);
+    try {
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(forgotEmail, {
+        redirectTo: window.location.origin + '/hub/reset-password',
+      });
+      if (resetError) {
+        setError(resetError.message);
+      } else {
+        setForgotMessage('Check your email for a reset link.');
+      }
+    } finally {
+      setForgotLoading(false);
+    }
+  };
+
   return (
     <IonPage>
       <IonContent className="ion-padding">
@@ -111,6 +140,50 @@ export function Login() {
                   {loading ? 'Signing in...' : 'Sign In'}
                 </IonButton>
               </form>
+              <div style={{ textAlign: 'right', marginTop: 8 }}>
+                <IonButton
+                  fill="clear"
+                  size="small"
+                  onClick={() => {
+                    setShowForgot(!showForgot);
+                    setError(null);
+                    setForgotMessage(null);
+                  }}
+                  data-testid="forgot-password-link"
+                >
+                  Forgot password?
+                </IonButton>
+              </div>
+              {showForgot && (
+                <form onSubmit={handleForgotPassword} data-testid="forgot-password-form">
+                  {forgotMessage && (
+                    <IonText color="success" data-testid="forgot-password-success">
+                      <p>{forgotMessage}</p>
+                    </IonText>
+                  )}
+                  <IonItem>
+                    <IonInput
+                      label="Email"
+                      labelPlacement="stacked"
+                      type="email"
+                      value={forgotEmail}
+                      onIonInput={(e) => setForgotEmail(e.detail.value ?? '')}
+                      autocomplete="email"
+                      required
+                      data-testid="forgot-email-input"
+                    />
+                  </IonItem>
+                  <IonButton
+                    expand="block"
+                    type="submit"
+                    disabled={forgotLoading}
+                    style={{ marginTop: 8 }}
+                    data-testid="send-reset-link-button"
+                  >
+                    {forgotLoading ? 'Sending...' : 'Send Reset Link'}
+                  </IonButton>
+                </form>
+              )}
               <div
                 style={{
                   display: 'flex',

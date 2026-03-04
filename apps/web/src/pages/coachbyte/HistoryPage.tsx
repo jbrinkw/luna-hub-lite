@@ -34,6 +34,7 @@ const PAGE_SIZE = 20;
 export function HistoryPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [days, setDays] = useState<HistoryDay[]>([]);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
@@ -46,6 +47,7 @@ export function HistoryPage() {
   const loadHistory = useCallback(
     async (cursorDate?: string) => {
       if (!user) return;
+      setLoadError(null);
       setLoading(true);
 
       let query = supabase
@@ -60,7 +62,14 @@ export function HistoryPage() {
         query = query.lt('plan_date', cursorDate);
       }
 
-      const { data: plans } = await query;
+      const { data: plans, error: plansErr } = await query;
+
+      if (plansErr) {
+        setLoadError(plansErr.message);
+        setLoading(false);
+        return;
+      }
+
       if (!plans || plans.length === 0) {
         if (!cursorDate) setDays([]);
         setHasMore(false);
@@ -179,6 +188,15 @@ export function HistoryPage() {
           ))}
         </IonSelect>
       </div>
+
+      {loadError && (
+        <IonCard color="danger" data-testid="load-error">
+          <IonCardContent>
+            <p>Failed to load data: {loadError}</p>
+            <IonButton onClick={() => loadHistory()}>Retry</IonButton>
+          </IonCardContent>
+        </IonCard>
+      )}
 
       {loading && days.length === 0 ? (
         <IonSpinner data-testid="history-loading" />

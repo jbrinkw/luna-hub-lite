@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonButton, IonInput, IonTextarea, IonText } from '@ionic/react';
+import { IonSpinner, IonButton, IonInput, IonTextarea, IonText, IonCard, IonCardContent } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
@@ -52,6 +52,7 @@ export function calcCaloriesFromMacros(protein: number, carbs: number, fat: numb
 export function MacroPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [currentDate, setCurrentDate] = useState(() => toDateStr(new Date()));
   const [macros, setMacros] = useState<MacroTotals | null>(null);
   const [consumed, setConsumed] = useState<ConsumedItem[]>([]);
@@ -83,12 +84,19 @@ export function MacroPage() {
 
   const loadData = useCallback(async () => {
     if (!userId) return;
+    setLoadError(null);
 
     // 1. Fetch daily macro summary via RPC
     // RPC returns: { calories: { consumed, goal, remaining }, protein: {...}, carbs: {...}, fat: {...} }
-    const { data: macroData } = await (chefbyte() as any).rpc('get_daily_macros', {
+    const { data: macroData, error: macroErr } = await (chefbyte() as any).rpc('get_daily_macros', {
       p_logical_date: currentDate,
     });
+
+    if (macroErr) {
+      setLoadError(macroErr.message);
+      setLoading(false);
+      return;
+    }
 
     if (macroData) {
       const rpc = macroData as Record<string, { consumed: number; goal: number; remaining: number }>;
@@ -397,6 +405,14 @@ export function MacroPage() {
   return (
     <ChefLayout title="Macros">
       <h2>MACROS</h2>
+      {loadError && (
+        <IonCard color="danger" data-testid="load-error">
+          <IonCardContent>
+            <p>Failed to load data: {loadError}</p>
+            <IonButton onClick={loadData}>Retry</IonButton>
+          </IonCardContent>
+        </IonCard>
+      )}
       {mutationError && (
         <IonText color="danger">
           <p>{mutationError}</p>
