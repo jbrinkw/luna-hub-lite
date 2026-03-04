@@ -14,6 +14,9 @@ import {
 } from '@ionic/react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 
+const DEMO_EMAIL = 'demo@lunahub.dev';
+const DEMO_PASSWORD = 'demo1234';
+
 export function Login() {
   const { signIn } = useAuth();
   const navigate = useNavigate();
@@ -21,6 +24,7 @@ export function Login() {
   const [password, setPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [demoLoading, setDemoLoading] = useState(false);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -45,6 +49,21 @@ export function Login() {
       }
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDemo = async () => {
+    setError(null);
+    setDemoLoading(true);
+    try {
+      const { error: signInError } = await signIn(DEMO_EMAIL, DEMO_PASSWORD);
+      if (signInError) {
+        setError('Demo account unavailable. Please create an account.');
+      } else {
+        navigate('/hub');
+      }
+    } finally {
+      setDemoLoading(false);
     }
   };
 
@@ -85,10 +104,31 @@ export function Login() {
                     required
                   />
                 </IonItem>
-                <IonButton expand="block" type="submit" disabled={loading} style={{ marginTop: 16 }}>
+                <IonButton expand="block" type="submit" disabled={loading || demoLoading} style={{ marginTop: 16 }}>
                   {loading ? 'Signing in...' : 'Sign In'}
                 </IonButton>
               </form>
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  margin: '16px 0',
+                }}
+              >
+                <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--ion-color-step-200)' }} />
+                <span style={{ color: 'var(--ion-color-medium)', fontSize: 13 }}>or</span>
+                <hr style={{ flex: 1, border: 'none', borderTop: '1px solid var(--ion-color-step-200)' }} />
+              </div>
+              <IonButton
+                expand="block"
+                fill="outline"
+                color="medium"
+                onClick={handleDemo}
+                disabled={loading || demoLoading}
+              >
+                {demoLoading ? 'Loading demo...' : 'Try Demo Account'}
+              </IonButton>
               <p style={{ textAlign: 'center', marginTop: 16 }}>
                 Don&apos;t have an account? <Link to="/signup">Sign up</Link>
               </p>
