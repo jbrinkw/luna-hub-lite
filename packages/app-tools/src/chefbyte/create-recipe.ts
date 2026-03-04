@@ -12,6 +12,7 @@ export const createRecipe: ToolDefinition = {
       base_servings: { type: 'number', description: 'Number of servings (optional)' },
       active_time: { type: 'integer', description: 'Active/prep time in minutes (optional)' },
       total_time: { type: 'integer', description: 'Total time in minutes (optional)' },
+      instructions: { type: 'string', description: 'Cooking instructions/directions (optional)' },
       ingredients: {
         type: 'array',
         description: 'List of ingredients',
@@ -33,7 +34,7 @@ export const createRecipe: ToolDefinition = {
     required: ['name', 'ingredients'],
   },
   handler: async (args, ctx) => {
-    const { name, description, base_servings, active_time, total_time, ingredients } = args;
+    const { name, description, base_servings, active_time, total_time, instructions, ingredients } = args;
 
     if (!ingredients || ingredients.length === 0) {
       return toolError('At least one ingredient is required');
@@ -45,12 +46,13 @@ export const createRecipe: ToolDefinition = {
     if (base_servings !== undefined) recipeRow.base_servings = base_servings;
     if (active_time !== undefined) recipeRow.active_time = active_time;
     if (total_time !== undefined) recipeRow.total_time = total_time;
+    if (instructions !== undefined) recipeRow.instructions = instructions;
 
     const { data: recipe, error: recipeError } = await ctx.supabase
       .schema('chefbyte')
       .from('recipes')
       .insert(recipeRow)
-      .select('recipe_id, name, base_servings, active_time, total_time')
+      .select('recipe_id, name, base_servings, active_time, total_time, instructions')
       .single();
 
     if (recipeError) return toolError(`Failed to create recipe: ${recipeError.message}`);

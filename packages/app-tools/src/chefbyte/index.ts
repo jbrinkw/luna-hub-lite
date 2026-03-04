@@ -18,6 +18,8 @@ import { createRecipe } from './create-recipe';
 import { getMacros } from './get-macros';
 import { logTempItem } from './log-temp-item';
 import { setPrice } from './set-price';
+import { deleteMealEntry } from './delete-meal-entry';
+import { updateProduct } from './update-product';
 
 export const chefbyteTools: Record<string, ToolDefinition> = {
   [getInventory.name]: getInventory,
@@ -39,4 +41,6 @@ export const chefbyteTools: Record<string, ToolDefinition> = {
   [getMacros.name]: getMacros,
   [logTempItem.name]: logTempItem,
   [setPrice.name]: setPrice,
+  [deleteMealEntry.name]: deleteMealEntry,
+  [updateProduct.name]: updateProduct,
 };

@@ -15,7 +15,7 @@ export const getRecipes: ToolDefinition = {
       .schema('chefbyte')
       .from('recipes')
       .select(
-        'recipe_id, name, description, base_servings, active_time, total_time, created_at, recipe_ingredients(ingredient_id, product_id, quantity, unit, products(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
+        'recipe_id, name, description, instructions, base_servings, active_time, total_time, created_at, recipe_ingredients(ingredient_id, product_id, quantity, unit, products(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
       )
       .eq('user_id', ctx.userId)
       .order('name', { ascending: true });
@@ -49,6 +49,7 @@ export const getRecipes: ToolDefinition = {
         recipe_id: r.recipe_id,
         name: r.name,
         description: r.description,
+        instructions: r.instructions ?? null,
         base_servings: r.base_servings ? Number(r.base_servings) : null,
         active_time: r.active_time,
         total_time: r.total_time,

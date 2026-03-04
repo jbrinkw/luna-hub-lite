@@ -208,6 +208,7 @@ export function SplitPage() {
               <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid={`day-${day.weekday}-table`}>
                 <thead>
                   <tr>
+                    <th style={{ textAlign: 'left' }}>#</th>
                     <th style={{ textAlign: 'left' }}>Exercise</th>
                     <th style={{ textAlign: 'left' }}>Reps</th>
                     <th style={{ textAlign: 'left' }}>Load</th>
@@ -219,6 +220,7 @@ export function SplitPage() {
                 <tbody>
                   {day.template_sets.map((set, i) => (
                     <tr key={i} data-testid={`day-${day.weekday}-set-${i}`}>
+                      <td data-testid={`day-${day.weekday}-set-${i}-order`}>{set.order}</td>
                       <td>
                         <IonSelect
                           value={set.exercise_id}

@@ -1,3 +1,4 @@
+import type { CSSProperties } from 'react';
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import {
   IonSpinner,
@@ -327,6 +328,16 @@ export function InventoryPage() {
     return 'success';
   };
 
+  const stockCardStyle = (totalStock: number, minStock: number): CSSProperties => {
+    if (totalStock <= 0) {
+      return { borderLeft: '4px solid #eb445a', background: '#fff5f5' };
+    }
+    if (minStock > 0 && totalStock < minStock) {
+      return { borderLeft: '4px solid #ffc409', background: '#fffbf0' };
+    }
+    return { borderLeft: '4px solid #2dd36f', background: '#f0faf4' };
+  };
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -390,7 +401,11 @@ export function InventoryPage() {
           {filteredGrouped.length === 0 && <p data-testid="no-products">No products in inventory.</p>}
 
           {filteredGrouped.map(({ product, totalStock, nearestExpiry, lotCount }) => (
-            <IonCard key={product.product_id} data-testid={`inv-product-${product.product_id}`}>
+            <IonCard
+              key={product.product_id}
+              data-testid={`inv-product-${product.product_id}`}
+              style={stockCardStyle(totalStock, Number(product.min_stock_amount))}
+            >
               <IonCardHeader>
                 <IonCardTitle>{product.name}</IonCardTitle>
                 {product.barcode && (

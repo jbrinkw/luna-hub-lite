@@ -10,6 +10,7 @@ import { updateSplit } from './update-split';
 import { setTimer } from './set-timer';
 import { getTimer } from './get-timer';
 import { getPrs } from './get-prs';
+import { getExercises } from './get-exercises';
 
 export const coachbyteTools: Record<string, ToolDefinition> = {
   [getTodayPlan.name]: getTodayPlan,
@@ -23,4 +24,5 @@ export const coachbyteTools: Record<string, ToolDefinition> = {
   [setTimer.name]: setTimer,
   [getTimer.name]: getTimer,
   [getPrs.name]: getPrs,
+  [getExercises.name]: getExercises,
 };

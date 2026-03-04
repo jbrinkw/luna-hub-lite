@@ -1,4 +1,4 @@
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect } from 'react';
 import { IonCard, IonCardContent, IonCardHeader, IonCardTitle } from '@ionic/react';
 
 interface ModalOverlayProps {
@@ -13,8 +13,29 @@ interface ModalOverlayProps {
 /**
  * Shared modal overlay — fixed backdrop + centered IonCard.
  * Replaces the identical 12-line pattern duplicated across 7+ pages.
+ * Supports Escape key to close and locks body scroll while open.
  */
 export function ModalOverlay({ isOpen, onClose, title, children, maxWidth = '500px', testId }: ModalOverlayProps) {
+  // Escape key handler
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, onClose]);
+
+  // Body scroll lock
+  useEffect(() => {
+    if (!isOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [isOpen]);
+
   if (!isOpen) return null;
 
   return (

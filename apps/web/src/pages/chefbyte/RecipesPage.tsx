@@ -30,6 +30,7 @@ interface ProductInfo {
 
 interface RecipeIngredient {
   ingredient_id: string;
+  product_id: string;
   quantity: number;
   unit: string;
   note: string | null;
@@ -89,6 +90,51 @@ export function computeRecipeMacros(
   };
 }
 
+/* ------------------------------------------------------------------ */
+/*  Stock status types & helper (exported for testing)                  */
+/* ------------------------------------------------------------------ */
+
+export type StockStatus = 'CAN MAKE' | 'PARTIAL' | 'NO STOCK' | 'N/A';
+
+export function computeStockStatus(ingredients: RecipeIngredient[], stockByProduct: Map<string, number>): StockStatus {
+  if (ingredients.length === 0) return 'N/A';
+
+  // Check if any ingredient has a linked product
+  const linkedIngredients = ingredients.filter((ing) => ing.products !== null);
+  if (linkedIngredients.length === 0) return 'N/A';
+
+  let inStockCount = 0;
+  for (const ing of linkedIngredients) {
+    const currentStock = stockByProduct.get(ing.product_id) ?? 0;
+    // Ingredient quantity is in containers or servings — compare against container stock
+    // For 'serving' unit, convert required qty to containers
+    let requiredContainers = Number(ing.quantity);
+    if (ing.unit === 'serving' && ing.products) {
+      requiredContainers = Number(ing.quantity) / Number(ing.products.servings_per_container || 1);
+    }
+    if (currentStock >= requiredContainers) {
+      inStockCount++;
+    }
+  }
+
+  if (inStockCount === linkedIngredients.length) return 'CAN MAKE';
+  if (inStockCount > 0) return 'PARTIAL';
+  return 'NO STOCK';
+}
+
+function stockStatusColor(status: StockStatus): string {
+  switch (status) {
+    case 'CAN MAKE':
+      return 'success';
+    case 'PARTIAL':
+      return 'warning';
+    case 'NO STOCK':
+      return 'danger';
+    case 'N/A':
+      return 'medium';
+  }
+}
+
 /* ================================================================== */
 /*  RecipesPage                                                        */
 /* ================================================================== */
@@ -99,6 +145,7 @@ export function RecipesPage() {
   const [loading, setLoading] = useState(true);
 
   const [recipes, setRecipes] = useState<Recipe[]>([]);
+  const [stockByProduct, setStockByProduct] = useState<Map<string, number>>(new Map());
 
   /* ---- Filter state ---- */
   const [searchText, setSearchText] = useState('');
@@ -118,6 +165,19 @@ export function RecipesPage() {
       )
       .eq('user_id', user.id)
       .order('name');
+
+    // Load all stock lots to compute stock-per-product
+    const { data: stockLots } = await chefbyte()
+      .from('stock_lots')
+      .select('product_id, qty_containers')
+      .eq('user_id', user.id);
+
+    const stockMap = new Map<string, number>();
+    for (const lot of (stockLots ?? []) as Array<{ product_id: string; qty_containers: number }>) {
+      const current = stockMap.get(lot.product_id) ?? 0;
+      stockMap.set(lot.product_id, current + Number(lot.qty_containers));
+    }
+    setStockByProduct(stockMap);
 
     setRecipes((recipeData ?? []) as Recipe[]);
     setLoading(false);
@@ -257,11 +317,16 @@ export function RecipesPage() {
                   <span>{macros.fat}g F</span>
                 </div>
 
-                {/* Stock status — disabled until stock check is wired */}
+                {/* Stock status */}
                 <div style={{ marginBottom: '8px' }}>
-                  <IonBadge color="medium" title="Coming soon" data-testid={`stock-status-${recipe.recipe_id}`}>
-                    STOCK N/A
-                  </IonBadge>
+                  {(() => {
+                    const status = computeStockStatus(recipe.recipe_ingredients, stockByProduct);
+                    return (
+                      <IonBadge color={stockStatusColor(status)} data-testid={`stock-status-${recipe.recipe_id}`}>
+                        {status}
+                      </IonBadge>
+                    );
+                  })()}
                 </div>
 
                 {/* Action buttons */}

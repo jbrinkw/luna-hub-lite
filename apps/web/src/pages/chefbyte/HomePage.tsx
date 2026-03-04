@@ -8,6 +8,7 @@ import { chefbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { calcCaloriesFromMacros } from '@/pages/chefbyte/MacroPage';
+import { computeRecipeMacros } from '@/pages/chefbyte/RecipesPage';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -23,6 +24,35 @@ interface MealPrepEntry {
   servings: number;
   recipes: { name: string } | null;
   products: { name: string } | null;
+}
+
+interface MealEntry {
+  meal_id: string;
+  servings: number;
+  meal_type: string | null;
+  completed_at: string | null;
+  recipes: {
+    name: string;
+    recipe_ingredients: Array<{
+      quantity: number;
+      unit: string;
+      products: {
+        calories_per_serving: number;
+        carbs_per_serving: number;
+        protein_per_serving: number;
+        fat_per_serving: number;
+        servings_per_container: number;
+      } | null;
+    }>;
+  } | null;
+  products: {
+    name: string;
+    calories_per_serving: number;
+    protein_per_serving: number;
+    carbs_per_serving: number;
+    fat_per_serving: number;
+    servings_per_container: number;
+  } | null;
 }
 
 /* ------------------------------------------------------------------ */
@@ -56,6 +86,9 @@ export function HomePage() {
 
   /* ---- Today's meal prep ---- */
   const [mealPrep, setMealPrep] = useState<MealPrepEntry[]>([]);
+
+  /* ---- Today's meals (non-prep) ---- */
+  const [todaysMeals, setTodaysMeals] = useState<MealEntry[]>([]);
 
   /* ---- Target Macros modal ---- */
   const [showTargetModal, setShowTargetModal] = useState(false);
@@ -173,6 +206,17 @@ export function HomePage() {
       .eq('meal_prep', true)
       .is('completed_at', null);
     setMealPrep((prepData ?? []) as MealPrepEntry[]);
+
+    // 7. Today's meals (non-prep)
+    const { data: mealsData } = await chefbyte()
+      .from('meal_plan_entries')
+      .select(
+        'meal_id, servings, meal_type, completed_at, recipes:recipe_id(name, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container)',
+      )
+      .eq('user_id', userId)
+      .eq('logical_date', today)
+      .eq('meal_prep', false);
+    setTodaysMeals((mealsData ?? []) as MealEntry[]);
 
     setLoading(false);
   }, [userId, today]);
@@ -456,6 +500,93 @@ export function HomePage() {
                 </span>
               </div>
             ))}
+          </div>
+        )}
+      </div>
+
+      {/* ============================================================ */}
+      {/*  TODAY'S MEALS                                                */}
+      {/* ============================================================ */}
+      <div data-testid="todays-meals-section" style={{ marginBottom: '24px' }}>
+        <h3>Today&apos;s Meals</h3>
+        {todaysMeals.length === 0 ? (
+          <p data-testid="no-todays-meals" style={{ color: '#666', fontStyle: 'italic' }}>
+            No meals planned for today
+          </p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {todaysMeals.map((entry) => {
+              const name = entry.recipes?.name ?? entry.products?.name ?? 'Unknown';
+              const isDone = entry.completed_at !== null;
+
+              // Calculate per-serving macros for this meal entry
+              let mealMacros: { calories: number; protein: number; carbs: number; fat: number } | null = null;
+              if (entry.recipes?.recipe_ingredients) {
+                const perServing = computeRecipeMacros(entry.recipes.recipe_ingredients, 1);
+                const servings = Number(entry.servings);
+                mealMacros = {
+                  calories: Math.round(perServing.calories * servings),
+                  protein: Math.round(perServing.protein * servings),
+                  carbs: Math.round(perServing.carbs * servings),
+                  fat: Math.round(perServing.fat * servings),
+                };
+              } else if (entry.products) {
+                const servings = Number(entry.servings);
+                mealMacros = {
+                  calories: Math.round(Number(entry.products.calories_per_serving) * servings),
+                  protein: Math.round(Number(entry.products.protein_per_serving) * servings),
+                  carbs: Math.round(Number(entry.products.carbs_per_serving) * servings),
+                  fat: Math.round(Number(entry.products.fat_per_serving) * servings),
+                };
+              }
+
+              return (
+                <div
+                  key={entry.meal_id}
+                  data-testid={`meal-entry-${entry.meal_id}`}
+                  style={{
+                    padding: '10px 12px',
+                    border: '1px solid #eee',
+                    borderLeft: `4px solid ${isDone ? '#2dd36f' : '#ffc409'}`,
+                    borderRadius: '6px',
+                    background: isDone ? '#f0faf4' : '#f7f7f9',
+                    opacity: isDone ? 0.8 : 1,
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ fontWeight: 600, textDecoration: isDone ? 'line-through' : 'none' }}>{name}</span>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      {entry.meal_type && (
+                        <span
+                          data-testid={`meal-type-${entry.meal_id}`}
+                          style={{ fontSize: '0.75em', color: '#888', textTransform: 'capitalize' }}
+                        >
+                          {entry.meal_type}
+                        </span>
+                      )}
+                      <span
+                        data-testid={`meal-status-${entry.meal_id}`}
+                        style={{
+                          fontSize: '0.8em',
+                          fontWeight: 600,
+                          color: isDone ? '#2dd36f' : '#ffc409',
+                        }}
+                      >
+                        {isDone ? 'Done' : 'Pending'}
+                      </span>
+                    </div>
+                  </div>
+                  {mealMacros && (
+                    <div
+                      data-testid={`meal-macros-${entry.meal_id}`}
+                      style={{ fontSize: '0.8em', color: '#666', marginTop: '4px' }}
+                    >
+                      {mealMacros.calories} cal | {mealMacros.protein}g P | {mealMacros.carbs}g C | {mealMacros.fat}g F
+                    </div>
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

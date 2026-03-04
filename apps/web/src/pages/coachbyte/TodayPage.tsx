@@ -11,6 +11,7 @@ import {
   IonTextarea,
   IonText,
   IonButton,
+  IonToast,
 } from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
@@ -20,6 +21,7 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase, coachbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
+import { epley1RM } from '@/pages/coachbyte/PrsPage';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
 
 interface CompletedSet {
@@ -60,6 +62,7 @@ export function TodayPage() {
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
   const [notes, setNotes] = useState('');
+  const [prToast, setPrToast] = useState<string | null>(null);
   const summaryDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -221,7 +224,12 @@ export function TodayPage() {
   }, [user, loadPlan, loadTimer]);
 
   const handleCompleteSet = async (reps: number, load: number) => {
-    if (!planId) return;
+    if (!planId || !user) return;
+
+    // Capture the exercise being completed (next incomplete set) before RPC
+    const nextSet = sets.find((s) => !s.completed);
+    const completedExerciseId = nextSet?.exercise_id;
+    const completedExerciseName = nextSet?.exercise_name;
 
     const { data, error: err } = await coachbyte().rpc('complete_next_set', {
       p_plan_id: planId,
@@ -239,6 +247,47 @@ export function TodayPage() {
     const restSeconds = result?.[0]?.rest_seconds;
     if (restSeconds && restSeconds > 0) {
       await startTimer(restSeconds);
+    }
+
+    // Check for new PR: compute Epley 1RM for the just-completed set
+    if (completedExerciseId && reps > 0 && load > 0) {
+      const newE1RM = epley1RM(load, reps);
+
+      // Fetch all previous completed sets for this exercise (excluding the one just completed)
+      const { data: prevSets } = await coachbyte()
+        .from('completed_sets')
+        .select('actual_reps, actual_load')
+        .eq('exercise_id', completedExerciseId)
+        .eq('user_id', user.id);
+
+      // Compute the previous best e1RM from all historical sets
+      let prevBestE1RM = 0;
+      for (const ps of (prevSets ?? []) as { actual_reps: number; actual_load: string | number }[]) {
+        const e = epley1RM(Number(ps.actual_load), ps.actual_reps);
+        if (e > prevBestE1RM) prevBestE1RM = e;
+      }
+
+      // The new set is already included in prevSets (it was just inserted by the RPC),
+      // so a PR is when newE1RM >= prevBestE1RM and it strictly exceeds any *other* set.
+      // Since the just-completed set is in the query results, prevBestE1RM includes it.
+      // We need to check if newE1RM equals prevBestE1RM (meaning this set IS the new best).
+      // To detect a true NEW PR, we check if the best *without* this set's contribution is lower.
+      let prevBestWithout = 0;
+      for (const ps of (prevSets ?? []) as { actual_reps: number; actual_load: string | number }[]) {
+        const r = ps.actual_reps;
+        const l = Number(ps.actual_load);
+        // Skip entries that exactly match the just-completed set (the new one)
+        if (r === reps && l === load) continue;
+        const e = epley1RM(l, r);
+        if (e > prevBestWithout) prevBestWithout = e;
+      }
+
+      if (newE1RM > prevBestWithout && prevBestWithout > 0) {
+        setPrToast(`NEW PR! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT} (was ${prevBestWithout})`);
+      } else if (newE1RM > 0 && prevBestWithout === 0) {
+        // First set ever for this exercise — still celebrate
+        setPrToast(`First record! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT}`);
+      }
     }
 
     await loadPlan();
@@ -615,6 +664,16 @@ export function TodayPage() {
         onIonBlur={handleSummaryBlur}
         data-testid="summary-textarea"
         rows={3}
+      />
+
+      <IonToast
+        isOpen={prToast !== null}
+        message={prToast ?? ''}
+        duration={4000}
+        color="success"
+        position="top"
+        onDidDismiss={() => setPrToast(null)}
+        data-testid="pr-toast"
       />
     </CoachLayout>
   );
