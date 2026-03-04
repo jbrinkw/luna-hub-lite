@@ -1,8 +1,16 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  IonPage, IonContent, IonCard, IonCardHeader, IonCardTitle,
-  IonCardContent, IonItem, IonInput, IonButton, IonText,
+  IonPage,
+  IonContent,
+  IonCard,
+  IonCardHeader,
+  IonCardTitle,
+  IonCardContent,
+  IonItem,
+  IonInput,
+  IonButton,
+  IonText,
 } from '@ionic/react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 
@@ -33,12 +41,15 @@ export function Signup() {
     }
 
     setLoading(true);
-    const { error: signUpError } = await signUp(email, password, displayName);
-    if (signUpError) {
-      setError(signUpError.message);
+    try {
+      const { error: signUpError } = await signUp(email, password, displayName);
+      if (signUpError) {
+        setError(signUpError.message);
+      } else {
+        navigate('/hub');
+      }
+    } finally {
       setLoading(false);
-    } else {
-      navigate('/hub');
     }
   };
 
@@ -87,12 +98,7 @@ export function Signup() {
                     autocomplete="new-password"
                   />
                 </IonItem>
-                <IonButton
-                  expand="block"
-                  type="submit"
-                  disabled={loading}
-                  style={{ marginTop: 16 }}
-                >
+                <IonButton expand="block" type="submit" disabled={loading} style={{ marginTop: 16 }}>
                   {loading ? 'Creating account...' : 'Sign Up'}
                 </IonButton>
               </form>

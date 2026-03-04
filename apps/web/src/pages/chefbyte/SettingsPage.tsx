@@ -14,6 +14,7 @@ import {
   IonSelect,
   IonSelectOption,
   IonAlert,
+  IonText,
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -115,6 +116,7 @@ export function SettingsPage() {
   const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null);
   const [deviceEvents, setDeviceEvents] = useState<LiquidTrackEvent[]>([]);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -122,11 +124,7 @@ export function SettingsPage() {
 
   const loadProducts = useCallback(async () => {
     if (!user) return;
-    const { data } = await chefbyte()
-      .from('products')
-      .select('*')
-      .eq('user_id', user.id)
-      .order('name');
+    const { data } = await chefbyte().from('products').select('*').eq('user_id', user.id).order('name');
     setProducts((data ?? []) as Product[]);
     setLoading(false);
   }, [user]);
@@ -141,6 +139,8 @@ export function SettingsPage() {
   }, [user]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadProducts();
     loadDevices();
   }, [loadProducts, loadDevices]);
@@ -151,11 +151,14 @@ export function SettingsPage() {
 
   const saveProduct = async () => {
     if (!user || !editingId) return;
+    setError(null);
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { product_id: _pid, user_id: _uid, ...updates } = editForm as Product;
-    await chefbyte()
-      .from('products')
-      .update(updates)
-      .eq('product_id', editingId);
+    const { error: updateErr } = await chefbyte().from('products').update(updates).eq('product_id', editingId);
+    if (updateErr) {
+      setError(updateErr.message);
+      return;
+    }
     setEditingId(null);
     setEditForm({});
     await loadProducts();
@@ -163,19 +166,26 @@ export function SettingsPage() {
 
   const addProduct = async () => {
     if (!user || !addForm.name.trim()) return;
-    await chefbyte()
+    setError(null);
+    const { error: insertErr } = await chefbyte()
       .from('products')
       .insert({ ...addForm, user_id: user.id });
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
     setAddForm(blankProduct());
     setShowAddProduct(false);
     await loadProducts();
   };
 
   const deleteProduct = async (productId: string) => {
-    await chefbyte()
-      .from('products')
-      .delete()
-      .eq('product_id', productId);
+    setError(null);
+    const { error: deleteErr } = await chefbyte().from('products').delete().eq('product_id', productId);
+    if (deleteErr) {
+      setError(deleteErr.message);
+      return;
+    }
     setDeleteTarget(null);
     await loadProducts();
   };
@@ -194,9 +204,10 @@ export function SettingsPage() {
     const encoder = new TextEncoder();
     const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawKey));
     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const keyHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const keyHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 
-    await chefbyte()
+    setError(null);
+    const { error: insertErr } = await chefbyte()
       .from('liquidtrack_devices')
       .insert({
         device_id: deviceId,
@@ -205,6 +216,10 @@ export function SettingsPage() {
         product_id: newDeviceProductId || null,
         import_key_hash: keyHash,
       });
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
 
     setGeneratedDevice({ device_id: deviceId, raw_key: rawKey });
     setNewDeviceName('');
@@ -214,10 +229,15 @@ export function SettingsPage() {
   };
 
   const revokeDevice = async (deviceId: string) => {
-    await chefbyte()
+    setError(null);
+    const { error: revokeErr } = await chefbyte()
       .from('liquidtrack_devices')
       .update({ is_active: false })
       .eq('device_id', deviceId);
+    if (revokeErr) {
+      setError(revokeErr.message);
+      return;
+    }
     setRevokeTarget(null);
     await loadDevices();
   };
@@ -245,7 +265,7 @@ export function SettingsPage() {
   /* ---------------------------------------------------------------- */
 
   const filteredProducts = searchText
-    ? products.filter(p => p.name.toLowerCase().includes(searchText.toLowerCase()))
+    ? products.filter((p) => p.name.toLowerCase().includes(searchText.toLowerCase()))
     : products;
 
   const startEdit = (p: Product) => {
@@ -276,68 +296,68 @@ export function SettingsPage() {
       <IonInput
         label="Name"
         value={form.name ?? ''}
-        onIonInput={e => onChange('name', e.detail.value ?? '')}
+        onIonInput={(e) => onChange('name', e.detail.value ?? '')}
         data-testid={`${testIdPrefix}-name`}
       />
       <IonInput
         label="Barcode"
         value={form.barcode ?? ''}
-        onIonInput={e => onChange('barcode', e.detail.value || null)}
+        onIonInput={(e) => onChange('barcode', e.detail.value || null)}
         data-testid={`${testIdPrefix}-barcode`}
       />
       <IonInput
         label="Servings/Container"
         type="number"
         value={form.servings_per_container ?? 1}
-        onIonInput={e => onChange('servings_per_container', Number(e.detail.value) || 1)}
+        onIonInput={(e) => onChange('servings_per_container', Number(e.detail.value) || 1)}
         data-testid={`${testIdPrefix}-servings`}
       />
       <IonInput
         label="Calories/Serving"
         type="number"
         value={form.calories_per_serving ?? 0}
-        onIonInput={e => onChange('calories_per_serving', Number(e.detail.value) || 0)}
+        onIonInput={(e) => onChange('calories_per_serving', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-calories`}
       />
       <IonInput
         label="Carbs/Serving"
         type="number"
         value={form.carbs_per_serving ?? 0}
-        onIonInput={e => onChange('carbs_per_serving', Number(e.detail.value) || 0)}
+        onIonInput={(e) => onChange('carbs_per_serving', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-carbs`}
       />
       <IonInput
         label="Protein/Serving"
         type="number"
         value={form.protein_per_serving ?? 0}
-        onIonInput={e => onChange('protein_per_serving', Number(e.detail.value) || 0)}
+        onIonInput={(e) => onChange('protein_per_serving', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-protein`}
       />
       <IonInput
         label="Fat/Serving"
         type="number"
         value={form.fat_per_serving ?? 0}
-        onIonInput={e => onChange('fat_per_serving', Number(e.detail.value) || 0)}
+        onIonInput={(e) => onChange('fat_per_serving', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-fat`}
       />
       <IonInput
         label="Min Stock"
         type="number"
         value={form.min_stock_amount ?? 0}
-        onIonInput={e => onChange('min_stock_amount', Number(e.detail.value) || 0)}
+        onIonInput={(e) => onChange('min_stock_amount', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-min-stock`}
       />
       <IonInput
         label="Walmart Link"
         value={form.walmart_link ?? ''}
-        onIonInput={e => onChange('walmart_link', e.detail.value || null)}
+        onIonInput={(e) => onChange('walmart_link', e.detail.value || null)}
         data-testid={`${testIdPrefix}-walmart-link`}
       />
       <IonInput
         label="Price"
         type="number"
         value={form.price ?? ''}
-        onIonInput={e => onChange('price', e.detail.value ? Number(e.detail.value) : null)}
+        onIonInput={(e) => onChange('price', e.detail.value ? Number(e.detail.value) : null)}
         data-testid={`${testIdPrefix}-price`}
       />
     </div>
@@ -359,9 +379,15 @@ export function SettingsPage() {
     <ChefLayout title="Settings">
       <h2>SETTINGS</h2>
 
+      {error && (
+        <IonText color="danger">
+          <p>{error}</p>
+        </IonText>
+      )}
+
       <IonSegment
         value={activeTab}
-        onIonChange={e => setActiveTab(e.detail.value as Tab)}
+        onIonChange={(e) => setActiveTab(e.detail.value as Tab)}
         data-testid="settings-tabs"
       >
         <IonSegmentButton value="products">
@@ -381,7 +407,7 @@ export function SettingsPage() {
           <IonInput
             placeholder="Search products..."
             value={searchText}
-            onIonInput={e => setSearchText(e.detail.value ?? '')}
+            onIonInput={(e) => setSearchText(e.detail.value ?? '')}
             data-testid="product-search"
             style={{ marginTop: '12px', marginBottom: '12px' }}
           />
@@ -404,7 +430,7 @@ export function SettingsPage() {
               <IonCardContent data-testid="add-product-form">
                 {renderProductFields(
                   addForm,
-                  (field, value) => setAddForm(prev => ({ ...prev, [field]: value })),
+                  (field, value) => setAddForm((prev) => ({ ...prev, [field]: value })),
                   'add',
                 )}
                 <IonButton
@@ -422,14 +448,14 @@ export function SettingsPage() {
 
           {/* Product list */}
           <IonList data-testid="product-list">
-            {filteredProducts.map(p => (
+            {filteredProducts.map((p) => (
               <IonCard key={p.product_id} data-testid={`product-${p.product_id}`}>
                 {editingId === p.product_id ? (
                   /* Editing mode */
                   <IonCardContent>
                     {renderProductFields(
                       editForm,
-                      (field, value) => setEditForm(prev => ({ ...prev, [field]: value })),
+                      (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
                       'edit',
                     )}
                     <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
@@ -448,7 +474,9 @@ export function SettingsPage() {
                       <IonCardTitle>{p.name}</IonCardTitle>
                     </IonCardHeader>
                     <IonCardContent>
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '0.9em' }}>
+                      <div
+                        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '0.9em' }}
+                      >
                         {p.barcode && <span>Barcode: {p.barcode}</span>}
                         <span>Servings/Container: {Number(p.servings_per_container)}</span>
                         <span>Cal: {Number(p.calories_per_serving)}</span>
@@ -459,7 +487,11 @@ export function SettingsPage() {
                         {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
                       </div>
                       <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                        <IonButton size="small" onClick={() => startEdit(p)} data-testid={`edit-product-${p.product_id}`}>
+                        <IonButton
+                          size="small"
+                          onClick={() => startEdit(p)}
+                          data-testid={`edit-product-${p.product_id}`}
+                        >
                           Edit
                         </IonButton>
                         <IonButton
@@ -486,7 +518,12 @@ export function SettingsPage() {
             message="Are you sure you want to delete this product? This cannot be undone."
             buttons={[
               { text: 'Cancel', role: 'cancel', handler: () => setDeleteTarget(null) },
-              { text: 'Delete', handler: () => { if (deleteTarget) deleteProduct(deleteTarget); } },
+              {
+                text: 'Delete',
+                handler: () => {
+                  if (deleteTarget) deleteProduct(deleteTarget);
+                },
+              },
             ]}
             onDidDismiss={() => setDeleteTarget(null)}
           />
@@ -517,17 +554,17 @@ export function SettingsPage() {
                 <IonInput
                   label="Device Name"
                   value={newDeviceName}
-                  onIonInput={e => setNewDeviceName(e.detail.value ?? '')}
+                  onIonInput={(e) => setNewDeviceName(e.detail.value ?? '')}
                   data-testid="device-name-input"
                 />
                 <IonSelect
                   label="Product"
                   value={newDeviceProductId}
-                  onIonChange={e => setNewDeviceProductId(e.detail.value ?? '')}
+                  onIonChange={(e) => setNewDeviceProductId(e.detail.value ?? '')}
                   data-testid="device-product-select"
                   placeholder="Select product (optional)"
                 >
-                  {products.map(p => (
+                  {products.map((p) => (
                     <IonSelectOption key={p.product_id} value={p.product_id}>
                       {p.name}
                     </IonSelectOption>
@@ -553,11 +590,13 @@ export function SettingsPage() {
                 <IonCardTitle>Device Created!</IonCardTitle>
               </IonCardHeader>
               <IonCardContent>
-                <p><strong>Device ID:</strong> {generatedDevice.device_id}</p>
-                <p><strong>Import Key:</strong> <code>{generatedDevice.raw_key}</code></p>
-                <p style={{ color: '#c00' }}>
-                  Save this key now -- you will not be able to see it again!
+                <p>
+                  <strong>Device ID:</strong> {generatedDevice.device_id}
                 </p>
+                <p>
+                  <strong>Import Key:</strong> <code>{generatedDevice.raw_key}</code>
+                </p>
+                <p style={{ color: '#c00' }}>Save this key now -- you will not be able to see it again!</p>
                 <IonButton size="small" onClick={() => setGeneratedDevice(null)}>
                   Dismiss
                 </IonButton>
@@ -567,7 +606,7 @@ export function SettingsPage() {
 
           {/* Device list */}
           <IonList data-testid="device-list">
-            {devices.map(d => (
+            {devices.map((d) => (
               <IonCard key={d.device_id} data-testid={`device-${d.device_id}`}>
                 <IonCardHeader>
                   <IonCardTitle>{d.device_name}</IonCardTitle>
@@ -617,13 +656,23 @@ export function SettingsPage() {
                             </tr>
                           </thead>
                           <tbody>
-                            {deviceEvents.map(ev => (
+                            {deviceEvents.map((ev) => (
                               <tr key={ev.event_id}>
                                 <td style={{ padding: '4px' }}>{formatDate(ev.created_at)}</td>
-                                <td style={{ textAlign: 'right', padding: '4px' }}>{Number(ev.weight_before).toFixed(1)}</td>
-                                <td style={{ textAlign: 'right', padding: '4px' }}>{Number(ev.weight_after).toFixed(1)}</td>
-                                <td style={{ textAlign: 'right', padding: '4px' }}>{Number(ev.consumption).toFixed(1)}</td>
-                                <td style={{ textAlign: 'right', padding: '4px' }}>{ev.calories != null ? `${Number(ev.calories).toFixed(0)}cal ${Number(ev.protein).toFixed(0)}p ${Number(ev.carbs).toFixed(0)}c ${Number(ev.fat).toFixed(0)}f` : '-'}</td>
+                                <td style={{ textAlign: 'right', padding: '4px' }}>
+                                  {Number(ev.weight_before).toFixed(1)}
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '4px' }}>
+                                  {Number(ev.weight_after).toFixed(1)}
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '4px' }}>
+                                  {Number(ev.consumption).toFixed(1)}
+                                </td>
+                                <td style={{ textAlign: 'right', padding: '4px' }}>
+                                  {ev.calories != null
+                                    ? `${Number(ev.calories).toFixed(0)}cal ${Number(ev.protein).toFixed(0)}p ${Number(ev.carbs).toFixed(0)}c ${Number(ev.fat).toFixed(0)}f`
+                                    : '-'}
+                                </td>
                               </tr>
                             ))}
                           </tbody>
@@ -643,7 +692,12 @@ export function SettingsPage() {
             message="Are you sure you want to revoke this device? It will stop working immediately."
             buttons={[
               { text: 'Cancel', role: 'cancel', handler: () => setRevokeTarget(null) },
-              { text: 'Revoke', handler: () => { if (revokeTarget) revokeDevice(revokeTarget); } },
+              {
+                text: 'Revoke',
+                handler: () => {
+                  if (revokeTarget) revokeDevice(revokeTarget);
+                },
+              },
             ]}
             onDidDismiss={() => setRevokeTarget(null)}
           />

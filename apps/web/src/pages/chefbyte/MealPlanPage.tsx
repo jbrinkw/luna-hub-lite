@@ -9,6 +9,7 @@ import {
   IonCardContent,
   IonCardHeader,
   IonCardTitle,
+  IonText,
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -89,6 +90,7 @@ export function MealPlanPage() {
 
   /* ---- Meal prep confirmation modal state ---- */
   const [prepTarget, setPrepTarget] = useState<MealEntry | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -175,12 +177,22 @@ export function MealPlanPage() {
   /* ---------------------------------------------------------------- */
 
   const markDone = async (mealId: string) => {
-    await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
+    setError(null);
+    const { error: rpcErr } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
+    if (rpcErr) {
+      setError(rpcErr.message);
+      return;
+    }
     await loadMeals();
   };
 
   const deleteMeal = async (mealId: string) => {
-    await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
+    setError(null);
+    const { error: deleteErr } = await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
+    if (deleteErr) {
+      setError(deleteErr.message);
+      return;
+    }
     await loadMeals();
   };
 
@@ -260,7 +272,8 @@ export function MealPlanPage() {
   const addMeal = async () => {
     if (!user || !addSelected || !selectedDay) return;
 
-    await chefbyte()
+    setError(null);
+    const { error: insertErr } = await chefbyte()
       .from('meal_plan_entries')
       .insert({
         user_id: user.id,
@@ -270,6 +283,10 @@ export function MealPlanPage() {
         servings: addServings,
         meal_prep: addMealPrep,
       });
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
 
     setShowAddModal(false);
     await loadMeals();
@@ -290,6 +307,12 @@ export function MealPlanPage() {
   return (
     <ChefLayout title="Meal Plan">
       <h2>MEAL PLAN</h2>
+
+      {error && (
+        <IonText color="danger">
+          <p>{error}</p>
+        </IonText>
+      )}
 
       {/* ============================================================ */}
       {/*  WEEK NAVIGATION                                              */}

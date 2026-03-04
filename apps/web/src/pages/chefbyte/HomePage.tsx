@@ -274,14 +274,6 @@ export function HomePage() {
     await loadData();
   };
 
-  const mealPlanToCart = async () => {
-    if (!user) return;
-    // Get upcoming meal plan entries that need ingredients
-    // For now, this is a simplified version - adds recipe ingredients to shopping list
-    // TODO: Full implementation in Phase 8
-    await loadData();
-  };
-
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -452,7 +444,7 @@ export function HomePage() {
         <IonButton size="small" onClick={openTasteModal} data-testid="taste-profile-btn">
           Taste Profile
         </IonButton>
-        <IonButton size="small" onClick={mealPlanToCart} data-testid="meal-plan-cart-btn">
+        <IonButton size="small" disabled title="Coming soon" data-testid="meal-plan-cart-btn">
           Meal Plan → Cart
         </IonButton>
       </div>

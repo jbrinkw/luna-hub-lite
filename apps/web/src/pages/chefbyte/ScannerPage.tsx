@@ -183,7 +183,7 @@ export function ScannerPage() {
           );
         } else {
           // Product not found — create placeholder (Edge Function stubbed)
-          // TODO: Call analyze-product Edge Function in Phase 8
+          // TODO: Call analyze-product Edge Function for automatic nutrition lookup
           const { data: newProduct } = await chefbyte()
             .from('products')
             .insert({

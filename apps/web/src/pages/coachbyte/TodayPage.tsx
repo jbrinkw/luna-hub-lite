@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback, useRef } from 'react';
 import {
   IonSpinner,
   IonGrid,
@@ -18,6 +18,7 @@ import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
+import { WEIGHT_UNIT } from '@/shared/constants';
 
 interface CompletedSet {
   completed_set_id: string;
@@ -52,6 +53,7 @@ export function TodayPage() {
   const [showAdHoc, setShowAdHoc] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const summaryDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const today = todayStr();
 
@@ -295,18 +297,27 @@ export function TodayPage() {
     await loadPlan();
   };
 
-  const handleSummaryChange = async (value: string) => {
+  const saveSummary = useCallback(
+    async (value: string) => {
+      if (!planId) return;
+      await supabase.schema('coachbyte').from('daily_plans').update({ summary: value }).eq('plan_id', planId);
+    },
+    [planId],
+  );
+
+  const handleSummaryChange = (value: string) => {
     setSummary(value);
     if (!planId) return;
-    await supabase.schema('coachbyte').from('daily_plans').update({ summary: value }).eq('plan_id', planId);
+    clearTimeout(summaryDebounceRef.current);
+    summaryDebounceRef.current = setTimeout(() => {
+      saveSummary(value);
+    }, 500);
   };
 
-  const timerDisplay =
-    timer.state === 'running' && timer.end_time
-      ? undefined // SetQueue doesn't use this directly, RestTimer handles display
-      : timer.state === 'expired'
-        ? 'Timer expired'
-        : undefined;
+  const handleSummaryBlur = () => {
+    clearTimeout(summaryDebounceRef.current);
+    saveSummary(summary);
+  };
 
   if (loading) {
     return (
@@ -335,7 +346,6 @@ export function TodayPage() {
               sets={sets}
               onComplete={handleCompleteSet}
               onAdHoc={() => setShowAdHoc(true)}
-              timerDisplay={timerDisplay}
               timerState={timer.state}
               disabled={false}
             />
@@ -380,7 +390,9 @@ export function TodayPage() {
                           <td>{i + 1}</td>
                           <td>{cs.exercise_name}</td>
                           <td>{cs.actual_reps}</td>
-                          <td>{cs.actual_load} lb</td>
+                          <td>
+                            {cs.actual_load} {WEIGHT_UNIT}
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -396,6 +408,7 @@ export function TodayPage() {
         label="Summary"
         value={summary}
         onIonInput={(e) => handleSummaryChange(e.detail.value ?? '')}
+        onIonBlur={handleSummaryBlur}
         data-testid="summary-textarea"
         rows={3}
       />

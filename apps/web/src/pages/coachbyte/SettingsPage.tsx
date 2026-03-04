@@ -1,5 +1,18 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonButton, IonInput, IonCheckbox, IonItem, IonLabel, IonList } from '@ionic/react';
+import {
+  IonSpinner,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonButton,
+  IonInput,
+  IonCheckbox,
+  IonItem,
+  IonLabel,
+  IonList,
+  IonText,
+} from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
@@ -29,6 +42,7 @@ export function SettingsPage() {
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [searchText, setSearchText] = useState('');
   const [newExerciseName, setNewExerciseName] = useState('');
+  const [error, setError] = useState<string | null>(null);
 
   const loadSettings = useCallback(async () => {
     if (!user) return;
@@ -64,13 +78,16 @@ export function SettingsPage() {
   }, [user]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSettings();
     loadExercises();
   }, [loadSettings, loadExercises]);
 
   const saveSettings = async () => {
     if (!user) return;
-    await supabase
+    setError(null);
+    const { error: saveErr } = await supabase
       .schema('coachbyte')
       .from('user_settings')
       .update({
@@ -79,12 +96,15 @@ export function SettingsPage() {
         available_plates: settings.available_plates as any,
       })
       .eq('user_id', user.id);
+    if (saveErr) {
+      setError(saveErr.message);
+    }
   };
 
   const togglePlate = (plate: number) => {
-    setSettings(prev => {
+    setSettings((prev) => {
       const plates = prev.available_plates.includes(plate)
-        ? prev.available_plates.filter(p => p !== plate)
+        ? prev.available_plates.filter((p) => p !== plate)
         : [...prev.available_plates, plate].sort((a, b) => b - a);
       return { ...prev, available_plates: plates };
     });
@@ -92,28 +112,38 @@ export function SettingsPage() {
 
   const addCustomExercise = async () => {
     if (!user || !newExerciseName.trim()) return;
+    setError(null);
 
-    await supabase
+    const { error: insertErr } = await supabase
       .schema('coachbyte')
       .from('exercises')
       .insert({ user_id: user.id, name: newExerciseName.trim() });
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
 
     setNewExerciseName('');
     await loadExercises();
   };
 
   const deleteExercise = async (exerciseId: string) => {
-    await supabase
+    setError(null);
+    const { error: deleteErr } = await supabase
       .schema('coachbyte')
       .from('exercises')
       .delete()
       .eq('exercise_id', exerciseId);
+    if (deleteErr) {
+      setError(deleteErr.message);
+      return;
+    }
 
     await loadExercises();
   };
 
   const filteredExercises = searchText
-    ? exercises.filter(e => e.name.toLowerCase().includes(searchText.toLowerCase()))
+    ? exercises.filter((e) => e.name.toLowerCase().includes(searchText.toLowerCase()))
     : exercises;
 
   if (loading) {
@@ -128,6 +158,12 @@ export function SettingsPage() {
     <CoachLayout title="Settings">
       <h2>SETTINGS</h2>
 
+      {error && (
+        <IonText color="danger">
+          <p>{error}</p>
+        </IonText>
+      )}
+
       <IonCard data-testid="defaults-card">
         <IonCardHeader>
           <IonCardTitle>Defaults</IonCardTitle>
@@ -137,7 +173,7 @@ export function SettingsPage() {
             label="Default Rest Duration (seconds)"
             type="number"
             value={settings.default_rest_seconds}
-            onIonInput={e => setSettings(prev => ({ ...prev, default_rest_seconds: Number(e.detail.value) || 90 }))}
+            onIonInput={(e) => setSettings((prev) => ({ ...prev, default_rest_seconds: Number(e.detail.value) || 90 }))}
             onIonBlur={saveSettings}
             data-testid="default-rest-input"
           />
@@ -153,18 +189,21 @@ export function SettingsPage() {
             label="Bar Weight (lbs)"
             type="number"
             value={settings.bar_weight_lbs}
-            onIonInput={e => setSettings(prev => ({ ...prev, bar_weight_lbs: Number(e.detail.value) || 45 }))}
+            onIonInput={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: Number(e.detail.value) || 45 }))}
             onIonBlur={saveSettings}
             data-testid="bar-weight-input"
           />
 
           <p style={{ marginTop: '12px', marginBottom: '4px' }}>Available Plates:</p>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-            {DEFAULT_PLATES.map(plate => (
+            {DEFAULT_PLATES.map((plate) => (
               <IonItem key={plate} lines="none" style={{ '--padding-start': '0' }}>
                 <IonCheckbox
                   checked={settings.available_plates.includes(plate)}
-                  onIonChange={() => { togglePlate(plate); setTimeout(saveSettings, 0); }}
+                  onIonChange={() => {
+                    togglePlate(plate);
+                    setTimeout(saveSettings, 0);
+                  }}
                   data-testid={`plate-${plate}`}
                 >
                   {plate} lb
@@ -183,12 +222,12 @@ export function SettingsPage() {
           <IonInput
             placeholder="Search exercises..."
             value={searchText}
-            onIonInput={e => setSearchText(e.detail.value ?? '')}
+            onIonInput={(e) => setSearchText(e.detail.value ?? '')}
             data-testid="exercise-search"
           />
 
           <IonList data-testid="exercise-list">
-            {filteredExercises.map(ex => (
+            {filteredExercises.map((ex) => (
               <IonItem key={ex.exercise_id} data-testid={`exercise-${ex.exercise_id}`}>
                 <IonLabel>
                   {ex.name}
@@ -216,7 +255,7 @@ export function SettingsPage() {
             <IonInput
               placeholder="New exercise name..."
               value={newExerciseName}
-              onIonInput={e => setNewExerciseName(e.detail.value ?? '')}
+              onIonInput={(e) => setNewExerciseName(e.detail.value ?? '')}
               data-testid="new-exercise-input"
             />
             <IonButton onClick={addCustomExercise} disabled={!newExerciseName.trim()} data-testid="add-exercise-btn">

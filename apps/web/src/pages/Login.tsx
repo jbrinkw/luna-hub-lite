@@ -1,8 +1,16 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  IonPage, IonContent, IonCard, IonCardHeader, IonCardTitle,
-  IonCardContent, IonItem, IonInput, IonButton, IonText,
+  IonPage,
+  IonContent,
+  IonCard,
+  IonCardHeader,
+  IonCardTitle,
+  IonCardContent,
+  IonItem,
+  IonInput,
+  IonButton,
+  IonText,
 } from '@ionic/react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 
@@ -28,12 +36,15 @@ export function Login() {
     }
 
     setLoading(true);
-    const { error: signInError } = await signIn(email, password);
-    if (signInError) {
-      setError(signInError.message);
+    try {
+      const { error: signInError } = await signIn(email, password);
+      if (signInError) {
+        setError(signInError.message);
+      } else {
+        navigate('/hub');
+      }
+    } finally {
       setLoading(false);
-    } else {
-      navigate('/hub');
     }
   };
 
@@ -74,12 +85,7 @@ export function Login() {
                     required
                   />
                 </IonItem>
-                <IonButton
-                  expand="block"
-                  type="submit"
-                  disabled={loading}
-                  style={{ marginTop: 16 }}
-                >
+                <IonButton expand="block" type="submit" disabled={loading} style={{ marginTop: 16 }}>
                   {loading ? 'Signing in...' : 'Sign In'}
                 </IonButton>
               </form>

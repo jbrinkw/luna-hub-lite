@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { IonSpinner } from '@ionic/react';
+import { useEffect, useState, useCallback } from 'react';
+import { IonSpinner, IonText } from '@ionic/react';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { AppActivationCard } from '@/components/hub/AppActivationCard';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -15,39 +15,59 @@ export function AppsPage() {
   const [activations, setActivations] = useState<Record<string, boolean>>({});
   const [loading, setLoading] = useState(true);
   const [mutating, setMutating] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const loadActivations = async () => {
+  const loadActivations = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
-      .schema('hub')
-      .from('app_activations')
-      .select('app_name')
-      .eq('user_id', user.id);
+    const { data } = await supabase.schema('hub').from('app_activations').select('app_name').eq('user_id', user.id);
 
     const map: Record<string, boolean> = {};
-    data?.forEach((row) => { map[row.app_name] = true; });
+    data?.forEach((row) => {
+      map[row.app_name] = true;
+    });
     setActivations(map);
     setLoading(false);
-  };
+  }, [user]);
 
-  useEffect(() => { loadActivations(); }, [user]);
+  useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadActivations();
+  }, [loadActivations]);
 
   const handleActivate = async (appName: string) => {
+    setError(null);
     setMutating(appName);
-    await supabase.schema('hub').rpc('activate_app', { p_app_name: appName });
+    const { error: rpcError } = await supabase.schema('hub').rpc('activate_app', { p_app_name: appName });
+    if (rpcError) {
+      setError(rpcError.message);
+      setMutating(null);
+      return;
+    }
     await loadActivations();
     setMutating(null);
   };
 
   const handleDeactivate = async (appName: string) => {
+    setError(null);
     setMutating(appName);
-    await supabase.schema('hub').rpc('deactivate_app', { p_app_name: appName });
+    const { error: rpcError } = await supabase.schema('hub').rpc('deactivate_app', { p_app_name: appName });
+    if (rpcError) {
+      setError(rpcError.message);
+      setMutating(null);
+      return;
+    }
     await loadActivations();
     setMutating(null);
   };
 
   return (
     <HubLayout title="Apps">
+      {error && (
+        <IonText color="danger">
+          <p>{error}</p>
+        </IonText>
+      )}
       {loading ? (
         <IonSpinner />
       ) : (

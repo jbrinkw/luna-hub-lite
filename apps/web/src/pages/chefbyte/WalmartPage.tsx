@@ -53,7 +53,7 @@ export function WalmartPage() {
       .is('walmart_link', null);
 
     setMissingLinks(
-      ((noLinks ?? []) as any[]).map(p => ({
+      ((noLinks ?? []) as any[]).map((p) => ({
         product_id: p.product_id,
         name: p.name,
         barcode: p.barcode,
@@ -82,6 +82,8 @@ export function WalmartPage() {
   }, [userId]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
 
@@ -91,10 +93,7 @@ export function WalmartPage() {
 
   const markNotOnWalmart = async (productId: string) => {
     if (!user) return;
-    await chefbyte()
-      .from('products')
-      .update({ walmart_link: 'NOT_ON_WALMART' })
-      .eq('product_id', productId);
+    await chefbyte().from('products').update({ walmart_link: 'NOT_ON_WALMART' }).eq('product_id', productId);
     await loadData();
   };
 
@@ -102,16 +101,8 @@ export function WalmartPage() {
     if (!user) return;
     const price = parseFloat(priceInputs[productId] ?? '');
     if (isNaN(price)) return;
-    await chefbyte()
-      .from('products')
-      .update({ price })
-      .eq('product_id', productId);
+    await chefbyte().from('products').update({ price }).eq('product_id', productId);
     await loadData();
-  };
-
-  const refreshAllPrices = async () => {
-    // STUBBED — walmart-scrape Edge Function not yet available (Phase 8)
-    // TODO: Call walmart-scrape for all linked products
   };
 
   /* ================================================================ */
@@ -142,7 +133,7 @@ export function WalmartPage() {
           </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {missingLinks.map(product => (
+            {missingLinks.map((product) => (
               <div
                 key={product.product_id}
                 data-testid={`link-item-${product.product_id}`}
@@ -153,22 +144,31 @@ export function WalmartPage() {
                   background: '#f7f7f9',
                 }}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    marginBottom: '8px',
+                  }}
+                >
                   <span style={{ fontWeight: 600 }}>{product.name}</span>
-                  {product.barcode && (
-                    <span style={{ fontSize: '0.8em', color: '#666' }}>({product.barcode})</span>
-                  )}
+                  {product.barcode && <span style={{ fontSize: '0.8em', color: '#666' }}>({product.barcode})</span>}
                 </div>
-                <div style={{ padding: '12px', background: '#fff', borderRadius: '4px', marginBottom: '8px', color: '#666', fontStyle: 'italic' }}>
+                <div
+                  style={{
+                    padding: '12px',
+                    background: '#fff',
+                    borderRadius: '4px',
+                    marginBottom: '8px',
+                    color: '#666',
+                    fontStyle: 'italic',
+                  }}
+                >
                   Search results will appear when Walmart integration is enabled
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <IonButton
-                    size="small"
-                    fill="outline"
-                    disabled
-                    data-testid={`link-selected-${product.product_id}`}
-                  >
+                  <IonButton size="small" fill="outline" disabled data-testid={`link-selected-${product.product_id}`}>
                     Link Selected
                   </IonButton>
                   <IonButton
@@ -198,7 +198,7 @@ export function WalmartPage() {
           </p>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-            {missingPrices.map(product => (
+            {missingPrices.map((product) => (
               <div
                 key={product.product_id}
                 data-testid={`price-item-${product.product_id}`}
@@ -218,8 +218,8 @@ export function WalmartPage() {
                   <IonInput
                     type="number"
                     value={priceInputs[product.product_id] ?? ''}
-                    onIonInput={e => {
-                      setPriceInputs(prev => ({
+                    onIonInput={(e) => {
+                      setPriceInputs((prev) => ({
                         ...prev,
                         [product.product_id]: e.detail.value ?? '',
                       }));
@@ -244,15 +244,10 @@ export function WalmartPage() {
       {/* ============================================================ */}
       {/*  REFRESH ALL PRICES                                           */}
       {/* ============================================================ */}
-      <IonButton
-        data-testid="refresh-all-btn"
-        onClick={refreshAllPrices}
-      >
+      <IonButton data-testid="refresh-all-btn" disabled title="Coming soon">
         Refresh All Prices
       </IonButton>
-      <p style={{ fontSize: '0.8em', color: '#666', marginTop: '4px' }}>
-        (Walmart scraping will be enabled in a future update)
-      </p>
+      <p style={{ fontSize: '0.8em', color: '#666', marginTop: '4px' }}>Bulk price refresh coming soon</p>
     </ChefLayout>
   );
 }

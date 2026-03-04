@@ -9,6 +9,7 @@ import {
   IonInput,
   IonCheckbox,
   IonList,
+  IonText,
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -44,6 +45,8 @@ export function ShoppingPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [items, setItems] = useState<ShoppingItem[]>([]);
+
+  const [error, setError] = useState<string | null>(null);
 
   /* ---- Add item form state ---- */
   const [searchText, setSearchText] = useState('');
@@ -125,12 +128,13 @@ export function ShoppingPage() {
 
   const addItem = async () => {
     if (!user || !searchText.trim()) return;
+    setError(null);
 
     let productId = selectedProductId;
 
     // If no product selected, create a placeholder
     if (!productId) {
-      const { data: newProduct } = await chefbyte()
+      const { data: newProduct, error: createErr } = await chefbyte()
         .from('products')
         .insert({
           user_id: user.id,
@@ -139,16 +143,24 @@ export function ShoppingPage() {
         })
         .select('product_id')
         .single();
+      if (createErr) {
+        setError(createErr.message);
+        return;
+      }
       productId = newProduct?.product_id;
     }
 
     if (!productId) return;
 
-    await chefbyte().from('shopping_list').insert({
+    const { error: insertErr } = await chefbyte().from('shopping_list').insert({
       user_id: user.id,
       product_id: productId,
       qty_containers: addQty,
     });
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
 
     setSearchText('');
     setSelectedProductId(null);
@@ -157,12 +169,25 @@ export function ShoppingPage() {
   };
 
   const togglePurchased = async (item: ShoppingItem) => {
-    await chefbyte().from('shopping_list').update({ purchased: !item.purchased }).eq('cart_item_id', item.cart_item_id);
+    setError(null);
+    const { error: updateErr } = await chefbyte()
+      .from('shopping_list')
+      .update({ purchased: !item.purchased })
+      .eq('cart_item_id', item.cart_item_id);
+    if (updateErr) {
+      setError(updateErr.message);
+      return;
+    }
     await loadItems();
   };
 
   const removeItem = async (cartItemId: string) => {
-    await chefbyte().from('shopping_list').delete().eq('cart_item_id', cartItemId);
+    setError(null);
+    const { error: deleteErr } = await chefbyte().from('shopping_list').delete().eq('cart_item_id', cartItemId);
+    if (deleteErr) {
+      setError(deleteErr.message);
+      return;
+    }
     await loadItems();
   };
 
@@ -187,17 +212,26 @@ export function ShoppingPage() {
       qty_containers: item.qty_containers,
       expires_on: null,
     }));
-    await chefbyte().from('stock_lots').insert(stockRows);
+    const { error: stockErr } = await chefbyte().from('stock_lots').insert(stockRows);
+    if (stockErr) {
+      setError(stockErr.message);
+      return;
+    }
 
     // Delete purchased items from shopping list
     const ids = purchased.map((i) => i.cart_item_id);
-    await chefbyte().from('shopping_list').delete().in('cart_item_id', ids);
+    const { error: delErr } = await chefbyte().from('shopping_list').delete().in('cart_item_id', ids);
+    if (delErr) {
+      setError(delErr.message);
+      return;
+    }
 
     await loadItems();
   };
 
   const autoAddBelowMinStock = async () => {
     if (!user) return;
+    setError(null);
 
     // Get all products with min_stock_amount
     const { data: products } = await chefbyte()
@@ -240,7 +274,11 @@ export function ShoppingPage() {
       }
     }
     if (rowsToInsert.length > 0) {
-      await chefbyte().from('shopping_list').insert(rowsToInsert);
+      const { error: batchErr } = await chefbyte().from('shopping_list').insert(rowsToInsert);
+      if (batchErr) {
+        setError(batchErr.message);
+        return;
+      }
     }
 
     await loadItems();
@@ -270,6 +308,12 @@ export function ShoppingPage() {
   return (
     <ChefLayout title="Shopping">
       <h2>SHOPPING LIST</h2>
+
+      {error && (
+        <IonText color="danger">
+          <p>{error}</p>
+        </IonText>
+      )}
 
       {/* ============================================================ */}
       {/*  ADD ITEM FORM                                                */}
