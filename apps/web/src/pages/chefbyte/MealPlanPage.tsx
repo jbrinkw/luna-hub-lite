@@ -1,5 +1,15 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { IonSpinner, IonButton, IonBadge, IonInput, IonToggle, IonText } from '@ionic/react';
+import {
+  IonSpinner,
+  IonButton,
+  IonBadge,
+  IonInput,
+  IonToggle,
+  IonText,
+  IonSelect,
+  IonSelectOption,
+  IonCheckbox,
+} from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -19,6 +29,7 @@ interface MealEntry {
   logical_date: string;
   servings: number;
   meal_prep: boolean;
+  meal_type: string | null;
   completed_at: string | null;
   recipes: {
     name: string;
@@ -95,6 +106,7 @@ export function MealPlanPage() {
   const [addSelected, setAddSelected] = useState<SearchResult | null>(null);
   const [addServings, setAddServings] = useState(1);
   const [addMealPrep, setAddMealPrep] = useState(false);
+  const [addMealType, setAddMealType] = useState<string | null>(null);
 
   /* ---- Meal prep confirmation modal state ---- */
   const [prepTarget, setPrepTarget] = useState<MealEntry | null>(null);
@@ -244,6 +256,19 @@ export function MealPlanPage() {
     await loadMeals();
   };
 
+  const toggleMealPrep = async (meal: MealEntry) => {
+    setError(null);
+    const { error: updateErr } = await chefbyte()
+      .from('meal_plan_entries')
+      .update({ meal_prep: !meal.meal_prep })
+      .eq('meal_id', meal.meal_id);
+    if (updateErr) {
+      setError(updateErr.message);
+      return;
+    }
+    await loadMeals();
+  };
+
   const executePrepConfirmed = async () => {
     if (!prepTarget) return;
     await markDone(prepTarget.meal_id);
@@ -319,6 +344,7 @@ export function MealPlanPage() {
     setAddSelected(null);
     setAddServings(1);
     setAddMealPrep(false);
+    setAddMealType(null);
     setAddShowDropdown(false);
     setShowAddModal(true);
   };
@@ -336,6 +362,7 @@ export function MealPlanPage() {
         logical_date: selectedDay,
         servings: addServings,
         meal_prep: addMealPrep,
+        meal_type: addMealType,
       });
     if (insertErr) {
       setError(insertErr.message);
@@ -429,6 +456,14 @@ export function MealPlanPage() {
                     data-testid={`grid-meal-${meal.meal_id}`}
                     style={{ fontSize: '0.8em', marginBottom: '4px' }}
                   >
+                    {meal.meal_type && (
+                      <div
+                        data-testid={`meal-type-label-${meal.meal_id}`}
+                        style={{ fontSize: '0.7em', color: '#666', textTransform: 'capitalize', lineHeight: 1.2 }}
+                      >
+                        {meal.meal_type}
+                      </div>
+                    )}
                     <div>
                       {entryName(meal)}
                       {meal.completed_at && (
@@ -495,6 +530,7 @@ export function MealPlanPage() {
               <thead>
                 <tr>
                   <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Entry</th>
+                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Type</th>
                   <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Mode</th>
                   <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Status</th>
                   <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Actions</th>
@@ -504,8 +540,21 @@ export function MealPlanPage() {
                 {selectedDayMeals.map((meal) => (
                   <tr key={meal.meal_id} data-testid={`detail-row-${meal.meal_id}`}>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{entryName(meal)}</td>
+                    <td style={{ padding: '8px', borderBottom: '1px solid #eee', textTransform: 'capitalize' }}>
+                      {meal.meal_type ?? '\u2014'}
+                    </td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                      {meal.meal_prep ? 'Prep' : 'Regular'}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <IonCheckbox
+                          checked={meal.meal_prep}
+                          onIonChange={() => toggleMealPrep(meal)}
+                          disabled={!!meal.completed_at}
+                          aria-label={`Toggle meal prep for ${entryName(meal)}`}
+                          data-testid={`toggle-prep-${meal.meal_id}`}
+                          style={{ '--size': '18px' } as React.CSSProperties}
+                        />
+                        <span>{meal.meal_prep ? 'Prep' : 'Regular'}</span>
+                      </div>
                     </td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
                       {meal.completed_at ? `DONE (${formatTime(meal.completed_at)})` : 'Planned'}
@@ -606,6 +655,20 @@ export function MealPlanPage() {
             onIonInput={(e) => setAddServings(Number(e.detail.value) || 1)}
             data-testid="add-meal-servings"
           />
+        </div>
+        <div style={{ marginBottom: '12px' }}>
+          <IonSelect
+            label="Meal Type"
+            value={addMealType}
+            onIonChange={(e) => setAddMealType(e.detail.value ?? null)}
+            placeholder="Select type (optional)"
+            data-testid="add-meal-type-select"
+          >
+            <IonSelectOption value="breakfast">Breakfast</IonSelectOption>
+            <IonSelectOption value="lunch">Lunch</IonSelectOption>
+            <IonSelectOption value="dinner">Dinner</IonSelectOption>
+            <IonSelectOption value="snack">Snack</IonSelectOption>
+          </IonSelect>
         </div>
         <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label>Meal Prep</label>

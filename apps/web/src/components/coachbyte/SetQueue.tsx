@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import {
   IonButton,
   IonCard,
@@ -51,14 +51,24 @@ export function SetQueue({
   const nextSet = sets.find((s) => !s.completed);
   const [reps, setReps] = useState<string>(nextSet?.target_reps?.toString() ?? '');
   const [load, setLoad] = useState<string>(nextSet?.target_load?.toString() ?? '');
+  const [validationError, setValidationError] = useState<string | null>(null);
+  const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   // Sync reps/load inputs when the active set changes (e.g. after completing a set)
   useEffect(() => {
     /* eslint-disable react-hooks/set-state-in-effect */
     setReps(nextSet?.target_reps?.toString() ?? '');
     setLoad(nextSet?.target_load?.toString() ?? '');
+    setValidationError(null);
     /* eslint-enable react-hooks/set-state-in-effect */
   }, [nextSet?.planned_set_id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Cleanup error timeout on unmount
+  useEffect(() => {
+    return () => {
+      clearTimeout(errorTimeoutRef.current);
+    };
+  }, []);
 
   const pendingSets = sets.filter((s) => !s.completed && s !== nextSet);
 
@@ -90,9 +100,14 @@ export function SetQueue({
   const handleComplete = () => {
     const r = parseInt(reps, 10);
     const l = parseFloat(load);
-    if (!isNaN(r) && !isNaN(l)) {
-      onComplete(r, l);
+    if (isNaN(r) || isNaN(l)) {
+      setValidationError('Please enter valid numbers for reps and load.');
+      clearTimeout(errorTimeoutRef.current);
+      errorTimeoutRef.current = setTimeout(() => setValidationError(null), 4000);
+      return;
     }
+    setValidationError(null);
+    onComplete(r, l);
   };
 
   const timerLabel =
@@ -151,6 +166,12 @@ export function SetQueue({
                 + Ad-Hoc Set
               </IonButton>
             </div>
+
+            {validationError && (
+              <IonText color="danger" data-testid="validation-error">
+                <p style={{ margin: '8px 0 0' }}>{validationError}</p>
+              </IonText>
+            )}
           </IonCardContent>
         </IonCard>
       )}

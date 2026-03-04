@@ -720,7 +720,24 @@ export function ScannerPage() {
               data-testid="unit-toggle"
               size="small"
               fill="outline"
-              onClick={() => setUnit((prev) => (prev === 'serving' ? 'container' : 'serving'))}
+              onClick={() => {
+                const spc = parseFloat(nutrition.servingsPerContainer) || 1;
+                const currentQty = parseFloat(screenValue) || 0;
+                setUnit((prev) => {
+                  if (prev === 'serving') {
+                    // switching to container: divide by servings_per_container
+                    const converted = currentQty / Math.max(spc, 0.001);
+                    setScreenValue(parseFloat(converted.toFixed(3)).toString());
+                    return 'container';
+                  } else {
+                    // switching to serving: multiply by servings_per_container
+                    const converted = currentQty * spc;
+                    setScreenValue(parseFloat(converted.toFixed(3)).toString());
+                    return 'serving';
+                  }
+                });
+                setOverwriteNext(true);
+              }}
             >
               {unit === 'serving' ? 'Serving' : 'Container'}
             </IonButton>

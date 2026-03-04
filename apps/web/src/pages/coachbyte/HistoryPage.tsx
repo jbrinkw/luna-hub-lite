@@ -13,6 +13,7 @@ import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { WEIGHT_UNIT } from '@/shared/constants';
+import { formatDateDisplay } from '@/shared/dates';
 
 interface HistoryDay {
   plan_id: string;
@@ -31,6 +32,11 @@ interface HistoryDetail {
 
 const PAGE_SIZE = 20;
 
+const timeFormatter = new Intl.DateTimeFormat('en-US', {
+  hour: 'numeric',
+  minute: '2-digit',
+});
+
 export function HistoryPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
@@ -41,7 +47,8 @@ export function HistoryPage() {
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
   const [detail, setDetail] = useState<HistoryDetail[]>([]);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [exerciseFilter] = useState<string>('all');
+  const [exerciseFilter, setExerciseFilter] = useState<string>('all');
+  const [exercisePlanIds, setExercisePlanIds] = useState<Set<string> | null>(null);
   const [exercises, setExercises] = useState<{ exercise_id: string; name: string }[]>([]);
 
   const loadHistory = useCallback(
@@ -166,8 +173,33 @@ export function HistoryPage() {
     setDetailLoading(false);
   };
 
+  // When exercise filter changes, fetch plan_ids that have completed sets for that exercise
+  useEffect(() => {
+    if (!user || exerciseFilter === 'all') {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setExercisePlanIds(null);
+      return;
+    }
+    supabase
+      .schema('coachbyte')
+      .from('completed_sets')
+      .select('plan_id')
+      .eq('user_id', user.id)
+      .eq('exercise_id', exerciseFilter)
+      .then(({ data }) => {
+        const ids = new Set((data ?? []).map((r: any) => r.plan_id as string));
+        // Async data fetching with setState is the standard pattern for this use case
+
+        setExercisePlanIds(ids);
+      });
+  }, [user, exerciseFilter]);
+
   // Filter out empty days (no completed sets) and apply exercise filter
-  const filteredDays = days.filter((d) => d.completed_count > 0);
+  const filteredDays = days.filter((d) => {
+    if (d.completed_count <= 0) return false;
+    if (exercisePlanIds !== null) return exercisePlanIds.has(d.plan_id);
+    return true;
+  });
 
   return (
     <CoachLayout title="History">
@@ -175,13 +207,12 @@ export function HistoryPage() {
         <h2>HISTORY</h2>
         <IonSelect
           value={exerciseFilter}
-          disabled
+          onIonChange={(e) => setExerciseFilter(e.detail.value)}
           aria-label="Filter by exercise"
-          title="Coming soon"
           interface="popover"
           data-testid="exercise-filter"
         >
-          <IonSelectOption value="all">All</IonSelectOption>
+          <IonSelectOption value="all">All Exercises</IonSelectOption>
           {exercises.map((ex) => (
             <IonSelectOption key={ex.exercise_id} value={ex.exercise_id}>
               {ex.name}
@@ -217,7 +248,7 @@ export function HistoryPage() {
             <tbody>
               {filteredDays.map((day) => (
                 <tr key={day.plan_id} data-testid={`history-row-${day.plan_date}`}>
-                  <td>{day.plan_date}</td>
+                  <td>{formatDateDisplay(day.plan_date)}</td>
                   <td>{day.summary ?? '—'}</td>
                   <td>
                     {day.completed_count}/{day.planned_count}
@@ -260,6 +291,7 @@ export function HistoryPage() {
                         <th style={{ textAlign: 'left' }}>Exercise</th>
                         <th style={{ textAlign: 'left' }}>Reps</th>
                         <th style={{ textAlign: 'left' }}>Load</th>
+                        <th style={{ textAlign: 'left' }}>Time</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -271,6 +303,7 @@ export function HistoryPage() {
                           <td>
                             {d.actual_load} {WEIGHT_UNIT}
                           </td>
+                          <td>{timeFormatter.format(new Date(d.completed_at))}</td>
                         </tr>
                       ))}
                     </tbody>

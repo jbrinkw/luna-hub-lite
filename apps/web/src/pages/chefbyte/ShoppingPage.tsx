@@ -189,14 +189,27 @@ export function ShoppingPage() {
 
     if (!productId) return;
 
-    const { error: insertErr } = await chefbyte().from('shopping_list').insert({
-      user_id: user.id,
-      product_id: productId,
-      qty_containers: addQty,
-    });
-    if (insertErr) {
-      setError(insertErr.message);
-      return;
+    // Check if product already exists on the list — if so, increment quantity
+    const existing = items.find((i) => i.product_id === productId);
+    if (existing) {
+      const { error: updateErr } = await chefbyte()
+        .from('shopping_list')
+        .update({ qty_containers: Number(existing.qty_containers) + addQty })
+        .eq('cart_item_id', existing.cart_item_id);
+      if (updateErr) {
+        setError(updateErr.message);
+        return;
+      }
+    } else {
+      const { error: insertErr } = await chefbyte().from('shopping_list').insert({
+        user_id: user.id,
+        product_id: productId,
+        qty_containers: addQty,
+      });
+      if (insertErr) {
+        setError(insertErr.message);
+        return;
+      }
     }
 
     setSearchText('');
@@ -292,22 +305,35 @@ export function ShoppingPage() {
       stockByProduct.set(lot.product_id, current + Number(lot.qty_containers));
     }
 
-    // Find products already on the shopping list
-    const existingProductIds = new Set(items.map((i) => i.product_id));
+    // Fetch fresh shopping list to avoid stale-state duplicates
+    const { data: freshShoppingItems } = await chefbyte()
+      .from('shopping_list')
+      .select('product_id, qty_containers')
+      .eq('user_id', user.id);
 
-    // Collect deficient products, then batch insert
+    // Sum already-listed quantities per product
+    const listedByProduct = new Map<string, number>();
+    for (const si of freshShoppingItems ?? []) {
+      const current = listedByProduct.get(si.product_id) ?? 0;
+      listedByProduct.set(si.product_id, current + Number(si.qty_containers));
+    }
+
+    // Collect deficient products, subtracting already-listed qty
     const rowsToInsert: Array<{ user_id: string; product_id: string; qty_containers: number }> = [];
     for (const product of products) {
-      if (existingProductIds.has(product.product_id)) continue;
       const currentStock = stockByProduct.get(product.product_id) ?? 0;
       const minStock = Number(product.min_stock_amount);
       if (currentStock < minStock) {
-        const qtyNeeded = Math.ceil(minStock - currentStock);
-        rowsToInsert.push({
-          user_id: user.id,
-          product_id: product.product_id,
-          qty_containers: qtyNeeded,
-        });
+        const deficit = minStock - currentStock;
+        const alreadyListed = listedByProduct.get(product.product_id) ?? 0;
+        const qtyNeeded = Math.ceil(deficit - alreadyListed);
+        if (qtyNeeded > 0) {
+          rowsToInsert.push({
+            user_id: user.id,
+            product_id: product.product_id,
+            qty_containers: qtyNeeded,
+          });
+        }
       }
     }
     if (rowsToInsert.length > 0) {

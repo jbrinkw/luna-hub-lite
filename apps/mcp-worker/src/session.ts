@@ -141,8 +141,20 @@ export class McpSession implements DurableObject {
         });
         break;
 
+      case 'ping':
+        response = jsonRpcSuccess(rpc.id, {});
+        break;
+
       case 'notifications/initialized':
         return new Response('', { status: 202 });
+
+      case 'resources/list':
+        response = jsonRpcSuccess(rpc.id, { resources: [] });
+        break;
+
+      case 'prompts/list':
+        response = jsonRpcSuccess(rpc.id, { prompts: [] });
+        break;
 
       case 'tools/list':
         await this.toolsReady;

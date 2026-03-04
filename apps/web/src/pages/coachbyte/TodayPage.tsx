@@ -59,7 +59,9 @@ export function TodayPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
+  const [notes, setNotes] = useState('');
   const summaryDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const notesDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const resetTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const isEditingRef = useRef(false);
@@ -68,6 +70,7 @@ export function TodayPage() {
   useEffect(() => {
     return () => {
       if (summaryDebounceRef.current) clearTimeout(summaryDebounceRef.current);
+      if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current);
       if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
       if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
     };
@@ -133,14 +136,15 @@ export function TodayPage() {
 
     setCompletedSets(completedMapped);
 
-    // Load plan summary
+    // Load plan summary and notes
     const { data: planData } = await coachbyte()
       .from('daily_plans')
-      .select('summary')
+      .select('summary, notes')
       .eq('plan_id', result.plan_id)
       .single();
 
     setSummary(planData?.summary ?? '');
+    setNotes((planData as any)?.notes ?? '');
     setLoading(false);
   }, [user, today]);
 
@@ -406,6 +410,29 @@ export function TodayPage() {
     saveSummary(summary);
   };
 
+  const saveNotes = useCallback(
+    async (value: string) => {
+      if (!planId) return;
+      const { error: err } = await coachbyte().from('daily_plans').update({ notes: value }).eq('plan_id', planId);
+      if (err) setError(err.message);
+    },
+    [planId],
+  );
+
+  const handleNotesChange = (value: string) => {
+    setNotes(value);
+    if (!planId) return;
+    clearTimeout(notesDebounceRef.current);
+    notesDebounceRef.current = setTimeout(() => {
+      saveNotes(value);
+    }, 500);
+  };
+
+  const handleNotesBlur = () => {
+    clearTimeout(notesDebounceRef.current);
+    saveNotes(notes);
+  };
+
   const deleteCompletedSet = async (completedSetId: string) => {
     if (confirmDeleteId !== completedSetId) {
       // First click — show confirm
@@ -567,6 +594,16 @@ export function TodayPage() {
                 )}
               </IonCardContent>
             </IonCard>
+
+            <IonTextarea
+              label="Workout Notes"
+              value={notes}
+              onIonInput={(e) => handleNotesChange(e.detail.value ?? '')}
+              onIonBlur={handleNotesBlur}
+              data-testid="notes-textarea"
+              rows={4}
+              placeholder="How did the workout feel? Any observations..."
+            />
           </IonCol>
         </IonRow>
       </IonGrid>

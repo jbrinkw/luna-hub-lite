@@ -259,6 +259,10 @@ export function RecipeFormPage() {
 
   const handleSave = async () => {
     if (!user || !name.trim()) return;
+    if (ingredients.length === 0) {
+      setSaveError('At least one ingredient is required.');
+      return;
+    }
     setSaveError(null);
 
     if (isEdit && id) {
@@ -614,7 +618,7 @@ export function RecipeFormPage() {
         <IonButton
           expand="block"
           onClick={handleSave}
-          disabled={!name.trim()}
+          disabled={!name.trim() || ingredients.length === 0}
           data-testid="save-recipe-btn"
           style={{ flex: 1 }}
         >
