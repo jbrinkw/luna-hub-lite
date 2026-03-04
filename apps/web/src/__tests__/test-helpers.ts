@@ -12,20 +12,17 @@ interface TestUser {
  * Create a test user via Supabase Auth admin API, return a signed-in client.
  * Each test user gets a unique email to avoid collisions.
  */
-export async function createTestUser(
-  suffix?: string,
-): Promise<TestUser> {
-  const id = suffix ?? crypto.randomUUID().slice(0, 8);
-  const email = `test-${id}@test.com`;
+export async function createTestUser(suffix?: string): Promise<TestUser> {
+  const base = suffix ?? crypto.randomUUID().slice(0, 8);
+  const email = `test-${base}-${Date.now()}@test.com`;
   const password = 'test-password-123';
 
   // Create user via admin API (bypasses email confirmation)
-  const { data: created, error: createError } =
-    await adminClient.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-    });
+  const { data: created, error: createError } = await adminClient.auth.admin.createUser({
+    email,
+    password,
+    email_confirm: true,
+  });
 
   if (createError || !created.user) {
     throw new Error(`Failed to create test user: ${createError?.message}`);

@@ -134,12 +134,21 @@ describe('Auth lifecycle', () => {
     userIds.push(data.user!.id);
 
     // Second signup with same email
-    const { error: _dupError } = await client2.auth.signUp({ email, password: 'password456' });
-    // Supabase may return success (anti-enumeration) or error — either is acceptable
-    // The important thing is only 1 user exists
-    const { data: users } = await adminClient.auth.admin.listUsers();
-    const matching = users.users.filter((u) => u.email === email);
-    expect(matching.length).toBe(1);
+    const { error: dupError, data: dupData } = await client2.auth.signUp({
+      email,
+      password: 'password456',
+    });
+
+    // GoTrue either returns error or obfuscated response (anti-enumeration)
+    // Verify original user still exists and is accessible
+    const { data: firstUser } = await adminClient.auth.admin.getUserById(data.user!.id);
+    expect(firstUser.user).toBeTruthy();
+    expect(firstUser.user!.email).toBe(email);
+
+    // If second signup returned a user, it must be the same one
+    if (!dupError && dupData.user) {
+      expect(dupData.user.id).toBe(data.user!.id);
+    }
   });
 
   it('session token refresh works', async () => {
