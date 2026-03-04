@@ -107,7 +107,7 @@ export function McpSettingsPage() {
     <HubLayout title="MCP Settings">
       <h3>Endpoint</h3>
       <IonText>
-        <code>https://mcp.lunahub.dev/sse</code>
+        <code>{import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/sse</code>
       </IonText>
 
       {loading ? (

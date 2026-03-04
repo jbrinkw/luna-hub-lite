@@ -140,13 +140,14 @@ export function SettingsPage() {
 
   useEffect(() => {
     // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+    /* eslint-disable react-hooks/set-state-in-effect */
     loadProducts();
     loadDevices();
   }, [loadProducts, loadDevices]);
 
   /* ---------------------------------------------------------------- */
   /*  Product CRUD                                                     */
+  /* eslint-enable react-hooks/set-state-in-effect */
   /* ---------------------------------------------------------------- */
 
   const saveProduct = async () => {

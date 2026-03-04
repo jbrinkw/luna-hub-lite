@@ -3,8 +3,9 @@ import { IonButton, IonInput, IonSelect, IonSelectOption, IonText, IonSpinner } 
 import { HubLayout } from '@/components/hub/HubLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { MIN_PASSWORD_LENGTH } from '@/shared/constants';
 
-const TIMEZONES = [
+const FALLBACK_TIMEZONES = [
   'America/New_York',
   'America/Chicago',
   'America/Denver',
@@ -17,6 +18,16 @@ const TIMEZONES = [
   'Australia/Sydney',
   'UTC',
 ];
+
+function getTimezones(): string[] {
+  try {
+    return Intl.supportedValuesOf('timeZone');
+  } catch {
+    return FALLBACK_TIMEZONES;
+  }
+}
+
+const TIMEZONES = getTimezones();
 
 export function AccountPage() {
   const { user } = useAuth();
@@ -72,8 +83,8 @@ export function AccountPage() {
 
   const handleChangePassword = async () => {
     setPwMessage(null);
-    if (newPassword.length < 6) {
-      setPwMessage({ type: 'error', text: 'Password must be at least 6 characters' });
+    if (newPassword.length < MIN_PASSWORD_LENGTH) {
+      setPwMessage({ type: 'error', text: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
       return;
     }
     if (newPassword !== confirmPassword) {
@@ -99,18 +110,12 @@ export function AccountPage() {
       ) : (
         <>
           <h3>Profile</h3>
-          <IonInput
-            label="Display Name"
-            value={displayName}
-            onIonInput={(e) => setDisplayName(e.detail.value ?? '')}
-          />
-          <IonSelect
-            label="Timezone"
-            value={timezone}
-            onIonChange={(e) => setTimezone(e.detail.value)}
-          >
+          <IonInput label="Display Name" value={displayName} onIonInput={(e) => setDisplayName(e.detail.value ?? '')} />
+          <IonSelect label="Timezone" value={timezone} onIonChange={(e) => setTimezone(e.detail.value)}>
             {TIMEZONES.map((tz) => (
-              <IonSelectOption key={tz} value={tz}>{tz}</IonSelectOption>
+              <IonSelectOption key={tz} value={tz}>
+                {tz}
+              </IonSelectOption>
             ))}
           </IonSelect>
           <IonSelect

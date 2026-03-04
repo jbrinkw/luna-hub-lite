@@ -1,5 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonInput, IonText } from '@ionic/react';
+import { WEIGHT_UNIT } from '@/shared/constants';
 
 export interface PlannedSet {
   planned_set_id: string;
@@ -17,16 +18,23 @@ interface SetQueueProps {
   sets: PlannedSet[];
   onComplete: (reps: number, load: number) => void;
   onAdHoc: () => void;
-  timerDisplay?: string;
   timerState?: 'running' | 'paused' | 'expired' | 'idle';
   onTimerToggle?: () => void;
   disabled?: boolean;
 }
 
-export function SetQueue({ sets, onComplete, onAdHoc, timerDisplay, timerState, onTimerToggle, disabled }: SetQueueProps) {
+export function SetQueue({ sets, onComplete, onAdHoc, timerState, onTimerToggle, disabled }: SetQueueProps) {
   const nextSet = sets.find((s) => !s.completed);
   const [reps, setReps] = useState<string>(nextSet?.target_reps?.toString() ?? '');
   const [load, setLoad] = useState<string>(nextSet?.target_load?.toString() ?? '');
+
+  // Sync reps/load inputs when the active set changes (e.g. after completing a set)
+  useEffect(() => {
+    /* eslint-disable react-hooks/set-state-in-effect */
+    setReps(nextSet?.target_reps?.toString() ?? '');
+    setLoad(nextSet?.target_load?.toString() ?? '');
+    /* eslint-enable react-hooks/set-state-in-effect */
+  }, [nextSet?.planned_set_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const pendingSets = sets.filter((s) => !s.completed && s !== nextSet);
 
@@ -44,13 +52,13 @@ export function SetQueue({ sets, onComplete, onAdHoc, timerDisplay, timerState, 
 
   const formatLoadDisplay = (set: PlannedSet) => {
     if (set.target_load_percentage && set.target_load) {
-      return `${set.target_load} lb (${set.target_load_percentage}%)`;
+      return `${set.target_load} ${WEIGHT_UNIT} (${set.target_load_percentage}%)`;
     }
     if (set.target_load_percentage && !set.target_load) {
       return `--- (${set.target_load_percentage}% — no PR)`;
     }
     if (set.target_load) {
-      return `${set.target_load} lb`;
+      return `${set.target_load} ${WEIGHT_UNIT}`;
     }
     return '---';
   };
@@ -78,15 +86,13 @@ export function SetQueue({ sets, onComplete, onAdHoc, timerDisplay, timerState, 
       {nextSet && (
         <IonCard data-testid="next-in-queue">
           <IonCardHeader>
-            <IonCardTitle style={{ display: 'flex', justifyContent: 'space-between' }}>
+            <IonCardTitle>
               <span>NEXT IN QUEUE</span>
-              {timerDisplay && <span data-testid="timer-badge">{timerDisplay}</span>}
             </IonCardTitle>
           </IonCardHeader>
           <IonCardContent>
             <p data-testid="next-exercise">
-              <strong>{nextSet.exercise_name}</strong>{' '}
-              {nextSet.target_reps} x {formatLoadDisplay(nextSet)}
+              <strong>{nextSet.exercise_name}</strong> {nextSet.target_reps} x {formatLoadDisplay(nextSet)}
             </p>
 
             <div style={{ display: 'flex', gap: '16px', margin: '12px 0' }}>
