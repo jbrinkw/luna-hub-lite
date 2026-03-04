@@ -1,3 +1,5 @@
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 export interface ToolDefinition {
   name: string;
   description: string;
@@ -7,7 +9,7 @@ export interface ToolDefinition {
 
 export interface ToolContext {
   userId: string;
-  supabase: any; // SupabaseClient with service role
+  supabase: SupabaseClient;
 }
 
 export interface ToolResult {

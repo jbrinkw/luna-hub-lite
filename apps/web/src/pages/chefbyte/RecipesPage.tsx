@@ -13,10 +13,7 @@ import {
 import { useNavigate } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
-
-// Cast needed: chefbyte schema types not yet generated
-const chefbyte = () => supabase.schema('chefbyte') as any;
+import { chefbyte } from '@/shared/supabase';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

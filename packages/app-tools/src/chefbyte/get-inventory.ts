@@ -16,8 +16,9 @@ export const getInventory: ToolDefinition = {
   handler: async (args, ctx) => {
     const includeLots = args.include_lots === true;
 
-    const { data: lots, error } = await ctx.supabase
-      .schema('chefbyte')
+    // Schema cast needed: chefbyte tables aren't in generated Database types
+    const chefbyte = ctx.supabase.schema('chefbyte') as any;
+    const { data: lots, error } = await chefbyte
       .from('stock_lots')
       .select(
         'lot_id, product_id, qty_containers, expires_on, location_id, created_at, products(name), locations(name)',

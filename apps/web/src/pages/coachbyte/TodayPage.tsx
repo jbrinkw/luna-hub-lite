@@ -16,7 +16,7 @@ import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
 import { RestTimer } from '@/components/coachbyte/RestTimer';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
+import { supabase, coachbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
 
@@ -61,9 +61,8 @@ export function TodayPage() {
     if (!user) return;
     setError(null);
 
-    // Ensure daily plan exists (cast needed: supabase-js typing doesn't fully support cross-schema rpc)
-    const coachbyte = supabase.schema('coachbyte') as any;
-    const { data: planResult, error: planErr } = await coachbyte.rpc('ensure_daily_plan', { p_day: today });
+    // Ensure daily plan exists
+    const { data: planResult, error: planErr } = await coachbyte().rpc('ensure_daily_plan', { p_day: today });
 
     if (planErr) {
       setError(planErr.message);
@@ -75,8 +74,7 @@ export function TodayPage() {
     setPlanId(result.plan_id);
 
     // Load planned sets with exercise names
-    const { data: plannedData } = await supabase
-      .schema('coachbyte')
+    const { data: plannedData } = await coachbyte()
       .from('planned_sets')
       .select(
         'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)',
@@ -85,8 +83,7 @@ export function TodayPage() {
       .order('"order"');
 
     // Load completed sets
-    const { data: completedData } = await supabase
-      .schema('coachbyte')
+    const { data: completedData } = await coachbyte()
       .from('completed_sets')
       .select('completed_set_id, planned_set_id, actual_reps, actual_load, completed_at, exercises(name)')
       .eq('plan_id', result.plan_id)
@@ -119,8 +116,7 @@ export function TodayPage() {
     setCompletedSets(completedMapped);
 
     // Load plan summary
-    const { data: planData } = await supabase
-      .schema('coachbyte')
+    const { data: planData } = await coachbyte()
       .from('daily_plans')
       .select('summary')
       .eq('plan_id', result.plan_id)
@@ -133,13 +129,12 @@ export function TodayPage() {
   // Load exercises for ad-hoc form
   useEffect(() => {
     if (!user) return;
-    supabase
-      .schema('coachbyte')
+    coachbyte()
       .from('exercises')
       .select('exercise_id, name')
       .or(`user_id.is.null,user_id.eq.${user.id}`)
       .order('name')
-      .then(({ data }) => {
+      .then(({ data }: { data: any }) => {
         setExercises((data ?? []) as Exercise[]);
       });
   }, [user]);
@@ -147,8 +142,7 @@ export function TodayPage() {
   // Load timer state
   const loadTimer = useCallback(async () => {
     if (!user) return;
-    const { data } = await supabase
-      .schema('coachbyte')
+    const { data } = await coachbyte()
       .from('timers')
       .select('state, end_time, duration_seconds, elapsed_before_pause')
       .eq('user_id', user.id)
@@ -205,8 +199,7 @@ export function TodayPage() {
   const handleCompleteSet = async (reps: number, load: number) => {
     if (!planId) return;
 
-    const coachbyte = supabase.schema('coachbyte') as any;
-    const { data, error: err } = await coachbyte.rpc('complete_next_set', {
+    const { data, error: err } = await coachbyte().rpc('complete_next_set', {
       p_plan_id: planId,
       p_reps: reps,
       p_load: load,
@@ -230,7 +223,7 @@ export function TodayPage() {
   const startTimer = async (seconds: number) => {
     if (!user) return;
     const endTime = new Date(Date.now() + seconds * 1000).toISOString();
-    await supabase.schema('coachbyte').from('timers').upsert(
+    await coachbyte().from('timers').upsert(
       {
         user_id: user.id,
         state: 'running',
@@ -248,8 +241,7 @@ export function TodayPage() {
     const elapsed = Math.floor(
       (Date.now() - (new Date(timer.end_time).getTime() - timer.duration_seconds * 1000)) / 1000,
     );
-    await supabase
-      .schema('coachbyte')
+    await coachbyte()
       .from('timers')
       .update({ state: 'paused', paused_at: new Date().toISOString(), elapsed_before_pause: Math.max(0, elapsed) })
       .eq('user_id', user.id);
@@ -260,8 +252,7 @@ export function TodayPage() {
     if (!user) return;
     const remaining = timer.duration_seconds - timer.elapsed_before_pause;
     const endTime = new Date(Date.now() + remaining * 1000).toISOString();
-    await supabase
-      .schema('coachbyte')
+    await coachbyte()
       .from('timers')
       .update({ state: 'running', end_time: endTime, paused_at: null })
       .eq('user_id', user.id);
@@ -270,21 +261,16 @@ export function TodayPage() {
 
   const resetTimer = async () => {
     if (!user) return;
-    await supabase.schema('coachbyte').from('timers').delete().eq('user_id', user.id);
+    await coachbyte().from('timers').delete().eq('user_id', user.id);
     setTimer(DEFAULT_TIMER);
   };
 
   const handleAdHocSubmit = async (exerciseId: string, reps: number, load: number) => {
     if (!user || !planId) return;
 
-    const planData = await supabase
-      .schema('coachbyte')
-      .from('daily_plans')
-      .select('logical_date')
-      .eq('plan_id', planId)
-      .single();
+    const planData = await coachbyte().from('daily_plans').select('logical_date').eq('plan_id', planId).single();
 
-    await supabase.schema('coachbyte').from('completed_sets').insert({
+    await coachbyte().from('completed_sets').insert({
       plan_id: planId,
       user_id: user.id,
       exercise_id: exerciseId,
@@ -300,7 +286,7 @@ export function TodayPage() {
   const saveSummary = useCallback(
     async (value: string) => {
       if (!planId) return;
-      await supabase.schema('coachbyte').from('daily_plans').update({ summary: value }).eq('plan_id', planId);
+      await coachbyte().from('daily_plans').update({ summary: value }).eq('plan_id', planId);
     },
     [planId],
   );

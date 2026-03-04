@@ -2,10 +2,8 @@ import { useState, useRef, useCallback } from 'react';
 import { IonButton } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
+import { chefbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
-
-const chefbyte = () => supabase.schema('chefbyte') as any;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

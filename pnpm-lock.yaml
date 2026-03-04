@@ -78,9 +78,6 @@ importers:
       '@ionic/react':
         specifier: ^8.7.18
         version: 8.7.18(react-dom@18.3.1(react@18.3.1))(react@18.3.1)
-      '@luna-hub/config':
-        specifier: workspace:*
-        version: link:../../packages/config
       '@luna-hub/db-types':
         specifier: workspace:*
         version: link:../../packages/db-types
@@ -164,12 +161,6 @@ importers:
       vitest:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@25.3.3)(jsdom@27.4.0)(yaml@2.8.2)
-
-  packages/config:
-    devDependencies:
-      typescript:
-        specifier: ~5.7.0
-        version: 5.7.3
 
   packages/db-types:
     devDependencies:

@@ -14,8 +14,9 @@ export const getPrs: ToolDefinition = {
     },
   },
   handler: async (args, ctx) => {
-    let query = ctx.supabase
-      .schema('coachbyte')
+    // Schema cast needed: coachbyte tables aren't in generated Database types
+    const coachbyte = ctx.supabase.schema('coachbyte') as any;
+    let query = coachbyte
       .from('completed_sets')
       .select('completed_set_id, exercise_id, actual_reps, actual_load, completed_at, exercises(name)')
       .eq('user_id', ctx.userId);

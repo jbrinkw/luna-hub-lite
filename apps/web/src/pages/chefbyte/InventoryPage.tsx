@@ -14,11 +14,8 @@ import {
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
+import { chefbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
-
-// Cast needed: chefbyte schema types not yet generated
-const chefbyte = () => supabase.schema('chefbyte') as any;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

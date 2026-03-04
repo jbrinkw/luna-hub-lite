@@ -22,7 +22,7 @@ function mockFetchResponse(body: any, ok = true, status = 200) {
 }
 
 // Base context (userId and supabase not used by extension tools)
-const baseCtx = { userId: 'user-1', supabase: {} };
+const baseCtx = { userId: 'user-1', supabase: {} as any };
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -131,10 +131,7 @@ describe('OBSIDIAN_create_note', () => {
   it('sends PUT with markdown content type on success', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('', true, 204));
 
-    const result = await handler(
-      { path: 'folder/new-note.md', content: '# Hello World' },
-      obsidianCtx(),
-    );
+    const result = await handler({ path: 'folder/new-note.md', content: '# Hello World' }, obsidianCtx());
 
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
@@ -150,10 +147,7 @@ describe('OBSIDIAN_create_note', () => {
   });
 
   it('returns toolError when credentials are missing', async () => {
-    const result = await handler(
-      { path: 'folder/note.md', content: 'content' },
-      emptyCredentialsCtx(),
-    );
+    const result = await handler({ path: 'folder/note.md', content: 'content' }, emptyCredentialsCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Obsidian credentials');
@@ -163,10 +157,7 @@ describe('OBSIDIAN_create_note', () => {
   it('returns toolError when API returns error', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('Server Error', false, 500));
 
-    const result = await handler(
-      { path: 'folder/note.md', content: 'content' },
-      obsidianCtx(),
-    );
+    const result = await handler({ path: 'folder/note.md', content: 'content' }, obsidianCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Obsidian API error: 500');
@@ -175,10 +166,7 @@ describe('OBSIDIAN_create_note', () => {
   it('returns toolError on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network failure'));
 
-    const result = await handler(
-      { path: 'folder/note.md', content: 'content' },
-      obsidianCtx(),
-    );
+    const result = await handler({ path: 'folder/note.md', content: 'content' }, obsidianCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Network error: Network failure');
@@ -239,10 +227,7 @@ describe('OBSIDIAN_update_note', () => {
   it('sends PUT with updated content on success', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('', true, 204));
 
-    const result = await handler(
-      { path: 'folder/existing.md', content: '# Updated Content' },
-      obsidianCtx(),
-    );
+    const result = await handler({ path: 'folder/existing.md', content: '# Updated Content' }, obsidianCtx());
 
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
@@ -258,10 +243,7 @@ describe('OBSIDIAN_update_note', () => {
   });
 
   it('returns toolError when credentials are missing', async () => {
-    const result = await handler(
-      { path: 'note.md', content: 'content' },
-      emptyCredentialsCtx(),
-    );
+    const result = await handler({ path: 'note.md', content: 'content' }, emptyCredentialsCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Obsidian credentials');
@@ -271,10 +253,7 @@ describe('OBSIDIAN_update_note', () => {
   it('returns toolError when API returns error', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('Not Found', false, 404));
 
-    const result = await handler(
-      { path: 'missing.md', content: 'content' },
-      obsidianCtx(),
-    );
+    const result = await handler({ path: 'missing.md', content: 'content' }, obsidianCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Obsidian API error: 404');
@@ -283,10 +262,7 @@ describe('OBSIDIAN_update_note', () => {
   it('returns toolError on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network failure'));
 
-    const result = await handler(
-      { path: 'note.md', content: 'content' },
-      obsidianCtx(),
-    );
+    const result = await handler({ path: 'note.md', content: 'content' }, obsidianCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Network error: Network failure');
@@ -304,10 +280,7 @@ describe('TODOIST_get_tasks', () => {
     const tasks = [{ id: 't1', content: 'Buy milk' }];
     mockFetch.mockReturnValueOnce(mockFetchResponse(tasks));
 
-    const result = await handler(
-      { project_id: 'proj-1', filter: 'today' },
-      todoistCtx(),
-    );
+    const result = await handler({ project_id: 'proj-1', filter: 'today' }, todoistCtx());
 
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
@@ -588,10 +561,7 @@ describe('HOMEASSISTANT_call_service', () => {
   });
 
   it('returns toolError when credentials are missing', async () => {
-    const result = await handler(
-      { domain: 'light', service: 'turn_on' },
-      emptyCredentialsCtx(),
-    );
+    const result = await handler({ domain: 'light', service: 'turn_on' }, emptyCredentialsCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Home Assistant credentials');
@@ -601,10 +571,7 @@ describe('HOMEASSISTANT_call_service', () => {
   it('returns toolError when API returns error', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('Internal Server Error', false, 500));
 
-    const result = await handler(
-      { domain: 'light', service: 'turn_on' },
-      haCtx(),
-    );
+    const result = await handler({ domain: 'light', service: 'turn_on' }, haCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Home Assistant API error: 500');
@@ -613,10 +580,7 @@ describe('HOMEASSISTANT_call_service', () => {
   it('returns toolError on network failure', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network failure'));
 
-    const result = await handler(
-      { domain: 'light', service: 'turn_on' },
-      haCtx(),
-    );
+    const result = await handler({ domain: 'light', service: 'turn_on' }, haCtx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Network error: Network failure');

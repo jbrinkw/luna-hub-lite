@@ -17,7 +17,6 @@
   },
   "dependencies": {
     "@ionic/react": "^8.7.18",
-    "@luna-hub/config": "workspace:*",
     "@luna-hub/db-types": "workspace:*",
     "@luna-hub/ui-kit": "workspace:*",
     "@supabase/supabase-js": "^2.98.0",

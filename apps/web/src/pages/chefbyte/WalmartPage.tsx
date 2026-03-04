@@ -2,9 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { IonSpinner, IonButton, IonInput } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
-
-const chefbyte = () => supabase.schema('chefbyte') as any;
+import { chefbyte } from '@/shared/supabase';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */

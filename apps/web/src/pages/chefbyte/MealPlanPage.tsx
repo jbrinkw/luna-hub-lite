@@ -1,23 +1,10 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import {
-  IonSpinner,
-  IonButton,
-  IonBadge,
-  IonInput,
-  IonToggle,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonText,
-} from '@ionic/react';
+import { IonSpinner, IonButton, IonBadge, IonInput, IonToggle, IonText } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
+import { chefbyte } from '@/shared/supabase';
 import { toDateStr } from '@/shared/dates';
-
-// Cast needed: chefbyte schema types not yet generated
-const chefbyte = () => supabase.schema('chefbyte') as any;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -488,137 +475,102 @@ export function MealPlanPage() {
       {/* ============================================================ */}
       {/*  ADD MEAL MODAL                                                */}
       {/* ============================================================ */}
-      {showAddModal && (
-        <div
-          data-testid="add-meal-modal"
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-          }}
-        >
-          <IonCard style={{ width: '100%', maxWidth: '500px', margin: '16px' }}>
-            <IonCardHeader>
-              <IonCardTitle>Add Meal</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <div style={{ marginBottom: '12px', position: 'relative' }}>
-                <IonInput
-                  label="Search recipe or product"
-                  value={addSearchText}
-                  onIonInput={(e) => handleAddSearchInput(e.detail.value ?? '')}
-                  data-testid="add-meal-search"
-                />
-                {addShowDropdown && (
-                  <div
-                    data-testid="add-meal-dropdown"
-                    style={{
-                      position: 'absolute',
-                      top: '100%',
-                      left: 0,
-                      right: 0,
-                      background: '#fff',
-                      border: '1px solid #ccc',
-                      borderRadius: '4px',
-                      zIndex: 10,
-                      maxHeight: '200px',
-                      overflow: 'auto',
-                    }}
-                  >
-                    {addSearchResults.map((item) => (
-                      <div
-                        key={`${item.type}-${item.id}`}
-                        onClick={() => selectAddItem(item)}
-                        data-testid={`add-dropdown-${item.type}-${item.id}`}
-                        style={{ padding: '8px 12px', cursor: 'pointer' }}
-                      >
-                        {item.name} ({item.type})
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div style={{ marginBottom: '12px' }}>
-                <IonInput
-                  label="Servings"
-                  type="number"
-                  value={addServings}
-                  onIonInput={(e) => setAddServings(Number(e.detail.value) || 1)}
-                  data-testid="add-meal-servings"
-                />
-              </div>
-              <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <label>Meal Prep</label>
-                <IonToggle
-                  checked={addMealPrep}
-                  onIonChange={(e) => setAddMealPrep(e.detail.checked)}
-                  data-testid="add-meal-prep-toggle"
-                />
-              </div>
-              <div style={{ marginBottom: '8px', fontSize: '0.85em', color: '#666' }}>Date: {selectedDay}</div>
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-                <IonButton fill="clear" onClick={() => setShowAddModal(false)} data-testid="add-meal-cancel">
-                  Cancel
-                </IonButton>
-                <IonButton onClick={addMeal} disabled={!addSelected} data-testid="add-meal-confirm">
-                  Add
-                </IonButton>
-              </div>
-            </IonCardContent>
-          </IonCard>
+      <ModalOverlay
+        isOpen={showAddModal}
+        onClose={() => setShowAddModal(false)}
+        title="Add Meal"
+        testId="add-meal-modal"
+      >
+        <div style={{ marginBottom: '12px', position: 'relative' }}>
+          <IonInput
+            label="Search recipe or product"
+            value={addSearchText}
+            onIonInput={(e) => handleAddSearchInput(e.detail.value ?? '')}
+            data-testid="add-meal-search"
+          />
+          {addShowDropdown && (
+            <div
+              data-testid="add-meal-dropdown"
+              style={{
+                position: 'absolute',
+                top: '100%',
+                left: 0,
+                right: 0,
+                background: '#fff',
+                border: '1px solid #ccc',
+                borderRadius: '4px',
+                zIndex: 10,
+                maxHeight: '200px',
+                overflow: 'auto',
+              }}
+            >
+              {addSearchResults.map((item) => (
+                <div
+                  key={`${item.type}-${item.id}`}
+                  onClick={() => selectAddItem(item)}
+                  data-testid={`add-dropdown-${item.type}-${item.id}`}
+                  style={{ padding: '8px 12px', cursor: 'pointer' }}
+                >
+                  {item.name} ({item.type})
+                </div>
+              ))}
+            </div>
+          )}
         </div>
-      )}
+        <div style={{ marginBottom: '12px' }}>
+          <IonInput
+            label="Servings"
+            type="number"
+            value={addServings}
+            onIonInput={(e) => setAddServings(Number(e.detail.value) || 1)}
+            data-testid="add-meal-servings"
+          />
+        </div>
+        <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+          <label>Meal Prep</label>
+          <IonToggle
+            checked={addMealPrep}
+            onIonChange={(e) => setAddMealPrep(e.detail.checked)}
+            data-testid="add-meal-prep-toggle"
+          />
+        </div>
+        <div style={{ marginBottom: '8px', fontSize: '0.85em', color: '#666' }}>Date: {selectedDay}</div>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+          <IonButton fill="clear" onClick={() => setShowAddModal(false)} data-testid="add-meal-cancel">
+            Cancel
+          </IonButton>
+          <IonButton onClick={addMeal} disabled={!addSelected} data-testid="add-meal-confirm">
+            Add
+          </IonButton>
+        </div>
+      </ModalOverlay>
 
       {/* ============================================================ */}
       {/*  MEAL PREP CONFIRMATION MODAL                                  */}
       {/* ============================================================ */}
-      {prepTarget && (
-        <div
-          data-testid="prep-confirm-modal"
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-          }}
-        >
-          <IonCard style={{ width: '100%', maxWidth: '450px', margin: '16px' }}>
-            <IonCardHeader>
-              <IonCardTitle>Execute Meal Prep</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <p>This will consume ingredients and create a [MEAL] lot.</p>
-              <p style={{ fontWeight: 'bold', margin: '12px 0' }}>
-                {entryName(prepTarget)} &mdash; {Number(prepTarget.servings).toFixed(1)} servings
-              </p>
-              <p style={{ fontSize: '0.85em', color: '#666' }}>
-                Macros will not be logged until the [MEAL] lot is consumed.
-              </p>
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton fill="clear" onClick={() => setPrepTarget(null)} data-testid="prep-cancel-btn">
-                  Cancel
-                </IonButton>
-                <IonButton color="tertiary" onClick={executePrepConfirmed} data-testid="prep-execute-btn">
-                  Execute
-                </IonButton>
-              </div>
-            </IonCardContent>
-          </IonCard>
+      <ModalOverlay
+        isOpen={prepTarget !== null}
+        onClose={() => setPrepTarget(null)}
+        title="Execute Meal Prep"
+        maxWidth="450px"
+        testId="prep-confirm-modal"
+      >
+        <p>This will consume ingredients and create a [MEAL] lot.</p>
+        {prepTarget && (
+          <p style={{ fontWeight: 'bold', margin: '12px 0' }}>
+            {entryName(prepTarget)} &mdash; {Number(prepTarget.servings).toFixed(1)} servings
+          </p>
+        )}
+        <p style={{ fontSize: '0.85em', color: '#666' }}>Macros will not be logged until the [MEAL] lot is consumed.</p>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
+          <IonButton fill="clear" onClick={() => setPrepTarget(null)} data-testid="prep-cancel-btn">
+            Cancel
+          </IonButton>
+          <IonButton color="tertiary" onClick={executePrepConfirmed} data-testid="prep-execute-btn">
+            Execute
+          </IonButton>
         </div>
-      )}
+      </ModalOverlay>
     </ChefLayout>
   );
 }

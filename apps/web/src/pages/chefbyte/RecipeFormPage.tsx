@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   IonSpinner,
   IonCard,
@@ -15,11 +15,8 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
+import { chefbyte } from '@/shared/supabase';
 import { computeRecipeMacros } from './RecipesPage';
-
-// Cast needed: chefbyte schema types not yet generated
-const chefbyte = () => supabase.schema('chefbyte') as any;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -138,8 +135,10 @@ export function RecipeFormPage() {
   }, [isEdit, loadRecipe]);
 
   /* ---------------------------------------------------------------- */
-  /*  Product search                                                   */
+  /*  Product search (server-side ilike + 300ms debounce)              */
   /* ---------------------------------------------------------------- */
+
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const searchProducts = useCallback(
     async (text: string) => {
@@ -154,13 +153,12 @@ export function RecipeFormPage() {
           'product_id, name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container',
         )
         .eq('user_id', user.id)
+        .ilike('name', `%${text}%`)
         .order('name');
 
-      const filtered = ((data ?? []) as ProductSearchResult[]).filter((p) =>
-        p.name.toLowerCase().includes(text.toLowerCase()),
-      );
-      setSearchResults(filtered);
-      setShowDropdown(filtered.length > 0);
+      const results = (data ?? []) as ProductSearchResult[];
+      setSearchResults(results);
+      setShowDropdown(results.length > 0);
     },
     [user],
   );
@@ -168,7 +166,8 @@ export function RecipeFormPage() {
   const handleSearchInput = (value: string) => {
     setSearchText(value);
     setSelectedProduct(null);
-    searchProducts(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => searchProducts(value), 300);
   };
 
   const selectProduct = (product: ProductSearchResult) => {

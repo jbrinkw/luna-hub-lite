@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import {
   IonSpinner,
   IonCard,
@@ -13,10 +13,7 @@ import {
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
-
-// Cast needed: chefbyte schema types not yet generated
-const chefbyte = () => supabase.schema('chefbyte') as any;
+import { chefbyte } from '@/shared/supabase';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -84,8 +81,10 @@ export function ShoppingPage() {
   const purchased = useMemo(() => items.filter((i) => i.purchased), [items]);
 
   /* ---------------------------------------------------------------- */
-  /*  Product search                                                   */
+  /*  Product search (server-side ilike + 300ms debounce)              */
   /* ---------------------------------------------------------------- */
+
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
 
   const searchProducts = useCallback(
     async (text: string) => {
@@ -98,13 +97,12 @@ export function ShoppingPage() {
         .from('products')
         .select('product_id, name')
         .eq('user_id', user.id)
+        .ilike('name', `%${text}%`)
         .order('name');
-      // Client-side filter since ilike may not work with schema cast
-      const filtered = ((data ?? []) as ProductSearchResult[]).filter((p) =>
-        p.name.toLowerCase().includes(text.toLowerCase()),
-      );
-      setSearchResults(filtered);
-      setShowDropdown(filtered.length > 0);
+
+      const results = (data ?? []) as ProductSearchResult[];
+      setSearchResults(results);
+      setShowDropdown(results.length > 0);
     },
     [user],
   );
@@ -112,7 +110,8 @@ export function ShoppingPage() {
   const handleSearchInput = (value: string) => {
     setSearchText(value);
     setSelectedProductId(null);
-    searchProducts(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => searchProducts(value), 300);
   };
 
   const selectProduct = (product: ProductSearchResult) => {

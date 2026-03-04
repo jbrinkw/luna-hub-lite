@@ -8,7 +8,14 @@ if (!supabaseUrl || !supabaseAnonKey) {
   console.warn('Supabase environment variables not set');
 }
 
-export const supabase = createClient<Database>(
-  supabaseUrl || 'http://localhost:54321',
-  supabaseAnonKey || '',
-);
+export const supabase = createClient<Database>(supabaseUrl || 'http://localhost:54321', supabaseAnonKey || '');
+
+/**
+ * Schema helpers — single `as any` cast here instead of 12+ scattered ones.
+ * The chefbyte/coachbyte schemas aren't in our generated Database type yet,
+ * so we need the cast until db-types covers non-public schemas.
+ */
+
+export const chefbyte = () => supabase.schema('chefbyte') as any;
+
+export const coachbyte = () => supabase.schema('coachbyte') as any;

@@ -1,22 +1,13 @@
 import { useEffect, useState, useCallback } from 'react';
-import {
-  IonSpinner,
-  IonButton,
-  IonInput,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonTextarea,
-} from '@ionic/react';
+import { IonSpinner, IonButton, IonInput, IonTextarea } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { ModalOverlay } from '@/components/shared/ModalOverlay';
+import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
+import { chefbyte } from '@/shared/supabase';
 import { toDateStr, formatDateDisplay } from '@/shared/dates';
+import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { computeRecipeMacros } from './RecipesPage';
-
-// Cast needed: chefbyte schema types not yet generated
-const chefbyte = () => supabase.schema('chefbyte') as any;
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -260,15 +251,6 @@ export function MacroPage() {
   };
 
   /* ---------------------------------------------------------------- */
-  /*  Progress bar helper                                              */
-  /* ---------------------------------------------------------------- */
-
-  const pct = (val: number, goal: number): number => {
-    if (goal <= 0) return 0;
-    return Math.min(Math.round((val / goal) * 100), 100);
-  };
-
-  /* ---------------------------------------------------------------- */
   /*  Temp Item modal actions                                          */
   /* ---------------------------------------------------------------- */
 
@@ -368,7 +350,7 @@ export function MacroPage() {
   }
 
   const consumedTotals = macros?.consumed ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
-  const goals = macros?.goals ?? { calories: 2000, protein: 150, carbs: 250, fat: 65 };
+  const goals = macros?.goals ?? { ...DEFAULT_MACRO_GOALS };
 
   return (
     <ChefLayout title="Macros">
@@ -397,86 +379,37 @@ export function MacroPage() {
       {/* ============================================================ */}
       <div data-testid="macro-summary" style={{ marginBottom: '24px' }}>
         <h3>Day Summary</h3>
-
-        {/* Calories */}
-        <div data-testid="progress-calories" style={{ marginBottom: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9em' }}>
-            <span>Calories</span>
-            <span>
-              {consumedTotals.calories} / {goals.calories} ({pct(consumedTotals.calories, goals.calories)}%)
-            </span>
-          </div>
-          <div style={{ background: '#eee', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: `${pct(consumedTotals.calories, goals.calories)}%`,
-                height: '100%',
-                background: '#3880ff',
-                borderRadius: '4px',
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Protein */}
-        <div data-testid="progress-protein" style={{ marginBottom: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9em' }}>
-            <span>Protein</span>
-            <span>
-              {consumedTotals.protein}g / {goals.protein}g ({pct(consumedTotals.protein, goals.protein)}%)
-            </span>
-          </div>
-          <div style={{ background: '#eee', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: `${pct(consumedTotals.protein, goals.protein)}%`,
-                height: '100%',
-                background: '#2dd36f',
-                borderRadius: '4px',
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Carbs */}
-        <div data-testid="progress-carbs" style={{ marginBottom: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9em' }}>
-            <span>Carbs</span>
-            <span>
-              {consumedTotals.carbs}g / {goals.carbs}g ({pct(consumedTotals.carbs, goals.carbs)}%)
-            </span>
-          </div>
-          <div style={{ background: '#eee', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: `${pct(consumedTotals.carbs, goals.carbs)}%`,
-                height: '100%',
-                background: '#ffc409',
-                borderRadius: '4px',
-              }}
-            />
-          </div>
-        </div>
-
-        {/* Fats */}
-        <div data-testid="progress-fats" style={{ marginBottom: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9em' }}>
-            <span>Fats</span>
-            <span>
-              {consumedTotals.fat}g / {goals.fat}g ({pct(consumedTotals.fat, goals.fat)}%)
-            </span>
-          </div>
-          <div style={{ background: '#eee', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
-            <div
-              style={{
-                width: `${pct(consumedTotals.fat, goals.fat)}%`,
-                height: '100%',
-                background: '#eb445a',
-                borderRadius: '4px',
-              }}
-            />
-          </div>
-        </div>
+        <MacroProgressBar
+          label="Calories"
+          current={consumedTotals.calories}
+          goal={goals.calories}
+          color="#3880ff"
+          testId="progress-calories"
+        />
+        <MacroProgressBar
+          label="Protein"
+          current={consumedTotals.protein}
+          goal={goals.protein}
+          color="#2dd36f"
+          unit="g"
+          testId="progress-protein"
+        />
+        <MacroProgressBar
+          label="Carbs"
+          current={consumedTotals.carbs}
+          goal={goals.carbs}
+          color="#ffc409"
+          unit="g"
+          testId="progress-carbs"
+        />
+        <MacroProgressBar
+          label="Fats"
+          current={consumedTotals.fat}
+          goal={goals.fat}
+          color="#eb445a"
+          unit="g"
+          testId="progress-fats"
+        />
       </div>
 
       {/* ============================================================ */}
@@ -573,189 +506,132 @@ export function MacroPage() {
       {/* ============================================================ */}
       {/*  LOG TEMP ITEM MODAL                                          */}
       {/* ============================================================ */}
-      {showTempModal && (
-        <div
-          data-testid="temp-item-modal"
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-          }}
-        >
-          <IonCard style={{ width: '100%', maxWidth: '500px', margin: '16px' }}>
-            <IonCardHeader>
-              <IonCardTitle>Log Temp Item</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <div style={{ display: 'grid', gap: '8px' }}>
-                <IonInput
-                  label="Name"
-                  value={tempName}
-                  onIonInput={(e) => setTempName(e.detail.value ?? '')}
-                  data-testid="temp-name"
-                />
-                <IonInput
-                  label="Calories"
-                  type="number"
-                  value={tempCalories}
-                  onIonInput={(e) => setTempCalories(Number(e.detail.value) || 0)}
-                  data-testid="temp-calories"
-                />
-                <IonInput
-                  label="Protein"
-                  type="number"
-                  value={tempProtein}
-                  onIonInput={(e) => setTempProtein(Number(e.detail.value) || 0)}
-                  data-testid="temp-protein"
-                />
-                <IonInput
-                  label="Carbs"
-                  type="number"
-                  value={tempCarbs}
-                  onIonInput={(e) => setTempCarbs(Number(e.detail.value) || 0)}
-                  data-testid="temp-carbs"
-                />
-                <IonInput
-                  label="Fat"
-                  type="number"
-                  value={tempFat}
-                  onIonInput={(e) => setTempFat(Number(e.detail.value) || 0)}
-                  data-testid="temp-fat"
-                />
-              </div>
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton fill="clear" onClick={() => setShowTempModal(false)} data-testid="temp-cancel-btn">
-                  Cancel
-                </IonButton>
-                <IonButton onClick={saveTempItem} disabled={!tempName.trim()} data-testid="temp-save-btn">
-                  Log Item
-                </IonButton>
-              </div>
-            </IonCardContent>
-          </IonCard>
+      <ModalOverlay
+        isOpen={showTempModal}
+        onClose={() => setShowTempModal(false)}
+        title="Log Temp Item"
+        testId="temp-item-modal"
+      >
+        <div style={{ display: 'grid', gap: '8px' }}>
+          <IonInput
+            label="Name"
+            value={tempName}
+            onIonInput={(e) => setTempName(e.detail.value ?? '')}
+            data-testid="temp-name"
+          />
+          <IonInput
+            label="Calories"
+            type="number"
+            value={tempCalories}
+            onIonInput={(e) => setTempCalories(Number(e.detail.value) || 0)}
+            data-testid="temp-calories"
+          />
+          <IonInput
+            label="Protein"
+            type="number"
+            value={tempProtein}
+            onIonInput={(e) => setTempProtein(Number(e.detail.value) || 0)}
+            data-testid="temp-protein"
+          />
+          <IonInput
+            label="Carbs"
+            type="number"
+            value={tempCarbs}
+            onIonInput={(e) => setTempCarbs(Number(e.detail.value) || 0)}
+            data-testid="temp-carbs"
+          />
+          <IonInput
+            label="Fat"
+            type="number"
+            value={tempFat}
+            onIonInput={(e) => setTempFat(Number(e.detail.value) || 0)}
+            data-testid="temp-fat"
+          />
         </div>
-      )}
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
+          <IonButton fill="clear" onClick={() => setShowTempModal(false)} data-testid="temp-cancel-btn">
+            Cancel
+          </IonButton>
+          <IonButton onClick={saveTempItem} disabled={!tempName.trim()} data-testid="temp-save-btn">
+            Log Item
+          </IonButton>
+        </div>
+      </ModalOverlay>
 
       {/* ============================================================ */}
       {/*  TARGET MACROS MODAL                                          */}
       {/* ============================================================ */}
-      {showTargetModal && (
-        <div
-          data-testid="target-macros-modal"
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-          }}
-        >
-          <IonCard style={{ width: '100%', maxWidth: '500px', margin: '16px' }}>
-            <IonCardHeader>
-              <IonCardTitle>Target Macros</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <div style={{ display: 'grid', gap: '8px' }}>
-                <IonInput
-                  label="Protein (g)"
-                  type="number"
-                  value={targetProtein}
-                  onIonInput={(e) => setTargetProtein(Number(e.detail.value) || 0)}
-                  data-testid="target-protein"
-                />
-                <IonInput
-                  label="Carbs (g)"
-                  type="number"
-                  value={targetCarbs}
-                  onIonInput={(e) => setTargetCarbs(Number(e.detail.value) || 0)}
-                  data-testid="target-carbs"
-                />
-                <IonInput
-                  label="Fats (g)"
-                  type="number"
-                  value={targetFat}
-                  onIonInput={(e) => setTargetFat(Number(e.detail.value) || 0)}
-                  data-testid="target-fats"
-                />
-                <div
-                  data-testid="target-calories"
-                  style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}
-                >
-                  <strong>Calories (auto): </strong>
-                  {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
-                  <div style={{ fontSize: '0.8em', color: '#666' }}>(protein*4 + carbs*4 + fat*9)</div>
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton fill="clear" onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">
-                  Cancel
-                </IonButton>
-                <IonButton onClick={saveTargets} data-testid="target-save-btn">
-                  Save
-                </IonButton>
-              </div>
-            </IonCardContent>
-          </IonCard>
+      <ModalOverlay
+        isOpen={showTargetModal}
+        onClose={() => setShowTargetModal(false)}
+        title="Target Macros"
+        testId="target-macros-modal"
+      >
+        <div style={{ display: 'grid', gap: '8px' }}>
+          <IonInput
+            label="Protein (g)"
+            type="number"
+            value={targetProtein}
+            onIonInput={(e) => setTargetProtein(Number(e.detail.value) || 0)}
+            data-testid="target-protein"
+          />
+          <IonInput
+            label="Carbs (g)"
+            type="number"
+            value={targetCarbs}
+            onIonInput={(e) => setTargetCarbs(Number(e.detail.value) || 0)}
+            data-testid="target-carbs"
+          />
+          <IonInput
+            label="Fats (g)"
+            type="number"
+            value={targetFat}
+            onIonInput={(e) => setTargetFat(Number(e.detail.value) || 0)}
+            data-testid="target-fats"
+          />
+          <div data-testid="target-calories" style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}>
+            <strong>Calories (auto): </strong>
+            {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
+            <div style={{ fontSize: '0.8em', color: '#666' }}>(protein*4 + carbs*4 + fat*9)</div>
+          </div>
         </div>
-      )}
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
+          <IonButton fill="clear" onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">
+            Cancel
+          </IonButton>
+          <IonButton onClick={saveTargets} data-testid="target-save-btn">
+            Save
+          </IonButton>
+        </div>
+      </ModalOverlay>
 
       {/* ============================================================ */}
       {/*  TASTE PROFILE MODAL                                          */}
       {/* ============================================================ */}
-      {showTasteModal && (
-        <div
-          data-testid="taste-modal"
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 100,
-          }}
-        >
-          <IonCard style={{ width: '100%', maxWidth: '500px', margin: '16px' }}>
-            <IonCardHeader>
-              <IonCardTitle>Taste Profile</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '12px' }}>
-                Dietary preferences and notes for recipe filtering and AI suggestions:
-              </p>
-              <IonTextarea
-                value={tasteProfile}
-                onIonInput={(e) => setTasteProfile(e.detail.value ?? '')}
-                data-testid="taste-textarea"
-                rows={5}
-              />
-              <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-                <IonButton fill="clear" onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">
-                  Cancel
-                </IonButton>
-                <IonButton onClick={saveTasteProfile} data-testid="taste-save-btn">
-                  Save
-                </IonButton>
-              </div>
-            </IonCardContent>
-          </IonCard>
+      <ModalOverlay
+        isOpen={showTasteModal}
+        onClose={() => setShowTasteModal(false)}
+        title="Taste Profile"
+        testId="taste-modal"
+      >
+        <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '12px' }}>
+          Dietary preferences and notes for recipe filtering and AI suggestions:
+        </p>
+        <IonTextarea
+          value={tasteProfile}
+          onIonInput={(e) => setTasteProfile(e.detail.value ?? '')}
+          data-testid="taste-textarea"
+          rows={5}
+        />
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
+          <IonButton fill="clear" onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">
+            Cancel
+          </IonButton>
+          <IonButton onClick={saveTasteProfile} data-testid="taste-save-btn">
+            Save
+          </IonButton>
         </div>
-      )}
+      </ModalOverlay>
     </ChefLayout>
   );
 }

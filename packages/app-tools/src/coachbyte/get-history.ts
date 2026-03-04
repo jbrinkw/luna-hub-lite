@@ -13,9 +13,11 @@ export const getHistory: ToolDefinition = {
   handler: async (args, ctx) => {
     const days = args.days ?? 7;
 
+    // Schema cast needed: coachbyte tables aren't in generated Database types
+    const coachbyte = ctx.supabase.schema('coachbyte') as any;
+
     // Fetch recent plans
-    const { data: plans, error: plansError } = await ctx.supabase
-      .schema('coachbyte')
+    const { data: plans, error: plansError } = await coachbyte
       .from('daily_plans')
       .select('plan_id, plan_date, summary, logical_date')
       .eq('user_id', ctx.userId)
@@ -28,8 +30,7 @@ export const getHistory: ToolDefinition = {
     const planIds = plans.map((p: any) => p.plan_id);
 
     // Fetch all completed sets for these plans
-    const { data: completedSets, error: csError } = await ctx.supabase
-      .schema('coachbyte')
+    const { data: completedSets, error: csError } = await coachbyte
       .from('completed_sets')
       .select('completed_set_id, plan_id, exercise_id, actual_reps, actual_load, completed_at, exercises(name)')
       .in('plan_id', planIds)
