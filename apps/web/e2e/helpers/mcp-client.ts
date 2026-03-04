@@ -141,6 +141,13 @@ export class McpE2EClient {
   }
 
   /**
+   * List all available tools. Returns the tools/list response.
+   */
+  async listTools(): Promise<{ tools: Array<{ name: string; description?: string; inputSchema?: any }> }> {
+    return this.sendRpc('tools/list', {});
+  }
+
+  /**
    * Disconnect from the SSE stream. Safe to call multiple times.
    */
   async disconnect(): Promise<void> {

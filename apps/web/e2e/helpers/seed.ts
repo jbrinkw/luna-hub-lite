@@ -330,6 +330,101 @@ export async function seedCoachByteData(client: SupabaseClient, userId: string):
 }
 
 // ---------------------------------------------------------------------------
+// seedMealEntry — add a meal plan entry for a given date
+// ---------------------------------------------------------------------------
+
+export async function seedMealEntry(
+  client: SupabaseClient,
+  userId: string,
+  recipeId: string,
+  date: string,
+  options?: { servings?: number; mealType?: string; isMealPrep?: boolean },
+): Promise<string> {
+  const chef = (client as any).schema('chefbyte');
+  const { data, error } = await chef
+    .from('meal_plan_entries')
+    .insert({
+      user_id: userId,
+      recipe_id: recipeId,
+      plan_date: date,
+      servings: options?.servings ?? 1,
+      meal_type: options?.mealType ?? 'lunch',
+      is_meal_prep: options?.isMealPrep ?? false,
+    })
+    .select('meal_id')
+    .single();
+  if (error) throw new Error(`Failed to seed meal entry: ${error.message}`);
+  return data.meal_id;
+}
+
+// ---------------------------------------------------------------------------
+// seedCompletedSet — bootstrap plan + complete a set programmatically
+// ---------------------------------------------------------------------------
+
+export async function seedCompletedSet(
+  client: SupabaseClient,
+  userId: string,
+  date: string,
+): Promise<{ planId: string; setId: string }> {
+  const coach = (client as any).schema('coachbyte');
+
+  // Ensure daily plan exists
+  const { data: plan, error: planErr } = await coach.rpc('ensure_daily_plan', { p_day: date });
+  if (planErr) throw new Error(`Failed to ensure daily plan: ${planErr.message}`);
+  const planId = plan.plan_id;
+
+  // Complete the next set
+  const { data: setResult, error: setErr } = await coach.rpc('complete_next_set', {
+    p_plan_id: planId,
+    p_reps: 5,
+    p_load: 225,
+  });
+  if (setErr) throw new Error(`Failed to complete set: ${setErr.message}`);
+
+  return { planId, setId: setResult.completed_set_id };
+}
+
+// ---------------------------------------------------------------------------
+// seedShoppingItems — add items to shopping list
+// ---------------------------------------------------------------------------
+
+export async function seedShoppingItems(
+  client: SupabaseClient,
+  userId: string,
+  items: Array<{ productId: string; qtyContainers: number; purchased?: boolean }>,
+): Promise<string[]> {
+  const chef = (client as any).schema('chefbyte');
+  const rows = items.map((item) => ({
+    user_id: userId,
+    product_id: item.productId,
+    qty_containers: item.qtyContainers,
+    purchased: item.purchased ?? false,
+  }));
+
+  const { data, error } = await chef.from('shopping_list').insert(rows).select('cart_item_id');
+  if (error) throw new Error(`Failed to seed shopping items: ${error.message}`);
+  return data.map((d: any) => d.cart_item_id);
+}
+
+// ---------------------------------------------------------------------------
+// seedWalmartLinks — set walmart_link on products
+// ---------------------------------------------------------------------------
+
+export async function seedWalmartLinks(
+  client: SupabaseClient,
+  productMap: Record<string, string>,
+  links: Record<string, string>, // product name -> walmart URL
+): Promise<void> {
+  const chef = (client as any).schema('chefbyte');
+  for (const [name, url] of Object.entries(links)) {
+    const productId = productMap[name];
+    if (!productId) throw new Error(`Product "${name}" not in productMap`);
+    const { error } = await chef.from('products').update({ walmart_link: url }).eq('product_id', productId);
+    if (error) throw new Error(`Failed to set walmart link for ${name}: ${error.message}`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
@@ -338,4 +433,9 @@ function futureDate(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
   return d.toISOString().split('T')[0];
+}
+
+/** Returns today's date as ISO date string */
+export function todayStr(): string {
+  return new Date().toISOString().split('T')[0];
 }
