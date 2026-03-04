@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback } from 'react';
 import { IonSpinner, IonButton, IonInput, IonText } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { supabase, chefbyte } from '@/shared/supabase';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -81,15 +81,79 @@ export function WalmartPage() {
 
   useEffect(() => {
     // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     loadData();
   }, [loadData]);
+
+  const [error, setError] = useState<string | null>(null);
+
+  /* ---------------------------------------------------------------- */
+  /*  Refresh All Prices                                               */
+  /* ---------------------------------------------------------------- */
+
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshProgress, setRefreshProgress] = useState('');
+
+  const refreshAllPrices = async () => {
+    if (!userId) return;
+    setRefreshing(true);
+    setError(null);
+
+    try {
+      // Fetch all products with a walmart_link (excluding NOT_ON_WALMART sentinel)
+      const { data: products } = await chefbyte()
+        .from('products')
+        .select('product_id, name, walmart_link')
+        .eq('user_id', userId)
+        .not('walmart_link', 'is', null)
+        .neq('walmart_link', 'NOT_ON_WALMART');
+
+      const toRefresh = (products ?? []) as Array<{
+        product_id: string;
+        name: string;
+        walmart_link: string;
+      }>;
+
+      if (toRefresh.length === 0) {
+        setRefreshing(false);
+        return;
+      }
+
+      let done = 0;
+      for (const p of toRefresh) {
+        setRefreshProgress(`${done + 1}/${toRefresh.length}`);
+
+        const { data, error: fnError } = await supabase.functions.invoke('walmart-scrape', {
+          body: { search_term: p.name },
+        });
+
+        if (!fnError && data?.results?.length > 0) {
+          // Try to find a result matching the stored walmart_link
+          const match = data.results.find(
+            (r: { url: string }) =>
+              r.url && p.walmart_link && r.url.replace(/\?.*$/, '') === p.walmart_link.replace(/\?.*$/, ''),
+          );
+          const price = match?.price ?? data.results[0]?.price;
+
+          if (price != null) {
+            await chefbyte().from('products').update({ price }).eq('product_id', p.product_id).eq('user_id', userId);
+          }
+        }
+        done++;
+      }
+
+      await loadData();
+    } catch {
+      setError('Failed to refresh prices');
+    } finally {
+      setRefreshing(false);
+      setRefreshProgress('');
+    }
+  };
 
   /* ---------------------------------------------------------------- */
   /*  Actions                                                          */
   /* ---------------------------------------------------------------- */
-
-  const [error, setError] = useState<string | null>(null);
 
   const markNotOnWalmart = async (productId: string) => {
     if (!user) return;
@@ -267,10 +331,16 @@ export function WalmartPage() {
       {/* ============================================================ */}
       {/*  REFRESH ALL PRICES                                           */}
       {/* ============================================================ */}
-      <IonButton data-testid="refresh-all-btn" disabled title="Coming soon">
-        Refresh All Prices
+      <IonButton data-testid="refresh-all-btn" onClick={refreshAllPrices} disabled={refreshing}>
+        {refreshing ? (
+          <>
+            <IonSpinner name="crescent" style={{ marginRight: '8px' }} />
+            Refreshing {refreshProgress}
+          </>
+        ) : (
+          'Refresh All Prices'
+        )}
       </IonButton>
-      <p style={{ fontSize: '0.8em', color: '#666', marginTop: '4px' }}>Bulk price refresh coming soon</p>
     </ChefLayout>
   );
 }

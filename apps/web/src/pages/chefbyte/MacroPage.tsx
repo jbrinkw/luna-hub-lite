@@ -286,6 +286,29 @@ export function MacroPage() {
   };
 
   /* ---------------------------------------------------------------- */
+  /*  Delete consumed item                                             */
+  /* ---------------------------------------------------------------- */
+
+  const deleteConsumedItem = async (item: ConsumedItem) => {
+    if (item.source === 'LiquidTrack') return; // IoT data, not user-deletable
+    setMutationError(null);
+
+    let error;
+    if (item.source === 'Meal Plan') {
+      ({ error } = await chefbyte().from('food_logs').delete().eq('log_id', item.id));
+    } else if (item.source === 'Temp Item') {
+      ({ error } = await chefbyte().from('temp_items').delete().eq('temp_id', item.id));
+    }
+
+    if (error) {
+      setMutationError(error.message);
+      return;
+    }
+
+    await loadData();
+  };
+
+  /* ---------------------------------------------------------------- */
   /*  Target Macros modal actions                                      */
   /* ---------------------------------------------------------------- */
 
@@ -453,6 +476,7 @@ export function MacroPage() {
                 <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>P</th>
                 <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>C</th>
                 <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>F</th>
+                <th style={{ padding: '8px', borderBottom: '1px solid #ddd', width: '40px' }}></th>
               </tr>
             </thead>
             <tbody>
@@ -468,6 +492,20 @@ export function MacroPage() {
                   </td>
                   <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.carbs}g</td>
                   <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.fat}g</td>
+                  <td style={{ padding: '4px', borderBottom: '1px solid #eee', textAlign: 'center' }}>
+                    {item.source !== 'LiquidTrack' && (
+                      <IonButton
+                        fill="clear"
+                        color="danger"
+                        size="small"
+                        data-testid={`delete-consumed-${item.id}`}
+                        onClick={() => deleteConsumedItem(item)}
+                        style={{ '--padding-start': '4px', '--padding-end': '4px', minHeight: 'auto' }}
+                      >
+                        x
+                      </IonButton>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

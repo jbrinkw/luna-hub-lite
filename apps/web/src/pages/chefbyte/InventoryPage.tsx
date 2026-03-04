@@ -12,8 +12,10 @@ import {
   IonLabel,
   IonAlert,
   IonText,
+  IonInput,
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
@@ -61,6 +63,11 @@ export function InventoryPage() {
   const [lots, setLots] = useState<StockLot[]>([]);
   const [locationId, setLocationId] = useState<string | null>(null);
   const [consumeAllTarget, setConsumeAllTarget] = useState<string | null>(null);
+
+  /* ---- Add-stock modal state ---- */
+  const [addingStockFor, setAddingStockFor] = useState<string | null>(null);
+  const [addStockQty, setAddStockQty] = useState<number>(1);
+  const [addStockExpiry, setAddStockExpiry] = useState<string>('');
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -158,19 +165,38 @@ export function InventoryPage() {
 
   const [error, setError] = useState<string | null>(null);
 
-  const addStock = async (productId: string, qtyContainers: number) => {
+  const openAddStockModal = (productId: string, defaultQty: number = 1) => {
+    setAddingStockFor(productId);
+    setAddStockQty(defaultQty);
+    setAddStockExpiry('');
+  };
+
+  const closeAddStockModal = () => {
+    setAddingStockFor(null);
+    setAddStockQty(1);
+    setAddStockExpiry('');
+  };
+
+  const addStock = async (productId: string, qtyContainers: number, expiresOn?: string | null) => {
     if (!user || !locationId) return;
 
-    // Check for existing lot with same product/location/no-expiry
-    const { data: existing } = await chefbyte()
+    const resolvedExpiry = expiresOn || null;
+
+    // Build query to find existing lot with same product/location/expiry
+    let query = chefbyte()
       .from('stock_lots')
       .select('lot_id, qty_containers')
       .eq('user_id', user.id)
       .eq('product_id', productId)
-      .eq('location_id', locationId)
-      .is('expires_on', null)
-      .limit(1)
-      .maybeSingle();
+      .eq('location_id', locationId);
+
+    if (resolvedExpiry) {
+      query = query.eq('expires_on', resolvedExpiry);
+    } else {
+      query = query.is('expires_on', null);
+    }
+
+    const { data: existing } = await query.limit(1).maybeSingle();
 
     if (existing) {
       // Merge into existing lot
@@ -189,7 +215,7 @@ export function InventoryPage() {
         product_id: productId,
         location_id: locationId,
         qty_containers: qtyContainers,
-        expires_on: null,
+        expires_on: resolvedExpiry,
       });
       if (err) {
         setError(err.message);
@@ -199,6 +225,12 @@ export function InventoryPage() {
 
     setError(null);
     await loadData();
+  };
+
+  const confirmAddStock = async () => {
+    if (!addingStockFor || addStockQty <= 0) return;
+    await addStock(addingStockFor, addStockQty, addStockExpiry || null);
+    closeAddStockModal();
   };
 
   const consumeStock = async (productId: string, qty: number, unit: 'container' | 'serving') => {
@@ -332,7 +364,7 @@ export function InventoryPage() {
                   <IonButton
                     size="small"
                     color="success"
-                    onClick={() => addStock(product.product_id, 1)}
+                    onClick={() => openAddStockModal(product.product_id, 1)}
                     data-testid={`add-ctn-${product.product_id}`}
                   >
                     +1 Ctn
@@ -349,7 +381,7 @@ export function InventoryPage() {
                     size="small"
                     color="success"
                     fill="outline"
-                    onClick={() => addStock(product.product_id, 1 / Number(product.servings_per_container))}
+                    onClick={() => openAddStockModal(product.product_id, 1 / Number(product.servings_per_container))}
                     data-testid={`add-srv-${product.product_id}`}
                   >
                     +1 Srv
@@ -414,6 +446,50 @@ export function InventoryPage() {
           )}
         </div>
       )}
+
+      {/* ========================================================== */}
+      {/*  ADD STOCK MODAL                                              */}
+      {/* ========================================================== */}
+      <ModalOverlay
+        isOpen={addingStockFor !== null}
+        onClose={closeAddStockModal}
+        title={`Add Stock — ${products.find((p) => p.product_id === addingStockFor)?.name ?? ''}`}
+        testId="add-stock-modal"
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          <div>
+            <label style={{ fontSize: '0.85em', color: '#888' }}>Quantity (containers)</label>
+            <IonInput
+              type="number"
+              value={addStockQty}
+              min="0.001"
+              step={'0.1'}
+              onIonInput={(e) => {
+                const val = parseFloat(e.detail.value ?? '');
+                if (!isNaN(val)) setAddStockQty(val);
+              }}
+              data-testid="add-stock-qty"
+            />
+          </div>
+          <div>
+            <label style={{ fontSize: '0.85em', color: '#888' }}>Expiry Date (optional)</label>
+            <IonInput
+              type="date"
+              value={addStockExpiry}
+              onIonInput={(e) => setAddStockExpiry(e.detail.value ?? '')}
+              data-testid="add-stock-expiry"
+            />
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+            <IonButton fill="clear" onClick={closeAddStockModal} data-testid="add-stock-cancel">
+              Cancel
+            </IonButton>
+            <IonButton onClick={confirmAddStock} disabled={addStockQty <= 0} data-testid="add-stock-confirm">
+              Add
+            </IonButton>
+          </div>
+        </div>
+      </ModalOverlay>
 
       {/* Consume All confirmation */}
       <IonAlert

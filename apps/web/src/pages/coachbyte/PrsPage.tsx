@@ -11,7 +11,7 @@ import {
 } from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase } from '@/shared/supabase';
+import { supabase, coachbyte } from '@/shared/supabase';
 import { WEIGHT_UNIT } from '@/shared/constants';
 
 interface ExercisePR {
@@ -104,28 +104,61 @@ export function PrsPage() {
 
   useEffect(() => {
     if (!user) return;
-    supabase
-      .schema('coachbyte')
-      .from('exercises')
-      .select('exercise_id, name')
-      .or(`user_id.is.null,user_id.eq.${user.id}`)
-      .order('name')
-      .then(({ data }) => {
-        setAllExercises((data ?? []) as any);
-        setTrackedExercises((data ?? []) as any);
-      });
+
+    const loadExercisesAndSettings = async () => {
+      // Fetch all exercises and saved PR tracking preference in parallel
+      const [exercisesRes, settingsRes] = await Promise.all([
+        supabase
+          .schema('coachbyte')
+          .from('exercises')
+          .select('exercise_id, name')
+          .or(`user_id.is.null,user_id.eq.${user.id}`)
+          .order('name'),
+        coachbyte().from('user_settings').select('pr_tracked_exercise_ids').eq('user_id', user.id).maybeSingle(),
+      ]);
+
+      const exercises = (exercisesRes.data ?? []) as { exercise_id: string; name: string }[];
+      setAllExercises(exercises);
+
+      // If user has saved tracked exercise IDs, filter to those; otherwise default to all
+      const savedIds: string[] | null = settingsRes.data?.pr_tracked_exercise_ids ?? null;
+      if (savedIds && Array.isArray(savedIds)) {
+        const savedSet = new Set(savedIds);
+        setTrackedExercises(exercises.filter((e) => savedSet.has(e.exercise_id)));
+      } else {
+        setTrackedExercises(exercises);
+      }
+    };
+
+    // Async data fetching with setState is the standard pattern for this use case
+
+    loadExercisesAndSettings();
   }, [user]);
+
+  const saveTrackedExercises = useCallback(
+    async (ids: string[]) => {
+      if (!user) return;
+      await coachbyte().from('user_settings').update({ pr_tracked_exercise_ids: ids }).eq('user_id', user.id);
+    },
+    [user],
+  );
 
   const addTrackedExercise = (exerciseId: string) => {
     const ex = allExercises.find((e) => e.exercise_id === exerciseId);
     if (ex && !trackedExercises.find((t) => t.exercise_id === exerciseId)) {
-      setTrackedExercises((prev) => [...prev, ex]);
+      const updated = [...trackedExercises, ex];
+      setTrackedExercises(updated);
+      // Fire-and-forget persist to DB
+      void saveTrackedExercises(updated.map((e) => e.exercise_id));
     }
     setSearchText('');
   };
 
   const removeTrackedExercise = (exerciseId: string) => {
-    setTrackedExercises((prev) => prev.filter((e) => e.exercise_id !== exerciseId));
+    const updated = trackedExercises.filter((e) => e.exercise_id !== exerciseId);
+    setTrackedExercises(updated);
+    // Fire-and-forget persist to DB
+    void saveTrackedExercises(updated.map((e) => e.exercise_id));
   };
 
   const trackedIds = new Set(trackedExercises.map((e) => e.exercise_id));
