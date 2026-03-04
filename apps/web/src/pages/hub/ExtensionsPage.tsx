@@ -73,28 +73,17 @@ export function ExtensionsPage() {
     await supabase
       .schema('hub')
       .from('extension_settings')
-      .upsert(
-        { user_id: user.id, extension_name: extName, enabled },
-        { onConflict: 'user_id,extension_name' },
-      );
+      .upsert({ user_id: user.id, extension_name: extName, enabled }, { onConflict: 'user_id,extension_name' });
   };
 
   const handleSaveCredentials = async (extName: string, credentials: Record<string, string>) => {
     if (!user) return { error: 'Not authenticated' };
 
-    // For MVP, store credentials as JSON string (Vault integration deferred)
-    const { error } = await supabase
-      .schema('hub')
-      .from('extension_settings')
-      .upsert(
-        {
-          user_id: user.id,
-          extension_name: extName,
-          credentials_encrypted: JSON.stringify(credentials),
-          enabled: states[extName]?.enabled ?? false,
-        },
-        { onConflict: 'user_id,extension_name' },
-      );
+    // Save credentials via server-side encrypted RPC (pgp_sym_encrypt)
+    const { error } = await supabase.schema('hub').rpc('save_extension_credentials', {
+      p_extension_name: extName,
+      p_credentials_json: JSON.stringify(credentials),
+    });
 
     if (error) return { error: error.message };
 

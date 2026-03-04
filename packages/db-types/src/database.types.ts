@@ -912,6 +912,18 @@ export type Database = {
     Functions: {
       activate_app: { Args: { p_app_name: string }; Returns: undefined }
       deactivate_app: { Args: { p_app_name: string }; Returns: undefined }
+      get_extension_credentials: {
+        Args: { p_extension_name: string }
+        Returns: string
+      }
+      get_extension_credentials_admin: {
+        Args: { p_user_id: string; p_extension_name: string }
+        Returns: string
+      }
+      save_extension_credentials: {
+        Args: { p_extension_name: string; p_credentials_json: string }
+        Returns: undefined
+      }
     }
     Enums: {
       [_ in never]: never
@@ -956,6 +968,14 @@ export type Database = {
       }
       deactivate_app: {
         Args: { p_app_name: string; p_user_id: string }
+        Returns: undefined
+      }
+      get_extension_credentials: {
+        Args: { p_user_id: string; p_extension_name: string }
+        Returns: string
+      }
+      save_extension_credentials: {
+        Args: { p_user_id: string; p_extension_name: string; p_credentials_json: string }
         Returns: undefined
       }
       ensure_daily_plan: {
