@@ -263,6 +263,7 @@ export function PrsPage() {
               value={searchText}
               onIonInput={(e) => setSearchText(e.detail.value ?? '')}
               placeholder="Enter exercise name..."
+              aria-label="Search exercises to track"
               data-testid="pr-search-input"
             />
             {searchResults.length > 0 && (

@@ -222,6 +222,7 @@ export function SplitPage() {
                       <td>
                         <IonSelect
                           value={set.exercise_id}
+                          aria-label="Exercise"
                           onIonChange={(e) => {
                             const ex = exercises.find((ex) => ex.exercise_id === e.detail.value);
                             updateSet(day.weekday, i, 'exercise_id', e.detail.value);
@@ -241,6 +242,7 @@ export function SplitPage() {
                         <IonInput
                           type="number"
                           min="0"
+                          aria-label="Target reps"
                           value={set.target_reps}
                           onIonInput={(e) =>
                             updateSet(day.weekday, i, 'target_reps', e.detail.value ? Number(e.detail.value) : null)
@@ -254,6 +256,7 @@ export function SplitPage() {
                           <IonInput
                             type="number"
                             min="0"
+                            aria-label="Load percentage"
                             value={set.target_load_percentage}
                             onIonInput={(e) =>
                               updateSet(
@@ -270,6 +273,7 @@ export function SplitPage() {
                           <IonInput
                             type="number"
                             min="0"
+                            aria-label="Target load"
                             value={set.target_load}
                             onIonInput={(e) =>
                               updateSet(day.weekday, i, 'target_load', e.detail.value ? Number(e.detail.value) : null)
@@ -282,6 +286,7 @@ export function SplitPage() {
                       <td>
                         <IonCheckbox
                           checked={set.target_load_percentage !== null}
+                          aria-label="Use relative load percentage"
                           onIonChange={(e) => {
                             if (e.detail.checked) {
                               updateSet(day.weekday, i, 'target_load_percentage', set.target_load_percentage ?? 80);
@@ -297,6 +302,7 @@ export function SplitPage() {
                         <IonInput
                           type="number"
                           min="0"
+                          aria-label="Rest seconds"
                           value={set.rest_seconds}
                           onIonInput={(e) =>
                             updateSet(day.weekday, i, 'rest_seconds', e.detail.value ? Number(e.detail.value) : 90)
@@ -312,6 +318,7 @@ export function SplitPage() {
                           color="danger"
                           onClick={() => removeSet(day.weekday, i)}
                           data-testid={`day-${day.weekday}-set-${i}-delete`}
+                          aria-label={`Remove set ${i + 1} from ${WEEKDAYS[day.weekday]}`}
                         >
                           ✕
                         </IonButton>

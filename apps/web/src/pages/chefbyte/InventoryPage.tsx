@@ -517,6 +517,7 @@ export function InventoryPage() {
             <label style={{ fontSize: '0.85em', color: '#888' }}>Quantity (containers)</label>
             <IonInput
               type="number"
+              aria-label="Quantity in containers"
               value={addStockQty}
               min="0.001"
               step={'0.1'}
@@ -531,6 +532,7 @@ export function InventoryPage() {
             <label style={{ fontSize: '0.85em', color: '#888' }}>Expiry Date (optional)</label>
             <IonInput
               type="date"
+              aria-label="Expiry date"
               value={addStockExpiry}
               onIonInput={(e) => setAddStockExpiry(e.detail.value ?? '')}
               data-testid="add-stock-expiry"

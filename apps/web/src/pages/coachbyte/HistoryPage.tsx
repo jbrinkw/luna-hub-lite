@@ -176,6 +176,7 @@ export function HistoryPage() {
         <IonSelect
           value={exerciseFilter}
           disabled
+          aria-label="Filter by exercise"
           title="Coming soon"
           interface="popover"
           data-testid="exercise-filter"
@@ -227,6 +228,11 @@ export function HistoryPage() {
                       fill="clear"
                       onClick={() => loadDetail(day.plan_id)}
                       data-testid={`expand-${day.plan_date}`}
+                      aria-label={
+                        expandedPlan === day.plan_id
+                          ? `Collapse ${day.plan_date} details`
+                          : `Expand ${day.plan_date} details`
+                      }
                     >
                       {expandedPlan === day.plan_id ? '▼' : '▶'}
                     </IonButton>

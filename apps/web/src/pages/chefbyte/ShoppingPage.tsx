@@ -444,6 +444,7 @@ export function ShoppingPage() {
                   <IonCheckbox
                     checked={item.purchased}
                     onIonChange={() => togglePurchased(item)}
+                    aria-label={`Mark ${item.products?.name ?? 'Unknown Product'} as purchased`}
                     data-testid={`check-${item.cart_item_id}`}
                   />
                   <span style={{ flex: 1 }}>{item.products?.name ?? 'Unknown Product'}</span>
@@ -498,6 +499,7 @@ export function ShoppingPage() {
                   <IonCheckbox
                     checked={true}
                     onIonChange={() => togglePurchased(item)}
+                    aria-label={`Unmark ${item.products?.name ?? 'Unknown Product'} as purchased`}
                     data-testid={`check-${item.cart_item_id}`}
                   />
                   <span style={{ flex: 1, textDecoration: 'line-through', color: '#888' }}>

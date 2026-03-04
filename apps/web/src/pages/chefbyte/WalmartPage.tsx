@@ -305,6 +305,7 @@ export function WalmartPage() {
                   <IonInput
                     type="number"
                     min="0"
+                    aria-label={`Price for ${product.name}`}
                     value={priceInputs[product.product_id] ?? ''}
                     onIonInput={(e) => {
                       setPriceInputs((prev) => ({

@@ -174,6 +174,7 @@ export function RecipesPage() {
       <div data-testid="recipes-filters" style={{ marginBottom: '16px' }}>
         <IonInput
           placeholder="Search recipes..."
+          aria-label="Search recipes"
           value={searchText}
           onIonInput={(e) => setSearchText(e.detail.value ?? '')}
           data-testid="recipe-search"

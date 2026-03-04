@@ -13,25 +13,25 @@ export function ModuleSwitcher() {
   const navigate = useNavigate();
   const { activations } = useAppContext();
 
-  const modules = allModules.filter(
-    (m) => m.appName === null || activations[m.appName],
-  );
+  const modules = allModules.filter((m) => m.appName === null || activations[m.appName]);
 
   const current = modules.find((m) => location.pathname.startsWith(m.path))?.path ?? '/hub';
 
   return (
-    <IonSegment
-      value={current}
-      onIonChange={(e) => {
-        const val = e.detail.value as string;
-        if (val && val !== current) navigate(val);
-      }}
-    >
-      {modules.map((m) => (
-        <IonSegmentButton key={m.path} value={m.path}>
-          <IonLabel>{m.label}</IonLabel>
-        </IonSegmentButton>
-      ))}
-    </IonSegment>
+    <nav aria-label="Module switcher">
+      <IonSegment
+        value={current}
+        onIonChange={(e) => {
+          const val = e.detail.value as string;
+          if (val && val !== current) navigate(val);
+        }}
+      >
+        {modules.map((m) => (
+          <IonSegmentButton key={m.path} value={m.path}>
+            <IonLabel>{m.label}</IonLabel>
+          </IonSegmentButton>
+        ))}
+      </IonSegment>
+    </nav>
   );
 }

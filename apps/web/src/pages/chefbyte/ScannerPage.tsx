@@ -485,6 +485,7 @@ export function ScannerPage() {
             data-testid="barcode-input"
             type="text"
             placeholder="Scan or type barcode..."
+            aria-label="Barcode"
             autoFocus
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
@@ -567,6 +568,7 @@ export function ScannerPage() {
                       e.stopPropagation();
                       undoScan(item);
                     }}
+                    aria-label={`Undo and remove ${item.name}`}
                     style={{
                       background: 'none',
                       border: 'none',
@@ -661,6 +663,7 @@ export function ScannerPage() {
                     data-testid={`nut-${f.key}`}
                     type="text"
                     inputMode="decimal"
+                    aria-label={f.label}
                     value={nutrition[f.key]}
                     onChange={(e) => handleNutritionChange(f.key, e.target.value)}
                     style={{
@@ -691,6 +694,7 @@ export function ScannerPage() {
                 key={key}
                 data-testid={`key-${key === '←' ? 'backspace' : key}`}
                 onClick={() => handleKeypadClick(key)}
+                aria-label={key === '←' ? 'Backspace' : key === '.' ? 'Decimal point' : key}
                 style={{
                   padding: '14px',
                   border: '1px solid #ddd',

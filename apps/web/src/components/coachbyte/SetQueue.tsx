@@ -184,6 +184,7 @@ export function SetQueue({
                       <IonInput
                         type="number"
                         min="0"
+                        aria-label={`Reps for set ${set.order}`}
                         value={set.target_reps}
                         onIonBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;
@@ -197,6 +198,7 @@ export function SetQueue({
                       <IonInput
                         type="number"
                         min="0"
+                        aria-label={`Load for set ${set.order}`}
                         value={set.target_load_percentage ?? set.target_load}
                         onIonBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;
@@ -212,6 +214,7 @@ export function SetQueue({
                       <IonInput
                         type="number"
                         min="0"
+                        aria-label={`Rest seconds for set ${set.order}`}
                         value={set.rest_seconds}
                         onIonBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;

@@ -15,6 +15,7 @@ import {
   IonSelectOption,
   IonAlert,
   IonText,
+  IonItem,
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -65,7 +66,7 @@ interface LiquidTrackEvent {
   is_refill: boolean;
 }
 
-type Tab = 'products' | 'liquidtrack';
+type Tab = 'products' | 'liquidtrack' | 'locations';
 
 /* ------------------------------------------------------------------ */
 /*  Blank-product template for Add Product form                       */
@@ -115,6 +116,13 @@ export function SettingsPage() {
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  /* ---- Locations state ---- */
+  const [locations, setLocations] = useState<
+    { location_id: string; user_id: string; name: string; created_at: string }[]
+  >([]);
+  const [newLocationName, setNewLocationName] = useState('');
+  const [deleteLocationTarget, setDeleteLocationTarget] = useState<string | null>(null);
+
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
   /* ---------------------------------------------------------------- */
@@ -135,12 +143,19 @@ export function SettingsPage() {
     setDevices((data ?? []) as LiquidTrackDevice[]);
   }, [user]);
 
+  const loadLocations = useCallback(async () => {
+    if (!user) return;
+    const { data } = await chefbyte().from('locations').select('*').eq('user_id', user.id).order('name');
+    setLocations((data ?? []) as { location_id: string; user_id: string; name: string; created_at: string }[]);
+  }, [user]);
+
   useEffect(() => {
     // Async data fetching with setState is the standard pattern for this use case
     /* eslint-disable react-hooks/set-state-in-effect */
     loadProducts();
     loadDevices();
-  }, [loadProducts, loadDevices]);
+    loadLocations();
+  }, [loadProducts, loadDevices, loadLocations]);
 
   /* ---------------------------------------------------------------- */
   /*  Product CRUD                                                     */
@@ -256,6 +271,45 @@ export function SettingsPage() {
       .limit(50);
     setDeviceEvents((data ?? []) as LiquidTrackEvent[]);
     setExpandedDeviceId(deviceId);
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Location actions                                                 */
+  /* ---------------------------------------------------------------- */
+
+  const addLocation = async () => {
+    if (!user || !newLocationName.trim()) return;
+    setError(null);
+    const { error: insertErr } = await chefbyte()
+      .from('locations')
+      .insert({ user_id: user.id, name: newLocationName.trim() });
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
+    setNewLocationName('');
+    await loadLocations();
+  };
+
+  const deleteLocation = async (locationId: string) => {
+    setError(null);
+    const { count } = await chefbyte()
+      .from('stock_lots')
+      .select('*', { count: 'exact', head: true })
+      .eq('location_id', locationId);
+    if (count && count > 0) {
+      setError('Cannot delete location with existing stock. Move stock first.');
+      setDeleteLocationTarget(null);
+      return;
+    }
+    const { error: deleteErr } = await chefbyte().from('locations').delete().eq('location_id', locationId);
+    if (deleteErr) {
+      setError(deleteErr.message);
+      setDeleteLocationTarget(null);
+      return;
+    }
+    setDeleteLocationTarget(null);
+    await loadLocations();
   };
 
   /* ---------------------------------------------------------------- */
@@ -400,6 +454,9 @@ export function SettingsPage() {
         </IonSegmentButton>
         <IonSegmentButton value="liquidtrack">
           <IonLabel>LiquidTrack</IonLabel>
+        </IonSegmentButton>
+        <IonSegmentButton value="locations">
+          <IonLabel>Locations</IonLabel>
         </IonSegmentButton>
       </IonSegment>
 
@@ -705,6 +762,78 @@ export function SettingsPage() {
               },
             ]}
             onDidDismiss={() => setRevokeTarget(null)}
+          />
+        </div>
+      )}
+      {/* ========================================================== */}
+      {/*  LOCATIONS TAB                                               */}
+      {/* ========================================================== */}
+      {activeTab === 'locations' && (
+        <div data-testid="locations-tab">
+          <IonCard data-testid="locations-section" style={{ marginTop: '12px' }}>
+            <IonCardHeader>
+              <IonCardTitle>Storage Locations</IonCardTitle>
+            </IonCardHeader>
+            <IonCardContent>
+              {/* Existing locations list */}
+              {locations.length === 0 ? (
+                <p style={{ color: '#888' }} data-testid="no-locations-msg">
+                  No locations yet. Add one below.
+                </p>
+              ) : (
+                <IonList data-testid="location-list">
+                  {locations.map((loc) => (
+                    <IonItem key={loc.location_id} data-testid={`location-${loc.location_id}`}>
+                      <IonLabel>{loc.name}</IonLabel>
+                      <IonButton
+                        slot="end"
+                        size="small"
+                        color="danger"
+                        fill="clear"
+                        onClick={() => setDeleteLocationTarget(loc.location_id)}
+                        data-testid={`delete-location-${loc.location_id}`}
+                      >
+                        Delete
+                      </IonButton>
+                    </IonItem>
+                  ))}
+                </IonList>
+              )}
+
+              {/* Add location form */}
+              <div
+                style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '12px' }}
+                data-testid="add-location-form"
+              >
+                <IonInput
+                  placeholder="New location name..."
+                  value={newLocationName}
+                  onIonInput={(e) => setNewLocationName(e.detail.value ?? '')}
+                  data-testid="location-name-input"
+                  style={{ flex: 1 }}
+                />
+                <IonButton onClick={addLocation} disabled={!newLocationName.trim()} data-testid="add-location-btn">
+                  Add Location
+                </IonButton>
+              </div>
+            </IonCardContent>
+          </IonCard>
+
+          {/* Delete location confirmation alert */}
+          <IonAlert
+            isOpen={deleteLocationTarget !== null}
+            header="Delete Location"
+            message="Are you sure you want to delete this location? This cannot be undone."
+            buttons={[
+              { text: 'Cancel', role: 'cancel', handler: () => setDeleteLocationTarget(null) },
+              {
+                text: 'Delete',
+                handler: () => {
+                  if (deleteLocationTarget) deleteLocation(deleteLocationTarget);
+                },
+              },
+            ]}
+            onDidDismiss={() => setDeleteLocationTarget(null)}
           />
         </div>
       )}

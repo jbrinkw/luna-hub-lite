@@ -556,6 +556,7 @@ export function MacroPage() {
                         size="small"
                         data-testid={`delete-consumed-${item.id}`}
                         onClick={() => deleteConsumedItem(item)}
+                        aria-label={`Remove ${item.name}`}
                         style={{ '--padding-start': '4px', '--padding-end': '4px', minHeight: 'auto' }}
                       >
                         x
@@ -746,6 +747,7 @@ export function MacroPage() {
           value={tasteProfile}
           onIonInput={(e) => setTasteProfile(e.detail.value ?? '')}
           data-testid="taste-textarea"
+          aria-label="Taste profile"
           rows={5}
         />
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
