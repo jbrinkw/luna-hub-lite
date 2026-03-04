@@ -473,6 +473,7 @@ export function HomePage() {
           <IonInput
             label="Protein (g)"
             type="number"
+            min="0"
             value={targetProtein}
             onIonInput={(e) => setTargetProtein(Number(e.detail.value) || 0)}
             data-testid="target-protein"
@@ -480,6 +481,7 @@ export function HomePage() {
           <IonInput
             label="Carbs (g)"
             type="number"
+            min="0"
             value={targetCarbs}
             onIonInput={(e) => setTargetCarbs(Number(e.detail.value) || 0)}
             data-testid="target-carbs"
@@ -487,6 +489,7 @@ export function HomePage() {
           <IonInput
             label="Fats (g)"
             type="number"
+            min="0"
             value={targetFat}
             onIonInput={(e) => setTargetFat(Number(e.detail.value) || 0)}
             data-testid="target-fats"

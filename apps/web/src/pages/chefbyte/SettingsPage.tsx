@@ -306,6 +306,7 @@ export function SettingsPage() {
       <IonInput
         label="Servings/Container"
         type="number"
+        min="0"
         value={form.servings_per_container ?? 1}
         onIonInput={(e) => onChange('servings_per_container', Number(e.detail.value) || 1)}
         data-testid={`${testIdPrefix}-servings`}
@@ -313,6 +314,7 @@ export function SettingsPage() {
       <IonInput
         label="Calories/Serving"
         type="number"
+        min="0"
         value={form.calories_per_serving ?? 0}
         onIonInput={(e) => onChange('calories_per_serving', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-calories`}
@@ -320,6 +322,7 @@ export function SettingsPage() {
       <IonInput
         label="Carbs/Serving"
         type="number"
+        min="0"
         value={form.carbs_per_serving ?? 0}
         onIonInput={(e) => onChange('carbs_per_serving', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-carbs`}
@@ -327,6 +330,7 @@ export function SettingsPage() {
       <IonInput
         label="Protein/Serving"
         type="number"
+        min="0"
         value={form.protein_per_serving ?? 0}
         onIonInput={(e) => onChange('protein_per_serving', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-protein`}
@@ -334,6 +338,7 @@ export function SettingsPage() {
       <IonInput
         label="Fat/Serving"
         type="number"
+        min="0"
         value={form.fat_per_serving ?? 0}
         onIonInput={(e) => onChange('fat_per_serving', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-fat`}
@@ -341,6 +346,7 @@ export function SettingsPage() {
       <IonInput
         label="Min Stock"
         type="number"
+        min="0"
         value={form.min_stock_amount ?? 0}
         onIonInput={(e) => onChange('min_stock_amount', Number(e.detail.value) || 0)}
         data-testid={`${testIdPrefix}-min-stock`}
@@ -354,6 +360,7 @@ export function SettingsPage() {
       <IonInput
         label="Price"
         type="number"
+        min="0"
         value={form.price ?? ''}
         onIonInput={(e) => onChange('price', e.detail.value ? Number(e.detail.value) : null)}
         data-testid={`${testIdPrefix}-price`}

@@ -520,6 +520,7 @@ export function MealPlanPage() {
           <IonInput
             label="Servings"
             type="number"
+            min="0"
             value={addServings}
             onIonInput={(e) => setAddServings(Number(e.detail.value) || 1)}
             data-testid="add-meal-servings"

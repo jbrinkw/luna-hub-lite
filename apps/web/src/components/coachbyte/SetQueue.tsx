@@ -123,6 +123,7 @@ export function SetQueue({
               <IonInput
                 label="Reps"
                 type="number"
+                min="0"
                 value={reps}
                 onIonInput={(e) => setReps(e.detail.value ?? '')}
                 data-testid="override-reps"
@@ -130,6 +131,7 @@ export function SetQueue({
               <IonInput
                 label="Load"
                 type="number"
+                min="0"
                 value={load}
                 onIonInput={(e) => setLoad(e.detail.value ?? '')}
                 data-testid="override-load"
@@ -181,6 +183,7 @@ export function SetQueue({
                     <td>
                       <IonInput
                         type="number"
+                        min="0"
                         value={set.target_reps}
                         onIonBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;
@@ -193,6 +196,7 @@ export function SetQueue({
                     <td>
                       <IonInput
                         type="number"
+                        min="0"
                         value={set.target_load_percentage ?? set.target_load}
                         onIonBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;
@@ -207,6 +211,7 @@ export function SetQueue({
                     <td>
                       <IonInput
                         type="number"
+                        min="0"
                         value={set.rest_seconds}
                         onIonBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;

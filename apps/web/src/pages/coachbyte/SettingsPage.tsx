@@ -164,6 +164,7 @@ export function SettingsPage() {
           <IonInput
             label="Default Rest Duration (seconds)"
             type="number"
+            min="0"
             value={settings.default_rest_seconds}
             onIonInput={(e) => setSettings((prev) => ({ ...prev, default_rest_seconds: Number(e.detail.value) || 90 }))}
             onIonBlur={saveSettings}
@@ -180,6 +181,7 @@ export function SettingsPage() {
           <IonInput
             label="Bar Weight (lbs)"
             type="number"
+            min="0"
             value={settings.bar_weight_lbs}
             onIonInput={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: Number(e.detail.value) || 45 }))}
             onIonBlur={saveSettings}

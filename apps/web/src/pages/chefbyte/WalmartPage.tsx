@@ -304,6 +304,7 @@ export function WalmartPage() {
                   <span>$</span>
                   <IonInput
                     type="number"
+                    min="0"
                     value={priceInputs[product.product_id] ?? ''}
                     onIonInput={(e) => {
                       setPriceInputs((prev) => ({

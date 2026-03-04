@@ -411,6 +411,7 @@ export function RecipeFormPage() {
               <IonInput
                 label="Base Servings"
                 type="number"
+                min="0"
                 value={baseServings}
                 onIonInput={(e) => setBaseServings(Number(e.detail.value) || 1)}
                 data-testid="recipe-base-servings"
@@ -418,6 +419,7 @@ export function RecipeFormPage() {
               <IonInput
                 label="Active Time (min)"
                 type="number"
+                min="0"
                 value={activeTime ?? ''}
                 onIonInput={(e) => setActiveTime(e.detail.value ? Number(e.detail.value) : null)}
                 data-testid="recipe-active-time"
@@ -425,6 +427,7 @@ export function RecipeFormPage() {
               <IonInput
                 label="Total Time (min)"
                 type="number"
+                min="0"
                 value={totalTime ?? ''}
                 onIonInput={(e) => setTotalTime(e.detail.value ? Number(e.detail.value) : null)}
                 data-testid="recipe-total-time"
@@ -499,6 +502,7 @@ export function RecipeFormPage() {
               <IonInput
                 label="Qty"
                 type="number"
+                min="0"
                 value={ingQuantity}
                 onIonInput={(e) => setIngQuantity(Number(e.detail.value) || 1)}
                 data-testid="ingredient-qty"

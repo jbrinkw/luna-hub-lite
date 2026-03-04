@@ -240,6 +240,7 @@ export function SplitPage() {
                       <td>
                         <IonInput
                           type="number"
+                          min="0"
                           value={set.target_reps}
                           onIonInput={(e) =>
                             updateSet(day.weekday, i, 'target_reps', e.detail.value ? Number(e.detail.value) : null)
@@ -252,6 +253,7 @@ export function SplitPage() {
                         {set.target_load_percentage ? (
                           <IonInput
                             type="number"
+                            min="0"
                             value={set.target_load_percentage}
                             onIonInput={(e) =>
                               updateSet(
@@ -267,6 +269,7 @@ export function SplitPage() {
                         ) : (
                           <IonInput
                             type="number"
+                            min="0"
                             value={set.target_load}
                             onIonInput={(e) =>
                               updateSet(day.weekday, i, 'target_load', e.detail.value ? Number(e.detail.value) : null)
@@ -293,6 +296,7 @@ export function SplitPage() {
                       <td>
                         <IonInput
                           type="number"
+                          min="0"
                           value={set.rest_seconds}
                           onIonInput={(e) =>
                             updateSet(day.weekday, i, 'rest_seconds', e.detail.value ? Number(e.detail.value) : 90)

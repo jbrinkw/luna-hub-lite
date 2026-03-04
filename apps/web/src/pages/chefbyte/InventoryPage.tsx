@@ -17,7 +17,7 @@ import {
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 
 /* ------------------------------------------------------------------ */
@@ -113,6 +113,46 @@ export function InventoryPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Realtime subscriptions                                           */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('inventory-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'chefbyte',
+          table: 'stock_lots',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          loadData();
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'chefbyte',
+          table: 'products',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          loadData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------------------------------------------------------- */
   /*  Aggregation                                                      */

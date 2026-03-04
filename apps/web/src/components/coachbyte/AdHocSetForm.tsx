@@ -1,5 +1,14 @@
 import { useState } from 'react';
-import { IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonInput, IonSelect, IonSelectOption } from '@ionic/react';
+import {
+  IonButton,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonInput,
+  IonSelect,
+  IonSelectOption,
+} from '@ionic/react';
 
 export interface Exercise {
   exercise_id: string;
@@ -48,6 +57,7 @@ export function AdHocSetForm({ exercises, onSubmit, onCancel }: AdHocSetFormProp
           <IonInput
             label="Reps"
             type="number"
+            min="0"
             value={reps}
             onIonInput={(e) => setReps(e.detail.value ?? '')}
             data-testid="adhoc-reps"
@@ -55,6 +65,7 @@ export function AdHocSetForm({ exercises, onSubmit, onCancel }: AdHocSetFormProp
           <IonInput
             label="Load"
             type="number"
+            min="0"
             value={load}
             onIonInput={(e) => setLoad(e.detail.value ?? '')}
             data-testid="adhoc-load"

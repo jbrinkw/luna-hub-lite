@@ -13,7 +13,7 @@ import {
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { chefbyte, supabase } from '@/shared/supabase';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -72,6 +72,34 @@ export function ShoppingPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadItems();
   }, [loadItems]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Realtime subscriptions                                           */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (!user) return;
+
+    const channel = supabase
+      .channel('shopping-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'chefbyte',
+          table: 'shopping_list',
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => {
+          loadItems();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------------------------------------------------------- */
   /*  Derived state                                                    */
@@ -367,6 +395,7 @@ export function ShoppingPage() {
               <IonInput
                 label="Qty"
                 type="number"
+                min="0"
                 value={addQty}
                 onIonInput={(e) => setAddQty(Number(e.detail.value) || 1)}
                 data-testid="add-item-qty"

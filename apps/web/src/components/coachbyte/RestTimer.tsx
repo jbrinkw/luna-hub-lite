@@ -142,6 +142,7 @@ export function RestTimer({
           <IonInput
             label="Custom (seconds)"
             type="number"
+            min="0"
             value={customDuration}
             onIonInput={(e) => setCustomDuration(e.detail.value ?? '')}
             data-testid="custom-duration-input"

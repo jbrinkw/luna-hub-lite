@@ -11,6 +11,18 @@ import { todayStr } from '@/shared/dates';
 
 type ScanMode = 'purchase' | 'consume_macros' | 'consume_no_macros' | 'shopping';
 
+interface UndoInfo {
+  type: 'purchase' | 'consume' | 'log' | 'shopping';
+  /** stock_lot_id, food_log log_id, or cart_item_id */
+  recordId?: string;
+  /** For consume reversal: re-add stock with this product/location */
+  productId?: string;
+  locationId?: string;
+  qtyContainers?: number;
+  /** For consume+macros reversal: also delete the food_log */
+  logId?: string;
+}
+
 interface QueueItem {
   id: string;
   barcode: string;
@@ -23,6 +35,7 @@ interface QueueItem {
   isNew: boolean; // placeholder products flagged [!NEW]
   stockLevel: number | null;
   errorMsg?: string;
+  undoInfo?: UndoInfo;
 }
 
 interface NutritionData {
@@ -172,7 +185,7 @@ export function ScannerPage() {
             fat: String(product.fat_per_serving ?? ''),
             protein: String(product.protein_per_serving ?? ''),
           };
-          await executeAction(mode, product, qty, unit, freshNutrition);
+          const undoInfo = await executeAction(mode, product, qty, unit, freshNutrition);
 
           setQueue((prev) =>
             prev.map((item) =>
@@ -183,6 +196,7 @@ export function ScannerPage() {
                     productId: product.product_id,
                     status: 'success',
                     isNew: product.is_placeholder,
+                    undoInfo,
                   }
                 : item,
             ),
@@ -238,8 +252,8 @@ export function ScannerPage() {
     qty: number,
     unitType: 'serving' | 'container',
     nutData: NutritionData,
-  ) => {
-    if (!user) return;
+  ): Promise<UndoInfo | undefined> => {
+    if (!user) return undefined;
 
     switch (actionMode) {
       case 'purchase': {
@@ -254,12 +268,16 @@ export function ScannerPage() {
         if (!locId) break; // No locations — can't add stock
 
         // Insert stock lot + optional nutrition update
-        await chefbyte().from('stock_lots').insert({
-          user_id: user.id,
-          product_id: product.product_id,
-          qty_containers: qty,
-          location_id: locId,
-        });
+        const { data: newLot } = await chefbyte()
+          .from('stock_lots')
+          .insert({
+            user_id: user.id,
+            product_id: product.product_id,
+            qty_containers: qty,
+            location_id: locId,
+          })
+          .select('lot_id')
+          .single();
         // Update product nutrition if changed
         if (nutData.calories || nutData.protein || nutData.carbs || nutData.fat) {
           await chefbyte()
@@ -273,17 +291,50 @@ export function ScannerPage() {
             })
             .eq('product_id', product.product_id);
         }
-        break;
+        return newLot ? { type: 'purchase', recordId: (newLot as any).lot_id } : undefined;
       }
       case 'consume_macros': {
+        const logicalDate = todayStr();
         await (chefbyte() as any).rpc('consume_product', {
           p_product_id: product.product_id,
           p_qty: qty,
           p_unit: unitType,
           p_log_macros: true,
-          p_logical_date: todayStr(),
+          p_logical_date: logicalDate,
         });
-        break;
+
+        // Get the default location so undo can re-add stock
+        const { data: purchLocs } = await chefbyte()
+          .from('locations')
+          .select('location_id')
+          .eq('user_id', user.id)
+          .order('created_at')
+          .limit(1);
+        const defaultLocId = (purchLocs?.[0] as any)?.location_id;
+
+        // Compute qty_containers for undo re-add
+        const spc = product.servings_per_container ?? 1;
+        const qtyContainers = unitType === 'serving' ? qty / Math.max(spc, 0.001) : qty;
+
+        // Find the food_log that was just created (most recent for this product+date)
+        const { data: recentLog } = await chefbyte()
+          .from('food_logs')
+          .select('log_id')
+          .eq('user_id', user.id)
+          .eq('product_id', product.product_id)
+          .eq('logical_date', logicalDate)
+          .is('meal_id', null)
+          .order('created_at', { ascending: false })
+          .limit(1)
+          .single();
+
+        return {
+          type: 'consume',
+          productId: product.product_id,
+          locationId: defaultLocId ?? undefined,
+          qtyContainers,
+          logId: (recentLog as any)?.log_id ?? undefined,
+        };
       }
       case 'consume_no_macros': {
         await (chefbyte() as any).rpc('consume_product', {
@@ -293,18 +344,41 @@ export function ScannerPage() {
           p_log_macros: false,
           p_logical_date: todayStr(),
         });
-        break;
+
+        // Get the default location so undo can re-add stock
+        const { data: cLocs } = await chefbyte()
+          .from('locations')
+          .select('location_id')
+          .eq('user_id', user.id)
+          .order('created_at')
+          .limit(1);
+        const cLocId = (cLocs?.[0] as any)?.location_id;
+
+        const cSpc = product.servings_per_container ?? 1;
+        const cQtyContainers = unitType === 'serving' ? qty / Math.max(cSpc, 0.001) : qty;
+
+        return {
+          type: 'consume',
+          productId: product.product_id,
+          locationId: cLocId ?? undefined,
+          qtyContainers: cQtyContainers,
+        };
       }
       case 'shopping': {
-        await chefbyte().from('shopping_list').insert({
-          user_id: user.id,
-          product_id: product.product_id,
-          qty_containers: qty,
-          purchased: false,
-        });
-        break;
+        const { data: newCartItem } = await chefbyte()
+          .from('shopping_list')
+          .insert({
+            user_id: user.id,
+            product_id: product.product_id,
+            qty_containers: qty,
+            purchased: false,
+          })
+          .select('cart_item_id')
+          .single();
+        return newCartItem ? { type: 'shopping', recordId: (newCartItem as any).cart_item_id } : undefined;
       }
     }
+    return undefined;
   };
 
   /* ---------------------------------------------------------------- */
@@ -344,9 +418,45 @@ export function ScannerPage() {
   /*  Queue actions                                                    */
   /* ---------------------------------------------------------------- */
 
-  const deleteQueueItem = (id: string) => {
-    setQueue((prev) => prev.filter((item) => item.id !== id));
-    if (activeItemId === id) setActiveItemId(null);
+  const undoScan = async (target: QueueItem) => {
+    if (target.undoInfo) {
+      try {
+        const info = target.undoInfo;
+        switch (info.type) {
+          case 'purchase':
+            // Delete the stock lot that was created
+            if (info.recordId) {
+              await chefbyte().from('stock_lots').delete().eq('lot_id', info.recordId);
+            }
+            break;
+          case 'consume':
+            // Re-add the consumed stock as a new lot
+            if (info.productId && info.locationId && info.qtyContainers && user) {
+              await chefbyte().from('stock_lots').insert({
+                user_id: user.id,
+                product_id: info.productId,
+                location_id: info.locationId,
+                qty_containers: info.qtyContainers,
+              });
+            }
+            // Delete the food_log if one was created
+            if (info.logId) {
+              await chefbyte().from('food_logs').delete().eq('log_id', info.logId);
+            }
+            break;
+          case 'shopping':
+            // Delete the shopping list item
+            if (info.recordId) {
+              await chefbyte().from('shopping_list').delete().eq('cart_item_id', info.recordId);
+            }
+            break;
+        }
+      } catch {
+        // Undo failed — still remove from queue UI so user isn't stuck
+      }
+    }
+    setQueue((prev) => prev.filter((item) => item.id !== target.id));
+    if (activeItemId === target.id) setActiveItemId(null);
   };
 
   /* ---------------------------------------------------------------- */
@@ -455,7 +565,7 @@ export function ScannerPage() {
                     data-testid={`delete-item-${item.id}`}
                     onClick={(e) => {
                       e.stopPropagation();
-                      deleteQueueItem(item.id);
+                      undoScan(item);
                     }}
                     style={{
                       background: 'none',

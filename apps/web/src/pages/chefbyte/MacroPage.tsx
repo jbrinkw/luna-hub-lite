@@ -4,7 +4,7 @@ import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { chefbyte, supabase } from '@/shared/supabase';
 import { toDateStr, formatDateDisplay } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { computeRecipeMacros } from './RecipesPage';
@@ -233,6 +233,46 @@ export function MacroPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadData();
   }, [loadData]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Realtime subscriptions                                           */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel('macro-changes')
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'chefbyte',
+          table: 'food_logs',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          loadData();
+        },
+      )
+      .on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: 'chefbyte',
+          table: 'temp_items',
+          filter: `user_id=eq.${userId}`,
+        },
+        () => {
+          loadData();
+        },
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------------------------------------------------------- */
   /*  Date navigation                                                  */
@@ -600,6 +640,7 @@ export function MacroPage() {
           <IonInput
             label="Calories"
             type="number"
+            min="0"
             value={tempCalories}
             onIonInput={(e) => setTempCalories(Number(e.detail.value) || 0)}
             data-testid="temp-calories"
@@ -607,6 +648,7 @@ export function MacroPage() {
           <IonInput
             label="Protein"
             type="number"
+            min="0"
             value={tempProtein}
             onIonInput={(e) => setTempProtein(Number(e.detail.value) || 0)}
             data-testid="temp-protein"
@@ -614,6 +656,7 @@ export function MacroPage() {
           <IonInput
             label="Carbs"
             type="number"
+            min="0"
             value={tempCarbs}
             onIonInput={(e) => setTempCarbs(Number(e.detail.value) || 0)}
             data-testid="temp-carbs"
@@ -621,6 +664,7 @@ export function MacroPage() {
           <IonInput
             label="Fat"
             type="number"
+            min="0"
             value={tempFat}
             onIonInput={(e) => setTempFat(Number(e.detail.value) || 0)}
             data-testid="temp-fat"
@@ -649,6 +693,7 @@ export function MacroPage() {
           <IonInput
             label="Protein (g)"
             type="number"
+            min="0"
             value={targetProtein}
             onIonInput={(e) => setTargetProtein(Number(e.detail.value) || 0)}
             data-testid="target-protein"
@@ -656,6 +701,7 @@ export function MacroPage() {
           <IonInput
             label="Carbs (g)"
             type="number"
+            min="0"
             value={targetCarbs}
             onIonInput={(e) => setTargetCarbs(Number(e.detail.value) || 0)}
             data-testid="target-carbs"
@@ -663,6 +709,7 @@ export function MacroPage() {
           <IonInput
             label="Fats (g)"
             type="number"
+            min="0"
             value={targetFat}
             onIonInput={(e) => setTargetFat(Number(e.detail.value) || 0)}
             data-testid="target-fats"
