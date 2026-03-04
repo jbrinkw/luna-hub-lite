@@ -242,7 +242,169 @@ describe('MCP Worker E2E', () => {
     expect(typeof parsed.total_planned).toBe('number');
   });
 
-  // ─── Test 9: Tool filtering — deactivated app ─────────────────────────
+  // ─── Test 9: POST /auth with valid API key ─────────────────────────────
+
+  it('POST /auth with valid API key returns sessionId and sseUrl', async () => {
+    const response = await fetch(`${WORKER_BASE}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+    expect(response.status).toBe(200);
+    const body = (await response.json()) as { sessionId: string; sseUrl: string };
+    expect(body.sessionId).toBeTruthy();
+    expect(body.sessionId.length).toBeGreaterThan(10);
+    expect(body.sseUrl).toContain('sessionId=');
+    expect(body.sseUrl).toContain(body.sessionId);
+  });
+
+  // ─── Test 10: POST /auth with invalid API key ─────────────────────────
+
+  it('POST /auth with invalid API key returns 401', async () => {
+    const response = await fetch(`${WORKER_BASE}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey: 'lh_invalidinvalidinvalidinvalid00' }),
+    });
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/invalid/i);
+  });
+
+  // ─── Test 11: POST /auth with missing apiKey ──────────────────────────
+
+  it('POST /auth with missing apiKey returns 400', async () => {
+    const response = await fetch(`${WORKER_BASE}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({}),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/missing/i);
+  });
+
+  // ─── Test 12: POST /auth with invalid JSON ────────────────────────────
+
+  it('POST /auth with invalid JSON returns 400', async () => {
+    const response = await fetch(`${WORKER_BASE}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: 'not-json',
+    });
+    expect(response.status).toBe(400);
+  });
+
+  // ─── Test 13: Full POST /auth → GET /sse → initialize flow ────────────
+
+  it('POST /auth → GET /sse?sessionId → initialize works end-to-end', async () => {
+    // Step 1: Authenticate
+    const authResponse = await fetch(`${WORKER_BASE}/auth`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey }),
+    });
+    expect(authResponse.status).toBe(200);
+    const { sessionId: authSessionId } = (await authResponse.json()) as { sessionId: string };
+
+    // Step 2: Connect via SSE using sessionId (not apiKey)
+    const sseAbort = new AbortController();
+    const sseResponse = await fetch(`${WORKER_BASE}/sse?sessionId=${authSessionId}`, {
+      signal: sseAbort.signal,
+      headers: { Accept: 'text/event-stream' },
+    });
+    expect(sseResponse.status).toBe(200);
+
+    // Read the endpoint event
+    const reader = sseResponse.body!.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let messageSessionId = '';
+
+    // Read until we get the endpoint event
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.includes('\n\n')) {
+        // Parse the endpoint event
+        const match = buffer.match(/sessionId=([a-f0-9]+)/);
+        if (match) {
+          messageSessionId = match[1];
+          break;
+        }
+      }
+    }
+
+    expect(messageSessionId).toBeTruthy();
+
+    // Step 3: Send initialize via POST /message
+    const msgResponse = await fetch(`${WORKER_BASE}/message?sessionId=${authSessionId}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'test-auth', version: '1.0' },
+        },
+      }),
+    });
+    expect(msgResponse.status).toBe(202);
+
+    // Read the response from SSE
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      if (buffer.includes('"protocolVersion"')) break;
+    }
+
+    expect(buffer).toContain('luna-hub-mcp');
+    expect(buffer).toContain('2024-11-05');
+
+    sseAbort.abort();
+  });
+
+  // ─── Test 14: POST /message without sessionId ─────────────────────────
+
+  it('POST /message without sessionId returns 400', async () => {
+    const response = await fetch(`${WORKER_BASE}/message`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/missing/i);
+  });
+
+  // ─── Test 15: POST /message with invalid sessionId ─────────────────────
+
+  it('POST /message with invalid sessionId returns 400', async () => {
+    const response = await fetch(`${WORKER_BASE}/message?sessionId=not-a-valid-id`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }),
+    });
+    expect(response.status).toBe(400);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/invalid/i);
+  });
+
+  // ─── Test 16: GET /sse without params ──────────────────────────────────
+
+  it('GET /sse without sessionId or apiKey returns 401', async () => {
+    const response = await fetch(`${WORKER_BASE}/sse`);
+    expect(response.status).toBe(401);
+    const body = (await response.json()) as { error: string };
+    expect(body.error).toMatch(/missing/i);
+  });
+
+  // ─── Test 17: Tool filtering — deactivated app ─────────────────────────
 
   it('tool filtering respects deactivated app (coachbyte only = no CHEFBYTE tools)', async () => {
     // Create a user with ONLY coachbyte active

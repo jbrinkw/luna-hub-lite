@@ -125,6 +125,27 @@ describe('SetQueue', () => {
     expect(onAdHoc).toHaveBeenCalled();
   });
 
+  it('syncs reps/load inputs when nextSet changes (useEffect)', async () => {
+    const sets1 = makeSets();
+    const { rerender } = render(<SetQueue sets={sets1} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
+    // Initially pre-filled with set 1 values
+    expect(screen.getByTestId('override-reps')).toHaveValue(5);
+    expect(screen.getByTestId('override-load')).toHaveValue(225);
+
+    // Mark set 1 as completed — nextSet should now be set 2
+    const sets2 = makeSets([{ completed: true }]);
+    rerender(<SetQueue sets={sets2} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
+    expect(screen.getByTestId('override-reps')).toHaveValue(8);
+    expect(screen.getByTestId('override-load')).toHaveValue(185);
+  });
+
+  it('syncs to third set when first two are completed', async () => {
+    const sets = makeSets([{ completed: true }, { completed: true }]);
+    render(<SetQueue sets={sets} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
+    expect(screen.getByTestId('override-reps')).toHaveValue(5);
+    expect(screen.getByTestId('override-load')).toHaveValue(240);
+  });
+
   it('disables Complete Set and Ad-Hoc buttons when disabled prop is true', () => {
     render(<SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} disabled />);
     expect(screen.getByTestId('complete-set-btn')).toBeDisabled();
@@ -132,11 +153,7 @@ describe('SetQueue', () => {
   });
 
   it('shows "All sets completed!" when every set has completed: true', () => {
-    const allDone = makeSets([
-      { completed: true },
-      { completed: true },
-      { completed: true },
-    ]);
+    const allDone = makeSets([{ completed: true }, { completed: true }, { completed: true }]);
     render(<SetQueue sets={allDone} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
     expect(screen.getByText('All sets completed!')).toBeInTheDocument();
     // The NEXT IN QUEUE card should not appear
