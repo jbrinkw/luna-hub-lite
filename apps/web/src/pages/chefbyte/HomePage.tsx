@@ -223,7 +223,7 @@ export function HomePage() {
 
   useEffect(() => {
     // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     loadData();
   }, [loadData]);
 
@@ -321,6 +321,112 @@ export function HomePage() {
       }
     }
     await loadData();
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Meal Plan -> Cart                                                */
+  /* ---------------------------------------------------------------- */
+
+  const [syncing, setSyncing] = useState(false);
+
+  const syncMealPlanToCart = async () => {
+    if (!user) return;
+    setSyncing(true);
+    setLoadError(null);
+
+    try {
+      // Get today's incomplete meal plan entries that have recipes
+      const { data: entries } = await chefbyte()
+        .from('meal_plan_entries')
+        .select(
+          'meal_id, servings, recipe_id, recipes:recipe_id(base_servings, recipe_ingredients(quantity, unit, product_id, products:product_id(servings_per_container)))',
+        )
+        .eq('user_id', user.id)
+        .eq('logical_date', today)
+        .is('completed_at', null);
+
+      if (!entries || entries.length === 0) {
+        setSyncing(false);
+        return;
+      }
+
+      // Aggregate product quantities (in containers) across all meal entries
+      const productQty = new Map<string, number>();
+
+      for (const entry of entries as any[]) {
+        if (!entry.recipes?.recipe_ingredients) continue;
+        const mealServings = Number(entry.servings) || 1;
+        const baseServings = Number(entry.recipes.base_servings) || 1;
+        const ratio = mealServings / baseServings;
+
+        for (const ri of entry.recipes.recipe_ingredients) {
+          const productId = ri.product_id as string;
+          const qty = Number(ri.quantity) || 0;
+          const unit = ri.unit as string;
+          const spc = Number(ri.products?.servings_per_container) || 1;
+
+          // Convert ingredient quantity to containers
+          let containers: number;
+          if (unit === 'container') {
+            containers = qty * ratio;
+          } else {
+            // 'serving' unit — convert to containers
+            containers = (qty * ratio) / spc;
+          }
+
+          const current = productQty.get(productId) ?? 0;
+          productQty.set(productId, current + containers);
+        }
+      }
+
+      // Also handle product-based entries (no recipe, just a product)
+      for (const entry of entries as any[]) {
+        if (entry.recipe_id) continue;
+        // Re-fetch if product_id present but no recipe
+        // The query above doesn't fetch product_id directly, so fetch separately
+      }
+
+      // Fetch product-based entries separately
+      const { data: productEntries } = await chefbyte()
+        .from('meal_plan_entries')
+        .select('product_id, servings, products:product_id(servings_per_container)')
+        .eq('user_id', user.id)
+        .eq('logical_date', today)
+        .is('completed_at', null)
+        .is('recipe_id', null)
+        .not('product_id', 'is', null);
+
+      for (const pe of (productEntries ?? []) as any[]) {
+        if (!pe.product_id) continue;
+        const spc = Number(pe.products?.servings_per_container) || 1;
+        const servings = Number(pe.servings) || 1;
+        const containers = servings / spc;
+        const current = productQty.get(pe.product_id) ?? 0;
+        productQty.set(pe.product_id, current + containers);
+      }
+
+      // Upsert each product into shopping_list (round up to whole containers)
+      for (const [productId, qty] of productQty) {
+        const roundedQty = Math.ceil(qty);
+        if (roundedQty <= 0) continue;
+
+        await chefbyte().from('shopping_list').upsert(
+          {
+            user_id: user.id,
+            product_id: productId,
+            qty_containers: roundedQty,
+            purchased: false,
+          },
+          { onConflict: 'user_id,product_id' },
+        );
+      }
+
+      await loadData();
+    } catch {
+      setLoadError('Failed to sync meal plan to cart');
+    } finally {
+      setSyncing(false);
+    }
   };
 
   /* ================================================================ */
@@ -463,8 +569,8 @@ export function HomePage() {
         <IonButton size="small" onClick={openTasteModal} data-testid="taste-profile-btn">
           Taste Profile
         </IonButton>
-        <IonButton size="small" disabled title="Coming soon" data-testid="meal-plan-cart-btn">
-          Meal Plan → Cart
+        <IonButton size="small" onClick={syncMealPlanToCart} disabled={syncing} data-testid="meal-plan-cart-btn">
+          {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
         </IonButton>
       </div>
 

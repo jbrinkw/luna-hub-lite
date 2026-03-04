@@ -48,8 +48,20 @@ export async function buildUserTools(
     userTools[name] = tool;
   }
 
-  // 4. Extension tools are always available unless explicitly disabled
+  // 4. Get enabled extensions
+  const { data: extensionSettings } = await supabase
+    .schema('hub')
+    .from('extension_settings')
+    .select('extension_name, enabled')
+    .eq('user_id', userId);
+
+  const enabledExtensions = new Set(
+    (extensionSettings || []).filter((e: any) => e.enabled).map((e: any) => e.extension_name),
+  );
+
+  // 5. Extension tools: only include if the extension is enabled and the tool is not individually disabled
   for (const [name, tool] of Object.entries(allExtensionTools)) {
+    if (!enabledExtensions.has(tool.extensionName)) continue;
     if (disabledTools.has(name)) continue;
     userTools[name] = tool;
   }

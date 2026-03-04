@@ -13,7 +13,7 @@ import {
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { toDateStr } from '@/shared/dates';
 import { computeRecipeMacros } from './RecipesPage';
 
@@ -287,18 +287,20 @@ export function MealPlanPage() {
         return;
       }
 
+      const escaped = escapeIlike(text);
+
       const { data: recipes } = await chefbyte()
         .from('recipes')
         .select('recipe_id, name')
         .eq('user_id', user.id)
-        .ilike('name', `%${text}%`)
+        .ilike('name', `%${escaped}%`)
         .order('name');
 
       const { data: products } = await chefbyte()
         .from('products')
         .select('product_id, name')
         .eq('user_id', user.id)
-        .ilike('name', `%${text}%`)
+        .ilike('name', `%${escaped}%`)
         .order('name');
 
       const results: SearchResult[] = [];
@@ -537,65 +539,112 @@ export function MealPlanPage() {
                 </tr>
               </thead>
               <tbody>
-                {selectedDayMeals.map((meal) => (
-                  <tr key={meal.meal_id} data-testid={`detail-row-${meal.meal_id}`}>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{entryName(meal)}</td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee', textTransform: 'capitalize' }}>
-                      {meal.meal_type ?? '\u2014'}
-                    </td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <IonCheckbox
-                          checked={meal.meal_prep}
-                          onIonChange={() => toggleMealPrep(meal)}
-                          disabled={!!meal.completed_at}
-                          aria-label={`Toggle meal prep for ${entryName(meal)}`}
-                          data-testid={`toggle-prep-${meal.meal_id}`}
-                          style={{ '--size': '18px' } as React.CSSProperties}
-                        />
-                        <span>{meal.meal_prep ? 'Prep' : 'Regular'}</span>
-                      </div>
-                    </td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                      {meal.completed_at ? `DONE (${formatTime(meal.completed_at)})` : 'Planned'}
-                    </td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                      {!meal.completed_at && (
-                        <div style={{ display: 'flex', gap: '4px' }}>
-                          <IonButton
-                            size="small"
-                            color="success"
-                            onClick={() => markDone(meal.meal_id)}
-                            data-testid={`mark-done-${meal.meal_id}`}
-                          >
-                            Mark Done
-                          </IonButton>
-                          {meal.meal_prep && (
+                {selectedDayMeals.map((meal) => {
+                  const macros = entryMacros(meal);
+                  return (
+                    <tr key={meal.meal_id} data-testid={`detail-row-${meal.meal_id}`}>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                        <div>{entryName(meal)}</div>
+                        {macros && (
+                          <div style={{ fontSize: '0.8em', color: '#888' }}>
+                            {macros.calories} cal | {macros.protein}g P | {macros.carbs}g C | {macros.fat}g F
+                          </div>
+                        )}
+                      </td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee', textTransform: 'capitalize' }}>
+                        {meal.meal_type ?? '\u2014'}
+                      </td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                          <IonCheckbox
+                            checked={meal.meal_prep}
+                            onIonChange={() => toggleMealPrep(meal)}
+                            disabled={!!meal.completed_at}
+                            aria-label={`Toggle meal prep for ${entryName(meal)}`}
+                            data-testid={`toggle-prep-${meal.meal_id}`}
+                            style={{ '--size': '18px' } as React.CSSProperties}
+                          />
+                          <span>{meal.meal_prep ? 'Prep' : 'Regular'}</span>
+                        </div>
+                      </td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                        {meal.completed_at ? `DONE (${formatTime(meal.completed_at)})` : 'Planned'}
+                      </td>
+                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
+                        {!meal.completed_at && (
+                          <div style={{ display: 'flex', gap: '4px' }}>
                             <IonButton
                               size="small"
-                              color="tertiary"
-                              onClick={() => setPrepTarget(meal)}
-                              data-testid={`exec-prep-${meal.meal_id}`}
+                              color="success"
+                              onClick={() => markDone(meal.meal_id)}
+                              data-testid={`mark-done-${meal.meal_id}`}
                             >
-                              Execute Prep
+                              Mark Done
                             </IonButton>
-                          )}
-                          <IonButton
-                            size="small"
-                            color="danger"
-                            fill="clear"
-                            onClick={() => deleteMeal(meal.meal_id)}
-                            data-testid={`delete-meal-${meal.meal_id}`}
-                          >
-                            Delete
-                          </IonButton>
-                        </div>
-                      )}
-                      {meal.completed_at && <span>\u2014</span>}
-                    </td>
-                  </tr>
-                ))}
+                            {meal.meal_prep && (
+                              <IonButton
+                                size="small"
+                                color="tertiary"
+                                onClick={() => setPrepTarget(meal)}
+                                data-testid={`exec-prep-${meal.meal_id}`}
+                              >
+                                Execute Prep
+                              </IonButton>
+                            )}
+                            <IonButton
+                              size="small"
+                              color="danger"
+                              fill="clear"
+                              onClick={() => deleteMeal(meal.meal_id)}
+                              data-testid={`delete-meal-${meal.meal_id}`}
+                            >
+                              Delete
+                            </IonButton>
+                          </div>
+                        )}
+                        {meal.completed_at && <span>\u2014</span>}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
+              <tfoot>
+                {(() => {
+                  const totals = selectedDayMeals.reduce(
+                    (acc, meal) => {
+                      const m = entryMacros(meal);
+                      if (m) {
+                        acc.calories += m.calories;
+                        acc.protein += m.protein;
+                        acc.carbs += m.carbs;
+                        acc.fat += m.fat;
+                      }
+                      return acc;
+                    },
+                    { calories: 0, protein: 0, carbs: 0, fat: 0 },
+                  );
+                  return (
+                    <tr data-testid="day-detail-total-row">
+                      <td
+                        style={{
+                          padding: '8px',
+                          borderTop: '2px solid #333',
+                          fontWeight: 700,
+                        }}
+                      >
+                        <div>TOTAL</div>
+                        <div style={{ fontSize: '0.8em', color: '#444' }}>
+                          {totals.calories} cal | {totals.protein}g P | {totals.carbs}g C | {totals.fat}g F
+                        </div>
+                      </td>
+                      <td style={{ padding: '8px', borderTop: '2px solid #333' }} />
+                      <td style={{ padding: '8px', borderTop: '2px solid #333' }} />
+                      <td style={{ padding: '8px', borderTop: '2px solid #333' }} />
+                      <td style={{ padding: '8px', borderTop: '2px solid #333' }} />
+                    </tr>
+                  );
+                })()}
+              </tfoot>
             </table>
           )}
         </div>

@@ -35,10 +35,10 @@ describe('ChefNav', () => {
     }
   });
 
-  it('Scanner tab is active when at /chef (index)', () => {
+  it('Home tab is active when at /chef (index)', () => {
     renderNav('/chef');
     const segment = screen.getByRole('tablist');
-    expect(segment).toHaveAttribute('data-value', '/chef');
+    expect(segment).toHaveAttribute('data-value', '/chef/home');
   });
 
   it('correct tab is active when at a sub-route', () => {
@@ -58,10 +58,10 @@ describe('ChefNav', () => {
     expect(screen.getByLabelText('ChefByte navigation')).toBeInTheDocument();
   });
 
-  it('falls back to Scanner tab for unknown sub-routes', () => {
+  it('falls back to Home tab for unknown sub-routes', () => {
     renderNav('/chef/unknown');
     const segment = screen.getByRole('tablist');
-    expect(segment).toHaveAttribute('data-value', '/chef');
+    expect(segment).toHaveAttribute('data-value', '/chef/home');
   });
 
   it('calls navigate when a different tab is clicked', () => {

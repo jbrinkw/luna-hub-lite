@@ -16,7 +16,7 @@ import {
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { computeRecipeMacros } from './RecipesPage';
 
 /* ------------------------------------------------------------------ */
@@ -163,7 +163,7 @@ export function RecipeFormPage() {
           'product_id, name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container',
         )
         .eq('user_id', user.id)
-        .ilike('name', `%${text}%`)
+        .ilike('name', `%${escapeIlike(text)}%`)
         .order('name');
 
       const results = (data ?? []) as ProductSearchResult[];
@@ -217,6 +217,10 @@ export function RecipeFormPage() {
 
   const removeIngredient = (index: number) => {
     setIngredients((prev) => prev.filter((_, i) => i !== index));
+  };
+
+  const updateIngredient = (index: number, field: keyof LocalIngredient, value: string | number) => {
+    setIngredients((prev) => prev.map((ing, i) => (i === index ? { ...ing, [field]: value } : ing)));
   };
 
   /* ---------------------------------------------------------------- */
@@ -567,11 +571,41 @@ export function RecipeFormPage() {
                 {ingredients.map((ing, idx) => (
                   <tr key={`${ing.product_id}-${idx}`} data-testid={`ingredient-row-${idx}`}>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{ing.product_name}</td>
-                    <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
-                      {ing.quantity}
+                    <td style={{ textAlign: 'right', padding: '4px 8px', borderBottom: '1px solid #eee' }}>
+                      <IonInput
+                        type="number"
+                        min="0"
+                        value={ing.quantity}
+                        onIonInput={(e) => updateIngredient(idx, 'quantity', Number(e.detail.value) || 0)}
+                        style={
+                          {
+                            '--padding-start': '4px',
+                            '--padding-end': '4px',
+                            textAlign: 'right',
+                          } as React.CSSProperties
+                        }
+                        data-testid={`edit-qty-${idx}`}
+                      />
                     </td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{ing.unit}</td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{ing.note || '\u2014'}</td>
+                    <td style={{ padding: '4px 8px', borderBottom: '1px solid #eee' }}>
+                      <IonSelect
+                        value={ing.unit}
+                        onIonChange={(e) => updateIngredient(idx, 'unit', e.detail.value ?? 'serving')}
+                        data-testid={`edit-unit-${idx}`}
+                      >
+                        <IonSelectOption value="serving">Serving</IonSelectOption>
+                        <IonSelectOption value="container">Container</IonSelectOption>
+                      </IonSelect>
+                    </td>
+                    <td style={{ padding: '4px 8px', borderBottom: '1px solid #eee' }}>
+                      <IonInput
+                        value={ing.note}
+                        placeholder="\u2014"
+                        onIonInput={(e) => updateIngredient(idx, 'note', e.detail.value ?? '')}
+                        style={{ '--padding-start': '4px', '--padding-end': '4px' } as React.CSSProperties}
+                        data-testid={`edit-note-${idx}`}
+                      />
+                    </td>
                     <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
                       <IonButton
                         size="small"

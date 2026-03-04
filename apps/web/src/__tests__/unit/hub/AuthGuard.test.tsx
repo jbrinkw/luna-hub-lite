@@ -12,7 +12,13 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
 const mockNavigate = vi.fn();
 vi.mock('react-router-dom', async () => {
   const actual = await vi.importActual('react-router-dom');
-  return { ...actual, Navigate: (props: { to: string; replace?: boolean }) => { mockNavigate(props); return null; } };
+  return {
+    ...actual,
+    Navigate: (props: { to: string; replace?: boolean }) => {
+      mockNavigate(props);
+      return null;
+    },
+  };
 });
 
 import { AuthGuard } from '@/components/AuthGuard';
@@ -27,7 +33,9 @@ describe('AuthGuard', () => {
 
     render(
       <MemoryRouter>
-        <AuthGuard><div>Protected Content</div></AuthGuard>
+        <AuthGuard>
+          <div>Protected Content</div>
+        </AuthGuard>
       </MemoryRouter>,
     );
 
@@ -39,7 +47,9 @@ describe('AuthGuard', () => {
 
     render(
       <MemoryRouter>
-        <AuthGuard><div>Protected Content</div></AuthGuard>
+        <AuthGuard>
+          <div>Protected Content</div>
+        </AuthGuard>
       </MemoryRouter>,
     );
 
@@ -52,12 +62,14 @@ describe('AuthGuard', () => {
 
     render(
       <MemoryRouter>
-        <AuthGuard><div>Protected Content</div></AuthGuard>
+        <AuthGuard>
+          <div>Protected Content</div>
+        </AuthGuard>
       </MemoryRouter>,
     );
 
     expect(screen.queryByText('Protected Content')).not.toBeInTheDocument();
-    expect(screen.getByText('Loading...')).toBeInTheDocument();
+    expect(screen.getByLabelText('loading')).toBeInTheDocument();
   });
 
   it('redirects to /login when session expires', () => {
@@ -66,7 +78,9 @@ describe('AuthGuard', () => {
 
     const { rerender } = render(
       <MemoryRouter>
-        <AuthGuard><div>Protected Content</div></AuthGuard>
+        <AuthGuard>
+          <div>Protected Content</div>
+        </AuthGuard>
       </MemoryRouter>,
     );
 
@@ -77,7 +91,9 @@ describe('AuthGuard', () => {
 
     rerender(
       <MemoryRouter>
-        <AuthGuard><div>Protected Content</div></AuthGuard>
+        <AuthGuard>
+          <div>Protected Content</div>
+        </AuthGuard>
       </MemoryRouter>,
     );
 
@@ -89,12 +105,12 @@ describe('AuthGuard', () => {
 
     render(
       <MemoryRouter>
-        <AuthGuard><div>Protected Content</div></AuthGuard>
+        <AuthGuard>
+          <div>Protected Content</div>
+        </AuthGuard>
       </MemoryRouter>,
     );
 
-    expect(mockNavigate).toHaveBeenCalledWith(
-      expect.objectContaining({ to: '/login', replace: true }),
-    );
+    expect(mockNavigate).toHaveBeenCalledWith(expect.objectContaining({ to: '/login', replace: true }));
   });
 });

@@ -9,6 +9,9 @@ import { getSplit } from './get-split';
 import { updateSplit } from './update-split';
 import { setTimer } from './set-timer';
 import { getTimer } from './get-timer';
+import { pauseTimer } from './pause-timer';
+import { resumeTimer } from './resume-timer';
+import { resetTimer } from './reset-timer';
 import { getPrs } from './get-prs';
 import { getExercises } from './get-exercises';
 
@@ -23,6 +26,9 @@ export const coachbyteTools: Record<string, ToolDefinition> = {
   [updateSplit.name]: updateSplit,
   [setTimer.name]: setTimer,
   [getTimer.name]: getTimer,
+  [pauseTimer.name]: pauseTimer,
+  [resumeTimer.name]: resumeTimer,
+  [resetTimer.name]: resetTimer,
   [getPrs.name]: getPrs,
   [getExercises.name]: getExercises,
 };

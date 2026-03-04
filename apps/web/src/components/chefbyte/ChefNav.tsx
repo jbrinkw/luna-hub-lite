@@ -2,7 +2,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { IonSegment, IonSegmentButton, IonLabel } from '@ionic/react';
 
 const tabs = [
-  { label: 'Scanner', path: '/chef' },
+  { label: 'Scanner', path: '/chef/scanner' },
   { label: 'Home', path: '/chef/home' },
   { label: 'Inventory', path: '/chef/inventory' },
   { label: 'Shopping', path: '/chef/shopping' },
@@ -17,11 +17,7 @@ export function ChefNav() {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // Match exact for index, startsWith for others
-  const current =
-    location.pathname === '/chef'
-      ? '/chef'
-      : tabs.find((t) => t.path !== '/chef' && location.pathname.startsWith(t.path))?.path ?? '/chef';
+  const current = tabs.find((t) => location.pathname.startsWith(t.path))?.path ?? '/chef/home';
 
   return (
     <nav aria-label="ChefByte navigation">

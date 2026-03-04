@@ -14,7 +14,7 @@ import {
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte, supabase } from '@/shared/supabase';
+import { chefbyte, supabase, escapeIlike } from '@/shared/supabase';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -135,7 +135,7 @@ export function ShoppingPage() {
         .from('products')
         .select('product_id, name')
         .eq('user_id', user.id)
-        .ilike('name', `%${text}%`)
+        .ilike('name', `%${escapeIlike(text)}%`)
         .order('name');
 
       const results = (data ?? []) as ProductSearchResult[];

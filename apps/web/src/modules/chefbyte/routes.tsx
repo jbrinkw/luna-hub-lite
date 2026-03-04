@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Navigate } from 'react-router-dom';
 import { ScannerPage } from '@/pages/chefbyte/ScannerPage';
 import { HomePage } from '@/pages/chefbyte/HomePage';
 import { InventoryPage } from '@/pages/chefbyte/InventoryPage';
@@ -13,8 +13,9 @@ import { SettingsPage } from '@/pages/chefbyte/SettingsPage';
 export function ChefRoutes() {
   return (
     <Routes>
-      <Route index element={<ScannerPage />} />
+      <Route index element={<Navigate to="/chef/home" replace />} />
       <Route path="home" element={<HomePage />} />
+      <Route path="scanner" element={<ScannerPage />} />
       <Route path="inventory" element={<InventoryPage />} />
       <Route path="shopping" element={<ShoppingPage />} />
       <Route path="meal-plan" element={<MealPlanPage />} />

@@ -87,6 +87,9 @@ export function WalmartPage() {
 
   const [error, setError] = useState<string | null>(null);
 
+  /* ---- Per-product Walmart URL inputs ---- */
+  const [urlInputs, setUrlInputs] = useState<Record<string, string>>({});
+
   /* ---------------------------------------------------------------- */
   /*  Refresh All Prices                                               */
   /* ---------------------------------------------------------------- */
@@ -187,6 +190,45 @@ export function WalmartPage() {
     await loadData();
   };
 
+  /* ---------------------------------------------------------------- */
+  /*  Save custom Walmart URL                                          */
+  /* ---------------------------------------------------------------- */
+
+  const cleanWalmartUrl = (raw: string): string => {
+    // Strip query params and hash, normalize
+    try {
+      const url = new URL(raw);
+      return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
+    } catch {
+      // If not a valid URL, return as-is (trimmed)
+      return raw.trim();
+    }
+  };
+
+  const saveWalmartUrl = async (productId: string) => {
+    if (!user) return;
+    setError(null);
+    const raw = (urlInputs[productId] ?? '').trim();
+    if (!raw) return;
+
+    const cleaned = cleanWalmartUrl(raw);
+    const { error: err } = await chefbyte()
+      .from('products')
+      .update({ walmart_link: cleaned })
+      .eq('product_id', productId)
+      .eq('user_id', user.id);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    setUrlInputs((prev) => {
+      const next = { ...prev };
+      delete next[productId];
+      return next;
+    });
+    await loadData();
+  };
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -244,20 +286,34 @@ export function WalmartPage() {
                 </div>
                 <div
                   style={{
-                    padding: '12px',
-                    background: '#fff',
-                    borderRadius: '4px',
+                    display: 'flex',
+                    gap: '8px',
+                    alignItems: 'center',
                     marginBottom: '8px',
-                    color: '#666',
-                    fontStyle: 'italic',
                   }}
                 >
-                  Search results will appear when Walmart integration is enabled
+                  <IonInput
+                    placeholder="Paste Walmart URL..."
+                    value={urlInputs[product.product_id] ?? ''}
+                    onIonInput={(e) =>
+                      setUrlInputs((prev) => ({
+                        ...prev,
+                        [product.product_id]: e.detail.value ?? '',
+                      }))
+                    }
+                    style={{ flex: 1 }}
+                    data-testid={`url-input-${product.product_id}`}
+                  />
+                  <IonButton
+                    size="small"
+                    onClick={() => saveWalmartUrl(product.product_id)}
+                    disabled={!(urlInputs[product.product_id] ?? '').trim()}
+                    data-testid={`save-url-${product.product_id}`}
+                  >
+                    Save URL
+                  </IonButton>
                 </div>
                 <div style={{ display: 'flex', gap: '8px' }}>
-                  <IonButton size="small" fill="outline" disabled data-testid={`link-selected-${product.product_id}`}>
-                    Link Selected
-                  </IonButton>
                   <IonButton
                     size="small"
                     color="medium"

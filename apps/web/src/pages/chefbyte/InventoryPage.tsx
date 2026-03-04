@@ -300,7 +300,7 @@ export function InventoryPage() {
       p_product_id: productId,
       p_qty: qty,
       p_unit: unit,
-      p_log_macros: false,
+      p_log_macros: true,
       p_logical_date: getLogicalDate(),
     });
     if (err) {

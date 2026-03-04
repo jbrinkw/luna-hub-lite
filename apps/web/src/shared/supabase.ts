@@ -19,3 +19,9 @@ export const supabase = createClient<Database>(supabaseUrl || 'http://localhost:
 export const chefbyte = () => supabase.schema('chefbyte') as any;
 
 export const coachbyte = () => supabase.schema('coachbyte') as any;
+
+/**
+ * Escape special characters in user input before passing to `.ilike()`.
+ * Prevents `%` and `_` in user-typed text from acting as SQL wildcards.
+ */
+export const escapeIlike = (s: string): string => s.replace(/[%_\\]/g, '\\$&');
