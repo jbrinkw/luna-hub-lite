@@ -10,6 +10,7 @@ import {
   IonCardTitle,
   IonTextarea,
   IonText,
+  IonButton,
 } from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
@@ -19,6 +20,7 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase, coachbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
+import { formatWeightWithPlates } from '@/shared/plateCalc';
 
 interface CompletedSet {
   completed_set_id: string;
@@ -51,9 +53,15 @@ export function TodayPage() {
   const [timer, setTimer] = useState<TimerState>(DEFAULT_TIMER);
   const [summary, setSummary] = useState('');
   const [showAdHoc, setShowAdHoc] = useState(false);
+  const [addingPlanned, setAddingPlanned] = useState(false);
   const [exercises, setExercises] = useState<Exercise[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [confirmReset, setConfirmReset] = useState(false);
   const summaryDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const resetTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const isEditingRef = useRef(false);
 
   const today = todayStr();
 
@@ -177,7 +185,9 @@ export function TodayPage() {
       .on(
         'postgres_changes',
         { event: '*', schema: 'coachbyte', table: 'planned_sets', filter: `user_id=eq.${user.id}` },
-        () => loadPlan(),
+        () => {
+          if (!isEditingRef.current) loadPlan();
+        },
       )
       .on(
         'postgres_changes',
@@ -217,6 +227,51 @@ export function TodayPage() {
       await startTimer(restSeconds);
     }
 
+    await loadPlan();
+  };
+
+  const updatePlannedSet = async (plannedSetId: string, field: string, value: number | null) => {
+    isEditingRef.current = true;
+    const { error: err } = await coachbyte()
+      .from('planned_sets')
+      .update({ [field]: value })
+      .eq('planned_set_id', plannedSetId);
+    isEditingRef.current = false;
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    // Realtime will handle the refresh after isEditing resets
+  };
+
+  const deletePlannedSet = async (plannedSetId: string) => {
+    const { error: err } = await coachbyte().from('planned_sets').delete().eq('planned_set_id', plannedSetId);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    await loadPlan();
+  };
+
+  const addPlannedSet = async (exerciseId: string, reps: number, load: number) => {
+    if (!user || !planId) return;
+    const maxOrder = Math.max(...sets.map((s) => s.order), 0);
+    const { error: err } = await coachbyte()
+      .from('planned_sets')
+      .insert({
+        plan_id: planId,
+        user_id: user.id,
+        exercise_id: exerciseId,
+        target_reps: reps,
+        target_load: load,
+        rest_seconds: 90,
+        order: maxOrder + 1,
+      });
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    setAddingPlanned(false);
     await loadPlan();
   };
 
@@ -281,6 +336,12 @@ export function TodayPage() {
     setTimer(DEFAULT_TIMER);
   };
 
+  const handleTimerExpired = async () => {
+    if (!user) return;
+    const { error: err } = await coachbyte().from('timers').update({ state: 'expired' }).eq('user_id', user.id);
+    if (err) setError(err.message);
+  };
+
   const handleAdHocSubmit = async (exerciseId: string, reps: number, load: number) => {
     if (!user || !planId) return;
     setError(null);
@@ -335,6 +396,45 @@ export function TodayPage() {
     saveSummary(summary);
   };
 
+  const deleteCompletedSet = async (completedSetId: string) => {
+    if (confirmDeleteId !== completedSetId) {
+      // First click — show confirm
+      setConfirmDeleteId(completedSetId);
+      clearTimeout(confirmTimeoutRef.current);
+      confirmTimeoutRef.current = setTimeout(() => setConfirmDeleteId(null), 3000);
+      return;
+    }
+    // Second click — delete
+    clearTimeout(confirmTimeoutRef.current);
+    setConfirmDeleteId(null);
+    const { error: err } = await coachbyte().from('completed_sets').delete().eq('completed_set_id', completedSetId);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    await loadPlan();
+  };
+
+  const resetPlan = async () => {
+    if (!confirmReset) {
+      setConfirmReset(true);
+      clearTimeout(resetTimeoutRef.current);
+      resetTimeoutRef.current = setTimeout(() => setConfirmReset(false), 3000);
+      return;
+    }
+    // Confirmed — delete the plan (cascade deletes planned_sets)
+    clearTimeout(resetTimeoutRef.current);
+    setConfirmReset(false);
+    if (!planId) return;
+    const { error: err } = await coachbyte().from('daily_plans').delete().eq('plan_id', planId);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    // Reload triggers ensure_daily_plan which recreates from split template
+    await loadPlan();
+  };
+
   if (loading) {
     return (
       <CoachLayout title="Today">
@@ -355,6 +455,18 @@ export function TodayPage() {
         </IonText>
       )}
 
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <IonButton
+          fill="outline"
+          color={confirmReset ? 'danger' : 'medium'}
+          size="small"
+          onClick={resetPlan}
+          data-testid="reset-plan-btn"
+        >
+          {confirmReset ? 'Confirm Reset?' : 'Reset Plan'}
+        </IonButton>
+      </div>
+
       <IonGrid>
         <IonRow>
           <IonCol size="12" sizeMd="7">
@@ -362,12 +474,19 @@ export function TodayPage() {
               sets={sets}
               onComplete={handleCompleteSet}
               onAdHoc={() => setShowAdHoc(true)}
+              onUpdateSet={updatePlannedSet}
+              onDeleteSet={deletePlannedSet}
+              onAddSet={() => setAddingPlanned(true)}
               timerState={timer.state}
               disabled={false}
             />
 
             {showAdHoc && (
               <AdHocSetForm exercises={exercises} onSubmit={handleAdHocSubmit} onCancel={() => setShowAdHoc(false)} />
+            )}
+
+            {addingPlanned && (
+              <AdHocSetForm exercises={exercises} onSubmit={addPlannedSet} onCancel={() => setAddingPlanned(false)} />
             )}
           </IonCol>
 
@@ -381,6 +500,7 @@ export function TodayPage() {
               onPause={pauseTimer}
               onResume={resumeTimer}
               onReset={resetTimer}
+              onExpired={handleTimerExpired}
             />
 
             <IonCard>
@@ -398,6 +518,7 @@ export function TodayPage() {
                         <th style={{ textAlign: 'left' }}>Exercise</th>
                         <th style={{ textAlign: 'left' }}>Reps</th>
                         <th style={{ textAlign: 'left' }}>Load</th>
+                        <th></th>
                       </tr>
                     </thead>
                     <tbody>
@@ -407,7 +528,18 @@ export function TodayPage() {
                           <td>{cs.exercise_name}</td>
                           <td>{cs.actual_reps}</td>
                           <td>
-                            {cs.actual_load} {WEIGHT_UNIT}
+                            {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
+                          </td>
+                          <td>
+                            <IonButton
+                              fill="clear"
+                              color={confirmDeleteId === cs.completed_set_id ? 'warning' : 'medium'}
+                              size="small"
+                              onClick={() => deleteCompletedSet(cs.completed_set_id)}
+                              data-testid={`delete-completed-${i + 1}`}
+                            >
+                              {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
+                            </IonButton>
                           </td>
                         </tr>
                       ))}

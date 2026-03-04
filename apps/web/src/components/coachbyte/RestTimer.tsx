@@ -18,6 +18,8 @@ interface RestTimerProps {
   onResume: () => void;
   /** Called to reset/dismiss */
   onReset: () => void;
+  /** Called when timer expires (remaining reaches 0) */
+  onExpired?: () => void;
 }
 
 function formatTime(totalSeconds: number): string {
@@ -35,6 +37,7 @@ export function RestTimer({
   onPause,
   onResume,
   onReset,
+  onExpired,
 }: RestTimerProps) {
   const [remaining, setRemaining] = useState(0);
   const [customDuration, setCustomDuration] = useState('');
@@ -56,12 +59,16 @@ export function RestTimer({
   useEffect(() => {
     clearTimer();
 
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (state === 'running' && endTime) {
       setRemaining(calcRemaining());
       intervalRef.current = setInterval(() => {
         const r = calcRemaining();
         setRemaining(r);
-        if (r <= 0) clearTimer();
+        if (r <= 0) {
+          clearTimer();
+          onExpired?.();
+        }
       }, 1000);
     } else if (state === 'paused') {
       setRemaining(durationSeconds - elapsedBeforePause);
@@ -70,9 +77,10 @@ export function RestTimer({
     } else {
       setRemaining(0);
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
 
     return clearTimer;
-  }, [state, endTime, durationSeconds, elapsedBeforePause, calcRemaining, clearTimer]);
+  }, [state, endTime, durationSeconds, elapsedBeforePause, calcRemaining, clearTimer, onExpired]);
 
   // Tab focus recovery
   useEffect(() => {
@@ -114,13 +122,19 @@ export function RestTimer({
 
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
           {state === 'running' && (
-            <IonButton onClick={onPause} data-testid="pause-btn">Pause</IonButton>
+            <IonButton onClick={onPause} data-testid="pause-btn">
+              Pause
+            </IonButton>
           )}
           {state === 'paused' && (
-            <IonButton onClick={onResume} data-testid="resume-btn">Resume</IonButton>
+            <IonButton onClick={onResume} data-testid="resume-btn">
+              Resume
+            </IonButton>
           )}
           {(state === 'running' || state === 'paused' || state === 'expired') && (
-            <IonButton onClick={onReset} data-testid="reset-btn">Reset</IonButton>
+            <IonButton onClick={onReset} data-testid="reset-btn">
+              Reset
+            </IonButton>
           )}
         </div>
 

@@ -3,6 +3,11 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
 
+// Mock plateCalc so tests don't depend on plate breakdown formatting
+vi.mock('@/shared/plateCalc', () => ({
+  formatWeightWithPlates: (w: number) => `${w}`,
+}));
+
 const makeSets = (overrides?: Partial<PlannedSet>[]): PlannedSet[] => [
   {
     planned_set_id: 'ps-1',
@@ -98,18 +103,20 @@ describe('SetQueue', () => {
     expect(screen.getByTestId('queue-row-3')).toHaveTextContent('Squat');
   });
 
-  it('displays relative load as "load lb (percentage%)" when target_load_percentage is set', () => {
+  it('displays load percentage in editable input when target_load_percentage is set', () => {
     render(<SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
-    // Set 3 has percentage 80% and load 240
-    expect(screen.getByTestId('queue-row-3')).toHaveTextContent('240 lb (80%)');
+    // Set 3 has percentage 80% — the load input shows the percentage value
+    const loadInput = screen.getByTestId('edit-load-3');
+    expect(loadInput).toHaveValue(80);
   });
 
-  it('displays "--- (percentage% — no PR)" when target_load_percentage set but target_load is null', () => {
+  it('displays null load when target_load_percentage set but target_load is null', () => {
     const sets = makeSets();
     sets[2].target_load = null;
     sets[2].target_load_percentage = 75;
     render(<SetQueue sets={sets} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
-    expect(screen.getByTestId('queue-row-3')).toHaveTextContent('--- (75% — no PR)');
+    const loadInput = screen.getByTestId('edit-load-3');
+    expect(loadInput).toHaveValue(75);
   });
 
   it('skips completed sets when finding the next incomplete set', () => {

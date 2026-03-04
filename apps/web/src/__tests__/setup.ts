@@ -19,9 +19,12 @@ vi.mock('@ionic/react', () => {
     IonCardTitle: wrap('h2'),
     IonCardContent: wrap('div'),
     IonItem: wrap('div'),
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
     IonInput: React.forwardRef(
-      ({ label, value, onIonInput, type, labelPlacement, autocomplete, required, ...props }: any, ref: any) =>
+      (
+        { label, value, onIonInput, type, labelPlacement: _lp, autocomplete, required: _req, ...props }: any,
+        ref: any,
+      ) =>
         React.createElement(
           'div',
           null,
@@ -161,8 +164,19 @@ vi.mock('@ionic/react', () => {
   };
 });
 
-// Mock ionicons
-vi.mock('ionicons/icons', () => new Proxy({}, { get: (_t, prop) => prop }));
+// Mock ionicons — Proxy with has/ownKeys traps so Vitest export validation passes
+vi.mock(
+  'ionicons/icons',
+  () =>
+    new Proxy(
+      {},
+      {
+        get: (_t, prop) => prop,
+        has: () => true,
+        ownKeys: () => [],
+      },
+    ),
+);
 
 // Mock AppProvider (provides default activation + online state for all tests)
 vi.mock('@/shared/AppProvider', () => ({

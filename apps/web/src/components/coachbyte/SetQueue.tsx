@@ -1,6 +1,17 @@
 import { useEffect, useState } from 'react';
-import { IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonInput, IonText } from '@ionic/react';
+import {
+  IonButton,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonIcon,
+  IonInput,
+  IonText,
+} from '@ionic/react';
+import { closeCircleOutline } from 'ionicons/icons';
 import { WEIGHT_UNIT } from '@/shared/constants';
+import { formatWeightWithPlates } from '@/shared/plateCalc';
 
 export interface PlannedSet {
   planned_set_id: string;
@@ -18,12 +29,25 @@ interface SetQueueProps {
   sets: PlannedSet[];
   onComplete: (reps: number, load: number) => void;
   onAdHoc: () => void;
+  onUpdateSet?: (plannedSetId: string, field: string, value: number | null) => void;
+  onDeleteSet?: (plannedSetId: string) => void;
+  onAddSet?: () => void;
   timerState?: 'running' | 'paused' | 'expired' | 'idle';
   onTimerToggle?: () => void;
   disabled?: boolean;
 }
 
-export function SetQueue({ sets, onComplete, onAdHoc, timerState, onTimerToggle, disabled }: SetQueueProps) {
+export function SetQueue({
+  sets,
+  onComplete,
+  onAdHoc,
+  onUpdateSet,
+  onDeleteSet,
+  onAddSet,
+  timerState,
+  onTimerToggle,
+  disabled,
+}: SetQueueProps) {
   const nextSet = sets.find((s) => !s.completed);
   const [reps, setReps] = useState<string>(nextSet?.target_reps?.toString() ?? '');
   const [load, setLoad] = useState<string>(nextSet?.target_load?.toString() ?? '');
@@ -52,13 +76,13 @@ export function SetQueue({ sets, onComplete, onAdHoc, timerState, onTimerToggle,
 
   const formatLoadDisplay = (set: PlannedSet) => {
     if (set.target_load_percentage && set.target_load) {
-      return `${set.target_load} ${WEIGHT_UNIT} (${set.target_load_percentage}%)`;
+      return `${formatWeightWithPlates(set.target_load)} ${WEIGHT_UNIT} (${set.target_load_percentage}%)`;
     }
     if (set.target_load_percentage && !set.target_load) {
       return `--- (${set.target_load_percentage}% — no PR)`;
     }
     if (set.target_load) {
-      return `${set.target_load} ${WEIGHT_UNIT}`;
+      return `${formatWeightWithPlates(set.target_load)} ${WEIGHT_UNIT}`;
     }
     return '---';
   };
@@ -145,6 +169,8 @@ export function SetQueue({ sets, onComplete, onAdHoc, timerState, onTimerToggle,
                   <th style={{ textAlign: 'left' }}>Exercise</th>
                   <th style={{ textAlign: 'left' }}>Reps</th>
                   <th style={{ textAlign: 'left' }}>Load</th>
+                  <th style={{ textAlign: 'left' }}>Rest</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -152,12 +178,65 @@ export function SetQueue({ sets, onComplete, onAdHoc, timerState, onTimerToggle,
                   <tr key={set.planned_set_id} data-testid={`queue-row-${set.order}`}>
                     <td>{set.order}</td>
                     <td>{set.exercise_name}</td>
-                    <td>{set.target_reps ?? '—'}</td>
-                    <td>{formatLoadDisplay(set)}</td>
+                    <td>
+                      <IonInput
+                        type="number"
+                        value={set.target_reps}
+                        onIonBlur={(e) => {
+                          const val = e.target.value ? Number(e.target.value) : null;
+                          if (val !== set.target_reps) onUpdateSet?.(set.planned_set_id, 'target_reps', val);
+                        }}
+                        style={{ width: '60px' }}
+                        data-testid={`edit-reps-${set.order}`}
+                      />
+                    </td>
+                    <td>
+                      <IonInput
+                        type="number"
+                        value={set.target_load_percentage ?? set.target_load}
+                        onIonBlur={(e) => {
+                          const val = e.target.value ? Number(e.target.value) : null;
+                          const field = set.target_load_percentage ? 'target_load_percentage' : 'target_load';
+                          if (val !== (set.target_load_percentage ?? set.target_load))
+                            onUpdateSet?.(set.planned_set_id, field, val);
+                        }}
+                        style={{ width: '80px' }}
+                        data-testid={`edit-load-${set.order}`}
+                      />
+                    </td>
+                    <td>
+                      <IonInput
+                        type="number"
+                        value={set.rest_seconds}
+                        onIonBlur={(e) => {
+                          const val = e.target.value ? Number(e.target.value) : null;
+                          if (val !== set.rest_seconds) onUpdateSet?.(set.planned_set_id, 'rest_seconds', val);
+                        }}
+                        style={{ width: '60px' }}
+                        data-testid={`edit-rest-${set.order}`}
+                      />
+                    </td>
+                    <td>
+                      <IonButton
+                        fill="clear"
+                        color="danger"
+                        size="small"
+                        onClick={() => onDeleteSet?.(set.planned_set_id)}
+                        data-testid={`delete-set-${set.order}`}
+                        aria-label="Remove set"
+                      >
+                        <IonIcon slot="icon-only" icon={closeCircleOutline} />
+                      </IonButton>
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+          )}
+          {onAddSet && (
+            <IonButton fill="outline" size="small" onClick={onAddSet} style={{ marginTop: 8 }}>
+              + Add Set
+            </IonButton>
           )}
         </IonCardContent>
       </IonCard>
