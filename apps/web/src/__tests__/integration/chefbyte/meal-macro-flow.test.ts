@@ -171,7 +171,7 @@ describe('ChefByte meal & macro flow', () => {
     expect(result.success).toBe(true);
     expect(result.completed_at).toBeTruthy();
 
-    // Verify chicken stock: was 5, consumed 1 container (ingredient qty=1 * servings=1)
+    // Verify chicken stock: was 5, scale_factor=1/2=0.5, consumed 1*0.5=0.5 container
     const { data: chickenStock, error: csErr } = await chef
       .from('stock_lots')
       .select('qty_containers')
@@ -179,9 +179,9 @@ describe('ChefByte meal & macro flow', () => {
       .eq('product_id', chickenId);
     expect(csErr).toBeNull();
     expect(chickenStock).toHaveLength(1);
-    expect(Number(chickenStock![0].qty_containers)).toBeCloseTo(4, 1); // 5 - 1 = 4
+    expect(Number(chickenStock![0].qty_containers)).toBeCloseTo(4.5, 1); // 5 - 0.5 = 4.5
 
-    // Verify rice stock: was 3, consumed 0.5 container (ingredient qty=0.5 * servings=1)
+    // Verify rice stock: was 3, consumed 0.5*0.5=0.25 container
     const { data: riceStock, error: rsErr } = await chef
       .from('stock_lots')
       .select('qty_containers')
@@ -189,7 +189,7 @@ describe('ChefByte meal & macro flow', () => {
       .eq('product_id', riceId);
     expect(rsErr).toBeNull();
     expect(riceStock).toHaveLength(1);
-    expect(Number(riceStock![0].qty_containers)).toBeCloseTo(2.5, 1); // 3 - 0.5 = 2.5
+    expect(Number(riceStock![0].qty_containers)).toBeCloseTo(2.75, 1); // 3 - 0.25 = 2.75
 
     // Verify food_logs were created (one per ingredient since it's a regular meal)
     const { data: logs, error: logErr } = await chef
@@ -203,18 +203,18 @@ describe('ChefByte meal & macro flow', () => {
     // Find the chicken food log
     const chickenLog = logs!.find((l: any) => l.product_id === chickenId);
     expect(chickenLog).toBeTruthy();
-    // 1 container * 4 servings/container * 165 cal/serving = 660 cal
-    expect(Number(chickenLog!.calories)).toBeCloseTo(660, 0);
-    // 1 container * 4 spc * 31 protein/serving = 124
-    expect(Number(chickenLog!.protein)).toBeCloseTo(124, 0);
+    // 0.5 container * 4 spc * 165 cal/serving = 330 cal
+    expect(Number(chickenLog!.calories)).toBeCloseTo(330, 0);
+    // 0.5 container * 4 spc * 31 protein/serving = 62
+    expect(Number(chickenLog!.protein)).toBeCloseTo(62, 0);
 
     // Find the rice food log
     const riceLog = logs!.find((l: any) => l.product_id === riceId);
     expect(riceLog).toBeTruthy();
-    // 0.5 container * 8 spc * 216 cal/serving = 864 cal
-    expect(Number(riceLog!.calories)).toBeCloseTo(864, 0);
-    // 0.5 container * 8 spc * 45 carbs/serving = 180
-    expect(Number(riceLog!.carbs)).toBeCloseTo(180, 0);
+    // 0.25 container * 8 spc * 216 cal/serving = 432 cal
+    expect(Number(riceLog!.calories)).toBeCloseTo(432, 0);
+    // 0.25 container * 8 spc * 45 carbs/serving = 90
+    expect(Number(riceLog!.carbs)).toBeCloseTo(90, 0);
 
     // Verify the meal plan entry is marked completed
     const { data: mealEntry, error: meErr } = await chef
@@ -335,10 +335,10 @@ describe('ChefByte meal & macro flow', () => {
     // servings_per_container should equal the meal's servings (2)
     expect(Number(mealProduct.servings_per_container)).toBe(2);
 
-    // Total macros: chicken (1 container * 2 servings * 4 spc * 165 cal) + rice (0.5 container * 2 servings * 8 spc * 216 cal)
-    // Chicken: 2 * 4 * 165 = 1320 cal, Rice: 1 * 8 * 216 = 1728 cal → total = 3048 cal
-    // Per serving (servings=2): 3048 / 2 = 1524 cal/serving
-    expect(Number(mealProduct.calories_per_serving)).toBeCloseTo(1524, 0);
+    // Total macros: scale_factor = 2/2 = 1.0
+    // Chicken: 1 container * 4 spc * 165 cal = 660, Rice: 0.5 container * 8 spc * 216 cal = 864
+    // Total = 1524 cal, per serving (servings=2): 1524 / 2 = 762 cal/serving
+    expect(Number(mealProduct.calories_per_serving)).toBeCloseTo(762, 0);
 
     // Verify a stock_lot was created for the [MEAL] product
     const { data: mealLots, error: mlErr } = await chef
@@ -351,7 +351,7 @@ describe('ChefByte meal & macro flow', () => {
     expect(mealLots!.length).toBeGreaterThanOrEqual(1);
     expect(Number(mealLots![0].qty_containers)).toBe(1);
 
-    // Verify stock was consumed: chicken went from 5 to 3 (consumed 1*2=2 containers), rice from 3 to 2 (consumed 0.5*2=1 container)
+    // Verify stock was consumed: scale_factor=1.0, chicken went from 5 to 4 (consumed 1*1=1), rice from 3 to 2.5 (consumed 0.5*1=0.5)
     const { data: chickenStock, error: csErr } = await chef
       .from('stock_lots')
       .select('qty_containers')
@@ -359,7 +359,7 @@ describe('ChefByte meal & macro flow', () => {
       .eq('product_id', chickenId);
     expect(csErr).toBeNull();
     expect(chickenStock).toHaveLength(1);
-    expect(Number(chickenStock![0].qty_containers)).toBeCloseTo(3, 1); // 5 - 2 = 3
+    expect(Number(chickenStock![0].qty_containers)).toBeCloseTo(4, 1); // 5 - 1 = 4
 
     const { data: riceStock, error: rsErr } = await chef
       .from('stock_lots')
@@ -368,6 +368,6 @@ describe('ChefByte meal & macro flow', () => {
       .eq('product_id', riceId);
     expect(rsErr).toBeNull();
     expect(riceStock).toHaveLength(1);
-    expect(Number(riceStock![0].qty_containers)).toBeCloseTo(2, 1); // 3 - 1 = 2
+    expect(Number(riceStock![0].qty_containers)).toBeCloseTo(2.5, 1); // 3 - 0.5 = 2.5
   });
 });

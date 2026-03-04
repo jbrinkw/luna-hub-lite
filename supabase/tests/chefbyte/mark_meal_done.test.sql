@@ -91,28 +91,28 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 3: Chicken stock reduced by 1 container (2.0 → 1.0)
--- qty = ingredient.quantity(1) * meal.servings(1) = 1 container
+-- Test 3: Chicken stock reduced by 0.5 container (2.0 → 1.5)
+-- qty = ingredient.quantity(1) * scale_factor(1/2) = 0.5 container
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
   (SELECT qty_containers FROM chefbyte.stock_lots
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND product_id = '30000000-0000-0000-0000-000000000001'),
-  1.000::numeric,
-  'chicken stock reduced from 2.0 to 1.0 after regular meal'
+  1.500::numeric,
+  'chicken stock reduced from 2.0 to 1.5 after regular meal (scale 0.5)'
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 4: Rice stock reduced by 1 container (2.0 → 1.0)
+-- Test 4: Rice stock reduced by 0.5 container (2.0 → 1.5)
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
   (SELECT qty_containers FROM chefbyte.stock_lots
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND product_id = '30000000-0000-0000-0000-000000000002'),
-  1.000::numeric,
-  'rice stock reduced from 2.0 to 1.0 after regular meal'
+  1.500::numeric,
+  'rice stock reduced from 2.0 to 1.5 after regular meal (scale 0.5)'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -129,9 +129,9 @@ SELECT is(
 
 -- ─────────────────────────────────────────────────────────────
 -- Test 6: Verify macro VALUES on food_log — Chicken entry
--- Recipe base_servings=2, meal servings=1
--- Chicken ingredient: qty=1 container * meal_servings=1 = 1 container consumed
--- 1 container * 4 spc * 165cal = 660cal, 4*31=124p, 4*3.6=14.4f, 4*0=0c
+-- Recipe base_servings=2, meal servings=1, scale_factor=1/2=0.5
+-- Chicken ingredient: qty=1 container * 0.5 = 0.5 container consumed
+-- 0.5 container * 4 spc * 165cal = 330cal, 0.5*4*31=62p, 0.5*4*3.6=7.2f
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
@@ -140,8 +140,8 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000001'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  660.000::numeric,
-  'food_log chicken calories = 1 container * 4 spc * 165 = 660'
+  330.000::numeric,
+  'food_log chicken calories = 0.5 container * 4 spc * 165 = 330'
 );
 
 SELECT is(
@@ -150,8 +150,8 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000001'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  124.000::numeric,
-  'food_log chicken protein = 1 container * 4 spc * 31 = 124'
+  62.000::numeric,
+  'food_log chicken protein = 0.5 container * 4 spc * 31 = 62'
 );
 
 SELECT is(
@@ -160,14 +160,14 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000001'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  14.400::numeric,
-  'food_log chicken fat = 1 container * 4 spc * 3.6 = 14.4'
+  7.200::numeric,
+  'food_log chicken fat = 0.5 container * 4 spc * 3.6 = 7.2'
 );
 
 -- ─────────────────────────────────────────────────────────────
 -- Test 7-8: Verify macro VALUES on food_log — Rice entry
--- Rice ingredient: qty=1 container * meal_servings=1 = 1 container consumed
--- 1 container * 3 spc * 130cal = 390cal, 3*2.7=8.1p, 3*0.3=0.9f, 3*28=84c
+-- Rice ingredient: qty=1 container * scale_factor(0.5) = 0.5 container consumed
+-- 0.5 container * 3 spc * 130cal = 195cal, 0.5*3*2.7=4.05p, 0.5*3*0.3=0.45f, 0.5*3*28=42c
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
@@ -176,8 +176,8 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000002'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  390.000::numeric,
-  'food_log rice calories = 1 container * 3 spc * 130 = 390'
+  195.000::numeric,
+  'food_log rice calories = 0.5 container * 3 spc * 130 = 195'
 );
 
 SELECT is(
@@ -186,8 +186,8 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000002'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  84.000::numeric,
-  'food_log rice carbs = 1 container * 3 spc * 28 = 84'
+  42.000::numeric,
+  'food_log rice carbs = 0.5 container * 3 spc * 28 = 42'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -298,71 +298,67 @@ SELECT is(
 
 -- ─────────────────────────────────────────────────────────────
 -- Test: Verify [MEAL] product per-serving macro values
--- NOTE on base_servings: The mark_meal_done function intentionally
--- ignores recipe.base_servings. It uses ingredient.quantity * meal.servings
--- directly for consumption. This means base_servings is a UI hint only;
--- the function treats each meal entry's servings field as the multiplier.
---
--- Chicken: 1 container * 2 servings = 2 containers → 2*4*165=1320cal,
---          2*4*31=248p, 2*4*3.6=28.8f, 2*4*0=0c
--- Rice:    1 container * 2 servings = 2 containers → 2*3*130=780cal,
---          2*3*2.7=16.2p, 2*3*0.3=1.8f, 2*3*28=168c
--- Total: 2100cal, 264.2p, 30.6f, 168c
--- Per serving (servings_per_container=2): 1050cal, 132.1p, 15.3f, 84c
+-- scale_factor = meal.servings(2) / recipe.base_servings(2) = 1.0
+-- Chicken: 1 container * 1.0 = 1 container → 1*4*165=660cal,
+--          1*4*31=124p, 1*4*3.6=14.4f, 1*4*0=0c
+-- Rice:    1 container * 1.0 = 1 container → 1*3*130=390cal,
+--          1*3*2.7=8.1p, 1*3*0.3=0.9f, 1*3*28=84c
+-- Total: 1050cal, 132.1p, 15.3f, 84c
+-- Per serving (servings_per_container=2): 525cal, 66.05p, 7.65f, 42c
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
   (SELECT calories_per_serving FROM chefbyte.products
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
-  1050.000::numeric,
-  '[MEAL] product calories_per_serving = 2100 / 2 = 1050'
+  525.000::numeric,
+  '[MEAL] product calories_per_serving = 1050 / 2 = 525'
 );
 
 SELECT is(
   (SELECT protein_per_serving FROM chefbyte.products
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
-  132.100::numeric,
-  '[MEAL] product protein_per_serving = 264.2 / 2 = 132.1'
+  66.050::numeric,
+  '[MEAL] product protein_per_serving = 132.1 / 2 = 66.05'
 );
 
 SELECT is(
   (SELECT fat_per_serving FROM chefbyte.products
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
-  15.300::numeric,
-  '[MEAL] product fat_per_serving = 30.6 / 2 = 15.3'
+  7.650::numeric,
+  '[MEAL] product fat_per_serving = 15.3 / 2 = 7.65'
 );
 
 SELECT is(
   (SELECT carbs_per_serving FROM chefbyte.products
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
-  84.000::numeric,
-  '[MEAL] product carbs_per_serving = 168 / 2 = 84'
+  42.000::numeric,
+  '[MEAL] product carbs_per_serving = 84 / 2 = 42'
 );
 
 -- ─────────────────────────────────────────────────────────────
 -- Test: Verify ingredient stock deducted after meal-prep
--- Both chicken and rice: started 2.0, regular meal took 1.0 (→1.0),
--- meal-prep takes 2.0 more → floors at 0 (lots deleted)
+-- Both chicken and rice: started 2.0, regular meal took 0.5 (→1.5),
+-- meal-prep (scale=1.0) takes 1.0 more → 0.5 remaining
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
-  (SELECT count(*)::integer FROM chefbyte.stock_lots
+  (SELECT qty_containers FROM chefbyte.stock_lots
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND product_id = '30000000-0000-0000-0000-000000000001'),
-  0,
-  'chicken stock fully depleted after meal-prep (2.0 - 1.0 regular - 2.0 prep = 0)'
+  0.500::numeric,
+  'chicken stock after regular + meal-prep = 2.0 - 0.5 - 1.0 = 0.5'
 );
 
 SELECT is(
-  (SELECT count(*)::integer FROM chefbyte.stock_lots
+  (SELECT qty_containers FROM chefbyte.stock_lots
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND product_id = '30000000-0000-0000-0000-000000000002'),
-  0,
-  'rice stock fully depleted after meal-prep (2.0 - 1.0 regular - 2.0 prep = 0)'
+  0.500::numeric,
+  'rice stock after regular + meal-prep = 2.0 - 0.5 - 1.0 = 0.5'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -418,7 +414,7 @@ SELECT ok(
 
 -- ─────────────────────────────────────────────────────────────
 -- Test 20: Product-based meal food_log has correct macros
--- servings=1 → consume 1 container → 2 spc * 150cal = 300cal
+-- servings=1 → consume 1 serving → 1 * 150cal = 150cal
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
@@ -427,8 +423,8 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000003'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  300.000::numeric,
-  'product-based meal food_log calories = 1 container * 2 spc * 150 = 300'
+  150.000::numeric,
+  'product-based meal food_log calories = 1 serving * 150 = 150'
 );
 
 SELECT is(
@@ -437,8 +433,8 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000003'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  10.000::numeric,
-  'product-based meal food_log protein = 1 container * 2 spc * 5 = 10'
+  5.000::numeric,
+  'product-based meal food_log protein = 1 serving * 5 = 5'
 );
 
 SELECT is(
@@ -447,8 +443,8 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000003'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  6.000::numeric,
-  'product-based meal food_log fat = 1 container * 2 spc * 3 = 6'
+  3.000::numeric,
+  'product-based meal food_log fat = 1 serving * 3 = 3'
 );
 
 SELECT is(
@@ -457,20 +453,21 @@ SELECT is(
       AND product_id = '30000000-0000-0000-0000-000000000003'
       AND logical_date = '2026-03-03'
     ORDER BY created_at ASC LIMIT 1),
-  54.000::numeric,
-  'product-based meal food_log carbs = 1 container * 2 spc * 27 = 54'
+  27.000::numeric,
+  'product-based meal food_log carbs = 1 serving * 27 = 27'
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 23: Product-based meal deducts stock (3.0 → 2.0)
+-- Test 23: Product-based meal deducts stock (3.0 → 2.5)
+-- 1 serving / 2 spc = 0.5 containers deducted
 -- ─────────────────────────────────────────────────────────────
 
 SELECT is(
   (SELECT qty_containers FROM chefbyte.stock_lots
     WHERE user_id = tests.get_supabase_uid('meal_tester')
       AND product_id = '30000000-0000-0000-0000-000000000003'),
-  2.000::numeric,
-  'product-based meal oats stock reduced from 3.0 to 2.0'
+  2.500::numeric,
+  'product-based meal oats stock reduced from 3.0 to 2.5 (1 serving = 0.5 container)'
 );
 
 -- ─────────────────────────────────────────────────────────────

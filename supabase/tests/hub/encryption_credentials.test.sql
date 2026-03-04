@@ -81,14 +81,22 @@ SELECT is(
 --------------------------------------------------------------
 SELECT tests.clear_authentication();
 
+-- Capture uid before switching to service_role (which lacks tests schema access)
+SELECT tests.get_supabase_uid('cred_owner') AS _owner_uid \gset
+
+SET ROLE service_role;
+
 SELECT is(
   (SELECT hub.get_extension_credentials_admin(
-    tests.get_supabase_uid('cred_owner'),
+    :'_owner_uid'::uuid,
     'obsidian'
   )),
   '{"vault_path":"/notes","token":"secret123"}',
   'get_extension_credentials_admin decrypts for service_role'
 );
+
+-- Reset back to postgres for remaining tests
+SET ROLE postgres;
 
 --------------------------------------------------------------
 -- Test 6: upsert overwrites existing credentials

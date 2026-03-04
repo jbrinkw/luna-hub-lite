@@ -258,10 +258,13 @@ export function HomePage() {
         qty_containers: Number(item.qty_containers),
         location_id: defaultLocationId,
       }));
-      await chefbyte().from('stock_lots').insert(stockRows);
+      const { error: insertErr } = await chefbyte().from('stock_lots').insert(stockRows);
 
-      const cartIds = validItems.map((item: any) => item.cart_item_id);
-      await chefbyte().from('shopping_list').delete().in('cart_item_id', cartIds);
+      // Only delete shopping items if stock insert succeeded
+      if (!insertErr) {
+        const cartIds = validItems.map((item: any) => item.cart_item_id);
+        await chefbyte().from('shopping_list').delete().in('cart_item_id', cartIds);
+      }
     }
     await loadData();
   };

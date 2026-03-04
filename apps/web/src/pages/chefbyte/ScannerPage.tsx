@@ -163,8 +163,16 @@ export function ScannerPage() {
             protein: String(product.protein_per_serving ?? ''),
           });
 
-          // Execute the action based on mode
-          await executeAction(mode, product, qty, unit, nutrition);
+          // Execute the action based on mode — use freshly computed nutrition
+          // (setNutrition is async/batched, so `nutrition` from closure is stale)
+          const freshNutrition: NutritionData = {
+            servingsPerContainer: String(product.servings_per_container ?? 1),
+            calories: String(product.calories_per_serving ?? ''),
+            carbs: String(product.carbs_per_serving ?? ''),
+            fat: String(product.fat_per_serving ?? ''),
+            protein: String(product.protein_per_serving ?? ''),
+          };
+          await executeAction(mode, product, qty, unit, freshNutrition);
 
           setQueue((prev) =>
             prev.map((item) =>

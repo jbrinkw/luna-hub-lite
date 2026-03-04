@@ -102,15 +102,6 @@ export function SettingsPage() {
     }
   };
 
-  const togglePlate = (plate: number) => {
-    setSettings((prev) => {
-      const plates = prev.available_plates.includes(plate)
-        ? prev.available_plates.filter((p) => p !== plate)
-        : [...prev.available_plates, plate].sort((a, b) => b - a);
-      return { ...prev, available_plates: plates };
-    });
-  };
-
   const addCustomExercise = async () => {
     if (!user || !newExerciseName.trim()) return;
     setError(null);
@@ -202,8 +193,25 @@ export function SettingsPage() {
                 <IonCheckbox
                   checked={settings.available_plates.includes(plate)}
                   onIonChange={() => {
-                    togglePlate(plate);
-                    setTimeout(saveSettings, 0);
+                    // Compute new plates inline to avoid stale closure in saveSettings
+                    const newPlates = settings.available_plates.includes(plate)
+                      ? settings.available_plates.filter((p) => p !== plate)
+                      : [...settings.available_plates, plate].sort((a, b) => b - a);
+                    const newSettings = { ...settings, available_plates: newPlates };
+                    setSettings(newSettings);
+                    // Save with the freshly computed settings
+                    (async () => {
+                      const { error: saveErr } = await supabase
+                        .schema('coachbyte')
+                        .from('user_settings')
+                        .update({
+                          default_rest_seconds: newSettings.default_rest_seconds,
+                          bar_weight_lbs: newSettings.bar_weight_lbs,
+                          available_plates: newSettings.available_plates as any,
+                        })
+                        .eq('user_id', user!.id);
+                      if (saveErr) setError(saveErr.message);
+                    })();
                   }}
                   data-testid={`plate-${plate}`}
                 >

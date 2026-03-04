@@ -65,7 +65,7 @@ export function WalmartPage() {
       .select('product_id, name, walmart_link, price')
       .eq('user_id', userId)
       .is('price', null)
-      .neq('walmart_link', null);
+      .not('walmart_link', 'is', null);
 
     setMissingPrices((noPrices ?? []) as MissingPriceProduct[]);
 

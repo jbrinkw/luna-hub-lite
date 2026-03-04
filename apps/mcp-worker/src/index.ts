@@ -9,6 +9,17 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY: string;
 }
 
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+};
+
+function jsonResponse(body: Record<string, unknown>, status: number): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+  });
+}
+
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     const url = new URL(request.url);
@@ -17,7 +28,7 @@ export default {
     if (request.method === 'OPTIONS') {
       return new Response(null, {
         headers: {
-          'Access-Control-Allow-Origin': '*',
+          ...CORS_HEADERS,
           'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization',
         },
@@ -26,7 +37,7 @@ export default {
 
     // Health check
     if (url.pathname === '/health') {
-      return new Response('ok');
+      return new Response('ok', { headers: CORS_HEADERS });
     }
 
     // Auth endpoint: POST /auth — validates API key in body, creates DO session,
@@ -36,27 +47,18 @@ export default {
       try {
         body = await request.json();
       } catch {
-        return new Response(JSON.stringify({ error: 'Invalid JSON body' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return jsonResponse({ error: 'Invalid JSON body' }, 400);
       }
 
       const apiKey = body.apiKey;
       if (!apiKey) {
-        return new Response(JSON.stringify({ error: 'Missing apiKey in request body' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return jsonResponse({ error: 'Missing apiKey in request body' }, 400);
       }
 
       const supabase = createServiceClient(env);
       const userId = await authenticateApiKey(supabase, apiKey);
       if (!userId) {
-        return new Response(JSON.stringify({ error: 'Invalid API key' }), {
-          status: 401,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return jsonResponse({ error: 'Invalid API key' }, 401);
       }
 
       // Create a new Durable Object and pre-initialize it with the userId.
@@ -69,19 +71,7 @@ export default {
       doInitUrl.searchParams.set('userId', userId);
       await stub.fetch(new Request(doInitUrl.toString()));
 
-      return new Response(
-        JSON.stringify({
-          sessionId,
-          sseUrl: `/sse?sessionId=${sessionId}`,
-        }),
-        {
-          status: 200,
-          headers: {
-            'Content-Type': 'application/json',
-            'Access-Control-Allow-Origin': '*',
-          },
-        },
-      );
+      return jsonResponse({ sessionId, sseUrl: `/sse?sessionId=${sessionId}` }, 200);
     }
 
     // SSE connection: GET /sse
@@ -98,10 +88,7 @@ export default {
         try {
           id = env.MCP_SESSION.idFromString(sessionId);
         } catch {
-          return new Response(JSON.stringify({ error: 'Invalid sessionId' }), {
-            status: 400,
-            headers: { 'Content-Type': 'application/json' },
-          });
+          return jsonResponse({ error: 'Invalid sessionId' }, 400);
         }
         const stub = env.MCP_SESSION.get(id);
         const doUrl = new URL(request.url);
@@ -114,10 +101,7 @@ export default {
         const supabase = createServiceClient(env);
         const userId = await authenticateApiKey(supabase, apiKey);
         if (!userId) {
-          return new Response(JSON.stringify({ error: 'Invalid API key' }), {
-            status: 401,
-            headers: { 'Content-Type': 'application/json' },
-          });
+          return jsonResponse({ error: 'Invalid API key' }, 401);
         }
 
         const id = env.MCP_SESSION.newUniqueId();
@@ -128,30 +112,21 @@ export default {
         return stub.fetch(new Request(doUrl.toString(), request));
       }
 
-      return new Response(JSON.stringify({ error: 'Missing sessionId or apiKey parameter' }), {
-        status: 401,
-        headers: { 'Content-Type': 'application/json' },
-      });
+      return jsonResponse({ error: 'Missing sessionId or apiKey parameter' }, 401);
     }
 
     // Message endpoint: POST /message?sessionId=xxx
     if (url.pathname === '/message' && request.method === 'POST') {
       const sessionId = url.searchParams.get('sessionId');
       if (!sessionId) {
-        return new Response(JSON.stringify({ error: 'Missing sessionId' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return jsonResponse({ error: 'Missing sessionId' }, 400);
       }
 
       let id: DurableObjectId;
       try {
         id = env.MCP_SESSION.idFromString(sessionId);
       } catch {
-        return new Response(JSON.stringify({ error: 'Invalid sessionId' }), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json' },
-        });
+        return jsonResponse({ error: 'Invalid sessionId' }, 400);
       }
       const stub = env.MCP_SESSION.get(id);
       const doUrl = new URL(request.url);
@@ -159,6 +134,6 @@ export default {
       return stub.fetch(new Request(doUrl.toString(), request));
     }
 
-    return new Response('Not found', { status: 404 });
+    return jsonResponse({ error: 'Not found' }, 404);
   },
 };

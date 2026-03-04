@@ -36,6 +36,18 @@ export const getCookable: ToolDefinition = {
       stockMap[lot.product_id] = (stockMap[lot.product_id] || 0) + Number(lot.qty_containers);
     }
 
+    // Get servings_per_container for unit conversion
+    const { data: products } = await ctx.supabase
+      .schema('chefbyte')
+      .from('products')
+      .select('product_id, servings_per_container')
+      .eq('user_id', ctx.userId);
+
+    const spcMap: Record<string, number> = {};
+    for (const p of products || []) {
+      spcMap[p.product_id] = Number(p.servings_per_container) || 1;
+    }
+
     const cookable: any[] = [];
 
     for (const recipe of recipes) {
@@ -46,17 +58,20 @@ export const getCookable: ToolDefinition = {
       let canCook = true;
 
       for (const ing of ingredients) {
-        const needed = Number(ing.quantity);
+        const rawNeeded = Number(ing.quantity);
         const available = stockMap[ing.product_id] || 0;
 
-        if (needed <= 0) continue;
+        if (rawNeeded <= 0) continue;
 
-        if (available < needed) {
+        // Convert serving-based ingredients to containers for comparison
+        const neededContainers = ing.unit === 'serving' ? rawNeeded / (spcMap[ing.product_id] || 1) : rawNeeded;
+
+        if (available < neededContainers) {
           canCook = false;
           break;
         }
 
-        const batches = Math.floor(available / needed);
+        const batches = Math.floor(available / neededContainers);
         if (batches < maxBatches) maxBatches = batches;
       }
 

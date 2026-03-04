@@ -63,6 +63,16 @@ export class McpSession implements DurableObject {
 
     const sessionId = this.state.id.toString();
 
+    // Close previous SSE stream if a new one connects (e.g., client reconnect)
+    if (this.sseController) {
+      try {
+        this.sseController.close();
+      } catch {
+        /* already closed */
+      }
+      this.sseController = null;
+    }
+
     const stream = new ReadableStream({
       start: (controller) => {
         this.sseController = controller;
@@ -92,7 +102,16 @@ export class McpSession implements DurableObject {
       });
     }
 
-    const rpc: JsonRpcRequest = await request.json();
+    let rpc: JsonRpcRequest;
+    try {
+      rpc = await request.json();
+    } catch {
+      const errResp = jsonRpcError(null as any, -32700, 'Parse error: invalid JSON');
+      if (this.sseController) {
+        this.sseController.enqueue(new TextEncoder().encode(sseEvent('message', errResp)));
+      }
+      return new Response('', { status: 202 });
+    }
     let response;
 
     switch (rpc.method) {
