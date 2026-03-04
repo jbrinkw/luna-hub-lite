@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonButton, IonInput, IonTextarea } from '@ionic/react';
+import { IonSpinner, IonButton, IonInput, IonTextarea, IonText } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
@@ -263,9 +263,12 @@ export function MacroPage() {
     setShowTempModal(true);
   };
 
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
   const saveTempItem = async () => {
     if (!user || !tempName.trim()) return;
-    await chefbyte().from('temp_items').insert({
+    setMutationError(null);
+    const { error: err } = await chefbyte().from('temp_items').insert({
       user_id: user.id,
       name: tempName.trim(),
       calories: tempCalories,
@@ -274,6 +277,10 @@ export function MacroPage() {
       fat: tempFat,
       logical_date: currentDate,
     });
+    if (err) {
+      setMutationError(err.message);
+      return;
+    }
     setShowTempModal(false);
     await loadData();
   };
@@ -294,6 +301,7 @@ export function MacroPage() {
 
   const saveTargets = async () => {
     if (!user) return;
+    setMutationError(null);
     const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat);
 
     // Upsert each config key
@@ -305,7 +313,13 @@ export function MacroPage() {
     ];
 
     for (const { key, value } of keys) {
-      await chefbyte().from('user_config').upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
+      const { error: err } = await chefbyte()
+        .from('user_config')
+        .upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
+      if (err) {
+        setMutationError(err.message);
+        return;
+      }
     }
 
     setShowTargetModal(false);
@@ -331,9 +345,14 @@ export function MacroPage() {
 
   const saveTasteProfile = async () => {
     if (!user) return;
-    await chefbyte()
+    setMutationError(null);
+    const { error: err } = await chefbyte()
       .from('user_config')
       .upsert({ user_id: user.id, key: 'taste_profile', value: tasteProfile }, { onConflict: 'user_id,key' });
+    if (err) {
+      setMutationError(err.message);
+      return;
+    }
     setShowTasteModal(false);
   };
 
@@ -355,6 +374,11 @@ export function MacroPage() {
   return (
     <ChefLayout title="Macros">
       <h2>MACROS</h2>
+      {mutationError && (
+        <IonText color="danger">
+          <p>{mutationError}</p>
+        </IonText>
+      )}
 
       {/* ============================================================ */}
       {/*  DATE NAVIGATION                                              */}

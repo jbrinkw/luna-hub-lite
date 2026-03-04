@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { IonSpinner, IonButton, IonBadge, IonInput, IonToggle, IonText } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
@@ -201,30 +201,26 @@ export function MealPlanPage() {
         return;
       }
 
-      const lower = text.toLowerCase();
-
       const { data: recipes } = await chefbyte()
         .from('recipes')
         .select('recipe_id, name')
         .eq('user_id', user.id)
+        .ilike('name', `%${text}%`)
         .order('name');
 
       const { data: products } = await chefbyte()
         .from('products')
         .select('product_id, name')
         .eq('user_id', user.id)
+        .ilike('name', `%${text}%`)
         .order('name');
 
       const results: SearchResult[] = [];
       for (const r of (recipes ?? []) as { recipe_id: string; name: string }[]) {
-        if (r.name.toLowerCase().includes(lower)) {
-          results.push({ id: r.recipe_id, name: r.name, type: 'recipe' });
-        }
+        results.push({ id: r.recipe_id, name: r.name, type: 'recipe' });
       }
       for (const p of (products ?? []) as { product_id: string; name: string }[]) {
-        if (p.name.toLowerCase().includes(lower)) {
-          results.push({ id: p.product_id, name: p.name, type: 'product' });
-        }
+        results.push({ id: p.product_id, name: p.name, type: 'product' });
       }
 
       setAddSearchResults(results);
@@ -233,10 +229,13 @@ export function MealPlanPage() {
     [user],
   );
 
+  const searchDebounceRef = useRef<ReturnType<typeof setTimeout>>();
+
   const handleAddSearchInput = (value: string) => {
     setAddSearchText(value);
     setAddSelected(null);
-    searchItems(value);
+    if (searchDebounceRef.current) clearTimeout(searchDebounceRef.current);
+    searchDebounceRef.current = setTimeout(() => searchItems(value), 300);
   };
 
   const selectAddItem = (item: SearchResult) => {

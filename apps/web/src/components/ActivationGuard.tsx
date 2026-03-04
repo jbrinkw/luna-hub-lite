@@ -9,7 +9,9 @@ interface ActivationGuardProps {
 
 /** Redirects to /hub/apps if the given app is not activated. */
 export function ActivationGuard({ appName, children }: ActivationGuardProps) {
-  const { activations } = useAppContext();
+  const { activations, activationsLoading } = useAppContext();
+
+  if (activationsLoading) return null;
 
   if (!activations[appName]) {
     return <Navigate to="/hub/apps" replace />;

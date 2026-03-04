@@ -11,6 +11,7 @@ import {
   IonSelect,
   IonSelectOption,
   IonAlert,
+  IonText,
 } from '@ionic/react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
@@ -81,6 +82,7 @@ export function RecipeFormPage() {
 
   /* ---- Delete confirmation ---- */
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------- */
   /*  Load existing recipe (edit mode)                                 */
@@ -97,6 +99,7 @@ export function RecipeFormPage() {
         '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
       )
       .eq('recipe_id', id)
+      .eq('user_id', userId)
       .single();
 
     if (recipe) {
@@ -249,10 +252,11 @@ export function RecipeFormPage() {
 
   const handleSave = async () => {
     if (!user || !name.trim()) return;
+    setSaveError(null);
 
     if (isEdit && id) {
       // Update recipe
-      await chefbyte()
+      const { error: updateErr } = await chefbyte()
         .from('recipes')
         .update({
           name: name.trim(),
@@ -262,10 +266,24 @@ export function RecipeFormPage() {
           total_time: totalTime,
           instructions: instructions || null,
         })
-        .eq('recipe_id', id);
+        .eq('recipe_id', id)
+        .eq('user_id', user.id);
+
+      if (updateErr) {
+        setSaveError(updateErr.message);
+        return;
+      }
 
       // Delete old ingredients, batch insert new
-      await chefbyte().from('recipe_ingredients').delete().eq('recipe_id', id);
+      const { error: delErr } = await chefbyte()
+        .from('recipe_ingredients')
+        .delete()
+        .eq('recipe_id', id)
+        .eq('user_id', user.id);
+      if (delErr) {
+        setSaveError(delErr.message);
+        return;
+      }
 
       if (ingredients.length > 0) {
         const ingredientRows = ingredients.map((ing) => ({
@@ -276,11 +294,15 @@ export function RecipeFormPage() {
           unit: ing.unit,
           note: ing.note || null,
         }));
-        await chefbyte().from('recipe_ingredients').insert(ingredientRows);
+        const { error: ingErr } = await chefbyte().from('recipe_ingredients').insert(ingredientRows);
+        if (ingErr) {
+          setSaveError(ingErr.message);
+          return;
+        }
       }
     } else {
       // Create recipe
-      const { data: newRecipe } = await chefbyte()
+      const { data: newRecipe, error: createErr } = await chefbyte()
         .from('recipes')
         .insert({
           user_id: user.id,
@@ -294,7 +316,12 @@ export function RecipeFormPage() {
         .select('recipe_id')
         .single();
 
-      if (newRecipe && ingredients.length > 0) {
+      if (createErr || !newRecipe) {
+        setSaveError(createErr?.message ?? 'Failed to create recipe');
+        return;
+      }
+
+      if (ingredients.length > 0) {
         const ingredientRows = ingredients.map((ing) => ({
           user_id: user.id,
           recipe_id: newRecipe.recipe_id,
@@ -303,7 +330,11 @@ export function RecipeFormPage() {
           unit: ing.unit,
           note: ing.note || null,
         }));
-        await chefbyte().from('recipe_ingredients').insert(ingredientRows);
+        const { error: ingErr } = await chefbyte().from('recipe_ingredients').insert(ingredientRows);
+        if (ingErr) {
+          setSaveError(ingErr.message);
+          return;
+        }
       }
     }
 
@@ -315,9 +346,22 @@ export function RecipeFormPage() {
   /* ---------------------------------------------------------------- */
 
   const handleDelete = async () => {
-    if (!id) return;
-    await chefbyte().from('recipe_ingredients').delete().eq('recipe_id', id);
-    await chefbyte().from('recipes').delete().eq('recipe_id', id);
+    if (!id || !user) return;
+    setSaveError(null);
+    const { error: ingErr } = await chefbyte()
+      .from('recipe_ingredients')
+      .delete()
+      .eq('recipe_id', id)
+      .eq('user_id', user.id);
+    if (ingErr) {
+      setSaveError(ingErr.message);
+      return;
+    }
+    const { error: recErr } = await chefbyte().from('recipes').delete().eq('recipe_id', id).eq('user_id', user.id);
+    if (recErr) {
+      setSaveError(recErr.message);
+      return;
+    }
     navigate('/chef/recipes');
   };
 
@@ -336,6 +380,12 @@ export function RecipeFormPage() {
   return (
     <ChefLayout title={isEdit ? 'Edit Recipe' : 'New Recipe'}>
       <h2>{isEdit ? 'EDIT RECIPE' : 'NEW RECIPE'}</h2>
+
+      {saveError && (
+        <IonText color="danger">
+          <p>{saveError}</p>
+        </IonText>
+      )}
 
       {/* ============================================================ */}
       {/*  RECIPE FIELDS                                                */}

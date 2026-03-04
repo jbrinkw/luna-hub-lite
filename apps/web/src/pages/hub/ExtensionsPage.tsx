@@ -65,15 +65,24 @@ export function ExtensionsPage() {
 
   const handleToggle = async (extName: string, enabled: boolean) => {
     if (!user) return;
-    setStates((prev) => ({
-      ...prev,
-      [extName]: { ...prev[extName], enabled },
+    const prev = states[extName];
+    setStates((s) => ({
+      ...s,
+      [extName]: { ...s[extName], enabled },
     }));
 
-    await supabase
+    const { error } = await supabase
       .schema('hub')
       .from('extension_settings')
       .upsert({ user_id: user.id, extension_name: extName, enabled }, { onConflict: 'user_id,extension_name' });
+
+    if (error) {
+      // Rollback optimistic update
+      setStates((s) => ({
+        ...s,
+        [extName]: prev ?? { enabled: !enabled, hasCredentials: false },
+      }));
+    }
   };
 
   const handleSaveCredentials = async (extName: string, credentials: Record<string, string>) => {

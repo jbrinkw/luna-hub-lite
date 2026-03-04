@@ -12,6 +12,7 @@ import {
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { WEIGHT_UNIT } from '@/shared/constants';
 
 interface HistoryDay {
   plan_id: string;
@@ -76,12 +77,14 @@ export function HistoryPage() {
         .schema('coachbyte')
         .from('planned_sets')
         .select('plan_id')
+        .eq('user_id', user.id)
         .in('plan_id', planIds);
 
       const { data: completedCounts } = await supabase
         .schema('coachbyte')
         .from('completed_sets')
         .select('plan_id')
+        .eq('user_id', user.id)
         .in('plan_id', planIds);
 
       const planned = new Map<string, number>();
@@ -140,6 +143,7 @@ export function HistoryPage() {
       .from('completed_sets')
       .select('actual_reps, actual_load, completed_at, exercises(name)')
       .eq('plan_id', planId)
+      .eq('user_id', user!.id)
       .order('completed_at');
 
     setDetail(
@@ -240,7 +244,9 @@ export function HistoryPage() {
                           <td>{i + 1}</td>
                           <td>{d.exercise_name}</td>
                           <td>{d.actual_reps}</td>
-                          <td>{d.actual_load} lb</td>
+                          <td>
+                            {d.actual_load} {WEIGHT_UNIT}
+                          </td>
                         </tr>
                       ))}
                     </tbody>

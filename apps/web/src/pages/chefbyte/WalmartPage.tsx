@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonButton, IonInput } from '@ionic/react';
+import { IonSpinner, IonButton, IonInput, IonText } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
@@ -89,17 +89,37 @@ export function WalmartPage() {
   /*  Actions                                                          */
   /* ---------------------------------------------------------------- */
 
+  const [error, setError] = useState<string | null>(null);
+
   const markNotOnWalmart = async (productId: string) => {
     if (!user) return;
-    await chefbyte().from('products').update({ walmart_link: 'NOT_ON_WALMART' }).eq('product_id', productId);
+    setError(null);
+    const { error: err } = await chefbyte()
+      .from('products')
+      .update({ walmart_link: 'NOT_ON_WALMART' })
+      .eq('product_id', productId)
+      .eq('user_id', user.id);
+    if (err) {
+      setError(err.message);
+      return;
+    }
     await loadData();
   };
 
   const savePrice = async (productId: string) => {
     if (!user) return;
+    setError(null);
     const price = parseFloat(priceInputs[productId] ?? '');
     if (isNaN(price)) return;
-    await chefbyte().from('products').update({ price }).eq('product_id', productId);
+    const { error: err } = await chefbyte()
+      .from('products')
+      .update({ price })
+      .eq('product_id', productId)
+      .eq('user_id', user.id);
+    if (err) {
+      setError(err.message);
+      return;
+    }
     await loadData();
   };
 
@@ -118,6 +138,11 @@ export function WalmartPage() {
   return (
     <ChefLayout title="Walmart">
       <h2>WALMART PRICE MANAGER</h2>
+      {error && (
+        <IonText color="danger">
+          <p>{error}</p>
+        </IonText>
+      )}
 
       {/* ============================================================ */}
       {/*  MISSING WALMART LINKS                                        */}

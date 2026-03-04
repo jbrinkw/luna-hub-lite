@@ -8,7 +8,7 @@ import { supabase } from '@/shared/supabase';
 // Default tool definitions (will be populated from activated apps)
 const TOOL_DEFINITIONS: Record<string, { description: string }> = {
   COACHBYTE_LOG_SET: { description: 'Log a completed set' },
-  COACHBYTE_GET_PLAN: { description: 'Get today\'s workout plan' },
+  COACHBYTE_GET_PLAN: { description: "Get today's workout plan" },
   COACHBYTE_GET_HISTORY: { description: 'View workout history' },
   COACHBYTE_GET_PRS: { description: 'View personal records' },
   CHEFBYTE_SCAN_BARCODE: { description: 'Scan a product barcode' },
@@ -57,15 +57,18 @@ export function ToolsPage() {
 
   const handleToggle = async (toolName: string, enabled: boolean) => {
     if (!user) return;
-    setTools((prev) => prev.map((t) => t.tool_name === toolName ? { ...t, enabled } : t));
+    const prev = tools.find((t) => t.tool_name === toolName);
+    setTools((s) => s.map((t) => (t.tool_name === toolName ? { ...t, enabled } : t)));
 
-    await supabase
+    const { error } = await supabase
       .schema('hub')
       .from('user_tool_config')
-      .upsert(
-        { user_id: user.id, tool_name: toolName, enabled },
-        { onConflict: 'user_id,tool_name' },
-      );
+      .upsert({ user_id: user.id, tool_name: toolName, enabled }, { onConflict: 'user_id,tool_name' });
+
+    if (error && prev) {
+      // Rollback optimistic update
+      setTools((s) => s.map((t) => (t.tool_name === toolName ? { ...t, enabled: prev.enabled } : t)));
+    }
   };
 
   return (

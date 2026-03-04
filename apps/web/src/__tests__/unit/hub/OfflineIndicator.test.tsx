@@ -15,6 +15,7 @@ describe('OfflineIndicator', () => {
       activations: {},
       online: true,
       lastSynced: new Date(),
+      activationsLoading: false,
       refreshActivations: vi.fn(),
     });
     const { container } = render(<OfflineIndicator />);
@@ -26,6 +27,7 @@ describe('OfflineIndicator', () => {
       activations: {},
       online: false,
       lastSynced: new Date('2026-03-03T10:00:00Z'),
+      activationsLoading: false,
       refreshActivations: vi.fn(),
     });
     render(<OfflineIndicator />);
@@ -38,6 +40,7 @@ describe('OfflineIndicator', () => {
       activations: {},
       online: false,
       lastSynced: syncDate,
+      activationsLoading: false,
       refreshActivations: vi.fn(),
     });
     render(<OfflineIndicator />);
@@ -52,6 +55,7 @@ describe('OfflineIndicator', () => {
       activations: {},
       online: false,
       lastSynced: null,
+      activationsLoading: false,
       refreshActivations: vi.fn(),
     });
     render(<OfflineIndicator />);

@@ -1,8 +1,18 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonChip, IonButton, IonInput } from '@ionic/react';
+import {
+  IonSpinner,
+  IonCard,
+  IonCardContent,
+  IonCardHeader,
+  IonCardTitle,
+  IonChip,
+  IonButton,
+  IonInput,
+} from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { WEIGHT_UNIT } from '@/shared/constants';
 
 interface ExercisePR {
   exercise_id: string;
@@ -87,6 +97,8 @@ export function PrsPage() {
   }, [user]);
 
   useEffect(() => {
+    // Async data fetching with setState is the standard pattern for this use case
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     computePRs();
   }, [computePRs]);
 
@@ -105,26 +117,26 @@ export function PrsPage() {
   }, [user]);
 
   const addTrackedExercise = (exerciseId: string) => {
-    const ex = allExercises.find(e => e.exercise_id === exerciseId);
-    if (ex && !trackedExercises.find(t => t.exercise_id === exerciseId)) {
-      setTrackedExercises(prev => [...prev, ex]);
+    const ex = allExercises.find((e) => e.exercise_id === exerciseId);
+    if (ex && !trackedExercises.find((t) => t.exercise_id === exerciseId)) {
+      setTrackedExercises((prev) => [...prev, ex]);
     }
     setSearchText('');
   };
 
   const removeTrackedExercise = (exerciseId: string) => {
-    setTrackedExercises(prev => prev.filter(e => e.exercise_id !== exerciseId));
+    setTrackedExercises((prev) => prev.filter((e) => e.exercise_id !== exerciseId));
   };
 
-  const trackedIds = new Set(trackedExercises.map(e => e.exercise_id));
-  const filteredPRs = prs.filter(pr => trackedIds.has(pr.exercise_id));
+  const trackedIds = new Set(trackedExercises.map((e) => e.exercise_id));
+  const filteredPRs = prs.filter((pr) => trackedIds.has(pr.exercise_id));
 
-  const searchResults = searchText.length > 0
-    ? allExercises.filter(e =>
-        e.name.toLowerCase().includes(searchText.toLowerCase()) &&
-        !trackedIds.has(e.exercise_id)
-      )
-    : [];
+  const searchResults =
+    searchText.length > 0
+      ? allExercises.filter(
+          (e) => e.name.toLowerCase().includes(searchText.toLowerCase()) && !trackedIds.has(e.exercise_id),
+        )
+      : [];
 
   if (loading) {
     return (
@@ -141,7 +153,7 @@ export function PrsPage() {
       {filteredPRs.length === 0 ? (
         <p data-testid="no-prs">No PRs recorded yet. Complete some sets to see your records.</p>
       ) : (
-        filteredPRs.map(pr => (
+        filteredPRs.map((pr) => (
           <IonCard key={pr.exercise_id} data-testid={`pr-card-${pr.exercise_id}`}>
             <IonCardHeader>
               <IonCardTitle style={{ display: 'flex', justifyContent: 'space-between' }}>
@@ -151,9 +163,9 @@ export function PrsPage() {
             </IonCardHeader>
             <IonCardContent>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {pr.rep_records.map(r => (
+                {pr.rep_records.map((r) => (
                   <IonChip key={r.reps} data-testid={`pr-${pr.exercise_id}-${r.reps}rep`}>
-                    {r.reps} rep: {r.load} lb
+                    {r.reps} rep: {r.load} {WEIGHT_UNIT}
                   </IonChip>
                 ))}
               </div>
@@ -170,13 +182,13 @@ export function PrsPage() {
           <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
             <IonInput
               value={searchText}
-              onIonInput={e => setSearchText(e.detail.value ?? '')}
+              onIonInput={(e) => setSearchText(e.detail.value ?? '')}
               placeholder="Enter exercise name..."
               data-testid="pr-search-input"
             />
             {searchResults.length > 0 && (
               <div data-testid="pr-search-results">
-                {searchResults.slice(0, 5).map(ex => (
+                {searchResults.slice(0, 5).map((ex) => (
                   <IonButton
                     key={ex.exercise_id}
                     size="small"
@@ -192,7 +204,7 @@ export function PrsPage() {
           </div>
 
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }} data-testid="tracked-chips">
-            {trackedExercises.map(ex => (
+            {trackedExercises.map((ex) => (
               <IonChip
                 key={ex.exercise_id}
                 onClick={() => removeTrackedExercise(ex.exercise_id)}

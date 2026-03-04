@@ -13,6 +13,7 @@ import {
   IonText,
 } from '@ionic/react';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { MIN_PASSWORD_LENGTH } from '@/shared/constants';
 
 export function Signup() {
   const { signUp } = useAuth();
@@ -37,6 +38,10 @@ export function Signup() {
     }
     if (!password) {
       setError('Password is required');
+      return;
+    }
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters`);
       return;
     }
 

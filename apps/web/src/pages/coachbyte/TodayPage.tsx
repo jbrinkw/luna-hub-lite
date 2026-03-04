@@ -223,7 +223,7 @@ export function TodayPage() {
   const startTimer = async (seconds: number) => {
     if (!user) return;
     const endTime = new Date(Date.now() + seconds * 1000).toISOString();
-    await coachbyte().from('timers').upsert(
+    const { error: err } = await coachbyte().from('timers').upsert(
       {
         user_id: user.id,
         state: 'running',
@@ -233,6 +233,10 @@ export function TodayPage() {
       },
       { onConflict: 'user_id' },
     );
+    if (err) {
+      setError(err.message);
+      return;
+    }
     await loadTimer();
   };
 
@@ -241,10 +245,14 @@ export function TodayPage() {
     const elapsed = Math.floor(
       (Date.now() - (new Date(timer.end_time).getTime() - timer.duration_seconds * 1000)) / 1000,
     );
-    await coachbyte()
+    const { error: err } = await coachbyte()
       .from('timers')
       .update({ state: 'paused', paused_at: new Date().toISOString(), elapsed_before_pause: Math.max(0, elapsed) })
       .eq('user_id', user.id);
+    if (err) {
+      setError(err.message);
+      return;
+    }
     await loadTimer();
   };
 
@@ -252,32 +260,53 @@ export function TodayPage() {
     if (!user) return;
     const remaining = timer.duration_seconds - timer.elapsed_before_pause;
     const endTime = new Date(Date.now() + remaining * 1000).toISOString();
-    await coachbyte()
+    const { error: err } = await coachbyte()
       .from('timers')
       .update({ state: 'running', end_time: endTime, paused_at: null })
       .eq('user_id', user.id);
+    if (err) {
+      setError(err.message);
+      return;
+    }
     await loadTimer();
   };
 
   const resetTimer = async () => {
     if (!user) return;
-    await coachbyte().from('timers').delete().eq('user_id', user.id);
+    const { error: err } = await coachbyte().from('timers').delete().eq('user_id', user.id);
+    if (err) {
+      setError(err.message);
+      return;
+    }
     setTimer(DEFAULT_TIMER);
   };
 
   const handleAdHocSubmit = async (exerciseId: string, reps: number, load: number) => {
     if (!user || !planId) return;
+    setError(null);
 
-    const planData = await coachbyte().from('daily_plans').select('logical_date').eq('plan_id', planId).single();
+    const { data: planData, error: fetchErr } = await coachbyte()
+      .from('daily_plans')
+      .select('logical_date')
+      .eq('plan_id', planId)
+      .single();
+    if (fetchErr) {
+      setError(fetchErr.message);
+      return;
+    }
 
-    await coachbyte().from('completed_sets').insert({
+    const { error: insertErr } = await coachbyte().from('completed_sets').insert({
       plan_id: planId,
       user_id: user.id,
       exercise_id: exerciseId,
       actual_reps: reps,
       actual_load: load,
-      logical_date: planData.data?.logical_date,
+      logical_date: planData?.logical_date,
     });
+    if (insertErr) {
+      setError(insertErr.message);
+      return;
+    }
 
     setShowAdHoc(false);
     await loadPlan();
@@ -286,7 +315,8 @@ export function TodayPage() {
   const saveSummary = useCallback(
     async (value: string) => {
       if (!planId) return;
-      await coachbyte().from('daily_plans').update({ summary: value }).eq('plan_id', planId);
+      const { error: err } = await coachbyte().from('daily_plans').update({ summary: value }).eq('plan_id', planId);
+      if (err) setError(err.message);
     },
     [planId],
   );

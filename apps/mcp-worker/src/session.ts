@@ -16,6 +16,7 @@ export class McpSession implements DurableObject {
   private toolsReady: Promise<void> = Promise.resolve();
   private sseController: ReadableStreamDefaultController | null = null;
   private supabase: any = null;
+  private keepaliveInterval: ReturnType<typeof setInterval> | null = null;
 
   constructor(
     private readonly state: DurableObjectState,
@@ -64,6 +65,10 @@ export class McpSession implements DurableObject {
     const sessionId = this.state.id.toString();
 
     // Close previous SSE stream if a new one connects (e.g., client reconnect)
+    if (this.keepaliveInterval) {
+      clearInterval(this.keepaliveInterval);
+      this.keepaliveInterval = null;
+    }
     if (this.sseController) {
       try {
         this.sseController.close();
@@ -77,8 +82,21 @@ export class McpSession implements DurableObject {
       start: (controller) => {
         this.sseController = controller;
         controller.enqueue(new TextEncoder().encode(sseEvent('endpoint', `/message?sessionId=${sessionId}`)));
+        // SSE keepalive: send comment every 30s to prevent proxy/browser timeouts
+        this.keepaliveInterval = setInterval(() => {
+          try {
+            controller.enqueue(new TextEncoder().encode(': keepalive\n\n'));
+          } catch {
+            // Stream closed
+            if (this.keepaliveInterval) clearInterval(this.keepaliveInterval);
+          }
+        }, 30_000);
       },
       cancel: () => {
+        if (this.keepaliveInterval) {
+          clearInterval(this.keepaliveInterval);
+          this.keepaliveInterval = null;
+        }
         this.sseController = null;
       },
     });
@@ -179,7 +197,13 @@ export class McpSession implements DurableObject {
                     toolError(`Configure ${extensionName} credentials in Hub settings.`),
                   );
                 } else {
-                  const credentials = JSON.parse(decryptedJson);
+                  let credentials: Record<string, string>;
+                  try {
+                    credentials = JSON.parse(decryptedJson);
+                  } catch {
+                    response = jsonRpcSuccess(rpc.id, toolError('Failed to parse extension credentials.'));
+                    break;
+                  }
                   const extCtx: ExtensionToolContext = { ...toolCtx, credentials };
                   const result = await tool.handler(toolArgs, extCtx);
                   response = jsonRpcSuccess(rpc.id, result);

@@ -22,6 +22,7 @@ describe('ModuleSwitcher', () => {
       activations: { coachbyte: true, chefbyte: true },
       online: true,
       lastSynced: null,
+      activationsLoading: false,
       refreshActivations: vi.fn(),
     });
   });
@@ -31,6 +32,7 @@ describe('ModuleSwitcher', () => {
       activations: {},
       online: true,
       lastSynced: null,
+      activationsLoading: false,
       refreshActivations: vi.fn(),
     });
 
@@ -47,6 +49,7 @@ describe('ModuleSwitcher', () => {
       activations: { coachbyte: true },
       online: true,
       lastSynced: null,
+      activationsLoading: false,
       refreshActivations: vi.fn(),
     });
 

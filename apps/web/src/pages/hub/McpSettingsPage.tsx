@@ -97,7 +97,8 @@ export function McpSettingsPage() {
       .schema('hub')
       .from('api_keys')
       .update({ revoked_at: new Date().toISOString() })
-      .eq('id', keyId);
+      .eq('id', keyId)
+      .eq('user_id', user!.id);
 
     if (err) setError(err.message);
     setRefreshCounter((c) => c + 1);

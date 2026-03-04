@@ -11,6 +11,7 @@ import {
   IonSegmentButton,
   IonLabel,
   IonAlert,
+  IonText,
 } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -155,26 +156,38 @@ export function InventoryPage() {
 
   const getLogicalDate = () => todayStr();
 
+  const [error, setError] = useState<string | null>(null);
+
   const addStock = async (productId: string, qtyContainers: number) => {
     if (!user || !locationId) return;
-    await chefbyte().from('stock_lots').insert({
+    const { error: err } = await chefbyte().from('stock_lots').insert({
       user_id: user.id,
       product_id: productId,
       location_id: locationId,
       qty_containers: qtyContainers,
       expires_on: null,
     });
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    setError(null);
     await loadData();
   };
 
   const consumeStock = async (productId: string, qty: number, unit: 'container' | 'serving') => {
-    await (chefbyte() as any).rpc('consume_product', {
+    const { error: err } = await (chefbyte() as any).rpc('consume_product', {
       p_product_id: productId,
       p_qty: qty,
       p_unit: unit,
       p_log_macros: false,
       p_logical_date: getLogicalDate(),
     });
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    setError(null);
     await loadData();
   };
 
@@ -210,6 +223,11 @@ export function InventoryPage() {
   return (
     <ChefLayout title="Inventory">
       <h2>INVENTORY</h2>
+      {error && (
+        <IonText color="danger">
+          <p>{error}</p>
+        </IonText>
+      )}
 
       <IonSegment
         value={viewMode}
