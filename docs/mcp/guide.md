@@ -19,6 +19,7 @@ The Worker aggregates tools from two sources:
 ## Tool Namespacing
 
 All tools are namespaced by source:
+
 - App tools: `COACHBYTE_`, `CHEFBYTE_`
 - Extension tools: `OBSIDIAN_`, `TODOIST_`, `HOMEASSISTANT_`
 
@@ -38,9 +39,22 @@ MCP clients load tool schemas fresh on each connection. Tool schema changes take
 
 Each user has a tool configuration stored in `hub.user_tool_config`. When an MCP client connects, the Worker loads that user's enabled tools and only exposes those in the tool listing. Users manage their tool toggles in the Hub UI. When a user deactivates an app module, that module's tools disappear from the tool listing on the next MCP client connection. In-flight tool calls complete normally.
 
+**Extension enabled filtering:** Extension tools are only included in the `tools/list` response if the extension is enabled in `hub.extension_settings` (checked via the `enabled` boolean). Individual extension tools can also be disabled via `user_tool_config`. Both checks must pass for an extension tool to appear.
+
 ## Subrequest Budget
 
 A typical app tool call uses 1-3 Supabase RPC subrequests. Extension tool calls use 2-4 (auth check + Vault credentials RPC + external API + optional write). The Workers free tier limit of 50 subrequests per invocation is sufficient.
+
+## Additional MCP Protocol Methods
+
+The Worker handles the following standard MCP protocol methods beyond `initialize` and `tools/list`:
+
+| Method                      | Response                                                                        |
+| --------------------------- | ------------------------------------------------------------------------------- |
+| `ping`                      | Returns empty object `{}` — used for connection health checks                   |
+| `resources/list`            | Returns `{ resources: [] }` — no resources exposed (placeholder for future use) |
+| `prompts/list`              | Returns `{ prompts: [] }` — no prompts exposed (placeholder for future use)     |
+| `notifications/initialized` | Returns HTTP 202 — acknowledges client initialization notification              |
 
 ---
 
@@ -84,10 +98,10 @@ If credentials are missing or invalid, the tool returns `isError: true` with "Co
 
 ### Included Extensions
 
-| Extension | Tools | External API |
-|-----------|-------|-------------|
-| Obsidian | Search notes, create note, get note, update note | Obsidian Local REST API |
-| Todoist | Get tasks, create task, complete task, get projects | Todoist Sync/REST API |
-| Home Assistant | Get entity state, call service, get entities list | Home Assistant REST API |
+| Extension      | Tools                                               | External API            |
+| -------------- | --------------------------------------------------- | ----------------------- |
+| Obsidian       | Search notes, create note, get note, update note    | Obsidian Local REST API |
+| Todoist        | Get tasks, create task, complete task, get projects | Todoist Sync/REST API   |
+| Home Assistant | Get entity state, call service, get entities list   | Home Assistant REST API |
 
 Additional extensions can be added by creating a new folder in `extensions/` with the tool definitions and config manifest. The MCP server Worker must be updated to import the new tools.
