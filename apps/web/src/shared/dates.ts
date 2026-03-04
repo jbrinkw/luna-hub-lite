@@ -7,14 +7,22 @@
  */
 
 /**
- * Returns today's date as a YYYY-MM-DD string in the local timezone.
+ * Returns today's logical date as a YYYY-MM-DD string in the local timezone.
  *
  * Unlike `new Date().toISOString().slice(0, 10)` which uses UTC and
  * can return yesterday/tomorrow near midnight, this uses the browser's
  * local timezone to match what the user expects.
+ *
+ * If dayStartHour > 0, times before that hour count as the previous day.
+ * This aligns with the server-side `private.get_logical_date()` which uses
+ * the user's `day_start_hour` profile setting to shift the day boundary.
  */
-export function todayStr(): string {
-  return new Date().toLocaleDateString('sv-SE');
+export function todayStr(dayStartHour = 0): string {
+  const now = new Date();
+  if (dayStartHour > 0) {
+    now.setHours(now.getHours() - dayStartHour);
+  }
+  return now.toLocaleDateString('sv-SE');
 }
 
 /**

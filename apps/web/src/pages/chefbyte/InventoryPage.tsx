@@ -160,17 +160,43 @@ export function InventoryPage() {
 
   const addStock = async (productId: string, qtyContainers: number) => {
     if (!user || !locationId) return;
-    const { error: err } = await chefbyte().from('stock_lots').insert({
-      user_id: user.id,
-      product_id: productId,
-      location_id: locationId,
-      qty_containers: qtyContainers,
-      expires_on: null,
-    });
-    if (err) {
-      setError(err.message);
-      return;
+
+    // Check for existing lot with same product/location/no-expiry
+    const { data: existing } = await chefbyte()
+      .from('stock_lots')
+      .select('lot_id, qty_containers')
+      .eq('user_id', user.id)
+      .eq('product_id', productId)
+      .eq('location_id', locationId)
+      .is('expires_on', null)
+      .limit(1)
+      .maybeSingle();
+
+    if (existing) {
+      // Merge into existing lot
+      const { error: err } = await chefbyte()
+        .from('stock_lots')
+        .update({ qty_containers: Number(existing.qty_containers) + qtyContainers })
+        .eq('lot_id', existing.lot_id);
+      if (err) {
+        setError(err.message);
+        return;
+      }
+    } else {
+      // Create new lot
+      const { error: err } = await chefbyte().from('stock_lots').insert({
+        user_id: user.id,
+        product_id: productId,
+        location_id: locationId,
+        qty_containers: qtyContainers,
+        expires_on: null,
+      });
+      if (err) {
+        setError(err.message);
+        return;
+      }
     }
+
     setError(null);
     await loadData();
   };

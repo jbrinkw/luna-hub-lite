@@ -53,8 +53,8 @@ SELECT is(
 
 SELECT is(
   (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'calories'->>'remaining')::numeric),
-  0::numeric,
-  'calories remaining = 0 (not NULL) when no data and no goal'
+  2000::numeric,
+  'calories remaining = default goal (2000) when no data and no user config'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -136,8 +136,8 @@ SELECT is(
 
 SELECT is(
   (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'calories'->>'goal')::numeric),
-  0::numeric,
-  'calories goal = 0 when no user_config set'
+  2000::numeric,
+  'calories goal = server default (2000) when no user_config set'
 );
 
 -- ─────────────────────────────────────────────────────────────

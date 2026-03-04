@@ -158,4 +158,26 @@ test.describe('Auth flow', () => {
     await expect(page).toHaveURL(/\/login/);
     await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
   });
+
+  test('demo login redirects to /hub with demo data', async ({ page }) => {
+    await page.goto('/login');
+    await page.getByRole('button', { name: /try demo account/i }).click();
+    await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
+    // Verify the hub page rendered with demo user
+    await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
+    // Verify demo user's display name is loaded in the profile input
+    await expect(page.getByLabel('Display Name')).toHaveValue('Demo User');
+  });
+
+  test('demo login button shows loading state', async ({ page }) => {
+    await page.goto('/login');
+    const demoBtn = page.getByRole('button', { name: /try demo account/i });
+    await expect(demoBtn).toBeVisible();
+    await expect(demoBtn).toBeEnabled();
+    await demoBtn.click();
+    // Button should show loading text while processing
+    await expect(page.getByRole('button', { name: /loading demo/i })).toBeVisible();
+    // Eventually redirects
+    await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
+  });
 });

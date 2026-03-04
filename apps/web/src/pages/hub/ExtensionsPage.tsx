@@ -10,21 +10,24 @@ const EXTENSIONS = [
     name: 'obsidian',
     displayName: 'Obsidian',
     description: 'Sync notes and data with your Obsidian vault',
-    credentialFields: [{ key: 'vault_path', label: 'Vault Path' }],
+    credentialFields: [
+      { key: 'obsidian_url', label: 'Obsidian Local REST API URL' },
+      { key: 'obsidian_api_key', label: 'API Key' },
+    ],
   },
   {
     name: 'todoist',
     displayName: 'Todoist',
     description: 'Sync tasks and shopping lists with Todoist',
-    credentialFields: [{ key: 'api_token', label: 'API Token' }],
+    credentialFields: [{ key: 'todoist_api_key', label: 'API Token' }],
   },
   {
     name: 'homeassistant',
     displayName: 'Home Assistant',
     description: 'Control smart home devices and automations',
     credentialFields: [
-      { key: 'url', label: 'Home Assistant URL' },
-      { key: 'token', label: 'Long-Lived Access Token' },
+      { key: 'ha_url', label: 'Home Assistant URL' },
+      { key: 'ha_api_key', label: 'Long-Lived Access Token' },
     ],
   },
 ];

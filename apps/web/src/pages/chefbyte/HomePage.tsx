@@ -248,7 +248,7 @@ export function HomePage() {
       .from('shopping_list')
       .select('*, products:product_id(is_placeholder)')
       .eq('user_id', user.id)
-      .eq('purchased', false);
+      .eq('purchased', true);
 
     const validItems = ((items ?? []) as any[]).filter((item) => !item.products?.is_placeholder);
     if (validItems.length > 0) {

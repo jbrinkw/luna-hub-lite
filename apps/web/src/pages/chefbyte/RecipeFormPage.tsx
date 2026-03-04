@@ -274,27 +274,28 @@ export function RecipeFormPage() {
         return;
       }
 
-      // Delete old ingredients, batch insert new
-      const { error: delErr } = await chefbyte()
-        .from('recipe_ingredients')
-        .delete()
-        .eq('recipe_id', id)
-        .eq('user_id', user.id);
-      if (delErr) {
-        setSaveError(delErr.message);
-        return;
-      }
-
-      if (ingredients.length > 0) {
-        const ingredientRows = ingredients.map((ing) => ({
-          user_id: user.id,
-          recipe_id: id,
-          product_id: ing.product_id,
-          quantity: ing.quantity,
-          unit: ing.unit,
-          note: ing.note || null,
-        }));
-        const { error: ingErr } = await chefbyte().from('recipe_ingredients').insert(ingredientRows);
+      // Atomic ingredient save via RPC (delete old + insert new in one transaction)
+      if (ingredients.length === 0) {
+        // Zero ingredients: just delete existing
+        const { error: delErr } = await chefbyte()
+          .from('recipe_ingredients')
+          .delete()
+          .eq('recipe_id', id)
+          .eq('user_id', user.id);
+        if (delErr) {
+          setSaveError(delErr.message);
+          return;
+        }
+      } else {
+        const { error: ingErr } = await chefbyte().rpc('save_recipe_ingredients', {
+          p_recipe_id: id,
+          p_ingredients: ingredients.map((ing) => ({
+            product_id: ing.product_id,
+            quantity: ing.quantity,
+            unit: ing.unit,
+            note: ing.note || null,
+          })),
+        });
         if (ingErr) {
           setSaveError(ingErr.message);
           return;
@@ -322,15 +323,15 @@ export function RecipeFormPage() {
       }
 
       if (ingredients.length > 0) {
-        const ingredientRows = ingredients.map((ing) => ({
-          user_id: user.id,
-          recipe_id: newRecipe.recipe_id,
-          product_id: ing.product_id,
-          quantity: ing.quantity,
-          unit: ing.unit,
-          note: ing.note || null,
-        }));
-        const { error: ingErr } = await chefbyte().from('recipe_ingredients').insert(ingredientRows);
+        const { error: ingErr } = await chefbyte().rpc('save_recipe_ingredients', {
+          p_recipe_id: newRecipe.recipe_id,
+          p_ingredients: ingredients.map((ing) => ({
+            product_id: ing.product_id,
+            quantity: ing.quantity,
+            unit: ing.unit,
+            note: ing.note || null,
+          })),
+        });
         if (ingErr) {
           setSaveError(ingErr.message);
           return;

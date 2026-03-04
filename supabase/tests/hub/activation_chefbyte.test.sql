@@ -125,7 +125,7 @@ VALUES (
 
 -- Add a user_config entry
 INSERT INTO chefbyte.user_config (user_id, key, value)
-VALUES (tests.get_supabase_uid('cf_activator'), 'daily_calorie_goal', '2000');
+VALUES (tests.get_supabase_uid('cf_activator'), 'goal_calories', '2000');
 
 -- Add a liquidtrack_device + event
 INSERT INTO chefbyte.liquidtrack_devices (user_id, device_name, import_key_hash)
