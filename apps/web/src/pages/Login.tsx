@@ -13,6 +13,7 @@ import {
   IonText,
 } from '@ionic/react';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { supabase } from '@/shared/supabase';
 
 const DEMO_EMAIL = 'demo@lunahub.dev';
 const DEMO_PASSWORD = 'demo1234';
@@ -60,6 +61,8 @@ export function Login() {
       if (signInError) {
         setError('Demo account unavailable. Please create an account.');
       } else {
+        // Shift all date-relative demo data to be relative to today
+        await (supabase.schema('hub') as any).rpc('reset_demo_dates');
         navigate('/hub');
       }
     } finally {
