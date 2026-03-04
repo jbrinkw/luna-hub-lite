@@ -13,6 +13,7 @@ interface Env {
 export class McpSession implements DurableObject {
   private userId: string = '';
   private tools: Record<string, ToolDefinition> = {};
+  private toolsReady: Promise<void> = Promise.resolve();
   private sseController: ReadableStreamDefaultController | null = null;
   private supabase: any = null;
 
@@ -23,27 +24,53 @@ export class McpSession implements DurableObject {
 
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
+    if (url.pathname === '/init') return this.handleInit(url);
     if (url.pathname === '/sse') return this.handleSseConnect(url);
     if (url.pathname === '/message' && request.method === 'POST') return this.handleMessage(request);
     return new Response('Not found', { status: 404 });
   }
 
-  private handleSseConnect(url: URL): Response {
-    this.userId = url.searchParams.get('userId') || '';
-    this.supabase = createServiceClient(this.env);
-    const sessionId = this.state.id.toString();
+  /** Called by POST /auth to pre-set userId and start building tools before SSE connects. */
+  private handleInit(url: URL): Response {
+    const userId = url.searchParams.get('userId') || '';
+    if (!userId) {
+      return new Response(JSON.stringify({ error: 'Missing userId' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
 
-    // Build tools asynchronously - will be ready before first tools/list call
-    buildUserTools(this.supabase, this.userId).then(tools => { this.tools = tools; });
+    this.userId = userId;
+    this.supabase = createServiceClient(this.env);
+    this.toolsReady = buildUserTools(this.supabase, this.userId).then((tools) => {
+      this.tools = tools;
+    });
+
+    return new Response('ok', { status: 200 });
+  }
+
+  private handleSseConnect(url: URL): Response {
+    // If userId is already set (via /init from POST /auth flow), skip re-initialization.
+    // Otherwise, initialize from query params (legacy GET /sse?apiKey=xxx flow).
+    const queryUserId = url.searchParams.get('userId') || '';
+    if (!this.userId && queryUserId) {
+      this.userId = queryUserId;
+      this.supabase = createServiceClient(this.env);
+      this.toolsReady = buildUserTools(this.supabase, this.userId).then((tools) => {
+        this.tools = tools;
+      });
+    }
+
+    const sessionId = this.state.id.toString();
 
     const stream = new ReadableStream({
       start: (controller) => {
         this.sseController = controller;
-        controller.enqueue(
-          new TextEncoder().encode(sseEvent('endpoint', `/message?sessionId=${sessionId}`)),
-        );
+        controller.enqueue(new TextEncoder().encode(sseEvent('endpoint', `/message?sessionId=${sessionId}`)));
       },
-      cancel: () => { this.sseController = null; },
+      cancel: () => {
+        this.sseController = null;
+      },
     });
 
     return new Response(stream, {
@@ -57,6 +84,14 @@ export class McpSession implements DurableObject {
   }
 
   private async handleMessage(request: Request): Promise<Response> {
+    // Reject unauthenticated sessions — userId is set during SSE connect
+    if (!this.userId) {
+      return new Response(JSON.stringify({ error: 'Session not authenticated' }), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     const rpc: JsonRpcRequest = await request.json();
     let response;
 
@@ -73,16 +108,20 @@ export class McpSession implements DurableObject {
         return new Response('', { status: 202 });
 
       case 'tools/list':
+        await this.toolsReady;
         response = jsonRpcSuccess(rpc.id, {
-          tools: Object.values(this.tools).map((t): McpToolSchema => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: t.inputSchema,
-          })),
+          tools: Object.values(this.tools).map(
+            (t): McpToolSchema => ({
+              name: t.name,
+              description: t.description,
+              inputSchema: t.inputSchema,
+            }),
+          ),
         });
         break;
 
       case 'tools/call': {
+        await this.toolsReady;
         const toolName = (rpc.params as any)?.name;
         const toolArgs = (rpc.params as any)?.arguments || {};
         const tool = this.tools[toolName];
@@ -93,25 +132,39 @@ export class McpSession implements DurableObject {
           const toolCtx: ToolContext = { userId: this.userId, supabase: this.supabase };
           try {
             if ('extensionName' in tool) {
-              // Extension tool: fetch credentials from hub.extension_settings
+              // Extension tool: check enabled status, then decrypt credentials via RPC
+              const extensionName = (tool as any).extensionName;
               const { data: settings } = await this.supabase
                 .schema('hub')
                 .from('extension_settings')
-                .select('credentials_encrypted')
+                .select('enabled')
                 .eq('user_id', this.userId)
-                .eq('extension_name', (tool as any).extensionName)
+                .eq('extension_name', extensionName)
                 .eq('enabled', true)
                 .single();
 
-              if (!settings?.credentials_encrypted) {
-                response = jsonRpcSuccess(rpc.id, toolError(
-                  `Configure ${(tool as any).extensionName} credentials in Hub settings.`,
-                ));
+              if (!settings) {
+                response = jsonRpcSuccess(rpc.id, toolError(`Configure ${extensionName} credentials in Hub settings.`));
               } else {
-                const credentials = JSON.parse(settings.credentials_encrypted);
-                const extCtx: ExtensionToolContext = { ...toolCtx, credentials };
-                const result = await tool.handler(toolArgs, extCtx);
-                response = jsonRpcSuccess(rpc.id, result);
+                // Decrypt credentials server-side via private.get_extension_credentials
+                const { data: decryptedJson, error: decryptErr } = await this.supabase
+                  .schema('hub')
+                  .rpc('get_extension_credentials_admin', {
+                    p_user_id: this.userId,
+                    p_extension_name: extensionName,
+                  });
+
+                if (decryptErr || !decryptedJson) {
+                  response = jsonRpcSuccess(
+                    rpc.id,
+                    toolError(`Configure ${extensionName} credentials in Hub settings.`),
+                  );
+                } else {
+                  const credentials = JSON.parse(decryptedJson);
+                  const extCtx: ExtensionToolContext = { ...toolCtx, credentials };
+                  const result = await tool.handler(toolArgs, extCtx);
+                  response = jsonRpcSuccess(rpc.id, result);
+                }
               }
             } else {
               // App tool: call handler directly
@@ -130,9 +183,7 @@ export class McpSession implements DurableObject {
     }
 
     if (this.sseController && response) {
-      this.sseController.enqueue(
-        new TextEncoder().encode(sseEvent('message', response)),
-      );
+      this.sseController.enqueue(new TextEncoder().encode(sseEvent('message', response)));
     }
 
     return new Response('', { status: 202 });
