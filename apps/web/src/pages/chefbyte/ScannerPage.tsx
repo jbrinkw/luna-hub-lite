@@ -2,8 +2,9 @@ import { useState, useRef, useCallback } from 'react';
 import { IonButton } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
+import { useScannerDetection } from '@/hooks/useScannerDetection';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -117,6 +118,18 @@ export function ScannerPage() {
   });
 
   /* ---------------------------------------------------------------- */
+  /*  Hardware barcode scanner detection                               */
+  /* ---------------------------------------------------------------- */
+
+  // handleBarcodeSubmit is defined below but referenced here via ref
+  const barcodeSubmitRef = useRef<(barcode: string) => void>(() => {});
+
+  useScannerDetection({
+    onBarcodeScanned: (barcode) => barcodeSubmitRef.current(barcode),
+    protectedInputIds: ['nut-servingsPerContainer', 'nut-calories', 'nut-carbs', 'nut-fat', 'nut-protein'],
+  });
+
+  /* ---------------------------------------------------------------- */
   /*  Barcode submit                                                   */
   /* ---------------------------------------------------------------- */
 
@@ -205,32 +218,97 @@ export function ScannerPage() {
             ),
           );
         } else {
-          // Product not found — create placeholder (Edge Function stubbed)
-          // TODO: Call analyze-product Edge Function for automatic nutrition lookup
-          const { data: newProduct } = await chefbyte()
-            .from('products')
-            .insert({
-              user_id: user.id,
-              barcode,
-              name: `Unknown (${barcode})`,
-              is_placeholder: true,
-            })
-            .select('product_id, name')
-            .single();
+          // Product not found — try analyze-product edge function first,
+          // fall back to placeholder if it fails or returns no data
+          let analyzedProduct: any = null;
+          try {
+            const { data: efData, error: efError } = await supabase.functions.invoke('analyze-product', {
+              body: { barcode },
+            });
+            if (!efError && efData?.suggestion) {
+              // Edge function returned normalized product data from OpenFoodFacts + AI
+              const s = efData.suggestion;
+              const { data: created } = await chefbyte()
+                .from('products')
+                .insert({
+                  user_id: user.id,
+                  barcode,
+                  name: s.name || `Product (${barcode})`,
+                  description: s.description || null,
+                  is_placeholder: false,
+                  calories_per_serving: s.calories_per_serving ?? null,
+                  protein_per_serving: s.protein_per_serving ?? null,
+                  carbs_per_serving: s.carbs_per_serving ?? null,
+                  fat_per_serving: s.fat_per_serving ?? null,
+                  servings_per_container: s.servings_per_container ?? 1,
+                })
+                .select(
+                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+                )
+                .single();
+              if (created) {
+                analyzedProduct = created;
+              }
+            }
+          } catch {
+            // Edge function call failed — fall through to placeholder
+          }
 
-          setQueue((prev) =>
-            prev.map((item) =>
-              item.id === tempId
-                ? {
-                    ...item,
-                    name: newProduct?.name ?? `Unknown (${barcode})`,
-                    productId: newProduct?.product_id ?? null,
-                    status: 'success',
-                    isNew: true,
-                  }
-                : item,
-            ),
-          );
+          if (analyzedProduct) {
+            // AI-analyzed product created successfully
+            const freshNut: NutritionData = {
+              servingsPerContainer: String(analyzedProduct.servings_per_container ?? 1),
+              calories: String(analyzedProduct.calories_per_serving ?? ''),
+              carbs: String(analyzedProduct.carbs_per_serving ?? ''),
+              fat: String(analyzedProduct.fat_per_serving ?? ''),
+              protein: String(analyzedProduct.protein_per_serving ?? ''),
+            };
+            setNutrition(freshNut);
+            setOriginalNutrition(freshNut);
+
+            const undoInfo = await executeAction(mode, analyzedProduct, qty, unit, freshNut);
+
+            setQueue((prev) =>
+              prev.map((item) =>
+                item.id === tempId
+                  ? {
+                      ...item,
+                      name: analyzedProduct.name,
+                      productId: analyzedProduct.product_id,
+                      status: 'success',
+                      isNew: false,
+                      undoInfo,
+                    }
+                  : item,
+              ),
+            );
+          } else {
+            // Fallback: create placeholder product
+            const { data: newProduct } = await chefbyte()
+              .from('products')
+              .insert({
+                user_id: user.id,
+                barcode,
+                name: `Unknown (${barcode})`,
+                is_placeholder: true,
+              })
+              .select('product_id, name')
+              .single();
+
+            setQueue((prev) =>
+              prev.map((item) =>
+                item.id === tempId
+                  ? {
+                      ...item,
+                      name: newProduct?.name ?? `Unknown (${barcode})`,
+                      productId: newProduct?.product_id ?? null,
+                      status: 'success',
+                      isNew: true,
+                    }
+                  : item,
+              ),
+            );
+          }
         }
       } catch (err: any) {
         setQueue((prev) =>
@@ -244,6 +322,9 @@ export function ScannerPage() {
     },
     [user, mode, screenValue, unit, nutrition],
   );
+
+  // Keep ref in sync so hardware scanner detection can call the latest version
+  barcodeSubmitRef.current = handleBarcodeSubmit;
 
   /* ---------------------------------------------------------------- */
   /*  Execute action based on mode                                     */

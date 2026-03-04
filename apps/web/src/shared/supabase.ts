@@ -5,7 +5,13 @@ const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  console.warn('Supabase environment variables not set');
+  if (import.meta.env.PROD) {
+    throw new Error(
+      'Missing required Supabase environment variables (VITE_SUPABASE_URL, VITE_SUPABASE_ANON_KEY). ' +
+        'The app cannot connect to the database in production without them.',
+    );
+  }
+  console.warn('Supabase environment variables not set — falling back to localhost');
 }
 
 export const supabase = createClient<Database>(supabaseUrl || 'http://localhost:54321', supabaseAnonKey || '');

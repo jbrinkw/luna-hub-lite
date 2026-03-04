@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonButton, IonInput, IonTextarea, IonCard, IonCardContent } from '@ionic/react';
+import { IonButton, IonInput, IonTextarea, IonCard, IonCardContent } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
@@ -9,6 +9,7 @@ import { todayStr } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { calcCaloriesFromMacros } from '@/pages/chefbyte/MacroPage';
 import { computeRecipeMacros } from '@/pages/chefbyte/RecipesPage';
+import { CardSkeleton, MacroBarSkeleton, ListSkeleton } from '@/components/SkeletonScreen';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -436,7 +437,11 @@ export function HomePage() {
   if (loading) {
     return (
       <ChefLayout title="Home">
-        <IonSpinner data-testid="home-loading" />
+        <div data-testid="home-loading">
+          <CardSkeleton />
+          <MacroBarSkeleton />
+          <ListSkeleton rows={3} />
+        </div>
       </ChefLayout>
     );
   }

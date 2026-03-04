@@ -62,10 +62,30 @@ export const belowMinStock: ToolDefinition = {
     }
 
     if (autoAdd && belowMin.length > 0) {
+      // Fetch existing shopping list items so we can ADD to qty rather than replace
+      const productIds = belowMin.map((item) => item.product_id);
+      const { data: existingItems, error: fetchErr } = await ctx.supabase
+        .schema('chefbyte')
+        .from('shopping_list')
+        .select('product_id, qty_containers')
+        .eq('user_id', ctx.userId)
+        .in('product_id', productIds);
+
+      if (fetchErr)
+        return toolError(
+          `Found ${belowMin.length} below-min products but failed to check shopping list: ${fetchErr.message}`,
+        );
+
+      const existingMap: Record<string, number> = {};
+      for (const item of existingItems || []) {
+        existingMap[item.product_id] = Number(item.qty_containers);
+      }
+
+      // Build rows with additive quantities
       const rows = belowMin.map((item) => ({
         user_id: ctx.userId,
         product_id: item.product_id,
-        qty_containers: item.deficit,
+        qty_containers: (existingMap[item.product_id] || 0) + item.deficit,
       }));
 
       const { error: upsertError } = await ctx.supabase

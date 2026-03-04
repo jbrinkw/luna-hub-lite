@@ -34,9 +34,10 @@ export const getTimer: ToolDefinition = {
       const nowMs = Date.now();
       remainingSeconds = Math.max(0, Math.round((endMs - nowMs) / 1000));
 
-      // If timer has expired, report as done
+      // If timer has expired, write done state to DB and report as done
       if (remainingSeconds === 0) {
         state = 'done';
+        await ctx.supabase.schema('coachbyte').from('timers').update({ state: 'done' }).eq('timer_id', timer.timer_id);
       }
     }
 
