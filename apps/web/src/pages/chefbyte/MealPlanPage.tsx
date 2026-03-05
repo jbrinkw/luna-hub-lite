@@ -1,15 +1,4 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import {
-  IonSpinner,
-  IonButton,
-  IonBadge,
-  IonInput,
-  IonToggle,
-  IonText,
-  IonSelect,
-  IonSelectOption,
-  IonCheckbox,
-} from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -170,6 +159,8 @@ export function MealPlanPage() {
   const dayDates = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => toDateStr(new Date(weekStart.getTime() + i * 86400000)));
   }, [weekStart]);
+
+  const todayStr = toDateStr(new Date());
 
   const mealsByDay = useMemo(() => {
     const map = new Map<string, MealEntry[]>();
@@ -382,55 +373,107 @@ export function MealPlanPage() {
   if (loading) {
     return (
       <ChefLayout title="Meal Plan">
-        <IonSpinner data-testid="mealplan-loading" />
+        <div style={{ padding: '20px' }} data-testid="mealplan-loading">
+          Loading meal plan...
+        </div>
       </ChefLayout>
     );
   }
 
   return (
     <ChefLayout title="Meal Plan">
-      <h2>MEAL PLAN</h2>
-
-      {error && (
-        <IonText color="danger">
-          <p>{error}</p>
-        </IonText>
-      )}
-
       {/* ============================================================ */}
-      {/*  WEEK NAVIGATION                                              */}
+      {/*  HEADER                                                       */}
       {/* ============================================================ */}
-      <div data-testid="week-nav" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-        <IonButton size="small" fill="outline" onClick={prevWeek} data-testid="prev-week-btn">
-          Prev
-        </IonButton>
-        <IonButton size="small" fill="outline" onClick={goToday} data-testid="today-btn">
-          Today
-        </IonButton>
-        <IonButton size="small" fill="outline" onClick={nextWeek} data-testid="next-week-btn">
-          Next
-        </IonButton>
-        <span data-testid="week-range" style={{ marginLeft: '8px', fontWeight: 'bold' }}>
-          {formatWeekRange(weekStart)}
-        </span>
+      <div
+        style={{
+          marginBottom: '20px',
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          flexWrap: 'wrap',
+          gap: '12px',
+        }}
+      >
+        <h1 style={{ margin: 0 }}>Meal Plan</h1>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button
+            onClick={openAddModal}
+            disabled={!selectedDay}
+            data-testid="add-meal-btn"
+            style={{
+              padding: '8px 16px',
+              background: '#2f9e44',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            Add Meal
+          </button>
+          <button
+            onClick={prevWeek}
+            data-testid="prev-week-btn"
+            style={{
+              padding: '8px 16px',
+              background: '#fff',
+              border: '1px solid #ddd',
+              borderRadius: '6px',
+              cursor: 'pointer',
+            }}
+          >
+            Previous
+          </button>
+          <button
+            onClick={goToday}
+            data-testid="today-btn"
+            style={{
+              padding: '8px 16px',
+              background: '#1e66f5',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            Today
+          </button>
+          <button
+            onClick={nextWeek}
+            data-testid="next-week-btn"
+            style={{
+              padding: '8px 16px',
+              background: '#fff',
+              border: '1px solid #ddd',
+              borderRadius: '6px',
+              cursor: 'pointer',
+            }}
+          >
+            Next
+          </button>
+        </div>
       </div>
+
+      {error && <p style={{ color: '#d33', margin: '0 0 12px' }}>{error}</p>}
+
+      <span
+        data-testid="week-range"
+        style={{ display: 'block', marginBottom: '12px', fontWeight: 'bold', fontSize: '14px', color: '#555' }}
+      >
+        {formatWeekRange(weekStart)}
+      </span>
 
       {/* ============================================================ */}
       {/*  7-DAY GRID                                                   */}
       {/* ============================================================ */}
-      <div
-        data-testid="week-grid"
-        style={{
-          display: 'grid',
-          gridTemplateColumns: 'repeat(7, 1fr)',
-          gap: '4px',
-          marginBottom: '16px',
-        }}
-      >
+      <div data-testid="week-grid" className="cb-week-grid" style={{ marginBottom: '16px' }}>
         {dayDates.map((date, i) => {
           const dayMeals = mealsByDay.get(date) ?? [];
-          const dayNum = new Date(date + 'T00:00:00').getDate();
           const isSelected = selectedDay === date;
+          const isToday = date === todayStr;
 
           return (
             <div
@@ -438,83 +481,168 @@ export function MealPlanPage() {
               data-testid={`day-col-${date}`}
               onClick={() => setSelectedDay(date)}
               style={{
-                padding: '8px',
-                border: isSelected ? '2px solid #3880ff' : '1px solid #ddd',
-                borderRadius: '4px',
+                background: isToday ? '#e8f4fd' : '#fff',
+                border: isToday ? '2px solid #1e66f5' : isSelected ? '2px solid #1e66f5' : '1px solid #ddd',
+                borderRadius: '8px',
+                padding: '12px',
                 cursor: 'pointer',
-                minHeight: '80px',
-                background: isSelected ? '#e8f0fe' : undefined,
+                minHeight: '200px',
+                display: 'flex',
+                flexDirection: 'column',
               }}
             >
-              <div style={{ fontWeight: 'bold', fontSize: '0.85em', marginBottom: '4px' }}>
-                {DAY_NAMES[i]} {dayNum}
+              <div
+                style={{
+                  fontWeight: 600,
+                  marginBottom: '12px',
+                  paddingBottom: '8px',
+                  borderBottom: '1px solid #eee',
+                  color: isToday ? '#1e66f5' : '#111',
+                }}
+              >
+                <div>{DAY_NAMES[i]}</div>
+                <div>
+                  {new Date(date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                </div>
+                {isToday && <div style={{ fontSize: '0.8em', color: '#1890ff', fontWeight: 'bold' }}>TODAY</div>}
               </div>
-              {dayMeals.length === 0 && <span style={{ color: '#aaa', fontSize: '0.8em' }}>(empty)</span>}
-              {dayMeals.map((meal) => {
-                const macros = entryMacros(meal);
-                return (
-                  <div
-                    key={meal.meal_id}
-                    data-testid={`grid-meal-${meal.meal_id}`}
-                    style={{ fontSize: '0.8em', marginBottom: '4px' }}
-                  >
-                    {meal.meal_type && (
-                      <div
-                        data-testid={`meal-type-label-${meal.meal_id}`}
-                        style={{ fontSize: '0.7em', color: '#666', textTransform: 'capitalize', lineHeight: 1.2 }}
-                      >
-                        {meal.meal_type}
-                      </div>
-                    )}
-                    <div>
-                      {entryName(meal)}
-                      {meal.completed_at && (
-                        <IonBadge
-                          color="success"
-                          style={{ marginLeft: '4px', fontSize: '0.7em' }}
-                          data-testid={`done-badge-${meal.meal_id}`}
-                        >
-                          done
-                        </IonBadge>
-                      )}
-                      {meal.meal_prep && !meal.completed_at && (
-                        <IonBadge
-                          color="tertiary"
-                          style={{ marginLeft: '4px', fontSize: '0.7em' }}
-                          data-testid={`prep-badge-${meal.meal_id}`}
-                        >
-                          PREP
-                        </IonBadge>
-                      )}
-                    </div>
-                    {macros && (macros.calories > 0 || macros.protein > 0) && (
-                      <div
-                        data-testid={`grid-macros-${meal.meal_id}`}
-                        style={{ fontSize: '0.7em', color: '#888', lineHeight: 1.2 }}
-                      >
-                        {macros.calories}cal {macros.protein}P {macros.carbs}C {macros.fat}F
-                      </div>
-                    )}
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
+                {dayMeals.length === 0 && (
+                  <div style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '20px 0' }}>
+                    No meals planned
                   </div>
-                );
-              })}
+                )}
+                {dayMeals.map((meal) => {
+                  const macros = entryMacros(meal);
+                  return (
+                    <div
+                      key={meal.meal_id}
+                      data-testid={`grid-meal-${meal.meal_id}`}
+                      style={{
+                        background: '#f7f7f9',
+                        padding: '8px',
+                        borderRadius: '6px',
+                        fontSize: '13px',
+                        border: '1px solid #eee',
+                        position: 'relative',
+                      }}
+                    >
+                      <div style={{ paddingRight: '20px' }}>
+                        <div style={{ fontWeight: 600, lineHeight: '1.2' }}>{entryName(meal)}</div>
+                        {meal.meal_type && (
+                          <div
+                            data-testid={`meal-type-label-${meal.meal_id}`}
+                            style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}
+                          >
+                            <span
+                              style={{
+                                background: '#eee',
+                                padding: '1px 4px',
+                                borderRadius: '3px',
+                                textTransform: 'capitalize',
+                              }}
+                            >
+                              {meal.meal_type}
+                            </span>
+                          </div>
+                        )}
+                        {meal.completed_at && (
+                          <span
+                            data-testid={`done-badge-${meal.meal_id}`}
+                            style={{
+                              display: 'inline-block',
+                              marginTop: '4px',
+                              fontSize: '10px',
+                              background: '#2f9e44',
+                              color: '#fff',
+                              padding: '1px 6px',
+                              borderRadius: '3px',
+                            }}
+                          >
+                            done
+                          </span>
+                        )}
+                        {meal.meal_prep && !meal.completed_at && (
+                          <span
+                            data-testid={`prep-badge-${meal.meal_id}`}
+                            style={{
+                              display: 'inline-block',
+                              marginTop: '4px',
+                              fontSize: '10px',
+                              background: '#6c5ce7',
+                              color: '#fff',
+                              padding: '1px 6px',
+                              borderRadius: '3px',
+                            }}
+                          >
+                            PREP
+                          </span>
+                        )}
+                      </div>
+
+                      {macros && (macros.calories > 0 || macros.protein > 0) && (
+                        <div
+                          data-testid={`grid-macros-${meal.meal_id}`}
+                          style={{
+                            fontSize: '11px',
+                            color: '#555',
+                            display: 'flex',
+                            flexWrap: 'wrap',
+                            gap: '6px',
+                            marginTop: '2px',
+                          }}
+                        >
+                          <span>
+                            {'\ud83d\udd25'}
+                            {macros.calories}
+                          </span>
+                          <span>
+                            {'\ud83e\udea9'}
+                            {macros.protein}
+                          </span>
+                          <span>
+                            {'\ud83c\udf5e'}
+                            {macros.carbs}
+                          </span>
+                          <span>
+                            {'\ud83e\udd51'}
+                            {macros.fat}
+                          </span>
+                        </div>
+                      )}
+
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          deleteMeal(meal.meal_id);
+                        }}
+                        data-testid={`delete-meal-${meal.meal_id}`}
+                        title="Remove"
+                        style={{
+                          position: 'absolute',
+                          top: '4px',
+                          right: '4px',
+                          padding: '2px 6px',
+                          background: '#d33',
+                          color: '#fff',
+                          border: 'none',
+                          borderRadius: '3px',
+                          cursor: 'pointer',
+                          fontSize: '12px',
+                          opacity: 0.8,
+                        }}
+                      >
+                        {'\u00d7'}
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           );
         })}
       </div>
-
-      {/* ============================================================ */}
-      {/*  ADD MEAL BUTTON                                               */}
-      {/* ============================================================ */}
-      <IonButton
-        size="small"
-        onClick={openAddModal}
-        disabled={!selectedDay}
-        data-testid="add-meal-btn"
-        style={{ marginBottom: '16px' }}
-      >
-        + Add Meal
-      </IonButton>
 
       {/* ============================================================ */}
       {/*  DAY DETAIL TABLE                                              */}
@@ -556,13 +684,13 @@ export function MealPlanPage() {
                       </td>
                       <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <IonCheckbox
+                          <input
+                            type="checkbox"
                             checked={meal.meal_prep}
-                            onIonChange={() => toggleMealPrep(meal)}
+                            onChange={() => toggleMealPrep(meal)}
                             disabled={!!meal.completed_at}
                             aria-label={`Toggle meal prep for ${entryName(meal)}`}
                             data-testid={`toggle-prep-${meal.meal_id}`}
-                            style={{ '--size': '18px' } as React.CSSProperties}
                           />
                           <span>{meal.meal_prep ? 'Prep' : 'Regular'}</span>
                         </div>
@@ -573,36 +701,58 @@ export function MealPlanPage() {
                       <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
                         {!meal.completed_at && (
                           <div style={{ display: 'flex', gap: '4px' }}>
-                            <IonButton
-                              size="small"
-                              color="success"
+                            <button
                               onClick={() => markDone(meal.meal_id)}
                               data-testid={`mark-done-${meal.meal_id}`}
+                              style={{
+                                padding: '6px 12px',
+                                background: '#2f9e44',
+                                color: '#fff',
+                                border: 'none',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                fontSize: '13px',
+                              }}
                             >
                               Mark Done
-                            </IonButton>
+                            </button>
                             {meal.meal_prep && (
-                              <IonButton
-                                size="small"
-                                color="tertiary"
+                              <button
                                 onClick={() => setPrepTarget(meal)}
                                 data-testid={`exec-prep-${meal.meal_id}`}
+                                style={{
+                                  padding: '6px 12px',
+                                  background: '#6c5ce7',
+                                  color: '#fff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  fontSize: '13px',
+                                }}
                               >
                                 Execute Prep
-                              </IonButton>
+                              </button>
                             )}
-                            <IonButton
-                              size="small"
-                              color="danger"
-                              fill="clear"
+                            <button
                               onClick={() => deleteMeal(meal.meal_id)}
                               data-testid={`delete-meal-${meal.meal_id}`}
+                              style={{
+                                padding: '6px 12px',
+                                background: 'transparent',
+                                color: '#d33',
+                                border: 'none',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                fontSize: '13px',
+                              }}
                             >
                               Delete
-                            </IonButton>
+                            </button>
                           </div>
                         )}
-                        {meal.completed_at && <span>\u2014</span>}
+                        {meal.completed_at && <span>{'\u2014'}</span>}
                       </td>
                     </tr>
                   );
@@ -660,11 +810,22 @@ export function MealPlanPage() {
         testId="add-meal-modal"
       >
         <div style={{ marginBottom: '12px', position: 'relative' }}>
-          <IonInput
-            label="Search recipe or product"
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>
+            Search recipe or product
+          </label>
+          <input
+            type="text"
             value={addSearchText}
-            onIonInput={(e) => handleAddSearchInput(e.detail.value ?? '')}
+            onChange={(e) => handleAddSearchInput(e.target.value)}
             data-testid="add-meal-search"
+            placeholder="Type to search..."
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: '1px solid #ccc',
+              borderRadius: '6px',
+              fontSize: '14px',
+            }}
           />
           {addShowDropdown && (
             <div
@@ -696,45 +857,78 @@ export function MealPlanPage() {
           )}
         </div>
         <div style={{ marginBottom: '12px' }}>
-          <IonInput
-            label="Servings"
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>Servings</label>
+          <input
             type="number"
-            min="0"
+            min={0}
             value={addServings}
-            onIonInput={(e) => setAddServings(Number(e.detail.value) || 1)}
+            onChange={(e) => setAddServings(Number(e.target.value) || 1)}
             data-testid="add-meal-servings"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: '1px solid #ccc',
+              borderRadius: '6px',
+              fontSize: '14px',
+            }}
           />
         </div>
         <div style={{ marginBottom: '12px' }}>
-          <IonSelect
-            label="Meal Type"
-            value={addMealType}
-            onIonChange={(e) => setAddMealType(e.detail.value ?? null)}
-            placeholder="Select type (optional)"
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>Meal Type</label>
+          <select
+            value={addMealType ?? ''}
+            onChange={(e) => setAddMealType(e.target.value || null)}
             data-testid="add-meal-type-select"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: '1px solid #ccc',
+              borderRadius: '6px',
+              fontSize: '14px',
+              background: '#fff',
+            }}
           >
-            <IonSelectOption value="breakfast">Breakfast</IonSelectOption>
-            <IonSelectOption value="lunch">Lunch</IonSelectOption>
-            <IonSelectOption value="dinner">Dinner</IonSelectOption>
-            <IonSelectOption value="snack">Snack</IonSelectOption>
-          </IonSelect>
+            <option value="">Select type (optional)</option>
+            <option value="breakfast">Breakfast</option>
+            <option value="lunch">Lunch</option>
+            <option value="dinner">Dinner</option>
+            <option value="snack">Snack</option>
+          </select>
         </div>
         <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
           <label>Meal Prep</label>
-          <IonToggle
+          <input
+            type="checkbox"
             checked={addMealPrep}
-            onIonChange={(e) => setAddMealPrep(e.detail.checked)}
+            onChange={(e) => setAddMealPrep(e.target.checked)}
             data-testid="add-meal-prep-toggle"
           />
         </div>
         <div style={{ marginBottom: '8px', fontSize: '0.85em', color: '#666' }}>Date: {selectedDay}</div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-          <IonButton fill="clear" onClick={() => setShowAddModal(false)} data-testid="add-meal-cancel">
+          <button
+            onClick={() => setShowAddModal(false)}
+            data-testid="add-meal-cancel"
+            style={{ padding: '8px 16px', background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          >
             Cancel
-          </IonButton>
-          <IonButton onClick={addMeal} disabled={!addSelected} data-testid="add-meal-confirm">
+          </button>
+          <button
+            onClick={addMeal}
+            disabled={!addSelected}
+            data-testid="add-meal-confirm"
+            style={{
+              padding: '8px 16px',
+              background: '#1e66f5',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
             Add
-          </IonButton>
+          </button>
         </div>
       </ModalOverlay>
 
@@ -756,12 +950,28 @@ export function MealPlanPage() {
         )}
         <p style={{ fontSize: '0.85em', color: '#666' }}>Macros will not be logged until the [MEAL] lot is consumed.</p>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <IonButton fill="clear" onClick={() => setPrepTarget(null)} data-testid="prep-cancel-btn">
+          <button
+            onClick={() => setPrepTarget(null)}
+            data-testid="prep-cancel-btn"
+            style={{ padding: '8px 16px', background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+          >
             Cancel
-          </IonButton>
-          <IonButton color="tertiary" onClick={executePrepConfirmed} data-testid="prep-execute-btn">
+          </button>
+          <button
+            onClick={executePrepConfirmed}
+            data-testid="prep-execute-btn"
+            style={{
+              padding: '8px 16px',
+              background: '#6c5ce7',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '4px',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
             Execute
-          </IonButton>
+          </button>
         </div>
       </ModalOverlay>
     </ChefLayout>

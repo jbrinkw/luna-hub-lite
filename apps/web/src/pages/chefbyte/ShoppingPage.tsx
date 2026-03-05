@@ -1,17 +1,4 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import {
-  IonSpinner,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonButton,
-  IonInput,
-  IonCheckbox,
-  IonList,
-  IonText,
-  IonAlert,
-} from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, supabase, escapeIlike } from '@/shared/supabase';
@@ -45,8 +32,6 @@ export function ShoppingPage() {
   const [items, setItems] = useState<ShoppingItem[]>([]);
 
   const [error, setError] = useState<string | null>(null);
-
-  const [showClearAllAlert, setShowClearAllAlert] = useState(false);
 
   /* ---- Add item form state ---- */
   const [searchText, setSearchText] = useState('');
@@ -358,6 +343,12 @@ export function ShoppingPage() {
     await loadItems();
   };
 
+  const handleClearAll = () => {
+    if (window.confirm('Are you sure you want to remove all items from the shopping list?')) {
+      clearAll();
+    }
+  };
+
   /* ---------------------------------------------------------------- */
   /*  Helpers                                                          */
   /* ---------------------------------------------------------------- */
@@ -374,125 +365,155 @@ export function ShoppingPage() {
   if (loading) {
     return (
       <ChefLayout title="Shopping">
-        <IonSpinner data-testid="shopping-loading" />
+        <div style={{ padding: '20px' }} data-testid="shopping-loading">
+          Loading shopping list...
+        </div>
       </ChefLayout>
     );
   }
 
   return (
     <ChefLayout title="Shopping">
-      <h2>SHOPPING LIST</h2>
+      <div style={{ padding: '20px' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
+          <h1 style={{ margin: 0 }}>Shopping List</h1>
+          <button
+            onClick={autoAddBelowMinStock}
+            data-testid="auto-add-btn"
+            style={{
+              padding: '10px 16px',
+              background: '#1e66f5',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+              fontWeight: 600,
+            }}
+          >
+            Auto-Add Below Min Stock
+          </button>
+        </div>
 
-      {error && (
-        <IonText color="danger">
-          <p>{error}</p>
-        </IonText>
-      )}
+        {error && <div style={{ color: '#d33', fontSize: '14px', padding: '8px' }}>{error}</div>}
 
-      {/* ============================================================ */}
-      {/*  ADD ITEM FORM                                                */}
-      {/* ============================================================ */}
-      <IonCard data-testid="add-item-form">
-        <IonCardHeader>
-          <IonCardTitle>Add Item</IonCardTitle>
-        </IonCardHeader>
-        <IonCardContent>
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-end', position: 'relative' }}>
-            <div style={{ flex: 1, position: 'relative' }}>
-              <IonInput
-                label="Item name"
-                value={searchText}
-                onIonInput={(e) => handleSearchInput(e.detail.value ?? '')}
-                data-testid="add-item-name"
-              />
-              {/* Autocomplete dropdown */}
-              {showDropdown && (
-                <div
-                  data-testid="product-dropdown"
-                  style={{
-                    position: 'absolute',
-                    top: '100%',
-                    left: 0,
-                    right: 0,
-                    background: '#fff',
-                    border: '1px solid #ccc',
-                    borderRadius: '4px',
-                    zIndex: 10,
-                    maxHeight: '200px',
-                    overflow: 'auto',
-                  }}
-                >
-                  {searchResults.map((p) => (
-                    <div
-                      key={p.product_id}
-                      onClick={() => selectProduct(p)}
-                      data-testid={`dropdown-item-${p.product_id}`}
-                      style={{
-                        padding: '8px 12px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      {p.name}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div style={{ width: '80px' }}>
-              <IonInput
-                label="Qty"
-                type="number"
-                min="0"
-                value={addQty}
-                onIonInput={(e) => setAddQty(Number(e.detail.value) || 1)}
-                data-testid="add-item-qty"
-              />
-            </div>
-            <IonButton onClick={addItem} disabled={!searchText.trim()} data-testid="add-item-btn">
-              Add
-            </IonButton>
+        {/* ============================================================ */}
+        {/*  ADD ITEM FORM                                                */}
+        {/* ============================================================ */}
+        <div
+          data-testid="add-item-form"
+          style={{
+            background: '#f7f7f9',
+            padding: '16px',
+            borderRadius: '8px',
+            marginBottom: '20px',
+            display: 'flex',
+            gap: '12px',
+          }}
+        >
+          <div style={{ flex: 1, position: 'relative' }}>
+            <input
+              type="text"
+              placeholder="Item name"
+              value={searchText}
+              onChange={(e) => handleSearchInput(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && addItem()}
+              data-testid="add-item-name"
+              style={{
+                width: '100%',
+                padding: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+            {/* Autocomplete dropdown */}
+            {showDropdown && (
+              <div
+                data-testid="product-dropdown"
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  background: '#fff',
+                  border: '1px solid #ccc',
+                  borderRadius: '4px',
+                  zIndex: 10,
+                  maxHeight: '200px',
+                  overflow: 'auto',
+                }}
+              >
+                {searchResults.map((p) => (
+                  <div
+                    key={p.product_id}
+                    onClick={() => selectProduct(p)}
+                    data-testid={`dropdown-item-${p.product_id}`}
+                    style={{
+                      padding: '8px 12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {p.name}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </IonCardContent>
-      </IonCard>
+          <input
+            type="number"
+            placeholder="Qty"
+            min="0"
+            value={addQty}
+            onChange={(e) => setAddQty(Number(e.target.value) || 1)}
+            data-testid="add-item-qty"
+            style={{
+              width: '100px',
+              padding: '10px',
+              border: '1px solid #ddd',
+              borderRadius: '6px',
+              fontSize: '14px',
+            }}
+          />
+          <button
+            onClick={addItem}
+            disabled={!searchText.trim()}
+            data-testid="add-item-btn"
+            style={{
+              padding: '10px 20px',
+              background: '#2f9e44',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+            }}
+          >
+            Add
+          </button>
+        </div>
 
-      {/* ============================================================ */}
-      {/*  AUTO-ADD BUTTON                                              */}
-      {/* ============================================================ */}
-      <div style={{ margin: '12px 0', display: 'flex', gap: '8px' }}>
-        <IonButton
-          expand="block"
-          fill="outline"
-          onClick={autoAddBelowMinStock}
-          data-testid="auto-add-btn"
-          style={{ flex: 1 }}
+        {/* ============================================================ */}
+        {/*  TO BUY SECTION                                               */}
+        {/* ============================================================ */}
+        <div
+          data-testid="to-buy-section"
+          style={{
+            background: '#fff',
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+            padding: '16px',
+            marginBottom: '20px',
+          }}
         >
-          Auto-Add Below Min Stock
-        </IonButton>
-        <IonButton
-          expand="block"
-          fill="outline"
-          color="danger"
-          onClick={() => setShowClearAllAlert(true)}
-          disabled={items.length === 0}
-          data-testid="clear-all-btn"
-          style={{ flex: 1 }}
-        >
-          Clear All
-        </IonButton>
-      </div>
-
-      {/* ============================================================ */}
-      {/*  TO BUY SECTION                                               */}
-      {/* ============================================================ */}
-      <IonCard data-testid="to-buy-section">
-        <IonCardHeader>
-          <IonCardTitle>To Buy ({toBuy.length})</IonCardTitle>
-        </IonCardHeader>
-        <IonCardContent>
+          <h3 style={{ margin: '0 0 12px', fontSize: '16px', fontWeight: 600 }}>To Buy ({toBuy.length})</h3>
           {toBuy.length === 0 ? (
-            <p data-testid="no-to-buy">No items to buy.</p>
+            <div data-testid="no-to-buy" style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+              No items to buy.
+            </div>
           ) : (
-            <IonList data-testid="to-buy-list">
+            <div data-testid="to-buy-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {toBuy.map((item) => (
                 <div
                   key={item.cart_item_id}
@@ -501,53 +522,86 @@ export function ShoppingPage() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
-                    padding: '8px 0',
-                    borderBottom: '1px solid #eee',
+                    padding: '10px',
+                    background: '#f7f7f9',
+                    borderRadius: '6px',
                   }}
                 >
-                  <IonCheckbox
+                  <input
+                    type="checkbox"
                     checked={item.purchased}
-                    onIonChange={() => togglePurchased(item)}
+                    onChange={() => togglePurchased(item)}
                     aria-label={`Mark ${item.products?.name ?? 'Unknown Product'} as purchased`}
                     data-testid={`check-${item.cart_item_id}`}
+                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
                   />
-                  <span style={{ flex: 1 }}>{item.products?.name ?? 'Unknown Product'}</span>
-                  <span style={{ color: '#666', fontSize: '0.9em' }}>{formatQty(item.qty_containers)}</span>
-                  <IonButton
-                    size="small"
-                    color="danger"
-                    fill="clear"
+                  <div style={{ flex: 1 }}>
+                    <strong>{item.products?.name ?? 'Unknown Product'}</strong>
+                    <span style={{ marginLeft: '12px', color: '#666' }}>{formatQty(item.qty_containers)}</span>
+                  </div>
+                  <button
                     onClick={() => removeItem(item.cart_item_id)}
                     data-testid={`remove-${item.cart_item_id}`}
+                    style={{
+                      padding: '4px 12px',
+                      background: '#d33',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                    }}
                   >
                     Remove
-                  </IonButton>
+                  </button>
                 </div>
               ))}
-            </IonList>
+            </div>
           )}
-        </IonCardContent>
-      </IonCard>
+        </div>
 
-      {/* ============================================================ */}
-      {/*  PURCHASED SECTION                                            */}
-      {/* ============================================================ */}
-      <IonCard data-testid="purchased-section">
-        <IonCardHeader>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <IonCardTitle>Purchased ({purchased.length})</IonCardTitle>
+        {/* ============================================================ */}
+        {/*  PURCHASED SECTION                                            */}
+        {/* ============================================================ */}
+        <div
+          data-testid="purchased-section"
+          style={{
+            background: '#fff',
+            border: '1px solid #ddd',
+            borderRadius: '8px',
+            padding: '16px',
+            marginBottom: '20px',
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
+            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#666' }}>
+              Purchased ({purchased.length})
+            </h3>
             {purchased.length > 0 && (
-              <IonButton size="small" onClick={importToInventory} data-testid="import-inventory-btn">
+              <button
+                onClick={importToInventory}
+                data-testid="import-inventory-btn"
+                style={{
+                  padding: '6px 12px',
+                  background: '#2f9e44',
+                  color: '#fff',
+                  border: 'none',
+                  borderRadius: '4px',
+                  cursor: 'pointer',
+                  fontSize: '13px',
+                  fontWeight: 600,
+                }}
+              >
                 Import to Inventory
-              </IonButton>
+              </button>
             )}
           </div>
-        </IonCardHeader>
-        <IonCardContent>
           {purchased.length === 0 ? (
-            <p data-testid="no-purchased">No purchased items.</p>
+            <div data-testid="no-purchased" style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+              No purchased items.
+            </div>
           ) : (
-            <IonList data-testid="purchased-list">
+            <div data-testid="purchased-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
               {purchased.map((item) => (
                 <div
                   key={item.cart_item_id}
@@ -556,53 +610,69 @@ export function ShoppingPage() {
                     display: 'flex',
                     alignItems: 'center',
                     gap: '12px',
-                    padding: '8px 0',
-                    borderBottom: '1px solid #eee',
+                    padding: '10px',
+                    background: '#f0f0f0',
+                    borderRadius: '6px',
+                    opacity: 0.7,
                   }}
                 >
-                  <IonCheckbox
+                  <input
+                    type="checkbox"
                     checked={true}
-                    onIonChange={() => togglePurchased(item)}
+                    onChange={() => togglePurchased(item)}
                     aria-label={`Unmark ${item.products?.name ?? 'Unknown Product'} as purchased`}
                     data-testid={`check-${item.cart_item_id}`}
+                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
                   />
-                  <span style={{ flex: 1, textDecoration: 'line-through', color: '#888' }}>
-                    {item.products?.name ?? 'Unknown Product'}
-                  </span>
-                  <span style={{ color: '#999', fontSize: '0.9em' }}>{formatQty(item.qty_containers)}</span>
-                  <IonButton
-                    size="small"
-                    color="danger"
-                    fill="clear"
+                  <div style={{ flex: 1, textDecoration: 'line-through', color: '#666' }}>
+                    <strong>{item.products?.name ?? 'Unknown Product'}</strong>
+                    <span style={{ marginLeft: '12px' }}>{formatQty(item.qty_containers)}</span>
+                  </div>
+                  <button
                     onClick={() => removeItem(item.cart_item_id)}
                     data-testid={`remove-${item.cart_item_id}`}
+                    style={{
+                      padding: '4px 12px',
+                      background: '#999',
+                      color: '#fff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontSize: '12px',
+                    }}
                   >
                     Remove
-                  </IonButton>
+                  </button>
                 </div>
               ))}
-            </IonList>
+            </div>
           )}
-        </IonCardContent>
-      </IonCard>
+        </div>
 
-      {/* Clear All confirmation */}
-      <IonAlert
-        isOpen={showClearAllAlert}
-        header="Clear All Items"
-        message="Are you sure you want to remove all items from the shopping list?"
-        buttons={[
-          { text: 'Cancel', role: 'cancel', handler: () => setShowClearAllAlert(false) },
-          {
-            text: 'Clear All',
-            handler: () => {
-              clearAll();
-              setShowClearAllAlert(false);
-            },
-          },
-        ]}
-        onDidDismiss={() => setShowClearAllAlert(false)}
-      />
+        {/* ============================================================ */}
+        {/*  CLEAR ALL BUTTON                                             */}
+        {/* ============================================================ */}
+        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+          <button
+            onClick={handleClearAll}
+            disabled={items.length === 0}
+            data-testid="clear-all-btn"
+            style={{
+              padding: '10px 16px',
+              background: '#d33',
+              color: '#fff',
+              border: 'none',
+              borderRadius: '6px',
+              cursor: items.length === 0 ? 'not-allowed' : 'pointer',
+              fontSize: '14px',
+              fontWeight: 600,
+              opacity: items.length === 0 ? 0.5 : 1,
+            }}
+          >
+            Clear All
+          </button>
+        </div>
+      </div>
     </ChefLayout>
   );
 }

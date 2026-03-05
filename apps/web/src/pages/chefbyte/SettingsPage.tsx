@@ -1,22 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import {
-  IonSpinner,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonButton,
-  IonInput,
-  IonLabel,
-  IonList,
-  IonSegment,
-  IonSegmentButton,
-  IonSelect,
-  IonSelectOption,
-  IonAlert,
-  IonText,
-  IonItem,
-} from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
@@ -67,6 +49,41 @@ interface LiquidTrackEvent {
 }
 
 type Tab = 'products' | 'liquidtrack' | 'locations';
+
+const tabs: { id: Tab; label: string; icon: string }[] = [
+  { id: 'products', label: 'Products', icon: '\uD83D\uDCE6' },
+  { id: 'liquidtrack', label: 'LiquidTrack', icon: '\uD83E\uDD64' },
+  { id: 'locations', label: 'Locations', icon: '\uD83D\uDCCD' },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Shared styles                                                      */
+/* ------------------------------------------------------------------ */
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '10px',
+  border: '1px solid #ddd',
+  borderRadius: '6px',
+  fontSize: '14px',
+  boxSizing: 'border-box',
+};
+
+const labelStyle: React.CSSProperties = {
+  display: 'block',
+  marginBottom: '4px',
+  fontWeight: 600,
+  fontSize: '13px',
+  color: '#374151',
+};
+
+const cardStyle: React.CSSProperties = {
+  border: '1px solid #ddd',
+  borderRadius: '8px',
+  padding: '16px',
+  marginBottom: '16px',
+  background: '#fff',
+};
 
 /* ------------------------------------------------------------------ */
 /*  Blank-product template for Add Product form                       */
@@ -344,81 +361,113 @@ export function SettingsPage() {
     onChange: (field: string, value: any) => void,
     testIdPrefix: string,
   ) => (
-    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-      <IonInput
-        label="Name"
-        value={form.name ?? ''}
-        onIonInput={(e) => onChange('name', e.detail.value ?? '')}
-        data-testid={`${testIdPrefix}-name`}
-      />
-      <IonInput
-        label="Barcode"
-        value={form.barcode ?? ''}
-        onIonInput={(e) => onChange('barcode', e.detail.value || null)}
-        data-testid={`${testIdPrefix}-barcode`}
-      />
-      <IonInput
-        label="Servings/Container"
-        type="number"
-        min="0"
-        value={form.servings_per_container ?? 1}
-        onIonInput={(e) => onChange('servings_per_container', Number(e.detail.value) || 1)}
-        data-testid={`${testIdPrefix}-servings`}
-      />
-      <IonInput
-        label="Calories/Serving"
-        type="number"
-        min="0"
-        value={form.calories_per_serving ?? 0}
-        onIonInput={(e) => onChange('calories_per_serving', Number(e.detail.value) || 0)}
-        data-testid={`${testIdPrefix}-calories`}
-      />
-      <IonInput
-        label="Carbs/Serving"
-        type="number"
-        min="0"
-        value={form.carbs_per_serving ?? 0}
-        onIonInput={(e) => onChange('carbs_per_serving', Number(e.detail.value) || 0)}
-        data-testid={`${testIdPrefix}-carbs`}
-      />
-      <IonInput
-        label="Protein/Serving"
-        type="number"
-        min="0"
-        value={form.protein_per_serving ?? 0}
-        onIonInput={(e) => onChange('protein_per_serving', Number(e.detail.value) || 0)}
-        data-testid={`${testIdPrefix}-protein`}
-      />
-      <IonInput
-        label="Fat/Serving"
-        type="number"
-        min="0"
-        value={form.fat_per_serving ?? 0}
-        onIonInput={(e) => onChange('fat_per_serving', Number(e.detail.value) || 0)}
-        data-testid={`${testIdPrefix}-fat`}
-      />
-      <IonInput
-        label="Min Stock"
-        type="number"
-        min="0"
-        value={form.min_stock_amount ?? 0}
-        onIonInput={(e) => onChange('min_stock_amount', Number(e.detail.value) || 0)}
-        data-testid={`${testIdPrefix}-min-stock`}
-      />
-      <IonInput
-        label="Walmart Link"
-        value={form.walmart_link ?? ''}
-        onIonInput={(e) => onChange('walmart_link', e.detail.value || null)}
-        data-testid={`${testIdPrefix}-walmart-link`}
-      />
-      <IonInput
-        label="Price"
-        type="number"
-        min="0"
-        value={form.price ?? ''}
-        onIonInput={(e) => onChange('price', e.detail.value ? Number(e.detail.value) : null)}
-        data-testid={`${testIdPrefix}-price`}
-      />
+    <div className="cb-form-grid">
+      <div>
+        <label style={labelStyle}>Name</label>
+        <input
+          value={form.name ?? ''}
+          onChange={(e) => onChange('name', e.target.value)}
+          data-testid={`${testIdPrefix}-name`}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Barcode</label>
+        <input
+          value={form.barcode ?? ''}
+          onChange={(e) => onChange('barcode', e.target.value || null)}
+          data-testid={`${testIdPrefix}-barcode`}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Servings/Container</label>
+        <input
+          type="number"
+          min="0"
+          value={form.servings_per_container ?? 1}
+          onChange={(e) => onChange('servings_per_container', Number(e.target.value) || 1)}
+          data-testid={`${testIdPrefix}-servings`}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Calories/Serving</label>
+        <input
+          type="number"
+          min="0"
+          value={form.calories_per_serving ?? 0}
+          onChange={(e) => onChange('calories_per_serving', Number(e.target.value) || 0)}
+          data-testid={`${testIdPrefix}-calories`}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Carbs/Serving</label>
+        <input
+          type="number"
+          min="0"
+          value={form.carbs_per_serving ?? 0}
+          onChange={(e) => onChange('carbs_per_serving', Number(e.target.value) || 0)}
+          data-testid={`${testIdPrefix}-carbs`}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Protein/Serving</label>
+        <input
+          type="number"
+          min="0"
+          value={form.protein_per_serving ?? 0}
+          onChange={(e) => onChange('protein_per_serving', Number(e.target.value) || 0)}
+          data-testid={`${testIdPrefix}-protein`}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Fat/Serving</label>
+        <input
+          type="number"
+          min="0"
+          value={form.fat_per_serving ?? 0}
+          onChange={(e) => onChange('fat_per_serving', Number(e.target.value) || 0)}
+          data-testid={`${testIdPrefix}-fat`}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Min Stock</label>
+        <input
+          type="number"
+          min="0"
+          value={form.min_stock_amount ?? 0}
+          onChange={(e) => onChange('min_stock_amount', Number(e.target.value) || 0)}
+          data-testid={`${testIdPrefix}-min-stock`}
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Walmart Link</label>
+        <input
+          value={form.walmart_link ?? ''}
+          onChange={(e) => onChange('walmart_link', e.target.value || null)}
+          data-testid={`${testIdPrefix}-walmart-link`}
+          placeholder="https://www.walmart.com/ip/..."
+          style={inputStyle}
+        />
+      </div>
+      <div>
+        <label style={labelStyle}>Price</label>
+        <input
+          type="number"
+          min="0"
+          value={form.price ?? ''}
+          onChange={(e) => onChange('price', e.target.value ? Number(e.target.value) : null)}
+          data-testid={`${testIdPrefix}-price`}
+          placeholder="$0.00"
+          style={inputStyle}
+        />
+      </div>
     </div>
   );
 
@@ -429,115 +478,172 @@ export function SettingsPage() {
   if (loading) {
     return (
       <ChefLayout title="Settings">
-        <IonSpinner data-testid="settings-loading" />
+        <div data-testid="settings-loading" style={{ padding: '20px', color: '#666' }}>
+          Loading...
+        </div>
       </ChefLayout>
     );
   }
 
   return (
     <ChefLayout title="Settings">
-      <h2>SETTINGS</h2>
+      {/* Header */}
+      <div style={{ marginBottom: '24px' }}>
+        <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#1a1a2e' }}>Settings</h1>
+        <p style={{ margin: '8px 0 0', color: '#666', fontSize: '14px' }}>Manage your products, devices, and data</p>
+      </div>
 
       {error && (
-        <IonText color="danger">
-          <p>{error}</p>
-        </IonText>
+        <p
+          style={{
+            color: '#d33',
+            background: '#fef2f2',
+            padding: '10px 14px',
+            borderRadius: '6px',
+            border: '1px solid #fecaca',
+            marginBottom: '16px',
+          }}
+        >
+          {error}
+        </p>
       )}
 
-      <IonSegment
-        value={activeTab}
-        onIonChange={(e) => setActiveTab(e.detail.value as Tab)}
-        data-testid="settings-tabs"
+      {/* Mobile tab select */}
+      <div className="cb-mobile-only" style={{ marginBottom: '12px' }}>
+        <select
+          value={activeTab}
+          onChange={(e) => setActiveTab(e.target.value as Tab)}
+          data-testid="settings-tabs"
+          style={{ padding: '10px', width: '100%', borderRadius: '8px', border: '1px solid #ddd', fontSize: '14px' }}
+        >
+          {tabs.map((tab) => (
+            <option key={tab.id} value={tab.id}>
+              {tab.icon} {tab.label}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {/* Desktop Tabs */}
+      <div className="cb-tab-bar cb-desktop-only" data-testid="settings-tabs">
+        {tabs.map((tab) => (
+          <button
+            className={`cb-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
+            onClick={() => setActiveTab(tab.id)}
+            key={tab.id}
+          >
+            <span>{tab.icon}</span> {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab Content Container */}
+      <div
+        style={{
+          background: '#fff',
+          borderRadius: '12px',
+          border: '1px solid #e0e0e0',
+          minHeight: '400px',
+          boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+        }}
       >
-        <IonSegmentButton value="products">
-          <IonLabel>Products</IonLabel>
-        </IonSegmentButton>
-        <IonSegmentButton value="liquidtrack">
-          <IonLabel>LiquidTrack</IonLabel>
-        </IonSegmentButton>
-        <IonSegmentButton value="locations">
-          <IonLabel>Locations</IonLabel>
-        </IonSegmentButton>
-      </IonSegment>
+        {/* ========================================================== */}
+        {/*  PRODUCTS TAB                                                */}
+        {/* ========================================================== */}
+        {activeTab === 'products' && (
+          <div data-testid="products-tab" style={{ padding: '20px' }}>
+            {/* Search bar */}
+            <input
+              placeholder="Search products..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              data-testid="product-search"
+              style={{ ...inputStyle, marginBottom: '16px' }}
+            />
 
-      {/* ========================================================== */}
-      {/*  PRODUCTS TAB                                                */}
-      {/* ========================================================== */}
-      {activeTab === 'products' && (
-        <div data-testid="products-tab">
-          {/* Search bar */}
-          <IonInput
-            placeholder="Search products..."
-            value={searchText}
-            onIonInput={(e) => setSearchText(e.detail.value ?? '')}
-            data-testid="product-search"
-            style={{ marginTop: '12px', marginBottom: '12px' }}
-          />
-
-          {/* Add Product */}
-          <IonCard data-testid="add-product-section">
-            <IonCardHeader>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <IonCardTitle>Add Product</IonCardTitle>
-                <IonButton
-                  size="small"
+            {/* Add Product */}
+            <div data-testid="add-product-section" style={{ ...cardStyle, marginBottom: '20px' }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: showAddProduct ? '16px' : 0,
+                }}
+              >
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#1a1a2e' }}>Add Product</h3>
+                <button
+                  className="cb-primary-btn"
                   onClick={() => setShowAddProduct(!showAddProduct)}
                   data-testid="toggle-add-product"
+                  style={{ background: showAddProduct ? '#6b7280' : '#2f9e44', fontSize: '13px', padding: '6px 14px' }}
                 >
                   {showAddProduct ? 'Cancel' : '+ New'}
-                </IonButton>
+                </button>
               </div>
-            </IonCardHeader>
-            {showAddProduct && (
-              <IonCardContent data-testid="add-product-form">
-                {renderProductFields(
-                  addForm,
-                  (field, value) => setAddForm((prev) => ({ ...prev, [field]: value })),
-                  'add',
-                )}
-                <IonButton
-                  expand="block"
-                  onClick={addProduct}
-                  disabled={!addForm.name.trim()}
-                  data-testid="save-new-product"
-                  style={{ marginTop: '12px' }}
-                >
-                  Save Product
-                </IonButton>
-              </IonCardContent>
-            )}
-          </IonCard>
+              {showAddProduct && (
+                <div data-testid="add-product-form">
+                  {renderProductFields(
+                    addForm,
+                    (field, value) => setAddForm((prev) => ({ ...prev, [field]: value })),
+                    'add',
+                  )}
+                  <button
+                    className="cb-primary-btn"
+                    onClick={addProduct}
+                    disabled={!addForm.name.trim()}
+                    data-testid="save-new-product"
+                    style={{ marginTop: '12px', background: '#2f9e44', width: '100%', padding: '12px' }}
+                  >
+                    Save Product
+                  </button>
+                </div>
+              )}
+            </div>
 
-          {/* Product list */}
-          <IonList data-testid="product-list">
-            {filteredProducts.map((p) => (
-              <IonCard key={p.product_id} data-testid={`product-${p.product_id}`}>
-                {editingId === p.product_id ? (
-                  /* Editing mode */
-                  <IonCardContent>
-                    {renderProductFields(
-                      editForm,
-                      (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
-                      'edit',
-                    )}
-                    <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-                      <IonButton onClick={saveProduct} data-testid="save-edit-product">
-                        Save
-                      </IonButton>
-                      <IonButton fill="clear" onClick={cancelEdit} data-testid="cancel-edit-product">
-                        Cancel
-                      </IonButton>
+            {/* Product list */}
+            <div data-testid="product-list">
+              {filteredProducts.map((p) => (
+                <div key={p.product_id} data-testid={`product-${p.product_id}`} style={cardStyle}>
+                  {editingId === p.product_id ? (
+                    /* Editing mode */
+                    <div>
+                      {renderProductFields(
+                        editForm,
+                        (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
+                        'edit',
+                      )}
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                        <button
+                          className="cb-primary-btn"
+                          onClick={saveProduct}
+                          data-testid="save-edit-product"
+                          style={{ background: '#2f9e44' }}
+                        >
+                          Save
+                        </button>
+                        <button
+                          className="cb-primary-btn"
+                          onClick={cancelEdit}
+                          data-testid="cancel-edit-product"
+                          style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
-                  </IonCardContent>
-                ) : (
-                  /* Display mode */
-                  <>
-                    <IonCardHeader>
-                      <IonCardTitle>{p.name}</IonCardTitle>
-                    </IonCardHeader>
-                    <IonCardContent>
+                  ) : (
+                    /* Display mode */
+                    <div>
+                      <h4 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 600 }}>{p.name}</h4>
                       <div
-                        style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '0.9em' }}
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: '1fr 1fr 1fr',
+                          gap: '4px',
+                          fontSize: '0.9em',
+                          color: '#555',
+                        }}
                       >
                         {p.barcode && <span>Barcode: {p.barcode}</span>}
                         <span>Servings/Container: {Number(p.servings_per_container)}</span>
@@ -548,256 +654,388 @@ export function SettingsPage() {
                         <span>Min Stock: {Number(p.min_stock_amount)}</span>
                         {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
                       </div>
-                      <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                        <IonButton
-                          size="small"
+                      <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                        <button
+                          className="cb-primary-btn"
                           onClick={() => startEdit(p)}
                           data-testid={`edit-product-${p.product_id}`}
+                          style={{ background: '#1e66f5', fontSize: '13px', padding: '6px 14px' }}
                         >
                           Edit
-                        </IonButton>
-                        <IonButton
-                          size="small"
-                          color="danger"
-                          fill="clear"
+                        </button>
+                        <button
                           onClick={() => setDeleteTarget(p.product_id)}
                           data-testid={`delete-product-${p.product_id}`}
+                          style={{
+                            background: 'transparent',
+                            border: 'none',
+                            color: '#d33',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: '13px',
+                            padding: '6px 14px',
+                          }}
                         >
                           Delete
-                        </IonButton>
+                        </button>
                       </div>
-                    </IonCardContent>
-                  </>
-                )}
-              </IonCard>
-            ))}
-          </IonList>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
 
-          {/* Delete confirmation alert */}
-          <IonAlert
-            isOpen={deleteTarget !== null}
-            header="Delete Product"
-            message="Are you sure you want to delete this product? This cannot be undone."
-            buttons={[
-              { text: 'Cancel', role: 'cancel', handler: () => setDeleteTarget(null) },
-              {
-                text: 'Delete',
-                handler: () => {
-                  if (deleteTarget) deleteProduct(deleteTarget);
-                },
-              },
-            ]}
-            onDidDismiss={() => setDeleteTarget(null)}
-          />
-        </div>
-      )}
+            {/* Delete confirmation dialog */}
+            {deleteTarget !== null && (
+              <div
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'rgba(0,0,0,0.5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 1000,
+                }}
+                onClick={() => setDeleteTarget(null)}
+              >
+                <div className="cb-modal-panel" onClick={(e) => e.stopPropagation()}>
+                  <h3 style={{ margin: '0 0 12px', fontSize: '18px', fontWeight: 700 }}>Delete Product</h3>
+                  <p style={{ color: '#666', margin: '0 0 20px' }}>
+                    Are you sure you want to delete this product? This cannot be undone.
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <button
+                      className="cb-primary-btn"
+                      onClick={() => setDeleteTarget(null)}
+                      style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="cb-primary-btn"
+                      onClick={() => {
+                        if (deleteTarget) deleteProduct(deleteTarget);
+                      }}
+                      style={{ background: '#d33' }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
 
-      {/* ========================================================== */}
-      {/*  LIQUIDTRACK TAB                                             */}
-      {/* ========================================================== */}
-      {activeTab === 'liquidtrack' && (
-        <div data-testid="liquidtrack-tab">
-          {/* Add Device */}
-          <IonCard data-testid="add-device-section" style={{ marginTop: '12px' }}>
-            <IonCardHeader>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <IonCardTitle>Add Device</IonCardTitle>
-                <IonButton
-                  size="small"
+        {/* ========================================================== */}
+        {/*  LIQUIDTRACK TAB                                             */}
+        {/* ========================================================== */}
+        {activeTab === 'liquidtrack' && (
+          <div data-testid="liquidtrack-tab" style={{ padding: '20px' }}>
+            {/* Add Device */}
+            <div data-testid="add-device-section" style={cardStyle}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: showAddDevice ? '16px' : 0,
+                }}
+              >
+                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#1a1a2e' }}>Add Device</h3>
+                <button
+                  className="cb-primary-btn"
                   onClick={() => setShowAddDevice(!showAddDevice)}
                   data-testid="toggle-add-device"
+                  style={{ background: showAddDevice ? '#6b7280' : '#1e66f5', fontSize: '13px', padding: '6px 14px' }}
                 >
                   {showAddDevice ? 'Cancel' : '+ New'}
-                </IonButton>
+                </button>
               </div>
-            </IonCardHeader>
-            {showAddDevice && (
-              <IonCardContent data-testid="add-device-form">
-                <IonInput
-                  label="Device Name"
-                  value={newDeviceName}
-                  onIonInput={(e) => setNewDeviceName(e.detail.value ?? '')}
-                  data-testid="device-name-input"
-                />
-                <IonSelect
-                  label="Product"
-                  value={newDeviceProductId}
-                  onIonChange={(e) => setNewDeviceProductId(e.detail.value ?? '')}
-                  data-testid="device-product-select"
-                  placeholder="Select product (optional)"
-                >
-                  {products.map((p) => (
-                    <IonSelectOption key={p.product_id} value={p.product_id}>
-                      {p.name}
-                    </IonSelectOption>
-                  ))}
-                </IonSelect>
-                <IonButton
-                  expand="block"
-                  onClick={generateDevice}
-                  disabled={!newDeviceName.trim()}
-                  data-testid="generate-device-btn"
-                  style={{ marginTop: '12px' }}
-                >
-                  Generate Device
-                </IonButton>
-              </IonCardContent>
-            )}
-          </IonCard>
+              {showAddDevice && (
+                <div data-testid="add-device-form" style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div>
+                    <label style={labelStyle}>Device Name</label>
+                    <input
+                      value={newDeviceName}
+                      onChange={(e) => setNewDeviceName(e.target.value)}
+                      data-testid="device-name-input"
+                      style={inputStyle}
+                      placeholder="e.g. Kitchen Scale"
+                    />
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Product</label>
+                    <select
+                      value={newDeviceProductId}
+                      onChange={(e) => setNewDeviceProductId(e.target.value)}
+                      data-testid="device-product-select"
+                      style={inputStyle}
+                    >
+                      <option value="">Select product (optional)</option>
+                      {products.map((p) => (
+                        <option key={p.product_id} value={p.product_id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <button
+                    className="cb-primary-btn"
+                    onClick={generateDevice}
+                    disabled={!newDeviceName.trim()}
+                    data-testid="generate-device-btn"
+                    style={{ background: '#1e66f5', width: '100%', padding: '12px' }}
+                  >
+                    Generate Device
+                  </button>
+                </div>
+              )}
+            </div>
 
-          {/* Generated device info */}
-          {generatedDevice && (
-            <IonCard data-testid="generated-device-info" color="success">
-              <IonCardHeader>
-                <IonCardTitle>Device Created!</IonCardTitle>
-              </IonCardHeader>
-              <IonCardContent>
-                <p>
+            {/* Generated device info */}
+            {generatedDevice && (
+              <div
+                data-testid="generated-device-info"
+                style={{
+                  ...cardStyle,
+                  border: '2px solid #2f9e44',
+                  background: '#f0fdf4',
+                }}
+              >
+                <h3 style={{ margin: '0 0 12px', fontSize: '16px', fontWeight: 700, color: '#2f9e44' }}>
+                  Device Created!
+                </h3>
+                <p style={{ margin: '0 0 8px' }}>
                   <strong>Device ID:</strong> {generatedDevice.device_id}
                 </p>
-                <p>
-                  <strong>Import Key:</strong> <code>{generatedDevice.raw_key}</code>
+                <p style={{ margin: '0 0 8px' }}>
+                  <strong>Import Key:</strong>{' '}
+                  <code style={{ background: '#e5e7eb', padding: '2px 6px', borderRadius: '4px', fontSize: '13px' }}>
+                    {generatedDevice.raw_key}
+                  </code>
                 </p>
-                <p style={{ color: '#c00' }}>Save this key now -- you will not be able to see it again!</p>
-                <IonButton size="small" onClick={() => setGeneratedDevice(null)}>
+                <p style={{ color: '#c00', margin: '0 0 12px', fontSize: '14px', fontWeight: 600 }}>
+                  Save this key now -- you will not be able to see it again!
+                </p>
+                <button
+                  className="cb-primary-btn"
+                  onClick={() => setGeneratedDevice(null)}
+                  style={{ background: '#6b7280', fontSize: '13px', padding: '6px 14px' }}
+                >
                   Dismiss
-                </IonButton>
-              </IonCardContent>
-            </IonCard>
-          )}
+                </button>
+              </div>
+            )}
 
-          {/* Device list */}
-          <IonList data-testid="device-list">
-            {devices.map((d) => (
-              <IonCard key={d.device_id} data-testid={`device-${d.device_id}`}>
-                <IonCardHeader>
-                  <IonCardTitle>{d.device_name}</IonCardTitle>
-                </IonCardHeader>
-                <IonCardContent>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '4px', fontSize: '0.9em' }}>
+            {/* Device list */}
+            <div data-testid="device-list">
+              {devices.map((d) => (
+                <div key={d.device_id} data-testid={`device-${d.device_id}`} style={cardStyle}>
+                  <h4 style={{ margin: '0 0 8px', fontSize: '16px', fontWeight: 600 }}>{d.device_name}</h4>
+                  <div
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 1fr 1fr',
+                      gap: '4px',
+                      fontSize: '0.9em',
+                      color: '#555',
+                    }}
+                  >
                     <span>Product: {d.products?.name ?? 'None'}</span>
-                    <span>Status: {d.is_active ? 'Active' : 'Revoked'}</span>
+                    <span>
+                      Status:{' '}
+                      <span style={{ color: d.is_active ? '#2f9e44' : '#d33', fontWeight: 600 }}>
+                        {d.is_active ? 'Active' : 'Revoked'}
+                      </span>
+                    </span>
                     <span>Created: {formatDate(d.created_at)}</span>
                   </div>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
                     {d.is_active && (
-                      <IonButton
-                        size="small"
-                        color="danger"
-                        fill="clear"
+                      <button
                         onClick={() => setRevokeTarget(d.device_id)}
                         data-testid={`revoke-device-${d.device_id}`}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#d33',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: '13px',
+                          padding: '4px 8px',
+                        }}
                       >
                         Revoke
-                      </IonButton>
+                      </button>
                     )}
-                    <IonButton
-                      size="small"
-                      fill="clear"
+                    <button
                       onClick={() => loadDeviceEvents(d.device_id)}
                       data-testid={`toggle-events-${d.device_id}`}
+                      style={{
+                        background: 'transparent',
+                        border: 'none',
+                        color: '#1e66f5',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: '13px',
+                        padding: '4px 8px',
+                      }}
                     >
                       {expandedDeviceId === d.device_id ? 'Hide Events' : 'Show Events'}
-                    </IonButton>
+                    </button>
                   </div>
 
                   {/* Event log for expanded device */}
                   {expandedDeviceId === d.device_id && (
                     <div data-testid={`events-${d.device_id}`} style={{ marginTop: '12px' }}>
                       {deviceEvents.length === 0 ? (
-                        <p style={{ color: '#888' }}>No events recorded.</p>
+                        <p style={{ color: '#888', fontStyle: 'italic' }}>No events recorded.</p>
                       ) : (
-                        <table style={{ width: '100%', fontSize: '0.85em', borderCollapse: 'collapse' }}>
-                          <thead>
-                            <tr>
-                              <th style={{ textAlign: 'left', padding: '4px' }}>Time</th>
-                              <th style={{ textAlign: 'right', padding: '4px' }}>Before</th>
-                              <th style={{ textAlign: 'right', padding: '4px' }}>After</th>
-                              <th style={{ textAlign: 'right', padding: '4px' }}>Consumed</th>
-                              <th style={{ textAlign: 'right', padding: '4px' }}>Macros</th>
-                            </tr>
-                          </thead>
-                          <tbody>
-                            {deviceEvents.map((ev) => (
-                              <tr key={ev.event_id}>
-                                <td style={{ padding: '4px' }}>{formatDate(ev.created_at)}</td>
-                                <td style={{ textAlign: 'right', padding: '4px' }}>
-                                  {Number(ev.weight_before).toFixed(1)}
-                                </td>
-                                <td style={{ textAlign: 'right', padding: '4px' }}>
-                                  {Number(ev.weight_after).toFixed(1)}
-                                </td>
-                                <td style={{ textAlign: 'right', padding: '4px' }}>
-                                  {Number(ev.consumption).toFixed(1)}
-                                </td>
-                                <td style={{ textAlign: 'right', padding: '4px' }}>
-                                  {ev.calories != null
-                                    ? `${Number(ev.calories).toFixed(0)}cal ${Number(ev.protein).toFixed(0)}p ${Number(ev.carbs).toFixed(0)}c ${Number(ev.fat).toFixed(0)}f`
-                                    : '-'}
-                                </td>
+                        <div className="cb-table-responsive">
+                          <table style={{ width: '100%', fontSize: '0.85em', borderCollapse: 'collapse' }}>
+                            <thead>
+                              <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
+                                <th style={{ textAlign: 'left', padding: '8px' }}>Time</th>
+                                <th style={{ textAlign: 'right', padding: '8px' }}>Before</th>
+                                <th style={{ textAlign: 'right', padding: '8px' }}>After</th>
+                                <th style={{ textAlign: 'right', padding: '8px' }}>Consumed</th>
+                                <th style={{ textAlign: 'right', padding: '8px' }}>Macros</th>
                               </tr>
-                            ))}
-                          </tbody>
-                        </table>
+                            </thead>
+                            <tbody>
+                              {deviceEvents.map((ev) => (
+                                <tr key={ev.event_id} style={{ borderBottom: '1px solid #eee' }}>
+                                  <td style={{ padding: '6px 8px' }}>{formatDate(ev.created_at)}</td>
+                                  <td style={{ textAlign: 'right', padding: '6px 8px' }}>
+                                    {Number(ev.weight_before).toFixed(1)}
+                                  </td>
+                                  <td style={{ textAlign: 'right', padding: '6px 8px' }}>
+                                    {Number(ev.weight_after).toFixed(1)}
+                                  </td>
+                                  <td style={{ textAlign: 'right', padding: '6px 8px' }}>
+                                    {Number(ev.consumption).toFixed(1)}
+                                  </td>
+                                  <td style={{ textAlign: 'right', padding: '6px 8px' }}>
+                                    {ev.calories != null
+                                      ? `${Number(ev.calories).toFixed(0)}cal ${Number(ev.protein).toFixed(0)}p ${Number(ev.carbs).toFixed(0)}c ${Number(ev.fat).toFixed(0)}f`
+                                      : '-'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
                       )}
                     </div>
                   )}
-                </IonCardContent>
-              </IonCard>
-            ))}
-          </IonList>
+                </div>
+              ))}
+            </div>
 
-          {/* Revoke confirmation alert */}
-          <IonAlert
-            isOpen={revokeTarget !== null}
-            header="Revoke Device"
-            message="Are you sure you want to revoke this device? It will stop working immediately."
-            buttons={[
-              { text: 'Cancel', role: 'cancel', handler: () => setRevokeTarget(null) },
-              {
-                text: 'Revoke',
-                handler: () => {
-                  if (revokeTarget) revokeDevice(revokeTarget);
-                },
-              },
-            ]}
-            onDidDismiss={() => setRevokeTarget(null)}
-          />
-        </div>
-      )}
-      {/* ========================================================== */}
-      {/*  LOCATIONS TAB                                               */}
-      {/* ========================================================== */}
-      {activeTab === 'locations' && (
-        <div data-testid="locations-tab">
-          <IonCard data-testid="locations-section" style={{ marginTop: '12px' }}>
-            <IonCardHeader>
-              <IonCardTitle>Storage Locations</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
+            {/* Revoke confirmation dialog */}
+            {revokeTarget !== null && (
+              <div
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'rgba(0,0,0,0.5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 1000,
+                }}
+                onClick={() => setRevokeTarget(null)}
+              >
+                <div className="cb-modal-panel" onClick={(e) => e.stopPropagation()}>
+                  <h3 style={{ margin: '0 0 12px', fontSize: '18px', fontWeight: 700 }}>Revoke Device</h3>
+                  <p style={{ color: '#666', margin: '0 0 20px' }}>
+                    Are you sure you want to revoke this device? It will stop working immediately.
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <button
+                      className="cb-primary-btn"
+                      onClick={() => setRevokeTarget(null)}
+                      style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="cb-primary-btn"
+                      onClick={() => {
+                        if (revokeTarget) revokeDevice(revokeTarget);
+                      }}
+                      style={{ background: '#d33' }}
+                    >
+                      Revoke
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ========================================================== */}
+        {/*  LOCATIONS TAB                                               */}
+        {/* ========================================================== */}
+        {activeTab === 'locations' && (
+          <div data-testid="locations-tab" style={{ padding: '20px' }}>
+            <div data-testid="locations-section" style={cardStyle}>
+              <h3 style={{ margin: '0 0 16px', fontSize: '16px', fontWeight: 700, color: '#1a1a2e' }}>
+                Storage Locations
+              </h3>
+
               {/* Existing locations list */}
               {locations.length === 0 ? (
-                <p style={{ color: '#888' }} data-testid="no-locations-msg">
+                <p style={{ color: '#888', fontStyle: 'italic' }} data-testid="no-locations-msg">
                   No locations yet. Add one below.
                 </p>
               ) : (
-                <IonList data-testid="location-list">
+                <div
+                  data-testid="location-list"
+                  style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}
+                >
                   {locations.map((loc) => (
-                    <IonItem key={loc.location_id} data-testid={`location-${loc.location_id}`}>
-                      <IonLabel>{loc.name}</IonLabel>
-                      <IonButton
-                        slot="end"
-                        size="small"
-                        color="danger"
-                        fill="clear"
+                    <div
+                      key={loc.location_id}
+                      data-testid={`location-${loc.location_id}`}
+                      style={{
+                        display: 'flex',
+                        justifyContent: 'space-between',
+                        alignItems: 'center',
+                        padding: '10px 12px',
+                        border: '1px solid #eee',
+                        borderRadius: '6px',
+                        background: '#fafafa',
+                      }}
+                    >
+                      <span style={{ fontWeight: 500 }}>{loc.name}</span>
+                      <button
                         onClick={() => setDeleteLocationTarget(loc.location_id)}
                         data-testid={`delete-location-${loc.location_id}`}
+                        style={{
+                          background: 'transparent',
+                          border: 'none',
+                          color: '#d33',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: '13px',
+                          padding: '4px 8px',
+                        }}
                       >
                         Delete
-                      </IonButton>
-                    </IonItem>
+                      </button>
+                    </div>
                   ))}
-                </IonList>
+                </div>
               )}
 
               {/* Add location form */}
@@ -805,38 +1043,71 @@ export function SettingsPage() {
                 style={{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '12px' }}
                 data-testid="add-location-form"
               >
-                <IonInput
+                <input
                   placeholder="New location name..."
                   value={newLocationName}
-                  onIonInput={(e) => setNewLocationName(e.detail.value ?? '')}
+                  onChange={(e) => setNewLocationName(e.target.value)}
                   data-testid="location-name-input"
-                  style={{ flex: 1 }}
+                  style={{ ...inputStyle, flex: 1 }}
                 />
-                <IonButton onClick={addLocation} disabled={!newLocationName.trim()} data-testid="add-location-btn">
+                <button
+                  className="cb-primary-btn"
+                  onClick={addLocation}
+                  disabled={!newLocationName.trim()}
+                  data-testid="add-location-btn"
+                  style={{ background: '#1e66f5', whiteSpace: 'nowrap' }}
+                >
                   Add Location
-                </IonButton>
+                </button>
               </div>
-            </IonCardContent>
-          </IonCard>
+            </div>
 
-          {/* Delete location confirmation alert */}
-          <IonAlert
-            isOpen={deleteLocationTarget !== null}
-            header="Delete Location"
-            message="Are you sure you want to delete this location? This cannot be undone."
-            buttons={[
-              { text: 'Cancel', role: 'cancel', handler: () => setDeleteLocationTarget(null) },
-              {
-                text: 'Delete',
-                handler: () => {
-                  if (deleteLocationTarget) deleteLocation(deleteLocationTarget);
-                },
-              },
-            ]}
-            onDidDismiss={() => setDeleteLocationTarget(null)}
-          />
-        </div>
-      )}
+            {/* Delete location confirmation dialog */}
+            {deleteLocationTarget !== null && (
+              <div
+                style={{
+                  position: 'fixed',
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: 0,
+                  background: 'rgba(0,0,0,0.5)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  zIndex: 1000,
+                }}
+                onClick={() => setDeleteLocationTarget(null)}
+              >
+                <div className="cb-modal-panel" onClick={(e) => e.stopPropagation()}>
+                  <h3 style={{ margin: '0 0 12px', fontSize: '18px', fontWeight: 700 }}>Delete Location</h3>
+                  <p style={{ color: '#666', margin: '0 0 20px' }}>
+                    Are you sure you want to delete this location? This cannot be undone.
+                  </p>
+                  <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+                    <button
+                      className="cb-primary-btn"
+                      onClick={() => setDeleteLocationTarget(null)}
+                      style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      className="cb-primary-btn"
+                      onClick={() => {
+                        if (deleteLocationTarget) deleteLocation(deleteLocationTarget);
+                      }}
+                      style={{ background: '#d33' }}
+                    >
+                      Delete
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
     </ChefLayout>
   );
 }

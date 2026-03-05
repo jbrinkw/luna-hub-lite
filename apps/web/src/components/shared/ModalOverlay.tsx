@@ -1,5 +1,4 @@
 import { type ReactNode, useEffect } from 'react';
-import { IonCard, IonCardContent, IonCardHeader, IonCardTitle } from '@ionic/react';
 
 interface ModalOverlayProps {
   isOpen: boolean;
@@ -11,7 +10,7 @@ interface ModalOverlayProps {
 }
 
 /**
- * Shared modal overlay — fixed backdrop + centered IonCard.
+ * Shared modal overlay — fixed backdrop + centered card.
  * Replaces the identical 12-line pattern duplicated across 7+ pages.
  * Supports Escape key to close and locks body scroll while open.
  */
@@ -58,12 +57,22 @@ export function ModalOverlay({ isOpen, onClose, title, children, maxWidth = '500
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <IonCard style={{ width: '100%', maxWidth, margin: '16px' }}>
-        <IonCardHeader>
-          <IonCardTitle>{title}</IonCardTitle>
-        </IonCardHeader>
-        <IonCardContent>{children}</IonCardContent>
-      </IonCard>
+      <div
+        style={{
+          background: '#fff',
+          padding: '20px',
+          borderRadius: '10px',
+          width: '92vw',
+          maxWidth,
+          maxHeight: '90vh',
+          overflowY: 'auto',
+          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.08)',
+          margin: '16px',
+        }}
+      >
+        <h3 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: 700 }}>{title}</h3>
+        {children}
+      </div>
     </div>
   );
 }

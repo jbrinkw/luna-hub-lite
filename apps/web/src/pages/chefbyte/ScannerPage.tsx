@@ -1,5 +1,4 @@
 import { useState, useRef, useCallback } from 'react';
-import { IonButton } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, supabase } from '@/shared/supabase';
@@ -558,7 +557,7 @@ export function ScannerPage() {
     <ChefLayout title="Scanner">
       <h2>SCANNER</h2>
 
-      <div data-testid="scanner-container" style={{ display: 'grid', gridTemplateColumns: '1.5fr 2.5fr', gap: '16px' }}>
+      <div data-testid="scanner-container" className="scanner-container">
         {/* ========================================================== */}
         {/*  LEFT COLUMN — QUEUE                                        */}
         {/* ========================================================== */}
@@ -588,22 +587,38 @@ export function ScannerPage() {
 
           {/* Filter buttons */}
           <div data-testid="filter-buttons" style={{ display: 'flex', gap: '4px' }}>
-            <IonButton
-              size="small"
-              fill={filter === 'all' ? 'solid' : 'outline'}
+            <button
               onClick={() => setFilter('all')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '6px',
+                fontWeight: 500,
+                fontSize: '14px',
+                cursor: 'pointer',
+                border: filter === 'all' ? '1px solid #dbeafe' : '1px solid #ddd',
+                background: filter === 'all' ? '#eff6ff' : '#fff',
+                color: filter === 'all' ? '#1e66f5' : '#4b5563',
+              }}
               data-testid="filter-all"
             >
               All
-            </IonButton>
-            <IonButton
-              size="small"
-              fill={filter === 'new' ? 'solid' : 'outline'}
+            </button>
+            <button
               onClick={() => setFilter('new')}
+              style={{
+                padding: '6px 14px',
+                borderRadius: '6px',
+                fontWeight: 500,
+                fontSize: '14px',
+                cursor: 'pointer',
+                border: filter === 'new' ? '1px solid #dbeafe' : '1px solid #ddd',
+                background: filter === 'new' ? '#eff6ff' : '#fff',
+                color: filter === 'new' ? '#1e66f5' : '#4b5563',
+              }}
               data-testid="filter-new"
             >
               New
-            </IonButton>
+            </button>
           </div>
 
           {/* Queue list */}
@@ -625,12 +640,12 @@ export function ScannerPage() {
                   padding: '8px 10px',
                   border: `2px solid ${
                     item.status === 'error'
-                      ? '#eb445a'
+                      ? '#d33'
                       : item.status === 'pending'
-                        ? '#ffc409'
+                        ? '#ff9800'
                         : item.isNew
-                          ? '#eb445a'
-                          : '#2dd36f'
+                          ? '#d33'
+                          : '#2f9e44'
                   }`,
                   borderRadius: '6px',
                   background: activeItemId === item.id ? '#e8f0fe' : item.isNew ? '#ffe9e9' : '#fff',
@@ -640,7 +655,7 @@ export function ScannerPage() {
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontWeight: 600, fontSize: '0.9em' }}>
                     {item.isNew && (
-                      <span data-testid={`new-badge-${item.id}`} style={{ color: '#eb445a', marginRight: '4px' }}>
+                      <span data-testid={`new-badge-${item.id}`} style={{ color: '#d33', marginRight: '4px' }}>
                         [!NEW]
                       </span>
                     )}
@@ -656,7 +671,7 @@ export function ScannerPage() {
                     style={{
                       background: 'none',
                       border: 'none',
-                      color: '#eb445a',
+                      color: '#d33',
                       cursor: 'pointer',
                       fontWeight: 700,
                       fontSize: '16px',
@@ -691,15 +706,14 @@ export function ScannerPage() {
                 { key: 'shopping', label: 'Add to Shopping' },
               ] as const
             ).map((m) => (
-              <IonButton
+              <button
                 key={m.key}
-                size="small"
-                fill={mode === m.key ? 'solid' : 'outline'}
+                className={`scanner-mode-btn ${mode === m.key ? 'active' : ''}`}
                 onClick={() => setMode(m.key)}
                 data-testid={`mode-${m.key}`}
               >
                 {m.label}
-              </IonButton>
+              </button>
             ))}
           </div>
 
@@ -765,30 +779,14 @@ export function ScannerPage() {
           )}
 
           {/* Numeric keypad */}
-          <div
-            data-testid="keypad-grid"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(3, 1fr)',
-              gap: '6px',
-            }}
-          >
+          <div data-testid="keypad-grid" className="scanner-keys-grid">
             {['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '←'].map((key) => (
               <button
                 key={key}
+                className={`scanner-key ${key === '←' ? 'op' : ''}`}
                 data-testid={`key-${key === '←' ? 'backspace' : key}`}
                 onClick={() => handleKeypadClick(key)}
                 aria-label={key === '←' ? 'Backspace' : key === '.' ? 'Decimal point' : key}
-                style={{
-                  padding: '14px',
-                  border: '1px solid #ddd',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontWeight: 700,
-                  fontSize: '18px',
-                  background: key === '←' ? '#eb445a' : '#fff',
-                  color: key === '←' ? '#fff' : '#111',
-                }}
               >
                 {key}
               </button>
@@ -797,10 +795,9 @@ export function ScannerPage() {
 
           {/* Unit toggle (consume modes only) */}
           {(mode === 'consume_macros' || mode === 'consume_no_macros') && (
-            <IonButton
+            <button
+              className="scanner-key unit-toggle"
               data-testid="unit-toggle"
-              size="small"
-              fill="outline"
               onClick={() => {
                 const spc = parseFloat(nutrition.servingsPerContainer) || 1;
                 const currentQty = parseFloat(screenValue) || 0;
@@ -821,7 +818,7 @@ export function ScannerPage() {
               }}
             >
               {unit === 'serving' ? 'Serving' : 'Container'}
-            </IonButton>
+            </button>
           )}
         </div>
       </div>

@@ -1,16 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import {
-  IonSpinner,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonButton,
-  IonInput,
-  IonChip,
-  IonBadge,
-} from '@ionic/react';
-import { useNavigate } from 'react-router-dom';
+import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
@@ -106,7 +95,7 @@ export function computeStockStatus(ingredients: RecipeIngredient[], stockByProdu
   let inStockCount = 0;
   for (const ing of linkedIngredients) {
     const currentStock = stockByProduct.get(ing.product_id) ?? 0;
-    // Ingredient quantity is in containers or servings — compare against container stock
+    // Ingredient quantity is in containers or servings -- compare against container stock
     // For 'serving' unit, convert required qty to containers
     let requiredContainers = Number(ing.quantity);
     if (ing.unit === 'serving' && ing.products) {
@@ -122,16 +111,24 @@ export function computeStockStatus(ingredients: RecipeIngredient[], stockByProdu
   return 'NO STOCK';
 }
 
-function stockStatusColor(status: StockStatus): string {
+function stockStatusStyle(status: StockStatus): React.CSSProperties {
+  const base: React.CSSProperties = {
+    display: 'inline-block',
+    padding: '2px 8px',
+    borderRadius: '4px',
+    fontSize: '12px',
+    fontWeight: 600,
+    color: '#fff',
+  };
   switch (status) {
     case 'CAN MAKE':
-      return 'success';
+      return { ...base, background: '#2f9e44' };
     case 'PARTIAL':
-      return 'warning';
+      return { ...base, background: '#ff9800' };
     case 'NO STOCK':
-      return 'danger';
+      return { ...base, background: '#d33' };
     case 'N/A':
-      return 'medium';
+      return { ...base, background: '#9ca3af', color: '#fff' };
   }
 }
 
@@ -141,7 +138,6 @@ function stockStatusColor(status: StockStatus): string {
 
 export function RecipesPage() {
   const { user } = useAuth();
-  const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
 
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -207,7 +203,7 @@ export function RecipesPage() {
       result = result.filter((r) => r.active_time !== null && r.active_time <= maxActiveTime);
     }
 
-    // Can be made filter — disabled until stock check is fully wired
+    // Can be made filter -- disabled until stock check is fully wired
 
     return result;
   }, [recipes, searchText, maxActiveTime]);
@@ -219,129 +215,209 @@ export function RecipesPage() {
   if (loading) {
     return (
       <ChefLayout title="Recipes">
-        <IonSpinner data-testid="recipes-loading" />
+        <div style={{ padding: '20px' }} data-testid="recipes-loading">
+          Loading recipes...
+        </div>
       </ChefLayout>
     );
   }
 
   return (
     <ChefLayout title="Recipes">
-      <h2>RECIPES</h2>
+      {/* ============================================================ */}
+      {/*  HEADER                                                       */}
+      {/* ============================================================ */}
+      <div className="cb-recipes-header">
+        <h1 style={{ margin: 0 }}>Recipes</h1>
+        <div className="cb-header-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <Link
+            to="/chef/recipes/finder"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '12px 16px',
+              textDecoration: 'none',
+              borderRadius: '6px',
+              fontWeight: 600,
+              fontSize: '14px',
+              background: '#fff',
+              border: '1px solid #ddd',
+              color: '#4b5563',
+            }}
+          >
+            Recipe Finder
+          </Link>
+          <Link
+            to="/chef/recipes/new"
+            data-testid="new-recipe-btn"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '12px 16px',
+              textDecoration: 'none',
+              borderRadius: '6px',
+              fontWeight: 600,
+              fontSize: '14px',
+              background: '#1e66f5',
+              color: '#fff',
+              border: 'none',
+            }}
+          >
+            + New Recipe
+          </Link>
+        </div>
+      </div>
 
       {/* ============================================================ */}
       {/*  FILTERS                                                      */}
       {/* ============================================================ */}
-      <div data-testid="recipes-filters" style={{ marginBottom: '16px' }}>
-        <IonInput
+      <div data-testid="recipes-filters" style={{ margin: '16px 0' }}>
+        <input
+          type="text"
           placeholder="Search recipes..."
           aria-label="Search recipes"
           value={searchText}
-          onIonInput={(e) => setSearchText(e.detail.value ?? '')}
+          onChange={(e) => setSearchText(e.target.value)}
           data-testid="recipe-search"
-          style={{ marginBottom: '8px' }}
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: '1px solid #ccc',
+            borderRadius: '6px',
+            fontSize: '14px',
+            marginBottom: '8px',
+          }}
         />
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-          <IonChip disabled title="Coming soon" data-testid="can-be-made-filter">
+          <button
+            disabled
+            title="Coming soon"
+            data-testid="can-be-made-filter"
+            style={{
+              padding: '6px 14px',
+              borderRadius: '16px',
+              border: '1px solid #ddd',
+              background: '#f3f4f6',
+              color: '#9ca3af',
+              cursor: 'not-allowed',
+              fontSize: '13px',
+              fontWeight: 500,
+            }}
+          >
             Can Be Made
-          </IonChip>
-          <IonChip
-            color={maxActiveTime === 30 ? 'primary' : undefined}
+          </button>
+          <button
             onClick={() => setMaxActiveTime(maxActiveTime === 30 ? null : 30)}
             data-testid="active-time-filter"
+            style={{
+              padding: '6px 14px',
+              borderRadius: '16px',
+              border: maxActiveTime === 30 ? '1px solid #1e66f5' : '1px solid #ddd',
+              background: maxActiveTime === 30 ? '#eff6ff' : '#fff',
+              color: maxActiveTime === 30 ? '#1e66f5' : '#4b5563',
+              cursor: 'pointer',
+              fontSize: '13px',
+              fontWeight: 500,
+            }}
           >
             &lt; 30 min
-          </IonChip>
-          <IonButton size="small" onClick={() => navigate('/chef/recipes/new')} data-testid="new-recipe-btn">
-            + New Recipe
-          </IonButton>
+          </button>
         </div>
       </div>
 
       {/* ============================================================ */}
       {/*  RECIPE CARDS                                                 */}
       {/* ============================================================ */}
-      <div data-testid="recipe-list">
+      <div data-testid="recipe-list" className="cb-recipes-list">
         {filteredRecipes.length === 0 && <p data-testid="no-recipes">No recipes found.</p>}
 
         {filteredRecipes.map((recipe) => {
           const macros = computeRecipeMacros(recipe.recipe_ingredients, Number(recipe.base_servings));
+          const status = computeStockStatus(recipe.recipe_ingredients, stockByProduct);
 
           return (
-            <IonCard key={recipe.recipe_id} data-testid={`recipe-card-${recipe.recipe_id}`}>
-              <IonCardHeader>
-                <IonCardTitle
-                  onClick={() => navigate(`/chef/recipes/${recipe.recipe_id}`)}
-                  style={{ cursor: 'pointer' }}
-                  data-testid={`recipe-name-${recipe.recipe_id}`}
+            <Link
+              key={recipe.recipe_id}
+              to={`/chef/recipes/${recipe.recipe_id}`}
+              className="cb-recipe-item"
+              data-testid={`recipe-card-${recipe.recipe_id}`}
+              style={{
+                background: '#fff',
+                border: '1px solid #eee',
+                borderRadius: '10px',
+                padding: '16px',
+                display: 'block',
+                textDecoration: 'none',
+                color: 'inherit',
+              }}
+            >
+              <h3
+                style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 600 }}
+                data-testid={`recipe-name-${recipe.recipe_id}`}
+              >
+                {recipe.name}
+              </h3>
+              {recipe.description && (
+                <p
+                  style={{ fontSize: '0.85em', color: '#666', margin: '4px 0 0' }}
+                  data-testid={`recipe-desc-${recipe.recipe_id}`}
                 >
-                  {recipe.name}
-                </IonCardTitle>
-                {recipe.description && (
-                  <p
-                    style={{ fontSize: '0.85em', color: '#666', margin: '4px 0 0' }}
-                    data-testid={`recipe-desc-${recipe.recipe_id}`}
-                  >
-                    {recipe.description.length > 60 ? recipe.description.slice(0, 60) + '...' : recipe.description}
-                  </p>
-                )}
-                <span style={{ fontSize: '0.8em', color: '#888' }} data-testid={`recipe-servings-${recipe.recipe_id}`}>
-                  Base servings: {Number(recipe.base_servings)}
+                  {recipe.description.length > 60 ? recipe.description.slice(0, 60) + '...' : recipe.description}
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: '12px', fontSize: '13px', color: '#888', margin: '6px 0 10px' }}>
+                <span data-testid={`recipe-servings-${recipe.recipe_id}`}>
+                  {Number(recipe.base_servings)} serving{Number(recipe.base_servings) !== 1 ? 's' : ''}
                 </span>
-              </IonCardHeader>
-              <IonCardContent>
-                {/* Time info */}
-                <div style={{ fontSize: '0.85em', color: '#666', marginBottom: '8px' }}>
-                  {recipe.active_time != null && (
-                    <span data-testid={`active-time-${recipe.recipe_id}`}>Active: {recipe.active_time} min</span>
-                  )}
-                  {recipe.active_time != null && recipe.total_time != null && ' / '}
-                  {recipe.total_time != null && (
-                    <span data-testid={`total-time-${recipe.recipe_id}`}>Total: {recipe.total_time} min</span>
-                  )}
-                </div>
+                {recipe.active_time != null && (
+                  <span data-testid={`active-time-${recipe.recipe_id}`}>Active: {recipe.active_time} min</span>
+                )}
+                {recipe.total_time != null && (
+                  <span data-testid={`total-time-${recipe.recipe_id}`}>Total: {recipe.total_time} min</span>
+                )}
+              </div>
 
-                {/* Per-serving macros */}
-                <div
-                  data-testid={`recipe-macros-${recipe.recipe_id}`}
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                    gap: '4px',
-                    marginBottom: '8px',
-                    fontSize: '0.9em',
-                  }}
-                >
-                  <span>{macros.calories} cal</span>
-                  <span>{macros.protein}g P</span>
-                  <span>{macros.carbs}g C</span>
-                  <span>{macros.fat}g F</span>
+              {/* Per-serving macros */}
+              <div
+                data-testid={`recipe-macros-${recipe.recipe_id}`}
+                className="cb-recipe-macros"
+                style={{ marginBottom: '10px' }}
+              >
+                <div className="macroItem">
+                  <span className="value">{macros.calories}</span>
+                  <span className="label" style={{ fontSize: '12px', color: '#888', marginLeft: '2px' }}>
+                    Cal
+                  </span>
                 </div>
+                <div className="macroItem">
+                  <span className="value">{macros.protein}g</span>
+                  <span className="label" style={{ fontSize: '12px', color: '#888', marginLeft: '2px' }}>
+                    P
+                  </span>
+                </div>
+                <div className="macroItem">
+                  <span className="value">{macros.carbs}g</span>
+                  <span className="label" style={{ fontSize: '12px', color: '#888', marginLeft: '2px' }}>
+                    C
+                  </span>
+                </div>
+                <div className="macroItem">
+                  <span className="value">{macros.fat}g</span>
+                  <span className="label" style={{ fontSize: '12px', color: '#888', marginLeft: '2px' }}>
+                    F
+                  </span>
+                </div>
+              </div>
 
-                {/* Stock status */}
-                <div style={{ marginBottom: '8px' }}>
-                  {(() => {
-                    const status = computeStockStatus(recipe.recipe_ingredients, stockByProduct);
-                    return (
-                      <IonBadge color={stockStatusColor(status)} data-testid={`stock-status-${recipe.recipe_id}`}>
-                        {status}
-                      </IonBadge>
-                    );
-                  })()}
-                </div>
-
-                {/* Action buttons */}
-                <div style={{ display: 'flex', gap: '8px' }}>
-                  <IonButton
-                    size="small"
-                    fill="outline"
-                    onClick={() => navigate('/chef/meal-plan')}
-                    data-testid={`meal-plan-btn-${recipe.recipe_id}`}
-                  >
-                    + Meal Plan
-                  </IonButton>
-                </div>
-              </IonCardContent>
-            </IonCard>
+              {/* Stock status */}
+              <div style={{ marginBottom: '8px' }}>
+                <span style={stockStatusStyle(status)} data-testid={`stock-status-${recipe.recipe_id}`}>
+                  {status}
+                </span>
+              </div>
+            </Link>
           );
         })}
       </div>

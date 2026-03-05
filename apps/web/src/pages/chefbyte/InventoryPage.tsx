@@ -1,20 +1,4 @@
-import type { CSSProperties } from 'react';
 import { useEffect, useState, useCallback, useMemo } from 'react';
-import {
-  IonSpinner,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonButton,
-  IonBadge,
-  IonSegment,
-  IonSegmentButton,
-  IonLabel,
-  IonAlert,
-  IonText,
-  IonInput,
-} from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -64,8 +48,6 @@ export function InventoryPage() {
   const [products, setProducts] = useState<Product[]>([]);
   const [lots, setLots] = useState<StockLot[]>([]);
   const [locationId, setLocationId] = useState<string | null>(null);
-  const [consumeAllTarget, setConsumeAllTarget] = useState<string | null>(null);
-
   /* ---- Search filter state ---- */
   const [searchText, setSearchText] = useState('');
 
@@ -311,31 +293,28 @@ export function InventoryPage() {
     await loadData();
   };
 
-  const consumeAll = async (productId: string) => {
+  const handleConsumeAll = async (productId: string) => {
+    const confirmed = window.confirm('Are you sure you want to consume all remaining stock for this product?');
+    if (!confirmed) return;
     const item = grouped.find((g) => g.product.product_id === productId);
     if (!item || item.totalStock <= 0) return;
     await consumeStock(productId, item.totalStock, 'container');
-    setConsumeAllTarget(null);
   };
 
   /* ---------------------------------------------------------------- */
   /*  Stock badge color                                                */
   /* ---------------------------------------------------------------- */
 
-  const stockBadgeColor = (totalStock: number, minStock: number): string => {
-    if (totalStock <= 0) return 'danger';
-    if (totalStock < minStock) return 'warning';
-    return 'success';
+  const stockBadgeBg = (totalStock: number, minStock: number): string => {
+    if (totalStock <= 0) return '#d33';
+    if (totalStock < minStock) return '#ff9800';
+    return '#2f9e44';
   };
 
-  const stockCardStyle = (totalStock: number, minStock: number): CSSProperties => {
-    if (totalStock <= 0) {
-      return { borderLeft: '4px solid #eb445a', background: '#fff5f5' };
-    }
-    if (minStock > 0 && totalStock < minStock) {
-      return { borderLeft: '4px solid #ffc409', background: '#fffbf0' };
-    }
-    return { borderLeft: '4px solid #2dd36f', background: '#f0faf4' };
+  const stockCardBorderColor = (totalStock: number, minStock: number): string => {
+    if (totalStock <= 0) return '#d33';
+    if (minStock > 0 && totalStock < minStock) return '#ff9800';
+    return '#2f9e44';
   };
 
   /* ================================================================ */
@@ -345,7 +324,9 @@ export function InventoryPage() {
   if (loading) {
     return (
       <ChefLayout title="Inventory">
-        <IonSpinner data-testid="inventory-loading" />
+        <div style={{ padding: '20px' }} data-testid="inventory-loading">
+          Loading inventory...
+        </div>
       </ChefLayout>
     );
   }
@@ -354,42 +335,87 @@ export function InventoryPage() {
     <ChefLayout title="Inventory">
       <h2>INVENTORY</h2>
       {loadError && (
-        <IonCard color="danger" data-testid="load-error">
-          <IonCardContent>
-            <p>Failed to load data: {loadError}</p>
-            <IonButton onClick={loadData}>Retry</IonButton>
-          </IonCardContent>
-        </IonCard>
+        <div
+          data-testid="load-error"
+          style={{
+            background: '#fff5f5',
+            border: '1px solid #d33',
+            borderRadius: '10px',
+            padding: '12px',
+            marginBottom: '12px',
+          }}
+        >
+          <p style={{ color: '#d33', margin: '0 0 8px 0' }}>Failed to load data: {loadError}</p>
+          <button
+            className="cb-primary-btn"
+            style={{
+              background: '#1e66f5',
+              color: '#fff',
+              border: 'none',
+              padding: '6px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+            }}
+            onClick={loadData}
+          >
+            Retry
+          </button>
+        </div>
       )}
-      {error && (
-        <IonText color="danger">
-          <p>{error}</p>
-        </IonText>
-      )}
+      {error && <p style={{ color: '#d33' }}>{error}</p>}
 
-      <IonSegment
-        value={viewMode}
-        onIonChange={(e) => setViewMode(e.detail.value as ViewMode)}
-        data-testid="inventory-view-toggle"
-      >
-        <IonSegmentButton value="grouped">
-          <IonLabel>Grouped</IonLabel>
-        </IonSegmentButton>
-        <IonSegmentButton value="lots">
-          <IonLabel>Lots</IonLabel>
-        </IonSegmentButton>
-      </IonSegment>
+      {/* View toggle */}
+      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }} data-testid="inventory-view-toggle">
+        <button
+          className="cb-primary-btn"
+          style={{
+            background: viewMode === 'grouped' ? '#1e66f5' : '#fff',
+            color: viewMode === 'grouped' ? '#fff' : '#4b5563',
+            border: '1px solid #ddd',
+            padding: '6px 16px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 600,
+          }}
+          onClick={() => setViewMode('grouped')}
+        >
+          Grouped
+        </button>
+        <button
+          className="cb-primary-btn"
+          style={{
+            background: viewMode === 'lots' ? '#1e66f5' : '#fff',
+            color: viewMode === 'lots' ? '#fff' : '#4b5563',
+            border: '1px solid #ddd',
+            padding: '6px 16px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontWeight: 600,
+          }}
+          onClick={() => setViewMode('lots')}
+        >
+          Lots
+        </button>
+      </div>
 
       {/* ========================================================== */}
       {/*  SEARCH FILTER                                               */}
       {/* ========================================================== */}
       <div style={{ margin: '12px 0' }}>
-        <IonInput
+        <input
           placeholder="Search products..."
           aria-label="Search products"
           value={searchText}
-          onIonInput={(e) => setSearchText(e.detail.value ?? '')}
+          onChange={(e) => setSearchText(e.target.value)}
           data-testid="inventory-search"
+          style={{
+            width: '100%',
+            padding: '10px 12px',
+            border: '1px solid #ccc',
+            borderRadius: '6px',
+            fontSize: '14px',
+            boxSizing: 'border-box',
+          }}
         />
       </div>
 
@@ -401,116 +427,169 @@ export function InventoryPage() {
           {filteredGrouped.length === 0 && <p data-testid="no-products">No products in inventory.</p>}
 
           {filteredGrouped.map(({ product, totalStock, nearestExpiry, lotCount }) => (
-            <IonCard
+            <div
               key={product.product_id}
               data-testid={`inv-product-${product.product_id}`}
-              style={stockCardStyle(totalStock, Number(product.min_stock_amount))}
+              style={{
+                background: '#fff',
+                border: '1px solid #eee',
+                borderRadius: '10px',
+                padding: '12px',
+                borderLeft: `4px solid ${stockCardBorderColor(totalStock, Number(product.min_stock_amount))}`,
+                marginBottom: '12px',
+              }}
             >
-              <IonCardHeader>
-                <IonCardTitle>{product.name}</IonCardTitle>
+              {/* Card header */}
+              <div style={{ marginBottom: '8px' }}>
+                <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '2px' }}>{product.name}</div>
                 {product.barcode && (
                   <span style={{ fontSize: '0.8em', color: '#888' }} data-testid={`barcode-${product.product_id}`}>
                     {product.barcode}
                   </span>
                 )}
-                <span style={{ fontSize: '0.85em', color: '#666' }}>
+                <span style={{ fontSize: '0.85em', color: '#666', marginLeft: product.barcode ? '8px' : '0' }}>
                   {Number(product.servings_per_container)} srvg/ctn
                 </span>
-              </IonCardHeader>
-              <IonCardContent>
-                <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                    gap: '8px',
-                    alignItems: 'center',
-                    marginBottom: '12px',
-                  }}
-                >
-                  <div>
-                    <span style={{ fontSize: '0.85em', color: '#888' }}>Total Stock</span>
-                    <br />
-                    <IonBadge
-                      color={stockBadgeColor(totalStock, Number(product.min_stock_amount))}
-                      data-testid={`stock-badge-${product.product_id}`}
-                    >
-                      {totalStock.toFixed(1)} ctn
-                    </IonBadge>
-                    <br />
-                    <span
-                      style={{ fontSize: '0.8em', color: '#888' }}
-                      data-testid={`stock-servings-${product.product_id}`}
-                    >
-                      ({(totalStock * Number(product.servings_per_container)).toFixed(1)} svgs)
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '0.85em', color: '#888' }}>Nearest Expiry</span>
-                    <br />
-                    <span data-testid={`expiry-${product.product_id}`}>{nearestExpiry ?? '\u2014'}</span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '0.85em', color: '#888' }}>Min Stock</span>
-                    <br />
-                    <span data-testid={`min-stock-${product.product_id}`}>
-                      {Number(product.min_stock_amount).toFixed(1)} ctn
-                    </span>
-                  </div>
-                  <div>
-                    <span style={{ fontSize: '0.85em', color: '#888' }}>Lots</span>
-                    <br />
-                    <span data-testid={`lot-count-${product.product_id}`}>{lotCount}</span>
-                  </div>
-                </div>
+              </div>
 
-                {/* Action buttons */}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                  <IonButton
-                    size="small"
-                    color="success"
-                    onClick={() => openAddStockModal(product.product_id, 1)}
-                    data-testid={`add-ctn-${product.product_id}`}
+              {/* Card content */}
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: '1fr 1fr 1fr 1fr',
+                  gap: '8px',
+                  alignItems: 'center',
+                  marginBottom: '12px',
+                }}
+              >
+                <div>
+                  <span style={{ fontSize: '0.85em', color: '#888' }}>Total Stock</span>
+                  <br />
+                  <span
+                    data-testid={`stock-badge-${product.product_id}`}
+                    style={{
+                      padding: '4px 12px',
+                      borderRadius: '12px',
+                      fontWeight: 600,
+                      fontSize: '12px',
+                      color: '#fff',
+                      background: stockBadgeBg(totalStock, Number(product.min_stock_amount)),
+                      display: 'inline-block',
+                    }}
                   >
-                    +1 Ctn
-                  </IonButton>
-                  <IonButton
-                    size="small"
-                    color="warning"
-                    onClick={() => consumeStock(product.product_id, 1, 'container')}
-                    data-testid={`sub-ctn-${product.product_id}`}
+                    {totalStock.toFixed(1)} ctn
+                  </span>
+                  <br />
+                  <span
+                    style={{ fontSize: '0.8em', color: '#888' }}
+                    data-testid={`stock-servings-${product.product_id}`}
                   >
-                    -1 Ctn
-                  </IonButton>
-                  <IonButton
-                    size="small"
-                    color="success"
-                    fill="outline"
-                    onClick={() => openAddStockModal(product.product_id, 1 / Number(product.servings_per_container))}
-                    data-testid={`add-srv-${product.product_id}`}
-                  >
-                    +1 Srv
-                  </IonButton>
-                  <IonButton
-                    size="small"
-                    color="warning"
-                    fill="outline"
-                    onClick={() => consumeStock(product.product_id, 1, 'serving')}
-                    data-testid={`sub-srv-${product.product_id}`}
-                  >
-                    -1 Srv
-                  </IonButton>
-                  <IonButton
-                    size="small"
-                    color="danger"
-                    fill="clear"
-                    onClick={() => setConsumeAllTarget(product.product_id)}
-                    data-testid={`consume-all-${product.product_id}`}
-                  >
-                    Consume All
-                  </IonButton>
+                    ({(totalStock * Number(product.servings_per_container)).toFixed(1)} svgs)
+                  </span>
                 </div>
-              </IonCardContent>
-            </IonCard>
+                <div>
+                  <span style={{ fontSize: '0.85em', color: '#888' }}>Nearest Expiry</span>
+                  <br />
+                  <span data-testid={`expiry-${product.product_id}`}>{nearestExpiry ?? '\u2014'}</span>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.85em', color: '#888' }}>Min Stock</span>
+                  <br />
+                  <span data-testid={`min-stock-${product.product_id}`}>
+                    {Number(product.min_stock_amount).toFixed(1)} ctn
+                  </span>
+                </div>
+                <div>
+                  <span style={{ fontSize: '0.85em', color: '#888' }}>Lots</span>
+                  <br />
+                  <span data-testid={`lot-count-${product.product_id}`}>{lotCount}</span>
+                </div>
+              </div>
+
+              {/* Action buttons */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
+                <button
+                  className="cb-primary-btn"
+                  style={{
+                    background: '#2f9e44',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '4px 12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                  }}
+                  onClick={() => openAddStockModal(product.product_id, 1)}
+                  data-testid={`add-ctn-${product.product_id}`}
+                >
+                  +1 Ctn
+                </button>
+                <button
+                  className="cb-primary-btn"
+                  style={{
+                    background: '#d33',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '4px 12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                  }}
+                  onClick={() => consumeStock(product.product_id, 1, 'container')}
+                  data-testid={`sub-ctn-${product.product_id}`}
+                >
+                  -1 Ctn
+                </button>
+                <button
+                  className="cb-primary-btn"
+                  style={{
+                    background: '#fff',
+                    color: '#2f9e44',
+                    border: '1px solid #2f9e44',
+                    padding: '4px 12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                  }}
+                  onClick={() => openAddStockModal(product.product_id, 1 / Number(product.servings_per_container))}
+                  data-testid={`add-srv-${product.product_id}`}
+                >
+                  +1 Srv
+                </button>
+                <button
+                  className="cb-primary-btn"
+                  style={{
+                    background: '#fff',
+                    color: '#d33',
+                    border: '1px solid #d33',
+                    padding: '4px 12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                  }}
+                  onClick={() => consumeStock(product.product_id, 1, 'serving')}
+                  data-testid={`sub-srv-${product.product_id}`}
+                >
+                  -1 Srv
+                </button>
+                <button
+                  className="cb-primary-btn"
+                  style={{
+                    background: '#333',
+                    color: '#fff',
+                    border: 'none',
+                    padding: '4px 12px',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                    fontSize: '13px',
+                  }}
+                  onClick={() => handleConsumeAll(product.product_id)}
+                  data-testid={`consume-all-${product.product_id}`}
+                >
+                  Consume All
+                </button>
+              </div>
+            </div>
           ))}
         </div>
       )}
@@ -525,24 +604,20 @@ export function InventoryPage() {
           {sortedLots.length > 0 && (
             <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '12px' }} data-testid="lots-table">
               <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Product</th>
-                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Location</th>
-                  <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>Qty (ctn)</th>
-                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Expires</th>
+                <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
+                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600 }}>Product</th>
+                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600 }}>Location</th>
+                  <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600 }}>Qty (ctn)</th>
+                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600 }}>Expires</th>
                 </tr>
               </thead>
               <tbody>
                 {sortedLots.map((lot) => (
-                  <tr key={lot.lot_id} data-testid={`lot-row-${lot.lot_id}`}>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{lot.productName}</td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                      {lot.locations?.name ?? '\u2014'}
-                    </td>
-                    <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
-                      {Number(lot.qty_containers).toFixed(1)}
-                    </td>
-                    <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{lot.expires_on ?? '\u2014'}</td>
+                  <tr key={lot.lot_id} data-testid={`lot-row-${lot.lot_id}`} style={{ borderBottom: '1px solid #eee' }}>
+                    <td style={{ padding: '12px' }}>{lot.productName}</td>
+                    <td style={{ padding: '12px' }}>{lot.locations?.name ?? '\u2014'}</td>
+                    <td style={{ textAlign: 'right', padding: '12px' }}>{Number(lot.qty_containers).toFixed(1)}</td>
+                    <td style={{ padding: '12px' }}>{lot.expires_on ?? '\u2014'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -562,57 +637,85 @@ export function InventoryPage() {
       >
         <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
           <div>
-            <label style={{ fontSize: '0.85em', color: '#888' }}>Quantity (containers)</label>
-            <IonInput
+            <label style={{ fontSize: '0.85em', color: '#888', display: 'block', marginBottom: '4px' }}>
+              Quantity (containers)
+            </label>
+            <input
               type="number"
               aria-label="Quantity in containers"
               value={addStockQty}
-              min="0.001"
-              step={'0.1'}
-              onIonInput={(e) => {
-                const val = parseFloat(e.detail.value ?? '');
+              min={0.001}
+              step={0.1}
+              onChange={(e) => {
+                const val = parseFloat(e.target.value);
                 if (!isNaN(val)) setAddStockQty(val);
               }}
               data-testid="add-stock-qty"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #ccc',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
             />
           </div>
           <div>
-            <label style={{ fontSize: '0.85em', color: '#888' }}>Expiry Date (optional)</label>
-            <IonInput
+            <label style={{ fontSize: '0.85em', color: '#888', display: 'block', marginBottom: '4px' }}>
+              Expiry Date (optional)
+            </label>
+            <input
               type="date"
               aria-label="Expiry date"
               value={addStockExpiry}
-              onIonInput={(e) => setAddStockExpiry(e.detail.value ?? '')}
+              onChange={(e) => setAddStockExpiry(e.target.value)}
               data-testid="add-stock-expiry"
+              style={{
+                width: '100%',
+                padding: '10px 12px',
+                border: '1px solid #ccc',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
             />
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
-            <IonButton fill="clear" onClick={closeAddStockModal} data-testid="add-stock-cancel">
+            <button
+              className="cb-primary-btn"
+              style={{
+                background: 'transparent',
+                color: '#4b5563',
+                border: 'none',
+                padding: '6px 16px',
+                borderRadius: '6px',
+                cursor: 'pointer',
+              }}
+              onClick={closeAddStockModal}
+              data-testid="add-stock-cancel"
+            >
               Cancel
-            </IonButton>
-            <IonButton onClick={confirmAddStock} disabled={addStockQty <= 0} data-testid="add-stock-confirm">
+            </button>
+            <button
+              className="cb-primary-btn"
+              style={{
+                background: addStockQty <= 0 ? '#ccc' : '#1e66f5',
+                color: '#fff',
+                border: 'none',
+                padding: '6px 16px',
+                borderRadius: '6px',
+                cursor: addStockQty <= 0 ? 'not-allowed' : 'pointer',
+              }}
+              onClick={confirmAddStock}
+              disabled={addStockQty <= 0}
+              data-testid="add-stock-confirm"
+            >
               Add
-            </IonButton>
+            </button>
           </div>
         </div>
       </ModalOverlay>
-
-      {/* Consume All confirmation */}
-      <IonAlert
-        isOpen={consumeAllTarget !== null}
-        header="Consume All Stock"
-        message="Are you sure you want to consume all remaining stock for this product?"
-        buttons={[
-          { text: 'Cancel', role: 'cancel', handler: () => setConsumeAllTarget(null) },
-          {
-            text: 'Consume All',
-            handler: () => {
-              if (consumeAllTarget) consumeAll(consumeAllTarget);
-            },
-          },
-        ]}
-        onDidDismiss={() => setConsumeAllTarget(null)}
-      />
     </ChefLayout>
   );
 }

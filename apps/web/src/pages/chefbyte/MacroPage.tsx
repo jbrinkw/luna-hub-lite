@@ -1,5 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonButton, IonInput, IonTextarea, IonText, IonCard, IonCardContent } from '@ionic/react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
@@ -44,6 +43,95 @@ interface PlannedItem {
 export function calcCaloriesFromMacros(protein: number, carbs: number, fat: number): number {
   return protein * 4 + carbs * 4 + fat * 9;
 }
+
+/* ------------------------------------------------------------------ */
+/*  Shared inline styles                                               */
+/* ------------------------------------------------------------------ */
+
+const inputStyle: React.CSSProperties = {
+  width: '100%',
+  padding: '10px',
+  border: '1px solid #ddd',
+  borderRadius: '6px',
+  fontSize: '14px',
+  boxSizing: 'border-box',
+};
+
+const cardStyle: React.CSSProperties = {
+  background: '#fff',
+  border: '1px solid #eee',
+  borderRadius: '8px',
+  padding: '16px',
+};
+
+const thStyle: React.CSSProperties = {
+  padding: '10px',
+  textAlign: 'left',
+  fontWeight: 600,
+  fontSize: '13px',
+};
+
+const thRightStyle: React.CSSProperties = { ...thStyle, textAlign: 'right' };
+
+const dateNavBtn: React.CSSProperties = {
+  padding: '8px 16px',
+  background: '#fff',
+  border: '1px solid #ddd',
+  borderRadius: '6px',
+  cursor: 'pointer',
+};
+
+const todayBtn: React.CSSProperties = {
+  padding: '8px 16px',
+  background: '#1e66f5',
+  color: '#fff',
+  border: 'none',
+  borderRadius: '6px',
+  fontWeight: 600,
+  cursor: 'pointer',
+};
+
+const primaryBtn: React.CSSProperties = {
+  padding: '8px 16px',
+  background: '#1e66f5',
+  color: '#fff',
+  border: 'none',
+  borderRadius: '6px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontSize: '14px',
+};
+
+const cancelBtn: React.CSSProperties = {
+  background: 'transparent',
+  border: '1px solid #ddd',
+  color: '#4b5563',
+  padding: '8px 16px',
+  borderRadius: '6px',
+  cursor: 'pointer',
+  fontSize: '14px',
+};
+
+const saveBtn: React.CSSProperties = {
+  padding: '8px 16px',
+  background: '#2f9e44',
+  color: '#fff',
+  border: 'none',
+  borderRadius: '6px',
+  fontWeight: 600,
+  cursor: 'pointer',
+  fontSize: '14px',
+};
+
+const dangerBtn: React.CSSProperties = {
+  padding: '2px 6px',
+  background: 'transparent',
+  border: 'none',
+  color: '#d33',
+  cursor: 'pointer',
+  fontWeight: 'bold',
+  fontSize: '16px',
+};
 
 /* ================================================================== */
 /*  MacroPage                                                          */
@@ -434,7 +522,9 @@ export function MacroPage() {
   if (loading) {
     return (
       <ChefLayout title="Macros">
-        <IonSpinner data-testid="macro-loading" />
+        <div style={{ padding: '20px' }} data-testid="macro-loading">
+          Loading macros...
+        </div>
       </ChefLayout>
     );
   }
@@ -446,32 +536,32 @@ export function MacroPage() {
     <ChefLayout title="Macros">
       <h2>MACROS</h2>
       {loadError && (
-        <IonCard color="danger" data-testid="load-error">
-          <IonCardContent>
-            <p>Failed to load data: {loadError}</p>
-            <IonButton onClick={loadData}>Retry</IonButton>
-          </IonCardContent>
-        </IonCard>
+        <div style={{ ...cardStyle, borderColor: '#d33', background: '#fff5f5' }} data-testid="load-error">
+          <p style={{ color: '#d33', margin: '0 0 8px' }}>Failed to load data: {loadError}</p>
+          <button style={primaryBtn} onClick={loadData}>
+            Retry
+          </button>
+        </div>
       )}
       {mutationError && (
-        <IonText color="danger">
+        <div style={{ color: '#d33', marginBottom: '12px' }}>
           <p>{mutationError}</p>
-        </IonText>
+        </div>
       )}
 
       {/* ============================================================ */}
       {/*  DATE NAVIGATION                                              */}
       {/* ============================================================ */}
       <div data-testid="date-nav" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-        <IonButton size="small" fill="outline" onClick={prevDate} data-testid="prev-date-btn">
+        <button style={dateNavBtn} onClick={prevDate} data-testid="prev-date-btn">
           Prev
-        </IonButton>
-        <IonButton size="small" fill="outline" onClick={goToday} data-testid="today-date-btn">
+        </button>
+        <button style={todayBtn} onClick={goToday} data-testid="today-date-btn">
           Today
-        </IonButton>
-        <IonButton size="small" fill="outline" onClick={nextDate} data-testid="next-date-btn">
+        </button>
+        <button style={dateNavBtn} onClick={nextDate} data-testid="next-date-btn">
           Next
-        </IonButton>
+        </button>
         <span data-testid="current-date" style={{ marginLeft: '8px', fontWeight: 'bold' }}>
           {formatDateDisplay(currentDate)}
         </span>
@@ -486,14 +576,14 @@ export function MacroPage() {
           label="Calories"
           current={consumedTotals.calories}
           goal={goals.calories}
-          color="#3880ff"
+          color="#1e66f5"
           testId="progress-calories"
         />
         <MacroProgressBar
           label="Protein"
           current={consumedTotals.protein}
           goal={goals.protein}
-          color="#2dd36f"
+          color="#2f9e44"
           unit="g"
           testId="progress-protein"
         />
@@ -509,7 +599,7 @@ export function MacroPage() {
           label="Fats"
           current={consumedTotals.fat}
           goal={goals.fat}
-          color="#eb445a"
+          color="#d33"
           unit="g"
           testId="progress-fats"
         />
@@ -525,14 +615,14 @@ export function MacroPage() {
         ) : (
           <table data-testid="consumed-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Source</th>
-                <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Item</th>
-                <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>Cal</th>
-                <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>P</th>
-                <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>C</th>
-                <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>F</th>
-                <th style={{ padding: '8px', borderBottom: '1px solid #ddd', width: '40px' }}></th>
+              <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
+                <th style={thStyle}>Source</th>
+                <th style={thStyle}>Item</th>
+                <th style={thRightStyle}>Cal</th>
+                <th style={thRightStyle}>P</th>
+                <th style={thRightStyle}>C</th>
+                <th style={thRightStyle}>F</th>
+                <th style={{ ...thStyle, width: '40px' }}></th>
               </tr>
             </thead>
             <tbody>
@@ -550,17 +640,14 @@ export function MacroPage() {
                   <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.fat}g</td>
                   <td style={{ padding: '4px', borderBottom: '1px solid #eee', textAlign: 'center' }}>
                     {item.source !== 'LiquidTrack' && (
-                      <IonButton
-                        fill="clear"
-                        color="danger"
-                        size="small"
+                      <button
+                        style={dangerBtn}
                         data-testid={`delete-consumed-${item.id}`}
                         onClick={() => deleteConsumedItem(item)}
                         aria-label={`Remove ${item.name}`}
-                        style={{ '--padding-start': '4px', '--padding-end': '4px', minHeight: 'auto' }}
                       >
                         x
-                      </IonButton>
+                      </button>
                     )}
                   </td>
                 </tr>
@@ -599,12 +686,12 @@ export function MacroPage() {
         ) : (
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>
             <thead>
-              <tr>
-                <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Item</th>
-                <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>Cal</th>
-                <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>P</th>
-                <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>C</th>
-                <th style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #ddd' }}>F</th>
+              <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
+                <th style={thStyle}>Item</th>
+                <th style={thRightStyle}>Cal</th>
+                <th style={thRightStyle}>P</th>
+                <th style={thRightStyle}>C</th>
+                <th style={thRightStyle}>F</th>
               </tr>
             </thead>
             <tbody>
@@ -630,15 +717,15 @@ export function MacroPage() {
       {/*  ACTION BUTTONS                                               */}
       {/* ============================================================ */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
-        <IonButton size="small" onClick={openTempModal} data-testid="log-temp-btn">
+        <button style={primaryBtn} onClick={openTempModal} data-testid="log-temp-btn">
           + Log Temp Item
-        </IonButton>
-        <IonButton size="small" onClick={openTargetModal} data-testid="target-macros-btn">
+        </button>
+        <button style={primaryBtn} onClick={openTargetModal} data-testid="target-macros-btn">
           Edit Targets
-        </IonButton>
-        <IonButton size="small" onClick={openTasteModal} data-testid="taste-profile-btn">
+        </button>
+        <button style={primaryBtn} onClick={openTasteModal} data-testid="taste-profile-btn">
           Taste Profile
-        </IonButton>
+        </button>
       </div>
 
       {/* ============================================================ */}
@@ -650,53 +737,68 @@ export function MacroPage() {
         title="Log Temp Item"
         testId="temp-item-modal"
       >
-        <div style={{ display: 'grid', gap: '8px' }}>
-          <IonInput
-            label="Name"
-            value={tempName}
-            onIonInput={(e) => setTempName(e.detail.value ?? '')}
-            data-testid="temp-name"
-          />
-          <IonInput
-            label="Calories"
-            type="number"
-            min="0"
-            value={tempCalories}
-            onIonInput={(e) => setTempCalories(Number(e.detail.value) || 0)}
-            data-testid="temp-calories"
-          />
-          <IonInput
-            label="Protein"
-            type="number"
-            min="0"
-            value={tempProtein}
-            onIonInput={(e) => setTempProtein(Number(e.detail.value) || 0)}
-            data-testid="temp-protein"
-          />
-          <IonInput
-            label="Carbs"
-            type="number"
-            min="0"
-            value={tempCarbs}
-            onIonInput={(e) => setTempCarbs(Number(e.detail.value) || 0)}
-            data-testid="temp-carbs"
-          />
-          <IonInput
-            label="Fat"
-            type="number"
-            min="0"
-            value={tempFat}
-            onIonInput={(e) => setTempFat(Number(e.detail.value) || 0)}
-            data-testid="temp-fat"
-          />
+        <div style={{ display: 'grid', gap: '12px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Name</label>
+            <input
+              style={inputStyle}
+              value={tempName}
+              onChange={(e) => setTempName(e.target.value)}
+              data-testid="temp-name"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Calories</label>
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={tempCalories}
+              onChange={(e) => setTempCalories(Number(e.target.value) || 0)}
+              data-testid="temp-calories"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Protein</label>
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={tempProtein}
+              onChange={(e) => setTempProtein(Number(e.target.value) || 0)}
+              data-testid="temp-protein"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Carbs</label>
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={tempCarbs}
+              onChange={(e) => setTempCarbs(Number(e.target.value) || 0)}
+              data-testid="temp-carbs"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Fat</label>
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={tempFat}
+              onChange={(e) => setTempFat(Number(e.target.value) || 0)}
+              data-testid="temp-fat"
+            />
+          </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <IonButton fill="clear" onClick={() => setShowTempModal(false)} data-testid="temp-cancel-btn">
+          <button style={cancelBtn} onClick={() => setShowTempModal(false)} data-testid="temp-cancel-btn">
             Cancel
-          </IonButton>
-          <IonButton onClick={saveTempItem} disabled={!tempName.trim()} data-testid="temp-save-btn">
+          </button>
+          <button style={saveBtn} onClick={saveTempItem} disabled={!tempName.trim()} data-testid="temp-save-btn">
             Log Item
-          </IonButton>
+          </button>
         </div>
       </ModalOverlay>
 
@@ -709,31 +811,44 @@ export function MacroPage() {
         title="Target Macros"
         testId="target-macros-modal"
       >
-        <div style={{ display: 'grid', gap: '8px' }}>
-          <IonInput
-            label="Protein (g)"
-            type="number"
-            min="0"
-            value={targetProtein}
-            onIonInput={(e) => setTargetProtein(Number(e.detail.value) || 0)}
-            data-testid="target-protein"
-          />
-          <IonInput
-            label="Carbs (g)"
-            type="number"
-            min="0"
-            value={targetCarbs}
-            onIonInput={(e) => setTargetCarbs(Number(e.detail.value) || 0)}
-            data-testid="target-carbs"
-          />
-          <IonInput
-            label="Fats (g)"
-            type="number"
-            min="0"
-            value={targetFat}
-            onIonInput={(e) => setTargetFat(Number(e.detail.value) || 0)}
-            data-testid="target-fats"
-          />
+        <div style={{ display: 'grid', gap: '12px' }}>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>
+              Protein (g)
+            </label>
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={targetProtein}
+              onChange={(e) => setTargetProtein(Number(e.target.value) || 0)}
+              data-testid="target-protein"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>
+              Carbs (g)
+            </label>
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={targetCarbs}
+              onChange={(e) => setTargetCarbs(Number(e.target.value) || 0)}
+              data-testid="target-carbs"
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Fats (g)</label>
+            <input
+              style={inputStyle}
+              type="number"
+              min="0"
+              value={targetFat}
+              onChange={(e) => setTargetFat(Number(e.target.value) || 0)}
+              data-testid="target-fats"
+            />
+          </div>
           <div data-testid="target-calories" style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}>
             <strong>Calories (auto): </strong>
             {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
@@ -741,12 +856,12 @@ export function MacroPage() {
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <IonButton fill="clear" onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">
+          <button style={cancelBtn} onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">
             Cancel
-          </IonButton>
-          <IonButton onClick={saveTargets} data-testid="target-save-btn">
+          </button>
+          <button style={saveBtn} onClick={saveTargets} data-testid="target-save-btn">
             Save
-          </IonButton>
+          </button>
         </div>
       </ModalOverlay>
 
@@ -762,20 +877,21 @@ export function MacroPage() {
         <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '12px' }}>
           Dietary preferences and notes for recipe filtering and AI suggestions:
         </p>
-        <IonTextarea
+        <textarea
+          style={{ ...inputStyle, resize: 'vertical', minHeight: '120px' }}
           value={tasteProfile}
-          onIonInput={(e) => setTasteProfile(e.detail.value ?? '')}
+          onChange={(e) => setTasteProfile(e.target.value)}
           data-testid="taste-textarea"
           aria-label="Taste profile"
           rows={5}
         />
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <IonButton fill="clear" onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">
+          <button style={cancelBtn} onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">
             Cancel
-          </IonButton>
-          <IonButton onClick={saveTasteProfile} data-testid="taste-save-btn">
+          </button>
+          <button style={saveBtn} onClick={saveTasteProfile} data-testid="taste-save-btn">
             Save
-          </IonButton>
+          </button>
         </div>
       </ModalOverlay>
     </ChefLayout>

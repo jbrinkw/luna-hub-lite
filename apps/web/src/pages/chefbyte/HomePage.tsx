@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonButton, IonInput, IonTextarea, IonCard, IonCardContent } from '@ionic/react';
+
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
@@ -454,12 +454,33 @@ export function HomePage() {
       <h2>CHEFBYTE</h2>
 
       {loadError && (
-        <IonCard color="danger" data-testid="load-error">
-          <IonCardContent>
-            <p>Failed to load data: {loadError}</p>
-            <IonButton onClick={loadData}>Retry</IonButton>
-          </IonCardContent>
-        </IonCard>
+        <div
+          data-testid="load-error"
+          style={{
+            border: '1px solid #ef4444',
+            background: '#fef2f2',
+            borderRadius: '8px',
+            padding: '16px',
+            marginBottom: '16px',
+          }}
+        >
+          <p style={{ margin: '0 0 8px 0', color: '#d33' }}>Failed to load data: {loadError}</p>
+          <button
+            onClick={loadData}
+            className="cb-primary-btn"
+            style={{
+              background: '#d33',
+              color: '#fff',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+          >
+            Retry
+          </button>
+        </div>
       )}
 
       {/* ============================================================ */}
@@ -532,14 +553,14 @@ export function HomePage() {
           label="Calories"
           current={consumed.calories}
           goal={goals.calories}
-          color="#3880ff"
+          color="#1e66f5"
           testId="compact-calories"
         />
         <MacroProgressBar
           label="Protein"
           current={consumed.protein}
           goal={goals.protein}
-          color="#2dd36f"
+          color="#2f9e44"
           unit="g"
           testId="compact-protein"
         />
@@ -555,7 +576,7 @@ export function HomePage() {
           label="Fats"
           current={consumed.fat}
           goal={goals.fat}
-          color="#eb445a"
+          color="#d33"
           unit="g"
           testId="compact-fats"
         />
@@ -565,18 +586,71 @@ export function HomePage() {
       {/*  QUICK ACTIONS                                                */}
       {/* ============================================================ */}
       <div data-testid="quick-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '24px' }}>
-        <IonButton size="small" onClick={importShopping} data-testid="import-shopping-btn">
+        <button
+          onClick={importShopping}
+          className="cb-primary-btn"
+          style={{
+            background: '#1e66f5',
+            color: '#fff',
+            border: 'none',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '13px',
+          }}
+          data-testid="import-shopping-btn"
+        >
           Import Shopping
-        </IonButton>
-        <IonButton size="small" onClick={openTargetModal} data-testid="target-macros-btn">
+        </button>
+        <button
+          onClick={openTargetModal}
+          className="cb-primary-btn"
+          style={{
+            background: '#1e66f5',
+            color: '#fff',
+            border: 'none',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '13px',
+          }}
+          data-testid="target-macros-btn"
+        >
           Target Macros
-        </IonButton>
-        <IonButton size="small" onClick={openTasteModal} data-testid="taste-profile-btn">
+        </button>
+        <button
+          onClick={openTasteModal}
+          className="cb-primary-btn"
+          style={{
+            background: '#1e66f5',
+            color: '#fff',
+            border: 'none',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '13px',
+          }}
+          data-testid="taste-profile-btn"
+        >
           Taste Profile
-        </IonButton>
-        <IonButton size="small" onClick={syncMealPlanToCart} disabled={syncing} data-testid="meal-plan-cart-btn">
+        </button>
+        <button
+          onClick={syncMealPlanToCart}
+          disabled={syncing}
+          className="cb-primary-btn"
+          style={{
+            background: '#1e66f5',
+            color: '#fff',
+            border: 'none',
+            padding: '8px 16px',
+            borderRadius: '6px',
+            cursor: 'pointer',
+            fontSize: '13px',
+          }}
+          data-testid="meal-plan-cart-btn"
+        >
           {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
-        </IonButton>
+        </button>
       </div>
 
       {/* ============================================================ */}
@@ -597,7 +671,7 @@ export function HomePage() {
                 style={{
                   padding: '10px 12px',
                   border: '1px solid #eee',
-                  borderLeft: '4px solid #3880ff',
+                  borderLeft: '4px solid #1e66f5',
                   borderRadius: '6px',
                   background: '#f7f7f9',
                   display: 'flex',
@@ -658,7 +732,7 @@ export function HomePage() {
                   style={{
                     padding: '10px 12px',
                     border: '1px solid #eee',
-                    borderLeft: `4px solid ${isDone ? '#2dd36f' : '#ffc409'}`,
+                    borderLeft: `4px solid ${isDone ? '#2f9e44' : '#ffc409'}`,
                     borderRadius: '6px',
                     background: isDone ? '#f0faf4' : '#f7f7f9',
                     opacity: isDone ? 0.8 : 1,
@@ -680,7 +754,7 @@ export function HomePage() {
                         style={{
                           fontSize: '0.8em',
                           fontWeight: 600,
-                          color: isDone ? '#2dd36f' : '#ffc409',
+                          color: isDone ? '#2f9e44' : '#ffc409',
                         }}
                       >
                         {isDone ? 'Done' : 'Pending'}
@@ -711,43 +785,105 @@ export function HomePage() {
         title="Target Macros"
         testId="target-macros-modal"
       >
-        <div style={{ display: 'grid', gap: '8px' }}>
-          <IonInput
-            label="Protein (g)"
-            type="number"
-            min="0"
-            value={targetProtein}
-            onIonInput={(e) => setTargetProtein(Number(e.detail.value) || 0)}
-            data-testid="target-protein"
-          />
-          <IonInput
-            label="Carbs (g)"
-            type="number"
-            min="0"
-            value={targetCarbs}
-            onIonInput={(e) => setTargetCarbs(Number(e.detail.value) || 0)}
-            data-testid="target-carbs"
-          />
-          <IonInput
-            label="Fats (g)"
-            type="number"
-            min="0"
-            value={targetFat}
-            onIonInput={(e) => setTargetFat(Number(e.detail.value) || 0)}
-            data-testid="target-fats"
-          />
-          <div data-testid="target-calories" style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}>
+        <div style={{ display: 'grid', gap: '12px' }}>
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: '#555' }}>
+              Protein (g)
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={targetProtein}
+              onChange={(e) => setTargetProtein(Number(e.target.value) || 0)}
+              data-testid="target-protein"
+              style={{
+                width: '100%',
+                padding: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: '#555' }}>
+              Carbs (g)
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={targetCarbs}
+              onChange={(e) => setTargetCarbs(Number(e.target.value) || 0)}
+              data-testid="target-carbs"
+              style={{
+                width: '100%',
+                padding: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div>
+            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: '#555' }}>
+              Fats (g)
+            </label>
+            <input
+              type="number"
+              min={0}
+              value={targetFat}
+              onChange={(e) => setTargetFat(Number(e.target.value) || 0)}
+              data-testid="target-fats"
+              style={{
+                width: '100%',
+                padding: '10px',
+                border: '1px solid #ddd',
+                borderRadius: '6px',
+                fontSize: '14px',
+                boxSizing: 'border-box',
+              }}
+            />
+          </div>
+          <div data-testid="target-calories" style={{ padding: '8px', background: '#f7f7f9', borderRadius: '4px' }}>
             <strong>Calories (auto): </strong>
             {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
           </div>
         </div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <IonButton fill="clear" onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">
+          <button
+            onClick={() => setShowTargetModal(false)}
+            className="cb-primary-btn"
+            style={{
+              background: 'transparent',
+              color: '#1e66f5',
+              border: '1px solid #e5e7eb',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+            data-testid="target-cancel-btn"
+          >
             Cancel
-          </IonButton>
-          <IonButton onClick={saveTargets} data-testid="target-save-btn">
+          </button>
+          <button
+            onClick={saveTargets}
+            className="cb-primary-btn"
+            style={{
+              background: '#1e66f5',
+              color: '#fff',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+            data-testid="target-save-btn"
+          >
             Save
-          </IonButton>
+          </button>
         </div>
       </ModalOverlay>
 
@@ -760,19 +896,55 @@ export function HomePage() {
         title="Taste Profile"
         testId="taste-modal"
       >
-        <IonTextarea
+        <textarea
           value={tasteProfile}
-          onIonInput={(e) => setTasteProfile(e.detail.value ?? '')}
+          onChange={(e) => setTasteProfile(e.target.value ?? '')}
           data-testid="taste-textarea"
           rows={5}
+          style={{
+            width: '100%',
+            padding: '10px',
+            border: '1px solid #ddd',
+            borderRadius: '6px',
+            fontSize: '14px',
+            resize: 'vertical',
+            boxSizing: 'border-box',
+            fontFamily: 'inherit',
+          }}
         />
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <IonButton fill="clear" onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">
+          <button
+            onClick={() => setShowTasteModal(false)}
+            className="cb-primary-btn"
+            style={{
+              background: 'transparent',
+              color: '#1e66f5',
+              border: '1px solid #e5e7eb',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+            data-testid="taste-cancel-btn"
+          >
             Cancel
-          </IonButton>
-          <IonButton onClick={saveTasteProfile} data-testid="taste-save-btn">
+          </button>
+          <button
+            onClick={saveTasteProfile}
+            className="cb-primary-btn"
+            style={{
+              background: '#1e66f5',
+              color: '#fff',
+              border: 'none',
+              padding: '8px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontSize: '14px',
+            }}
+            data-testid="taste-save-btn"
+          >
             Save
-          </IonButton>
+          </button>
         </div>
       </ModalOverlay>
     </ChefLayout>
