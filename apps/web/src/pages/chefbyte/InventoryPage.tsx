@@ -347,7 +347,7 @@ export function InventoryPage() {
         >
           <p style={{ color: '#d33', margin: '0 0 8px 0' }}>Failed to load data: {loadError}</p>
           <button
-            className="cb-primary-btn"
+            className="primary-btn"
             style={{
               background: '#1e66f5',
               color: '#fff',
@@ -367,7 +367,7 @@ export function InventoryPage() {
       {/* View toggle */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }} data-testid="inventory-view-toggle">
         <button
-          className="cb-primary-btn"
+          className="primary-btn"
           style={{
             background: viewMode === 'grouped' ? '#1e66f5' : '#fff',
             color: viewMode === 'grouped' ? '#fff' : '#4b5563',
@@ -382,7 +382,7 @@ export function InventoryPage() {
           Grouped
         </button>
         <button
-          className="cb-primary-btn"
+          className="primary-btn"
           style={{
             background: viewMode === 'lots' ? '#1e66f5' : '#fff',
             color: viewMode === 'lots' ? '#fff' : '#4b5563',
@@ -509,7 +509,7 @@ export function InventoryPage() {
               {/* Action buttons */}
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   style={{
                     background: '#2f9e44',
                     color: '#fff',
@@ -525,7 +525,7 @@ export function InventoryPage() {
                   +1 Ctn
                 </button>
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   style={{
                     background: '#d33',
                     color: '#fff',
@@ -541,7 +541,7 @@ export function InventoryPage() {
                   -1 Ctn
                 </button>
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   style={{
                     background: '#fff',
                     color: '#2f9e44',
@@ -557,7 +557,7 @@ export function InventoryPage() {
                   +1 Srv
                 </button>
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   style={{
                     background: '#fff',
                     color: '#d33',
@@ -573,7 +573,7 @@ export function InventoryPage() {
                   -1 Srv
                 </button>
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   style={{
                     background: '#333',
                     color: '#fff',
@@ -683,7 +683,7 @@ export function InventoryPage() {
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
             <button
-              className="cb-primary-btn"
+              className="primary-btn"
               style={{
                 background: 'transparent',
                 color: '#4b5563',
@@ -698,7 +698,7 @@ export function InventoryPage() {
               Cancel
             </button>
             <button
-              className="cb-primary-btn"
+              className="primary-btn"
               style={{
                 background: addStockQty <= 0 ? '#ccc' : '#1e66f5',
                 color: '#fff',

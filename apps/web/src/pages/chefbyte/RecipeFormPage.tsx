@@ -433,8 +433,8 @@ export function RecipeFormPage() {
       {/* ============================================================ */}
       {/*  RECIPE FIELDS                                                */}
       {/* ============================================================ */}
-      <div data-testid="recipe-fields" className="cb-card" style={{ padding: '20px', marginBottom: '16px' }}>
-        <div className="cb-form-grid">
+      <div data-testid="recipe-fields" className="card" style={{ padding: '20px', marginBottom: '16px' }}>
+        <div className="formGrid">
           <div style={{ gridColumn: '1 / -1' }}>
             <label style={labelStyle}>Name</label>
             <input
@@ -505,7 +505,7 @@ export function RecipeFormPage() {
       {/* ============================================================ */}
       {/*  INGREDIENTS SECTION                                          */}
       {/* ============================================================ */}
-      <div data-testid="ingredients-section" className="cb-card" style={{ padding: '20px', marginBottom: '16px' }}>
+      <div data-testid="ingredients-section" className="card" style={{ padding: '20px', marginBottom: '16px' }}>
         <h3 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: 700, color: '#1a1a2e' }}>Ingredients</h3>
 
         {/* Add ingredient form */}
@@ -598,7 +598,7 @@ export function RecipeFormPage() {
             />
           </div>
           <button
-            className="cb-primary-btn"
+            className="primary-btn"
             onClick={addIngredient}
             disabled={!selectedProduct}
             data-testid="add-ingredient-btn"
@@ -610,7 +610,7 @@ export function RecipeFormPage() {
 
         {/* Ingredients table */}
         {ingredients.length > 0 && (
-          <div className="cb-table-responsive">
+          <div className="table-responsive">
             <table
               style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '12px' }}
               data-testid="ingredients-table"
@@ -755,7 +755,7 @@ export function RecipeFormPage() {
       {/* ============================================================ */}
       <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
         <button
-          className="cb-primary-btn"
+          className="primary-btn"
           onClick={handleSave}
           disabled={!name.trim() || ingredients.length === 0}
           data-testid="save-recipe-btn"
@@ -765,7 +765,7 @@ export function RecipeFormPage() {
         </button>
 
         <button
-          className="cb-primary-btn"
+          className="primary-btn"
           onClick={() => navigate('/chef/recipes')}
           style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
         >
@@ -774,7 +774,7 @@ export function RecipeFormPage() {
 
         {isEdit && (
           <button
-            className="cb-primary-btn"
+            className="primary-btn"
             onClick={() => setShowDeleteAlert(true)}
             data-testid="delete-recipe-btn"
             style={{ background: '#d33' }}
@@ -801,20 +801,20 @@ export function RecipeFormPage() {
           }}
           onClick={() => setShowDeleteAlert(false)}
         >
-          <div className="cb-modal-panel" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
             <h3 style={{ margin: '0 0 12px', fontSize: '18px', fontWeight: 700 }}>Delete Recipe</h3>
             <p style={{ color: '#666', margin: '0 0 20px' }}>
               Are you sure you want to delete this recipe? This cannot be undone.
             </p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
               <button
-                className="cb-primary-btn"
+                className="primary-btn"
                 onClick={() => setShowDeleteAlert(false)}
                 style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
               >
                 Cancel
               </button>
-              <button className="cb-primary-btn" onClick={handleDelete} style={{ background: '#d33' }}>
+              <button className="primary-btn" onClick={handleDelete} style={{ background: '#d33' }}>
                 Delete
               </button>
             </div>

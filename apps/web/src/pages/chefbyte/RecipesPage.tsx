@@ -227,9 +227,9 @@ export function RecipesPage() {
       {/* ============================================================ */}
       {/*  HEADER                                                       */}
       {/* ============================================================ */}
-      <div className="cb-recipes-header">
+      <div className="recipesHeader">
         <h1 style={{ margin: 0 }}>Recipes</h1>
-        <div className="cb-header-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div className="headerActions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <Link
             to="/chef/recipes/finder"
             style={{
@@ -330,7 +330,7 @@ export function RecipesPage() {
       {/* ============================================================ */}
       {/*  RECIPE CARDS                                                 */}
       {/* ============================================================ */}
-      <div data-testid="recipe-list" className="cb-recipes-list">
+      <div data-testid="recipe-list" className="recipesList">
         {filteredRecipes.length === 0 && <p data-testid="no-recipes">No recipes found.</p>}
 
         {filteredRecipes.map((recipe) => {
@@ -341,7 +341,7 @@ export function RecipesPage() {
             <Link
               key={recipe.recipe_id}
               to={`/chef/recipes/${recipe.recipe_id}`}
-              className="cb-recipe-item"
+              className="recipeListItem"
               data-testid={`recipe-card-${recipe.recipe_id}`}
               style={{
                 background: '#fff',
@@ -382,7 +382,7 @@ export function RecipesPage() {
               {/* Per-serving macros */}
               <div
                 data-testid={`recipe-macros-${recipe.recipe_id}`}
-                className="cb-recipe-macros"
+                className="recipeMacros"
                 style={{ marginBottom: '10px' }}
               >
                 <div className="macroItem">

@@ -462,7 +462,7 @@ export function HomePage() {
           }}
         >
           <p style={{ margin: '0 0 8px 0', color: '#d33' }}>Failed to load data: {loadError}</p>
-          <button onClick={loadData} className="cb-primary-btn" style={{ background: '#d33' }}>
+          <button onClick={loadData} className="primary-btn" style={{ background: '#d33' }}>
             Retry
           </button>
         </div>
@@ -812,7 +812,7 @@ export function HomePage() {
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
           <button
             onClick={() => setShowTargetModal(false)}
-            className="cb-primary-btn"
+            className="primary-btn"
             style={{
               background: 'transparent',
               color: '#1e66f5',
@@ -828,7 +828,7 @@ export function HomePage() {
           </button>
           <button
             onClick={saveTargets}
-            className="cb-primary-btn"
+            className="primary-btn"
             style={{
               background: '#1e66f5',
               color: '#fff',
@@ -873,7 +873,7 @@ export function HomePage() {
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
           <button
             onClick={() => setShowTasteModal(false)}
-            className="cb-primary-btn"
+            className="primary-btn"
             style={{
               background: 'transparent',
               color: '#1e66f5',
@@ -889,7 +889,7 @@ export function HomePage() {
           </button>
           <button
             onClick={saveTasteProfile}
-            className="cb-primary-btn"
+            className="primary-btn"
             style={{
               background: '#1e66f5',
               color: '#fff',

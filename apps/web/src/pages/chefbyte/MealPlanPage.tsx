@@ -469,7 +469,7 @@ export function MealPlanPage() {
       {/* ============================================================ */}
       {/*  7-DAY GRID                                                   */}
       {/* ============================================================ */}
-      <div data-testid="week-grid" className="cb-week-grid" style={{ marginBottom: '16px' }}>
+      <div data-testid="week-grid" className="week-grid" style={{ marginBottom: '16px' }}>
         {dayDates.map((date, i) => {
           const dayMeals = mealsByDay.get(date) ?? [];
           const isSelected = selectedDay === date;

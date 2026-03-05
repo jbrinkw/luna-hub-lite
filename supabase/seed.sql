@@ -347,7 +347,7 @@ INSERT INTO chefbyte.shopping_list (cart_item_id, user_id, product_id, qty_conta
 ON CONFLICT (user_id, product_id) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
--- 13. CoachByte splits (Push/Pull/Legs for weekdays 1,2,3,5,6)
+-- 13. CoachByte splits (Push/Pull/Legs for weekdays 1,2,3,4,5,6)
 -- ─────────────────────────────────────────────────────────────────────────────
 -- Looks up global exercise IDs by name since they are auto-generated UUIDs.
 -- Weekday: 0=Sun, 1=Mon, 2=Tue, 3=Wed, 4=Thu, 5=Fri, 6=Sat
@@ -522,6 +522,31 @@ BEGIN
        jsonb_build_object('exercise_id', v_face_pull, 'target_reps', 15, 'target_load', 35,  'rest_seconds', 60,  'order', 19)
      ),
      'Pull B — Row focus')
+  ON CONFLICT (user_id, weekday) DO NOTHING;
+
+  -- Thursday (4) = Legs B
+  INSERT INTO coachbyte.splits (split_id, user_id, weekday, template_sets, split_notes) VALUES
+    ('aaaaaaaa-9004-0000-0000-000000000000', v_user_id, 4,
+     jsonb_build_array(
+       jsonb_build_object('exercise_id', v_leg_press, 'target_reps', 10, 'target_load', 380, 'rest_seconds', 120, 'order', 1),
+       jsonb_build_object('exercise_id', v_leg_press, 'target_reps', 10, 'target_load', 380, 'rest_seconds', 120, 'order', 2),
+       jsonb_build_object('exercise_id', v_leg_press, 'target_reps', 10, 'target_load', 380, 'rest_seconds', 120, 'order', 3),
+       jsonb_build_object('exercise_id', v_leg_press, 'target_reps', 10, 'target_load', 380, 'rest_seconds', 120, 'order', 4),
+       jsonb_build_object('exercise_id', v_rdl,       'target_reps', 8,  'target_load', 205, 'rest_seconds', 90,  'order', 5),
+       jsonb_build_object('exercise_id', v_rdl,       'target_reps', 8,  'target_load', 205, 'rest_seconds', 90,  'order', 6),
+       jsonb_build_object('exercise_id', v_rdl,       'target_reps', 8,  'target_load', 205, 'rest_seconds', 90,  'order', 7),
+       jsonb_build_object('exercise_id', v_leg_ext,   'target_reps', 12, 'target_load', 100, 'rest_seconds', 60,  'order', 8),
+       jsonb_build_object('exercise_id', v_leg_ext,   'target_reps', 12, 'target_load', 100, 'rest_seconds', 60,  'order', 9),
+       jsonb_build_object('exercise_id', v_leg_ext,   'target_reps', 12, 'target_load', 100, 'rest_seconds', 60,  'order', 10),
+       jsonb_build_object('exercise_id', v_leg_curl,  'target_reps', 12, 'target_load', 100, 'rest_seconds', 60,  'order', 11),
+       jsonb_build_object('exercise_id', v_leg_curl,  'target_reps', 12, 'target_load', 100, 'rest_seconds', 60,  'order', 12),
+       jsonb_build_object('exercise_id', v_leg_curl,  'target_reps', 12, 'target_load', 100, 'rest_seconds', 60,  'order', 13),
+       jsonb_build_object('exercise_id', v_squat,     'target_reps', 8,  'target_load', 245, 'rest_seconds', 120, 'order', 14),
+       jsonb_build_object('exercise_id', v_squat,     'target_reps', 8,  'target_load', 245, 'rest_seconds', 120, 'order', 15),
+       jsonb_build_object('exercise_id', v_squat,     'target_reps', 8,  'target_load', 245, 'rest_seconds', 120, 'order', 16),
+       jsonb_build_object('exercise_id', v_calf,      'target_reps', 15, 'target_load', 145, 'rest_seconds', 60,  'order', 17)
+     ),
+     'Legs B — Leg Press focus')
   ON CONFLICT (user_id, weekday) DO NOTHING;
 
   -- ───────────────────────────────────────────────────────────────────────────
