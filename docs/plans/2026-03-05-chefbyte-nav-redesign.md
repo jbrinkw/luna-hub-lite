@@ -107,7 +107,7 @@ Header with week navigation (prev/today/next) and date range.
 Sections:
 
 1. **Week grid** — 7 day cards. Today highlighted. Each card shows meal entries (name, done checkmark, [PREP] badge). Click day to select.
-2. **Day detail** — table below grid: Entry, Meal Type, Mode (Regular/Prep), Macros, Status/Action. TOTAL row. Actions: [Done] for regular, [Execute] for prep, [x] to delete. Meal type clickable to change via dropdown. Mode togglable.
+2. **Day detail** — table below grid: Entry, Meal Type, Mode (Regular/Prep), Macros, Status/Action. TOTAL row. Actions: [Done] for regular, [Execute] for prep, [Undo] for completed, [x] to delete. Meal type clickable to change via dropdown. Mode togglable.
 3. **Footer actions** — [+ Add Meal] [Meal Plan -> Cart]
 
 Modals:

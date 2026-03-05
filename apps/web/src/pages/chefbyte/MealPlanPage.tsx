@@ -265,6 +265,16 @@ export function MealPlanPage() {
     await loadMeals();
   };
 
+  const unmarkDone = async (mealId: string) => {
+    setError(null);
+    const { error: rpcErr } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
+    if (rpcErr) {
+      setError(rpcErr.message);
+      return;
+    }
+    await loadMeals();
+  };
+
   const deleteMeal = async (mealId: string) => {
     setError(null);
     const { error: deleteErr } = await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
@@ -766,7 +776,7 @@ export function MealPlanPage() {
                               flexShrink: 0,
                             }}
                           >
-                            {!meal.completed_at && (
+                            {!meal.completed_at ? (
                               <>
                                 <button
                                   onClick={() => markDone(meal.meal_id)}
@@ -805,6 +815,24 @@ export function MealPlanPage() {
                                   </button>
                                 )}
                               </>
+                            ) : (
+                              <button
+                                onClick={() => unmarkDone(meal.meal_id)}
+                                data-testid={`undo-done-${meal.meal_id}`}
+                                style={{
+                                  padding: '5px 12px',
+                                  background: '#fff',
+                                  color: '#f59e0b',
+                                  border: '1px solid #f59e0b',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer',
+                                  fontWeight: 600,
+                                  fontSize: '12px',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                Undo
+                              </button>
                             )}
                             <button
                               onClick={() => deleteMeal(meal.meal_id)}

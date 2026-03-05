@@ -78,6 +78,7 @@ AI-powered nutrition system: meal planning, inventory management, macro tracking
 - Toggle between regular and meal prep per entry (including toggling on existing entries)
 - Entries linked to recipes auto-calculate ingredient requirements. `meal_plan.servings` acts as a batch multiplier: ingredient_needed = recipe_ingredient.quantity × servings. Recipe ingredient quantities represent the total amount for the full recipe (all `base_servings`).
 - **Product-based entries** (recipe_id IS NULL, product_id set): Mark Done on regular mode consumes `servings` containers of the product and logs macros. Meal prep mode creates a `[MEAL]` lot from the product directly with frozen nutrition.
+- **Undo (unmark done):** Completed meals can be undone via `private.unmark_meal_done`. This reverses the operation: deletes the food_logs tagged with the meal_id, restores consumed stock to the user's default location, and for meal prep entries deletes the `[MEAL]` product and its stock lot. The meal's `completed_at` is set back to NULL. Food_logs are tagged with `meal_id` during `mark_meal_done` for traceability.
 
 ### Macro Tracking
 
@@ -172,6 +173,7 @@ Desktop-first with responsive design. Matching the legacy ChefByte layout.
 | `CHEFBYTE_add_meal`                     | Add entry (with optional meal_prep flag)                                                                                        |
 | `CHEFBYTE_delete_meal_entry`            | Delete a meal plan entry by meal_id                                                                                             |
 | `CHEFBYTE_mark_done`                    | Execute meal plan entry (regular: consume + log macros; meal prep: consume + create `[MEAL]` lot, no immediate macro log)       |
+| `CHEFBYTE_unmark_done`                  | Undo a completed meal: reverses food_logs, restores stock, deletes `[MEAL]` product for prep entries, clears `completed_at`     |
 | `CHEFBYTE_get_recipes`                  | Recipe catalog (includes `instructions` field in response)                                                                      |
 | `CHEFBYTE_get_cookable`                 | Recipes makeable with current stock                                                                                             |
 | `CHEFBYTE_create_recipe`                | Create recipe with ingredients (referencing products by UUID), supports optional `instructions` field                           |

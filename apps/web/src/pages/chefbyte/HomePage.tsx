@@ -441,6 +441,11 @@ export function HomePage() {
     if (!error) await loadData();
   };
 
+  const unmarkMealDone = async (mealId: string) => {
+    const { error } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
+    if (!error) await loadData();
+  };
+
   const executePrepMeal = async (mealId: string) => {
     setConfirmPrepId(null);
     const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
@@ -875,16 +880,22 @@ export function HomePage() {
                         </span>
                       )}
                       {isDone ? (
-                        <span
-                          data-testid={`meal-status-${entry.meal_id}`}
+                        <button
+                          onClick={() => unmarkMealDone(entry.meal_id)}
+                          data-testid={`meal-undo-${entry.meal_id}`}
                           style={{
-                            fontSize: '0.8em',
+                            padding: '4px 10px',
+                            background: '#fff',
+                            color: '#f59e0b',
+                            border: '1px solid #f59e0b',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
                             fontWeight: 600,
-                            color: '#2f9e44',
+                            fontSize: '12px',
                           }}
                         >
-                          Done
-                        </span>
+                          Undo
+                        </button>
                       ) : (
                         <button
                           onClick={() => markMealDone(entry.meal_id)}
