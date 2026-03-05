@@ -487,10 +487,10 @@
 /* ------------------------------------------------------------------ */
 
 .coach-root .timer-display {
-  font-size: 20px;
   font-weight: bold;
   text-align: right;
   margin-left: 20px;
+  min-width: 100px;
 }
 
 .coach-root .timer-running {

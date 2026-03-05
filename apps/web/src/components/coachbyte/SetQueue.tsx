@@ -115,18 +115,15 @@ export function SetQueue({
                 </div>
                 <div className="next-set-rest">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
               </div>
-              {timerDisplay && (
-                <div
-                  className={`timer-display ${timerState === 'running' ? 'timer-running' : timerState === 'expired' ? 'timer-expired' : 'timer-idle'}`}
-                  data-testid="inline-timer"
-                >
-                  {timerState === 'running' && <div>Timer:</div>}
-                  {timerState === 'expired' && <div>Timer</div>}
-                  <div style={{ fontSize: 20, marginTop: 4 }}>
-                    {timerState === 'expired' ? 'expired!' : timerDisplay}
-                  </div>
+              <div
+                className={`timer-display ${timerState === 'running' ? 'timer-running' : timerState === 'expired' ? 'timer-expired' : 'timer-idle'}`}
+                data-testid="inline-timer"
+              >
+                <div style={{ fontSize: 13, marginBottom: 2 }}>{timerState === 'expired' ? 'Timer' : 'Rest Timer'}</div>
+                <div style={{ fontSize: 32, fontFamily: 'monospace', lineHeight: 1 }}>
+                  {timerState === 'expired' ? 'expired!' : timerDisplay || '0:00'}
                 </div>
-              )}
+              </div>
             </div>
 
             <form
