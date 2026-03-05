@@ -372,6 +372,16 @@ deno_version = 2
 [functions.liquidtrack]
 verify_jwt = false
 
+# analyze-product verifies JWT internally via supabase.auth.getUser().
+# Relay JWT check disabled to work around Supabase CLI 2.75 ES256 bug
+# (edge runtime passes HS256 secret as Uint8Array to ES256 verifier).
+[functions.analyze-product]
+verify_jwt = false
+
+# walmart-scrape verifies JWT internally via supabase.auth.getUser().
+[functions.walmart-scrape]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

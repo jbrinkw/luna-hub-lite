@@ -2,9 +2,11 @@
  * Analyze-Product Edge Function Integration Tests
  *
  * Tests the analyze-product edge function with real HTTP calls.
- * Tests auth, validation, existing-product detection, and quota enforcement.
- * Note: Supabase relay validates JWT before the function code runs,
- * so auth error responses use {msg: "..."} format.
+ * Tests auth, validation, existing-product detection, quota enforcement,
+ * and OpenFoodFacts data verification with known barcodes.
+ *
+ * verify_jwt = false in config.toml — the function handles its own auth
+ * via supabase.auth.getUser(). Error responses use {error: "..."} format.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { adminClient } from '../../setup.integration';
@@ -45,8 +47,7 @@ describe('Analyze-Product Edge Function', () => {
     });
     expect(res.status).toBe(401);
     const body = await res.json();
-    // Supabase relay uses {msg: "..."} for JWT errors
-    expect(body.msg || body.error).toBeTruthy();
+    expect(body.error).toMatch(/missing authorization/i);
   });
 
   it('rejects requests with invalid JWT', async () => {
@@ -60,7 +61,7 @@ describe('Analyze-Product Edge Function', () => {
     });
     expect(res.status).toBe(401);
     const body = await res.json();
-    expect(body.msg || body.error).toBeTruthy();
+    expect(body.error).toMatch(/invalid token/i);
   });
 
   // ─── Validation tests ──────────────────────────────────────
@@ -184,4 +185,101 @@ describe('Analyze-Product Edge Function', () => {
     expect(body.off.product_name).toBeTruthy();
     // suggestion may be null if ANTHROPIC_API_KEY isn't configured
   }, 30_000);
+
+  // ─── Real barcode data verification ──────────────────────
+
+  it('Coca-Cola Zero (049000042566) returns correct OFF data', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+      },
+      body: JSON.stringify({ barcode: '049000042566' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe('ai');
+    expect(body.off).toBeDefined();
+
+    // OFF data shape verification
+    expect(body.off.product_name).toBeTruthy();
+    expect(body.off.brands).toMatch(/coca.cola/i);
+
+    // Coca-Cola Zero has ~0 calories — the OFF data should reflect this
+    // (The AI suggestion may normalize differently, but raw OFF brands must match)
+  }, 30_000);
+
+  it('Nutella (3017620422003) returns correct OFF data with nutriments', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+      },
+      body: JSON.stringify({ barcode: '3017620422003' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe('ai');
+    expect(body.off).toBeDefined();
+
+    // Nutella is a very stable product in OFF
+    expect(body.off.product_name).toMatch(/nutella/i);
+    expect(body.off.brands).toMatch(/nutella/i);
+
+    // Verify the image_url is returned (Nutella always has images in OFF)
+    expect(body.off.image_url).toBeTruthy();
+  }, 30_000);
+
+  it('Coca-Cola Original EU (5449000000996) returns correct OFF data', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+      },
+      body: JSON.stringify({ barcode: '5449000000996' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe('ai');
+    expect(body.off).toBeDefined();
+
+    expect(body.off.product_name).toMatch(/coca.cola/i);
+    expect(body.off.brands).toMatch(/coca.cola/i);
+    // Categories should be present for well-known products
+    expect(body.off.categories).toBeTruthy();
+  }, 30_000);
+
+  // ─── Direct OpenFoodFacts API verification ───────────────
+  // Verifies raw OFF data for a known barcode. Uses a single well-known
+  // product to minimize rate limiting from the OFF API.
+
+  it('OFF API returns correct nutriment data for Nutella (3017620422003)', async () => {
+    // Small delay to avoid rate limiting from prior edge function OFF calls
+    await new Promise((r) => setTimeout(r, 1000));
+
+    const resp = await fetch('https://world.openfoodfacts.org/api/v0/product/3017620422003.json', {
+      headers: { 'User-Agent': 'LunaHub/1.0 (test)' },
+    });
+    expect(resp.ok).toBe(true);
+    const json = await resp.json();
+    expect(json.status).toBe(1);
+
+    const p = json.product;
+    expect(p.product_name).toMatch(/nutella/i);
+
+    // Nutella nutriments per 100g — stable values
+    const n = p.nutriments;
+    expect(n).toBeDefined();
+    expect(n['fat_100g']).toBeGreaterThan(25); // ~30.9g
+    expect(n['carbohydrates_100g']).toBeGreaterThan(50); // ~57.5g
+    expect(n['proteins_100g']).toBeGreaterThan(4); // ~6.3g
+    expect(n['sugars_100g']).toBeGreaterThan(50);
+    expect(p.serving_size).toBeTruthy();
+  }, 15_000);
 });

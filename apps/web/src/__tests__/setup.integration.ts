@@ -19,7 +19,7 @@ function getServiceRoleKey(): string {
     return process.env.SUPABASE_SERVICE_ROLE_KEY;
   }
   try {
-    const jwt = execSync('npx supabase gen bearer-jwt --role service_role --exp "2033-01-01T00:00:00Z"', {
+    const jwt = execSync('npx supabase gen bearer-jwt --role service_role --valid-for 87600h', {
       encoding: 'utf-8',
       timeout: 15000,
       cwd: process.env.SUPABASE_WORKDIR ?? undefined,
