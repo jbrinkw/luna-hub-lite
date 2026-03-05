@@ -331,4 +331,282 @@ describe('CoachByte TodayPage queries', () => {
     expect(verifyData.length).toBe(1);
     expect(Number(verifyData[0].actual_load)).toBe(100);
   });
+
+  // -------------------------------------------------------------------
+  // TodayPage: planned_sets update (edit reps/load)
+  // Source: TodayPage.tsx line 296-308 — updatePlannedSet
+  //   .from('planned_sets')
+  //   .update({ [field]: value })
+  //   .eq('planned_set_id', plannedSetId)
+  // -------------------------------------------------------------------
+  it('planned_sets update modifies target_reps and target_load', async () => {
+    // Get a planned set
+    const { data: sets } = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .select('planned_set_id, target_reps, target_load')
+      .eq('plan_id', planId)
+      .order('"order"')
+      .limit(1);
+    expect(sets!.length).toBeGreaterThan(0);
+    const setId = sets![0].planned_set_id;
+
+    // Update (EXACT pattern from TodayPage updatePlannedSet)
+    const updateResult = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .update({ target_reps: 8, target_load: 200 })
+      .eq('planned_set_id', setId);
+    expect(updateResult.error).toBeNull();
+
+    // Verify
+    const { data: after } = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .select('target_reps, target_load')
+      .eq('planned_set_id', setId)
+      .single();
+    expect(after!.target_reps).toBe(8);
+    expect(Number(after!.target_load)).toBe(200);
+
+    // Restore original values
+    await coachbyte(ctx.client)
+      .from('planned_sets')
+      .update({ target_reps: sets![0].target_reps, target_load: sets![0].target_load })
+      .eq('planned_set_id', setId);
+  });
+
+  // -------------------------------------------------------------------
+  // TodayPage: planned_sets insert (add set to plan)
+  // Source: TodayPage.tsx line 319-338 — addPlannedSet
+  //   .from('planned_sets')
+  //   .insert({ plan_id, user_id, exercise_id, target_reps, target_load, rest_seconds, order })
+  // -------------------------------------------------------------------
+  it('planned_sets insert adds a new set to the plan', async () => {
+    // Get exercise for new set
+    const { data: exercises } = await coachbyte(ctx.client)
+      .from('exercises')
+      .select('exercise_id')
+      .is('user_id', null)
+      .limit(1);
+    expect(exercises!.length).toBeGreaterThan(0);
+
+    // Get current max order
+    const { data: existing } = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .select('"order"')
+      .eq('plan_id', planId)
+      .order('"order"', { ascending: false })
+      .limit(1);
+    const nextOrder = (existing?.[0]?.order ?? 0) + 1;
+
+    // Insert (EXACT pattern from TodayPage addPlannedSet)
+    const insertResult = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .insert({
+        plan_id: planId,
+        user_id: ctx.userId,
+        exercise_id: exercises![0].exercise_id,
+        target_reps: 10,
+        target_load: 135,
+        rest_seconds: 90,
+        order: nextOrder,
+      })
+      .select('planned_set_id')
+      .single();
+    expect(insertResult.error).toBeNull();
+    expect(insertResult.data).not.toBeNull();
+
+    // Cleanup
+    await coachbyte(ctx.client).from('planned_sets').delete().eq('planned_set_id', insertResult.data!.planned_set_id);
+  });
+
+  // -------------------------------------------------------------------
+  // TodayPage: planned_sets delete
+  // Source: TodayPage.tsx line 310-317 — deletePlannedSet
+  //   .from('planned_sets').delete().eq('planned_set_id', plannedSetId)
+  // -------------------------------------------------------------------
+  it('planned_sets delete removes a set from the plan', async () => {
+    // Get exercise for temp set
+    const { data: exercises } = await coachbyte(ctx.client)
+      .from('exercises')
+      .select('exercise_id')
+      .is('user_id', null)
+      .limit(1);
+
+    // Insert a temporary set
+    const insertResult = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .insert({
+        plan_id: planId,
+        user_id: ctx.userId,
+        exercise_id: (exercises as any[])[0].exercise_id,
+        target_reps: 5,
+        target_load: 100,
+        rest_seconds: 60,
+        order: 99,
+      })
+      .select('planned_set_id')
+      .single();
+    expect(insertResult.error).toBeNull();
+    const tempSet = insertResult.data as any;
+    expect(tempSet).not.toBeNull();
+
+    // Delete (EXACT pattern from TodayPage deletePlannedSet)
+    const deleteResult = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .delete()
+      .eq('planned_set_id', tempSet.planned_set_id);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: after } = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .select('planned_set_id')
+      .eq('planned_set_id', tempSet.planned_set_id);
+    expect((after as any[])!.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
+  // TodayPage: completed_sets delete
+  // Source: TodayPage.tsx line 485-502 — deleteCompletedSet
+  //   .from('completed_sets').delete().eq('completed_set_id', completedSetId)
+  // -------------------------------------------------------------------
+  it('completed_sets delete removes a completed set', async () => {
+    // Get an exercise
+    const { data: exercises } = await coachbyte(ctx.client)
+      .from('exercises')
+      .select('exercise_id')
+      .is('user_id', null)
+      .limit(1);
+
+    // Insert a completed set directly (ad-hoc style)
+    const { data: inserted, error: insertErr } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .insert({
+        plan_id: planId,
+        user_id: ctx.userId,
+        exercise_id: (exercises as any[])[0].exercise_id,
+        actual_reps: 5,
+        actual_load: 225,
+      })
+      .select('completed_set_id')
+      .single();
+    expect(insertErr).toBeNull();
+    expect(inserted).not.toBeNull();
+    const completedSetId = (inserted as any).completed_set_id;
+
+    // Delete (EXACT pattern from TodayPage deleteCompletedSet)
+    const deleteResult = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .delete()
+      .eq('completed_set_id', completedSetId);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: after } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('completed_set_id')
+      .eq('completed_set_id', completedSetId);
+    expect((after as any[])!.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
+  // TodayPage: daily_plans delete (reset plan)
+  // Source: TodayPage.tsx line 504-522 — resetPlan
+  //   .from('daily_plans').delete().eq('plan_id', planId)
+  // -------------------------------------------------------------------
+  it('daily_plans delete resets entire plan (cascade)', async () => {
+    // Create a separate plan for a different date
+    const testDate = '2026-01-15'; // far-past date, won't conflict
+    const { data: newPlan } = await (coachbyte(ctx.client) as any).rpc('ensure_daily_plan', {
+      p_day: testDate,
+    });
+    expect(newPlan).not.toBeNull();
+
+    // Insert a planned set for this plan
+    const { data: exercises } = await coachbyte(ctx.client)
+      .from('exercises')
+      .select('exercise_id')
+      .is('user_id', null)
+      .limit(1);
+
+    await coachbyte(ctx.client).from('planned_sets').insert({
+      plan_id: newPlan.plan_id,
+      user_id: ctx.userId,
+      exercise_id: exercises![0].exercise_id,
+      target_reps: 5,
+      target_load: 100,
+      order: 1,
+    });
+
+    // Delete plan (EXACT pattern from TodayPage resetPlan)
+    const deleteResult = await coachbyte(ctx.client).from('daily_plans').delete().eq('plan_id', newPlan.plan_id);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify plan deleted
+    const { data: after } = await coachbyte(ctx.client)
+      .from('daily_plans')
+      .select('plan_id')
+      .eq('plan_id', newPlan.plan_id);
+    expect(after!.length).toBe(0);
+
+    // Verify planned sets cascade-deleted
+    const { data: setsAfter } = await coachbyte(ctx.client)
+      .from('planned_sets')
+      .select('planned_set_id')
+      .eq('plan_id', newPlan.plan_id);
+    expect(setsAfter!.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
+  // TodayPage: PR detection query (completed_sets for same exercise)
+  // Source: TodayPage.tsx line 257-261 — handleCompleteSet PR check
+  //   .from('completed_sets')
+  //   .select('actual_reps, actual_load')
+  //   .eq('exercise_id', completedExerciseId)
+  //   .eq('user_id', user.id)
+  // -------------------------------------------------------------------
+  it('PR detection: queries previous completed_sets for same exercise', async () => {
+    // Get an exercise
+    const { data: exercises } = await coachbyte(ctx.client)
+      .from('exercises')
+      .select('exercise_id')
+      .is('user_id', null)
+      .limit(1);
+    const exerciseId = (exercises as any[])[0].exercise_id;
+
+    // Insert a completed set directly for PR detection
+    const { data: inserted, error: insertErr } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .insert({
+        plan_id: planId,
+        user_id: ctx.userId,
+        exercise_id: exerciseId,
+        actual_reps: 5,
+        actual_load: 300,
+      })
+      .select('completed_set_id')
+      .single();
+    expect(insertErr).toBeNull();
+
+    // PR detection query (EXACT pattern from TodayPage handleCompleteSet)
+    const { data: allSetsForExercise } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('actual_reps, actual_load')
+      .eq('exercise_id', exerciseId)
+      .eq('user_id', ctx.userId);
+
+    expect(allSetsForExercise).not.toBeNull();
+    expect((allSetsForExercise as any[])!.length).toBeGreaterThan(0);
+
+    // Each should have reps and load for Epley calculation
+    for (const s of allSetsForExercise as any[]) {
+      expect(typeof s.actual_reps).toBe('number');
+      expect(typeof Number(s.actual_load)).toBe('number');
+    }
+
+    // Cleanup
+    await coachbyte(ctx.client)
+      .from('completed_sets')
+      .delete()
+      .eq('completed_set_id', (inserted as any).completed_set_id);
+  });
 });

@@ -203,4 +203,82 @@ describe('CoachByte PrsPage queries', () => {
     const maxE1rm = Math.max(...e1rms);
     expect(maxE1rm).toBe(303); // 3x275 produces highest e1RM
   });
+
+  // -------------------------------------------------------------------
+  // PrsPage: user_settings pr_tracked_exercise_ids save/load
+  // Source: PrsPage.tsx line 156-159 — saveTrackedExercises
+  //   .from('user_settings').update({ pr_tracked_exercise_ids: ids }).eq('user_id', user.id)
+  // Source: PrsPage.tsx line 135 — loadExercisesAndSettings
+  //   .from('user_settings').select('pr_tracked_exercise_ids').eq('user_id', user.id).maybeSingle()
+  // -------------------------------------------------------------------
+  it('user_settings pr_tracked_exercise_ids save and load round-trip', async () => {
+    // Get exercises
+    const { data: exercises } = await coachbyte(ctx.client)
+      .from('exercises')
+      .select('exercise_id')
+      .is('user_id', null)
+      .limit(3);
+    expect(exercises!.length).toBeGreaterThanOrEqual(2);
+
+    const trackedIds = [exercises![0].exercise_id, exercises![1].exercise_id];
+
+    // Save (EXACT pattern from PrsPage saveTrackedExercises)
+    const updateResult = await coachbyte(ctx.client)
+      .from('user_settings')
+      .update({ pr_tracked_exercise_ids: trackedIds })
+      .eq('user_id', ctx.userId);
+    expect(updateResult.error).toBeNull();
+
+    // Load back (EXACT pattern from PrsPage loadExercisesAndSettings)
+    const { data: loaded } = await coachbyte(ctx.client)
+      .from('user_settings')
+      .select('pr_tracked_exercise_ids')
+      .eq('user_id', ctx.userId)
+      .maybeSingle();
+    expect(loaded).not.toBeNull();
+    expect(loaded!.pr_tracked_exercise_ids).toEqual(trackedIds);
+
+    // Cleanup - reset to null (default)
+    await coachbyte(ctx.client)
+      .from('user_settings')
+      .update({ pr_tracked_exercise_ids: null })
+      .eq('user_id', ctx.userId);
+  });
+
+  // -------------------------------------------------------------------
+  // PrsPage: completed_sets with date range filter
+  // Source: PrsPage.tsx line 45-56 — computePRs with dateRange
+  //   .from('completed_sets')
+  //   .select('exercise_id, actual_reps, actual_load, exercises(name)')
+  //   .eq('user_id', user.id)
+  //   .gte('completed_at', cutoffDate.toISOString())
+  //   .order('completed_at', { ascending: false })
+  // -------------------------------------------------------------------
+  it('completed_sets query with date range gte filter', async () => {
+    const ninetyDaysAgo = new Date();
+    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
+    const dateStr = ninetyDaysAgo.toISOString();
+
+    // EXACT query from PrsPage (with date range)
+    const { data: sets } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('exercise_id, actual_reps, actual_load, exercises(name)')
+      .eq('user_id', ctx.userId)
+      .gte('completed_at', dateStr)
+      .order('completed_at', { ascending: false });
+
+    expect(sets).not.toBeNull();
+    expect(Array.isArray(sets)).toBe(true);
+    // We completed 3 planned + 1 ad-hoc = 4 sets in beforeAll, all within 90 days
+    expect(sets!.length).toBe(4);
+
+    // Verify each row has the expected shape
+    for (const s of sets!) {
+      expect(typeof s.exercise_id).toBe('string');
+      expect(typeof s.actual_reps).toBe('number');
+      expect(typeof Number(s.actual_load)).toBe('number');
+      expect(s.exercises).not.toBeNull();
+      expect(typeof (s as any).exercises.name).toBe('string');
+    }
+  });
 });

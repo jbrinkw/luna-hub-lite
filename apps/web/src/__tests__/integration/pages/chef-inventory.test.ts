@@ -4,6 +4,7 @@ import {
   chefbyte,
   seedAllChefByte,
   assertQuerySucceeds,
+  todayDate,
   type PageTestContext,
   type ChefByteSeeds,
 } from './helpers';
@@ -254,5 +255,79 @@ describe('ChefByte InventoryPage queries', () => {
     expect(lots).not.toBeNull();
     expect(lots!.length).toBe(1);
     expect(Number(lots![0].qty_containers)).toBe(1);
+  });
+
+  // -----------------------------------------------------------------------
+  // Exact update from InventoryPage.tsx addStock merge path
+  // When product/location/expiry match an existing lot, update qty
+  // -----------------------------------------------------------------------
+  it('addStock merges into existing lot when product/location/expiry match', async () => {
+    const chickenId = seeds.productMap['Chicken Breast'];
+
+    // Get existing lot
+    const { data: lots } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id, qty_containers, expires_on')
+      .eq('product_id', chickenId);
+    expect(lots!.length).toBe(1);
+    const existingLot = lots![0];
+    const originalQty = Number(existingLot.qty_containers);
+
+    // Merge: update qty_containers on existing lot (EXACT pattern from InventoryPage)
+    const mergeResult = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .update({ qty_containers: originalQty + 2 })
+      .eq('lot_id', existingLot.lot_id);
+    expect(mergeResult.error).toBeNull();
+
+    // Verify merged
+    const { data: after } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('lot_id', existingLot.lot_id)
+      .single();
+    expect(Number(after!.qty_containers)).toBeCloseTo(originalQty + 2, 1);
+
+    // Restore original qty
+    await chefbyte(ctx.client)
+      .from('stock_lots')
+      .update({ qty_containers: originalQty })
+      .eq('lot_id', existingLot.lot_id);
+  });
+
+  // -----------------------------------------------------------------------
+  // consume_product RPC from inventory page
+  // -----------------------------------------------------------------------
+  it('consume_product RPC depletes stock from inventory', async () => {
+    const chickenId = seeds.productMap['Chicken Breast'];
+    const today = todayDate();
+
+    // Get stock before
+    const { data: before } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('product_id', chickenId);
+    const totalBefore = before!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+
+    // Consume 1 container (EXACT RPC from InventoryPage)
+    const result = await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: chickenId,
+      p_qty: 1,
+      p_unit: 'container',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+    expect(result.error).toBeNull();
+
+    // Verify stock reduced
+    const { data: after } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('product_id', chickenId);
+    const totalAfter = after!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+    expect(totalAfter).toBeCloseTo(totalBefore - 1, 1);
+
+    // Cleanup food_logs
+    await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
   });
 });

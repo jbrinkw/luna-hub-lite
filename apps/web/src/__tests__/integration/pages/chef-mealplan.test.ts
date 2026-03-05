@@ -532,4 +532,45 @@ describe('ChefByte MealPlanPage queries', () => {
     const sorted = [...names].sort((a: string, b: string) => a.localeCompare(b));
     expect(names).toEqual(sorted);
   });
+
+  /* ---------------------------------------------------------------- */
+  /*  Toggle meal_prep flag on a meal plan entry                       */
+  /*  Exact update from MealPlanPage.tsx toggle handler                */
+  /* ---------------------------------------------------------------- */
+  it('toggles meal_prep flag on a meal plan entry', async () => {
+    const today = todayDate();
+
+    // Insert a non-prep meal
+    const { data: meal } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: recipeId,
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id, meal_prep')
+      .single();
+    expect(meal).not.toBeNull();
+    expect(meal!.meal_prep).toBe(false);
+
+    // Toggle meal_prep to true (EXACT pattern from MealPlanPage)
+    const updateResult = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .update({ meal_prep: true })
+      .eq('meal_id', meal!.meal_id);
+    expect(updateResult.error).toBeNull();
+
+    // Verify toggled
+    const { data: after } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .select('meal_prep')
+      .eq('meal_id', meal!.meal_id)
+      .single();
+    expect(after!.meal_prep).toBe(true);
+
+    // Cleanup
+    await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
+  });
 });

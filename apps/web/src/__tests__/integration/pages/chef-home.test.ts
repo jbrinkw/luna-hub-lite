@@ -370,7 +370,7 @@ describe('ChefByte HomePage queries', () => {
     const item = shopData[0] as any;
     expect(item.products.is_placeholder).toBe(false);
 
-    // Insert stock lot (EXACT pattern from HomePage)
+    // Insert stock lot (pattern from HomePage — unique expires_on to avoid merge_key conflict)
     const stockResult = await chefbyte(ctx.client)
       .from('stock_lots')
       .insert({
@@ -378,6 +378,7 @@ describe('ChefByte HomePage queries', () => {
         product_id: item.product_id,
         qty_containers: Number(item.qty_containers),
         location_id: locId,
+        expires_on: '2099-06-15',
       });
     expect(stockResult.error).toBeNull();
 
@@ -395,5 +396,31 @@ describe('ChefByte HomePage queries', () => {
       .eq('user_id', ctx.userId);
     const verifyData = assertQuerySucceeds(verifyResult, 'shopping list after import');
     expect(verifyData.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
+  // HomePage: stock_lots query for stock availability badges
+  // Source: HomePage.tsx line ~227-230
+  //   .from('stock_lots').select('product_id, qty_containers').eq('user_id', userId)
+  // -------------------------------------------------------------------
+  it('stock_lots query for all user products returns qty_containers for badge computation', async () => {
+    const result = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('product_id, qty_containers')
+      .eq('user_id', ctx.userId);
+
+    const data = assertQuerySucceeds(result, 'stock lots for badges') as any[];
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBeGreaterThanOrEqual(3); // At least Chicken, Rice, Eggs have stock
+
+    // Verify we can build a stock map from the data
+    const stockMap = new Map<string, number>();
+    for (const lot of data) {
+      const cur = stockMap.get(lot.product_id) ?? 0;
+      stockMap.set(lot.product_id, cur + Number(lot.qty_containers));
+    }
+    expect(stockMap.size).toBeGreaterThanOrEqual(3);
+    // Chicken has at least 3.0 containers from seed
+    expect(stockMap.get(seeds.productMap['Chicken Breast'])).toBeGreaterThanOrEqual(3.0);
   });
 });

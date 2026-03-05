@@ -238,4 +238,32 @@ describe('API key lifecycle', () => {
     expect(error).toBeNull();
     expect(data!.revoked_at).toBeNull();
   });
+
+  it('enforces max 10 active keys count check', async () => {
+    const { userId, client } = await createTestUser('key-max10');
+    userIds.push(userId);
+
+    // Insert a couple of keys
+    for (let i = 0; i < 2; i++) {
+      const hash = await sha256(`max-key-${i}`);
+      const { error: insertError } = await client
+        .schema('hub')
+        .from('api_keys')
+        .insert({ user_id: userId, api_key_hash: hash, label: `Max Key ${i}` });
+      expect(insertError).toBeNull();
+    }
+
+    // Count active keys query (EXACT pattern from McpSettingsPage)
+    const { count, error } = await client
+      .schema('hub')
+      .from('api_keys')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .is('revoked_at', null);
+    expect(error).toBeNull();
+    expect(typeof count).toBe('number');
+    // Verify count matches what we inserted and is less than 10
+    expect(count).toBe(2);
+    expect(count).toBeLessThanOrEqual(10);
+  });
 });

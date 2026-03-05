@@ -182,4 +182,37 @@ describe('CoachByte HistoryPage queries', () => {
     expect(first.exercises).not.toBeNull();
     expect(first.exercises.name).toBe('Squat');
   });
+
+  // -------------------------------------------------------------------
+  // HistoryPage: exercise filter query (completed_sets plan_ids by exercise)
+  // Source: HistoryPage.tsx line 183-194
+  //   .from('completed_sets')
+  //   .select('plan_id')
+  //   .eq('user_id', user.id)
+  //   .eq('exercise_id', exerciseFilter)
+  // -------------------------------------------------------------------
+  it('completed_sets filter by exercise_id returns plan_ids', async () => {
+    // Get an exercise that has completed sets
+    const { data: completedSets } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('exercise_id')
+      .eq('user_id', ctx.userId)
+      .limit(1);
+
+    expect(completedSets).not.toBeNull();
+    expect(completedSets!.length).toBeGreaterThan(0);
+
+    const exerciseId = completedSets![0].exercise_id;
+
+    // EXACT query from HistoryPage exercise filter
+    const { data: planIds } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('plan_id')
+      .eq('user_id', ctx.userId)
+      .eq('exercise_id', exerciseId);
+
+    expect(planIds).not.toBeNull();
+    expect(planIds!.length).toBeGreaterThan(0);
+    expect(typeof planIds![0].plan_id).toBe('string');
+  });
 });

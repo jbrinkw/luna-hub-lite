@@ -367,4 +367,85 @@ describe('ChefByte MacroPage queries', () => {
     }
     // No error means the query shape is valid even if no row found
   });
+
+  // -------------------------------------------------------------------
+  // MacroPage: food_logs delete by log_id
+  // Source: MacroPage.tsx delete handler
+  //   .from('food_logs').delete().eq('log_id', logId)
+  // -------------------------------------------------------------------
+  it('food_logs delete by log_id removes the entry', async () => {
+    const today = todayDate();
+
+    // First create a food log via mark_meal_done
+    const { data: meal } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: seeds.recipeId,
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(meal).not.toBeNull();
+
+    await (chefbyte(ctx.client) as any).rpc('mark_meal_done', { p_meal_id: meal!.meal_id });
+
+    // Get food_logs
+    const { data: logs } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('user_id', ctx.userId)
+      .eq('meal_id', meal!.meal_id);
+    expect(logs!.length).toBeGreaterThan(0);
+
+    // Delete by log_id (EXACT pattern from MacroPage)
+    const deleteResult = await chefbyte(ctx.client).from('food_logs').delete().eq('log_id', logs![0].log_id);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: after } = await chefbyte(ctx.client).from('food_logs').select('log_id').eq('log_id', logs![0].log_id);
+    expect(after!.length).toBe(0);
+
+    // Cleanup
+    await (chefbyte(ctx.client) as any).rpc('unmark_meal_done', { p_meal_id: meal!.meal_id });
+    await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
+  });
+
+  // -------------------------------------------------------------------
+  // MacroPage: temp_items delete by temp_id
+  // Source: MacroPage.tsx delete handler
+  //   .from('temp_items').delete().eq('temp_id', tempId)
+  // -------------------------------------------------------------------
+  it('temp_items delete by temp_id removes the entry', async () => {
+    const today = todayDate();
+
+    // Insert temp item
+    const { data: inserted } = await chefbyte(ctx.client)
+      .from('temp_items')
+      .insert({
+        user_id: ctx.userId,
+        name: 'Test Snack',
+        calories: 200,
+        protein: 10,
+        carbs: 25,
+        fat: 8,
+        logical_date: today,
+      })
+      .select('temp_id')
+      .single();
+    expect(inserted).not.toBeNull();
+
+    // Delete by temp_id (EXACT pattern from MacroPage)
+    const deleteResult = await chefbyte(ctx.client).from('temp_items').delete().eq('temp_id', inserted!.temp_id);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: after } = await chefbyte(ctx.client)
+      .from('temp_items')
+      .select('temp_id')
+      .eq('temp_id', inserted!.temp_id);
+    expect(after!.length).toBe(0);
+  });
 });

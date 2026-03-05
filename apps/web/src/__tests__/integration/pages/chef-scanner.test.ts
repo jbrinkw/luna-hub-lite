@@ -335,4 +335,121 @@ describe('ChefByte ScannerPage queries', () => {
     expect(data).toHaveProperty('success');
     expect(data.success).toBe(true);
   });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: undo purchase — delete stock lot
+  // Source: ScannerPage.tsx undoScan (purchase mode)
+  //   .from('stock_lots').delete().eq('lot_id', lotId)
+  // -------------------------------------------------------------------
+  it('undo purchase deletes the stock lot created during scan', async () => {
+    const chickenId = productMap['Chicken Breast'];
+
+    // Insert a stock lot with unique expires_on to avoid merge_key conflict
+    const { data: lot } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .insert({
+        user_id: ctx.userId,
+        product_id: chickenId,
+        qty_containers: 1,
+        location_id: locationId,
+        expires_on: '2099-12-31',
+      })
+      .select('lot_id')
+      .single();
+    expect(lot).not.toBeNull();
+
+    // Undo: delete the stock lot (EXACT pattern from ScannerPage undoScan)
+    const deleteResult = await chefbyte(ctx.client).from('stock_lots').delete().eq('lot_id', lot!.lot_id);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: after } = await chefbyte(ctx.client).from('stock_lots').select('lot_id').eq('lot_id', lot!.lot_id);
+    expect(after!.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: undo consume — re-add stock lot + delete food_log
+  // Source: ScannerPage.tsx undoScan (consume mode)
+  // -------------------------------------------------------------------
+  it('undo consume re-adds stock lot and deletes food_log', async () => {
+    const chickenId = productMap['Chicken Breast'];
+    const today = todayDate();
+
+    // Consume product (simulating consume scan)
+    await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: chickenId,
+      p_qty: 1,
+      p_unit: 'container',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+
+    // Find the food_log (EXACT pattern from ScannerPage for undo lookup)
+    const { data: logs } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('user_id', ctx.userId)
+      .eq('product_id', chickenId)
+      .eq('logical_date', today)
+      .is('meal_id', null)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    expect(logs).not.toBeNull();
+    expect(logs!.length).toBeGreaterThan(0);
+    const logId = logs![0].log_id;
+
+    // Undo: re-add stock lot with unique expires_on to avoid merge_key conflict
+    const reAddResult = await chefbyte(ctx.client).from('stock_lots').insert({
+      user_id: ctx.userId,
+      product_id: chickenId,
+      qty_containers: 1,
+      location_id: locationId,
+      expires_on: '2099-12-30',
+    });
+    expect(reAddResult.error).toBeNull();
+
+    // Undo: delete food_log (EXACT pattern from ScannerPage undoScan)
+    const deleteLogResult = await chefbyte(ctx.client).from('food_logs').delete().eq('log_id', logId);
+    expect(deleteLogResult.error).toBeNull();
+
+    // Verify food_log deleted
+    const { data: afterLog } = await chefbyte(ctx.client).from('food_logs').select('log_id').eq('log_id', logId);
+    expect(afterLog!.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: undo shopping add — delete shopping list item
+  // Source: ScannerPage.tsx undoScan (shopping mode)
+  //   .from('shopping_list').delete().eq('cart_item_id', cartItemId)
+  // -------------------------------------------------------------------
+  it('undo shopping add deletes the shopping list item', async () => {
+    const chickenId = productMap['Chicken Breast'];
+
+    // Add to shopping list (simulating shopping scan)
+    const { data: item } = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .insert({
+        user_id: ctx.userId,
+        product_id: chickenId,
+        qty_containers: 1,
+        purchased: false,
+      })
+      .select('cart_item_id')
+      .single();
+    expect(item).not.toBeNull();
+
+    // Undo: delete shopping item (EXACT pattern from ScannerPage undoScan)
+    const deleteResult = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .delete()
+      .eq('cart_item_id', item!.cart_item_id);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: after } = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .select('cart_item_id')
+      .eq('cart_item_id', item!.cart_item_id);
+    expect(after!.length).toBe(0);
+  });
 });

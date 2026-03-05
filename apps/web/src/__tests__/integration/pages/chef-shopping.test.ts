@@ -285,4 +285,118 @@ describe('ChefByte ShoppingPage queries', () => {
     expect(typeof data.product_id).toBe('string');
     expect(data.product_id.length).toBeGreaterThan(0);
   });
+
+  // -----------------------------------------------------------------------
+  // importToInventory batch: creates stock lots and deletes shopping items
+  // Exact flow from ShoppingPage.tsx importToInventory
+  // -----------------------------------------------------------------------
+  it('importToInventory creates stock lots and removes purchased items', async () => {
+    const riceId = seeds.productMap['Brown Rice'];
+
+    // Clean up any existing shopping items first
+    await chefbyte(ctx.client).from('shopping_list').delete().eq('user_id', ctx.userId);
+
+    // Add item to shopping list and mark purchased
+    const { data: item } = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .insert({
+        user_id: ctx.userId,
+        product_id: riceId,
+        qty_containers: 2,
+        purchased: true,
+      })
+      .select('cart_item_id')
+      .single();
+    expect(item).not.toBeNull();
+
+    // Get default location (EXACT query from ShoppingPage importToInventory)
+    const { data: locs } = await chefbyte(ctx.client)
+      .from('locations')
+      .select('location_id')
+      .eq('user_id', ctx.userId)
+      .order('created_at')
+      .limit(1);
+    expect(locs!.length).toBeGreaterThan(0);
+    const locId = locs![0].location_id;
+
+    // Get stock before import
+    const { data: stockBefore } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('product_id', riceId);
+    const totalBefore = stockBefore!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+
+    // Insert stock lot (EXACT pattern from ShoppingPage)
+    const stockResult = await chefbyte(ctx.client).from('stock_lots').insert({
+      user_id: ctx.userId,
+      product_id: riceId,
+      qty_containers: 2,
+      location_id: locId,
+    });
+    expect(stockResult.error).toBeNull();
+
+    // Delete from shopping list (EXACT pattern from ShoppingPage)
+    const deleteResult = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .delete()
+      .eq('cart_item_id', item!.cart_item_id);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify stock added
+    const { data: stockAfter } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('product_id', riceId);
+    const totalAfter = stockAfter!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+    expect(totalAfter).toBeCloseTo(totalBefore + 2, 1);
+
+    // Verify shopping list empty
+    const { data: shopAfter } = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .select('cart_item_id')
+      .eq('user_id', ctx.userId);
+    expect(shopAfter!.length).toBe(0);
+  });
+
+  // -----------------------------------------------------------------------
+  // Shopping list qty increment on existing item
+  // Exact pattern from ShoppingPage.tsx addItem when product already on list
+  // -----------------------------------------------------------------------
+  it('shopping list qty increment updates existing item', async () => {
+    const chickenId = seeds.productMap['Chicken Breast'];
+
+    // Clean up any existing shopping items first
+    await chefbyte(ctx.client).from('shopping_list').delete().eq('user_id', ctx.userId);
+
+    // Add initial item
+    const { data: initial } = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .insert({
+        user_id: ctx.userId,
+        product_id: chickenId,
+        qty_containers: 1,
+        purchased: false,
+      })
+      .select('cart_item_id, qty_containers')
+      .single();
+    expect(initial).not.toBeNull();
+
+    // Increment qty (EXACT pattern from ShoppingPage addItem when product already on list)
+    const updateResult = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .update({ qty_containers: Number(initial!.qty_containers) + 1 })
+      .eq('cart_item_id', initial!.cart_item_id);
+    expect(updateResult.error).toBeNull();
+
+    // Verify incremented
+    const { data: after } = await chefbyte(ctx.client)
+      .from('shopping_list')
+      .select('qty_containers')
+      .eq('cart_item_id', initial!.cart_item_id)
+      .single();
+    expect(Number(after!.qty_containers)).toBe(2);
+
+    // Cleanup
+    await chefbyte(ctx.client).from('shopping_list').delete().eq('cart_item_id', initial!.cart_item_id);
+  });
 });
