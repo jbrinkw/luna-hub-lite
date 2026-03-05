@@ -4,16 +4,31 @@
  * Tests the full SSE/JSON-RPC protocol against a locally running wrangler dev.
  * Requires: local Supabase running (supabase start) + wrangler dev (spawned by globalSetup).
  */
+import { execSync } from 'node:child_process';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { McpTestClient } from './helpers/mcp-client';
 import { generateTestApiKey } from './helpers/api-key';
 
 const SUPABASE_URL = 'http://127.0.0.1:54321';
-const SERVICE_ROLE_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
 const ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+
+function getServiceRoleKey(): string {
+  if (process.env.SUPABASE_SERVICE_ROLE_KEY) return process.env.SUPABASE_SERVICE_ROLE_KEY;
+  try {
+    const out = execSync('npx supabase gen bearer-jwt --role service_role --exp "2033-01-01T00:00:00Z"', {
+      encoding: 'utf-8',
+      timeout: 15000,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    }).trim();
+    const lines = out.split('\n');
+    return lines[lines.length - 1].trim();
+  } catch {
+    return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
+  }
+}
+const SERVICE_ROLE_KEY = getServiceRoleKey();
 
 const WORKER_BASE = 'http://localhost:8787';
 
