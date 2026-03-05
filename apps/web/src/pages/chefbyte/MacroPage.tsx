@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
@@ -534,7 +535,10 @@ export function MacroPage() {
 
   return (
     <ChefLayout title="Macros">
-      <h1 style={{ margin: 0 }}>Macros</h1>
+      <Link to="/chef" style={{ textDecoration: 'none', color: '#1e66f5', fontSize: '14px', fontWeight: 500 }}>
+        &larr; Dashboard
+      </Link>
+      <h1 style={{ margin: '8px 0 0' }}>Macros</h1>
       {loadError && (
         <div style={{ ...cardStyle, borderColor: '#d33', background: '#fff5f5' }} data-testid="load-error">
           <p style={{ color: '#d33', margin: '0 0 8px' }}>Failed to load data: {loadError}</p>

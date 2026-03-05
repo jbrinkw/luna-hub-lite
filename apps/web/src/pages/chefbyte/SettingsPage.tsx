@@ -83,8 +83,8 @@ const labelStyle: React.CSSProperties = {
 const cardStyle: React.CSSProperties = {
   border: '1px solid #ddd',
   borderRadius: '8px',
-  padding: '16px',
-  marginBottom: '16px',
+  padding: '12px',
+  marginBottom: '8px',
   background: '#fff',
 };
 
@@ -598,7 +598,7 @@ export function SettingsPage() {
                     onClick={addProduct}
                     disabled={!addForm.name.trim()}
                     data-testid="save-new-product"
-                    style={{ marginTop: '12px', background: '#2f9e44', width: '100%', padding: '12px' }}
+                    style={{ marginTop: '12px', background: '#1e66f5', width: '100%', padding: '12px' }}
                   >
                     Save Product
                   </button>
@@ -607,9 +607,16 @@ export function SettingsPage() {
             </div>
 
             {/* Product list */}
-            <div data-testid="product-list">
+            <div
+              data-testid="product-list"
+              style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(340px, 1fr))', gap: '8px' }}
+            >
               {filteredProducts.map((p) => (
-                <div key={p.product_id} data-testid={`product-${p.product_id}`} style={cardStyle}>
+                <div
+                  key={p.product_id}
+                  data-testid={`product-${p.product_id}`}
+                  style={{ ...cardStyle, marginBottom: 0 }}
+                >
                   {editingId === p.product_id ? (
                     /* Editing mode */
                     <div>
@@ -623,7 +630,7 @@ export function SettingsPage() {
                           className="primary-btn"
                           onClick={saveProduct}
                           data-testid="save-edit-product"
-                          style={{ background: '#2f9e44' }}
+                          style={{ background: '#1e66f5' }}
                         >
                           Save
                         </button>

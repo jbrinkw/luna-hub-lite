@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, escapeIlike } from '@/shared/supabase';
@@ -411,7 +411,13 @@ export function RecipeFormPage() {
   return (
     <ChefLayout title={isEdit ? 'Edit Recipe' : 'New Recipe'}>
       <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#1a1a2e' }}>
+        <Link
+          to="/chef/recipes"
+          style={{ textDecoration: 'none', color: '#1e66f5', fontSize: '14px', fontWeight: 500 }}
+        >
+          &larr; Recipes
+        </Link>
+        <h1 style={{ margin: '8px 0 0', fontSize: '28px', fontWeight: 700, color: '#1a1a2e' }}>
           {isEdit ? 'Edit Recipe' : 'New Recipe'}
         </h1>
       </div>
@@ -759,7 +765,7 @@ export function RecipeFormPage() {
           onClick={handleSave}
           disabled={!name.trim() || ingredients.length === 0}
           data-testid="save-recipe-btn"
-          style={{ flex: 1, background: '#2f9e44', padding: '12px 16px', fontSize: '15px' }}
+          style={{ flex: 'none', background: '#1e66f5', padding: '12px 24px', fontSize: '15px' }}
         >
           {isEdit ? 'Update Recipe' : 'Create Recipe'}
         </button>

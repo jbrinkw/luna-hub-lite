@@ -482,7 +482,7 @@ export function ShoppingPage() {
             data-testid="add-item-btn"
             style={{
               padding: '10px 20px',
-              background: '#2f9e44',
+              background: '#1e66f5',
               color: '#fff',
               border: 'none',
               borderRadius: '6px',
@@ -544,9 +544,9 @@ export function ShoppingPage() {
                     data-testid={`remove-${item.cart_item_id}`}
                     style={{
                       padding: '4px 12px',
-                      background: '#d33',
-                      color: '#fff',
-                      border: 'none',
+                      background: 'transparent',
+                      color: '#888',
+                      border: '1px solid #ddd',
                       borderRadius: '4px',
                       cursor: 'pointer',
                       fontSize: '12px',
@@ -633,9 +633,9 @@ export function ShoppingPage() {
                     data-testid={`remove-${item.cart_item_id}`}
                     style={{
                       padding: '4px 12px',
-                      background: '#999',
-                      color: '#fff',
-                      border: 'none',
+                      background: 'transparent',
+                      color: '#888',
+                      border: '1px solid #ddd',
                       borderRadius: '4px',
                       cursor: 'pointer',
                       fontSize: '12px',
