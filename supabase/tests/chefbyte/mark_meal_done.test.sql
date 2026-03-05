@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(34);
+SELECT plan(50);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -482,6 +482,179 @@ SELECT isnt(
 );
 
 -- ─────────────────────────────────────────────────────────────
+-- Test: food_logs tagged with meal_id after mark_meal_done
+-- (regular meal from Test 1 should have meal_id set)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND meal_id = '50000000-0000-0000-0000-000000000001'
+      AND logical_date = '2026-03-03'),
+  2,
+  'food_logs tagged with meal_id after mark_meal_done (2 entries for regular meal)'
+);
+
+-- ═════════════════════════════════════════════════════════════
+-- UNMARK_MEAL_DONE TESTS
+-- ═════════════════════════════════════════════════════════════
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Unmark regular meal (meal_id 50...001) — returns success
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT (chefbyte.unmark_meal_done('50000000-0000-0000-0000-000000000001'::uuid))->>'success'),
+  'true',
+  'unmark_meal_done on regular meal returns success=true'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: After undo, completed_at is NULL
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT completed_at FROM chefbyte.meal_plan_entries
+    WHERE meal_id = '50000000-0000-0000-0000-000000000001'),
+  NULL::timestamptz,
+  'completed_at is NULL after unmark_meal_done'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: After undo, food_logs for that meal_id are deleted
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND meal_id = '50000000-0000-0000-0000-000000000001'),
+  0,
+  'food_logs for undone meal are deleted'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: After undo, chicken stock restored to 1.5 (was 1.5 → consumed 0.5 → 1.0 after prep,
+-- but unmark only reverses the regular meal's 0.5, so goes from 0.5 to 1.0)
+-- Wait — after regular meal (0.5 consumed) stock was 1.5, then meal prep (1.0 consumed) → 0.5.
+-- Undo the regular meal restores 0.5 containers → 0.5 + 0.5 = 1.0
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT sum(qty_containers) FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND product_id = '30000000-0000-0000-0000-000000000001'),
+  1.000::numeric,
+  'chicken stock restored after unmark regular meal (0.5 + restored 0.5 = 1.0)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Rice stock similarly restored
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT sum(qty_containers) FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND product_id = '30000000-0000-0000-0000-000000000002'),
+  1.000::numeric,
+  'rice stock restored after unmark regular meal'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Calling unmark_meal_done on already-uncompleted meal returns success=false
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT (chefbyte.unmark_meal_done('50000000-0000-0000-0000-000000000001'::uuid))->>'success'),
+  'false',
+  'unmark_meal_done on already-uncompleted meal returns success=false'
+);
+
+SELECT is(
+  (SELECT (chefbyte.unmark_meal_done('50000000-0000-0000-0000-000000000001'::uuid))->>'error'),
+  'Meal is not completed',
+  'unmark_meal_done on uncompleted meal returns correct error message'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Unmark meal-prep entry (meal_id 50...002) — deletes [MEAL] product
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT (chefbyte.unmark_meal_done('50000000-0000-0000-0000-000000000002'::uuid))->>'success'),
+  'true',
+  'unmark_meal_done on meal-prep entry returns success=true'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: After undo meal-prep, completed_at is NULL
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT completed_at FROM chefbyte.meal_plan_entries
+    WHERE meal_id = '50000000-0000-0000-0000-000000000002'),
+  NULL::timestamptz,
+  'meal-prep completed_at is NULL after unmark_meal_done'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: After undo meal-prep, [MEAL] product is deleted
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
+  0,
+  '[MEAL] product deleted after unmark_meal_done on meal-prep'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: After undo meal-prep, [MEAL] stock lot is also deleted
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.stock_lots sl
+    JOIN chefbyte.products p ON sl.product_id = p.product_id
+    WHERE p.user_id = tests.get_supabase_uid('meal_tester')
+      AND p.name LIKE '[MEAL] Chicken Rice Bowl 03-03%'),
+  0,
+  '[MEAL] stock lot deleted after unmark_meal_done on meal-prep'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Unmark product-based meal (meal_id 50...003)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT (chefbyte.unmark_meal_done('50000000-0000-0000-0000-000000000003'::uuid))->>'success'),
+  'true',
+  'unmark_meal_done on product-based meal returns success=true'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: After undo product-based meal, completed_at is NULL
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT completed_at FROM chefbyte.meal_plan_entries
+    WHERE meal_id = '50000000-0000-0000-0000-000000000003'),
+  NULL::timestamptz,
+  'product-based meal completed_at is NULL after unmark'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: After undo product-based meal, food_logs for Oats deleted
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND meal_id = '50000000-0000-0000-0000-000000000003'),
+  0,
+  'food_logs for undone product-based meal are deleted'
+);
+
+-- ─────────────────────────────────────────────────────────────
 -- Test 25: Cross-user isolation — User B cannot mark User A's meal
 -- ─────────────────────────────────────────────────────────────
 
@@ -516,17 +689,37 @@ SELECT throws_ok(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 26: Verify User A's meal is still uncompleted after intruder attempt
+-- Test: Cross-user isolation for unmark — mark it first, then intruder tries undo
 -- ─────────────────────────────────────────────────────────────
 
 SELECT tests.clear_authentication();
 SELECT tests.authenticate_as('meal_tester');
 
-SELECT is(
+SELECT chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000004'::uuid);
+
+SELECT tests.clear_authentication();
+SELECT tests.authenticate_as('meal_intruder');
+
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.unmark_meal_done('50000000-0000-0000-0000-000000000004'::uuid)
+  $$,
+  'Meal not found or not owned by user',
+  'User B cannot unmark_meal_done on User A meal (cross-user isolation)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 26: Verify User A's meal is still completed after intruder undo attempt
+-- ─────────────────────────────────────────────────────────────
+
+SELECT tests.clear_authentication();
+SELECT tests.authenticate_as('meal_tester');
+
+SELECT isnt(
   (SELECT completed_at FROM chefbyte.meal_plan_entries
     WHERE meal_id = '50000000-0000-0000-0000-000000000004'),
   NULL::timestamptz,
-  'User A meal still uncompleted after User B attempt'
+  'User A meal still completed after User B unmark attempt'
 );
 
 -- ─────────────────────────────────────────────────────────────

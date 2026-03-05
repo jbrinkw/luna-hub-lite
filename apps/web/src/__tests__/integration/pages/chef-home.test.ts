@@ -225,6 +225,58 @@ describe('ChefByte HomePage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // HomePage: unmark_meal_done RPC (undo completed meal)
+  // Source: HomePage.tsx unmarkMealDone()
+  //   .rpc('unmark_meal_done', { p_meal_id: mealId })
+  // -------------------------------------------------------------------
+  it('unmark_meal_done RPC reverses a completed meal from dashboard', async () => {
+    const today = todayDate();
+
+    // Create a meal entry for today
+    const { data: meal, error: mealErr } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: seeds.recipeId,
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(mealErr).toBeNull();
+    expect(meal).not.toBeNull();
+
+    // Mark done first
+    const { data: markResult } = await (chefbyte(ctx.client) as any).rpc('mark_meal_done', {
+      p_meal_id: meal!.meal_id,
+    });
+    expect(markResult.success).toBe(true);
+
+    // Exact RPC call from HomePage.tsx unmarkMealDone()
+    const { data: undoResult, error: undoErr } = await (chefbyte(ctx.client) as any).rpc('unmark_meal_done', {
+      p_meal_id: meal!.meal_id,
+    });
+    expect(undoErr).toBeNull();
+    expect(undoResult).not.toBeNull();
+    expect(undoResult.success).toBe(true);
+    expect(typeof undoResult.deleted_logs).toBe('number');
+    expect(typeof undoResult.restored_stock).toBe('number');
+
+    // Verify meal is uncompleted
+    const { data: verify } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .select('completed_at')
+      .eq('meal_id', meal!.meal_id)
+      .single();
+    expect(verify!.completed_at).toBeNull();
+
+    // Cleanup
+    await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
+    await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
+  });
+
+  // -------------------------------------------------------------------
   // HomePage: user_config upsert for macro goals
   // Source: HomePage.tsx line 193-195
   //   .from('user_config').upsert({ user_id, key, value }, { onConflict: 'user_id,key' })

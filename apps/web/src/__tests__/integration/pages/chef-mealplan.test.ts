@@ -290,6 +290,99 @@ describe('ChefByte MealPlanPage queries', () => {
   });
 
   /* ---------------------------------------------------------------- */
+  /*  Unmark meal done — exact from MealPlanPage.tsx unmarkDone()      */
+  /*  line ~270                                                        */
+  /* ---------------------------------------------------------------- */
+  it('unmarks a done meal via RPC (reverses completion)', async () => {
+    const today = todayDate();
+
+    // Create and mark done
+    const { data: meal } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: recipeId,
+        product_id: null,
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(meal).not.toBeNull();
+
+    const { data: markResult } = await (chefbyte(ctx.client) as any).rpc('mark_meal_done', {
+      p_meal_id: meal!.meal_id,
+    });
+    expect(markResult.success).toBe(true);
+
+    // Verify completed
+    const { data: before } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .select('completed_at')
+      .eq('meal_id', meal!.meal_id)
+      .single();
+    expect(before!.completed_at).not.toBeNull();
+
+    // Exact RPC call from MealPlanPage.tsx unmarkDone()
+    const { data: undoResult, error: rpcErr } = await (chefbyte(ctx.client) as any).rpc('unmark_meal_done', {
+      p_meal_id: meal!.meal_id,
+    });
+    expect(rpcErr).toBeNull();
+    expect(undoResult).not.toBeNull();
+    expect(undoResult.success).toBe(true);
+
+    // Verify completed_at is cleared
+    const { data: after } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .select('completed_at')
+      .eq('meal_id', meal!.meal_id)
+      .single();
+    expect(after!.completed_at).toBeNull();
+
+    // Verify food_logs cleaned up
+    const { data: logs } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('user_id', ctx.userId)
+      .eq('meal_id', meal!.meal_id);
+    expect(logs).toHaveLength(0);
+
+    // Cleanup
+    await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
+    await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
+  });
+
+  it('unmark_meal_done on uncompleted meal returns success=false', async () => {
+    const today = todayDate();
+
+    const { data: meal } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: recipeId,
+        product_id: null,
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(meal).not.toBeNull();
+
+    // Try to unmark a meal that was never marked done
+    const { data: result, error: rpcErr } = await (chefbyte(ctx.client) as any).rpc('unmark_meal_done', {
+      p_meal_id: meal!.meal_id,
+    });
+    expect(rpcErr).toBeNull();
+    expect(result.success).toBe(false);
+    expect(result.error).toBe('Meal is not completed');
+
+    // Cleanup
+    await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
+  });
+
+  /* ---------------------------------------------------------------- */
   /*  Delete meal — exact from MealPlanPage.tsx deleteMeal()           */
   /*  line 188                                                         */
   /* ---------------------------------------------------------------- */
