@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { seedFullAndLogin, seedChefByteData } from '../helpers/seed';
+import { seedFullAndLogin, seedChefByteData, todayStr } from '../helpers/seed';
 
 test.describe('ChefByte Macros page', () => {
   test('macros page shows date nav and progress bars', async ({ page }) => {
@@ -152,7 +152,7 @@ test.describe('ChefByte Macros page', () => {
       const chef = (client as any).schema('chefbyte');
 
       // Seed a temp item directly in the database for today's date
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayStr();
       const { data: tempItem, error: tempErr } = await chef
         .from('temp_items')
         .insert({

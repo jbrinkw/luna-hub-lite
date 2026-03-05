@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { seedFullAndLogin, seedChefByteData } from '../helpers/seed';
+import { seedFullAndLogin, seedChefByteData, seedRecipe } from '../helpers/seed';
 
 test.describe('ChefByte Recipes', () => {
   test('recipes page loads with seeded recipe', async ({ page }) => {
@@ -104,6 +104,69 @@ test.describe('ChefByte Recipes', () => {
       await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
       const nameInput = page.getByTestId('recipe-name').locator('input');
       await expect(nameInput).toHaveValue('Chicken & Rice');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('stock badge shows CAN MAKE when all ingredients are in stock', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'rec-canmake');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+
+      await page.goto('/chef/recipes');
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+
+      // Chicken & Rice recipe: Chicken Breast (3 ctn in stock, needs 0.5) + Brown Rice (2 ctn in stock, needs 0.25)
+      // Both ingredients fully stocked -> CAN MAKE
+      const badge = page.getByTestId(`stock-status-${recipeId}`);
+      await expect(badge).toBeVisible();
+      await expect(badge).toHaveText('CAN MAKE');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('stock badge shows PARTIAL when some ingredients are missing', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'rec-partial');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      // Create a recipe using Chicken Breast (3 ctn in stock) + Bananas (0 ctn in stock)
+      const partialRecipeId = await seedRecipe(client, userId, 'Partial Bowl', [
+        { productId: productMap['Chicken Breast'], quantity: 1, unit: 'container' },
+        { productId: productMap['Bananas'], quantity: 2, unit: 'container' },
+      ]);
+
+      await page.goto('/chef/recipes');
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+
+      // Chicken in stock, Bananas out -> PARTIAL
+      const badge = page.getByTestId(`stock-status-${partialRecipeId}`);
+      await expect(badge).toBeVisible();
+      await expect(badge).toHaveText('PARTIAL');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('stock badge shows NO STOCK when no ingredients are in stock', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'rec-nostock');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      // Create a recipe using only Bananas (0 ctn in stock)
+      const noStockRecipeId = await seedRecipe(client, userId, 'Banana Only', [
+        { productId: productMap['Bananas'], quantity: 1, unit: 'container' },
+      ]);
+
+      await page.goto('/chef/recipes');
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+
+      // Bananas 0 stock -> NO STOCK
+      const badge = page.getByTestId(`stock-status-${noStockRecipeId}`);
+      await expect(badge).toBeVisible();
+      await expect(badge).toHaveText('NO STOCK');
     } finally {
       await cleanup();
     }

@@ -407,6 +407,45 @@ export async function seedShoppingItems(
 }
 
 // ---------------------------------------------------------------------------
+// seedRecipe — create a recipe with ingredients (for stock badge tests, etc.)
+// ---------------------------------------------------------------------------
+
+export async function seedRecipe(
+  client: SupabaseClient,
+  userId: string,
+  name: string,
+  ingredients: Array<{ productId: string; quantity: number; unit: string }>,
+  options?: { baseServings?: number },
+): Promise<string> {
+  const chef = (client as any).schema('chefbyte');
+
+  const { data: recipe, error: recipeErr } = await chef
+    .from('recipes')
+    .insert({
+      user_id: userId,
+      name,
+      base_servings: options?.baseServings ?? 1,
+    })
+    .select('recipe_id')
+    .single();
+  if (recipeErr) throw new Error(`Failed to insert recipe "${name}": ${recipeErr.message}`);
+
+  if (ingredients.length > 0) {
+    const rows = ingredients.map((ing) => ({
+      recipe_id: recipe.recipe_id,
+      product_id: ing.productId,
+      user_id: userId,
+      quantity: ing.quantity,
+      unit: ing.unit,
+    }));
+    const { error: ingredErr } = await chef.from('recipe_ingredients').insert(rows);
+    if (ingredErr) throw new Error(`Failed to insert ingredients for "${name}": ${ingredErr.message}`);
+  }
+
+  return recipe.recipe_id;
+}
+
+// ---------------------------------------------------------------------------
 // seedWalmartLinks — set walmart_link on products
 // ---------------------------------------------------------------------------
 
@@ -428,14 +467,15 @@ export async function seedWalmartLinks(
 // Helpers
 // ---------------------------------------------------------------------------
 
-/** Returns an ISO date string N days in the future */
+/** Returns an ISO date string N days in the future (local timezone) */
 function futureDate(days: number): string {
   const d = new Date();
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }
 
-/** Returns today's date as ISO date string */
+/** Returns today's date as ISO date string (local timezone, not UTC) */
 export function todayStr(): string {
-  return new Date().toISOString().split('T')[0];
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 }

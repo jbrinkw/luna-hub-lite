@@ -266,4 +266,42 @@ test.describe('Auth flow', () => {
     await forgotBtn.click();
     await expect(page.getByTestId('forgot-password-form')).not.toBeVisible();
   });
+
+  test('session expiry redirects to /login', async ({ page }) => {
+    // Login a user, then invalidate their session server-side, then verify
+    // navigating to a protected page redirects to /login.
+    const { email, password, userId } = await seedUser('session-expiry');
+    try {
+      // Login via browser
+      await page.goto('/login');
+      await page.getByLabel('Email').fill(email);
+      await page.getByLabel('Password').fill(password);
+      await page.getByRole('button', { name: /sign in/i }).click();
+      await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+      await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
+
+      // Invalidate the session server-side by signing the user out via admin API.
+      // This revokes all refresh tokens so the next getSession / token refresh fails.
+      await admin.auth.admin.signOut(userId);
+
+      // Clear the browser's stored session so Supabase client re-checks on navigation.
+      // This simulates what happens when the token refresh fails (session becomes null).
+      await page.evaluate(() => {
+        // Remove Supabase auth tokens from localStorage to force re-auth check
+        const keys = Object.keys(localStorage);
+        for (const key of keys) {
+          if (key.includes('supabase') || key.includes('auth')) {
+            localStorage.removeItem(key);
+          }
+        }
+      });
+
+      // Navigate to a protected page — should redirect to /login
+      await page.goto('/hub');
+      await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
+      await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+    } finally {
+      await cleanupUser(userId);
+    }
+  });
 });

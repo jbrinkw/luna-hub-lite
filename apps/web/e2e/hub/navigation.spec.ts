@@ -136,4 +136,55 @@ test.describe('Hub navigation', () => {
       await cleanup();
     }
   });
+
+  test('404 catch-all: /hub/nonexistent shows "Page not found"', async ({ page }) => {
+    const { cleanup } = await seedAndLogin(page, '404-hub');
+    try {
+      await page.goto('/hub/nonexistent');
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
+      await expect(page.getByText('The page you requested does not exist.')).toBeVisible();
+      await expect(page.getByRole('link', { name: /go to hub/i })).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('404 catch-all: /chef/nonexistent shows "Page not found"', async ({ page }) => {
+    // ChefByte must be activated to reach its router (ActivationGuard)
+    const { cleanup } = await seedFullAndLogin(page, '404-chef');
+    try {
+      await page.goto('/chef/nonexistent');
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
+      await expect(page.getByText('The page you requested does not exist.')).toBeVisible();
+      await expect(page.getByRole('link', { name: /go to chefbyte/i })).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('404 catch-all: /coach/nonexistent shows "Page not found"', async ({ page }) => {
+    // CoachByte must be activated to reach its router (ActivationGuard)
+    const { cleanup } = await seedFullAndLogin(page, '404-coach');
+    try {
+      await page.goto('/coach/nonexistent');
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
+      await expect(page.getByText('The page you requested does not exist.')).toBeVisible();
+      await expect(page.getByRole('link', { name: /go to coachbyte/i })).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('404 catch-all: /nonexistent-path shows "Page not found"', async ({ page }) => {
+    // A path not under /hub, /coach, or /chef still gets caught by the top-level catch-all
+    const { cleanup } = await seedAndLogin(page, '404-toplevel');
+    try {
+      await page.goto('/nonexistent-path');
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
+      await expect(page.getByText('The page you requested does not exist.')).toBeVisible();
+      await expect(page.getByRole('link', { name: /go to hub/i })).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
 });

@@ -25,6 +25,18 @@ export function ChefRoutes() {
       <Route path="macros" element={<MacroPage />} />
       <Route path="walmart" element={<WalmartPage />} />
       <Route path="settings" element={<SettingsPage />} />
+      <Route
+        path="*"
+        element={
+          <div style={{ padding: '2rem', textAlign: 'center' }}>
+            <h2>Page not found</h2>
+            <p>The page you requested does not exist.</p>
+            <a href="/chef" style={{ color: '#3880ff' }}>
+              Go to ChefByte
+            </a>
+          </div>
+        }
+      />
     </Routes>
   );
 }

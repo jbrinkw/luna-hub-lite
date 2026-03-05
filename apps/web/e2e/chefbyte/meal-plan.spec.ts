@@ -40,7 +40,7 @@ test.describe('ChefByte Meal Plan Page', () => {
       await expect(weekGrid).toBeVisible();
 
       // Today's date column exists
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayStr();
       const todayCol = page.getByTestId(`day-col-${today}`);
       await expect(todayCol).toBeVisible();
     } finally {
@@ -57,7 +57,7 @@ test.describe('ChefByte Meal Plan Page', () => {
       await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
 
       // Click today's day column
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayStr();
       await page.getByTestId(`day-col-${today}`).click();
 
       // Day detail panel visible
@@ -82,7 +82,7 @@ test.describe('ChefByte Meal Plan Page', () => {
       await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
 
       // Click today's column to open day detail first
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayStr();
       await page.getByTestId(`day-col-${today}`).click();
       await expect(page.getByTestId('day-detail')).toBeVisible({ timeout: 5000 });
 
@@ -118,7 +118,7 @@ test.describe('ChefByte Meal Plan Page', () => {
       await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
 
       // Click today's column to open day detail
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayStr();
       await page.getByTestId(`day-col-${today}`).click();
       await expect(page.getByTestId('day-detail')).toBeVisible({ timeout: 5000 });
 
@@ -257,6 +257,134 @@ test.describe('ChefByte Meal Plan Page', () => {
       const doneBadge = page.getByTestId(`done-badge-${mealId}`);
       await expect(doneBadge).toBeVisible({ timeout: 5000 });
       await expect(doneBadge).toContainText('done');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('meal_type labels display correctly for each meal entry', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-mp-types');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+      const today = todayStr();
+
+      // Seed entries with different meal types
+      const breakfastId = await seedMealEntry(client, userId, recipeId, today, { servings: 1, mealType: 'breakfast' });
+      const lunchId = await seedMealEntry(client, userId, recipeId, today, { servings: 1, mealType: 'lunch' });
+      const dinnerId = await seedMealEntry(client, userId, recipeId, today, { servings: 1, mealType: 'dinner' });
+      const snackId = await seedMealEntry(client, userId, recipeId, today, { servings: 1, mealType: 'snack' });
+
+      await page.goto('/chef/meal-plan');
+      await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
+
+      // Verify meal_type labels appear in the grid cells
+      await expect(page.getByTestId(`meal-type-label-${breakfastId}`)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId(`meal-type-label-${breakfastId}`)).toContainText('breakfast');
+
+      await expect(page.getByTestId(`meal-type-label-${lunchId}`)).toBeVisible();
+      await expect(page.getByTestId(`meal-type-label-${lunchId}`)).toContainText('lunch');
+
+      await expect(page.getByTestId(`meal-type-label-${dinnerId}`)).toBeVisible();
+      await expect(page.getByTestId(`meal-type-label-${dinnerId}`)).toContainText('dinner');
+
+      await expect(page.getByTestId(`meal-type-label-${snackId}`)).toBeVisible();
+      await expect(page.getByTestId(`meal-type-label-${snackId}`)).toContainText('snack');
+
+      // Also verify labels render in the day detail panel
+      await page.getByTestId(`day-col-${today}`).click();
+      await expect(page.getByTestId('day-detail')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('day-detail-table')).toBeVisible({ timeout: 5000 });
+
+      // The detail table Type column shows meal_type with capitalize style
+      const breakfastRow = page.getByTestId(`detail-row-${breakfastId}`);
+      await expect(breakfastRow).toContainText('breakfast');
+      const dinnerRow = page.getByTestId(`detail-row-${dinnerId}`);
+      await expect(dinnerRow).toContainText('dinner');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('each meal entry shows macro breakdown in grid and detail', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-mp-entrymacros');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+      const today = todayStr();
+
+      const mealId = await seedMealEntry(client, userId, recipeId, today, { servings: 2, mealType: 'lunch' });
+
+      await page.goto('/chef/meal-plan');
+      await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
+
+      // Verify macros appear on the grid cell for this meal
+      const gridMacros = page.getByTestId(`grid-macros-${mealId}`);
+      await expect(gridMacros).toBeVisible({ timeout: 5000 });
+      // Should contain calorie value and macro abbreviations
+      await expect(gridMacros).toContainText(/\d+cal/);
+      await expect(gridMacros).toContainText(/\d+P/);
+      await expect(gridMacros).toContainText(/\d+C/);
+      await expect(gridMacros).toContainText(/\d+F/);
+
+      // Open day detail and verify macros in the detail row
+      await page.getByTestId(`day-col-${today}`).click();
+      await expect(page.getByTestId('day-detail')).toBeVisible({ timeout: 5000 });
+
+      const detailRow = page.getByTestId(`detail-row-${mealId}`);
+      await expect(detailRow).toBeVisible({ timeout: 5000 });
+      // Detail row shows "X cal | Yg P | Zg C | Wg F"
+      await expect(detailRow).toContainText(/\d+ cal/);
+      await expect(detailRow).toContainText(/\d+g P/);
+      await expect(detailRow).toContainText(/\d+g C/);
+      await expect(detailRow).toContainText(/\d+g F/);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('meal prep: mark done creates [MEAL] product in inventory', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-mp-prepflow');
+    try {
+      const { recipeId } = await seedChefByteData(client, userId);
+      const today = todayStr();
+
+      // Seed a meal prep entry
+      const mealId = await seedMealEntry(client, userId, recipeId, today, {
+        servings: 2,
+        mealType: 'lunch',
+        isMealPrep: true,
+      });
+
+      await page.goto('/chef/meal-plan');
+      await expect(page.getByTestId('mealplan-loading')).toBeHidden({ timeout: 10000 });
+
+      // Click today's column to open day detail
+      await page.getByTestId(`day-col-${today}`).click();
+      await expect(page.getByTestId('day-detail')).toBeVisible({ timeout: 5000 });
+
+      // Verify the meal entry is there and shows PREP badge in grid
+      await expect(page.getByTestId(`prep-badge-${mealId}`)).toBeVisible({ timeout: 5000 });
+
+      // Click Mark Done on the meal prep entry
+      const markDoneBtn = page.getByTestId(`mark-done-${mealId}`);
+      await expect(markDoneBtn).toBeVisible({ timeout: 5000 });
+      await markDoneBtn.click();
+
+      // Wait for completion — Mark Done button should disappear and done badge should appear
+      await expect(markDoneBtn).not.toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId(`done-badge-${mealId}`)).toBeVisible({ timeout: 5000 });
+
+      // Navigate to inventory and verify [MEAL] product was created
+      await page.goto('/chef/inventory');
+      await expect(page.getByTestId('inventory-loading')).toBeHidden({ timeout: 10000 });
+
+      // Search for [MEAL] in inventory
+      const searchInput = page.getByTestId('inventory-search').locator('input');
+      await searchInput.fill('[MEAL]');
+
+      // The grouped view should show a product starting with "[MEAL] Chicken & Rice"
+      const groupedView = page.getByTestId('grouped-view');
+      await expect(groupedView).toBeVisible({ timeout: 5000 });
+      await expect(groupedView).toContainText('[MEAL] Chicken & Rice', { timeout: 5000 });
     } finally {
       await cleanup();
     }

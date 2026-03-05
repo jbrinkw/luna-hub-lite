@@ -144,7 +144,7 @@ test.describe('CoachByte Today Page', () => {
     }
   });
 
-  test('can submit ad-hoc set with exercise, reps, and load', async ({ page }) => {
+  test('can submit ad-hoc set with exercise, reps, and load — verified in DB', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'coach-today-adhoc-sub');
     try {
       await seedCoachByteData(client, userId);
@@ -186,6 +186,23 @@ test.describe('CoachByte Today Page', () => {
       const completedRow = page.getByTestId('completed-row-1');
       await expect(completedRow).toBeVisible({ timeout: 10000 });
       await expect(completedRow).toContainText('Squat');
+      await expect(completedRow).toContainText('8');
+      await expect(completedRow).toContainText('135');
+
+      // Verify the ad-hoc set was persisted to the DB with correct values
+      const coach = (client as any).schema('coachbyte');
+      const { data: dbSets, error: dbErr } = await coach
+        .from('completed_sets')
+        .select('actual_reps, actual_load, exercise_id, exercises(name)')
+        .eq('user_id', userId)
+        .is('planned_set_id', null); // ad-hoc sets have no planned_set_id
+
+      expect(dbErr).toBeNull();
+      expect(dbSets).toBeTruthy();
+      expect(dbSets.length).toBe(1);
+      expect(dbSets[0].actual_reps).toBe(8);
+      expect(Number(dbSets[0].actual_load)).toBe(135);
+      expect(dbSets[0].exercises.name).toBe('Squat');
     } finally {
       await cleanup();
     }
@@ -415,7 +432,8 @@ test.describe('CoachByte Today Page', () => {
       const coach = (client as any).schema('coachbyte');
 
       // Bootstrap the plan first so we have a plan_id
-      const todayDate = new Date().toISOString().split('T')[0];
+      const d = new Date();
+      const todayDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
       const { data: planResult } = await coach.rpc('ensure_daily_plan', { p_day: todayDate });
       const planId = planResult.plan_id;
 
@@ -424,6 +442,7 @@ test.describe('CoachByte Today Page', () => {
       const squat = exercises.find((e: any) => e.name === 'Squat');
 
       // Insert a previous completed set with lower weight to establish a baseline
+      // e1RM(135, 5) = 135 * (1 + 5/30) = 157.5 → rounds to 158
       await coach.from('completed_sets').insert({
         plan_id: planId,
         user_id: userId,
@@ -437,16 +456,21 @@ test.describe('CoachByte Today Page', () => {
       await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
 
       // The first set in queue should be Squat at 225 lbs (higher than the 135 baseline)
-      // Completing it should trigger a PR toast since e1RM(225, 5) > e1RM(135, 5)
+      // e1RM(225, 5) = 225 * (1 + 5/30) = 262.5 → rounds to 263
+      // Since 263 > 158, completing this set should trigger a "NEW PR!" toast
       await page.getByTestId('complete-set-btn').click();
 
-      // Wait for the PR toast to appear — use data-testid to target the specific toast
+      // Wait for the PR toast to appear — IonToast uses is-open attribute
       const toast = page.getByTestId('pr-toast');
       await expect(toast).toHaveAttribute('is-open', 'true', { timeout: 10000 });
 
-      // Verify the toast message attribute contains PR-related text
+      // Verify the toast message contains "NEW PR!" and the exercise name
       const toastMessage = await toast.getAttribute('message');
-      expect(toastMessage).toContain('PR');
+      expect(toastMessage).toBeTruthy();
+      expect(toastMessage).toContain('NEW PR!');
+      expect(toastMessage).toContain('Squat');
+      // Verify the new e1RM value is displayed (263 for 225 lbs @ 5 reps)
+      expect(toastMessage).toContain('263');
     } finally {
       await cleanup();
     }

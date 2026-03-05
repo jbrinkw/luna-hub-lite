@@ -6,6 +6,7 @@ import {
   seedCoachByteData,
   seedMealEntry,
   seedCompletedSet,
+  seedShoppingItems,
   todayStr,
 } from '../helpers/seed';
 import { generateTestApiKey, McpE2EClient } from '../helpers/mcp-client';
@@ -339,6 +340,353 @@ test.describe('MCP Tools — ChefByte', () => {
       await ctx?.cleanup();
     }
   });
+
+  test('CHEFBYTE_get_shopping_list returns shopping items', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-shoplist');
+      const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
+
+      // Seed 2 shopping items
+      await seedShoppingItems(ctx.client, ctx.userId, [
+        { productId: productMap['Chicken Breast'], qtyContainers: 2 },
+        { productId: productMap['Brown Rice'], qtyContainers: 1 },
+      ]);
+
+      const result = await ctx.mcp.callTool('CHEFBYTE_get_shopping_list', {});
+      const data = parseResult(result);
+
+      expect(data.total_items).toBe(2);
+      const names = data.items.map((i: any) => i.product_name);
+      expect(names).toContain('Chicken Breast');
+      expect(names).toContain('Brown Rice');
+
+      // Verify item structure
+      const chicken = data.items.find((i: any) => i.product_name === 'Chicken Breast');
+      expect(chicken.product_id).toBe(productMap['Chicken Breast']);
+      expect(chicken.qty_containers).toBe(2);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_clear_shopping removes all items', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-clearshop');
+      const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
+
+      // Seed shopping items
+      await seedShoppingItems(ctx.client, ctx.userId, [
+        { productId: productMap['Eggs'], qtyContainers: 1 },
+        { productId: productMap['Bananas'], qtyContainers: 5 },
+      ]);
+
+      // Verify items exist before clearing
+      const chef = (ctx.client as any).schema('chefbyte');
+      const { data: before } = await chef.from('shopping_list').select('cart_item_id').eq('user_id', ctx.userId);
+      expect(before!.length).toBe(2);
+
+      // Clear via MCP
+      const result = await ctx.mcp.callTool('CHEFBYTE_clear_shopping', {});
+      const data = parseResult(result);
+      expect(data.message).toContain('cleared');
+
+      // Verify all items are gone
+      const { data: after } = await chef.from('shopping_list').select('cart_item_id').eq('user_id', ctx.userId);
+      expect(after!.length).toBe(0);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_set_price updates product price', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-setprice');
+      const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
+
+      const chickenId = productMap['Chicken Breast'];
+
+      const result = await ctx.mcp.callTool('CHEFBYTE_set_price', {
+        product_id: chickenId,
+        price: 8.49,
+      });
+      const data = parseResult(result);
+
+      expect(data.message).toContain('Chicken Breast');
+      expect(data.message).toContain('$8.49');
+      expect(data.product.product_id).toBe(chickenId);
+      expect(Number(data.product.price)).toBeCloseTo(8.49, 2);
+
+      // Verify in DB
+      const chef = (ctx.client as any).schema('chefbyte');
+      const { data: product } = await chef.from('products').select('price').eq('product_id', chickenId).single();
+      expect(Number(product.price)).toBeCloseTo(8.49, 2);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_toggle_purchased toggles purchased flag', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-toggle');
+      const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
+
+      // Seed an unpurchased item
+      const [itemId] = await seedShoppingItems(ctx.client, ctx.userId, [
+        { productId: productMap['Protein Powder'], qtyContainers: 1, purchased: false },
+      ]);
+
+      // Toggle to purchased
+      const result1 = await ctx.mcp.callTool('CHEFBYTE_toggle_purchased', {
+        item_id: itemId,
+      });
+      const data1 = parseResult(result1);
+      expect(data1.item.purchased).toBe(true);
+      expect(data1.message).toContain('purchased');
+
+      // Toggle back to not purchased
+      const result2 = await ctx.mcp.callTool('CHEFBYTE_toggle_purchased', {
+        item_id: itemId,
+      });
+      const data2 = parseResult(result2);
+      expect(data2.item.purchased).toBe(false);
+      expect(data2.message).toContain('not purchased');
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_delete_shopping_item removes single item', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-delshop');
+      const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
+
+      // Seed 2 items
+      const [itemId1, itemId2] = await seedShoppingItems(ctx.client, ctx.userId, [
+        { productId: productMap['Chicken Breast'], qtyContainers: 2 },
+        { productId: productMap['Eggs'], qtyContainers: 1 },
+      ]);
+
+      // Delete the first item
+      const result = await ctx.mcp.callTool('CHEFBYTE_delete_shopping_item', {
+        item_id: itemId1,
+      });
+      const data = parseResult(result);
+      expect(data.message).toContain('deleted');
+      expect(data.item_id).toBe(itemId1);
+
+      // Verify only the second item remains
+      const chef = (ctx.client as any).schema('chefbyte');
+      const { data: remaining } = await chef.from('shopping_list').select('cart_item_id').eq('user_id', ctx.userId);
+      expect(remaining!.length).toBe(1);
+      expect(remaining![0].cart_item_id).toBe(itemId2);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_import_shopping_to_inventory creates stock lots from purchased items', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-import');
+      const { productMap, locationId } = await seedChefByteData(ctx.client, ctx.userId);
+
+      const chef = (ctx.client as any).schema('chefbyte');
+
+      // Seed shopping items: 1 purchased, 1 not purchased
+      await seedShoppingItems(ctx.client, ctx.userId, [
+        { productId: productMap['Bananas'], qtyContainers: 3, purchased: true },
+        { productId: productMap['Protein Powder'], qtyContainers: 1, purchased: false },
+      ]);
+
+      // Get stock before import
+      const { data: lotsBefore } = await chef
+        .from('stock_lots')
+        .select('lot_id')
+        .eq('product_id', productMap['Bananas'])
+        .eq('user_id', ctx.userId);
+      const countBefore = lotsBefore!.length;
+
+      // Import via MCP (uses the Fridge location)
+      const result = await ctx.mcp.callTool('CHEFBYTE_import_shopping_to_inventory', {
+        location_id: locationId,
+      });
+      const data = parseResult(result);
+
+      expect(data.lots_created).toBe(1); // Only the purchased Bananas
+      expect(data.lots.length).toBe(1);
+      expect(data.lots[0].product_id).toBe(productMap['Bananas']);
+      expect(data.lots[0].qty_containers).toBe(3);
+
+      // Verify new stock lot was created
+      const { data: lotsAfter } = await chef
+        .from('stock_lots')
+        .select('lot_id')
+        .eq('product_id', productMap['Bananas'])
+        .eq('user_id', ctx.userId);
+      expect(lotsAfter!.length).toBe(countBefore + 1);
+
+      // Verify purchased items were removed from shopping list
+      const { data: shopAfter } = await chef
+        .from('shopping_list')
+        .select('cart_item_id, purchased')
+        .eq('user_id', ctx.userId);
+      expect(shopAfter!.length).toBe(1); // Only the unpurchased Protein Powder remains
+      expect(shopAfter![0].purchased).toBe(false);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_get_recipes returns recipes with ingredients', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-recipes');
+      await seedChefByteData(ctx.client, ctx.userId);
+
+      const result = await ctx.mcp.callTool('CHEFBYTE_get_recipes', {});
+      const data = parseResult(result);
+
+      expect(data.total).toBeGreaterThanOrEqual(1);
+      const recipe = data.recipes.find((r: any) => r.name === 'Chicken & Rice');
+      expect(recipe).toBeTruthy();
+      expect(recipe.recipe_id).toBeTruthy();
+      expect(recipe.base_servings).toBe(2);
+      expect(recipe.ingredients.length).toBe(2);
+
+      // Verify ingredient structure includes product names and macros
+      const chickenIngredient = recipe.ingredients.find((i: any) => i.product_name === 'Chicken Breast');
+      expect(chickenIngredient).toBeTruthy();
+      expect(chickenIngredient.quantity).toBe(0.5);
+      expect(chickenIngredient.unit).toBe('container');
+      expect(chickenIngredient.macros_per_container).toBeTruthy();
+      expect(chickenIngredient.macros_per_container.calories).toBeGreaterThan(0);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_get_cookable identifies recipes with sufficient stock', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-cookable');
+      await seedChefByteData(ctx.client, ctx.userId);
+
+      // The seeded "Chicken & Rice" recipe requires:
+      //   - 0.5 container Chicken Breast (stock: 3)
+      //   - 0.25 container Brown Rice (stock: 2)
+      // So it should be cookable.
+      const result = await ctx.mcp.callTool('CHEFBYTE_get_cookable', {});
+      const data = parseResult(result);
+
+      expect(data.total).toBeGreaterThanOrEqual(1);
+      const chickenRice = data.cookable.find((c: any) => c.name === 'Chicken & Rice');
+      expect(chickenRice).toBeTruthy();
+      expect(chickenRice.max_batches).toBeGreaterThanOrEqual(1);
+      expect(chickenRice.servings_per_batch).toBe(2);
+      expect(chickenRice.max_servings).toBeGreaterThanOrEqual(2);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_add_meal creates a meal plan entry', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-addmeal');
+      const { recipeId } = await seedChefByteData(ctx.client, ctx.userId);
+
+      const today = todayStr();
+      const result = await ctx.mcp.callTool('CHEFBYTE_add_meal', {
+        logical_date: today,
+        recipe_id: recipeId,
+        servings: 3,
+      });
+      const data = parseResult(result);
+
+      expect(data.message).toContain('added');
+      expect(data.meal.meal_id).toBeTruthy();
+      expect(data.meal.logical_date).toBe(today);
+      expect(data.meal.recipe_id).toBe(recipeId);
+      expect(Number(data.meal.servings)).toBe(3);
+      expect(data.meal.meal_prep).toBe(false);
+
+      // Verify in DB
+      const chef = (ctx.client as any).schema('chefbyte');
+      const { data: entry } = await chef
+        .from('meal_plan_entries')
+        .select('meal_id, recipe_id, servings, logical_date')
+        .eq('meal_id', data.meal.meal_id)
+        .single();
+      expect(entry.recipe_id).toBe(recipeId);
+      expect(Number(entry.servings)).toBe(3);
+      expect(entry.logical_date).toBe(today);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_mark_done completes meal and deducts stock', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-markdone');
+      const { recipeId, productMap } = await seedChefByteData(ctx.client, ctx.userId);
+
+      const chef = (ctx.client as any).schema('chefbyte');
+      const today = todayStr();
+
+      // Seed a meal plan entry (1 serving of Chicken & Rice, base_servings=2)
+      const mealId = await seedMealEntry(ctx.client, ctx.userId, recipeId, today, {
+        servings: 1,
+      });
+
+      // Get chicken stock before marking done
+      const { data: chickenBefore } = await chef
+        .from('stock_lots')
+        .select('qty_containers')
+        .eq('product_id', productMap['Chicken Breast'])
+        .eq('user_id', ctx.userId)
+        .gt('qty_containers', 0);
+      const chickenStockBefore = chickenBefore!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+
+      // Mark done via MCP
+      const result = await ctx.mcp.callTool('CHEFBYTE_mark_done', {
+        meal_id: mealId,
+      });
+      const data = parseResult(result);
+      expect(data.success).not.toBe(false); // Ensure no error from RPC
+
+      // Verify completed_at is set
+      const { data: meal } = await chef.from('meal_plan_entries').select('completed_at').eq('meal_id', mealId).single();
+      expect(meal.completed_at).toBeTruthy();
+
+      // Verify stock was deducted (chicken should have decreased)
+      const { data: chickenAfter } = await chef
+        .from('stock_lots')
+        .select('qty_containers')
+        .eq('product_id', productMap['Chicken Breast'])
+        .eq('user_id', ctx.userId)
+        .gte('qty_containers', 0);
+      const chickenStockAfter = chickenAfter!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+      expect(chickenStockAfter).toBeLessThan(chickenStockBefore);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -537,6 +885,93 @@ test.describe('MCP Tools — CoachByte', () => {
       const coach = (ctx.client as any).schema('coachbyte');
       const { data: plan } = await coach.from('daily_plans').select('summary').eq('plan_id', planId).single();
       expect(plan.summary).toBe(summaryText);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('COACHBYTE_log_set logs an ad-hoc completed set', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-coach-logset');
+      const { exerciseMap } = await seedCoachByteData(ctx.client, ctx.userId);
+
+      const squatId = exerciseMap['Squat'];
+
+      const result = await ctx.mcp.callTool('COACHBYTE_log_set', {
+        exercise_id: squatId,
+        reps: 8,
+        load: 275,
+      });
+      const data = parseResult(result);
+
+      expect(data.message).toContain('Ad-hoc set logged');
+      expect(data.message).toContain('8 reps');
+      expect(data.message).toContain('275');
+      expect(data.completed_set_id).toBeTruthy();
+      expect(data.completed_at).toBeTruthy();
+
+      // Verify in DB
+      const coach = (ctx.client as any).schema('coachbyte');
+      const { data: setRow } = await coach
+        .from('completed_sets')
+        .select('actual_reps, actual_load, exercise_id, planned_set_id')
+        .eq('completed_set_id', data.completed_set_id)
+        .single();
+      expect(setRow.actual_reps).toBe(8);
+      expect(Number(setRow.actual_load)).toBe(275);
+      expect(setRow.exercise_id).toBe(squatId);
+      expect(setRow.planned_set_id).toBeNull(); // Ad-hoc set has no planned_set_id
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('COACHBYTE_update_split updates template sets for a weekday', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-coach-updatesplit');
+      const { exerciseMap } = await seedCoachByteData(ctx.client, ctx.userId);
+
+      const benchId = exerciseMap['Bench Press'];
+
+      // Update split for a different weekday (use weekday 6 = Saturday to avoid
+      // conflict with the seed which uses today's weekday)
+      const targetWeekday = 6; // Saturday
+      const newTemplateSets = [
+        { exercise_id: benchId, target_reps: 10, target_load: 135, rest_seconds: 90 },
+        { exercise_id: benchId, target_reps: 8, target_load: 155, rest_seconds: 120 },
+      ];
+
+      const result = await ctx.mcp.callTool('COACHBYTE_update_split', {
+        weekday: targetWeekday,
+        template_sets: newTemplateSets,
+      });
+      const data = parseResult(result);
+
+      expect(data.message).toContain('Saturday');
+      expect(data.split_id).toBeTruthy();
+      expect(data.weekday).toBe(targetWeekday);
+      expect(data.day_name).toBe('Saturday');
+      expect(data.template_sets.length).toBe(2);
+      expect(data.template_sets[0].exercise_id).toBe(benchId);
+      expect(data.template_sets[0].target_reps).toBe(10);
+      expect(data.template_sets[1].target_load).toBe(155);
+
+      // Verify persistence in DB
+      const coach = (ctx.client as any).schema('coachbyte');
+      const { data: split } = await coach
+        .from('splits')
+        .select('weekday, template_sets')
+        .eq('user_id', ctx.userId)
+        .eq('weekday', targetWeekday)
+        .single();
+      expect(split.weekday).toBe(targetWeekday);
+      expect(split.template_sets.length).toBe(2);
+      expect(split.template_sets[0].target_reps).toBe(10);
+      expect(split.template_sets[1].target_reps).toBe(8);
     } finally {
       await ctx?.mcp.disconnect();
       await ctx?.cleanup();

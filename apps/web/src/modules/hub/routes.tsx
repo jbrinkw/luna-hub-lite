@@ -14,6 +14,18 @@ export function HubRoutes() {
       <Route path="tools" element={<ToolsPage />} />
       <Route path="extensions" element={<ExtensionsPage />} />
       <Route path="mcp" element={<McpSettingsPage />} />
+      <Route
+        path="*"
+        element={
+          <div style={{ padding: '2rem', textAlign: 'center' }}>
+            <h2>Page not found</h2>
+            <p>The page you requested does not exist.</p>
+            <a href="/hub" style={{ color: '#3880ff' }}>
+              Go to Hub
+            </a>
+          </div>
+        }
+      />
     </Routes>
   );
 }

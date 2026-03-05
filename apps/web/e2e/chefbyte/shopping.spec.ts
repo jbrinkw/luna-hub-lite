@@ -194,6 +194,48 @@ test.describe('ChefByte Shopping', () => {
     }
   });
 
+  test('product dropdown search shows matching products', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-dropdown');
+    try {
+      await seedChefByteData(client, userId);
+
+      await page.goto('/chef/shopping');
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+
+      // Type "Chick" in the add-item search field
+      const searchInput = page.getByTestId('add-item-name').locator('input');
+      await searchInput.fill('Chick');
+
+      // Wait for the product dropdown to appear (300ms debounce + query)
+      const dropdown = page.getByTestId('product-dropdown');
+      await expect(dropdown).toBeVisible({ timeout: 5000 });
+
+      // Dropdown should contain "Chicken Breast" as a matching product
+      await expect(dropdown).toContainText('Chicken Breast');
+
+      // Dropdown items should have data-testid prefix
+      const dropdownItems = dropdown.locator('[data-testid^="dropdown-item-"]');
+      const count = await dropdownItems.count();
+      expect(count).toBeGreaterThan(0);
+
+      // Click the Chicken Breast item — search field should be populated and dropdown should close
+      await dropdownItems.first().click();
+      await expect(dropdown).not.toBeVisible({ timeout: 3000 });
+      await expect(searchInput).toHaveValue('Chicken Breast');
+
+      // Clear and type something with no matches
+      await searchInput.fill('');
+      await searchInput.fill('ZZZNOMATCH');
+
+      // Dropdown should not appear for non-matching search
+      // Wait a bit for debounce to fire
+      await page.waitForTimeout(500);
+      await expect(dropdown).not.toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('uncheck purchased item moves back to to-buy section', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-uncheck');
     try {

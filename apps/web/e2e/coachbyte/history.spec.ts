@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { seedFullAndLogin, seedCoachByteData } from '../helpers/seed';
+import { seedFullAndLogin, seedCoachByteData, todayStr } from '../helpers/seed';
 
 test.describe('CoachByte History', () => {
   test('history page shows workout history', async ({ page }) => {
@@ -22,7 +22,7 @@ test.describe('CoachByte History', () => {
       await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
 
       // Verify a history row exists for today's date
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayStr();
       await expect(page.getByTestId(`history-row-${today}`)).toBeVisible();
     } finally {
       await cleanup();
@@ -45,7 +45,7 @@ test.describe('CoachByte History', () => {
       await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
 
       // Click expand button for today's date
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayStr();
       await page.getByTestId(`expand-${today}`).click();
 
       // Verify detail card is visible
@@ -104,57 +104,84 @@ test.describe('CoachByte History', () => {
     }
   });
 
-  test('exercise filter actually narrows displayed data', async ({ page }) => {
+  test('exercise filter hides days without matching exercise', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'coach-hist-filt-narrow');
     try {
-      await seedCoachByteData(client, userId);
+      const coach = (client as any).schema('coachbyte');
 
-      // Bootstrap plan and complete multiple sets (both Squat and Bench)
-      await page.goto('/coach');
-      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+      // Fetch global exercises
+      const { data: exercises } = await coach.from('exercises').select('exercise_id, name').is('user_id', null);
+      const squat = exercises.find((e: any) => e.name === 'Squat');
+      const bench = exercises.find((e: any) => e.name === 'Bench Press');
+      const deadlift = exercises.find((e: any) => e.name === 'Deadlift');
+      if (!squat || !bench || !deadlift) throw new Error('Global exercises not found');
 
-      // Complete set 1 (Squat)
-      await page.getByTestId('complete-set-btn').click();
-      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+      const today = new Date();
+      const todayDate = todayStr();
 
-      // Complete set 2 (Squat)
-      await page.getByTestId('complete-set-btn').click();
-      await expect(page.getByTestId('completed-row-2')).toBeVisible({ timeout: 10000 });
+      // Create yesterday's date
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayDate = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
 
-      // Complete set 3 (Bench Press)
-      await page.getByTestId('complete-set-btn').click();
-      await expect(page.getByTestId('completed-row-3')).toBeVisible({ timeout: 10000 });
+      // Seed a split for today so ensure_daily_plan works
+      const weekday = today.getDay();
+      await coach.from('splits').insert({
+        user_id: userId,
+        weekday,
+        template_sets: [
+          { exercise_id: squat.exercise_id, target_reps: 5, target_load: 225, order: 1 },
+          { exercise_id: bench.exercise_id, target_reps: 5, target_load: 185, order: 2 },
+        ],
+        split_notes: '',
+      });
+
+      // Day 1 (yesterday): only Deadlift completed
+      const { data: plan1 } = await coach.rpc('ensure_daily_plan', { p_day: yesterdayDate });
+      await coach.from('completed_sets').insert({
+        plan_id: plan1.plan_id,
+        user_id: userId,
+        exercise_id: deadlift.exercise_id,
+        actual_reps: 5,
+        actual_load: 315,
+        logical_date: yesterdayDate,
+      });
+
+      // Day 2 (today): only Bench Press completed
+      const { data: plan2 } = await coach.rpc('ensure_daily_plan', { p_day: todayDate });
+      await coach.from('completed_sets').insert({
+        plan_id: plan2.plan_id,
+        user_id: userId,
+        exercise_id: bench.exercise_id,
+        actual_reps: 5,
+        actual_load: 185,
+        logical_date: todayDate,
+      });
 
       // Navigate to history
       await page.goto('/coach/history');
       await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
 
-      const today = new Date().toISOString().split('T')[0];
+      // Without filter, both days should be visible
+      await expect(page.getByTestId(`history-row-${todayDate}`)).toBeVisible();
+      await expect(page.getByTestId(`history-row-${yesterdayDate}`)).toBeVisible();
 
-      // Without filter, today's row should be visible
-      await expect(page.getByTestId(`history-row-${today}`)).toBeVisible();
-
-      // Expand to confirm both exercises are present
-      await page.getByTestId(`expand-${today}`).click();
-      await expect(page.getByTestId('detail-card')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('detail-row-1')).toContainText('Squat');
-      await expect(page.getByTestId('detail-row-3')).toContainText('Bench Press');
-
-      // Now apply the exercise filter — select an exercise by interacting with the IonSelect
-      // The exercise-filter is an IonSelect with popover interface
+      // Apply the exercise filter: select "Bench Press"
       const exerciseFilter = page.getByTestId('exercise-filter');
       await exerciseFilter.click();
 
-      // Wait for the popover options to appear, then pick "Bench Press" (exact match)
       const benchOption = page.getByRole('radio', { name: 'Bench Press', exact: true });
       await expect(benchOption).toBeVisible({ timeout: 5000 });
       await benchOption.click();
 
       // Wait for filtering to take effect
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(1500);
 
-      // History should still show today's row (since it has Bench Press sets)
-      await expect(page.getByTestId(`history-row-${today}`)).toBeVisible();
+      // Today's row should still be visible (has Bench Press)
+      await expect(page.getByTestId(`history-row-${todayDate}`)).toBeVisible();
+
+      // Yesterday's row should be HIDDEN (only had Deadlift, no Bench Press)
+      await expect(page.getByTestId(`history-row-${yesterdayDate}`)).toBeHidden();
     } finally {
       await cleanup();
     }
@@ -175,7 +202,7 @@ test.describe('CoachByte History', () => {
       await page.goto('/coach/history');
       await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
 
-      const today = new Date().toISOString().split('T')[0];
+      const today = todayStr();
       const historyRow = page.getByTestId(`history-row-${today}`);
       await expect(historyRow).toBeVisible();
 
@@ -190,37 +217,62 @@ test.describe('CoachByte History', () => {
     }
   });
 
-  test('pagination loads more results when available', async ({ page }) => {
+  test('pagination Load More button works with 25+ days of history', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'coach-hist-paging');
     try {
-      await seedCoachByteData(client, userId);
+      const coach = (client as any).schema('coachbyte');
 
-      // Bootstrap plan and complete a set so there is at least 1 history entry
-      await page.goto('/coach');
-      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
-      await page.getByTestId('complete-set-btn').click();
-      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+      // Fetch a global exercise for seeding completed sets
+      const { data: exercises } = await coach.from('exercises').select('exercise_id, name').is('user_id', null);
+      const squat = exercises.find((e: any) => e.name === 'Squat');
+      if (!squat) throw new Error('Squat exercise not found');
+
+      // Seed 25 days of history (PAGE_SIZE=20, so we need >20 to trigger Load More)
+      const today = new Date();
+      for (let i = 0; i < 25; i++) {
+        const d = new Date(today);
+        d.setDate(d.getDate() - i);
+        const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+
+        // Ensure daily plan for this date
+        const { data: plan, error: planErr } = await coach.rpc('ensure_daily_plan', { p_day: dateStr });
+        if (planErr) throw new Error(`ensure_daily_plan failed for ${dateStr}: ${planErr.message}`);
+
+        // Insert a completed set for this day
+        await coach.from('completed_sets').insert({
+          plan_id: plan.plan_id,
+          user_id: userId,
+          exercise_id: squat.exercise_id,
+          actual_reps: 5,
+          actual_load: 225,
+          logical_date: dateStr,
+        });
+      }
 
       // Navigate to history
       await page.goto('/coach/history');
       await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
 
-      // Check if load-more button exists. With only 1 day of history it likely won't,
-      // so we verify the page loaded correctly and the button is hidden.
-      const loadMoreBtn = page.getByTestId('load-more-btn');
-      const loadMoreVisible = await loadMoreBtn.isVisible().catch(() => false);
+      // Count initial rows — should be PAGE_SIZE (20)
+      const rowsBefore = await page.locator('[data-testid^="history-row-"]').count();
+      expect(rowsBefore).toBe(20);
 
-      if (loadMoreVisible) {
-        // If somehow there are >20 days of history, verify the button works
-        const rowsBefore = await page.locator('[data-testid^="history-row-"]').count();
-        await loadMoreBtn.click();
-        await page.waitForTimeout(2000);
-        const rowsAfter = await page.locator('[data-testid^="history-row-"]').count();
-        expect(rowsAfter).toBeGreaterThanOrEqual(rowsBefore);
-      } else {
-        // With limited history, load-more should not be visible (fewer than PAGE_SIZE results)
-        await expect(loadMoreBtn).toBeHidden();
-      }
+      // Load More button should be visible since we have 25 > 20 days
+      const loadMoreBtn = page.getByTestId('load-more-btn');
+      await expect(loadMoreBtn).toBeVisible();
+
+      // Click Load More
+      await loadMoreBtn.click();
+
+      // Wait for additional rows to load
+      await page.waitForTimeout(2000);
+
+      // After loading more, we should have all 25 rows
+      const rowsAfter = await page.locator('[data-testid^="history-row-"]').count();
+      expect(rowsAfter).toBe(25);
+
+      // Load More button should now be hidden (no more pages)
+      await expect(loadMoreBtn).toBeHidden();
     } finally {
       await cleanup();
     }
