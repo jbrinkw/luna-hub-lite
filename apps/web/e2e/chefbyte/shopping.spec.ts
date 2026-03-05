@@ -269,4 +269,45 @@ test.describe('ChefByte Shopping', () => {
       await cleanup();
     }
   });
+
+  test('adding non-existent product name creates placeholder product', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-placeholder');
+    try {
+      await seedChefByteData(client, userId);
+
+      await page.goto('/chef/shopping');
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+
+      // Type a completely unique product name that won't match any seeded product
+      await page.getByTestId('add-item-name').locator('input').fill('E2E Nonexistent Widget');
+
+      // Wait for debounce (300ms) — dropdown should not appear for a non-matching name
+      await page.waitForTimeout(500);
+
+      // Set quantity to 1
+      await page.getByTestId('add-item-qty').locator('input').fill('1');
+
+      // Click the Add button to add the item
+      await page.getByTestId('add-item-btn').click();
+
+      // Wait for the item to appear in the to-buy list
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
+
+      // Verify the to-buy section shows the new product name
+      await expect(page.getByTestId('to-buy-section')).toContainText('E2E Nonexistent Widget');
+
+      // Verify in DB that a placeholder product was created
+      const chef = (client as any).schema('chefbyte');
+      const { data: placeholderProducts } = await chef
+        .from('products')
+        .select('product_id, name, is_placeholder')
+        .eq('user_id', userId)
+        .eq('name', 'E2E Nonexistent Widget');
+      expect(placeholderProducts).toBeTruthy();
+      expect(placeholderProducts.length).toBe(1);
+      expect(placeholderProducts[0].is_placeholder).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
 });

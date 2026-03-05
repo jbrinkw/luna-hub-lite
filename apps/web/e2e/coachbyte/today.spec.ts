@@ -475,4 +475,70 @@ test.describe('CoachByte Today Page', () => {
       await cleanup();
     }
   });
+
+  test('timer expired state displays message and reset button works', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'coach-today-expired');
+    try {
+      // Seed a custom split with rest_seconds so timer auto-starts after completing a set
+      const coach = (client as any).schema('coachbyte');
+
+      const { data: exercises } = await coach.from('exercises').select('exercise_id, name').is('user_id', null);
+      const squat = exercises.find((e: any) => e.name === 'Squat');
+      const bench = exercises.find((e: any) => e.name === 'Bench Press');
+      if (!squat || !bench) throw new Error('Global exercises not found');
+
+      const today = new Date();
+      const weekday = today.getDay();
+
+      const templateSets = [
+        { exercise_id: squat.exercise_id, target_reps: 5, target_load: 225, rest_seconds: 90, order: 1 },
+        { exercise_id: squat.exercise_id, target_reps: 5, target_load: 225, rest_seconds: 90, order: 2 },
+        { exercise_id: bench.exercise_id, target_reps: 5, target_load: 185, rest_seconds: 60, order: 3 },
+      ];
+
+      await coach.from('splits').insert({
+        user_id: userId,
+        weekday,
+        template_sets: templateSets,
+        split_notes: 'E2E timer expiry test split',
+      });
+
+      await page.goto('/coach');
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+
+      // Complete the first set — this auto-starts the rest timer
+      await page.getByTestId('complete-set-btn').click();
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+
+      // Confirm the timer started running
+      await expect(page.getByTestId('pause-btn')).toBeVisible({ timeout: 10000 });
+
+      // Force-expire the timer via DB update, then reload so the page
+      // fetches the expired state on mount (avoids Realtime timing issues)
+      await coach
+        .from('timers')
+        .update({
+          state: 'expired',
+          end_time: new Date(Date.now() - 1000).toISOString(),
+        })
+        .eq('user_id', userId);
+
+      await page.reload();
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+
+      // After reload, loadTimer fetches the expired state
+      await expect(page.getByTestId('timer-expired')).toBeVisible({ timeout: 10000 });
+
+      // Verify the expired message text
+      await expect(page.getByTestId('timer-expired')).toContainText('Timer expired');
+
+      // Click the reset button to return to idle state
+      await page.getByTestId('reset-btn').click();
+
+      // The expired message should disappear after reset
+      await expect(page.getByTestId('timer-expired')).not.toBeVisible({ timeout: 5000 });
+    } finally {
+      await cleanup();
+    }
+  });
 });

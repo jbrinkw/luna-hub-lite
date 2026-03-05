@@ -280,4 +280,54 @@ test.describe('ChefByte Home Page', () => {
       await cleanup();
     }
   });
+
+  test('meal plan to cart sync adds recipe ingredients to shopping list', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-home-sync');
+    try {
+      const { recipeId, productMap } = await seedChefByteData(client, userId);
+
+      // Seed a meal plan entry for today (non-prep, not completed)
+      const today = todayStr();
+      await seedMealEntry(client, userId, recipeId, today, {
+        servings: 2,
+        mealType: 'lunch',
+        isMealPrep: false,
+      });
+
+      await page.goto('/chef/home');
+      await expect(page.getByTestId('home-loading')).toBeHidden({ timeout: 10000 });
+
+      // Click the meal plan → cart sync button
+      await page.getByTestId('meal-plan-cart-btn').click();
+
+      // Wait for the sync to process
+      await page.waitForTimeout(2000);
+
+      // Verify in DB that shopping list items were created from recipe ingredients
+      const chef = (client as any).schema('chefbyte');
+      const { data: shopItems } = await chef
+        .from('shopping_list')
+        .select('product_id, qty_containers, purchased')
+        .eq('user_id', userId);
+
+      expect(shopItems).toBeTruthy();
+      expect(shopItems.length).toBeGreaterThanOrEqual(1);
+
+      // The recipe "Chicken & Rice" has 2 ingredients: Chicken Breast (0.5 container) and Brown Rice (0.25 container)
+      // With 2 servings and base_servings=2, ratio = 1
+      // Chicken: 0.5 * 1 = 0.5 → ceil = 1 container
+      // Rice: 0.25 * 1 = 0.25 → ceil = 1 container
+      const chickenItem = shopItems.find((i: any) => i.product_id === productMap['Chicken Breast']);
+      expect(chickenItem).toBeTruthy();
+      expect(chickenItem.qty_containers).toBe(1);
+      expect(chickenItem.purchased).toBe(false);
+
+      const riceItem = shopItems.find((i: any) => i.product_id === productMap['Brown Rice']);
+      expect(riceItem).toBeTruthy();
+      expect(riceItem.qty_containers).toBe(1);
+      expect(riceItem.purchased).toBe(false);
+    } finally {
+      await cleanup();
+    }
+  });
 });

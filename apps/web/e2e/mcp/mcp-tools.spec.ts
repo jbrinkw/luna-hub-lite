@@ -639,6 +639,64 @@ test.describe('MCP Tools — ChefByte', () => {
     }
   });
 
+  test('CHEFBYTE_get_inventory returns inventory grouped by product', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-inventory');
+      await seedChefByteData(ctx.client, ctx.userId);
+
+      const result = await ctx.mcp.callTool('CHEFBYTE_get_inventory', {});
+      const data = parseResult(result);
+
+      // seedChefByteData creates 5 products with stock lots
+      expect(data.total_products).toBeGreaterThanOrEqual(1);
+      expect(data.inventory.length).toBeGreaterThanOrEqual(1);
+
+      // Chicken Breast should appear with total_containers = 3 (seeded)
+      const chicken = data.inventory.find((i: any) => i.product_name === 'Chicken Breast');
+      expect(chicken).toBeTruthy();
+      expect(Number(chicken.total_containers)).toBe(3);
+      expect(chicken.nearest_expiry).toBeTruthy();
+
+      // Brown Rice should have total_containers = 2
+      const rice = data.inventory.find((i: any) => i.product_name === 'Brown Rice');
+      expect(rice).toBeTruthy();
+      expect(Number(rice.total_containers)).toBe(2);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('CHEFBYTE_get_product_lots returns lots for a specific product', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-chef-lots');
+      const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
+
+      const chickenId = productMap['Chicken Breast'];
+
+      const result = await ctx.mcp.callTool('CHEFBYTE_get_product_lots', {
+        product_id: chickenId,
+      });
+      const data = parseResult(result);
+
+      expect(data.product_id).toBe(chickenId);
+      expect(data.total_lots).toBeGreaterThanOrEqual(1);
+      expect(data.lots.length).toBeGreaterThanOrEqual(1);
+
+      // Verify lot structure
+      const lot = data.lots[0];
+      expect(lot.lot_id).toBeTruthy();
+      expect(Number(lot.qty_containers)).toBe(3); // seeded with 3 containers
+      expect(lot.expires_on).toBeTruthy();
+      expect(lot.location).toBeTruthy(); // Should be "Fridge"
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
   test('CHEFBYTE_mark_done completes meal and deducts stock', async () => {
     let ctx: TestContext | null = null;
     try {
@@ -972,6 +1030,114 @@ test.describe('MCP Tools — CoachByte', () => {
       expect(split.template_sets.length).toBe(2);
       expect(split.template_sets[0].target_reps).toBe(10);
       expect(split.template_sets[1].target_reps).toBe(8);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('COACHBYTE_update_plan replaces planned sets for a day', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-coach-updateplan');
+      const { exerciseMap } = await seedCoachByteData(ctx.client, ctx.userId);
+
+      const squatId = exerciseMap['Squat'];
+      const benchId = exerciseMap['Bench Press'];
+
+      // Bootstrap a plan first
+      const planResult = await ctx.mcp.callTool('COACHBYTE_get_today_plan', {});
+      const planData = parseResult(planResult);
+      const planId = planData.plan_id;
+      expect(planId).toBeTruthy();
+
+      // Original plan has 3 sets (2 squat + 1 bench from seed)
+      // Replace with 2 new sets
+      const newSets = [
+        { exercise_id: benchId, target_reps: 10, target_load: 135, rest_seconds: 60, order: 1 },
+        { exercise_id: squatId, target_reps: 8, target_load: 185, rest_seconds: 90, order: 2 },
+      ];
+
+      const result = await ctx.mcp.callTool('COACHBYTE_update_plan', {
+        plan_id: planId,
+        sets: newSets,
+      });
+      const data = parseResult(result);
+
+      expect(data.plan_id).toBe(planId);
+      expect(data.sets.length).toBe(2);
+      expect(data.sets[0].exercise_id).toBe(benchId);
+      expect(data.sets[0].target_reps).toBe(10);
+      expect(data.sets[0].order).toBe(1);
+      expect(data.sets[1].exercise_id).toBe(squatId);
+      expect(data.sets[1].target_load).toBe(185);
+      expect(data.sets[1].order).toBe(2);
+
+      // Verify in DB - old sets replaced
+      const coach = (ctx.client as any).schema('coachbyte');
+      const { data: dbSets } = await coach
+        .from('planned_sets')
+        .select('exercise_id, target_reps, target_load, rest_seconds, "order"')
+        .eq('plan_id', planId)
+        .order('order');
+      expect(dbSets!.length).toBe(2);
+      expect(dbSets![0].target_reps).toBe(10);
+      expect(dbSets![1].target_reps).toBe(8);
+    } finally {
+      await ctx?.mcp.disconnect();
+      await ctx?.cleanup();
+    }
+  });
+
+  test('COACHBYTE_complete_next_set completes the next queued set', async () => {
+    let ctx: TestContext | null = null;
+    try {
+      ctx = await setupMcpUser('mcp-coach-completenext');
+      await seedCoachByteData(ctx.client, ctx.userId);
+
+      // Bootstrap plan
+      const planResult = await ctx.mcp.callTool('COACHBYTE_get_today_plan', {});
+      const planData = parseResult(planResult);
+      const planId = planData.plan_id;
+      expect(planId).toBeTruthy();
+
+      // Complete the first set (Squat, order 1)
+      const result = await ctx.mcp.callTool('COACHBYTE_complete_next_set', {
+        plan_id: planId,
+        reps: 5,
+        load: 225,
+      });
+      const data = parseResult(result);
+
+      expect(data.message).toBeTruthy();
+
+      // Verify a completed set was created in DB
+      const coach = (ctx.client as any).schema('coachbyte');
+      const { data: completedSets } = await coach
+        .from('completed_sets')
+        .select('actual_reps, actual_load, planned_set_id')
+        .eq('plan_id', planId)
+        .not('planned_set_id', 'is', null);
+      expect(completedSets!.length).toBe(1);
+      expect(completedSets![0].actual_reps).toBe(5);
+      expect(Number(completedSets![0].actual_load)).toBe(225);
+
+      // Complete the second set
+      const result2 = await ctx.mcp.callTool('COACHBYTE_complete_next_set', {
+        plan_id: planId,
+        reps: 5,
+        load: 225,
+      });
+      const data2 = parseResult(result2);
+      expect(data2.message).toBeTruthy();
+
+      // Now 2 completed sets
+      const { data: afterSets } = await coach
+        .from('completed_sets')
+        .select('actual_reps')
+        .eq('plan_id', planId)
+        .not('planned_set_id', 'is', null);
+      expect(afterSets!.length).toBe(2);
     } finally {
       await ctx?.mcp.disconnect();
       await ctx?.cleanup();
