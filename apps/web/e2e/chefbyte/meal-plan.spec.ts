@@ -319,11 +319,11 @@ test.describe('ChefByte Meal Plan Page', () => {
       // Verify macros appear on the grid cell for this meal
       const gridMacros = page.getByTestId(`grid-macros-${mealId}`);
       await expect(gridMacros).toBeVisible({ timeout: 5000 });
-      // Should contain calorie value and macro abbreviations
+      // Should contain calorie value and macro abbreviations (text format: "Xcal | Yg P | Zg C | Wg F")
       await expect(gridMacros).toContainText(/\d+cal/);
-      await expect(gridMacros).toContainText(/\d+P/);
-      await expect(gridMacros).toContainText(/\d+C/);
-      await expect(gridMacros).toContainText(/\d+F/);
+      await expect(gridMacros).toContainText(/\d+g P/);
+      await expect(gridMacros).toContainText(/\d+g C/);
+      await expect(gridMacros).toContainText(/\d+g F/);
 
       // Open day detail and verify macros in the detail row
       await page.getByTestId(`day-col-${today}`).click();

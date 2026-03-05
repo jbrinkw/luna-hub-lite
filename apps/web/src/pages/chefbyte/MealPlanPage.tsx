@@ -64,6 +64,7 @@ export function getMonday(date: Date): Date {
 }
 
 const DAY_NAMES = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN'];
+const DAY_NAMES_FULL = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'];
 
 function formatWeekRange(monday: Date): string {
   const sunday = new Date(monday.getTime() + 6 * 86400000);
@@ -74,6 +75,15 @@ function formatWeekRange(monday: Date): string {
 function formatTime(iso: string): string {
   const d = new Date(iso);
   return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: false });
+}
+
+function formatDateShort(dateStr: string): string {
+  return new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+
+function formatDateLong(dateStr: string, dayIndex: number): string {
+  const d = new Date(dateStr + 'T00:00:00');
+  return `${DAY_NAMES_FULL[dayIndex]}, ${d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
 }
 
 /* ================================================================== */
@@ -96,6 +106,7 @@ export function MealPlanPage() {
   const [addServings, setAddServings] = useState(1);
   const [addMealPrep, setAddMealPrep] = useState(false);
   const [addMealType, setAddMealType] = useState<string | null>(null);
+  const [addDate, setAddDate] = useState<string>('');
 
   /* ---- Meal prep confirmation modal state ---- */
   const [prepTarget, setPrepTarget] = useState<MealEntry | null>(null);
@@ -129,9 +140,28 @@ export function MealPlanPage() {
 
   useEffect(() => {
     // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     loadMeals();
   }, [loadMeals]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Auto-select today on initial load                                */
+  /* ---------------------------------------------------------------- */
+
+  const todayStr = toDateStr(new Date());
+
+  useEffect(() => {
+    if (!loading && selectedDay === null) {
+      // Auto-select today if it's in the current week
+      const startDate = toDateStr(weekStart);
+      const endDate = toDateStr(new Date(weekStart.getTime() + 6 * 86400000));
+      if (todayStr >= startDate && todayStr <= endDate) {
+        setSelectedDay(todayStr);
+      }
+    }
+    // Only run when loading finishes, not on every todayStr change
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading]);
 
   /* ---------------------------------------------------------------- */
   /*  Week navigation                                                  */
@@ -159,8 +189,6 @@ export function MealPlanPage() {
   const dayDates = useMemo(() => {
     return Array.from({ length: 7 }, (_, i) => toDateStr(new Date(weekStart.getTime() + i * 86400000)));
   }, [weekStart]);
-
-  const todayStr = toDateStr(new Date());
 
   const mealsByDay = useMemo(() => {
     const map = new Map<string, MealEntry[]>();
@@ -339,11 +367,13 @@ export function MealPlanPage() {
     setAddMealPrep(false);
     setAddMealType(null);
     setAddShowDropdown(false);
+    // Default date: selected day or today
+    setAddDate(selectedDay || todayStr);
     setShowAddModal(true);
   };
 
   const addMeal = async () => {
-    if (!user || !addSelected || !selectedDay) return;
+    if (!user || !addSelected || !addDate) return;
 
     setError(null);
     const { error: insertErr } = await chefbyte()
@@ -352,7 +382,7 @@ export function MealPlanPage() {
         user_id: user.id,
         recipe_id: addSelected.type === 'recipe' ? addSelected.id : null,
         product_id: addSelected.type === 'product' ? addSelected.id : null,
-        logical_date: selectedDay,
+        logical_date: addDate,
         servings: addServings,
         meal_prep: addMealPrep,
         meal_type: addMealType,
@@ -360,6 +390,11 @@ export function MealPlanPage() {
     if (insertErr) {
       setError(insertErr.message);
       return;
+    }
+
+    // If the added date is in the current week and we don't have a day selected, select it
+    if (!selectedDay) {
+      setSelectedDay(addDate);
     }
 
     setShowAddModal(false);
@@ -380,14 +415,32 @@ export function MealPlanPage() {
     );
   }
 
+  const selectedDayIndex = selectedDay ? dayDates.indexOf(selectedDay) : -1;
+
+  /* Compute totals for the selected day */
+  const dayTotals = selectedDayMeals.reduce(
+    (acc, meal) => {
+      const m = entryMacros(meal);
+      if (m) {
+        acc.calories += m.calories;
+        acc.protein += m.protein;
+        acc.carbs += m.carbs;
+        acc.fat += m.fat;
+      }
+      return acc;
+    },
+    { calories: 0, protein: 0, carbs: 0, fat: 0 },
+  );
+
   return (
     <ChefLayout title="Meal Plan">
       {/* ============================================================ */}
-      {/*  HEADER                                                       */}
+      {/*  TOP BAR                                                      */}
       {/* ============================================================ */}
       <div
+        data-testid="week-nav"
         style={{
-          marginBottom: '20px',
+          marginBottom: '16px',
           display: 'flex',
           justifyContent: 'space-between',
           alignItems: 'center',
@@ -395,48 +448,52 @@ export function MealPlanPage() {
           gap: '12px',
         }}
       >
-        <h1 style={{ margin: 0 }}>Meal Plan</h1>
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <h1 style={{ margin: 0, fontSize: '1.4em' }}>Meal Plan</h1>
           <button
             onClick={openAddModal}
-            disabled={!selectedDay}
             data-testid="add-meal-btn"
             style={{
-              padding: '8px 16px',
+              padding: '6px 14px',
               background: '#2f9e44',
               color: '#fff',
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
               fontWeight: 600,
+              fontSize: '13px',
             }}
           >
-            Add Meal
+            + Add Meal
           </button>
+        </div>
+        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
           <button
             onClick={prevWeek}
             data-testid="prev-week-btn"
             style={{
-              padding: '8px 16px',
+              padding: '6px 12px',
               background: '#fff',
               border: '1px solid #ddd',
               borderRadius: '6px',
               cursor: 'pointer',
+              fontSize: '13px',
             }}
           >
-            Previous
+            Prev
           </button>
           <button
             onClick={goToday}
             data-testid="today-btn"
             style={{
-              padding: '8px 16px',
+              padding: '6px 12px',
               background: '#1e66f5',
               color: '#fff',
               border: 'none',
               borderRadius: '6px',
               cursor: 'pointer',
               fontWeight: 600,
+              fontSize: '13px',
             }}
           >
             Today
@@ -445,360 +502,357 @@ export function MealPlanPage() {
             onClick={nextWeek}
             data-testid="next-week-btn"
             style={{
-              padding: '8px 16px',
+              padding: '6px 12px',
               background: '#fff',
               border: '1px solid #ddd',
               borderRadius: '6px',
               cursor: 'pointer',
+              fontSize: '13px',
             }}
           >
             Next
           </button>
+          <span
+            data-testid="week-range"
+            style={{ marginLeft: '8px', fontWeight: 'bold', fontSize: '13px', color: '#555' }}
+          >
+            {formatWeekRange(weekStart)}
+          </span>
         </div>
       </div>
 
       {error && <p style={{ color: '#d33', margin: '0 0 12px' }}>{error}</p>}
 
-      <span
-        data-testid="week-range"
-        style={{ display: 'block', marginBottom: '12px', fontWeight: 'bold', fontSize: '14px', color: '#555' }}
-      >
-        {formatWeekRange(weekStart)}
-      </span>
-
       {/* ============================================================ */}
-      {/*  7-DAY GRID                                                   */}
+      {/*  SIDE-BY-SIDE LAYOUT                                          */}
       {/* ============================================================ */}
-      <div data-testid="week-grid" className="week-grid" style={{ marginBottom: '16px' }}>
-        {dayDates.map((date, i) => {
-          const dayMeals = mealsByDay.get(date) ?? [];
-          const isSelected = selectedDay === date;
-          const isToday = date === todayStr;
+      <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+        {/* ---------------------------------------------------------- */}
+        {/*  LEFT PANEL — Compact week list                             */}
+        {/* ---------------------------------------------------------- */}
+        <div
+          data-testid="week-grid"
+          style={{
+            width: '280px',
+            minWidth: '280px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '2px',
+            background: '#f0f0f0',
+            borderRadius: '8px',
+            overflow: 'hidden',
+            border: '1px solid #ddd',
+          }}
+        >
+          {dayDates.map((date, i) => {
+            const dayMeals = mealsByDay.get(date) ?? [];
+            const isSelected = selectedDay === date;
+            const isToday = date === todayStr;
+            const mealCount = dayMeals.length;
 
-          return (
-            <div
-              key={date}
-              data-testid={`day-col-${date}`}
-              onClick={() => setSelectedDay(date)}
-              style={{
-                background: isToday ? '#e8f4fd' : '#fff',
-                border: isToday ? '2px solid #1e66f5' : isSelected ? '2px solid #1e66f5' : '1px solid #ddd',
-                borderRadius: '8px',
-                padding: '12px',
-                cursor: 'pointer',
-                minHeight: '200px',
-                display: 'flex',
-                flexDirection: 'column',
-              }}
-            >
+            return (
               <div
+                key={date}
+                data-testid={`day-col-${date}`}
+                onClick={() => setSelectedDay(date)}
                 style={{
-                  fontWeight: 600,
-                  marginBottom: '12px',
-                  paddingBottom: '8px',
-                  borderBottom: '1px solid #eee',
-                  color: isToday ? '#1e66f5' : '#111',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  padding: '10px 14px',
+                  cursor: 'pointer',
+                  background: isToday ? '#e8f4fd' : isSelected ? '#f5f5f5' : '#fff',
+                  borderLeft: isSelected || isToday ? '3px solid #1e66f5' : '3px solid transparent',
+                  transition: 'background 0.15s',
                 }}
               >
-                <div>{DAY_NAMES[i]}</div>
-                <div>
-                  {new Date(date + 'T00:00:00').toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                </div>
-                {isToday && <div style={{ fontSize: '0.8em', color: '#1890ff', fontWeight: 'bold' }}>TODAY</div>}
-              </div>
-
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', flex: 1 }}>
-                {dayMeals.length === 0 && (
-                  <div style={{ textAlign: 'center', color: '#999', fontSize: '13px', padding: '20px 0' }}>
-                    No meals planned
-                  </div>
-                )}
-                {dayMeals.map((meal) => {
-                  const macros = entryMacros(meal);
-                  return (
-                    <div
-                      key={meal.meal_id}
-                      data-testid={`grid-meal-${meal.meal_id}`}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span
+                    style={{ fontWeight: 600, fontSize: '13px', color: isToday ? '#1e66f5' : '#333', minWidth: '30px' }}
+                  >
+                    {DAY_NAMES[i]}
+                  </span>
+                  <span style={{ fontSize: '13px', color: '#666' }}>{formatDateShort(date)}</span>
+                  {isToday && (
+                    <span
                       style={{
-                        background: '#f7f7f9',
-                        padding: '8px',
-                        borderRadius: '6px',
-                        fontSize: '13px',
-                        border: '1px solid #eee',
-                        position: 'relative',
+                        fontSize: '10px',
+                        fontWeight: 700,
+                        color: '#1e66f5',
+                        background: '#d0e8ff',
+                        padding: '1px 6px',
+                        borderRadius: '3px',
                       }}
                     >
-                      <div style={{ paddingRight: '20px' }}>
-                        <div style={{ fontWeight: 600, lineHeight: '1.2' }}>{entryName(meal)}</div>
-                        {meal.meal_type && (
-                          <div
-                            data-testid={`meal-type-label-${meal.meal_id}`}
-                            style={{ fontSize: '11px', color: '#666', marginTop: '2px' }}
-                          >
-                            <span
-                              style={{
-                                background: '#eee',
-                                padding: '1px 4px',
-                                borderRadius: '3px',
-                                textTransform: 'capitalize',
-                              }}
-                            >
-                              {meal.meal_type}
-                            </span>
-                          </div>
-                        )}
-                        {meal.completed_at && (
-                          <span
-                            data-testid={`done-badge-${meal.meal_id}`}
-                            style={{
-                              display: 'inline-block',
-                              marginTop: '4px',
-                              fontSize: '10px',
-                              background: '#2f9e44',
-                              color: '#fff',
-                              padding: '1px 6px',
-                              borderRadius: '3px',
-                            }}
-                          >
-                            done
-                          </span>
-                        )}
-                        {meal.meal_prep && !meal.completed_at && (
-                          <span
-                            data-testid={`prep-badge-${meal.meal_id}`}
-                            style={{
-                              display: 'inline-block',
-                              marginTop: '4px',
-                              fontSize: '10px',
-                              background: '#6c5ce7',
-                              color: '#fff',
-                              padding: '1px 6px',
-                              borderRadius: '3px',
-                            }}
-                          >
-                            PREP
-                          </span>
-                        )}
-                      </div>
+                      TODAY
+                    </span>
+                  )}
+                </div>
+                {mealCount > 0 && (
+                  <span style={{ fontSize: '12px', color: '#888' }}>
+                    {mealCount} meal{mealCount !== 1 ? 's' : ''}
+                  </span>
+                )}
+              </div>
+            );
+          })}
+        </div>
 
-                      {macros && (macros.calories > 0 || macros.protein > 0) && (
-                        <div
-                          data-testid={`grid-macros-${meal.meal_id}`}
-                          style={{
-                            fontSize: '11px',
-                            color: '#555',
-                            display: 'flex',
-                            flexWrap: 'wrap',
-                            gap: '6px',
-                            marginTop: '2px',
-                          }}
-                        >
-                          <span>
-                            {'\ud83d\udd25'}
-                            {macros.calories}
-                          </span>
-                          <span>
-                            {'\ud83e\udea9'}
-                            {macros.protein}
-                          </span>
-                          <span>
-                            {'\ud83c\udf5e'}
-                            {macros.carbs}
-                          </span>
-                          <span>
-                            {'\ud83e\udd51'}
-                            {macros.fat}
-                          </span>
-                        </div>
-                      )}
+        {/* ---------------------------------------------------------- */}
+        {/*  RIGHT PANEL — Selected day detail                          */}
+        {/* ---------------------------------------------------------- */}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          {!selectedDay ? (
+            <div
+              style={{
+                padding: '40px 20px',
+                textAlign: 'center',
+                color: '#999',
+                fontSize: '15px',
+                background: '#fafafa',
+                borderRadius: '8px',
+                border: '1px solid #eee',
+              }}
+            >
+              Select a day to view details
+            </div>
+          ) : (
+            <div data-testid="day-detail">
+              <h3 data-testid="day-detail-title" style={{ margin: '0 0 16px', fontSize: '1.1em', color: '#222' }}>
+                {formatDateLong(selectedDay, selectedDayIndex)}
+              </h3>
 
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          deleteMeal(meal.meal_id);
-                        }}
-                        data-testid={`delete-meal-${meal.meal_id}`}
-                        title="Remove"
+              {selectedDayMeals.length === 0 ? (
+                <p data-testid="no-meals" style={{ color: '#888', fontSize: '14px' }}>
+                  No meals planned. Click + Add Meal to get started.
+                </p>
+              ) : (
+                <div data-testid="day-detail-table" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                  {selectedDayMeals.map((meal) => {
+                    const macros = entryMacros(meal);
+                    return (
+                      <div
+                        key={meal.meal_id}
+                        data-testid={`detail-row-${meal.meal_id}`}
                         style={{
-                          position: 'absolute',
-                          top: '4px',
-                          right: '4px',
-                          padding: '2px 6px',
-                          background: '#d33',
-                          color: '#fff',
-                          border: 'none',
-                          borderRadius: '3px',
-                          cursor: 'pointer',
-                          fontSize: '12px',
-                          opacity: 0.8,
+                          background: '#fff',
+                          border: '1px solid #e8e8e8',
+                          borderRadius: '8px',
+                          padding: '14px 16px',
                         }}
                       >
-                        {'\u00d7'}
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-          );
-        })}
-      </div>
+                        {/* Also keep grid-meal testid for E2E compat */}
+                        <div
+                          data-testid={`grid-meal-${meal.meal_id}`}
+                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
+                        >
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            {/* Name */}
+                            <div style={{ fontWeight: 600, fontSize: '15px', color: '#111' }}>{entryName(meal)}</div>
 
-      {/* ============================================================ */}
-      {/*  DAY DETAIL TABLE                                              */}
-      {/* ============================================================ */}
-      {selectedDay && (
-        <div data-testid="day-detail">
-          <h3 data-testid="day-detail-title">
-            {DAY_NAMES[dayDates.indexOf(selectedDay)]} {new Date(selectedDay + 'T00:00:00').getDate()} Detail
-          </h3>
-
-          {selectedDayMeals.length === 0 ? (
-            <p data-testid="no-meals">No meals planned for this day.</p>
-          ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="day-detail-table">
-              <thead>
-                <tr>
-                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Entry</th>
-                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Type</th>
-                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Mode</th>
-                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Status</th>
-                  <th style={{ textAlign: 'left', padding: '8px', borderBottom: '1px solid #ddd' }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {selectedDayMeals.map((meal) => {
-                  const macros = entryMacros(meal);
-                  return (
-                    <tr key={meal.meal_id} data-testid={`detail-row-${meal.meal_id}`}>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                        <div>{entryName(meal)}</div>
-                        {macros && (
-                          <div style={{ fontSize: '0.8em', color: '#888' }}>
-                            {macros.calories} cal | {macros.protein}g P | {macros.carbs}g C | {macros.fat}g F
-                          </div>
-                        )}
-                      </td>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee', textTransform: 'capitalize' }}>
-                        {meal.meal_type ?? '\u2014'}
-                      </td>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                          <input
-                            type="checkbox"
-                            checked={meal.meal_prep}
-                            onChange={() => toggleMealPrep(meal)}
-                            disabled={!!meal.completed_at}
-                            aria-label={`Toggle meal prep for ${entryName(meal)}`}
-                            data-testid={`toggle-prep-${meal.meal_id}`}
-                          />
-                          <span>{meal.meal_prep ? 'Prep' : 'Regular'}</span>
-                        </div>
-                      </td>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                        {meal.completed_at ? `DONE (${formatTime(meal.completed_at)})` : 'Planned'}
-                      </td>
-                      <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>
-                        {!meal.completed_at && (
-                          <div style={{ display: 'flex', gap: '4px' }}>
-                            <button
-                              onClick={() => markDone(meal.meal_id)}
-                              data-testid={`mark-done-${meal.meal_id}`}
-                              style={{
-                                padding: '6px 12px',
-                                background: '#2f9e44',
-                                color: '#fff',
-                                border: 'none',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                fontWeight: 600,
-                                fontSize: '13px',
-                              }}
-                            >
-                              Mark Done
-                            </button>
-                            {meal.meal_prep && (
-                              <button
-                                onClick={() => setPrepTarget(meal)}
-                                data-testid={`exec-prep-${meal.meal_id}`}
+                            {/* Meal type badge */}
+                            {meal.meal_type && (
+                              <span
+                                data-testid={`meal-type-label-${meal.meal_id}`}
                                 style={{
-                                  padding: '6px 12px',
-                                  background: '#6c5ce7',
-                                  color: '#fff',
-                                  border: 'none',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontWeight: 600,
-                                  fontSize: '13px',
+                                  display: 'inline-block',
+                                  marginTop: '4px',
+                                  fontSize: '11px',
+                                  background: '#eee',
+                                  padding: '2px 8px',
+                                  borderRadius: '3px',
+                                  textTransform: 'capitalize',
+                                  color: '#555',
                                 }}
                               >
-                                Execute Prep
-                              </button>
+                                {meal.meal_type}
+                              </span>
+                            )}
+
+                            {/* Macros — text format, no emoji */}
+                            {macros && (macros.calories > 0 || macros.protein > 0) && (
+                              <div
+                                data-testid={`grid-macros-${meal.meal_id}`}
+                                style={{ fontSize: '13px', color: '#666', marginTop: '6px' }}
+                              >
+                                {macros.calories}cal | {macros.protein}g P | {macros.carbs}g C | {macros.fat}g F
+                              </div>
+                            )}
+
+                            {/* Status badges + mode */}
+                            <div
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                gap: '6px',
+                                marginTop: '8px',
+                                flexWrap: 'wrap',
+                              }}
+                            >
+                              {meal.completed_at && (
+                                <span
+                                  data-testid={`done-badge-${meal.meal_id}`}
+                                  style={{
+                                    display: 'inline-block',
+                                    fontSize: '11px',
+                                    background: '#2f9e44',
+                                    color: '#fff',
+                                    padding: '2px 8px',
+                                    borderRadius: '3px',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  Done
+                                </span>
+                              )}
+                              {meal.meal_prep && !meal.completed_at && (
+                                <span
+                                  data-testid={`prep-badge-${meal.meal_id}`}
+                                  style={{
+                                    display: 'inline-block',
+                                    fontSize: '11px',
+                                    background: '#6c5ce7',
+                                    color: '#fff',
+                                    padding: '2px 8px',
+                                    borderRadius: '3px',
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  PREP
+                                </span>
+                              )}
+                              {!meal.meal_prep && !meal.completed_at && (
+                                <span style={{ fontSize: '11px', color: '#888' }}>Regular</span>
+                              )}
+                              {meal.completed_at && (
+                                <span style={{ fontSize: '11px', color: '#888' }}>
+                                  at {formatTime(meal.completed_at)}
+                                </span>
+                              )}
+                              {/* Prep toggle (hidden label for accessibility) */}
+                              {!meal.completed_at && (
+                                <label
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    gap: '3px',
+                                    fontSize: '11px',
+                                    color: '#888',
+                                    cursor: 'pointer',
+                                  }}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    checked={meal.meal_prep}
+                                    onChange={() => toggleMealPrep(meal)}
+                                    disabled={!!meal.completed_at}
+                                    aria-label={`Toggle meal prep for ${entryName(meal)}`}
+                                    data-testid={`toggle-prep-${meal.meal_id}`}
+                                    style={{ width: '13px', height: '13px' }}
+                                  />
+                                  Prep
+                                </label>
+                              )}
+                            </div>
+                          </div>
+
+                          {/* Action buttons */}
+                          <div
+                            style={{
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px',
+                              marginLeft: '12px',
+                              flexShrink: 0,
+                            }}
+                          >
+                            {!meal.completed_at && (
+                              <>
+                                <button
+                                  onClick={() => markDone(meal.meal_id)}
+                                  data-testid={`mark-done-${meal.meal_id}`}
+                                  style={{
+                                    padding: '5px 12px',
+                                    background: '#2f9e44',
+                                    color: '#fff',
+                                    border: 'none',
+                                    borderRadius: '4px',
+                                    cursor: 'pointer',
+                                    fontWeight: 600,
+                                    fontSize: '12px',
+                                    whiteSpace: 'nowrap',
+                                  }}
+                                >
+                                  Mark Done
+                                </button>
+                                {meal.meal_prep && (
+                                  <button
+                                    onClick={() => setPrepTarget(meal)}
+                                    data-testid={`exec-prep-${meal.meal_id}`}
+                                    style={{
+                                      padding: '5px 12px',
+                                      background: '#6c5ce7',
+                                      color: '#fff',
+                                      border: 'none',
+                                      borderRadius: '4px',
+                                      cursor: 'pointer',
+                                      fontWeight: 600,
+                                      fontSize: '12px',
+                                      whiteSpace: 'nowrap',
+                                    }}
+                                  >
+                                    Execute Prep
+                                  </button>
+                                )}
+                              </>
                             )}
                             <button
                               onClick={() => deleteMeal(meal.meal_id)}
                               data-testid={`delete-meal-${meal.meal_id}`}
                               style={{
-                                padding: '6px 12px',
+                                padding: '5px 12px',
                                 background: 'transparent',
                                 color: '#d33',
                                 border: 'none',
                                 cursor: 'pointer',
                                 fontWeight: 600,
-                                fontSize: '13px',
+                                fontSize: '12px',
+                                whiteSpace: 'nowrap',
+                                textAlign: 'right',
                               }}
                             >
                               Delete
                             </button>
                           </div>
-                        )}
-                        {meal.completed_at && <span>{'\u2014'}</span>}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-              <tfoot>
-                {(() => {
-                  const totals = selectedDayMeals.reduce(
-                    (acc, meal) => {
-                      const m = entryMacros(meal);
-                      if (m) {
-                        acc.calories += m.calories;
-                        acc.protein += m.protein;
-                        acc.carbs += m.carbs;
-                        acc.fat += m.fat;
-                      }
-                      return acc;
-                    },
-                    { calories: 0, protein: 0, carbs: 0, fat: 0 },
-                  );
-                  return (
-                    <tr data-testid="day-detail-total-row">
-                      <td
-                        style={{
-                          padding: '8px',
-                          borderTop: '2px solid #333',
-                          fontWeight: 700,
-                        }}
-                      >
-                        <div>TOTAL</div>
-                        <div style={{ fontSize: '0.8em', color: '#444' }}>
-                          {totals.calories} cal | {totals.protein}g P | {totals.carbs}g C | {totals.fat}g F
                         </div>
-                      </td>
-                      <td style={{ padding: '8px', borderTop: '2px solid #333' }} />
-                      <td style={{ padding: '8px', borderTop: '2px solid #333' }} />
-                      <td style={{ padding: '8px', borderTop: '2px solid #333' }} />
-                      <td style={{ padding: '8px', borderTop: '2px solid #333' }} />
-                    </tr>
-                  );
-                })()}
-              </tfoot>
-            </table>
+                      </div>
+                    );
+                  })}
+
+                  {/* TOTAL macros row */}
+                  <div
+                    data-testid="day-detail-total-row"
+                    style={{
+                      background: '#f7f7f9',
+                      border: '1px solid #e0e0e0',
+                      borderRadius: '8px',
+                      padding: '12px 16px',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                    }}
+                  >
+                    <span style={{ fontWeight: 700, fontSize: '14px', color: '#222' }}>TOTAL</span>
+                    <span style={{ fontSize: '14px', color: '#444', fontWeight: 600 }}>
+                      {dayTotals.calories} cal | {dayTotals.protein}g P | {dayTotals.carbs}g C | {dayTotals.fat}g F
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
           )}
         </div>
-      )}
+      </div>
 
       {/* ============================================================ */}
       {/*  ADD MEAL MODAL                                                */}
@@ -809,6 +863,22 @@ export function MealPlanPage() {
         title="Add Meal"
         testId="add-meal-modal"
       >
+        <div style={{ marginBottom: '12px' }}>
+          <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>Date</label>
+          <input
+            type="date"
+            value={addDate}
+            onChange={(e) => setAddDate(e.target.value)}
+            data-testid="add-meal-date"
+            style={{
+              width: '100%',
+              padding: '8px 12px',
+              border: '1px solid #ccc',
+              borderRadius: '6px',
+              fontSize: '14px',
+            }}
+          />
+        </div>
         <div style={{ marginBottom: '12px', position: 'relative' }}>
           <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>
             Search recipe or product
@@ -904,7 +974,6 @@ export function MealPlanPage() {
             data-testid="add-meal-prep-toggle"
           />
         </div>
-        <div style={{ marginBottom: '8px', fontSize: '0.85em', color: '#666' }}>Date: {selectedDay}</div>
         <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
           <button
             onClick={() => setShowAddModal(false)}
