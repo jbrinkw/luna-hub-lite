@@ -22,10 +22,21 @@ interface SetQueueProps {
   onDeleteSet?: (plannedSetId: string) => void;
   onAddSet?: () => void;
   timerState?: 'running' | 'paused' | 'expired' | 'idle';
+  timerDisplay?: string;
   disabled?: boolean;
 }
 
-export function SetQueue({ sets, onComplete, onAdHoc, onUpdateSet, onDeleteSet, onAddSet, disabled }: SetQueueProps) {
+export function SetQueue({
+  sets,
+  onComplete,
+  onAdHoc,
+  onUpdateSet,
+  onDeleteSet,
+  onAddSet,
+  timerState,
+  timerDisplay,
+  disabled,
+}: SetQueueProps) {
   const nextSet = sets.find((s) => !s.completed);
   const [reps, setReps] = useState<string>(nextSet?.target_reps?.toString() ?? '');
   const [load, setLoad] = useState<string>(nextSet?.target_load?.toString() ?? '');
@@ -92,12 +103,30 @@ export function SetQueue({ sets, onComplete, onAdHoc, onUpdateSet, onDeleteSet, 
 
         {nextSet ? (
           <>
-            <div className="next-set-box" data-testid="next-exercise">
-              <div className="next-set-exercise">{nextSet.exercise_name}</div>
-              <div className="next-set-detail">
-                {nextSet.target_reps} reps @ {formatLoadDisplay(nextSet)}
+            <div
+              className="next-set-box"
+              data-testid="next-exercise"
+              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
+            >
+              <div style={{ flex: 1 }}>
+                <div className="next-set-exercise">{nextSet.exercise_name}</div>
+                <div className="next-set-detail">
+                  {nextSet.target_reps} reps @ {formatLoadDisplay(nextSet)}
+                </div>
+                <div className="next-set-rest">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
               </div>
-              <div className="next-set-rest">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
+              {timerDisplay && (
+                <div
+                  className={`timer-display ${timerState === 'running' ? 'timer-running' : timerState === 'expired' ? 'timer-expired' : 'timer-idle'}`}
+                  data-testid="inline-timer"
+                >
+                  {timerState === 'running' && <div>Timer:</div>}
+                  {timerState === 'expired' && <div>Timer</div>}
+                  <div style={{ fontSize: 20, marginTop: 4 }}>
+                    {timerState === 'expired' ? 'expired!' : timerDisplay}
+                  </div>
+                </div>
+              )}
             </div>
 
             <form

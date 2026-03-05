@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
-import { RestTimer } from '@/components/coachbyte/RestTimer';
+import { RestTimer, formatTime } from '@/components/coachbyte/RestTimer';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase, coachbyte } from '@/shared/supabase';
@@ -458,6 +458,22 @@ export function TodayPage() {
     await loadPlan();
   };
 
+  const [timerRemaining, setTimerRemaining] = useState(0);
+
+  useEffect(() => {
+    if (timer.state === 'running' && timer.end_time) {
+      const calc = () => Math.max(0, Math.ceil((new Date(timer.end_time!).getTime() - Date.now()) / 1000));
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setTimerRemaining(calc());
+      const id = setInterval(() => setTimerRemaining(calc()), 1000);
+      return () => clearInterval(id);
+    } else if (timer.state === 'paused') {
+      setTimerRemaining(timer.duration_seconds - timer.elapsed_before_pause);
+    } else {
+      setTimerRemaining(0);
+    }
+  }, [timer.state, timer.end_time, timer.duration_seconds, timer.elapsed_before_pause]);
+
   if (loading) {
     return (
       <CoachLayout title="Today">
@@ -538,6 +554,13 @@ export function TodayPage() {
         onDeleteSet={deletePlannedSet}
         onAddSet={() => setAddingPlanned(true)}
         timerState={timer.state}
+        timerDisplay={
+          timer.state === 'running' || timer.state === 'paused'
+            ? formatTime(timerRemaining)
+            : timer.state === 'expired'
+              ? 'expired!'
+              : undefined
+        }
         disabled={false}
       />
 
