@@ -311,12 +311,6 @@ export function InventoryPage() {
     return '#2f9e44';
   };
 
-  const stockCardBorderColor = (totalStock: number, minStock: number): string => {
-    if (totalStock <= 0) return '#d33';
-    if (minStock > 0 && totalStock < minStock) return '#ff9800';
-    return '#2f9e44';
-  };
-
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -426,171 +420,220 @@ export function InventoryPage() {
         <div data-testid="grouped-view">
           {filteredGrouped.length === 0 && <p data-testid="no-products">No products in inventory.</p>}
 
-          {filteredGrouped.map(({ product, totalStock, nearestExpiry, lotCount }) => (
+          {filteredGrouped.length > 0 && (
             <div
-              key={product.product_id}
-              data-testid={`inv-product-${product.product_id}`}
               style={{
                 background: '#fff',
-                border: '1px solid #eee',
+                border: '1px solid #e0e0e0',
                 borderRadius: '10px',
-                padding: '12px',
-                borderLeft: `4px solid ${stockCardBorderColor(totalStock, Number(product.min_stock_amount))}`,
-                marginBottom: '12px',
+                overflow: 'hidden',
               }}
             >
-              {/* Card header */}
-              <div style={{ marginBottom: '8px' }}>
-                <div style={{ fontWeight: 700, fontSize: '16px', marginBottom: '2px' }}>{product.name}</div>
-                {product.barcode && (
-                  <span style={{ fontSize: '0.8em', color: '#888' }} data-testid={`barcode-${product.product_id}`}>
-                    {product.barcode}
-                  </span>
-                )}
-                <span style={{ fontSize: '0.85em', color: '#666', marginLeft: product.barcode ? '8px' : '0' }}>
-                  {Number(product.servings_per_container)} srvg/ctn
-                </span>
-              </div>
-
-              {/* Card content */}
+              {/* Table header */}
               <div
                 style={{
                   display: 'grid',
-                  gridTemplateColumns: '1fr 1fr 1fr 1fr',
-                  gap: '8px',
-                  alignItems: 'center',
-                  marginBottom: '12px',
+                  gridTemplateColumns: '1fr 140px 90px 60px 210px',
+                  gap: '0',
+                  padding: '8px 12px',
+                  background: '#f7f7f9',
+                  borderBottom: '2px solid #ddd',
+                  fontSize: '12px',
+                  fontWeight: 600,
+                  color: '#666',
+                  textTransform: 'uppercase',
+                  letterSpacing: '0.5px',
                 }}
               >
-                <div>
-                  <span style={{ fontSize: '0.85em', color: '#888' }}>Total Stock</span>
-                  <br />
-                  <span
-                    data-testid={`stock-badge-${product.product_id}`}
-                    style={{
-                      padding: '4px 12px',
-                      borderRadius: '12px',
-                      fontWeight: 600,
-                      fontSize: '12px',
-                      color: '#fff',
-                      background: stockBadgeBg(totalStock, Number(product.min_stock_amount)),
-                      display: 'inline-block',
-                    }}
-                  >
-                    {totalStock.toFixed(1)} ctn
-                  </span>
-                  <br />
-                  <span
-                    style={{ fontSize: '0.8em', color: '#888' }}
-                    data-testid={`stock-servings-${product.product_id}`}
-                  >
-                    ({(totalStock * Number(product.servings_per_container)).toFixed(1)} svgs)
-                  </span>
-                </div>
-                <div>
-                  <span style={{ fontSize: '0.85em', color: '#888' }}>Nearest Expiry</span>
-                  <br />
-                  <span data-testid={`expiry-${product.product_id}`}>{nearestExpiry ?? '\u2014'}</span>
-                </div>
-                <div>
-                  <span style={{ fontSize: '0.85em', color: '#888' }}>Min Stock</span>
-                  <br />
-                  <span data-testid={`min-stock-${product.product_id}`}>
-                    {Number(product.min_stock_amount).toFixed(1)} ctn
-                  </span>
-                </div>
-                <div>
-                  <span style={{ fontSize: '0.85em', color: '#888' }}>Lots</span>
-                  <br />
-                  <span data-testid={`lot-count-${product.product_id}`}>{lotCount}</span>
-                </div>
+                <span>Product</span>
+                <span>Stock</span>
+                <span>Expiry</span>
+                <span>Min</span>
+                <span style={{ textAlign: 'right' }}>Actions</span>
               </div>
 
-              {/* Action buttons */}
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }}>
-                <button
-                  className="primary-btn"
-                  style={{
-                    background: '#2f9e44',
-                    color: '#fff',
-                    border: 'none',
-                    padding: '4px 12px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                  }}
-                  onClick={() => openAddStockModal(product.product_id, 1)}
-                  data-testid={`add-ctn-${product.product_id}`}
-                >
-                  +1 Ctn
-                </button>
-                <button
-                  className="primary-btn"
-                  style={{
-                    background: '#d33',
-                    color: '#fff',
-                    border: 'none',
-                    padding: '4px 12px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                  }}
-                  onClick={() => consumeStock(product.product_id, 1, 'container')}
-                  data-testid={`sub-ctn-${product.product_id}`}
-                >
-                  -1 Ctn
-                </button>
-                <button
-                  className="primary-btn"
-                  style={{
-                    background: '#fff',
-                    color: '#2f9e44',
-                    border: '1px solid #2f9e44',
-                    padding: '4px 12px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                  }}
-                  onClick={() => openAddStockModal(product.product_id, 1 / Number(product.servings_per_container))}
-                  data-testid={`add-srv-${product.product_id}`}
-                >
-                  +1 Srv
-                </button>
-                <button
-                  className="primary-btn"
-                  style={{
-                    background: '#fff',
-                    color: '#d33',
-                    border: '1px solid #d33',
-                    padding: '4px 12px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                  }}
-                  onClick={() => consumeStock(product.product_id, 1, 'serving')}
-                  data-testid={`sub-srv-${product.product_id}`}
-                >
-                  -1 Srv
-                </button>
-                <button
-                  className="primary-btn"
-                  style={{
-                    background: '#333',
-                    color: '#fff',
-                    border: 'none',
-                    padding: '4px 12px',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                    fontSize: '13px',
-                  }}
-                  onClick={() => handleConsumeAll(product.product_id)}
-                  data-testid={`consume-all-${product.product_id}`}
-                >
-                  Consume All
-                </button>
-              </div>
+              {/* Product rows */}
+              {filteredGrouped.map(({ product, totalStock, nearestExpiry }, idx) => {
+                const isZeroStock = totalStock <= 0;
+                const servingsTotal = totalStock * Number(product.servings_per_container);
+                const expiryLabel = nearestExpiry
+                  ? new Date(nearestExpiry + 'T00:00:00').toLocaleDateString('en-US', {
+                      month: 'short',
+                      day: 'numeric',
+                    })
+                  : '\u2014';
+
+                return (
+                  <div
+                    key={product.product_id}
+                    data-testid={`inv-product-${product.product_id}`}
+                    style={{
+                      display: 'grid',
+                      gridTemplateColumns: '1fr 140px 90px 60px 210px',
+                      gap: '0',
+                      padding: '7px 12px',
+                      alignItems: 'center',
+                      borderBottom: idx < filteredGrouped.length - 1 ? '1px solid #f0f0f0' : 'none',
+                      opacity: isZeroStock ? 0.5 : 1,
+                      fontSize: '14px',
+                    }}
+                  >
+                    {/* Product name + stock dot */}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                      <span
+                        style={{
+                          width: '10px',
+                          height: '10px',
+                          borderRadius: '50%',
+                          background: stockBadgeBg(totalStock, Number(product.min_stock_amount)),
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                        title={`${product.name}${product.barcode ? ` | Barcode: ${product.barcode}` : ''} | ${Number(product.servings_per_container)} srv/ctn`}
+                      >
+                        {product.name}
+                      </span>
+                      {product.barcode && (
+                        <span style={{ display: 'none' }} data-testid={`barcode-${product.product_id}`}>
+                          {product.barcode}
+                        </span>
+                      )}
+                    </div>
+
+                    {/* Stock */}
+                    <div>
+                      <span data-testid={`stock-badge-${product.product_id}`} style={{ fontWeight: 600 }}>
+                        {totalStock.toFixed(1)} ctn
+                      </span>
+                      <span
+                        style={{ fontSize: '12px', color: '#888', marginLeft: '4px' }}
+                        data-testid={`stock-servings-${product.product_id}`}
+                      >
+                        ({servingsTotal.toFixed(1)} svgs)
+                      </span>
+                    </div>
+
+                    {/* Expiry */}
+                    <span data-testid={`expiry-${product.product_id}`} style={{ fontSize: '13px', color: '#555' }}>
+                      {expiryLabel}
+                    </span>
+
+                    {/* Min stock */}
+                    <span data-testid={`min-stock-${product.product_id}`} style={{ fontSize: '13px', color: '#555' }}>
+                      {Number(product.min_stock_amount).toFixed(1)}
+                    </span>
+
+                    {/* Actions */}
+                    <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                      {/* +/- Container pair */}
+                      <div style={{ display: 'inline-flex' }}>
+                        <button
+                          className="primary-btn"
+                          style={{
+                            background: '#2f9e44',
+                            color: '#fff',
+                            border: 'none',
+                            padding: '3px 8px',
+                            borderRadius: '4px 0 0 4px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            lineHeight: '1.4',
+                          }}
+                          onClick={() => openAddStockModal(product.product_id, 1)}
+                          data-testid={`add-ctn-${product.product_id}`}
+                        >
+                          +1
+                        </button>
+                        <button
+                          className="primary-btn"
+                          style={{
+                            background: '#d33',
+                            color: '#fff',
+                            border: 'none',
+                            padding: '3px 8px',
+                            borderRadius: '0 4px 4px 0',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            lineHeight: '1.4',
+                          }}
+                          onClick={() => consumeStock(product.product_id, 1, 'container')}
+                          data-testid={`sub-ctn-${product.product_id}`}
+                        >
+                          -1
+                        </button>
+                      </div>
+
+                      {/* +/- Serving pair */}
+                      <div style={{ display: 'inline-flex' }}>
+                        <button
+                          className="primary-btn"
+                          style={{
+                            background: '#fff',
+                            color: '#2f9e44',
+                            border: '1px solid #2f9e44',
+                            padding: '3px 6px',
+                            borderRadius: '4px 0 0 4px',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            lineHeight: '1.4',
+                            borderRight: 'none',
+                          }}
+                          onClick={() =>
+                            openAddStockModal(product.product_id, 1 / Number(product.servings_per_container))
+                          }
+                          data-testid={`add-srv-${product.product_id}`}
+                        >
+                          +S
+                        </button>
+                        <button
+                          className="primary-btn"
+                          style={{
+                            background: '#fff',
+                            color: '#d33',
+                            border: '1px solid #d33',
+                            padding: '3px 6px',
+                            borderRadius: '0 4px 4px 0',
+                            cursor: 'pointer',
+                            fontSize: '12px',
+                            fontWeight: 600,
+                            lineHeight: '1.4',
+                          }}
+                          onClick={() => consumeStock(product.product_id, 1, 'serving')}
+                          data-testid={`sub-srv-${product.product_id}`}
+                        >
+                          -S
+                        </button>
+                      </div>
+
+                      {/* Consume All */}
+                      <button
+                        className="primary-btn"
+                        style={{
+                          background: 'transparent',
+                          color: '#666',
+                          border: 'none',
+                          padding: '3px 6px',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          textDecoration: 'underline',
+                          lineHeight: '1.4',
+                        }}
+                        onClick={() => handleConsumeAll(product.product_id)}
+                        data-testid={`consume-all-${product.product_id}`}
+                      >
+                        Consume All
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          ))}
+          )}
         </div>
       )}
 
