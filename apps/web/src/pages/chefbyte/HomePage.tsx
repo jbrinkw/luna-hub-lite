@@ -115,12 +115,13 @@ export function HomePage() {
     if (!userId) return;
     setLoadError(null);
 
-    // 1. Status cards — missing prices
+    // 1. Status cards — missing prices (exclude [MEAL] lots)
     const { data: mp, error: mpErr } = await chefbyte()
       .from('products')
       .select('product_id')
       .eq('user_id', userId)
-      .is('price', null);
+      .is('price', null)
+      .not('name', 'ilike', '[MEAL]%');
     if (mpErr) {
       setLoadError(mpErr.message);
       return;

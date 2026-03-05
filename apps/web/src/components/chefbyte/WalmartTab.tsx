@@ -79,12 +79,14 @@ export function WalmartTab() {
     );
 
     // 2. Missing Prices: products with NO walmart_link that need manual price entry
+    //    Exclude [MEAL] lots — they are temporary meal-prep containers, not purchasable
     const { data: noPrices } = await chefbyte()
       .from('products')
       .select('product_id, name, walmart_link, price')
       .eq('user_id', userId)
       .is('price', null)
-      .is('walmart_link', null);
+      .is('walmart_link', null)
+      .not('name', 'ilike', '[MEAL]%');
 
     setMissingPrices((noPrices ?? []) as MissingPriceProduct[]);
 
