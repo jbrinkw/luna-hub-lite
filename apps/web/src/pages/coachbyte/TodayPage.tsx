@@ -1,18 +1,4 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
-import {
-  IonSpinner,
-  IonGrid,
-  IonRow,
-  IonCol,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonTextarea,
-  IonText,
-  IonButton,
-  IonToast,
-} from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
 import { RestTimer } from '@/components/coachbyte/RestTimer';
@@ -69,7 +55,6 @@ export function TodayPage() {
   const resetTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const isEditingRef = useRef(false);
 
-  // Cleanup debounce/timeout timers on unmount
   useEffect(() => {
     return () => {
       if (summaryDebounceRef.current) clearTimeout(summaryDebounceRef.current);
@@ -85,7 +70,6 @@ export function TodayPage() {
     if (!user) return;
     setLoadError(null);
 
-    // Ensure daily plan exists
     const { data: planResult, error: planErr } = await coachbyte().rpc('ensure_daily_plan', { p_day: today });
 
     if (planErr) {
@@ -97,7 +81,6 @@ export function TodayPage() {
     const result = planResult as { plan_id: string; status: string };
     setPlanId(result.plan_id);
 
-    // Load planned sets with exercise names
     const { data: plannedData } = await coachbyte()
       .from('planned_sets')
       .select(
@@ -106,7 +89,6 @@ export function TodayPage() {
       .eq('plan_id', result.plan_id)
       .order('"order"');
 
-    // Load completed sets
     const { data: completedData } = await coachbyte()
       .from('completed_sets')
       .select('completed_set_id, planned_set_id, actual_reps, actual_load, completed_at, exercises(name)')
@@ -139,7 +121,6 @@ export function TodayPage() {
 
     setCompletedSets(completedMapped);
 
-    // Load plan summary and notes
     const { data: planData } = await coachbyte()
       .from('daily_plans')
       .select('summary, notes')
@@ -151,7 +132,6 @@ export function TodayPage() {
     setLoading(false);
   }, [user, today]);
 
-  // Load exercises for ad-hoc form
   useEffect(() => {
     if (!user) return;
     coachbyte()
@@ -164,7 +144,6 @@ export function TodayPage() {
       });
   }, [user]);
 
-  // Load timer state
   const loadTimer = useCallback(async () => {
     if (!user) return;
     const { data } = await coachbyte()
@@ -185,15 +164,12 @@ export function TodayPage() {
     }
   }, [user]);
 
-  // Initial load
   useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadPlan();
     loadTimer();
   }, [loadPlan, loadTimer]);
 
-  // Realtime subscriptions
   useEffect(() => {
     if (!user) return;
 
@@ -226,7 +202,6 @@ export function TodayPage() {
   const handleCompleteSet = async (reps: number, load: number) => {
     if (!planId || !user) return;
 
-    // Capture the exercise being completed (next incomplete set) before RPC
     const nextSet = sets.find((s) => !s.completed);
     const completedExerciseId = nextSet?.exercise_id;
     const completedExerciseName = nextSet?.exercise_name;
@@ -242,41 +217,25 @@ export function TodayPage() {
       return;
     }
 
-    // Auto-start timer with returned rest_seconds
     const result = data as { rest_seconds: number | null }[] | null;
     const restSeconds = result?.[0]?.rest_seconds;
     if (restSeconds && restSeconds > 0) {
       await startTimer(restSeconds);
     }
 
-    // Check for new PR: compute Epley 1RM for the just-completed set
     if (completedExerciseId && reps > 0 && load > 0) {
       const newE1RM = epley1RM(load, reps);
 
-      // Fetch all previous completed sets for this exercise (excluding the one just completed)
       const { data: prevSets } = await coachbyte()
         .from('completed_sets')
         .select('actual_reps, actual_load')
         .eq('exercise_id', completedExerciseId)
         .eq('user_id', user.id);
 
-      // Compute the previous best e1RM from all historical sets
-      let prevBestE1RM = 0;
-      for (const ps of (prevSets ?? []) as { actual_reps: number; actual_load: string | number }[]) {
-        const e = epley1RM(Number(ps.actual_load), ps.actual_reps);
-        if (e > prevBestE1RM) prevBestE1RM = e;
-      }
-
-      // The new set is already included in prevSets (it was just inserted by the RPC),
-      // so a PR is when newE1RM >= prevBestE1RM and it strictly exceeds any *other* set.
-      // Since the just-completed set is in the query results, prevBestE1RM includes it.
-      // We need to check if newE1RM equals prevBestE1RM (meaning this set IS the new best).
-      // To detect a true NEW PR, we check if the best *without* this set's contribution is lower.
       let prevBestWithout = 0;
       for (const ps of (prevSets ?? []) as { actual_reps: number; actual_load: string | number }[]) {
         const r = ps.actual_reps;
         const l = Number(ps.actual_load);
-        // Skip entries that exactly match the just-completed set (the new one)
         if (r === reps && l === load) continue;
         const e = epley1RM(l, r);
         if (e > prevBestWithout) prevBestWithout = e;
@@ -285,7 +244,6 @@ export function TodayPage() {
       if (newE1RM > prevBestWithout && prevBestWithout > 0) {
         setPrToast(`NEW PR! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT} (was ${prevBestWithout})`);
       } else if (newE1RM > 0 && prevBestWithout === 0) {
-        // First set ever for this exercise — still celebrate
         setPrToast(`First record! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT}`);
       }
     }
@@ -300,11 +258,7 @@ export function TodayPage() {
       .update({ [field]: value })
       .eq('planned_set_id', plannedSetId);
     isEditingRef.current = false;
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    // Realtime will handle the refresh after isEditing resets
+    if (err) setError(err.message);
   };
 
   const deletePlannedSet = async (plannedSetId: string) => {
@@ -367,11 +321,8 @@ export function TodayPage() {
       .from('timers')
       .update({ state: 'paused', paused_at: new Date().toISOString(), elapsed_before_pause: Math.max(0, elapsed) })
       .eq('user_id', user.id);
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    await loadTimer();
+    if (err) setError(err.message);
+    else await loadTimer();
   };
 
   const resumeTimer = async () => {
@@ -382,21 +333,15 @@ export function TodayPage() {
       .from('timers')
       .update({ state: 'running', end_time: endTime, paused_at: null })
       .eq('user_id', user.id);
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    await loadTimer();
+    if (err) setError(err.message);
+    else await loadTimer();
   };
 
   const resetTimer = async () => {
     if (!user) return;
     const { error: err } = await coachbyte().from('timers').delete().eq('user_id', user.id);
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    setTimer(DEFAULT_TIMER);
+    if (err) setError(err.message);
+    else setTimer(DEFAULT_TIMER);
   };
 
   const handleTimerExpired = async () => {
@@ -449,9 +394,7 @@ export function TodayPage() {
     setSummary(value);
     if (!planId) return;
     clearTimeout(summaryDebounceRef.current);
-    summaryDebounceRef.current = setTimeout(() => {
-      saveSummary(value);
-    }, 500);
+    summaryDebounceRef.current = setTimeout(() => saveSummary(value), 500);
   };
 
   const handleSummaryBlur = () => {
@@ -472,9 +415,7 @@ export function TodayPage() {
     setNotes(value);
     if (!planId) return;
     clearTimeout(notesDebounceRef.current);
-    notesDebounceRef.current = setTimeout(() => {
-      saveNotes(value);
-    }, 500);
+    notesDebounceRef.current = setTimeout(() => saveNotes(value), 500);
   };
 
   const handleNotesBlur = () => {
@@ -484,13 +425,11 @@ export function TodayPage() {
 
   const deleteCompletedSet = async (completedSetId: string) => {
     if (confirmDeleteId !== completedSetId) {
-      // First click — show confirm
       setConfirmDeleteId(completedSetId);
       clearTimeout(confirmTimeoutRef.current);
       confirmTimeoutRef.current = setTimeout(() => setConfirmDeleteId(null), 3000);
       return;
     }
-    // Second click — delete
     clearTimeout(confirmTimeoutRef.current);
     setConfirmDeleteId(null);
     const { error: err } = await coachbyte().from('completed_sets').delete().eq('completed_set_id', completedSetId);
@@ -508,7 +447,6 @@ export function TodayPage() {
       resetTimeoutRef.current = setTimeout(() => setConfirmReset(false), 3000);
       return;
     }
-    // Confirmed — delete the plan (cascade deletes planned_sets)
     clearTimeout(resetTimeoutRef.current);
     setConfirmReset(false);
     if (!planId) return;
@@ -517,164 +455,191 @@ export function TodayPage() {
       setError(err.message);
       return;
     }
-    // Reload triggers ensure_daily_plan which recreates from split template
     await loadPlan();
   };
 
   if (loading) {
     return (
       <CoachLayout title="Today">
-        <IonSpinner />
+        <p className="muted-text">Loading workout...</p>
       </CoachLayout>
     );
   }
 
   return (
     <CoachLayout title="Today">
-      <h2>
-        TODAY'S WORKOUT <span style={{ float: 'right', fontWeight: 'normal', fontSize: '1rem' }}>{today}</span>
-      </h2>
-
-      {loadError && (
-        <IonCard color="danger" data-testid="load-error">
-          <IonCardContent>
-            <p>Failed to load data: {loadError}</p>
-            <IonButton onClick={loadPlan}>Retry</IonButton>
-          </IonCardContent>
-        </IonCard>
-      )}
-
-      {error && (
-        <IonText color="danger">
-          <p>{error}</p>
-        </IonText>
-      )}
-
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
-        <IonButton
-          fill="outline"
-          color={confirmReset ? 'danger' : 'medium'}
-          size="small"
-          onClick={resetPlan}
-          data-testid="reset-plan-btn"
-        >
-          {confirmReset ? 'Confirm Reset?' : 'Reset Plan'}
-        </IonButton>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '2px solid #eee',
+          paddingBottom: 10,
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ margin: 0 }}>Today's Workout</h2>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
+          <span className="muted-text" style={{ fontSize: 14 }}>
+            {today}
+          </span>
+          <button
+            className={`btn ${confirmReset ? 'btn-red' : 'btn-gray'} btn-sm`}
+            onClick={resetPlan}
+            data-testid="reset-plan-btn"
+          >
+            {confirmReset ? 'Confirm Reset?' : 'Reset Plan'}
+          </button>
+        </div>
       </div>
 
-      <IonGrid>
-        <IonRow>
-          <IonCol size="12" sizeMd="7">
-            <SetQueue
-              sets={sets}
-              onComplete={handleCompleteSet}
-              onAdHoc={() => setShowAdHoc(true)}
-              onUpdateSet={updatePlannedSet}
-              onDeleteSet={deletePlannedSet}
-              onAddSet={() => setAddingPlanned(true)}
-              timerState={timer.state}
-              disabled={false}
-            />
+      {loadError && (
+        <div className="card" style={{ borderColor: '#dc3545' }} data-testid="load-error">
+          <div className="card-body">
+            <p className="error-text">Failed to load data: {loadError}</p>
+            <button className="btn btn-blue" onClick={loadPlan}>
+              Retry
+            </button>
+          </div>
+        </div>
+      )}
 
-            {showAdHoc && (
-              <AdHocSetForm exercises={exercises} onSubmit={handleAdHocSubmit} onCancel={() => setShowAdHoc(false)} />
-            )}
+      {error && <p className="error-text">{error}</p>}
 
-            {addingPlanned && (
-              <AdHocSetForm exercises={exercises} onSubmit={addPlannedSet} onCancel={() => setAddingPlanned(false)} />
-            )}
-          </IonCol>
+      {prToast && (
+        <div
+          style={{
+            background: '#d4edda',
+            color: '#155724',
+            padding: '12px 16px',
+            borderRadius: 8,
+            marginBottom: 16,
+            border: '1px solid #c3e6cb',
+            fontWeight: 'bold',
+          }}
+          data-testid="pr-toast"
+        >
+          {prToast}
+          <button
+            className="btn-clear"
+            onClick={() => setPrToast(null)}
+            style={{ float: 'right', cursor: 'pointer', background: 'none', border: 'none', fontWeight: 'bold' }}
+          >
+            x
+          </button>
+        </div>
+      )}
 
-          <IonCol size="12" sizeMd="5">
-            <RestTimer
-              endTime={timer.end_time}
-              state={timer.state}
-              durationSeconds={timer.duration_seconds}
-              elapsedBeforePause={timer.elapsed_before_pause}
-              onStart={(secs) => startTimer(secs)}
-              onPause={pauseTimer}
-              onResume={resumeTimer}
-              onReset={resetTimer}
-              onExpired={handleTimerExpired}
-            />
-
-            <IonCard>
-              <IonCardHeader>
-                <IonCardTitle>COMPLETED SETS</IonCardTitle>
-              </IonCardHeader>
-              <IonCardContent>
-                {completedSets.length === 0 ? (
-                  <p>No sets completed yet.</p>
-                ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-                    <thead>
-                      <tr>
-                        <th style={{ textAlign: 'left' }}>#</th>
-                        <th style={{ textAlign: 'left' }}>Exercise</th>
-                        <th style={{ textAlign: 'left' }}>Reps</th>
-                        <th style={{ textAlign: 'left' }}>Load</th>
-                        <th></th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {completedSets.map((cs, i) => (
-                        <tr key={cs.completed_set_id} data-testid={`completed-row-${i + 1}`}>
-                          <td>{i + 1}</td>
-                          <td>{cs.exercise_name}</td>
-                          <td>{cs.actual_reps}</td>
-                          <td>
-                            {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
-                          </td>
-                          <td>
-                            <IonButton
-                              fill="clear"
-                              color={confirmDeleteId === cs.completed_set_id ? 'warning' : 'medium'}
-                              size="small"
-                              onClick={() => deleteCompletedSet(cs.completed_set_id)}
-                              data-testid={`delete-completed-${i + 1}`}
-                            >
-                              {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
-                            </IonButton>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-              </IonCardContent>
-            </IonCard>
-
-            <IonTextarea
-              label="Workout Notes"
-              value={notes}
-              onIonInput={(e) => handleNotesChange(e.detail.value ?? '')}
-              onIonBlur={handleNotesBlur}
-              data-testid="notes-textarea"
-              rows={4}
-              placeholder="How did the workout feel? Any observations..."
-            />
-          </IonCol>
-        </IonRow>
-      </IonGrid>
-
-      <IonTextarea
-        label="Summary"
-        value={summary}
-        onIonInput={(e) => handleSummaryChange(e.detail.value ?? '')}
-        onIonBlur={handleSummaryBlur}
-        data-testid="summary-textarea"
-        rows={3}
+      <SetQueue
+        sets={sets}
+        onComplete={handleCompleteSet}
+        onAdHoc={() => setShowAdHoc(true)}
+        onUpdateSet={updatePlannedSet}
+        onDeleteSet={deletePlannedSet}
+        onAddSet={() => setAddingPlanned(true)}
+        timerState={timer.state}
+        disabled={false}
       />
 
-      <IonToast
-        isOpen={prToast !== null}
-        message={prToast ?? ''}
-        duration={4000}
-        color="success"
-        position="top"
-        onDidDismiss={() => setPrToast(null)}
-        data-testid="pr-toast"
-      />
+      {showAdHoc && (
+        <AdHocSetForm exercises={exercises} onSubmit={handleAdHocSubmit} onCancel={() => setShowAdHoc(false)} />
+      )}
+
+      {addingPlanned && (
+        <AdHocSetForm exercises={exercises} onSubmit={addPlannedSet} onCancel={() => setAddingPlanned(false)} />
+      )}
+
+      <div className="workout-columns">
+        {/* Completed Sets */}
+        <div className="card">
+          <h3 className="card-header">Completed Sets ({completedSets.length} done)</h3>
+          <div className="card-body">
+            {completedSets.length === 0 ? (
+              <p className="muted-text" style={{ fontStyle: 'italic', textAlign: 'center' }}>
+                No sets completed yet
+              </p>
+            ) : (
+              <table>
+                <thead>
+                  <tr>
+                    <th>#</th>
+                    <th>Exercise</th>
+                    <th>Reps</th>
+                    <th>Load</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {completedSets.map((cs, i) => (
+                    <tr key={cs.completed_set_id} data-testid={`completed-row-${i + 1}`}>
+                      <td>{i + 1}</td>
+                      <td>
+                        <strong>{cs.exercise_name}</strong>
+                      </td>
+                      <td>
+                        <strong>{cs.actual_reps}</strong>
+                      </td>
+                      <td>
+                        <strong>
+                          {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
+                        </strong>
+                      </td>
+                      <td>
+                        <button
+                          className={`btn btn-sm ${confirmDeleteId === cs.completed_set_id ? 'btn-orange' : 'btn-gray'}`}
+                          onClick={() => deleteCompletedSet(cs.completed_set_id)}
+                          data-testid={`delete-completed-${i + 1}`}
+                        >
+                          {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </div>
+
+        {/* Timer */}
+        <RestTimer
+          endTime={timer.end_time}
+          state={timer.state}
+          durationSeconds={timer.duration_seconds}
+          elapsedBeforePause={timer.elapsed_before_pause}
+          onStart={(secs) => startTimer(secs)}
+          onPause={pauseTimer}
+          onResume={resumeTimer}
+          onReset={resetTimer}
+          onExpired={handleTimerExpired}
+        />
+      </div>
+
+      {/* Notes */}
+      <div className="summary-section" style={{ marginBottom: 20 }}>
+        <h3>Workout Notes</h3>
+        <textarea
+          rows={4}
+          value={notes}
+          onChange={(e) => handleNotesChange(e.target.value)}
+          onBlur={handleNotesBlur}
+          placeholder="How did the workout feel? Any observations..."
+          data-testid="notes-textarea"
+        />
+      </div>
+
+      {/* Summary */}
+      <div className="summary-section">
+        <h3>Summary</h3>
+        <textarea
+          rows={3}
+          value={summary}
+          onChange={(e) => handleSummaryChange(e.target.value)}
+          onBlur={handleSummaryBlur}
+          placeholder="Add your workout summary here..."
+          data-testid="summary-textarea"
+        />
+      </div>
     </CoachLayout>
   );
 }

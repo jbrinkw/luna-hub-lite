@@ -1,24 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { IonButton, IonCard, IonCardContent, IonCardHeader, IonCardTitle, IonInput } from '@ionic/react';
 
 interface RestTimerProps {
-  /** Timer end time (server-derived) */
   endTime?: string | null;
-  /** Timer state from DB */
   state: 'running' | 'paused' | 'expired' | 'idle';
-  /** Duration in seconds */
   durationSeconds: number;
-  /** Elapsed before pause (for paused timers) */
   elapsedBeforePause: number;
-  /** Called to start/restart timer */
   onStart: (seconds: number) => void;
-  /** Called to pause */
   onPause: () => void;
-  /** Called to resume */
   onResume: () => void;
-  /** Called to reset/dismiss */
   onReset: () => void;
-  /** Called when timer expires (remaining reaches 0) */
   onExpired?: () => void;
 }
 
@@ -50,7 +40,6 @@ export function RestTimer({
     }
   }, []);
 
-  // Calculate remaining from end_time (handles tab recovery)
   const calcRemaining = useCallback(() => {
     if (!endTime) return 0;
     return Math.max(0, Math.ceil((new Date(endTime).getTime() - Date.now()) / 1000));
@@ -59,8 +48,8 @@ export function RestTimer({
   useEffect(() => {
     clearTimer();
 
-    /* eslint-disable react-hooks/set-state-in-effect */
     if (state === 'running' && endTime) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       setRemaining(calcRemaining());
       intervalRef.current = setInterval(() => {
         const r = calcRemaining();
@@ -77,12 +66,10 @@ export function RestTimer({
     } else {
       setRemaining(0);
     }
-    /* eslint-enable react-hooks/set-state-in-effect */
 
     return clearTimer;
   }, [state, endTime, durationSeconds, elapsedBeforePause, calcRemaining, clearTimer, onExpired]);
 
-  // Tab focus recovery
   useEffect(() => {
     const handleVisibility = () => {
       if (!document.hidden && state === 'running' && endTime) {
@@ -102,57 +89,54 @@ export function RestTimer({
   };
 
   return (
-    <IonCard data-testid="rest-timer">
-      <IonCardHeader>
-        <IonCardTitle>Rest Timer</IonCardTitle>
-      </IonCardHeader>
-      <IonCardContent>
-        <div
-          data-testid="timer-display"
-          style={{ fontSize: '3rem', fontFamily: 'monospace', textAlign: 'center', margin: '16px 0' }}
-        >
+    <div className="card timer-card" data-testid="rest-timer">
+      <h3 className="card-header">Rest Timer</h3>
+      <div className="card-body">
+        <div className="timer-big" data-testid="timer-display">
           {formatTime(remaining)}
         </div>
 
         {state === 'expired' && (
-          <p data-testid="timer-expired" style={{ textAlign: 'center', fontWeight: 'bold' }}>
+          <p data-testid="timer-expired" style={{ textAlign: 'center', fontWeight: 'bold', color: '#dc3545' }}>
             Timer expired
           </p>
         )}
 
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', flexWrap: 'wrap' }}>
+        <div className="timer-controls">
           {state === 'running' && (
-            <IonButton onClick={onPause} data-testid="pause-btn">
+            <button className="btn btn-blue" onClick={onPause} data-testid="pause-btn">
               Pause
-            </IonButton>
+            </button>
           )}
           {state === 'paused' && (
-            <IonButton onClick={onResume} data-testid="resume-btn">
+            <button className="btn btn-blue" onClick={onResume} data-testid="resume-btn">
               Resume
-            </IonButton>
+            </button>
           )}
           {(state === 'running' || state === 'paused' || state === 'expired') && (
-            <IonButton onClick={onReset} data-testid="reset-btn">
+            <button className="btn btn-gray" onClick={onReset} data-testid="reset-btn">
               Reset
-            </IonButton>
+            </button>
           )}
         </div>
 
-        <div style={{ display: 'flex', gap: '8px', marginTop: '12px', alignItems: 'end' }}>
-          <IonInput
-            label="Custom (seconds)"
-            type="number"
-            min="0"
-            value={customDuration}
-            onIonInput={(e) => setCustomDuration(e.detail.value ?? '')}
-            data-testid="custom-duration-input"
-          />
-          <IonButton onClick={handleCustomStart} data-testid="custom-start-btn">
+        <div className="timer-custom">
+          <div className="form-group" style={{ flex: 1 }}>
+            <label>Custom (seconds)</label>
+            <input
+              type="number"
+              value={customDuration}
+              onChange={(e) => setCustomDuration(e.target.value)}
+              className="input-full"
+              data-testid="custom-duration-input"
+            />
+          </div>
+          <button className="btn btn-blue" onClick={handleCustomStart} data-testid="custom-start-btn">
             Start
-          </IonButton>
+          </button>
         </div>
-      </IonCardContent>
-    </IonCard>
+      </div>
+    </div>
   );
 }
 

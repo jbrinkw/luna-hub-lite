@@ -1,18 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import {
-  IonSpinner,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonButton,
-  IonInput,
-  IonCheckbox,
-  IonSelect,
-  IonSelectOption,
-  IonTextarea,
-  IonText,
-} from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
@@ -77,7 +63,6 @@ export function SplitPage() {
   }, [user]);
 
   useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadSplits();
   }, [loadSplits]);
@@ -182,185 +167,192 @@ export function SplitPage() {
   if (loading) {
     return (
       <CoachLayout title="Split">
-        <IonSpinner data-testid="split-loading" />
+        <p className="muted-text" data-testid="split-loading">
+          Loading split...
+        </p>
       </CoachLayout>
     );
   }
 
   return (
     <CoachLayout title="Split">
-      <h2>WEEKLY SPLIT PLANNER</h2>
-      {saveError && (
-        <IonText color="danger">
-          <p>{saveError}</p>
-        </IonText>
-      )}
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '2px solid #eee',
+          paddingBottom: 10,
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ margin: 0 }}>Weekly Split Planner</h2>
+      </div>
+
+      {saveError && <p className="error-text">{saveError}</p>}
 
       {splits.map((day) => (
-        <IonCard key={day.weekday} data-testid={`day-${day.weekday}`}>
-          <IonCardHeader>
-            <IonCardTitle>{WEEKDAYS[day.weekday]}</IonCardTitle>
-          </IonCardHeader>
-          <IonCardContent>
-            {day.template_sets.length === 0 ? (
-              <p data-testid={`day-${day.weekday}-empty`}>Rest day (no exercises)</p>
-            ) : (
-              <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid={`day-${day.weekday}-table`}>
-                <thead>
-                  <tr>
-                    <th style={{ textAlign: 'left' }}>#</th>
-                    <th style={{ textAlign: 'left' }}>Exercise</th>
-                    <th style={{ textAlign: 'left' }}>Reps</th>
-                    <th style={{ textAlign: 'left' }}>Load</th>
-                    <th style={{ textAlign: 'left' }}>Rel%</th>
-                    <th style={{ textAlign: 'left' }}>Rest</th>
-                    <th></th>
+        <div className="split-day" key={day.weekday} data-testid={`day-${day.weekday}`}>
+          <h3>{WEEKDAYS[day.weekday]}</h3>
+
+          {day.template_sets.length === 0 ? (
+            <p className="muted-text" style={{ fontStyle: 'italic' }} data-testid={`day-${day.weekday}-empty`}>
+              Rest day (no exercises)
+            </p>
+          ) : (
+            <table data-testid={`day-${day.weekday}-table`}>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Exercise</th>
+                  <th>Reps</th>
+                  <th>Load</th>
+                  <th>Rel%</th>
+                  <th>Rest</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {day.template_sets.map((set, i) => (
+                  <tr key={i} data-testid={`day-${day.weekday}-set-${i}`}>
+                    <td data-testid={`day-${day.weekday}-set-${i}-order`}>{set.order}</td>
+                    <td>
+                      <select
+                        value={set.exercise_id}
+                        aria-label="Exercise"
+                        onChange={(e) => {
+                          const ex = exercises.find((ex) => ex.exercise_id === e.target.value);
+                          updateSet(day.weekday, i, 'exercise_id', e.target.value);
+                          if (ex) updateSet(day.weekday, i, 'exercise_name', ex.name);
+                        }}
+                        data-testid={`day-${day.weekday}-set-${i}-exercise`}
+                      >
+                        {exercises.map((ex) => (
+                          <option key={ex.exercise_id} value={ex.exercise_id}>
+                            {ex.name}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        className="input-narrow"
+                        min="0"
+                        aria-label="Target reps"
+                        value={set.target_reps ?? ''}
+                        onChange={(e) =>
+                          updateSet(day.weekday, i, 'target_reps', e.target.value ? Number(e.target.value) : null)
+                        }
+                        data-testid={`day-${day.weekday}-set-${i}-reps`}
+                      />
+                    </td>
+                    <td>
+                      {set.target_load_percentage ? (
+                        <input
+                          type="number"
+                          className="input-load"
+                          min="0"
+                          aria-label="Load percentage"
+                          value={set.target_load_percentage}
+                          onChange={(e) =>
+                            updateSet(
+                              day.weekday,
+                              i,
+                              'target_load_percentage',
+                              e.target.value ? Number(e.target.value) : null,
+                            )
+                          }
+                          data-testid={`day-${day.weekday}-set-${i}-load-pct`}
+                        />
+                      ) : (
+                        <input
+                          type="number"
+                          className="input-load"
+                          min="0"
+                          aria-label="Target load"
+                          value={set.target_load ?? ''}
+                          onChange={(e) =>
+                            updateSet(day.weekday, i, 'target_load', e.target.value ? Number(e.target.value) : null)
+                          }
+                          data-testid={`day-${day.weekday}-set-${i}-load`}
+                        />
+                      )}
+                    </td>
+                    <td>
+                      <input
+                        type="checkbox"
+                        checked={set.target_load_percentage !== null}
+                        aria-label="Use relative load percentage"
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            updateSet(day.weekday, i, 'target_load_percentage', set.target_load_percentage ?? 80);
+                            updateSet(day.weekday, i, 'target_load', null);
+                          } else {
+                            updateSet(day.weekday, i, 'target_load_percentage', null);
+                          }
+                        }}
+                        data-testid={`day-${day.weekday}-set-${i}-rel`}
+                      />
+                    </td>
+                    <td>
+                      <input
+                        type="number"
+                        className="input-rest"
+                        min="0"
+                        aria-label="Rest seconds"
+                        value={set.rest_seconds}
+                        onChange={(e) =>
+                          updateSet(day.weekday, i, 'rest_seconds', e.target.value ? Number(e.target.value) : 90)
+                        }
+                        data-testid={`day-${day.weekday}-set-${i}-rest`}
+                      />
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-red btn-sm"
+                        onClick={() => removeSet(day.weekday, i)}
+                        data-testid={`day-${day.weekday}-set-${i}-delete`}
+                        aria-label={`Remove set ${i + 1} from ${WEEKDAYS[day.weekday]}`}
+                      >
+                        Remove
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {day.template_sets.map((set, i) => (
-                    <tr key={i} data-testid={`day-${day.weekday}-set-${i}`}>
-                      <td data-testid={`day-${day.weekday}-set-${i}-order`}>{set.order}</td>
-                      <td>
-                        <IonSelect
-                          value={set.exercise_id}
-                          aria-label="Exercise"
-                          onIonChange={(e) => {
-                            const ex = exercises.find((ex) => ex.exercise_id === e.detail.value);
-                            updateSet(day.weekday, i, 'exercise_id', e.detail.value);
-                            if (ex) updateSet(day.weekday, i, 'exercise_name', ex.name);
-                          }}
-                          interface="popover"
-                          data-testid={`day-${day.weekday}-set-${i}-exercise`}
-                        >
-                          {exercises.map((ex) => (
-                            <IonSelectOption key={ex.exercise_id} value={ex.exercise_id}>
-                              {ex.name}
-                            </IonSelectOption>
-                          ))}
-                        </IonSelect>
-                      </td>
-                      <td>
-                        <IonInput
-                          type="number"
-                          min="0"
-                          aria-label="Target reps"
-                          value={set.target_reps}
-                          onIonInput={(e) =>
-                            updateSet(day.weekday, i, 'target_reps', e.detail.value ? Number(e.detail.value) : null)
-                          }
-                          data-testid={`day-${day.weekday}-set-${i}-reps`}
-                          style={{ width: '60px' }}
-                        />
-                      </td>
-                      <td>
-                        {set.target_load_percentage ? (
-                          <IonInput
-                            type="number"
-                            min="0"
-                            aria-label="Load percentage"
-                            value={set.target_load_percentage}
-                            onIonInput={(e) =>
-                              updateSet(
-                                day.weekday,
-                                i,
-                                'target_load_percentage',
-                                e.detail.value ? Number(e.detail.value) : null,
-                              )
-                            }
-                            data-testid={`day-${day.weekday}-set-${i}-load-pct`}
-                            style={{ width: '70px' }}
-                          />
-                        ) : (
-                          <IonInput
-                            type="number"
-                            min="0"
-                            aria-label="Target load"
-                            value={set.target_load}
-                            onIonInput={(e) =>
-                              updateSet(day.weekday, i, 'target_load', e.detail.value ? Number(e.detail.value) : null)
-                            }
-                            data-testid={`day-${day.weekday}-set-${i}-load`}
-                            style={{ width: '80px' }}
-                          />
-                        )}
-                      </td>
-                      <td>
-                        <IonCheckbox
-                          checked={set.target_load_percentage !== null}
-                          aria-label="Use relative load percentage"
-                          onIonChange={(e) => {
-                            if (e.detail.checked) {
-                              updateSet(day.weekday, i, 'target_load_percentage', set.target_load_percentage ?? 80);
-                              updateSet(day.weekday, i, 'target_load', null);
-                            } else {
-                              updateSet(day.weekday, i, 'target_load_percentage', null);
-                            }
-                          }}
-                          data-testid={`day-${day.weekday}-set-${i}-rel`}
-                        />
-                      </td>
-                      <td>
-                        <IonInput
-                          type="number"
-                          min="0"
-                          aria-label="Rest seconds"
-                          value={set.rest_seconds}
-                          onIonInput={(e) =>
-                            updateSet(day.weekday, i, 'rest_seconds', e.detail.value ? Number(e.detail.value) : 90)
-                          }
-                          data-testid={`day-${day.weekday}-set-${i}-rest`}
-                          style={{ width: '60px' }}
-                        />
-                      </td>
-                      <td>
-                        <IonButton
-                          size="small"
-                          fill="clear"
-                          color="danger"
-                          onClick={() => removeSet(day.weekday, i)}
-                          data-testid={`day-${day.weekday}-set-${i}-delete`}
-                          aria-label={`Remove set ${i + 1} from ${WEEKDAYS[day.weekday]}`}
-                        >
-                          ✕
-                        </IonButton>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+                ))}
+              </tbody>
+            </table>
+          )}
 
-            <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-              <IonButton
-                size="small"
-                onClick={() => addSet(day.weekday)}
-                disabled={exercises.length === 0}
-                data-testid={`day-${day.weekday}-add`}
-              >
-                + Add Exercise
-              </IonButton>
-              <IonButton
-                size="small"
-                fill="outline"
-                onClick={() => saveSplit(day)}
-                disabled={savingDay === day.weekday}
-                data-testid={`day-${day.weekday}-save`}
-              >
-                {savingDay === day.weekday ? 'Saving...' : 'Save'}
-              </IonButton>
-            </div>
+          <div style={{ marginTop: 8, display: 'flex', gap: 8 }}>
+            <button
+              className="btn btn-green btn-sm"
+              onClick={() => addSet(day.weekday)}
+              disabled={exercises.length === 0}
+              data-testid={`day-${day.weekday}-add`}
+            >
+              + Add Exercise
+            </button>
+            <button
+              className="btn btn-outline btn-sm"
+              onClick={() => saveSplit(day)}
+              disabled={savingDay === day.weekday}
+              data-testid={`day-${day.weekday}-save`}
+            >
+              {savingDay === day.weekday ? 'Saving...' : 'Save'}
+            </button>
+          </div>
 
-            <IonTextarea
-              label="Notes"
+          <div className="split-notes" style={{ marginTop: 8 }}>
+            <label style={{ fontSize: 14, fontWeight: 'bold', display: 'block', marginBottom: 4 }}>Notes</label>
+            <textarea
               value={day.split_notes}
-              onIonInput={(e) => updateNotes(day.weekday, e.detail.value ?? '')}
+              onChange={(e) => updateNotes(day.weekday, e.target.value)}
               data-testid={`day-${day.weekday}-notes`}
               rows={2}
-              style={{ marginTop: '8px' }}
             />
-          </IonCardContent>
-        </IonCard>
+          </div>
+        </div>
       ))}
     </CoachLayout>
   );

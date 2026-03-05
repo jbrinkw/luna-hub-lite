@@ -1,14 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import {
-  IonSpinner,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonChip,
-  IonButton,
-  IonInput,
-} from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase, coachbyte } from '@/shared/supabase';
@@ -115,7 +105,6 @@ export function PrsPage() {
   }, [user, dateRange]);
 
   useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
     // eslint-disable-next-line react-hooks/set-state-in-effect
     computePRs();
   }, [computePRs]);
@@ -124,7 +113,6 @@ export function PrsPage() {
     if (!user) return;
 
     const loadExercisesAndSettings = async () => {
-      // Fetch all exercises and saved PR tracking preference in parallel
       const [exercisesRes, settingsRes] = await Promise.all([
         supabase
           .schema('coachbyte')
@@ -138,7 +126,6 @@ export function PrsPage() {
       const exercises = (exercisesRes.data ?? []) as { exercise_id: string; name: string }[];
       setAllExercises(exercises);
 
-      // If user has saved tracked exercise IDs, filter to those; otherwise default to all
       const savedIds: string[] | null = settingsRes.data?.pr_tracked_exercise_ids ?? null;
       if (savedIds && Array.isArray(savedIds)) {
         const savedSet = new Set(savedIds);
@@ -147,8 +134,6 @@ export function PrsPage() {
         setTrackedExercises(exercises);
       }
     };
-
-    // Async data fetching with setState is the standard pattern for this use case
 
     loadExercisesAndSettings();
   }, [user]);
@@ -166,7 +151,6 @@ export function PrsPage() {
     if (ex && !trackedExercises.find((t) => t.exercise_id === exerciseId)) {
       const updated = [...trackedExercises, ex];
       setTrackedExercises(updated);
-      // Fire-and-forget persist to DB
       void saveTrackedExercises(updated.map((e) => e.exercise_id));
     }
     setSearchText('');
@@ -175,7 +159,6 @@ export function PrsPage() {
   const removeTrackedExercise = (exerciseId: string) => {
     const updated = trackedExercises.filter((e) => e.exercise_id !== exerciseId);
     setTrackedExercises(updated);
-    // Fire-and-forget persist to DB
     void saveTrackedExercises(updated.map((e) => e.exercise_id));
   };
 
@@ -192,56 +175,76 @@ export function PrsPage() {
   if (loading) {
     return (
       <CoachLayout title="PRs">
-        <IonSpinner data-testid="prs-loading" />
+        <p className="muted-text" data-testid="prs-loading">
+          Loading your PRs...
+        </p>
       </CoachLayout>
     );
   }
 
   return (
     <CoachLayout title="PRs">
-      <h2>PR TRACKER</h2>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '2px solid #eee',
+          paddingBottom: 10,
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ margin: 0 }}>PR Tracker</h2>
+      </div>
 
       {loadError && (
-        <IonCard color="danger" data-testid="load-error">
-          <IonCardContent>
-            <p>Failed to load data: {loadError}</p>
-            <IonButton onClick={computePRs}>Retry</IonButton>
-          </IonCardContent>
-        </IonCard>
+        <div className="card" style={{ borderColor: '#dc3545' }} data-testid="load-error">
+          <div className="card-body">
+            <p className="error-text">Failed to load data: {loadError}</p>
+            <button className="btn btn-blue" onClick={computePRs}>
+              Retry
+            </button>
+          </div>
+        </div>
       )}
 
       {filteredPRs.length === 0 ? (
-        <p data-testid="no-prs">No PRs recorded yet. Complete some sets to see your records.</p>
+        <div className="empty-state" data-testid="no-prs">
+          <h3>No PRs recorded yet</h3>
+          <p>Complete some sets to see your records.</p>
+        </div>
       ) : (
         filteredPRs.map((pr) => (
-          <IonCard key={pr.exercise_id} data-testid={`pr-card-${pr.exercise_id}`}>
-            <IonCardHeader>
-              <IonCardTitle style={{ display: 'flex', justifyContent: 'space-between' }}>
-                <span data-testid={`pr-name-${pr.exercise_id}`}>{pr.exercise_name.toUpperCase()}</span>
-                <span data-testid={`pr-e1rm-${pr.exercise_id}`}>e1RM: {pr.e1rm}</span>
-              </IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                {pr.rep_records.map((r) => (
-                  <IonChip key={r.reps} data-testid={`pr-${pr.exercise_id}-${r.reps}rep`}>
-                    {r.reps} rep: {r.load} {WEIGHT_UNIT}
-                  </IonChip>
-                ))}
-              </div>
-            </IonCardContent>
-          </IonCard>
+          <div className="pr-card" key={pr.exercise_id} data-testid={`pr-card-${pr.exercise_id}`}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
+              <span className="pr-exercise-name" style={{ marginBottom: 0 }} data-testid={`pr-name-${pr.exercise_id}`}>
+                {pr.exercise_name}
+              </span>
+              <span
+                style={{ fontSize: 16, fontWeight: 'bold', color: '#007bff' }}
+                data-testid={`pr-e1rm-${pr.exercise_id}`}
+              >
+                e1RM: {pr.e1rm} {WEIGHT_UNIT}
+              </span>
+            </div>
+            <div className="pr-list">
+              {pr.rep_records.map((r) => (
+                <div className="pr-chip" key={r.reps} data-testid={`pr-${pr.exercise_id}-${r.reps}rep`}>
+                  {r.reps} rep{r.reps !== 1 ? 's' : ''}: {r.load} {WEIGHT_UNIT}
+                </div>
+              ))}
+            </div>
+          </div>
         ))
       )}
 
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '8px 0' }}>
-        <p data-testid="date-range-info" style={{ margin: 0, fontSize: '0.9em', color: 'var(--ion-color-medium)' }}>
+        <p data-testid="date-range-info" className="muted-text" style={{ margin: 0, fontSize: '0.9em' }}>
           {dateRange < 9999 ? `Showing PRs from last ${dateRange} days` : 'Showing PRs from all history'}
         </p>
         {dateRange < 9999 && (
-          <IonButton
-            size="small"
-            fill="outline"
+          <button
+            className="btn btn-outline btn-sm"
             data-testid="load-all-history-btn"
             onClick={() => {
               setLoading(true);
@@ -249,53 +252,71 @@ export function PrsPage() {
             }}
           >
             Load All History
-          </IonButton>
+          </button>
         )}
       </div>
 
-      <IonCard data-testid="tracked-exercises-card">
-        <IonCardHeader>
-          <IonCardTitle>Tracked Exercises</IonCardTitle>
-        </IonCardHeader>
-        <IonCardContent>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
-            <IonInput
-              value={searchText}
-              onIonInput={(e) => setSearchText(e.detail.value ?? '')}
-              placeholder="Enter exercise name..."
-              aria-label="Search exercises to track"
-              data-testid="pr-search-input"
-            />
-            {searchResults.length > 0 && (
-              <div data-testid="pr-search-results">
-                {searchResults.slice(0, 5).map((ex) => (
-                  <IonButton
-                    key={ex.exercise_id}
-                    size="small"
-                    fill="outline"
-                    onClick={() => addTrackedExercise(ex.exercise_id)}
-                    data-testid={`add-exercise-${ex.exercise_id}`}
-                  >
-                    {ex.name}
-                  </IonButton>
-                ))}
-              </div>
-            )}
-          </div>
+      <div className="tracked-section" data-testid="tracked-exercises-card">
+        <h3 style={{ marginBottom: 8, fontSize: 18, marginTop: 0 }}>Tracked Exercises</h3>
+        <p className="muted-text" style={{ fontSize: 13, marginBottom: 15 }}>
+          Add exercises to track all rep ranges for those exercises automatically.
+        </p>
 
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px' }} data-testid="tracked-chips">
-            {trackedExercises.map((ex) => (
-              <IonChip
+        <div style={{ display: 'flex', gap: 8, marginBottom: 15, alignItems: 'center' }}>
+          <input
+            type="text"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            placeholder="Enter exercise name..."
+            aria-label="Search exercises to track"
+            data-testid="pr-search-input"
+            style={{ flex: 1 }}
+          />
+        </div>
+
+        {searchResults.length > 0 && (
+          <div data-testid="pr-search-results" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 15 }}>
+            {searchResults.slice(0, 5).map((ex) => (
+              <button
                 key={ex.exercise_id}
-                onClick={() => removeTrackedExercise(ex.exercise_id)}
-                data-testid={`tracked-${ex.exercise_id}`}
+                className="btn btn-outline btn-sm"
+                onClick={() => addTrackedExercise(ex.exercise_id)}
+                data-testid={`add-exercise-${ex.exercise_id}`}
               >
-                {ex.name} ✕
-              </IonChip>
+                {ex.name}
+              </button>
             ))}
           </div>
-        </IonCardContent>
-      </IonCard>
+        )}
+
+        {trackedExercises.length === 0 ? (
+          <p className="muted-text" style={{ fontStyle: 'italic', fontSize: 13 }}>
+            No exercises being tracked
+          </p>
+        ) : (
+          <>
+            <div style={{ fontSize: 14, fontWeight: 'bold', marginBottom: 10 }}>
+              Currently Tracking ({trackedExercises.length} exercises)
+            </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }} data-testid="tracked-chips">
+              {trackedExercises.map((ex) => (
+                <div
+                  className="tracked-chip"
+                  key={ex.exercise_id}
+                  data-testid={`tracked-${ex.exercise_id}`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => removeTrackedExercise(ex.exercise_id)}
+                >
+                  <span>{ex.name}</span>
+                  <button className="btn btn-red btn-sm" style={{ padding: '2px 6px', fontSize: 11 }}>
+                    Remove
+                  </button>
+                </div>
+              ))}
+            </div>
+          </>
+        )}
+      </div>
     </CoachLayout>
   );
 }

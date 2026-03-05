@@ -1,18 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import {
-  IonSpinner,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonButton,
-  IonInput,
-  IonCheckbox,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonText,
-} from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
@@ -78,7 +64,6 @@ export function SettingsPage() {
   }, [user]);
 
   useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
     /* eslint-disable react-hooks/set-state-in-effect */
     loadSettings();
     loadExercises();
@@ -141,140 +126,146 @@ export function SettingsPage() {
   if (loading) {
     return (
       <CoachLayout title="Settings">
-        <IonSpinner data-testid="settings-loading" />
+        <p className="muted-text" data-testid="settings-loading">
+          Loading settings...
+        </p>
       </CoachLayout>
     );
   }
 
   return (
     <CoachLayout title="Settings">
-      <h2>SETTINGS</h2>
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '2px solid #eee',
+          paddingBottom: 10,
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ margin: 0 }}>Settings</h2>
+      </div>
 
-      {error && (
-        <IonText color="danger">
-          <p>{error}</p>
-        </IonText>
-      )}
+      {error && <p className="error-text">{error}</p>}
 
-      <IonCard data-testid="defaults-card">
-        <IonCardHeader>
-          <IonCardTitle>Defaults</IonCardTitle>
-        </IonCardHeader>
-        <IonCardContent>
-          <IonInput
-            label="Default Rest Duration (seconds)"
+      <div className="settings-section" data-testid="defaults-card">
+        <h3>Defaults</h3>
+        <div className="form-group" style={{ maxWidth: 300 }}>
+          <label>Default Rest Duration (seconds)</label>
+          <input
             type="number"
             min="0"
             value={settings.default_rest_seconds}
-            onIonInput={(e) => setSettings((prev) => ({ ...prev, default_rest_seconds: Number(e.detail.value) || 90 }))}
-            onIonBlur={saveSettings}
+            onChange={(e) => setSettings((prev) => ({ ...prev, default_rest_seconds: Number(e.target.value) || 90 }))}
+            onBlur={saveSettings}
             data-testid="default-rest-input"
           />
-        </IonCardContent>
-      </IonCard>
+        </div>
+      </div>
 
-      <IonCard data-testid="plate-calc-card">
-        <IonCardHeader>
-          <IonCardTitle>Plate Calculator</IonCardTitle>
-        </IonCardHeader>
-        <IonCardContent>
-          <IonInput
-            label="Bar Weight (lbs)"
+      <div className="settings-section" data-testid="plate-calc-card">
+        <h3>Plate Calculator</h3>
+        <div className="form-group" style={{ maxWidth: 300, marginBottom: 16 }}>
+          <label>Bar Weight (lbs)</label>
+          <input
             type="number"
             min="0"
             value={settings.bar_weight_lbs}
-            onIonInput={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: Number(e.detail.value) || 45 }))}
-            onIonBlur={saveSettings}
+            onChange={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: Number(e.target.value) || 45 }))}
+            onBlur={saveSettings}
             data-testid="bar-weight-input"
           />
+        </div>
 
-          <p style={{ marginTop: '12px', marginBottom: '4px' }}>Available Plates:</p>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
-            {DEFAULT_PLATES.map((plate) => (
-              <IonItem key={plate} lines="none" style={{ '--padding-start': '0' }}>
-                <IonCheckbox
-                  checked={settings.available_plates.includes(plate)}
-                  onIonChange={() => {
-                    // Compute new plates inline to avoid stale closure in saveSettings
-                    const newPlates = settings.available_plates.includes(plate)
-                      ? settings.available_plates.filter((p) => p !== plate)
-                      : [...settings.available_plates, plate].sort((a, b) => b - a);
-                    const newSettings = { ...settings, available_plates: newPlates };
-                    setSettings(newSettings);
-                    // Save with the freshly computed settings
-                    (async () => {
-                      const { error: saveErr } = await supabase
-                        .schema('coachbyte')
-                        .from('user_settings')
-                        .update({
-                          default_rest_seconds: newSettings.default_rest_seconds,
-                          bar_weight_lbs: newSettings.bar_weight_lbs,
-                          available_plates: newSettings.available_plates as any,
-                        })
-                        .eq('user_id', user!.id);
-                      if (saveErr) setError(saveErr.message);
-                    })();
-                  }}
-                  data-testid={`plate-${plate}`}
-                >
-                  {plate} lb
-                </IonCheckbox>
-              </IonItem>
-            ))}
-          </div>
-        </IonCardContent>
-      </IonCard>
+        <p style={{ marginBottom: 4, fontWeight: 'bold', fontSize: 14 }}>Available Plates:</p>
+        <div className="plate-grid">
+          {DEFAULT_PLATES.map((plate) => (
+            <label className="plate-item" key={plate}>
+              <input
+                type="checkbox"
+                checked={settings.available_plates.includes(plate)}
+                onChange={() => {
+                  const newPlates = settings.available_plates.includes(plate)
+                    ? settings.available_plates.filter((p) => p !== plate)
+                    : [...settings.available_plates, plate].sort((a, b) => b - a);
+                  const newSettings = { ...settings, available_plates: newPlates };
+                  setSettings(newSettings);
+                  (async () => {
+                    const { error: saveErr } = await supabase
+                      .schema('coachbyte')
+                      .from('user_settings')
+                      .update({
+                        default_rest_seconds: newSettings.default_rest_seconds,
+                        bar_weight_lbs: newSettings.bar_weight_lbs,
+                        available_plates: newSettings.available_plates as any,
+                      })
+                      .eq('user_id', user!.id);
+                    if (saveErr) setError(saveErr.message);
+                  })();
+                }}
+                data-testid={`plate-${plate}`}
+              />
+              {plate} lb
+            </label>
+          ))}
+        </div>
+      </div>
 
-      <IonCard data-testid="exercise-library-card">
-        <IonCardHeader>
-          <IonCardTitle>Exercise Library</IonCardTitle>
-        </IonCardHeader>
-        <IonCardContent>
-          <IonInput
+      <div className="settings-section" data-testid="exercise-library-card">
+        <h3>Exercise Library</h3>
+
+        <div style={{ marginBottom: 12 }}>
+          <input
+            type="text"
             placeholder="Search exercises..."
             value={searchText}
-            onIonInput={(e) => setSearchText(e.detail.value ?? '')}
+            onChange={(e) => setSearchText(e.target.value)}
             data-testid="exercise-search"
+            style={{ width: '100%' }}
           />
+        </div>
 
-          <IonList data-testid="exercise-list">
-            {filteredExercises.map((ex) => (
-              <IonItem key={ex.exercise_id} data-testid={`exercise-${ex.exercise_id}`}>
-                <IonLabel>
-                  {ex.name}
-                  <span style={{ color: '#888', marginLeft: '8px', fontSize: '0.85em' }}>
-                    ({ex.user_id ? 'custom' : 'global'})
-                  </span>
-                </IonLabel>
-                {ex.user_id && (
-                  <IonButton
-                    slot="end"
-                    size="small"
-                    color="danger"
-                    fill="clear"
-                    onClick={() => deleteExercise(ex.exercise_id)}
-                    data-testid={`delete-exercise-${ex.exercise_id}`}
-                  >
-                    Delete
-                  </IonButton>
-                )}
-              </IonItem>
-            ))}
-          </IonList>
+        <div data-testid="exercise-list">
+          {filteredExercises.map((ex) => (
+            <div className="exercise-list-item" key={ex.exercise_id} data-testid={`exercise-${ex.exercise_id}`}>
+              <span>
+                {ex.name}
+                <span className="exercise-tag">({ex.user_id ? 'custom' : 'global'})</span>
+              </span>
+              {ex.user_id && (
+                <button
+                  className="btn btn-red btn-sm"
+                  onClick={() => deleteExercise(ex.exercise_id)}
+                  data-testid={`delete-exercise-${ex.exercise_id}`}
+                >
+                  Delete
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
 
-          <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
-            <IonInput
-              placeholder="New exercise name..."
-              value={newExerciseName}
-              onIonInput={(e) => setNewExerciseName(e.detail.value ?? '')}
-              data-testid="new-exercise-input"
-            />
-            <IonButton onClick={addCustomExercise} disabled={!newExerciseName.trim()} data-testid="add-exercise-btn">
-              + Add Custom Exercise
-            </IonButton>
-          </div>
-        </IonCardContent>
-      </IonCard>
+        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
+          <input
+            type="text"
+            placeholder="New exercise name..."
+            value={newExerciseName}
+            onChange={(e) => setNewExerciseName(e.target.value)}
+            data-testid="new-exercise-input"
+            style={{ flex: 1 }}
+          />
+          <button
+            className="btn btn-green"
+            onClick={addCustomExercise}
+            disabled={!newExerciseName.trim()}
+            data-testid="add-exercise-btn"
+          >
+            + Add Custom Exercise
+          </button>
+        </div>
+      </div>
     </CoachLayout>
   );
 }

@@ -1,15 +1,4 @@
 import { useEffect, useState, useRef } from 'react';
-import {
-  IonButton,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonIcon,
-  IonInput,
-  IonText,
-} from '@ionic/react';
-import { closeCircleOutline } from 'ionicons/icons';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
 
@@ -33,37 +22,25 @@ interface SetQueueProps {
   onDeleteSet?: (plannedSetId: string) => void;
   onAddSet?: () => void;
   timerState?: 'running' | 'paused' | 'expired' | 'idle';
-  onTimerToggle?: () => void;
   disabled?: boolean;
 }
 
-export function SetQueue({
-  sets,
-  onComplete,
-  onAdHoc,
-  onUpdateSet,
-  onDeleteSet,
-  onAddSet,
-  timerState,
-  onTimerToggle,
-  disabled,
-}: SetQueueProps) {
+export function SetQueue({ sets, onComplete, onAdHoc, onUpdateSet, onDeleteSet, onAddSet, disabled }: SetQueueProps) {
   const nextSet = sets.find((s) => !s.completed);
   const [reps, setReps] = useState<string>(nextSet?.target_reps?.toString() ?? '');
   const [load, setLoad] = useState<string>(nextSet?.target_load?.toString() ?? '');
   const [validationError, setValidationError] = useState<string | null>(null);
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
-  // Sync reps/load inputs when the active set changes (e.g. after completing a set)
   useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setReps(nextSet?.target_reps?.toString() ?? '');
+
     setLoad(nextSet?.target_load?.toString() ?? '');
+
     setValidationError(null);
-    /* eslint-enable react-hooks/set-state-in-effect */
   }, [nextSet?.planned_set_id]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Cleanup error timeout on unmount
   useEffect(() => {
     return () => {
       clearTimeout(errorTimeoutRef.current);
@@ -71,18 +48,6 @@ export function SetQueue({
   }, []);
 
   const pendingSets = sets.filter((s) => !s.completed && s !== nextSet);
-
-  if (sets.length === 0) {
-    return (
-      <IonCard>
-        <IonCardContent>
-          <IonText>
-            <p>No workout planned for today.</p>
-          </IonText>
-        </IonCardContent>
-      </IonCard>
-    );
-  }
 
   const formatLoadDisplay = (set: PlannedSet) => {
     if (set.target_load_percentage && set.target_load) {
@@ -110,152 +75,165 @@ export function SetQueue({
     onComplete(r, l);
   };
 
-  const timerLabel =
-    timerState === 'running'
-      ? 'Pause'
-      : timerState === 'paused'
-        ? 'Resume'
-        : timerState === 'expired'
-          ? 'Timer expired'
-          : 'Start Timer';
+  if (sets.length === 0) {
+    return (
+      <div className="empty-state">
+        <h3>No workout planned for today.</h3>
+        <p>Add sets manually or configure your weekly split.</p>
+      </div>
+    );
+  }
 
   return (
-    <div>
-      {/* Next In Queue Card */}
-      {nextSet && (
-        <IonCard data-testid="next-in-queue">
-          <IonCardHeader>
-            <IonCardTitle>
-              <span>NEXT IN QUEUE</span>
-            </IonCardTitle>
-          </IonCardHeader>
-          <IonCardContent>
-            <p data-testid="next-exercise">
-              <strong>{nextSet.exercise_name}</strong> {nextSet.target_reps} x {formatLoadDisplay(nextSet)}
-            </p>
+    <>
+      {/* Next In Queue Section */}
+      <div className="next-in-queue-section" data-testid="next-in-queue">
+        <h3 style={{ marginTop: 0, marginBottom: 20, fontSize: 20, color: '#155724' }}>Next in Queue:</h3>
 
-            <div style={{ display: 'flex', gap: '16px', margin: '12px 0' }}>
-              <IonInput
-                label="Reps"
-                type="number"
-                min="0"
-                value={reps}
-                onIonInput={(e) => setReps(e.detail.value ?? '')}
-                data-testid="override-reps"
-              />
-              <IonInput
-                label="Load"
-                type="number"
-                min="0"
-                value={load}
-                onIonInput={(e) => setLoad(e.detail.value ?? '')}
-                data-testid="override-load"
-              />
+        {nextSet ? (
+          <>
+            <div className="next-set-box" data-testid="next-exercise">
+              <div className="next-set-exercise">{nextSet.exercise_name}</div>
+              <div className="next-set-detail">
+                {nextSet.target_reps} reps @ {formatLoadDisplay(nextSet)}
+              </div>
+              <div className="next-set-rest">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
             </div>
 
-            <div style={{ display: 'flex', gap: '8px' }}>
-              <IonButton onClick={handleComplete} disabled={disabled} data-testid="complete-set-btn">
+            <form
+              className="completion-form"
+              onSubmit={(e) => {
+                e.preventDefault();
+                handleComplete();
+              }}
+              data-testid="completion-form"
+            >
+              <div className="form-group">
+                <label>Exercise</label>
+                <input
+                  type="text"
+                  value={nextSet.exercise_name}
+                  readOnly
+                  style={{ width: 180, padding: 8, fontSize: 16 }}
+                  data-testid="override-exercise"
+                />
+              </div>
+              <div className="form-group">
+                <label>Reps Done</label>
+                <input
+                  type="number"
+                  value={reps}
+                  onChange={(e) => setReps(e.target.value)}
+                  style={{ width: 80, padding: 8, fontSize: 16, textAlign: 'center' }}
+                  data-testid="override-reps"
+                />
+              </div>
+              <div className="form-group">
+                <label>Weight ({WEIGHT_UNIT})</label>
+                <input
+                  type="number"
+                  value={load}
+                  onChange={(e) => setLoad(e.target.value)}
+                  style={{ width: 80, padding: 8, fontSize: 16, textAlign: 'center' }}
+                  data-testid="override-load"
+                />
+              </div>
+              <button type="submit" className="btn btn-green btn-lg" disabled={disabled} data-testid="complete-set-btn">
                 Complete Set
-              </IonButton>
-              {onTimerToggle && (
-                <IonButton onClick={onTimerToggle} disabled={timerState === 'expired'} data-testid="timer-toggle-btn">
-                  {timerLabel}
-                </IonButton>
-              )}
-              <IonButton onClick={onAdHoc} disabled={disabled} data-testid="adhoc-btn">
+              </button>
+              <button
+                type="button"
+                className="btn btn-cyan"
+                onClick={onAdHoc}
+                disabled={disabled}
+                data-testid="adhoc-btn"
+              >
                 + Ad-Hoc Set
-              </IonButton>
-            </div>
+              </button>
+            </form>
 
             {validationError && (
-              <IonText color="danger" data-testid="validation-error">
-                <p style={{ margin: '8px 0 0' }}>{validationError}</p>
-              </IonText>
+              <p className="error-text" style={{ margin: '8px 0 0' }} data-testid="validation-error">
+                {validationError}
+              </p>
             )}
-          </IonCardContent>
-        </IonCard>
-      )}
+          </>
+        ) : (
+          <div className="all-done-box">
+            <div className="all-done-text">All sets completed!</div>
+          </div>
+        )}
+      </div>
 
       {/* Pending Queue Table */}
-      <IonCard>
-        <IonCardHeader>
-          <IonCardTitle>SET QUEUE</IonCardTitle>
-        </IonCardHeader>
-        <IonCardContent>
+      <div className="card">
+        <h3 className="card-header">Set Queue ({pendingSets.length} remaining)</h3>
+        <div className="card-body">
           {pendingSets.length === 0 && !nextSet ? (
-            <p>All sets completed!</p>
+            <p className="muted-text" style={{ fontStyle: 'italic', textAlign: 'center' }}>
+              No sets remaining
+            </p>
           ) : (
-            <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <table>
               <thead>
                 <tr>
-                  <th style={{ textAlign: 'left' }}>#</th>
-                  <th style={{ textAlign: 'left' }}>Exercise</th>
-                  <th style={{ textAlign: 'left' }}>Reps</th>
-                  <th style={{ textAlign: 'left' }}>Load</th>
-                  <th style={{ textAlign: 'left' }}>Rest</th>
-                  <th></th>
+                  <th>Exercise</th>
+                  <th>Reps</th>
+                  <th>Load</th>
+                  <th>Rest</th>
+                  <th>Action</th>
                 </tr>
               </thead>
               <tbody>
                 {pendingSets.map((set) => (
                   <tr key={set.planned_set_id} data-testid={`queue-row-${set.order}`}>
-                    <td>{set.order}</td>
                     <td>{set.exercise_name}</td>
                     <td>
-                      <IonInput
+                      <input
                         type="number"
-                        min="0"
-                        aria-label={`Reps for set ${set.order}`}
-                        value={set.target_reps}
-                        onIonBlur={(e) => {
+                        className="input-narrow"
+                        defaultValue={set.target_reps ?? ''}
+                        onBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;
                           if (val !== set.target_reps) onUpdateSet?.(set.planned_set_id, 'target_reps', val);
                         }}
-                        style={{ width: '60px' }}
                         data-testid={`edit-reps-${set.order}`}
                       />
                     </td>
                     <td>
-                      <IonInput
+                      <input
                         type="number"
-                        min="0"
-                        aria-label={`Load for set ${set.order}`}
-                        value={set.target_load_percentage ?? set.target_load}
-                        onIonBlur={(e) => {
+                        className="input-load"
+                        defaultValue={set.target_load_percentage ?? set.target_load ?? ''}
+                        onBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;
                           const field = set.target_load_percentage ? 'target_load_percentage' : 'target_load';
                           if (val !== (set.target_load_percentage ?? set.target_load))
                             onUpdateSet?.(set.planned_set_id, field, val);
                         }}
-                        style={{ width: '80px' }}
                         data-testid={`edit-load-${set.order}`}
                       />
                     </td>
                     <td>
-                      <IonInput
+                      <input
                         type="number"
-                        min="0"
-                        aria-label={`Rest seconds for set ${set.order}`}
-                        value={set.rest_seconds}
-                        onIonBlur={(e) => {
+                        className="input-rest"
+                        defaultValue={set.rest_seconds ?? 60}
+                        onBlur={(e) => {
                           const val = e.target.value ? Number(e.target.value) : null;
                           if (val !== set.rest_seconds) onUpdateSet?.(set.planned_set_id, 'rest_seconds', val);
                         }}
-                        style={{ width: '60px' }}
                         data-testid={`edit-rest-${set.order}`}
                       />
                     </td>
                     <td>
-                      <IonButton
-                        fill="clear"
-                        color="danger"
-                        size="small"
+                      <button
+                        className="btn btn-red btn-sm"
                         onClick={() => onDeleteSet?.(set.planned_set_id)}
                         data-testid={`delete-set-${set.order}`}
-                        aria-label="Remove set"
                       >
-                        <IonIcon slot="icon-only" icon={closeCircleOutline} />
-                      </IonButton>
+                        Remove
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -263,12 +241,12 @@ export function SetQueue({
             </table>
           )}
           {onAddSet && (
-            <IonButton fill="outline" size="small" onClick={onAddSet} style={{ marginTop: 8 }}>
+            <button className="btn btn-green btn-sm" onClick={onAddSet} style={{ marginTop: 8 }}>
               + Add Set
-            </IonButton>
+            </button>
           )}
-        </IonCardContent>
-      </IonCard>
-    </div>
+        </div>
+      </div>
+    </>
   );
 }

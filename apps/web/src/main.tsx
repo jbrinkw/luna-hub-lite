@@ -19,6 +19,7 @@ import '@ionic/react/css/display.css';
 /* App theme */
 import './theme/variables.css';
 import './theme/chefbyte.css';
+import './theme/coachbyte.css';
 
 setupTheme();
 

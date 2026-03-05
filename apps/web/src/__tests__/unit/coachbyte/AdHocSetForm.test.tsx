@@ -17,10 +17,12 @@ describe('AdHocSetForm', () => {
   it('renders exercise select dropdown with all exercises', () => {
     render(<AdHocSetForm exercises={exercises} onSubmit={vi.fn()} onCancel={vi.fn()} />);
     const select = screen.getByTestId('exercise-select') as HTMLSelectElement;
-    expect(select.options).toHaveLength(3);
-    expect(select.options[0]).toHaveTextContent('Squat');
-    expect(select.options[1]).toHaveTextContent('Bench Press');
-    expect(select.options[2]).toHaveTextContent('Deadlift');
+    // +1 for the placeholder "Select exercise..." option
+    expect(select.options).toHaveLength(4);
+    expect(select.options[0]).toHaveTextContent('Select exercise...');
+    expect(select.options[1]).toHaveTextContent('Squat');
+    expect(select.options[2]).toHaveTextContent('Bench Press');
+    expect(select.options[3]).toHaveTextContent('Deadlift');
   });
 
   it('renders reps and load inputs', () => {
@@ -62,6 +64,8 @@ describe('AdHocSetForm', () => {
   it('renders empty options when exercises array is empty', () => {
     render(<AdHocSetForm exercises={[]} onSubmit={vi.fn()} onCancel={vi.fn()} />);
     const select = screen.getByTestId('exercise-select') as HTMLSelectElement;
-    expect(select.options).toHaveLength(0);
+    // Only the placeholder option
+    expect(select.options).toHaveLength(1);
+    expect(select.options[0]).toHaveTextContent('Select exercise...');
   });
 });

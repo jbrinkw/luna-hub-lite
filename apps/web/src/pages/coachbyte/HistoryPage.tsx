@@ -1,14 +1,4 @@
 import { useEffect, useState, useCallback } from 'react';
-import {
-  IonSpinner,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonButton,
-  IonSelect,
-  IonSelectOption,
-} from '@ionic/react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
@@ -88,7 +78,6 @@ export function HistoryPage() {
       const page = hasNextPage ? plans.slice(0, PAGE_SIZE) : plans;
       const planIds = page.map((p: any) => p.plan_id);
 
-      // Get planned/completed counts per plan
       const { data: plannedCounts } = await supabase
         .schema('coachbyte')
         .from('planned_sets')
@@ -130,7 +119,6 @@ export function HistoryPage() {
   );
 
   useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadHistory();
   }, [loadHistory]);
@@ -173,7 +161,6 @@ export function HistoryPage() {
     setDetailLoading(false);
   };
 
-  // When exercise filter changes, fetch plan_ids that have completed sets for that exercise
   useEffect(() => {
     if (!user || exerciseFilter === 'all') {
       // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -188,13 +175,10 @@ export function HistoryPage() {
       .eq('exercise_id', exerciseFilter)
       .then(({ data }) => {
         const ids = new Set((data ?? []).map((r: any) => r.plan_id as string));
-        // Async data fetching with setState is the standard pattern for this use case
-
         setExercisePlanIds(ids);
       });
   }, [user, exerciseFilter]);
 
-  // Filter out empty days (no completed sets) and apply exercise filter
   const filteredDays = days.filter((d) => {
     if (d.completed_count <= 0) return false;
     if (exercisePlanIds !== null) return exercisePlanIds.has(d.plan_id);
@@ -203,125 +187,157 @@ export function HistoryPage() {
 
   return (
     <CoachLayout title="History">
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h2>HISTORY</h2>
-        <IonSelect
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          borderBottom: '2px solid #eee',
+          paddingBottom: 10,
+          marginBottom: 20,
+        }}
+      >
+        <h2 style={{ margin: 0 }}>Workout History</h2>
+        <select
           value={exerciseFilter}
-          onIonChange={(e) => setExerciseFilter(e.detail.value)}
-          aria-label="Filter by exercise"
-          interface="popover"
+          onChange={(e) => setExerciseFilter(e.target.value)}
+          style={{ padding: '6px 10px' }}
           data-testid="exercise-filter"
         >
-          <IonSelectOption value="all">All Exercises</IonSelectOption>
+          <option value="all">All Exercises</option>
           {exercises.map((ex) => (
-            <IonSelectOption key={ex.exercise_id} value={ex.exercise_id}>
+            <option key={ex.exercise_id} value={ex.exercise_id}>
               {ex.name}
-            </IonSelectOption>
+            </option>
           ))}
-        </IonSelect>
+        </select>
       </div>
 
       {loadError && (
-        <IonCard color="danger" data-testid="load-error">
-          <IonCardContent>
-            <p>Failed to load data: {loadError}</p>
-            <IonButton onClick={() => loadHistory()}>Retry</IonButton>
-          </IonCardContent>
-        </IonCard>
+        <div className="card" style={{ borderColor: '#dc3545' }} data-testid="load-error">
+          <div className="card-body">
+            <p className="error-text">Failed to load data: {loadError}</p>
+            <button className="btn btn-blue" onClick={() => loadHistory()}>
+              Retry
+            </button>
+          </div>
+        </div>
       )}
 
       {loading && days.length === 0 ? (
-        <IonSpinner data-testid="history-loading" />
+        <p className="muted-text" data-testid="history-loading">
+          Loading workout history...
+        </p>
       ) : filteredDays.length === 0 ? (
-        <p data-testid="no-history">No workout history yet.</p>
+        <div className="empty-state" data-testid="no-history">
+          <h3>No workout history yet</h3>
+          <p>Complete some workouts to see your history here.</p>
+        </div>
       ) : (
         <>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }} data-testid="history-table">
-            <thead>
-              <tr>
-                <th style={{ textAlign: 'left' }}>Date</th>
-                <th style={{ textAlign: 'left' }}>Summary</th>
-                <th style={{ textAlign: 'left' }}>Sets</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filteredDays.map((day) => (
-                <tr key={day.plan_id} data-testid={`history-row-${day.plan_date}`}>
-                  <td>{formatDateDisplay(day.plan_date)}</td>
-                  <td>{day.summary ?? '—'}</td>
-                  <td>
-                    {day.completed_count}/{day.planned_count}
-                  </td>
-                  <td>
-                    <IonButton
-                      size="small"
-                      fill="clear"
-                      onClick={() => loadDetail(day.plan_id)}
-                      data-testid={`expand-${day.plan_date}`}
-                      aria-label={
-                        expandedPlan === day.plan_id
-                          ? `Collapse ${day.plan_date} details`
-                          : `Expand ${day.plan_date} details`
-                      }
-                    >
-                      {expandedPlan === day.plan_id ? '▼' : '▶'}
-                    </IonButton>
-                  </td>
+          <div className="history-table">
+            <table data-testid="history-table">
+              <thead>
+                <tr>
+                  <th>Date</th>
+                  <th>Summary</th>
+                  <th>Sets</th>
+                  <th>Actions</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {filteredDays.map((day) => (
+                  <tr key={day.plan_id} data-testid={`history-row-${day.plan_date}`}>
+                    <td>
+                      <strong>{formatDateDisplay(day.plan_date)}</strong>
+                    </td>
+                    <td>
+                      {day.summary ? (
+                        <div style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>{day.summary}</div>
+                      ) : (
+                        <em className="muted-text">No summary</em>
+                      )}
+                    </td>
+                    <td>
+                      {day.completed_count}/{day.planned_count}
+                    </td>
+                    <td>
+                      <button
+                        className="btn btn-blue btn-sm"
+                        onClick={() => loadDetail(day.plan_id)}
+                        data-testid={`expand-${day.plan_date}`}
+                        aria-label={
+                          expandedPlan === day.plan_id
+                            ? `Collapse ${day.plan_date} details`
+                            : `Expand ${day.plan_date} details`
+                        }
+                      >
+                        {expandedPlan === day.plan_id ? 'Hide' : 'View Details'}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           {expandedPlan && (
-            <IonCard data-testid="detail-card">
-              <IonCardHeader>
-                <IonCardTitle>Completed Sets</IonCardTitle>
-              </IonCardHeader>
-              <IonCardContent>
+            <div className="card" style={{ marginTop: 20 }} data-testid="detail-card">
+              <h3 className="card-header">Completed Sets</h3>
+              <div className="card-body">
                 {detailLoading ? (
-                  <IonSpinner />
+                  <p className="muted-text">Loading...</p>
                 ) : detail.length === 0 ? (
-                  <p>No sets completed.</p>
+                  <p className="muted-text">No sets completed.</p>
                 ) : (
-                  <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <table>
                     <thead>
                       <tr>
-                        <th style={{ textAlign: 'left' }}>#</th>
-                        <th style={{ textAlign: 'left' }}>Exercise</th>
-                        <th style={{ textAlign: 'left' }}>Reps</th>
-                        <th style={{ textAlign: 'left' }}>Load</th>
-                        <th style={{ textAlign: 'left' }}>Time</th>
+                        <th>#</th>
+                        <th>Exercise</th>
+                        <th>Reps</th>
+                        <th>Load</th>
+                        <th>Time</th>
                       </tr>
                     </thead>
                     <tbody>
                       {detail.map((d, i) => (
                         <tr key={i} data-testid={`detail-row-${i + 1}`}>
                           <td>{i + 1}</td>
-                          <td>{d.exercise_name}</td>
-                          <td>{d.actual_reps}</td>
                           <td>
-                            {d.actual_load} {WEIGHT_UNIT}
+                            <strong>{d.exercise_name}</strong>
                           </td>
-                          <td>{timeFormatter.format(new Date(d.completed_at))}</td>
+                          <td>
+                            <strong>{d.actual_reps}</strong>
+                          </td>
+                          <td>
+                            <strong>
+                              {d.actual_load} {WEIGHT_UNIT}
+                            </strong>
+                          </td>
+                          <td>
+                            <span className="muted-text" style={{ fontSize: 12 }}>
+                              {timeFormatter.format(new Date(d.completed_at))}
+                            </span>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
                 )}
-              </IonCardContent>
-            </IonCard>
+              </div>
+            </div>
           )}
 
           {hasMore && (
-            <IonButton
-              expand="block"
-              fill="outline"
+            <button
+              className="btn btn-outline"
               onClick={() => cursor && loadHistory(cursor)}
               data-testid="load-more-btn"
+              style={{ width: '100%', marginTop: 16 }}
             >
               Load More
-            </IonButton>
+            </button>
           )}
         </>
       )}

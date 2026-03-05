@@ -1,0 +1,760 @@
+/* CoachByte — scoped under .coach-root */
+/* Matches legacy luna_ext_coachbyte UI design */
+
+/* Tokens */
+.coach-root {
+  --cb-blue: #007bff;
+  --cb-green: #28a745;
+  --cb-red: #dc3545;
+  --cb-cyan: #17a2b8;
+  --cb-orange: #ff9800;
+  --cb-gray-bg: #f5f5f5;
+  --cb-gray-100: #f8f9fa;
+  --cb-gray-border: #ddd;
+  --cb-gray-border-light: #eee;
+  --cb-text: #333;
+  --cb-text-muted: #666;
+  --cb-text-dim: #999;
+  --cb-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  --cb-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.1);
+  --cb-radius: 4px;
+  --cb-radius-lg: 8px;
+  --cb-max-width: 1200px;
+
+  height: 100%;
+  overflow-y: hidden;
+  display: flex;
+  flex-direction: column;
+  background: var(--cb-gray-bg);
+  font-family: Arial, sans-serif;
+  color: var(--cb-text);
+  line-height: 1.6;
+  -webkit-font-smoothing: antialiased;
+}
+
+.coach-root *,
+.coach-root *::before,
+.coach-root *::after {
+  box-sizing: border-box;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Header                                                             */
+/* ------------------------------------------------------------------ */
+
+.coach-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: #fff;
+  border-bottom: 2px solid var(--cb-gray-border-light);
+  flex-shrink: 0;
+}
+
+.coach-brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-decoration: none;
+  color: var(--cb-text);
+  font-weight: 700;
+  font-size: 22px;
+}
+
+.coach-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.coach-hamburger {
+  display: none;
+  background: transparent;
+  border: 1px solid var(--cb-gray-border);
+  border-radius: var(--cb-radius);
+  padding: 6px 10px;
+  cursor: pointer;
+  font-size: 18px;
+  color: #111;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tab bar                                                            */
+/* ------------------------------------------------------------------ */
+
+.coach-tabs {
+  display: flex;
+  gap: 0;
+  background: #fff;
+  border-bottom: 1px solid var(--cb-gray-border);
+  padding: 0 16px;
+  flex-shrink: 0;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+.coach-tab {
+  padding: 12px 16px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--cb-text-muted);
+  text-decoration: none;
+  border-bottom: 2px solid transparent;
+  white-space: nowrap;
+  transition:
+    color 0.15s,
+    border-color 0.15s;
+}
+
+.coach-tab:hover {
+  color: var(--cb-text);
+}
+
+.coach-tab.active {
+  color: var(--cb-blue);
+  border-bottom-color: var(--cb-blue);
+  font-weight: 600;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Mobile drawer                                                      */
+/* ------------------------------------------------------------------ */
+
+.coach-drawer {
+  display: none;
+  flex-direction: column;
+  background: #fff;
+  border-bottom: 1px solid var(--cb-gray-border);
+  padding: 0 16px;
+}
+
+.coach-drawer.open {
+  display: flex;
+}
+
+.coach-drawer-links {
+  display: flex;
+  flex-direction: column;
+  padding: 8px 0;
+}
+
+.coach-drawer-link {
+  display: block;
+  padding: 10px 12px;
+  color: var(--cb-text);
+  text-decoration: none;
+  font-size: 14px;
+  font-weight: 500;
+  border: none;
+  background: none;
+  text-align: left;
+  cursor: pointer;
+  border-radius: var(--cb-radius);
+}
+
+.coach-drawer-link:hover {
+  background: #f3f4f6;
+}
+
+.coach-drawer-link.active {
+  color: var(--cb-blue);
+  background: #e7f1ff;
+}
+
+.coach-drawer-link.danger {
+  color: var(--cb-red);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Content                                                            */
+/* ------------------------------------------------------------------ */
+
+.coach-content {
+  flex: 1 1 auto;
+  overflow-y: auto;
+  padding: 20px;
+  max-width: var(--cb-max-width);
+  width: 100%;
+  margin: 0 auto;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Buttons                                                            */
+/* ------------------------------------------------------------------ */
+
+.coach-root .btn {
+  padding: 8px 16px;
+  border: none;
+  border-radius: var(--cb-radius);
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: bold;
+  transition: all 0.2s ease;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  white-space: nowrap;
+}
+
+.coach-root .btn:hover:not(:disabled) {
+  opacity: 0.9;
+  transform: translateY(-1px);
+}
+
+.coach-root .btn:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.coach-root .btn-blue {
+  background: var(--cb-blue);
+  color: #fff;
+}
+
+.coach-root .btn-green {
+  background: var(--cb-green);
+  color: #fff;
+}
+
+.coach-root .btn-red {
+  background: var(--cb-red);
+  color: #fff;
+}
+
+.coach-root .btn-cyan {
+  background: var(--cb-cyan);
+  color: #fff;
+}
+
+.coach-root .btn-orange {
+  background: var(--cb-orange);
+  color: #fff;
+}
+
+.coach-root .btn-gray {
+  background: #6c757d;
+  color: #fff;
+}
+
+.coach-root .btn-outline {
+  background: transparent;
+  border: 1px solid var(--cb-gray-border);
+  color: var(--cb-text);
+}
+
+.coach-root .btn-outline:hover:not(:disabled) {
+  background: var(--cb-gray-100);
+}
+
+.coach-root .btn-sm {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.coach-root .btn-lg {
+  padding: 12px 24px;
+  font-size: 16px;
+}
+
+.coach-root .btn-clear {
+  background: transparent;
+  border: none;
+  color: var(--cb-text-muted);
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.coach-root .btn-clear:hover:not(:disabled) {
+  color: var(--cb-red);
+  transform: none;
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Cards & Sections                                                   */
+/* ------------------------------------------------------------------ */
+
+.coach-root .card {
+  background: #fff;
+  border: 1px solid var(--cb-gray-border);
+  border-radius: var(--cb-radius-lg);
+  box-shadow: var(--cb-shadow);
+  margin-bottom: 20px;
+  overflow: hidden;
+}
+
+.coach-root .card-header {
+  background: var(--cb-gray-100);
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--cb-gray-border);
+  font-size: 16px;
+  font-weight: bold;
+  margin: 0;
+}
+
+.coach-root .card-body {
+  padding: 16px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Tables                                                             */
+/* ------------------------------------------------------------------ */
+
+.coach-root table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.coach-root thead th {
+  background: var(--cb-gray-100);
+  padding: 8px;
+  text-align: left;
+  border-bottom: 2px solid var(--cb-gray-border);
+  font-size: 12px;
+  font-weight: bold;
+  color: var(--cb-text);
+}
+
+.coach-root tbody td {
+  padding: 8px;
+  border-bottom: 1px solid var(--cb-gray-border-light);
+  vertical-align: middle;
+}
+
+.coach-root tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.coach-root .add-row {
+  background: var(--cb-gray-100);
+}
+
+.coach-root .highlight-row {
+  background: #e8f5e8;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Form Inputs                                                        */
+/* ------------------------------------------------------------------ */
+
+.coach-root input[type='text'],
+.coach-root input[type='number'],
+.coach-root input[type='password'],
+.coach-root select {
+  padding: 6px 8px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 14px;
+  font-family: Arial, sans-serif;
+}
+
+.coach-root input:focus,
+.coach-root select:focus,
+.coach-root textarea:focus {
+  outline: none;
+  border-color: var(--cb-blue);
+  box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+}
+
+.coach-root .input-narrow {
+  width: 60px;
+  text-align: center;
+}
+
+.coach-root .input-sm {
+  width: 40px;
+  text-align: center;
+}
+
+.coach-root .input-rest {
+  width: 50px;
+  text-align: center;
+}
+
+.coach-root .input-load {
+  width: 80px;
+  text-align: center;
+}
+
+.coach-root .input-full {
+  width: 100%;
+}
+
+.coach-root textarea {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: var(--cb-radius);
+  font-size: 14px;
+  font-family: Arial, sans-serif;
+  resize: vertical;
+}
+
+.coach-root .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.coach-root .form-group label {
+  font-size: 14px;
+  font-weight: bold;
+  color: var(--cb-text);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Today Page — Next In Queue                                         */
+/* ------------------------------------------------------------------ */
+
+.coach-root .next-in-queue-section {
+  border: 1px solid var(--cb-green);
+  border-radius: var(--cb-radius-lg);
+  padding: 20px;
+  margin-bottom: 20px;
+  background: #f8fff8;
+}
+
+.coach-root .next-set-box {
+  background: #e8f5e8;
+  padding: 15px;
+  border-radius: 6px;
+  margin-bottom: 15px;
+  border: 2px solid var(--cb-green);
+}
+
+.coach-root .next-set-exercise {
+  font-size: 22px;
+  font-weight: bold;
+  color: #155724;
+  margin-bottom: 6px;
+}
+
+.coach-root .next-set-detail {
+  font-size: 18px;
+  font-weight: bold;
+  color: var(--cb-text);
+}
+
+.coach-root .next-set-rest {
+  font-size: 15px;
+  color: var(--cb-text-muted);
+  margin-top: 4px;
+}
+
+.coach-root .all-done-box {
+  background: var(--cb-gray-100);
+  border: 2px solid #6c757d;
+  padding: 15px;
+  border-radius: 6px;
+  text-align: center;
+}
+
+.coach-root .all-done-text {
+  font-size: 20px;
+  font-weight: bold;
+  color: #6c757d;
+  padding: 10px;
+}
+
+.coach-root .completion-form {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Today Page — Two Column Layout                                     */
+/* ------------------------------------------------------------------ */
+
+.coach-root .workout-columns {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 20px;
+}
+
+.coach-root .workout-columns > .card {
+  flex: 1;
+  margin-bottom: 0;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Timer                                                              */
+/* ------------------------------------------------------------------ */
+
+.coach-root .timer-display {
+  font-size: 20px;
+  font-weight: bold;
+  text-align: right;
+  margin-left: 20px;
+}
+
+.coach-root .timer-running {
+  color: var(--cb-blue);
+}
+
+.coach-root .timer-expired {
+  color: var(--cb-red);
+}
+
+.coach-root .timer-idle {
+  color: var(--cb-text-muted);
+}
+
+.coach-root .timer-card .timer-big {
+  font-size: 3rem;
+  font-family: monospace;
+  text-align: center;
+  margin: 16px 0;
+}
+
+.coach-root .timer-card .timer-controls {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+
+.coach-root .timer-card .timer-custom {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+  align-items: end;
+}
+
+/* ------------------------------------------------------------------ */
+/*  PR Tracker                                                         */
+/* ------------------------------------------------------------------ */
+
+.coach-root .pr-card {
+  background: #fff;
+  border-radius: var(--cb-radius-lg);
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--cb-shadow);
+  border: 1px solid var(--cb-gray-border);
+}
+
+.coach-root .pr-exercise-name {
+  font-size: 20px;
+  font-weight: bold;
+  margin-bottom: 15px;
+  color: var(--cb-text);
+  text-transform: capitalize;
+}
+
+.coach-root .pr-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.coach-root .pr-chip {
+  background: var(--cb-gray-100);
+  padding: 8px 12px;
+  border-radius: var(--cb-radius);
+  border: 1px solid var(--cb-gray-border);
+  font-size: 14px;
+  font-weight: bold;
+}
+
+.coach-root .tracked-section {
+  background: var(--cb-gray-100);
+  padding: 20px;
+  border-radius: var(--cb-radius-lg);
+  border: 1px solid var(--cb-gray-border);
+  margin-top: 20px;
+}
+
+.coach-root .tracked-chip {
+  display: flex;
+  align-items: center;
+  background: #fff;
+  padding: 6px 10px;
+  border-radius: var(--cb-radius);
+  border: 1px solid var(--cb-gray-border);
+  font-size: 13px;
+  gap: 8px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Split Planner                                                      */
+/* ------------------------------------------------------------------ */
+
+.coach-root .split-day {
+  margin-bottom: 40px;
+}
+
+.coach-root .split-day h3 {
+  margin-bottom: 10px;
+  font-size: 18px;
+}
+
+.coach-root .split-notes textarea {
+  min-height: 100px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  History                                                            */
+/* ------------------------------------------------------------------ */
+
+.coach-root .history-table {
+  background: #fff;
+  border-radius: var(--cb-radius-lg);
+  overflow: hidden;
+  box-shadow: var(--cb-shadow);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Settings                                                           */
+/* ------------------------------------------------------------------ */
+
+.coach-root .settings-section {
+  background: #fff;
+  border: 1px solid var(--cb-gray-border);
+  border-radius: var(--cb-radius-lg);
+  padding: 20px;
+  margin-bottom: 20px;
+  box-shadow: var(--cb-shadow);
+}
+
+.coach-root .settings-section h3 {
+  margin-top: 0;
+  margin-bottom: 15px;
+  font-size: 18px;
+}
+
+.coach-root .exercise-list-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--cb-gray-border-light);
+}
+
+.coach-root .exercise-list-item:last-child {
+  border-bottom: none;
+}
+
+.coach-root .exercise-tag {
+  color: #888;
+  margin-left: 8px;
+  font-size: 0.85em;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Empty State                                                        */
+/* ------------------------------------------------------------------ */
+
+.coach-root .empty-state {
+  text-align: center;
+  padding: 40px;
+  border: 2px dashed var(--cb-gray-border);
+  border-radius: var(--cb-radius-lg);
+  background: var(--cb-gray-100);
+  color: var(--cb-text-muted);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Create Today Banner                                                */
+/* ------------------------------------------------------------------ */
+
+.coach-root .create-today-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 16px 20px;
+  border-radius: var(--cb-radius-lg);
+  border: 1px solid #ffe599;
+  background: #fff8e1;
+  margin-bottom: 20px;
+  box-shadow: var(--cb-shadow-sm);
+}
+
+/* ------------------------------------------------------------------ */
+/*  Summary section                                                    */
+/* ------------------------------------------------------------------ */
+
+.coach-root .summary-section {
+  border: 1px solid var(--cb-gray-border);
+  border-radius: var(--cb-radius-lg);
+  padding: 15px;
+}
+
+.coach-root .summary-section h3 {
+  margin-top: 0;
+  margin-bottom: 10px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Error / Info                                                       */
+/* ------------------------------------------------------------------ */
+
+.coach-root .error-text {
+  color: var(--cb-red);
+}
+
+.coach-root .muted-text {
+  color: var(--cb-text-muted);
+}
+
+.coach-root .date-label {
+  float: right;
+  font-weight: normal;
+  font-size: 1rem;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Plate checkboxes                                                   */
+/* ------------------------------------------------------------------ */
+
+.coach-root .plate-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.coach-root .plate-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 14px;
+}
+
+.coach-root .plate-item input[type='checkbox'] {
+  width: 16px;
+  height: 16px;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Responsive                                                         */
+/* ------------------------------------------------------------------ */
+
+@media (max-width: 900px) {
+  .coach-root .coach-tabs {
+    display: none;
+  }
+
+  .coach-root .coach-hamburger {
+    display: inline-flex;
+  }
+
+  .coach-root .workout-columns {
+    flex-direction: column;
+  }
+}
+
+@media (max-width: 640px) {
+  .coach-content {
+    padding: 12px;
+  }
+
+  .coach-root .completion-form {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

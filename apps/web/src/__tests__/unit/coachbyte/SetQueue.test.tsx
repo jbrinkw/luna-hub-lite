@@ -163,7 +163,7 @@ describe('SetQueue', () => {
     const allDone = makeSets([{ completed: true }, { completed: true }, { completed: true }]);
     render(<SetQueue sets={allDone} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
     expect(screen.getByText('All sets completed!')).toBeInTheDocument();
-    // The NEXT IN QUEUE card should not appear
-    expect(screen.queryByTestId('next-in-queue')).not.toBeInTheDocument();
+    // The next-exercise box should not appear
+    expect(screen.queryByTestId('next-exercise')).not.toBeInTheDocument();
   });
 });

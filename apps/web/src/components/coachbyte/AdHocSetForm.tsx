@@ -1,14 +1,4 @@
 import { useState } from 'react';
-import {
-  IonButton,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardTitle,
-  IonInput,
-  IonSelect,
-  IonSelectOption,
-} from '@ionic/react';
 
 export interface Exercise {
   exercise_id: string;
@@ -28,59 +18,69 @@ export function AdHocSetForm({ exercises, onSubmit, onCancel }: AdHocSetFormProp
 
   const canSubmit = exerciseId && reps && load && parseInt(reps, 10) >= 0 && parseFloat(load) >= 0;
 
-  const handleSubmit = () => {
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
     if (!canSubmit) return;
     onSubmit(exerciseId, parseInt(reps, 10), parseFloat(load));
   };
 
   return (
-    <IonCard data-testid="adhoc-form">
-      <IonCardHeader>
-        <IonCardTitle>Ad-Hoc Set</IonCardTitle>
-      </IonCardHeader>
-      <IonCardContent>
-        <IonSelect
-          label="Exercise"
-          placeholder="Select exercise"
-          value={exerciseId}
-          onIonChange={(e) => setExerciseId(e.detail.value)}
-          data-testid="exercise-select"
-        >
-          {exercises.map((ex) => (
-            <IonSelectOption key={ex.exercise_id} value={ex.exercise_id}>
-              {ex.name}
-            </IonSelectOption>
-          ))}
-        </IonSelect>
+    <div className="card" data-testid="adhoc-form">
+      <h3 className="card-header">Ad-Hoc Set</h3>
+      <div className="card-body">
+        <form onSubmit={handleSubmit}>
+          <div className="form-group" style={{ marginBottom: 12 }}>
+            <label>Exercise</label>
+            <select
+              value={exerciseId}
+              onChange={(e) => setExerciseId(e.target.value)}
+              className="input-full"
+              data-testid="exercise-select"
+            >
+              <option value="">Select exercise...</option>
+              {exercises.map((ex) => (
+                <option key={ex.exercise_id} value={ex.exercise_id}>
+                  {ex.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-        <div style={{ display: 'flex', gap: '16px', margin: '12px 0' }}>
-          <IonInput
-            label="Reps"
-            type="number"
-            min="0"
-            value={reps}
-            onIonInput={(e) => setReps(e.detail.value ?? '')}
-            data-testid="adhoc-reps"
-          />
-          <IonInput
-            label="Load"
-            type="number"
-            min="0"
-            value={load}
-            onIonInput={(e) => setLoad(e.detail.value ?? '')}
-            data-testid="adhoc-load"
-          />
-        </div>
+          <div style={{ display: 'flex', gap: 16, marginBottom: 12 }}>
+            <div className="form-group">
+              <label>Reps</label>
+              <input
+                type="number"
+                value={reps}
+                onChange={(e) => setReps(e.target.value)}
+                className="input-narrow"
+                style={{ width: 80, padding: 8 }}
+                data-testid="adhoc-reps"
+              />
+            </div>
+            <div className="form-group">
+              <label>Load</label>
+              <input
+                type="number"
+                value={load}
+                onChange={(e) => setLoad(e.target.value)}
+                className="input-load"
+                style={{ padding: 8 }}
+                data-testid="adhoc-load"
+              />
+            </div>
+          </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <IonButton onClick={handleSubmit} disabled={!canSubmit} data-testid="adhoc-submit">
-            Add Set
-          </IonButton>
-          <IonButton onClick={onCancel} data-testid="adhoc-cancel">
-            Cancel
-          </IonButton>
-        </div>
-      </IonCardContent>
-    </IonCard>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button type="submit" className="btn btn-green" disabled={!canSubmit} data-testid="adhoc-submit">
+              Add Set
+            </button>
+            <button type="button" className="btn btn-gray" onClick={onCancel} data-testid="adhoc-cancel">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
