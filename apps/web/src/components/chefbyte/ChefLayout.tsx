@@ -35,10 +35,20 @@ export function ChefLayout({ children }: ChefLayoutProps) {
     <div className="chef-root">
       {/* Header */}
       <header className="chef-header" data-testid="chef-header">
-        <Link to="/chef" className="chef-brand" onClick={() => setDrawerOpen(false)}>
-          <span className="chef-brand-icon">{'\u{1F373}'}</span>
-          <span className="chef-brand-text">ChefByte</span>
-        </Link>
+        <div className="chef-brand">
+          <Link
+            to="/hub/account"
+            style={{ color: 'inherit', textDecoration: 'none' }}
+            onClick={() => setDrawerOpen(false)}
+          >
+            Luna Hub
+          </Link>
+          <span style={{ color: '#999', margin: '0 6px' }}>/</span>
+          <Link to="/chef" style={{ color: 'inherit', textDecoration: 'none' }} onClick={() => setDrawerOpen(false)}>
+            <span className="chef-brand-icon">{'\u{1F373}'}</span>
+            <span className="chef-brand-text">ChefByte</span>
+          </Link>
+        </div>
         <div className="chef-header-actions">
           <button
             className={`chef-scanner-btn${isScanner ? ' active' : ''}`}

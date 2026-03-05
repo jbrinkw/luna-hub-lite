@@ -30,9 +30,19 @@ export function CoachLayout({ children }: CoachLayoutProps) {
     <div className="coach-root">
       {/* Header */}
       <header className="coach-header" data-testid="coach-header">
-        <Link to="/coach" className="coach-brand" onClick={() => setDrawerOpen(false)}>
-          CoachByte
-        </Link>
+        <div className="coach-brand">
+          <Link
+            to="/hub/account"
+            style={{ color: 'inherit', textDecoration: 'none' }}
+            onClick={() => setDrawerOpen(false)}
+          >
+            Luna Hub
+          </Link>
+          <span style={{ color: '#999', margin: '0 6px' }}>/</span>
+          <Link to="/coach" style={{ color: 'inherit', textDecoration: 'none' }} onClick={() => setDrawerOpen(false)}>
+            CoachByte
+          </Link>
+        </div>
         <div className="coach-header-actions">
           <button className="coach-hamburger" aria-label="Toggle navigation" onClick={() => setDrawerOpen(!drawerOpen)}>
             {'\u2630'}
