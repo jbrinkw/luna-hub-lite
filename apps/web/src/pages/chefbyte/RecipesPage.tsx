@@ -85,7 +85,15 @@ export function computeRecipeMacros(
 
 export type StockStatus = 'CAN MAKE' | 'PARTIAL' | 'NO STOCK' | 'N/A';
 
-export function computeStockStatus(ingredients: RecipeIngredient[], stockByProduct: Map<string, number>): StockStatus {
+export function computeStockStatus(
+  ingredients: Array<{
+    product_id: string;
+    quantity: number;
+    unit: string;
+    products: { servings_per_container: number } | null;
+  }>,
+  stockByProduct: Map<string, number>,
+): StockStatus {
   if (ingredients.length === 0) return 'N/A';
 
   // Check if any ingredient has a linked product

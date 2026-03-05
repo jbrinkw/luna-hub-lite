@@ -8,7 +8,7 @@ import { chefbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { calcCaloriesFromMacros } from '@/pages/chefbyte/MacroPage';
-import { computeRecipeMacros } from '@/pages/chefbyte/RecipesPage';
+import { computeRecipeMacros, computeStockStatus, type StockStatus } from '@/pages/chefbyte/RecipesPage';
 import { CardSkeleton, MacroBarSkeleton, ListSkeleton } from '@/components/SkeletonScreen';
 
 /* ------------------------------------------------------------------ */
@@ -34,7 +34,9 @@ interface MealEntry {
   completed_at: string | null;
   recipes: {
     name: string;
+    base_servings: number;
     recipe_ingredients: Array<{
+      product_id: string;
       quantity: number;
       unit: string;
       products: {
@@ -46,6 +48,7 @@ interface MealEntry {
       } | null;
     }>;
   } | null;
+  product_id: string | null;
   products: {
     name: string;
     calories_per_serving: number;
@@ -90,6 +93,7 @@ export function HomePage() {
 
   /* ---- Today's meals (non-prep) ---- */
   const [todaysMeals, setTodaysMeals] = useState<MealEntry[]>([]);
+  const [stockByProduct, setStockByProduct] = useState<Map<string, number>>(new Map());
 
   /* ---- Target Macros modal ---- */
   const [showTargetModal, setShowTargetModal] = useState(false);
@@ -212,12 +216,24 @@ export function HomePage() {
     const { data: mealsData } = await chefbyte()
       .from('meal_plan_entries')
       .select(
-        'meal_id, servings, meal_type, completed_at, recipes:recipe_id(name, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container)',
+        'meal_id, servings, meal_type, completed_at, product_id, recipes:recipe_id(name, base_servings, recipe_ingredients(product_id, quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container)',
       )
       .eq('user_id', userId)
       .eq('logical_date', today)
       .eq('meal_prep', false);
     setTodaysMeals((mealsData ?? []) as MealEntry[]);
+
+    // 8. Stock by product — for stock availability badges on meals
+    const { data: allStockLots } = await chefbyte()
+      .from('stock_lots')
+      .select('product_id, qty_containers')
+      .eq('user_id', userId);
+    const stockMap = new Map<string, number>();
+    for (const lot of (allStockLots ?? []) as any[]) {
+      const cur = stockMap.get(lot.product_id) ?? 0;
+      stockMap.set(lot.product_id, cur + Number(lot.qty_containers));
+    }
+    setStockByProduct(stockMap);
 
     setLoading(false);
   }, [userId, today]);
@@ -834,6 +850,24 @@ export function HomePage() {
               const name = entry.recipes?.name ?? entry.products?.name ?? 'Unknown';
               const isDone = entry.completed_at !== null;
 
+              // Stock status for this meal
+              let mealStockStatus: StockStatus = 'N/A';
+              if (!isDone) {
+                if (entry.recipes?.recipe_ingredients) {
+                  const scaleFactor = Number(entry.servings) / (Number(entry.recipes.base_servings) || 1);
+                  const scaledIngredients = entry.recipes.recipe_ingredients.map((ing) => ({
+                    ...ing,
+                    quantity: Number(ing.quantity) * scaleFactor,
+                  }));
+                  mealStockStatus = computeStockStatus(scaledIngredients, stockByProduct);
+                } else if (entry.product_id && entry.products) {
+                  const spc = Number(entry.products.servings_per_container) || 1;
+                  const neededContainers = Number(entry.servings) / spc;
+                  const available = stockByProduct.get(entry.product_id) ?? 0;
+                  mealStockStatus = available >= neededContainers ? 'CAN MAKE' : available > 0 ? 'PARTIAL' : 'NO STOCK';
+                }
+              }
+
               // Calculate per-serving macros for this meal entry
               let mealMacros: { calories: number; protein: number; carbs: number; fat: number } | null = null;
               if (entry.recipes?.recipe_ingredients) {
@@ -869,7 +903,30 @@ export function HomePage() {
                   }}
                 >
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 600, textDecoration: isDone ? 'line-through' : 'none' }}>{name}</span>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600, textDecoration: isDone ? 'line-through' : 'none' }}>{name}</span>
+                      {!isDone && mealStockStatus !== 'N/A' && (
+                        <span
+                          data-testid={`meal-stock-${entry.meal_id}`}
+                          style={{
+                            display: 'inline-block',
+                            padding: '1px 6px',
+                            borderRadius: '4px',
+                            fontSize: '10px',
+                            fontWeight: 700,
+                            color: '#fff',
+                            background:
+                              mealStockStatus === 'CAN MAKE'
+                                ? '#2f9e44'
+                                : mealStockStatus === 'PARTIAL'
+                                  ? '#ff9800'
+                                  : '#d33',
+                          }}
+                        >
+                          {mealStockStatus === 'CAN MAKE' ? '✓ IN STOCK' : mealStockStatus}
+                        </span>
+                      )}
+                    </div>
                     <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
                       {entry.meal_type && (
                         <span
