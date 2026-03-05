@@ -564,6 +564,19 @@ export function TodayPage() {
         disabled={false}
       />
 
+      {/* Timer — right after the queue */}
+      <RestTimer
+        endTime={timer.end_time}
+        state={timer.state}
+        durationSeconds={timer.duration_seconds}
+        elapsedBeforePause={timer.elapsed_before_pause}
+        onStart={(secs) => startTimer(secs)}
+        onPause={pauseTimer}
+        onResume={resumeTimer}
+        onReset={resetTimer}
+        onExpired={handleTimerExpired}
+      />
+
       {showAdHoc && (
         <AdHocSetForm exercises={exercises} onSubmit={handleAdHocSubmit} onCancel={() => setShowAdHoc(false)} />
       )}
@@ -572,70 +585,55 @@ export function TodayPage() {
         <AdHocSetForm exercises={exercises} onSubmit={addPlannedSet} onCancel={() => setAddingPlanned(false)} />
       )}
 
-      <div className="workout-columns">
-        {/* Completed Sets */}
-        <div className="card">
-          <h3 className="card-header">Completed Sets ({completedSets.length} done)</h3>
-          <div className="card-body">
-            {completedSets.length === 0 ? (
-              <p className="muted-text" style={{ fontStyle: 'italic', textAlign: 'center' }}>
-                No sets completed yet
-              </p>
-            ) : (
-              <table>
-                <thead>
-                  <tr>
-                    <th>#</th>
-                    <th>Exercise</th>
-                    <th>Reps</th>
-                    <th>Load</th>
-                    <th>Action</th>
+      {/* Completed Sets */}
+      <div className="card">
+        <h3 className="card-header">Completed Sets ({completedSets.length} done)</h3>
+        <div className="card-body">
+          {completedSets.length === 0 ? (
+            <p className="muted-text" style={{ fontStyle: 'italic', textAlign: 'center' }}>
+              No sets completed yet
+            </p>
+          ) : (
+            <table>
+              <thead>
+                <tr>
+                  <th>#</th>
+                  <th>Exercise</th>
+                  <th>Reps</th>
+                  <th>Load</th>
+                  <th>Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                {completedSets.map((cs, i) => (
+                  <tr key={cs.completed_set_id} data-testid={`completed-row-${i + 1}`}>
+                    <td>{i + 1}</td>
+                    <td>
+                      <strong>{cs.exercise_name}</strong>
+                    </td>
+                    <td>
+                      <strong>{cs.actual_reps}</strong>
+                    </td>
+                    <td>
+                      <strong>
+                        {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
+                      </strong>
+                    </td>
+                    <td>
+                      <button
+                        className={`btn btn-sm ${confirmDeleteId === cs.completed_set_id ? 'btn-orange' : 'btn-gray'}`}
+                        onClick={() => deleteCompletedSet(cs.completed_set_id)}
+                        data-testid={`delete-completed-${i + 1}`}
+                      >
+                        {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
+                      </button>
+                    </td>
                   </tr>
-                </thead>
-                <tbody>
-                  {completedSets.map((cs, i) => (
-                    <tr key={cs.completed_set_id} data-testid={`completed-row-${i + 1}`}>
-                      <td>{i + 1}</td>
-                      <td>
-                        <strong>{cs.exercise_name}</strong>
-                      </td>
-                      <td>
-                        <strong>{cs.actual_reps}</strong>
-                      </td>
-                      <td>
-                        <strong>
-                          {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
-                        </strong>
-                      </td>
-                      <td>
-                        <button
-                          className={`btn btn-sm ${confirmDeleteId === cs.completed_set_id ? 'btn-orange' : 'btn-gray'}`}
-                          onClick={() => deleteCompletedSet(cs.completed_set_id)}
-                          data-testid={`delete-completed-${i + 1}`}
-                        >
-                          {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
-
-        {/* Timer */}
-        <RestTimer
-          endTime={timer.end_time}
-          state={timer.state}
-          durationSeconds={timer.duration_seconds}
-          elapsedBeforePause={timer.elapsed_before_pause}
-          onStart={(secs) => startTimer(secs)}
-          onPause={pauseTimer}
-          onResume={resumeTimer}
-          onReset={resetTimer}
-          onExpired={handleTimerExpired}
-        />
       </div>
 
       {/* Notes */}
