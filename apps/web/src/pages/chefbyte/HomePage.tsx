@@ -2,7 +2,6 @@ import { useEffect, useState, useCallback } from 'react';
 
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
-import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
@@ -451,8 +450,6 @@ export function HomePage() {
 
   return (
     <ChefLayout title="Home">
-      <h2>CHEFBYTE</h2>
-
       {loadError && (
         <div
           data-testid="load-error"
@@ -465,192 +462,153 @@ export function HomePage() {
           }}
         >
           <p style={{ margin: '0 0 8px 0', color: '#d33' }}>Failed to load data: {loadError}</p>
-          <button
-            onClick={loadData}
-            className="cb-primary-btn"
-            style={{
-              background: '#d33',
-              color: '#fff',
-              border: 'none',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
-          >
+          <button onClick={loadData} className="cb-primary-btn" style={{ background: '#d33' }}>
             Retry
           </button>
         </div>
       )}
 
       {/* ============================================================ */}
-      {/*  STATUS CARDS                                                 */}
+      {/*  MACRO GRID — matches legacy currentDayCard / macroGrid       */}
       {/* ============================================================ */}
-      <div
-        data-testid="status-cards"
-        style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '24px' }}
-      >
+      <div data-testid="macro-summary" style={{ marginBottom: '16px' }}>
+        <div style={{ marginBottom: '8px' }}>
+          <span style={{ fontWeight: 600 }}>Today</span>{' '}
+          <span style={{ fontSize: '14px', color: '#666' }}>(6:00 AM - 5:59 AM)</span>
+        </div>
+        <div
+          data-testid="status-cards"
+          style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '12px' }}
+        >
+          <div
+            data-testid="compact-calories"
+            style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
+          >
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '4px' }}>Calories</label>
+            <div>
+              <span>{Math.round(consumed.calories)}</span> / <span>{goals.calories}</span>
+            </div>
+            <small style={{ fontSize: '11px', color: '#888' }}>consumed / goal</small>
+          </div>
+          <div
+            data-testid="compact-carbs"
+            style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
+          >
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '4px' }}>Carbs</label>
+            <div>
+              <span>{Math.round(consumed.carbs)}</span> / <span>{goals.carbs}</span>g
+            </div>
+            <small style={{ fontSize: '11px', color: '#888' }}>consumed / goal</small>
+          </div>
+          <div
+            data-testid="compact-fats"
+            style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
+          >
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '4px' }}>Fats</label>
+            <div>
+              <span>{Math.round(consumed.fat)}</span> / <span>{goals.fat}</span>g
+            </div>
+            <small style={{ fontSize: '11px', color: '#888' }}>consumed / goal</small>
+          </div>
+          <div
+            data-testid="compact-protein"
+            style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
+          >
+            <label style={{ display: 'block', fontWeight: 600, marginBottom: '4px' }}>Protein</label>
+            <div>
+              <span>{Math.round(consumed.protein)}</span> / <span>{goals.protein}</span>g
+            </div>
+            <small style={{ fontSize: '11px', color: '#888' }}>consumed / goal</small>
+          </div>
+        </div>
+
+        {/* Status Row — matches legacy statusRow */}
         <div
           data-testid="card-missing-prices"
-          style={{
-            background: '#f7f7f9',
-            border: '1px solid #eee',
-            borderRadius: '8px',
-            padding: '12px',
-            textAlign: 'center',
-          }}
+          style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', fontSize: '14px', marginBottom: '12px' }}
         >
-          <div style={{ fontSize: '24px', fontWeight: 700 }}>{missingPrices}</div>
-          <div style={{ fontSize: '12px', color: '#666' }}>Missing Prices</div>
+          <span>
+            Missing Prices: <strong>{missingPrices}</strong>
+          </span>
+          <span data-testid="card-placeholders">
+            Placeholder Items: <strong>{placeholders}</strong>
+          </span>
+          <span data-testid="card-below-min">
+            Below Min Stock: <strong>{belowMinStock}</strong>
+          </span>
+          <span data-testid="card-cart-value">
+            Shopping Cart Value: <strong>${cartValue.toFixed(2)}</strong>
+          </span>
         </div>
-        <div
-          data-testid="card-placeholders"
-          style={{
-            background: '#f7f7f9',
-            border: '1px solid #eee',
-            borderRadius: '8px',
-            padding: '12px',
-            textAlign: 'center',
-          }}
-        >
-          <div style={{ fontSize: '24px', fontWeight: 700 }}>{placeholders}</div>
-          <div style={{ fontSize: '12px', color: '#666' }}>Placeholders</div>
-        </div>
-        <div
-          data-testid="card-below-min"
-          style={{
-            background: '#f7f7f9',
-            border: '1px solid #eee',
-            borderRadius: '8px',
-            padding: '12px',
-            textAlign: 'center',
-          }}
-        >
-          <div style={{ fontSize: '24px', fontWeight: 700 }}>{belowMinStock}</div>
-          <div style={{ fontSize: '12px', color: '#666' }}>Below Min Stock</div>
-        </div>
-        <div
-          data-testid="card-cart-value"
-          style={{
-            background: '#f7f7f9',
-            border: '1px solid #eee',
-            borderRadius: '8px',
-            padding: '12px',
-            textAlign: 'center',
-          }}
-        >
-          <div style={{ fontSize: '24px', fontWeight: 700 }}>${cartValue.toFixed(2)}</div>
-          <div style={{ fontSize: '12px', color: '#666' }}>Cart Value</div>
-        </div>
-      </div>
 
-      {/* ============================================================ */}
-      {/*  COMPACT MACRO SUMMARY                                        */}
-      {/* ============================================================ */}
-      <div data-testid="macro-summary" style={{ marginBottom: '24px' }}>
-        <h3>Today&apos;s Macros</h3>
-        <MacroProgressBar
-          label="Calories"
-          current={consumed.calories}
-          goal={goals.calories}
-          color="#1e66f5"
-          testId="compact-calories"
-        />
-        <MacroProgressBar
-          label="Protein"
-          current={consumed.protein}
-          goal={goals.protein}
-          color="#2f9e44"
-          unit="g"
-          testId="compact-protein"
-        />
-        <MacroProgressBar
-          label="Carbs"
-          current={consumed.carbs}
-          goal={goals.carbs}
-          color="#ffc409"
-          unit="g"
-          testId="compact-carbs"
-        />
-        <MacroProgressBar
-          label="Fats"
-          current={consumed.fat}
-          goal={goals.fat}
-          color="#d33"
-          unit="g"
-          testId="compact-fats"
-        />
-      </div>
-
-      {/* ============================================================ */}
-      {/*  QUICK ACTIONS                                                */}
-      {/* ============================================================ */}
-      <div data-testid="quick-actions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', marginBottom: '24px' }}>
-        <button
-          onClick={importShopping}
-          className="cb-primary-btn"
-          style={{
-            background: '#1e66f5',
-            color: '#fff',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '13px',
-          }}
-          data-testid="import-shopping-btn"
-        >
-          Import Shopping
-        </button>
-        <button
-          onClick={openTargetModal}
-          className="cb-primary-btn"
-          style={{
-            background: '#1e66f5',
-            color: '#fff',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '13px',
-          }}
-          data-testid="target-macros-btn"
-        >
-          Target Macros
-        </button>
-        <button
-          onClick={openTasteModal}
-          className="cb-primary-btn"
-          style={{
-            background: '#1e66f5',
-            color: '#fff',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '13px',
-          }}
-          data-testid="taste-profile-btn"
-        >
-          Taste Profile
-        </button>
-        <button
-          onClick={syncMealPlanToCart}
-          disabled={syncing}
-          className="cb-primary-btn"
-          style={{
-            background: '#1e66f5',
-            color: '#fff',
-            border: 'none',
-            padding: '8px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontSize: '13px',
-          }}
-          data-testid="meal-plan-cart-btn"
-        >
-          {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
-        </button>
+        {/* Action Buttons — matches legacy shoppingLinksBtn colors */}
+        <div data-testid="quick-actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <button
+            onClick={importShopping}
+            data-testid="import-shopping-btn"
+            style={{
+              background: '#ff8c00',
+              color: '#fff',
+              border: 'none',
+              padding: '10px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '14px',
+            }}
+          >
+            Import Shopping List
+          </button>
+          <button
+            onClick={syncMealPlanToCart}
+            disabled={syncing}
+            data-testid="meal-plan-cart-btn"
+            style={{
+              background: '#1e66f5',
+              color: '#fff',
+              border: 'none',
+              padding: '10px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '14px',
+            }}
+          >
+            {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
+          </button>
+          <button
+            onClick={openTasteModal}
+            data-testid="taste-profile-btn"
+            style={{
+              background: '#9b59b6',
+              color: '#fff',
+              border: 'none',
+              padding: '10px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '14px',
+            }}
+          >
+            Taste Profile
+          </button>
+          <button
+            onClick={openTargetModal}
+            data-testid="target-macros-btn"
+            style={{
+              background: '#e67e22',
+              color: '#fff',
+              border: 'none',
+              padding: '10px 16px',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              fontWeight: 600,
+              fontSize: '14px',
+            }}
+          >
+            Target Macros
+          </button>
+        </div>
       </div>
 
       {/* ============================================================ */}

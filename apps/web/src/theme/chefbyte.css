@@ -26,35 +26,15 @@
 }
 
 /* ------------------------------------------------------------------ */
-/*  Chef Page Layout                                                   */
+/*  Container                                                          */
 /* ------------------------------------------------------------------ */
 
-.chef-page {
-  min-height: 100vh;
-  background: var(--cb-bg);
-  font-family:
-    'Inter',
-    system-ui,
-    -apple-system,
-    BlinkMacSystemFont,
-    'Segoe UI',
-    sans-serif;
-  color: var(--cb-text);
-  display: flex;
-  flex-direction: column;
-}
-
-.chef-container {
+.cb-container {
   width: 100%;
   max-width: var(--cb-content-max);
   margin: 0 auto;
   padding-left: var(--cb-space-4);
   padding-right: var(--cb-space-4);
-}
-
-.chef-content {
-  flex: 1;
-  padding: var(--cb-space-5) 0;
 }
 
 /* ------------------------------------------------------------------ */
@@ -523,7 +503,7 @@
 }
 
 @media (max-width: 640px) {
-  .chef-container {
+  .cb-container {
     padding-left: var(--cb-space-3);
     padding-right: var(--cb-space-3);
   }

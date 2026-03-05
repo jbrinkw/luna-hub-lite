@@ -555,7 +555,7 @@ export function ScannerPage() {
 
   return (
     <ChefLayout title="Scanner">
-      <h2>SCANNER</h2>
+      <h1 style={{ margin: 0 }}>Scanner</h1>
 
       <div data-testid="scanner-container" className="scanner-container">
         {/* ========================================================== */}

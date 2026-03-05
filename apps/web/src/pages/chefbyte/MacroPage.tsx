@@ -534,7 +534,7 @@ export function MacroPage() {
 
   return (
     <ChefLayout title="Macros">
-      <h2>MACROS</h2>
+      <h1 style={{ margin: 0 }}>Macros</h1>
       {loadError && (
         <div style={{ ...cardStyle, borderColor: '#d33', background: '#fff5f5' }} data-testid="load-error">
           <p style={{ color: '#d33', margin: '0 0 8px' }}>Failed to load data: {loadError}</p>

@@ -333,7 +333,7 @@ export function InventoryPage() {
 
   return (
     <ChefLayout title="Inventory">
-      <h2>INVENTORY</h2>
+      <h1 style={{ margin: 0 }}>Inventory</h1>
       {loadError && (
         <div
           data-testid="load-error"
