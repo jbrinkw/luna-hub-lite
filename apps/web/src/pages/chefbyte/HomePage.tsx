@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
+import { Link } from 'react-router-dom';
 
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
@@ -429,6 +430,23 @@ export function HomePage() {
     }
   };
 
+  /* ---------------------------------------------------------------- */
+  /*  Mark meal done / execute prep                                    */
+  /* ---------------------------------------------------------------- */
+
+  const [confirmPrepId, setConfirmPrepId] = useState<string | null>(null);
+
+  const markMealDone = async (mealId: string) => {
+    const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
+    if (!error) await loadData();
+  };
+
+  const executePrepMeal = async (mealId: string) => {
+    setConfirmPrepId(null);
+    const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
+    if (!error) await loadData();
+  };
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -447,6 +465,92 @@ export function HomePage() {
 
   const consumed = macros?.consumed ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const goals = macros?.goals ?? { ...DEFAULT_MACRO_GOALS };
+
+  /* Helper: progress bar colors */
+  const macroColors = {
+    calories: '#1e66f5',
+    protein: '#22c55e',
+    carbs: '#f59e0b',
+    fat: '#ef4444',
+  } as const;
+
+  /* Helper: inline progress bar */
+  const ProgressBar = ({
+    value,
+    goal,
+    color,
+    label,
+    unit,
+    testId,
+  }: {
+    value: number;
+    goal: number;
+    color: string;
+    label: string;
+    unit: string;
+    testId: string;
+  }) => {
+    const pct = pctOf(value, goal);
+    return (
+      <div
+        data-testid={testId}
+        style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
+      >
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+          <label style={{ fontWeight: 600, fontSize: '14px' }}>{label}</label>
+          <span style={{ fontSize: '12px', fontWeight: 600, color }}>{pct}%</span>
+        </div>
+        <div
+          data-testid={`${testId}-bar`}
+          style={{
+            width: '100%',
+            height: '8px',
+            background: '#e5e7eb',
+            borderRadius: '4px',
+            overflow: 'hidden',
+            marginBottom: '4px',
+          }}
+        >
+          <div
+            style={{
+              width: `${pct}%`,
+              height: '100%',
+              background: color,
+              borderRadius: '4px',
+              transition: 'width 0.3s ease',
+            }}
+          />
+        </div>
+        <div style={{ fontSize: '13px', color: '#555' }}>
+          {Math.round(value)} / {goal}
+          {unit}
+        </div>
+      </div>
+    );
+  };
+
+  /* Helper: button styles */
+  const primaryBtnStyle: React.CSSProperties = {
+    background: '#1e66f5',
+    color: '#fff',
+    border: 'none',
+    padding: '10px 16px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontWeight: 600,
+    fontSize: '14px',
+  };
+
+  const outlineBtnStyle: React.CSSProperties = {
+    background: '#fff',
+    color: '#1e66f5',
+    border: '2px solid #1e66f5',
+    padding: '10px 16px',
+    borderRadius: '6px',
+    cursor: 'pointer',
+    fontWeight: 600,
+    fontSize: '14px',
+  };
 
   return (
     <ChefLayout title="Home">
@@ -469,94 +573,132 @@ export function HomePage() {
       )}
 
       {/* ============================================================ */}
-      {/*  MACRO GRID — matches legacy currentDayCard / macroGrid       */}
+      {/*  MACRO SUMMARY — progress bars, clickable to /chef/macros     */}
       {/* ============================================================ */}
       <div data-testid="macro-summary" style={{ marginBottom: '16px' }}>
         <div style={{ marginBottom: '8px' }}>
           <span style={{ fontWeight: 600 }}>Today</span>{' '}
           <span style={{ fontSize: '14px', color: '#666' }}>(6:00 AM - 5:59 AM)</span>
         </div>
-        <div
-          data-testid="status-cards"
-          style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '12px', marginBottom: '12px' }}
-        >
+        <Link to="/chef/macros" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
           <div
-            data-testid="compact-calories"
-            style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
-          >
-            <label style={{ display: 'block', fontWeight: 600, marginBottom: '4px' }}>Calories</label>
-            <div>
-              <span>{Math.round(consumed.calories)}</span> / <span>{goals.calories}</span>
-            </div>
-            <small style={{ fontSize: '11px', color: '#888' }}>consumed / goal</small>
-          </div>
-          <div
-            data-testid="compact-carbs"
-            style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
-          >
-            <label style={{ display: 'block', fontWeight: 600, marginBottom: '4px' }}>Carbs</label>
-            <div>
-              <span>{Math.round(consumed.carbs)}</span> / <span>{goals.carbs}</span>g
-            </div>
-            <small style={{ fontSize: '11px', color: '#888' }}>consumed / goal</small>
-          </div>
-          <div
-            data-testid="compact-fats"
-            style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
-          >
-            <label style={{ display: 'block', fontWeight: 600, marginBottom: '4px' }}>Fats</label>
-            <div>
-              <span>{Math.round(consumed.fat)}</span> / <span>{goals.fat}</span>g
-            </div>
-            <small style={{ fontSize: '11px', color: '#888' }}>consumed / goal</small>
-          </div>
-          <div
-            data-testid="compact-protein"
-            style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
-          >
-            <label style={{ display: 'block', fontWeight: 600, marginBottom: '4px' }}>Protein</label>
-            <div>
-              <span>{Math.round(consumed.protein)}</span> / <span>{goals.protein}</span>g
-            </div>
-            <small style={{ fontSize: '11px', color: '#888' }}>consumed / goal</small>
-          </div>
-        </div>
-
-        {/* Status Row — matches legacy statusRow */}
-        <div
-          data-testid="card-missing-prices"
-          style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', fontSize: '14px', marginBottom: '12px' }}
-        >
-          <span>
-            Missing Prices: <strong>{missingPrices}</strong>
-          </span>
-          <span data-testid="card-placeholders">
-            Placeholder Items: <strong>{placeholders}</strong>
-          </span>
-          <span data-testid="card-below-min">
-            Below Min Stock: <strong>{belowMinStock}</strong>
-          </span>
-          <span data-testid="card-cart-value">
-            Shopping Cart Value: <strong>${cartValue.toFixed(2)}</strong>
-          </span>
-        </div>
-
-        {/* Action Buttons — matches legacy shoppingLinksBtn colors */}
-        <div data-testid="quick-actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <button
-            onClick={importShopping}
-            data-testid="import-shopping-btn"
+            data-testid="status-cards"
             style={{
-              background: '#ff8c00',
-              color: '#fff',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: '6px',
+              display: 'grid',
+              gridTemplateColumns: 'repeat(4, 1fr)',
+              gap: '12px',
+              marginBottom: '12px',
               cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '14px',
             }}
           >
+            <ProgressBar
+              testId="compact-calories"
+              label="Calories"
+              value={consumed.calories}
+              goal={goals.calories}
+              color={macroColors.calories}
+              unit=""
+            />
+            <ProgressBar
+              testId="compact-protein"
+              label="Protein"
+              value={consumed.protein}
+              goal={goals.protein}
+              color={macroColors.protein}
+              unit="g"
+            />
+            <ProgressBar
+              testId="compact-carbs"
+              label="Carbs"
+              value={consumed.carbs}
+              goal={goals.carbs}
+              color={macroColors.carbs}
+              unit="g"
+            />
+            <ProgressBar
+              testId="compact-fats"
+              label="Fats"
+              value={consumed.fat}
+              goal={goals.fat}
+              color={macroColors.fat}
+              unit="g"
+            />
+          </div>
+        </Link>
+
+        {/* Alert Badge Cards */}
+        <div
+          data-testid="card-missing-prices"
+          style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}
+        >
+          <Link
+            to="/chef/inventory"
+            data-testid="card-below-min"
+            style={{
+              textDecoration: 'none',
+              color: belowMinStock > 0 ? '#fff' : '#666',
+              background: belowMinStock > 0 ? '#f59e0b' : '#f0f0f0',
+              padding: '8px 14px',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'inline-block',
+            }}
+          >
+            Below Min Stock: {belowMinStock}
+          </Link>
+          <Link
+            to="/chef/settings?tab=walmart"
+            style={{
+              textDecoration: 'none',
+              color: missingPrices > 0 ? '#fff' : '#666',
+              background: missingPrices > 0 ? '#ef4444' : '#f0f0f0',
+              padding: '8px 14px',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'inline-block',
+            }}
+          >
+            Missing Prices: {missingPrices}
+          </Link>
+          <Link
+            to="/chef/settings?tab=products"
+            data-testid="card-placeholders"
+            style={{
+              textDecoration: 'none',
+              color: placeholders > 0 ? '#333' : '#666',
+              background: placeholders > 0 ? '#fde68a' : '#f0f0f0',
+              padding: '8px 14px',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'inline-block',
+            }}
+          >
+            Placeholders: {placeholders}
+          </Link>
+          <Link
+            to="/chef/shopping"
+            data-testid="card-cart-value"
+            style={{
+              textDecoration: 'none',
+              color: '#666',
+              background: '#f0f0f0',
+              padding: '8px 14px',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 600,
+              display: 'inline-block',
+            }}
+          >
+            Cart: ${cartValue.toFixed(2)}
+          </Link>
+        </div>
+
+        {/* Action Buttons — standardized blue primary / outlined secondary */}
+        <div data-testid="quick-actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+          <button onClick={importShopping} data-testid="import-shopping-btn" style={primaryBtnStyle}>
             Import Shopping List
           </button>
           <button
@@ -564,48 +706,17 @@ export function HomePage() {
             disabled={syncing}
             data-testid="meal-plan-cart-btn"
             style={{
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '14px',
+              ...primaryBtnStyle,
+              opacity: syncing ? 0.6 : 1,
+              cursor: syncing ? 'not-allowed' : 'pointer',
             }}
           >
             {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
           </button>
-          <button
-            onClick={openTasteModal}
-            data-testid="taste-profile-btn"
-            style={{
-              background: '#9b59b6',
-              color: '#fff',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '14px',
-            }}
-          >
+          <button onClick={openTasteModal} data-testid="taste-profile-btn" style={outlineBtnStyle}>
             Taste Profile
           </button>
-          <button
-            onClick={openTargetModal}
-            data-testid="target-macros-btn"
-            style={{
-              background: '#e67e22',
-              color: '#fff',
-              border: 'none',
-              padding: '10px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '14px',
-            }}
-          >
+          <button onClick={openTargetModal} data-testid="target-macros-btn" style={outlineBtnStyle}>
             Target Macros
           </button>
         </div>
@@ -637,10 +748,66 @@ export function HomePage() {
                   alignItems: 'center',
                 }}
               >
-                <span style={{ fontWeight: 600 }}>{entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}</span>
-                <span style={{ color: '#666', fontSize: '0.9em' }}>
-                  {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
-                </span>
+                <div>
+                  <span style={{ fontWeight: 600 }}>{entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}</span>
+                  <span style={{ color: '#666', fontSize: '0.9em', marginLeft: '8px' }}>
+                    {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
+                  </span>
+                </div>
+                {confirmPrepId === entry.meal_id ? (
+                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <span style={{ fontSize: '12px', color: '#666' }}>Execute?</span>
+                    <button
+                      onClick={() => executePrepMeal(entry.meal_id)}
+                      data-testid={`prep-confirm-${entry.meal_id}`}
+                      style={{
+                        background: '#22c55e',
+                        color: '#fff',
+                        border: 'none',
+                        padding: '4px 10px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: '12px',
+                      }}
+                    >
+                      Yes
+                    </button>
+                    <button
+                      onClick={() => setConfirmPrepId(null)}
+                      data-testid={`prep-cancel-${entry.meal_id}`}
+                      style={{
+                        background: '#e5e7eb',
+                        color: '#333',
+                        border: 'none',
+                        padding: '4px 10px',
+                        borderRadius: '4px',
+                        cursor: 'pointer',
+                        fontWeight: 600,
+                        fontSize: '12px',
+                      }}
+                    >
+                      No
+                    </button>
+                  </div>
+                ) : (
+                  <button
+                    onClick={() => setConfirmPrepId(entry.meal_id)}
+                    data-testid={`prep-execute-${entry.meal_id}`}
+                    style={{
+                      background: '#1e66f5',
+                      color: '#fff',
+                      border: 'none',
+                      padding: '5px 12px',
+                      borderRadius: '4px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      fontSize: '12px',
+                    }}
+                  >
+                    Execute
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -707,16 +874,35 @@ export function HomePage() {
                           {entry.meal_type}
                         </span>
                       )}
-                      <span
-                        data-testid={`meal-status-${entry.meal_id}`}
-                        style={{
-                          fontSize: '0.8em',
-                          fontWeight: 600,
-                          color: isDone ? '#2f9e44' : '#ffc409',
-                        }}
-                      >
-                        {isDone ? 'Done' : 'Pending'}
-                      </span>
+                      {isDone ? (
+                        <span
+                          data-testid={`meal-status-${entry.meal_id}`}
+                          style={{
+                            fontSize: '0.8em',
+                            fontWeight: 600,
+                            color: '#2f9e44',
+                          }}
+                        >
+                          Done
+                        </span>
+                      ) : (
+                        <button
+                          onClick={() => markMealDone(entry.meal_id)}
+                          data-testid={`meal-done-${entry.meal_id}`}
+                          style={{
+                            background: '#22c55e',
+                            color: '#fff',
+                            border: 'none',
+                            padding: '4px 10px',
+                            borderRadius: '4px',
+                            cursor: 'pointer',
+                            fontWeight: 600,
+                            fontSize: '12px',
+                          }}
+                        >
+                          Mark Done
+                        </button>
+                      )}
                     </div>
                   </div>
                   {mealMacros && (
