@@ -108,8 +108,6 @@ export function MealPlanPage() {
   const [addMealType, setAddMealType] = useState<string | null>(null);
   const [addDate, setAddDate] = useState<string>('');
 
-  /* ---- Meal prep confirmation modal state ---- */
-  const [prepTarget, setPrepTarget] = useState<MealEntry | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------- */
@@ -296,12 +294,6 @@ export function MealPlanPage() {
       return;
     }
     await loadMeals();
-  };
-
-  const executePrepConfirmed = async () => {
-    if (!prepTarget) return;
-    await markDone(prepTarget.meal_id);
-    setPrepTarget(null);
   };
 
   /* ---------------------------------------------------------------- */
@@ -797,7 +789,7 @@ export function MealPlanPage() {
                                 </button>
                                 {meal.meal_prep && (
                                   <button
-                                    onClick={() => setPrepTarget(meal)}
+                                    onClick={() => markDone(meal.meal_id)}
                                     data-testid={`exec-prep-${meal.meal_id}`}
                                     style={{
                                       padding: '5px 12px',
@@ -1025,49 +1017,6 @@ export function MealPlanPage() {
             }}
           >
             Add
-          </button>
-        </div>
-      </ModalOverlay>
-
-      {/* ============================================================ */}
-      {/*  MEAL PREP CONFIRMATION MODAL                                  */}
-      {/* ============================================================ */}
-      <ModalOverlay
-        isOpen={prepTarget !== null}
-        onClose={() => setPrepTarget(null)}
-        title="Execute Meal Prep"
-        maxWidth="450px"
-        testId="prep-confirm-modal"
-      >
-        <p>This will consume ingredients and create a [MEAL] lot.</p>
-        {prepTarget && (
-          <p style={{ fontWeight: 'bold', margin: '12px 0' }}>
-            {entryName(prepTarget)} &mdash; {Number(prepTarget.servings).toFixed(1)} servings
-          </p>
-        )}
-        <p style={{ fontSize: '0.85em', color: '#666' }}>Macros will not be logged until the [MEAL] lot is consumed.</p>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <button
-            onClick={() => setPrepTarget(null)}
-            data-testid="prep-cancel-btn"
-            style={{ padding: '8px 16px', background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
-          >
-            Cancel
-          </button>
-          <button
-            onClick={executePrepConfirmed}
-            data-testid="prep-execute-btn"
-            style={{
-              padding: '8px 16px',
-              background: '#6c5ce7',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 600,
-            }}
-          >
-            Execute
           </button>
         </div>
       </ModalOverlay>
