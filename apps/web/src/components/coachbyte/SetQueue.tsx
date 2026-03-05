@@ -120,7 +120,7 @@ export function SetQueue({
                 data-testid="inline-timer"
               >
                 <div style={{ fontSize: 13, marginBottom: 2 }}>{timerState === 'expired' ? 'Timer' : 'Rest Timer'}</div>
-                <div style={{ fontSize: 32, fontFamily: 'monospace', lineHeight: 1 }}>
+                <div style={{ fontSize: 48, fontFamily: 'monospace', lineHeight: 1 }}>
                   {timerState === 'expired' ? 'expired!' : timerDisplay || '0:00'}
                 </div>
               </div>
