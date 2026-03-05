@@ -120,6 +120,7 @@ export function ShoppingPage() {
         .from('products')
         .select('product_id, name')
         .eq('user_id', user.id)
+        .not('name', 'ilike', '[MEAL]%')
         .ilike('name', `%${escapeIlike(text)}%`)
         .order('name');
 
@@ -273,6 +274,7 @@ export function ShoppingPage() {
       .from('products')
       .select('product_id, name, min_stock_amount')
       .eq('user_id', user.id)
+      .not('name', 'ilike', '[MEAL]%')
       .gt('min_stock_amount', 0);
 
     if (!products || products.length === 0) return;

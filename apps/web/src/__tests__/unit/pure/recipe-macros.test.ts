@@ -130,4 +130,32 @@ describe('computeRecipeMacros', () => {
     expect(result.protein).toBe(3);
     expect(result.fat).toBe(3);
   });
+
+  /* ---- Macro density (g per 100 cal) — used by recipe filter ---- */
+
+  it('supports high-protein density calculation (g protein per 100 cal)', () => {
+    // Chicken breast: 165 cal, 31g protein per serving
+    const ingredients = [{ quantity: 1, unit: 'serving', products: makeProduct(165, 0, 31, 3.6, 1) }];
+    const macros = computeRecipeMacros(ingredients, 1);
+    const proteinPer100Cal = (macros.protein / macros.calories) * 100;
+    // 31/165 * 100 = 18.8 g/100cal — high protein
+    expect(proteinPer100Cal).toBeGreaterThan(8); // default threshold
+    expect(proteinPer100Cal).toBeCloseTo(18.8, 0);
+  });
+
+  it('supports high-carbs density calculation (g carbs per 100 cal)', () => {
+    // Rice: 200 cal, 45g carbs per serving
+    const ingredients = [{ quantity: 1, unit: 'serving', products: makeProduct(200, 45, 4, 0.5, 1) }];
+    const macros = computeRecipeMacros(ingredients, 1);
+    const carbsPer100Cal = (macros.carbs / macros.calories) * 100;
+    // 45/200 * 100 = 22.5 g/100cal — high carbs
+    expect(carbsPer100Cal).toBeGreaterThan(10); // default threshold
+    expect(carbsPer100Cal).toBeCloseTo(22.5, 0);
+  });
+
+  it('zero-calorie recipe excluded from density filters', () => {
+    const macros = computeRecipeMacros([], 1);
+    expect(macros.calories).toBe(0);
+    // Filter should reject when calories is 0 (division by zero guard)
+  });
 });

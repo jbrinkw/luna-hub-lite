@@ -391,6 +391,33 @@ describe('ChefByte SettingsPage queries', () => {
   });
 
   // -----------------------------------------------------------------------
+  // [MEAL] products excluded from settings products list
+  // -----------------------------------------------------------------------
+  it('[MEAL] products excluded from settings products list', async () => {
+    // Insert a [MEAL] product
+    await chefbyte(ctx.client).from('products').insert({
+      user_id: ctx.userId,
+      name: '[MEAL] Test Meal Product',
+      is_placeholder: false,
+    });
+
+    // Run the EXACT query from SettingsPage (with [MEAL] exclusion filter)
+    const { data } = await chefbyte(ctx.client)
+      .from('products')
+      .select('*')
+      .eq('user_id', ctx.userId)
+      .not('name', 'ilike', '[MEAL]%')
+      .order('name');
+
+    // Verify [MEAL] product is NOT in results
+    const mealProducts = (data ?? []).filter((p: any) => p.name.startsWith('[MEAL]'));
+    expect(mealProducts.length).toBe(0);
+
+    // Verify other products ARE in results
+    expect((data ?? []).length).toBeGreaterThan(0);
+  });
+
+  // -----------------------------------------------------------------------
   // Exact query from SettingsPage.tsx loadDeviceEvents (line 232-238)
   // -----------------------------------------------------------------------
   it('liquidtrack_events query matches page pattern', async () => {

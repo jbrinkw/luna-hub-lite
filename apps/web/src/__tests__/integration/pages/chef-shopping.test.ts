@@ -399,4 +399,55 @@ describe('ChefByte ShoppingPage queries', () => {
     // Cleanup
     await chefbyte(ctx.client).from('shopping_list').delete().eq('cart_item_id', initial!.cart_item_id);
   });
+
+  // -----------------------------------------------------------------------
+  // [MEAL] products excluded from shopping product search
+  // -----------------------------------------------------------------------
+  it('[MEAL] products excluded from shopping product search', async () => {
+    // Insert a [MEAL] product
+    await chefbyte(ctx.client).from('products').insert({
+      user_id: ctx.userId,
+      name: '[MEAL] Chicken Bowl',
+      is_placeholder: false,
+    });
+
+    // Run the EXACT query from ShoppingPage searchProducts (searching for "Chicken")
+    const { data } = await chefbyte(ctx.client)
+      .from('products')
+      .select('product_id, name')
+      .eq('user_id', ctx.userId)
+      .not('name', 'ilike', '[MEAL]%')
+      .ilike('name', '%Chicken%')
+      .order('name');
+
+    // Should find "Chicken Breast" but NOT "[MEAL] Chicken Bowl"
+    const names = (data ?? []).map((p: any) => p.name);
+    expect(names).toContain('Chicken Breast');
+    expect(names.every((n: string) => !n.startsWith('[MEAL]'))).toBe(true);
+  });
+
+  // -----------------------------------------------------------------------
+  // [MEAL] products excluded from auto-add below min stock
+  // -----------------------------------------------------------------------
+  it('[MEAL] products excluded from auto-add below min stock', async () => {
+    // Insert a [MEAL] product with min_stock > 0
+    await chefbyte(ctx.client).from('products').insert({
+      user_id: ctx.userId,
+      name: '[MEAL] Prep Bowl',
+      is_placeholder: false,
+      min_stock_amount: 5,
+    });
+
+    // Run the EXACT query from ShoppingPage autoAddBelowMinStock
+    const { data } = await chefbyte(ctx.client)
+      .from('products')
+      .select('product_id, name, min_stock_amount')
+      .eq('user_id', ctx.userId)
+      .not('name', 'ilike', '[MEAL]%')
+      .gt('min_stock_amount', 0);
+
+    // Should NOT include the [MEAL] product
+    const names = (data ?? []).map((p: any) => p.name);
+    expect(names.every((n: string) => !n.startsWith('[MEAL]'))).toBe(true);
+  });
 });

@@ -154,6 +154,21 @@ export function RecipesPage() {
   /* ---- Filter state ---- */
   const [searchText, setSearchText] = useState('');
   const [maxActiveTime, setMaxActiveTime] = useState<number | null>(null);
+  const [canBeMadeOnly, setCanBeMadeOnly] = useState(false);
+  const [highProteinOnly, setHighProteinOnly] = useState(false);
+  const [highCarbsOnly, setHighCarbsOnly] = useState(false);
+
+  /* ---- Macro density thresholds (g per 100 cal, persisted) ---- */
+  const [proteinThreshold, setProteinThreshold] = useState(() => {
+    const saved = localStorage.getItem('chefbyte_protein_threshold');
+    return saved ? Number(saved) : 8;
+  });
+  const [carbsThreshold, setCarbsThreshold] = useState(() => {
+    const saved = localStorage.getItem('chefbyte_carbs_threshold');
+    return saved ? Number(saved) : 10;
+  });
+  const [editingThreshold, setEditingThreshold] = useState<'protein' | 'carbs' | null>(null);
+  const [thresholdInput, setThresholdInput] = useState('');
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -211,10 +226,41 @@ export function RecipesPage() {
       result = result.filter((r) => r.active_time !== null && r.active_time <= maxActiveTime);
     }
 
-    // Can be made filter -- disabled until stock check is fully wired
+    // Can be made filter
+    if (canBeMadeOnly) {
+      result = result.filter((r) => computeStockStatus(r.recipe_ingredients, stockByProduct) === 'CAN MAKE');
+    }
+
+    // High protein filter (g protein per 100 cal >= threshold)
+    if (highProteinOnly) {
+      result = result.filter((r) => {
+        const macros = computeRecipeMacros(r.recipe_ingredients, Number(r.base_servings));
+        if (macros.calories === 0) return false;
+        return (macros.protein / macros.calories) * 100 >= proteinThreshold;
+      });
+    }
+
+    // High carbs filter (g carbs per 100 cal >= threshold)
+    if (highCarbsOnly) {
+      result = result.filter((r) => {
+        const macros = computeRecipeMacros(r.recipe_ingredients, Number(r.base_servings));
+        if (macros.calories === 0) return false;
+        return (macros.carbs / macros.calories) * 100 >= carbsThreshold;
+      });
+    }
 
     return result;
-  }, [recipes, searchText, maxActiveTime]);
+  }, [
+    recipes,
+    searchText,
+    maxActiveTime,
+    canBeMadeOnly,
+    stockByProduct,
+    highProteinOnly,
+    highCarbsOnly,
+    proteinThreshold,
+    carbsThreshold,
+  ]);
 
   /* ================================================================ */
   /*  RENDER                                                           */
@@ -300,16 +346,15 @@ export function RecipesPage() {
         />
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
           <button
-            disabled
-            title="Coming soon"
+            onClick={() => setCanBeMadeOnly(!canBeMadeOnly)}
             data-testid="can-be-made-filter"
             style={{
               padding: '6px 14px',
               borderRadius: '16px',
-              border: '1px solid #ddd',
-              background: '#f3f4f6',
-              color: '#9ca3af',
-              cursor: 'not-allowed',
+              border: canBeMadeOnly ? '1px solid #2f9e44' : '1px solid #ddd',
+              background: canBeMadeOnly ? '#ecfdf5' : '#fff',
+              color: canBeMadeOnly ? '#2f9e44' : '#4b5563',
+              cursor: 'pointer',
               fontSize: '13px',
               fontWeight: 500,
             }}
@@ -332,6 +377,202 @@ export function RecipesPage() {
           >
             &lt; 30 min
           </button>
+
+          {/* High Protein filter + edit threshold */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+            <button
+              onClick={() => setHighProteinOnly(!highProteinOnly)}
+              data-testid="high-protein-filter"
+              style={{
+                padding: '6px 14px',
+                borderRadius: editingThreshold === 'protein' ? '16px 0 0 16px' : '16px',
+                border: highProteinOnly ? '1px solid #7c3aed' : '1px solid #ddd',
+                borderRight: editingThreshold === 'protein' ? 'none' : undefined,
+                background: highProteinOnly ? '#f5f3ff' : '#fff',
+                color: highProteinOnly ? '#7c3aed' : '#4b5563',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 500,
+              }}
+            >
+              High Protein ({proteinThreshold}g/100cal)
+            </button>
+            {editingThreshold !== 'protein' ? (
+              <button
+                onClick={() => {
+                  setEditingThreshold('protein');
+                  setThresholdInput(String(proteinThreshold));
+                }}
+                data-testid="edit-protein-threshold"
+                title="Edit threshold"
+                style={{
+                  padding: '4px 6px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  background: '#f9fafb',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: '#666',
+                  lineHeight: 1,
+                }}
+              >
+                ✎
+              </button>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const val = parseFloat(thresholdInput);
+                  if (!isNaN(val) && val > 0) {
+                    setProteinThreshold(val);
+                    localStorage.setItem('chefbyte_protein_threshold', String(val));
+                  }
+                  setEditingThreshold(null);
+                }}
+                style={{ display: 'inline-flex', alignItems: 'center' }}
+              >
+                <input
+                  type="number"
+                  value={thresholdInput}
+                  onChange={(e) => setThresholdInput(e.target.value)}
+                  autoFocus
+                  step="0.5"
+                  min="0"
+                  data-testid="protein-threshold-input"
+                  style={{
+                    width: '55px',
+                    padding: '5px 4px',
+                    border: '1px solid #7c3aed',
+                    borderRadius: '0',
+                    fontSize: '13px',
+                    textAlign: 'center',
+                  }}
+                  onBlur={() => {
+                    const val = parseFloat(thresholdInput);
+                    if (!isNaN(val) && val > 0) {
+                      setProteinThreshold(val);
+                      localStorage.setItem('chefbyte_protein_threshold', String(val));
+                    }
+                    setEditingThreshold(null);
+                  }}
+                />
+                <button
+                  type="submit"
+                  data-testid="save-protein-threshold"
+                  style={{
+                    padding: '5px 8px',
+                    border: '1px solid #7c3aed',
+                    borderLeft: 'none',
+                    borderRadius: '0 16px 16px 0',
+                    background: '#7c3aed',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  OK
+                </button>
+              </form>
+            )}
+          </div>
+
+          {/* High Carbs filter + edit threshold */}
+          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+            <button
+              onClick={() => setHighCarbsOnly(!highCarbsOnly)}
+              data-testid="high-carbs-filter"
+              style={{
+                padding: '6px 14px',
+                borderRadius: editingThreshold === 'carbs' ? '16px 0 0 16px' : '16px',
+                border: highCarbsOnly ? '1px solid #d97706' : '1px solid #ddd',
+                borderRight: editingThreshold === 'carbs' ? 'none' : undefined,
+                background: highCarbsOnly ? '#fffbeb' : '#fff',
+                color: highCarbsOnly ? '#d97706' : '#4b5563',
+                cursor: 'pointer',
+                fontSize: '13px',
+                fontWeight: 500,
+              }}
+            >
+              High Carbs ({carbsThreshold}g/100cal)
+            </button>
+            {editingThreshold !== 'carbs' ? (
+              <button
+                onClick={() => {
+                  setEditingThreshold('carbs');
+                  setThresholdInput(String(carbsThreshold));
+                }}
+                data-testid="edit-carbs-threshold"
+                title="Edit threshold"
+                style={{
+                  padding: '4px 6px',
+                  border: '1px solid #ddd',
+                  borderRadius: '4px',
+                  background: '#f9fafb',
+                  cursor: 'pointer',
+                  fontSize: '11px',
+                  color: '#666',
+                  lineHeight: 1,
+                }}
+              >
+                ✎
+              </button>
+            ) : (
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  const val = parseFloat(thresholdInput);
+                  if (!isNaN(val) && val > 0) {
+                    setCarbsThreshold(val);
+                    localStorage.setItem('chefbyte_carbs_threshold', String(val));
+                  }
+                  setEditingThreshold(null);
+                }}
+                style={{ display: 'inline-flex', alignItems: 'center' }}
+              >
+                <input
+                  type="number"
+                  value={thresholdInput}
+                  onChange={(e) => setThresholdInput(e.target.value)}
+                  autoFocus
+                  step="0.5"
+                  min="0"
+                  data-testid="carbs-threshold-input"
+                  style={{
+                    width: '55px',
+                    padding: '5px 4px',
+                    border: '1px solid #d97706',
+                    borderRadius: '0',
+                    fontSize: '13px',
+                    textAlign: 'center',
+                  }}
+                  onBlur={() => {
+                    const val = parseFloat(thresholdInput);
+                    if (!isNaN(val) && val > 0) {
+                      setCarbsThreshold(val);
+                      localStorage.setItem('chefbyte_carbs_threshold', String(val));
+                    }
+                    setEditingThreshold(null);
+                  }}
+                />
+                <button
+                  type="submit"
+                  data-testid="save-carbs-threshold"
+                  style={{
+                    padding: '5px 8px',
+                    border: '1px solid #d97706',
+                    borderLeft: 'none',
+                    borderRadius: '0 16px 16px 0',
+                    background: '#d97706',
+                    color: '#fff',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                  }}
+                >
+                  OK
+                </button>
+              </form>
+            )}
+          </div>
         </div>
       </div>
 
