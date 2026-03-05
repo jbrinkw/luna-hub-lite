@@ -237,6 +237,84 @@ describe('ChefByte SettingsPage queries', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Exact flow from SettingsPage.tsx deleteLocation (line 316-335)
+  // Location delete blocked when stock_lots exist
+  // -----------------------------------------------------------------------
+  it('location delete blocked when stock_lots exist at location', async () => {
+    // Create a location to test with
+    const { data: loc } = await chefbyte(ctx.client)
+      .from('locations')
+      .insert({ user_id: ctx.userId, name: 'Delete Test Loc' })
+      .select('location_id')
+      .single();
+    expect(loc).not.toBeNull();
+    const locationId = loc!.location_id;
+
+    // Add a stock lot at that location
+    const productId = seeds.productMap['Bananas'];
+    const insertResult = await chefbyte(ctx.client).from('stock_lots').insert({
+      user_id: ctx.userId,
+      product_id: productId,
+      location_id: locationId,
+      qty_containers: 1,
+      expires_on: '2099-11-11',
+    });
+    expect(insertResult.error).toBeNull();
+
+    // Exact query from SettingsPage.tsx line 318-321 (count check)
+    const { count } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('*', { count: 'exact', head: true })
+      .eq('location_id', locationId);
+
+    expect(count).toBeGreaterThan(0);
+
+    // Verify location still exists (page would block delete here)
+    const { data: stillThere } = await chefbyte(ctx.client)
+      .from('locations')
+      .select('location_id')
+      .eq('location_id', locationId);
+    expect(stillThere).toHaveLength(1);
+
+    // Cleanup: remove stock lot then location
+    await chefbyte(ctx.client).from('stock_lots').delete().eq('location_id', locationId);
+    await chefbyte(ctx.client).from('locations').delete().eq('location_id', locationId);
+  });
+
+  // -----------------------------------------------------------------------
+  // Location delete succeeds when no stock at location
+  // -----------------------------------------------------------------------
+  it('location delete succeeds when no stock_lots at location', async () => {
+    // Create a location with no stock
+    const { data: loc } = await chefbyte(ctx.client)
+      .from('locations')
+      .insert({ user_id: ctx.userId, name: 'Empty Loc' })
+      .select('location_id')
+      .single();
+    expect(loc).not.toBeNull();
+    const locationId = loc!.location_id;
+
+    // Exact count query from SettingsPage.tsx line 318-321
+    const { count } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('*', { count: 'exact', head: true })
+      .eq('location_id', locationId);
+
+    expect(count).toBe(0);
+
+    // Delete location (exact pattern from SettingsPage.tsx line 327)
+    const deleteResult = await chefbyte(ctx.client).from('locations').delete().eq('location_id', locationId);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: remaining } = await chefbyte(ctx.client)
+      .from('locations')
+      .select('location_id')
+      .eq('location_id', locationId);
+    expect(remaining).toHaveLength(0);
+  });
+
+  // -----------------------------------------------------------------------
   // Exact insert from SettingsPage.tsx generateDevice (line 199-207)
   // -----------------------------------------------------------------------
   it('liquidtrack device insert matches page pattern', async () => {
