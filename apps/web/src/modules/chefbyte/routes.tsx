@@ -7,7 +7,6 @@ import { MealPlanPage } from '@/pages/chefbyte/MealPlanPage';
 import { RecipesPage } from '@/pages/chefbyte/RecipesPage';
 import { RecipeFormPage } from '@/pages/chefbyte/RecipeFormPage';
 import { MacroPage } from '@/pages/chefbyte/MacroPage';
-import { WalmartPage } from '@/pages/chefbyte/WalmartPage';
 import { SettingsPage } from '@/pages/chefbyte/SettingsPage';
 
 export function ChefRoutes() {
@@ -23,7 +22,7 @@ export function ChefRoutes() {
       <Route path="recipes/new" element={<RecipeFormPage />} />
       <Route path="recipes/:id" element={<RecipeFormPage />} />
       <Route path="macros" element={<MacroPage />} />
-      <Route path="walmart" element={<WalmartPage />} />
+      <Route path="walmart" element={<Navigate to="/chef/settings?tab=walmart" replace />} />
       <Route path="settings" element={<SettingsPage />} />
       <Route
         path="*"

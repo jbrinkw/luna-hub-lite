@@ -1,5 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { WalmartTab } from '@/components/chefbyte/WalmartTab';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 
@@ -48,10 +50,11 @@ interface LiquidTrackEvent {
   is_refill: boolean;
 }
 
-type Tab = 'products' | 'liquidtrack' | 'locations';
+type Tab = 'products' | 'walmart' | 'liquidtrack' | 'locations';
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'products', label: 'Products', icon: '\uD83D\uDCE6' },
+  { id: 'walmart', label: 'Walmart', icon: '\uD83C\uDFEA' },
   { id: 'liquidtrack', label: 'LiquidTrack', icon: '\uD83E\uDD64' },
   { id: 'locations', label: 'Locations', icon: '\uD83D\uDCCD' },
 ];
@@ -110,7 +113,9 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
 
 export function SettingsPage() {
   const { user } = useAuth();
-  const [activeTab, setActiveTab] = useState<Tab>('products');
+  const [searchParams] = useSearchParams();
+  const initialTab = (searchParams.get('tab') as Tab) || 'products';
+  const [activeTab, setActiveTab] = useState<Tab>(tabs.some((t) => t.id === initialTab) ? initialTab : 'products');
   const [loading, setLoading] = useState(true);
 
   /* ---- Products state ---- */
@@ -361,7 +366,7 @@ export function SettingsPage() {
     onChange: (field: string, value: any) => void,
     testIdPrefix: string,
   ) => (
-    <div className="cb-form-grid">
+    <div className="formGrid">
       <div>
         <label style={labelStyle}>Name</label>
         <input
@@ -509,7 +514,7 @@ export function SettingsPage() {
       )}
 
       {/* Mobile tab select */}
-      <div className="cb-mobile-only" style={{ marginBottom: '12px' }}>
+      <div className="mobile-only" style={{ marginBottom: '12px' }}>
         <select
           value={activeTab}
           onChange={(e) => setActiveTab(e.target.value as Tab)}
@@ -525,10 +530,10 @@ export function SettingsPage() {
       </div>
 
       {/* Desktop Tabs */}
-      <div className="cb-tab-bar cb-desktop-only" data-testid="settings-tabs">
+      <div className="tab-bar desktop-only" data-testid="settings-tabs">
         {tabs.map((tab) => (
           <button
-            className={`cb-tab-btn ${activeTab === tab.id ? 'active' : ''}`}
+            className={`tab-btn ${activeTab === tab.id ? 'active' : ''}`}
             onClick={() => setActiveTab(tab.id)}
             key={tab.id}
           >
@@ -573,7 +578,7 @@ export function SettingsPage() {
               >
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#1a1a2e' }}>Add Product</h3>
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   onClick={() => setShowAddProduct(!showAddProduct)}
                   data-testid="toggle-add-product"
                   style={{ background: showAddProduct ? '#6b7280' : '#2f9e44', fontSize: '13px', padding: '6px 14px' }}
@@ -589,7 +594,7 @@ export function SettingsPage() {
                     'add',
                   )}
                   <button
-                    className="cb-primary-btn"
+                    className="primary-btn"
                     onClick={addProduct}
                     disabled={!addForm.name.trim()}
                     data-testid="save-new-product"
@@ -615,7 +620,7 @@ export function SettingsPage() {
                       )}
                       <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
                         <button
-                          className="cb-primary-btn"
+                          className="primary-btn"
                           onClick={saveProduct}
                           data-testid="save-edit-product"
                           style={{ background: '#2f9e44' }}
@@ -623,7 +628,7 @@ export function SettingsPage() {
                           Save
                         </button>
                         <button
-                          className="cb-primary-btn"
+                          className="primary-btn"
                           onClick={cancelEdit}
                           data-testid="cancel-edit-product"
                           style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
@@ -656,7 +661,7 @@ export function SettingsPage() {
                       </div>
                       <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
                         <button
-                          className="cb-primary-btn"
+                          className="primary-btn"
                           onClick={() => startEdit(p)}
                           data-testid={`edit-product-${p.product_id}`}
                           style={{ background: '#1e66f5', fontSize: '13px', padding: '6px 14px' }}
@@ -702,21 +707,21 @@ export function SettingsPage() {
                 }}
                 onClick={() => setDeleteTarget(null)}
               >
-                <div className="cb-modal-panel" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
                   <h3 style={{ margin: '0 0 12px', fontSize: '18px', fontWeight: 700 }}>Delete Product</h3>
                   <p style={{ color: '#666', margin: '0 0 20px' }}>
                     Are you sure you want to delete this product? This cannot be undone.
                   </p>
                   <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button
-                      className="cb-primary-btn"
+                      className="primary-btn"
                       onClick={() => setDeleteTarget(null)}
                       style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
                     >
                       Cancel
                     </button>
                     <button
-                      className="cb-primary-btn"
+                      className="primary-btn"
                       onClick={() => {
                         if (deleteTarget) deleteProduct(deleteTarget);
                       }}
@@ -728,6 +733,15 @@ export function SettingsPage() {
                 </div>
               </div>
             )}
+          </div>
+        )}
+
+        {/* ========================================================== */}
+        {/*  WALMART TAB                                                 */}
+        {/* ========================================================== */}
+        {activeTab === 'walmart' && (
+          <div data-testid="walmart-tab" style={{ padding: '20px' }}>
+            <WalmartTab />
           </div>
         )}
 
@@ -748,7 +762,7 @@ export function SettingsPage() {
               >
                 <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 700, color: '#1a1a2e' }}>Add Device</h3>
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   onClick={() => setShowAddDevice(!showAddDevice)}
                   data-testid="toggle-add-device"
                   style={{ background: showAddDevice ? '#6b7280' : '#1e66f5', fontSize: '13px', padding: '6px 14px' }}
@@ -785,7 +799,7 @@ export function SettingsPage() {
                     </select>
                   </div>
                   <button
-                    className="cb-primary-btn"
+                    className="primary-btn"
                     onClick={generateDevice}
                     disabled={!newDeviceName.trim()}
                     data-testid="generate-device-btn"
@@ -823,7 +837,7 @@ export function SettingsPage() {
                   Save this key now -- you will not be able to see it again!
                 </p>
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   onClick={() => setGeneratedDevice(null)}
                   style={{ background: '#6b7280', fontSize: '13px', padding: '6px 14px' }}
                 >
@@ -896,7 +910,7 @@ export function SettingsPage() {
                       {deviceEvents.length === 0 ? (
                         <p style={{ color: '#888', fontStyle: 'italic' }}>No events recorded.</p>
                       ) : (
-                        <div className="cb-table-responsive">
+                        <div className="table-responsive">
                           <table style={{ width: '100%', fontSize: '0.85em', borderCollapse: 'collapse' }}>
                             <thead>
                               <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
@@ -954,21 +968,21 @@ export function SettingsPage() {
                 }}
                 onClick={() => setRevokeTarget(null)}
               >
-                <div className="cb-modal-panel" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
                   <h3 style={{ margin: '0 0 12px', fontSize: '18px', fontWeight: 700 }}>Revoke Device</h3>
                   <p style={{ color: '#666', margin: '0 0 20px' }}>
                     Are you sure you want to revoke this device? It will stop working immediately.
                   </p>
                   <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button
-                      className="cb-primary-btn"
+                      className="primary-btn"
                       onClick={() => setRevokeTarget(null)}
                       style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
                     >
                       Cancel
                     </button>
                     <button
-                      className="cb-primary-btn"
+                      className="primary-btn"
                       onClick={() => {
                         if (revokeTarget) revokeDevice(revokeTarget);
                       }}
@@ -1051,7 +1065,7 @@ export function SettingsPage() {
                   style={{ ...inputStyle, flex: 1 }}
                 />
                 <button
-                  className="cb-primary-btn"
+                  className="primary-btn"
                   onClick={addLocation}
                   disabled={!newLocationName.trim()}
                   data-testid="add-location-btn"
@@ -1079,21 +1093,21 @@ export function SettingsPage() {
                 }}
                 onClick={() => setDeleteLocationTarget(null)}
               >
-                <div className="cb-modal-panel" onClick={(e) => e.stopPropagation()}>
+                <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
                   <h3 style={{ margin: '0 0 12px', fontSize: '18px', fontWeight: 700 }}>Delete Location</h3>
                   <p style={{ color: '#666', margin: '0 0 20px' }}>
                     Are you sure you want to delete this location? This cannot be undone.
                   </p>
                   <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
                     <button
-                      className="cb-primary-btn"
+                      className="primary-btn"
                       onClick={() => setDeleteLocationTarget(null)}
                       style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
                     >
                       Cancel
                     </button>
                     <button
-                      className="cb-primary-btn"
+                      className="primary-btn"
                       onClick={() => {
                         if (deleteLocationTarget) deleteLocation(deleteLocationTarget);
                       }}
