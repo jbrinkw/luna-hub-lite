@@ -113,10 +113,24 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 
 ## TOTALS: 54 findings (18H, 20M, 23L)
 
-## Top 5 Most Critical (fix first)
+## Fix Progress: 29 DONE, 24 OPEN (test quality), 1 DEFERRED
 
-1. **H12** — `dayStartHour` never passed to `todayStr()` — ALL pages use wrong day boundary for users with non-default day_start_hour
-2. **H14/H15/H16** — MCP Worker toolsReady has no error handling or timeout — session hangs on DB failure
-3. **H1/H2** — Silent meal/settings save failures — users don't know operations failed
-4. **H7** — 10+ unchecked Supabase queries in HomePage — silent data gaps
-5. **H18** — `getLogicalDate()` in app-tools ignores profile query errors — wrong dates in MCP tool calls
+### Fixed (29):
+
+- **All source code bugs** (H1,H2,H7,H8-H16,H18, M10,M13-M17,M19,M20, L8,L9,L14,L19-L23)
+- Schema: NOT NULL constraints, index, CHECK constraints
+- MCP Worker: error handling, timeout, JSON-RPC spec compliance
+- UI: dayStartHour, error surfacing, stale closures, loading states
+- Extensions: shared constants, response body in errors, input validation
+- Edge functions: response validation, input validation
+
+### Remaining OPEN (24) — all test quality improvements:
+
+- **H3-H6**: Extension test mocks, weak RLS tests, E2E waitForTimeout, stock re-verification
+- **H17, M18**: MCP tool argument validation, SSE reconnection race
+- **M1-M5, M7-M9, M11-M12**: Test tautologies, weak assertions, missing coverage
+- **L1-L7, L10-L13, L15-L18**: Low-priority test and seed improvements
+
+### DEFERRED (1):
+
+- **M6**: `as any` casts — requires DB types regeneration and significant refactor
