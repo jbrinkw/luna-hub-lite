@@ -1,6 +1,6 @@
 {
   "name": "obsidian",
-  "displayName": "Obsidian",
-  "description": "Integration with Obsidian vault via Local REST API",
-  "credentialFields": ["obsidian_api_key", "obsidian_url"]
+  "displayName": "Obsidian Vault",
+  "description": "Integration with Obsidian vault via GitHub-compatible Git API (GitHub, Gitea, etc.)",
+  "credentialFields": ["github_token", "github_repo", "github_api_url"]
 }

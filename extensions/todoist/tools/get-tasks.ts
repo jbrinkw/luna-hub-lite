@@ -32,8 +32,9 @@ export const TODOIST_get_tasks: ExtensionToolDefinition = {
 
       if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
 
-      const data = await resp.json();
-      return toolSuccess(data);
+      const data: any = await resp.json();
+      // v1 API wraps list responses in { results: [...] }
+      return toolSuccess(Array.isArray(data) ? data : (data.results ?? data));
     } catch (e) {
       return toolError(`Network error: ${(e as Error).message}`);
     }

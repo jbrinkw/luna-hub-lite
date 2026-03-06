@@ -2,20 +2,28 @@ import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/ap
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
 import { TODOIST_API_BASE } from './constants';
 
-export const TODOIST_get_projects: ExtensionToolDefinition = {
-  name: 'TODOIST_get_projects',
+export const TODOIST_get_sections: ExtensionToolDefinition = {
+  name: 'TODOIST_get_sections',
   extensionName: 'todoist',
-  description: 'List all projects in the Todoist account.',
+  description: 'List sections in Todoist, optionally filtered by project ID.',
   inputSchema: {
     type: 'object',
-    properties: {},
+    properties: {
+      project_id: { type: 'string', description: 'Filter sections by project ID' },
+    },
   },
-  handler: async (_args, ctx) => {
+  handler: async (args, ctx) => {
     const { todoist_api_key } = (ctx as ExtensionToolContext).credentials;
     if (!todoist_api_key) return toolError('Missing Todoist credentials (todoist_api_key)');
 
     try {
-      const resp = await fetch(`${TODOIST_API_BASE}/projects`, {
+      const params = new URLSearchParams();
+      if (args.project_id) params.set('project_id', args.project_id);
+
+      const qs = params.toString();
+      const url = `${TODOIST_API_BASE}/sections${qs ? `?${qs}` : ''}`;
+
+      const resp = await fetch(url, {
         method: 'GET',
         headers: { Authorization: `Bearer ${todoist_api_key}` },
       });

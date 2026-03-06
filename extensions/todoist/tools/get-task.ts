@@ -2,29 +2,31 @@ import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/ap
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
 import { TODOIST_API_BASE } from './constants';
 
-export const TODOIST_get_projects: ExtensionToolDefinition = {
-  name: 'TODOIST_get_projects',
+export const TODOIST_get_task: ExtensionToolDefinition = {
+  name: 'TODOIST_get_task',
   extensionName: 'todoist',
-  description: 'List all projects in the Todoist account.',
+  description: 'Get a single Todoist task by its ID.',
   inputSchema: {
     type: 'object',
-    properties: {},
+    properties: {
+      task_id: { type: 'string', description: 'The ID of the task to retrieve' },
+    },
+    required: ['task_id'],
   },
-  handler: async (_args, ctx) => {
+  handler: async (args, ctx) => {
     const { todoist_api_key } = (ctx as ExtensionToolContext).credentials;
     if (!todoist_api_key) return toolError('Missing Todoist credentials (todoist_api_key)');
 
     try {
-      const resp = await fetch(`${TODOIST_API_BASE}/projects`, {
+      const resp = await fetch(`${TODOIST_API_BASE}/tasks/${encodeURIComponent(args.task_id)}`, {
         method: 'GET',
         headers: { Authorization: `Bearer ${todoist_api_key}` },
       });
 
       if (!resp.ok) return toolError(`Todoist API error: ${resp.status} ${resp.statusText}`);
 
-      const data: any = await resp.json();
-      // v1 API wraps list responses in { results: [...] }
-      return toolSuccess(Array.isArray(data) ? data : (data.results ?? data));
+      const data = await resp.json();
+      return toolSuccess(data);
     } catch (e) {
       return toolError(`Network error: ${(e as Error).message}`);
     }

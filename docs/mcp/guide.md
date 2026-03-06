@@ -78,9 +78,14 @@ extensions/{name}/
 {
   "name": "obsidian",
   "display_name": "Obsidian",
-  "description": "Read and write notes in your Obsidian vault",
-  "required_secrets": ["obsidian_api_key"],
-  "tools": ["OBSIDIAN_search_notes", "OBSIDIAN_create_note", "OBSIDIAN_get_note"]
+  "description": "Read and write notes in your Obsidian vault via Git API",
+  "required_secrets": ["github_token", "github_repo", "github_api_url"],
+  "tools": [
+    "OBSIDIAN_get_project_hierarchy",
+    "OBSIDIAN_get_project_text",
+    "OBSIDIAN_get_notes_by_date_range",
+    "OBSIDIAN_update_project_note"
+  ]
 }
 ```
 
@@ -91,17 +96,17 @@ When the MCP server receives a tool call for an extension tool:
 1. Worker identifies the tool's extension from the tool registry
 2. Worker reads the user's credentials via `private.get_extension_credentials(p_user_id, p_extension_name)` SECURITY DEFINER function called through Supabase RPC
 3. Worker calls the extension's handler function, passing credentials and tool arguments
-4. Handler makes the API call (e.g., Obsidian REST API, Todoist Sync API)
+4. Handler makes the API call (e.g., GitHub/Gitea Contents API, Todoist REST API, Home Assistant REST API)
 5. Handler returns the result to the Worker, which sends it to the MCP client
 
 If credentials are missing or invalid, the tool returns `isError: true` with "Configure [Extension] credentials in Hub settings at lunahub.dev/hub/extensions."
 
 ### Included Extensions
 
-| Extension      | Tools                                               | External API            |
-| -------------- | --------------------------------------------------- | ----------------------- |
-| Obsidian       | Search notes, create note, get note, update note    | Obsidian Local REST API |
-| Todoist        | Get tasks, create task, complete task, get projects | Todoist Sync/REST API   |
-| Home Assistant | Get entity state, call service, get entities list   | Home Assistant REST API |
+| Extension      | Tools                                                                                    | External API              |
+| -------------- | ---------------------------------------------------------------------------------------- | ------------------------- |
+| Obsidian       | Get project hierarchy, get project text, get notes by date range, update note            | GitHub/Gitea Contents API |
+| Todoist        | Get tasks, get task, create task, update task, complete task, get projects, get sections | Todoist REST API v1       |
+| Home Assistant | Get devices, get entity status, turn on, turn off, TV remote                             | Home Assistant REST API   |
 
 Additional extensions can be added by creating a new folder in `extensions/` with the tool definitions and config manifest. The MCP server Worker must be updated to import the new tools.

@@ -173,9 +173,9 @@ describe('MCP Worker E2E', () => {
     expect(toolNames).toContain('COACHBYTE_get_today_plan');
 
     // Verify extension tools are included
-    expect(toolNames).toContain('OBSIDIAN_search_notes');
+    expect(toolNames).toContain('OBSIDIAN_get_project_hierarchy');
     expect(toolNames).toContain('TODOIST_get_tasks');
-    expect(toolNames).toContain('HOMEASSISTANT_get_entities');
+    expect(toolNames).toContain('HOMEASSISTANT_get_devices');
 
     // Each tool should have name, description, inputSchema
     for (const tool of tools) {
@@ -470,7 +470,7 @@ describe('MCP Worker E2E', () => {
       expect(toolNames).toContain('COACHBYTE_get_today_plan');
 
       // Extension tools should still be present
-      expect(toolNames).toContain('OBSIDIAN_search_notes');
+      expect(toolNames).toContain('OBSIDIAN_get_project_hierarchy');
     } finally {
       if (client2?.isConnected) await client2.disconnect();
       await cleanup();

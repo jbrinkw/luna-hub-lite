@@ -5,7 +5,7 @@ export default defineConfig({
   test: {
     include: ['src/__tests__/integration/**/*.test.ts'],
     environment: 'node',
-    testTimeout: 30_000,
+    testTimeout: 30000,
   },
   resolve: {
     alias: { '@': path.resolve(__dirname, 'src') },

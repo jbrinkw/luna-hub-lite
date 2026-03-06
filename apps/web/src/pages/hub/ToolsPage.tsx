@@ -76,9 +76,11 @@ const TOOL_GROUPS: ToolGroup[] = [
   {
     label: 'Home Assistant',
     tools: [
-      { name: 'HOMEASSISTANT_get_entity_state', description: 'Get entity state' },
-      { name: 'HOMEASSISTANT_call_service', description: 'Call a HA service' },
-      { name: 'HOMEASSISTANT_get_entities', description: 'List all entities' },
+      { name: 'HOMEASSISTANT_get_devices', description: 'List all devices' },
+      { name: 'HOMEASSISTANT_get_entity_status', description: 'Get device status' },
+      { name: 'HOMEASSISTANT_turn_on', description: 'Turn on a device' },
+      { name: 'HOMEASSISTANT_turn_off', description: 'Turn off a device' },
+      { name: 'HOMEASSISTANT_tv_remote', description: 'TV remote control' },
     ],
   },
 ];
