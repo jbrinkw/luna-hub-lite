@@ -15,8 +15,10 @@ import {
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 
-const DEMO_EMAIL = 'demo@lunahub.dev';
-const DEMO_PASSWORD = 'demo1234';
+// Intentional demo account credentials — allows one-click demo login.
+// Override via VITE_DEMO_EMAIL / VITE_DEMO_PASSWORD env vars if needed.
+const DEMO_EMAIL = import.meta.env.VITE_DEMO_EMAIL || 'demo@lunahub.dev';
+const DEMO_PASSWORD = import.meta.env.VITE_DEMO_PASSWORD || 'demo1234';
 
 export function Login() {
   const { signIn } = useAuth();

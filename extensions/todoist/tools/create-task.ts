@@ -1,7 +1,6 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-
-const TODOIST_BASE = 'https://api.todoist.com/rest/v2';
+import { TODOIST_API_BASE } from './constants';
 
 export const TODOIST_create_task: ExtensionToolDefinition = {
   name: 'TODOIST_create_task',
@@ -27,7 +26,7 @@ export const TODOIST_create_task: ExtensionToolDefinition = {
       if (args.due_string) body.due_string = args.due_string;
       if (args.priority) body.priority = args.priority;
 
-      const resp = await fetch(`${TODOIST_BASE}/tasks`, {
+      const resp = await fetch(`${TODOIST_API_BASE}/tasks`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${todoist_api_key}`,

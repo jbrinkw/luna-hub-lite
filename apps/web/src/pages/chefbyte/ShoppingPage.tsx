@@ -92,7 +92,7 @@ export function ShoppingPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, loadItems]);
 
   /* ---------------------------------------------------------------- */
   /*  Derived state                                                    */

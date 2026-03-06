@@ -36,11 +36,25 @@ export function useScannerDetection({
   const lastKeyTimeRef = useRef(0);
   const resetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Stabilize callback reference so effect doesn't re-register on every render
+  // Stabilize callback and config references so the effect doesn't re-register
   const callbackRef = useRef(onBarcodeScanned);
   useEffect(() => {
     callbackRef.current = onBarcodeScanned;
   }, [onBarcodeScanned]);
+
+  const protectedIdsRef = useRef(protectedInputIds);
+  useEffect(() => {
+    protectedIdsRef.current = protectedInputIds;
+  }, [protectedInputIds]);
+
+  const minLenRef = useRef(minBarcodeLength);
+  const maxLenRef = useRef(maxBarcodeLength);
+  const speedRef = useRef(scanSpeedThreshold);
+  useEffect(() => {
+    minLenRef.current = minBarcodeLength;
+    maxLenRef.current = maxBarcodeLength;
+    speedRef.current = scanSpeedThreshold;
+  }, [minBarcodeLength, maxBarcodeLength, scanSpeedThreshold]);
 
   const stableCallback = useCallback((barcode: string) => {
     callbackRef.current(barcode);
@@ -50,7 +64,7 @@ export function useScannerDetection({
     const isProtectedTarget = (target: EventTarget | null): boolean => {
       if (!target || !(target instanceof HTMLElement)) return false;
       // Check by ID
-      if (target.id && protectedInputIds.includes(target.id)) return true;
+      if (target.id && protectedIdsRef.current.includes(target.id)) return true;
       // Protect all input/textarea elements except the barcode input
       const tag = target.tagName.toLowerCase();
       if ((tag === 'input' || tag === 'textarea') && target.getAttribute('data-testid') !== 'barcode-input') {
@@ -80,7 +94,7 @@ export function useScannerDetection({
 
       // Accumulate digit keystrokes that arrive rapidly
       if (e.key >= '0' && e.key <= '9') {
-        if (delta < scanSpeedThreshold || bufferRef.current.length === 0) {
+        if (delta < speedRef.current || bufferRef.current.length === 0) {
           bufferRef.current += e.key;
         } else {
           // Slow typing -> human; reset scanner buffer
@@ -94,8 +108,8 @@ export function useScannerDetection({
       // Enter: commit if buffer looks like a barcode
       if (
         e.key === 'Enter' &&
-        bufferRef.current.length >= minBarcodeLength &&
-        bufferRef.current.length <= maxBarcodeLength
+        bufferRef.current.length >= minLenRef.current &&
+        bufferRef.current.length <= maxLenRef.current
       ) {
         e.preventDefault();
         e.stopPropagation();
@@ -114,12 +128,14 @@ export function useScannerDetection({
       }
     };
 
-    // Use capture phase to intercept before normal event handlers
+    // Use capture phase to intercept before normal event handlers.
+    // Listener registered once; config changes are read via refs.
     document.addEventListener('keydown', handleKeyDown, true);
 
     return () => {
       document.removeEventListener('keydown', handleKeyDown, true);
       if (resetTimerRef.current) clearTimeout(resetTimerRef.current);
     };
-  }, [minBarcodeLength, maxBarcodeLength, scanSpeedThreshold, protectedInputIds, stableCallback]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 }

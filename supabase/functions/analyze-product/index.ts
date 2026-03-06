@@ -162,13 +162,22 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Barcode is required' }, 400);
     }
 
+    // Validate barcode: must be a string, alphanumeric only, max 50 chars
+    const barcodeStr = String(barcode);
+    if (barcodeStr.length > 50) {
+      return jsonResponse({ error: 'Barcode too long (max 50 characters)' }, 400);
+    }
+    if (!/^[a-zA-Z0-9]+$/.test(barcodeStr)) {
+      return jsonResponse({ error: 'Barcode must be alphanumeric' }, 400);
+    }
+
     // Check if product already exists for this user
     const { data: existing } = await supabase
       .schema('chefbyte')
       .from('products')
       .select('*')
       .eq('user_id', user.id)
-      .eq('barcode', String(barcode))
+      .eq('barcode', barcodeStr)
       .single();
 
     if (existing) {
@@ -182,7 +191,7 @@ Deno.serve(async (req) => {
     }
 
     // Fetch from OpenFoodFacts
-    const offProduct = await fetchOpenFoodFacts(String(barcode));
+    const offProduct = await fetchOpenFoodFacts(barcodeStr);
     if (!offProduct) {
       return jsonResponse({ error: 'Product not found in OpenFoodFacts' }, 404);
     }

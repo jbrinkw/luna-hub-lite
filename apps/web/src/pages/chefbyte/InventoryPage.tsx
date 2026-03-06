@@ -140,7 +140,7 @@ export function InventoryPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, loadData]);
 
   /* ---------------------------------------------------------------- */
   /*  Aggregation                                                      */

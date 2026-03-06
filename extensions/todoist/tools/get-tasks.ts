@@ -1,7 +1,6 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-
-const TODOIST_BASE = 'https://api.todoist.com/rest/v2';
+import { TODOIST_API_BASE } from './constants';
 
 export const TODOIST_get_tasks: ExtensionToolDefinition = {
   name: 'TODOIST_get_tasks',
@@ -24,7 +23,7 @@ export const TODOIST_get_tasks: ExtensionToolDefinition = {
       if (args.filter) params.set('filter', args.filter);
 
       const qs = params.toString();
-      const url = `${TODOIST_BASE}/tasks${qs ? `?${qs}` : ''}`;
+      const url = `${TODOIST_API_BASE}/tasks${qs ? `?${qs}` : ''}`;
 
       const resp = await fetch(url, {
         method: 'GET',

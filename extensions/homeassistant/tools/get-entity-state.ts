@@ -28,7 +28,12 @@ export const HOMEASSISTANT_get_entity_state: ExtensionToolDefinition = {
         },
       });
 
-      if (!resp.ok) return toolError(`Home Assistant API error: ${resp.status} ${resp.statusText}`);
+      if (!resp.ok) {
+        const body = await resp.text().catch(() => '');
+        return toolError(
+          `Home Assistant API error: ${resp.status} ${resp.statusText}${body ? ` — ${body.slice(0, 500)}` : ''}`,
+        );
+      }
 
       const data = await resp.json();
       return toolSuccess(data);

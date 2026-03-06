@@ -25,7 +25,7 @@ export const consume: ToolDefinition = {
     const { product_id, qty, unit } = args;
     const logMacros = args.log_macros !== false;
 
-    if (qty <= 0) return toolError('qty must be positive');
+    if (!Number.isFinite(qty) || qty <= 0) return toolError('qty must be a positive finite number');
 
     const logicalDate = await getLogicalDate(ctx.supabase, ctx.userId);
 

@@ -385,7 +385,7 @@ export function HomePage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, loadData]);
 
   // Re-load on tab focus to catch midnight date changes
   useEffect(() => {

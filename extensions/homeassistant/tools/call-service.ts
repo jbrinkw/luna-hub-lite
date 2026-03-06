@@ -4,7 +4,8 @@ import { toolSuccess, toolError } from '@luna-hub/app-tools';
 export const HOMEASSISTANT_call_service: ExtensionToolDefinition = {
   name: 'HOMEASSISTANT_call_service',
   extensionName: 'homeassistant',
-  description: 'Call a Home Assistant service (e.g. turn on a light, lock a door). Specify domain, service, and optional entity/data.',
+  description:
+    'Call a Home Assistant service (e.g. turn on a light, lock a door). Specify domain, service, and optional entity/data.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -39,7 +40,12 @@ export const HOMEASSISTANT_call_service: ExtensionToolDefinition = {
         body: JSON.stringify(body),
       });
 
-      if (!resp.ok) return toolError(`Home Assistant API error: ${resp.status} ${resp.statusText}`);
+      if (!resp.ok) {
+        const respBody = await resp.text().catch(() => '');
+        return toolError(
+          `Home Assistant API error: ${resp.status} ${resp.statusText}${respBody ? ` — ${respBody.slice(0, 500)}` : ''}`,
+        );
+      }
 
       const data = await resp.json();
       return toolSuccess(data);

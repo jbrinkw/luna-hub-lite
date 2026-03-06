@@ -15,7 +15,8 @@ export const addToShopping: ToolDefinition = {
   handler: async (args, ctx) => {
     const { product_id, qty_containers } = args;
 
-    if (qty_containers <= 0) return toolError('qty_containers must be positive');
+    if (!Number.isFinite(qty_containers) || qty_containers <= 0)
+      return toolError('qty_containers must be a positive finite number');
 
     const row: Record<string, any> = {
       user_id: ctx.userId,

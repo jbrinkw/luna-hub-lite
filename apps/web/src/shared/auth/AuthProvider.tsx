@@ -29,7 +29,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSessionError = () => setSessionError(null);
 
   useEffect(() => {
-    // Set up listener FIRST to avoid missing events between getSession and subscribe
+    // onAuthStateChange fires INITIAL_SESSION on subscribe, providing the session.
+    // No separate getSession() call needed — that would race with INITIAL_SESSION.
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange(async (event, newSession) => {
@@ -48,14 +49,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!newSession && initialLoadDone.current && event !== 'SIGNED_OUT') {
         setSessionError('Your session has expired. Please sign in again.');
       }
-    });
-
-    // Then get initial session (onAuthStateChange may also fire INITIAL_SESSION)
-    supabase.auth.getSession().then(({ data: { session: initialSession } }) => {
-      setSession(initialSession);
-      setUser(initialSession?.user ?? null);
-      setLoading(false);
-      initialLoadDone.current = true;
     });
 
     return () => subscription.unsubscribe();

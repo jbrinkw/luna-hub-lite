@@ -17,7 +17,8 @@ export const addStock: ToolDefinition = {
   handler: async (args, ctx) => {
     const { product_id, qty_containers, location_id, expires_on } = args;
 
-    if (qty_containers <= 0) return toolError('qty_containers must be positive');
+    if (!Number.isFinite(qty_containers) || qty_containers <= 0)
+      return toolError('qty_containers must be a positive finite number');
 
     // Resolve location_id: use provided, or fetch default (first by created_at)
     let resolvedLocationId = location_id;

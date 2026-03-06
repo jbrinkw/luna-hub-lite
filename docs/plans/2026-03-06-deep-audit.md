@@ -20,21 +20,21 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 
 ## MEDIUM Priority
 
-| #   | Layer       | Issue                                                                                         | Files                                                                              | Status |
-| --- | ----------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | ------ |
-| M1  | Unit        | 6 SkeletonScreen tests are tautologies — just count DOM elements                              | SkeletonScreen.test.tsx                                                            | OPEN   |
-| M2  | Unit        | Component tests mock too much — ApiKeyGenerator, ToolToggle, ExtensionCard test mock behavior | ApiKeyGenerator.test.tsx, ToolToggle.test.tsx, ExtensionCard.test.tsx              | OPEN   |
-| M3  | E2E         | URL-only navigation checks — recipe-form, recipes, history verify URL not content             | recipe-form.spec.ts, recipes.spec.ts, history.spec.ts                              | OPEN   |
-| M4  | E2E         | Form tests don't verify persistence — meal-plan add, recipe save, shopping add                | meal-plan.spec.ts, recipe-form.spec.ts, shopping.spec.ts                           | OPEN   |
-| M5  | Integration | Realtime tests use setTimeout hacks instead of event waits                                    | subscriptions.test.ts                                                              | OPEN   |
-| M6  | Source      | 20+ `as any` casts hiding type errors                                                         | supabase.ts, Login.tsx, InventoryPage, MacroPage, ScannerPage, all CoachByte pages | OPEN   |
-| M7  | pgTAP       | Missing error/invalid input tests for get_logical_date, ensure_daily_plan, consume_product    | logical_date.test.sql, ensure_daily_plan.test.sql, consume_product.test.sql        | OPEN   |
-| M8  | Integration | reset_demo_dates test passes whether function exists or not                                   | auth-lifecycle.test.ts:285-306                                                     | OPEN   |
-| M9  | Integration | API key auth not round-trip tested — hash stored but no test plaintext authenticates          | api-key-lifecycle.test.ts                                                          | OPEN   |
-| M10 | Source      | Dead WalmartPage.tsx — just a Navigate redirect                                               | WalmartPage.tsx                                                                    | DONE   |
-| M11 | Integration | chef-home unmark_meal_done doesn't verify food_logs restored                                  | chef-home.test.ts:232-277                                                          | OPEN   |
-| M12 | Integration | analyze-product quota test doesn't verify daily reset logic                                   | analyze-product.test.ts:118-144                                                    | OPEN   |
-| M13 | Source      | Edge function analyze-product doesn't validate Claude response before DB insert               | analyze-product/index.ts                                                           | DONE   |
+| #   | Layer       | Issue                                                                                         | Files                                                                              | Status   |
+| --- | ----------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------- |
+| M1  | Unit        | 6 SkeletonScreen tests are tautologies — just count DOM elements                              | SkeletonScreen.test.tsx                                                            | OPEN     |
+| M2  | Unit        | Component tests mock too much — ApiKeyGenerator, ToolToggle, ExtensionCard test mock behavior | ApiKeyGenerator.test.tsx, ToolToggle.test.tsx, ExtensionCard.test.tsx              | OPEN     |
+| M3  | E2E         | URL-only navigation checks — recipe-form, recipes, history verify URL not content             | recipe-form.spec.ts, recipes.spec.ts, history.spec.ts                              | OPEN     |
+| M4  | E2E         | Form tests don't verify persistence — meal-plan add, recipe save, shopping add                | meal-plan.spec.ts, recipe-form.spec.ts, shopping.spec.ts                           | OPEN     |
+| M5  | Integration | Realtime tests use setTimeout hacks instead of event waits                                    | subscriptions.test.ts                                                              | OPEN     |
+| M6  | Source      | 20+ `as any` casts hiding type errors                                                         | supabase.ts, Login.tsx, InventoryPage, MacroPage, ScannerPage, all CoachByte pages | DEFERRED |
+| M7  | pgTAP       | Missing error/invalid input tests for get_logical_date, ensure_daily_plan, consume_product    | logical_date.test.sql, ensure_daily_plan.test.sql, consume_product.test.sql        | OPEN     |
+| M8  | Integration | reset_demo_dates test passes whether function exists or not                                   | auth-lifecycle.test.ts:285-306                                                     | OPEN     |
+| M9  | Integration | API key auth not round-trip tested — hash stored but no test plaintext authenticates          | api-key-lifecycle.test.ts                                                          | OPEN     |
+| M10 | Source      | Dead WalmartPage.tsx — just a Navigate redirect                                               | WalmartPage.tsx                                                                    | DONE     |
+| M11 | Integration | chef-home unmark_meal_done doesn't verify food_logs restored                                  | chef-home.test.ts:232-277                                                          | OPEN     |
+| M12 | Integration | analyze-product quota test doesn't verify daily reset logic                                   | analyze-product.test.ts:118-144                                                    | OPEN     |
+| M13 | Source      | Edge function analyze-product doesn't validate Claude response before DB insert               | analyze-product/index.ts                                                           | DONE     |
 
 ## LOW Priority
 
@@ -47,13 +47,13 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 | L5  | pgTAP       | Incomplete JSONB return verification — ensure_daily_plan, consume_product check 1-2 keys  | ensure_daily_plan.test.sql, consume_product.test.sql        | OPEN   |
 | L6  | pgTAP       | Missing logical_date verification on DML — stock_lots, food_logs inserts                  | stock_lots.test.sql, mark_meal_done.test.sql                | OPEN   |
 | L7  | E2E         | hub/smoke.spec.ts only 1 test — just checks layout exists                                 | smoke.spec.ts                                               | OPEN   |
-| L8  | Source      | Hardcoded demo credentials in Login.tsx                                                   | Login.tsx:18-19                                             | OPEN   |
-| L9  | Source      | Edge function validation gaps — analyze-product + walmart-scrape                          | analyze-product/index.ts, walmart-scrape/index.ts           | OPEN   |
+| L8  | Source      | Hardcoded demo credentials in Login.tsx                                                   | Login.tsx:18-19                                             | DONE   |
+| L9  | Source      | Edge function validation gaps — analyze-product + walmart-scrape                          | analyze-product/index.ts, walmart-scrape/index.ts           | DONE   |
 | L10 | pgTAP       | Tautological activation tests — test INSERT syntax works not behavior gated by activation | activation_chefbyte.test.sql, activation_coachbyte.test.sql | OPEN   |
 | L11 | Integration | chefbyte-tools setPrice never re-reads DB to confirm write persisted                      | chefbyte-tools.test.ts                                      | OPEN   |
 | L12 | Integration | coachbyte-tools updateSplit doesn't confirm old rows deleted                              | coachbyte-tools.test.ts                                     | OPEN   |
 | L13 | Unit        | stock-badge tests just verify color function returns hardcoded values                     | stock-badge.test.ts                                         | OPEN   |
-| L14 | Source      | Realtime useEffect eslint-disable-line on dependency arrays                               | InventoryPage.tsx, ShoppingPage.tsx, HomePage.tsx           | OPEN   |
+| L14 | Source      | Realtime useEffect eslint-disable-line on dependency arrays                               | InventoryPage.tsx, ShoppingPage.tsx, HomePage.tsx           | DONE   |
 | L15 | E2E         | inventory.spec.ts checks badges exist but not that values match seed data                 | inventory.spec.ts                                           | OPEN   |
 | L16 | Integration | extension-settings stores plaintext in credentials_encrypted column                       | extension-settings.test.ts:39-70                            | OPEN   |
 
@@ -84,7 +84,7 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 | M14 | Schema | Missing CHECK constraints on liquidtrack_events weight columns                                     | 20260303040000_chefbyte_tables.sql:138-152 | DONE   |
 | M15 | Source | ActivationGuard returns null during loading — causes blank screen + remount                        | ActivationGuard.tsx:14                     | DONE   |
 | M16 | Source | RestTimer stale closure in visibilitychange handler — timer may not sync on tab refocus            | RestTimer.tsx:73-81                        | DONE   |
-| M17 | Source | AuthProvider getSession + onAuthStateChange race — redundant state updates on init                 | AuthProvider.tsx:31-59                     | OPEN   |
+| M17 | Source | AuthProvider getSession + onAuthStateChange race — redundant state updates on init                 | AuthProvider.tsx:31-59                     | DONE   |
 | M18 | MCP    | SSE reconnection race condition — messages lost during controller swap                             | session.ts:67-83                           | OPEN   |
 | M19 | MCP    | Unknown tool returns jsonRpcSuccess with isError instead of jsonRpcError — JSON-RPC spec violation | session.ts:179                             | DONE   |
 | M20 | MCP    | Tool errors not logged to console — zero production visibility into handler crashes                | session.ts:229-231                         | DONE   |
@@ -96,10 +96,10 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 | L17 | Seed      | recipe_ingredients.note column inconsistently seeded (some NULL, some text)              | seed.sql:242-275                             | OPEN   |
 | L18 | Source    | ModalOverlay missing focus trap for accessibility                                        | ModalOverlay.tsx:17-78                       | OPEN   |
 | L19 | Source    | useSettingsAlerts ignores Supabase errors — alerts silently disappear on query failure   | useSettingsAlerts.ts:12-38                   | DONE   |
-| L20 | Source    | useScannerDetection inefficient memoization — unnecessary event listener re-registration | useScannerDetection.ts:40-47                 | OPEN   |
-| L21 | App-tools | Todoist tools hardcode API URL in 4 files instead of shared constant                     | extensions/todoist/tools/\*.ts               | OPEN   |
-| L22 | App-tools | Extension error responses discard API response body details                              | extensions/homeassistant/tools/\*.ts         | OPEN   |
-| L23 | App-tools | No upper-bound validation on numeric inputs (allows Infinity)                            | add-stock.ts, add-to-shopping.ts, consume.ts | OPEN   |
+| L20 | Source    | useScannerDetection inefficient memoization — unnecessary event listener re-registration | useScannerDetection.ts:40-47                 | DONE   |
+| L21 | App-tools | Todoist tools hardcode API URL in 4 files instead of shared constant                     | extensions/todoist/tools/\*.ts               | DONE   |
+| L22 | App-tools | Extension error responses discard API response body details                              | extensions/homeassistant/tools/\*.ts         | DONE   |
+| L23 | App-tools | No upper-bound validation on numeric inputs (allows Infinity)                            | add-stock.ts, add-to-shopping.ts, consume.ts | DONE   |
 
 ---
 
