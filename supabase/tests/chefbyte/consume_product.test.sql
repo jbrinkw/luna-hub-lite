@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(34);
+SELECT plan(40);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -321,6 +321,87 @@ SELECT is(
   ))->>'success'),
   'true',
   'consume_product return value has success=true'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- L5: Full JSONB return value verification — all keys checked
+-- Create a fresh lot for predictable return values.
+-- Product: Chicken Breast (4 spc, 165cal/31p/3.6f/0c)
+-- Lot: 2.0 containers → consume 1 container → stock_remaining=1.0
+-- ─────────────────────────────────────────────────────────────
+
+INSERT INTO chefbyte.stock_lots (lot_id, user_id, product_id, location_id, qty_containers, expires_on)
+VALUES (
+  '20000000-0000-0000-0000-00000000000a',
+  tests.get_supabase_uid('cf_tester'),
+  '10000000-0000-0000-0000-000000000001',
+  :'fridge_id',
+  2.0,
+  '2026-07-01'
+);
+
+-- Capture the full JSONB return to check all keys
+SELECT is(
+  (SELECT (chefbyte.consume_product(
+    '10000000-0000-0000-0000-000000000001'::uuid,
+    1, 'container', true, '2026-03-03'::date
+  ))->>'qty_consumed'),
+  '1',
+  'consume_product return: qty_consumed = 1 (matches requested amount)'
+);
+
+-- Consume again for remaining assertions (lot has 1.0 left, consume 0.5)
+SELECT is(
+  (SELECT (chefbyte.consume_product(
+    '10000000-0000-0000-0000-000000000001'::uuid,
+    0.5, 'container', true, '2026-03-03'::date
+  ))->'macros'->>'calories'),
+  '330.000',
+  'consume_product return: macros.calories = 0.5 * 4spc * 165 = 330'
+);
+
+-- One more consume to verify stock_remaining and nested macros
+SELECT is(
+  (SELECT (chefbyte.consume_product(
+    '10000000-0000-0000-0000-000000000001'::uuid,
+    0.25, 'container', true, '2026-03-03'::date
+  ))->>'stock_remaining'),
+  '0.250',
+  'consume_product return: stock_remaining = 0.25 after consuming 0.25 from 0.5'
+);
+
+-- Verify macros sub-object has all four keys (protein, fat, carbs, calories)
+SELECT is(
+  (SELECT count(*)::integer FROM jsonb_object_keys(
+    (SELECT (chefbyte.consume_product(
+      '10000000-0000-0000-0000-000000000001'::uuid,
+      0.25, 'container', false, '2026-03-03'::date
+    ))->'macros')
+  )),
+  4,
+  'consume_product return: macros sub-object has exactly 4 keys'
+);
+
+-- Verify top-level has exactly 4 keys: success, qty_consumed, macros, stock_remaining
+SELECT is(
+  (SELECT count(*)::integer FROM jsonb_object_keys(
+    chefbyte.consume_product(
+      '10000000-0000-0000-0000-000000000001'::uuid,
+      0.001, 'container', false, '2026-03-03'::date
+    )
+  )),
+  4,
+  'consume_product return: top-level JSONB has exactly 4 keys (success, qty_consumed, macros, stock_remaining)'
+);
+
+-- Verify food_log logical_date is set correctly on records inserted by consume_product
+SELECT is(
+  (SELECT logical_date FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = '10000000-0000-0000-0000-000000000001'
+    ORDER BY created_at DESC LIMIT 1),
+  '2026-03-03'::date,
+  'food_log logical_date = 2026-03-03 (matches p_logical_date argument)'
 );
 
 -- ─────────────────────────────────────────────────────────────

@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(23);
+SELECT plan(26);
 
 -- Setup: create user
 SELECT tests.create_supabase_user('cf_activator');
@@ -222,10 +222,55 @@ SELECT is(
 );
 
 ------------------------------------------------------------
+-- L10: Deactivation behavioral gate — prevents normal module usage
+-- After deactivation, no locations exist so stock_lot creation fails.
+-- Also, consume_product fails because products no longer exist.
+------------------------------------------------------------
+
+-- Verify: no locations means stock_lot FK fails even if user re-creates a product
+-- First insert a product (allowed — RLS only checks user_id, not activation)
+INSERT INTO chefbyte.products (product_id, user_id, name, calories_per_serving)
+VALUES ('aaaa0000-0000-0000-0000-000000000001', tests.get_supabase_uid('cf_activator'), 'Post-Deactivation Rice', 200);
+
+-- Attempt to insert a stock lot — fails because no locations exist (FK violation)
+SELECT throws_ok(
+  format(
+    'INSERT INTO chefbyte.stock_lots (user_id, product_id, location_id, qty_containers)
+     VALUES (%L, %L, gen_random_uuid(), 1)',
+    tests.get_supabase_uid('cf_activator'), 'aaaa0000-0000-0000-0000-000000000001'
+  ),
+  '23503',
+  NULL,
+  'After deactivation: stock_lot insert fails — no valid locations (FK violation)'
+);
+
+-- consume_product fails because the original product (Test Rice) was deleted by deactivation
+-- Use a known UUID that no longer exists after cascade delete
+SELECT throws_ok(
+  $$SELECT chefbyte.consume_product(
+    '11111111-1111-1111-1111-111111111111'::uuid,
+    1, 'container', true, '2026-03-03'::date
+  )$$,
+  'Product not found or not owned by user',
+  'After deactivation: consume_product fails — products were cascade-deleted'
+);
+
+-- Verify activation row is gone (user is no longer "activated")
+SELECT is(
+  (SELECT count(*)::integer FROM hub.app_activations
+    WHERE user_id = tests.get_supabase_uid('cf_activator') AND app_name = 'chefbyte'),
+  0,
+  'After deactivation: activation row confirmed absent'
+);
+
+-- Clean up the post-deactivation product before reactivation
+DELETE FROM chefbyte.products WHERE product_id = 'aaaa0000-0000-0000-0000-000000000001';
+
+------------------------------------------------------------
 -- Reactivation
 ------------------------------------------------------------
 
--- Test 11: Reactivate after deactivation works cleanly
+-- Test: Reactivate after deactivation works cleanly
 SELECT lives_ok(
   $$ SELECT hub.activate_app('chefbyte') $$,
   'Reactivate ChefByte after deactivation succeeds'

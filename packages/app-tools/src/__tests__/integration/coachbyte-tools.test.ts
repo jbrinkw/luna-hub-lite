@@ -373,6 +373,22 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(data.template_sets[0].exercise_id).toBe(squatId);
     expect(data.template_sets[0].target_reps).toBe(10);
     expect(data.template_sets[0].target_load).toBe(135);
+
+    // L12 fix: Re-read DB to confirm old template_sets were replaced, not appended
+    const { data: row, error } = await admin
+      .schema('coachbyte')
+      .from('splits')
+      .select('template_sets')
+      .eq('user_id', userId)
+      .eq('weekday', otherWeekday)
+      .single();
+    expect(error).toBeNull();
+    const dbSets = row!.template_sets as any[];
+    expect(dbSets).toHaveLength(1);
+    expect(dbSets[0].exercise_id).toBe(squatId);
+    expect(dbSets[0].target_reps).toBe(10);
+    expect(dbSets[0].target_load).toBe(135);
+    expect(dbSets[0].rest_seconds).toBe(60);
   });
 
   it('updateSplit rejects invalid weekday', async () => {

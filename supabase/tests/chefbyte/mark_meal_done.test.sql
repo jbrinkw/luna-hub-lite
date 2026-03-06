@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(57);
+SELECT plan(60);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -125,6 +125,31 @@ SELECT is(
       AND logical_date = '2026-03-03'),
   2,
   'food_logs has 2 entries (one per ingredient) after regular meal'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- L6: Verify logical_date on food_logs created by mark_meal_done
+-- Both food_log entries should have logical_date = 2026-03-03
+-- (matching the meal_plan_entry's logical_date)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND logical_date = '2026-03-03'
+      AND meal_id = '50000000-0000-0000-0000-000000000001'),
+  2,
+  'all food_logs from mark_meal_done have logical_date = 2026-03-03 (meal logical_date)'
+);
+
+-- Verify no food_logs have a different logical_date for this meal
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND meal_id = '50000000-0000-0000-0000-000000000001'
+      AND logical_date != '2026-03-03'),
+  0,
+  'no food_logs from mark_meal_done have incorrect logical_date'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -455,6 +480,20 @@ SELECT is(
     ORDER BY created_at ASC LIMIT 1),
   27.000::numeric,
   'product-based meal food_log carbs = 1 serving * 27 = 27'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- L6: Product-based meal food_log logical_date verification
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT logical_date FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND product_id = '30000000-0000-0000-0000-000000000003'
+      AND meal_id = '50000000-0000-0000-0000-000000000003'
+    ORDER BY created_at ASC LIMIT 1),
+  '2026-03-03'::date,
+  'product-based meal food_log logical_date = 2026-03-03 (matches meal logical_date)'
 );
 
 -- ─────────────────────────────────────────────────────────────

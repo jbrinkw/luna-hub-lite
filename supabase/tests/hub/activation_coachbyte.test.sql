@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(14);
+SELECT plan(18);
 
 -- Setup: create user and activate CoachByte
 SELECT tests.create_supabase_user('cb_activator');
@@ -109,10 +109,56 @@ SELECT is(
 );
 
 ------------------------------------------------------------
+-- L10: Deactivation behavioral gate — module functions
+-- return degraded results after deactivation
+------------------------------------------------------------
+
+-- After deactivation, ensure_daily_plan should return 'empty' status
+-- because all splits were deleted — no workout template to bootstrap from
+SELECT is(
+  (SELECT (coachbyte.ensure_daily_plan('2026-03-02'::date))->>'status'),
+  'empty',
+  'After deactivation: ensure_daily_plan returns empty (splits deleted, no template)'
+);
+
+-- Verify no planned_sets were created (the plan is empty)
+SELECT is(
+  (SELECT count(*)::integer FROM coachbyte.planned_sets ps
+   JOIN coachbyte.daily_plans dp ON dp.plan_id = ps.plan_id
+   WHERE dp.user_id = tests.get_supabase_uid('cb_activator')
+     AND dp.plan_date = '2026-03-02'),
+  0,
+  'After deactivation: no planned_sets created (no split data available)'
+);
+
+-- Verify user_settings are gone — direct query returns 0 rows
+SELECT is(
+  (SELECT count(*)::integer FROM coachbyte.user_settings
+    WHERE user_id = tests.get_supabase_uid('cb_activator')),
+  0,
+  'After deactivation: user_settings confirmed absent (module is non-functional)'
+);
+
+-- complete_next_set fails because the plan has no planned sets
+-- The function should return NULL rest_seconds (no sets to complete)
+SELECT is(
+  (SELECT rest_seconds FROM coachbyte.complete_next_set(
+    (SELECT plan_id FROM coachbyte.daily_plans
+      WHERE user_id = tests.get_supabase_uid('cb_activator') AND plan_date = '2026-03-02'),
+    5, 135
+  )),
+  NULL::integer,
+  'After deactivation: complete_next_set returns NULL (no planned sets to complete)'
+);
+
+-- Clean up the daily_plan created by ensure_daily_plan above
+DELETE FROM coachbyte.daily_plans WHERE user_id = tests.get_supabase_uid('cb_activator');
+
+------------------------------------------------------------
 -- Reactivation
 ------------------------------------------------------------
 
--- Test 10: Reactivate CoachByte → clean slate
+-- Test: Reactivate CoachByte → clean slate
 SELECT lives_ok(
   $$ SELECT hub.activate_app('coachbyte') $$,
   'Reactivate CoachByte succeeds'

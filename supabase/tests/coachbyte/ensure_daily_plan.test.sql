@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(32);
+SELECT plan(38);
 
 -- Setup
 SELECT tests.create_supabase_user('edp_user');
@@ -306,7 +306,56 @@ SELECT ok(
 );
 
 ------------------------------------------------------------
--- TEST 25-26: rest_seconds copied from template
+-- TEST 25-30: Full JSONB return value verification
+-- ensure_daily_plan returns {plan_id, status}. Verify both
+-- keys are present and plan_id matches the actual DB row.
+------------------------------------------------------------
+
+-- Verify 'created' return: plan_id matches DB, status='created'
+-- Use a fresh date (2026-03-23 is a Monday) for a clean 'created' response
+SELECT is(
+  (SELECT (coachbyte.ensure_daily_plan('2026-03-23'::date))->>'status'),
+  'created',
+  'JSONB return: status=created for fresh Monday plan (2026-03-23)'
+);
+
+SELECT is(
+  (SELECT (coachbyte.ensure_daily_plan('2026-03-23'::date))->>'plan_id'),
+  (SELECT plan_id::text FROM coachbyte.daily_plans
+    WHERE user_id = tests.get_supabase_uid('edp_user') AND plan_date = '2026-03-23'),
+  'JSONB return: plan_id matches DB row for existing plan'
+);
+
+-- Verify 'existing' return has both keys with correct values
+SELECT ok(
+  (SELECT coachbyte.ensure_daily_plan('2026-03-23'::date)) ? 'status'
+  AND (SELECT coachbyte.ensure_daily_plan('2026-03-23'::date)) ? 'plan_id',
+  'JSONB return (existing): both status and plan_id keys present'
+);
+
+-- Verify 'empty' return: plan_id is non-null UUID, status='empty'
+-- 2026-03-24 is a Tuesday (no split)
+SELECT is(
+  (SELECT (coachbyte.ensure_daily_plan('2026-03-24'::date))->>'plan_id'),
+  (SELECT plan_id::text FROM coachbyte.daily_plans
+    WHERE user_id = tests.get_supabase_uid('edp_user') AND plan_date = '2026-03-24'),
+  'JSONB return (empty): plan_id matches DB row for empty plan'
+);
+
+SELECT ok(
+  (SELECT (coachbyte.ensure_daily_plan('2026-03-24'::date))->>'plan_id') IS NOT NULL,
+  'JSONB return (empty): plan_id is non-null'
+);
+
+-- Verify the return has exactly 2 keys (plan_id and status, no extras)
+SELECT is(
+  (SELECT count(*)::integer FROM jsonb_object_keys(coachbyte.ensure_daily_plan('2026-03-23'::date))),
+  2,
+  'JSONB return: exactly 2 keys (plan_id and status, no extras)'
+);
+
+------------------------------------------------------------
+-- TEST 31-32: rest_seconds copied from template (renumbered)
 ------------------------------------------------------------
 SELECT is(
   (SELECT count(*)::integer FROM coachbyte.planned_sets ps

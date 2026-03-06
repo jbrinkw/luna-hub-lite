@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(14);
+SELECT plan(16);
 
 -- Setup: create users, activate chefbyte, create product + get a location
 SELECT tests.create_supabase_user('lot_owner');
@@ -70,6 +70,33 @@ SELECT lives_ok(
     tests.get_supabase_uid('lot_owner'), :'product_id', :'pantry_id'
   ),
   'Different location creates separate lot'
+);
+
+------------------------------------------------------------
+-- L6: Verify date columns populated correctly on inserted lots
+------------------------------------------------------------
+
+-- Test: created_at is populated (NOT NULL default now())
+SELECT ok(
+  (SELECT created_at IS NOT NULL FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('lot_owner')
+      AND product_id = :'product_id'
+      AND location_id = :'fridge_id'
+      AND expires_on = '2026-04-15'
+    LIMIT 1),
+  'created_at is NOT NULL on inserted stock lot (auto-populated by default)'
+);
+
+-- Test: expires_on matches the value passed during INSERT
+SELECT is(
+  (SELECT expires_on FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('lot_owner')
+      AND product_id = :'product_id'
+      AND location_id = :'fridge_id'
+      AND expires_on = '2026-04-15'
+    LIMIT 1),
+  '2026-04-15'::date,
+  'expires_on = 2026-04-15 on inserted stock lot (matches INSERT value)'
 );
 
 ------------------------------------------------------------

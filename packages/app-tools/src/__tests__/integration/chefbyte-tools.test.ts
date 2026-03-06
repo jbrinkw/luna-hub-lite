@@ -166,6 +166,16 @@ describe('ChefByte Tool Integration Tests', () => {
       expect(data.product.product_id).toBe(productId);
       expect(data.product.name).toBe('Test Chicken Breast');
       expect(Number(data.product.price)).toBeCloseTo(12.49, 2);
+
+      // L11 fix: Re-read DB to confirm price write persisted
+      const { data: row, error } = await admin
+        .schema('chefbyte')
+        .from('products')
+        .select('price')
+        .eq('product_id', productId)
+        .single();
+      expect(error).toBeNull();
+      expect(Number(row!.price)).toBeCloseTo(12.49, 2);
     });
 
     it('rejects a negative price', async () => {
@@ -1184,6 +1194,16 @@ describe('ChefByte Tool Integration Tests', () => {
       const data = parseToolResult(result);
 
       expect(Number(data.product.price)).toBe(0);
+
+      // L11 fix: Re-read DB to confirm zero price persisted
+      const { data: row, error } = await admin
+        .schema('chefbyte')
+        .from('products')
+        .select('price')
+        .eq('product_id', productId)
+        .single();
+      expect(error).toBeNull();
+      expect(Number(row!.price)).toBe(0);
     });
 
     it('clearShopping on empty list is a no-op', async () => {
