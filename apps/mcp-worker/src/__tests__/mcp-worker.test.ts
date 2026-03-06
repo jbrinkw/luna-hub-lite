@@ -4,7 +4,6 @@
  * Tests the full SSE/JSON-RPC protocol against a locally running wrangler dev.
  * Requires: local Supabase running (supabase start) + wrangler dev (spawned by globalSetup).
  */
-import { execSync } from 'node:child_process';
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { McpTestClient } from './helpers/mcp-client';
@@ -14,19 +13,14 @@ const SUPABASE_URL = 'http://127.0.0.1:54321';
 const ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
 
+// Local Supabase uses HS256 JWTs signed with the demo secret.
+// Newer CLI versions generate ES256 via `supabase gen bearer-jwt`, which GoTrue rejects.
+// Use the well-known demo service_role key directly.
+const DEFAULT_SERVICE_ROLE_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
+
 function getServiceRoleKey(): string {
-  if (process.env.SUPABASE_SERVICE_ROLE_KEY) return process.env.SUPABASE_SERVICE_ROLE_KEY;
-  try {
-    const out = execSync('npx supabase gen bearer-jwt --role service_role --exp "2033-01-01T00:00:00Z"', {
-      encoding: 'utf-8',
-      timeout: 15000,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    }).trim();
-    const lines = out.split('\n');
-    return lines[lines.length - 1].trim();
-  } catch {
-    return 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
-  }
+  return process.env.SUPABASE_SERVICE_ROLE_KEY ?? DEFAULT_SERVICE_ROLE_KEY;
 }
 const SERVICE_ROLE_KEY = getServiceRoleKey();
 
@@ -38,7 +32,7 @@ const WORKER_BASE = 'http://localhost:8787';
  */
 async function createTestUser(
   admin: SupabaseClient,
-  opts: { email: string; activateApps: string[] },
+  opts: { email: string; activateApps: string[]; enableExtensions?: string[] },
 ): Promise<{ userId: string; apiKey: string; cleanup: () => Promise<void> }> {
   const password = 'TestPassword123!';
 
@@ -68,6 +62,17 @@ async function createTestUser(
     }
   }
 
+  // Enable extensions (via service role — bypasses RLS)
+  if (opts.enableExtensions && opts.enableExtensions.length > 0) {
+    const rows = opts.enableExtensions.map((ext) => ({
+      user_id: userId,
+      extension_name: ext,
+      enabled: true,
+    }));
+    const { error: extErr } = await (admin as any).schema('hub').from('extension_settings').upsert(rows);
+    if (extErr) throw new Error(`Failed to enable extensions: ${extErr.message}`);
+  }
+
   // Generate API key (via service role — bypasses RLS)
   const apiKey = await generateTestApiKey(admin, userId);
 
@@ -95,6 +100,7 @@ describe('MCP Worker E2E', () => {
     const result = await createTestUser(admin, {
       email: `mcp-e2e-${Date.now()}@test.local`,
       activateApps: ['coachbyte', 'chefbyte'],
+      enableExtensions: ['obsidian', 'todoist', 'homeassistant'],
     });
     userId = result.userId;
     apiKey = result.apiKey;
@@ -422,10 +428,11 @@ describe('MCP Worker E2E', () => {
   // ─── Test 17: Tool filtering — deactivated app ─────────────────────────
 
   it('tool filtering respects deactivated app (coachbyte only = no CHEFBYTE tools)', async () => {
-    // Create a user with ONLY coachbyte active
+    // Create a user with ONLY coachbyte active, but extensions enabled
     const { apiKey: apiKey2, cleanup } = await createTestUser(admin, {
       email: `mcp-e2e-coachonly-${Date.now()}@test.local`,
       activateApps: ['coachbyte'],
+      enableExtensions: ['obsidian', 'todoist', 'homeassistant'],
     });
 
     let client2: McpTestClient | null = null;
