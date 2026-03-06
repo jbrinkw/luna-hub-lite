@@ -97,7 +97,80 @@ curl -sf -X POST "${HA_URL}/api/onboarding/integration" \
   -H "Content-Type: application/json" \
   -d "{\"client_id\":\"${CLIENT_ID}\",\"redirect_uri\":\"${CLIENT_ID}\"}" >/dev/null 2>&1 || true
 
+# Step 4: Seed test entities (template light + switch backed by input_booleans)
+echo "Seeding test entities..."
+cat > /tmp/ha-test-config.yaml << 'YAML'
+homeassistant:
+
+default_config:
+
+input_boolean:
+  luna_backing_light:
+    name: Backing Light
+    initial: off
+  luna_backing_switch:
+    name: Backing Switch
+    initial: off
+
+switch:
+  - platform: template
+    switches:
+      luna_test_switch:
+        friendly_name: "Luna Test Switch"
+        value_template: "{{ is_state('input_boolean.luna_backing_switch', 'on') }}"
+        turn_on:
+          service: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.luna_backing_switch
+        turn_off:
+          service: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.luna_backing_switch
+
+light:
+  - platform: template
+    lights:
+      luna_test_light:
+        friendly_name: "Luna Test Light"
+        value_template: "{{ is_state('input_boolean.luna_backing_light', 'on') }}"
+        turn_on:
+          service: input_boolean.turn_on
+          target:
+            entity_id: input_boolean.luna_backing_light
+        turn_off:
+          service: input_boolean.turn_off
+          target:
+            entity_id: input_boolean.luna_backing_light
+YAML
+docker cp /tmp/ha-test-config.yaml "${HA_CONTAINER}:/config/configuration.yaml"
+docker restart "${HA_CONTAINER}"
+echo "Waiting for HA to restart with test entities..."
+for i in $(seq 1 90); do
+  if curl -sf "${HA_URL}/api/" >/dev/null 2>&1; then
+    echo "HA is up."
+    break
+  fi
+  sleep 2
+done
+sleep 5
+
+# Get fresh token after restart
+FLOW_ID=$(curl -sf -X POST "${HA_URL}/auth/login_flow" \
+  -H "Content-Type: application/json" \
+  -d "{\"client_id\":\"${CLIENT_ID}\",\"handler\":[\"homeassistant\",null],\"redirect_uri\":\"${CLIENT_ID}\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['flow_id'])")
+AUTH_CODE2=$(curl -sf -X POST "${HA_URL}/auth/login_flow/${FLOW_ID}" \
+  -H "Content-Type: application/json" \
+  -d "{\"client_id\":\"${CLIENT_ID}\",\"username\":\"${HA_USER}\",\"password\":\"${HA_PASS}\"}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['result'])")
+ACCESS_TOKEN=$(curl -sf -X POST "${HA_URL}/auth/token" \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  -d "grant_type=authorization_code&code=${AUTH_CODE2}&client_id=${CLIENT_ID}" \
+  | python3 -c "import sys,json; print(json.load(sys.stdin)['access_token'])")
+
 echo ""
 echo "=== HA Setup Complete ==="
 echo "HA_URL=${HA_URL}"
 echo "HA_TOKEN=${ACCESS_TOKEN}"
+echo ""
+echo "Test entities: light.luna_test_light, switch.luna_test_switch"

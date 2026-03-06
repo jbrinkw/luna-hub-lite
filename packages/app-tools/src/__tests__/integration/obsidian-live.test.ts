@@ -34,162 +34,334 @@ function ctx(): ExtensionToolContext {
   };
 }
 
+function emptyCtx(): ExtensionToolContext {
+  return {
+    userId: 'test',
+    supabase: {} as any,
+    credentials: {
+      github_token: '',
+      github_repo: '',
+      github_api_url: '',
+    },
+  };
+}
+
 function parse(result: any) {
   if (result.isError) throw new Error(result.content[0].text);
   return JSON.parse(result.content[0].text);
 }
 
 describe.skipIf(skip)('Obsidian (Gitea) Live Integration Tests', () => {
-  // -------------------------------------------------------------------------
+  // =========================================================================
   // get_project_hierarchy
-  // -------------------------------------------------------------------------
+  // =========================================================================
 
-  it('should return the project hierarchy with roots and children', async () => {
-    const result = await obsidianTools.OBSIDIAN_get_project_hierarchy.handler({}, ctx());
-    const data = parse(result);
+  describe('get_project_hierarchy', () => {
+    it('should list Luna and Research as roots with Lite as child of Luna', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_project_hierarchy.handler({}, ctx());
+      const data = parse(result);
 
-    expect(data.status).toBe('success');
-    expect(typeof data.hierarchy).toBe('string');
+      expect(data.status).toBe('success');
+      expect(typeof data.hierarchy).toBe('string');
 
-    const hierarchy = data.hierarchy as string;
+      const hierarchy = data.hierarchy as string;
 
-    // Should contain root-level projects
-    expect(hierarchy).toMatch(/Luna/i);
-    expect(hierarchy).toMatch(/Research/i);
+      // Root-level projects present
+      expect(hierarchy).toContain('Luna');
+      expect(hierarchy).toContain('Research');
 
-    // Lite should appear as a child (indented with "- ")
-    expect(hierarchy).toMatch(/- Lite/i);
+      // Lite appears as a child (indented with "- ")
+      expect(hierarchy).toMatch(/- Lite/);
+
+      // Hierarchy mentions at least 3 projects (Luna, Lite, Research)
+      const projectLines = hierarchy.split('\n').filter((l: string) => l.trim().length > 0);
+      expect(projectLines.length).toBeGreaterThanOrEqual(3);
+    });
   });
 
-  // -------------------------------------------------------------------------
-  // get_project_text — by project_id
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // get_project_text
+  // =========================================================================
 
-  it('should return project text by project_id', async () => {
-    const result = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'luna-lite' }, ctx());
-    const data = parse(result);
+  describe('get_project_text', () => {
+    it('should return project text by project_id (luna-lite)', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'luna-lite' }, ctx());
+      const data = parse(result);
 
-    expect(data.status).toBe('success');
-    expect(data.project_id).toBe('luna-lite');
+      expect(data.status).toBe('success');
+      expect(data.project_id).toBe('luna-lite');
 
-    // Root page should contain the project description
-    expect(data.root_page_text).toContain('Serverless refactor');
+      // Root page should contain the project description
+      expect(data.root_page_text).toContain('Serverless refactor');
 
-    // Note page should contain dated entries
-    expect(data.note_page_text).toContain('3/5/26');
-    expect(data.note_page_text).toContain('3/4/26');
-    expect(data.note_page_text).toContain('3/1/26');
+      // Note page should contain all 3 dated entries
+      expect(data.note_page_text).toContain('3/5/26');
+      expect(data.note_page_text).toContain('3/4/26');
+      expect(data.note_page_text).toContain('3/1/26');
+    });
+
+    it('should resolve by display name with exact case (Research)', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'Research' }, ctx());
+      const data = parse(result);
+
+      expect(data.status).toBe('success');
+      expect(data.project_id).toBe('research');
+      expect(data.root_page_text).toBeTruthy();
+    });
+
+    it('should resolve by display name case-insensitively (research)', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'research' }, ctx());
+      const data = parse(result);
+
+      expect(data.status).toBe('success');
+      expect(data.project_id).toBe('research');
+      expect(data.root_page_text).toBeTruthy();
+    });
+
+    it('should return root_page_text but no notes for parent without Notes.md (luna-development)', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'luna-development' }, ctx());
+      const data = parse(result);
+
+      expect(data.status).toBe('success');
+      expect(data.project_id).toBe('luna-development');
+      expect(data.root_page_text).toBeTruthy();
+
+      // luna-development has no Notes.md — note_page_text should be null or empty
+      expect(!data.note_page_text || data.note_page_text === '').toBe(true);
+    });
+
+    it('should return isError for a non-existent project', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'nonexistent' }, ctx());
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text.toLowerCase()).toContain('not found');
+    });
   });
 
-  // -------------------------------------------------------------------------
-  // get_project_text — by display name
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // get_notes_by_date_range
+  // =========================================================================
 
-  it('should return project text by display name', async () => {
-    const result = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'Research' }, ctx());
-    const data = parse(result);
+  describe('get_notes_by_date_range', () => {
+    it('should return at least 5 entries across both projects for a wide range', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
+        { start_date: '3/1/26', end_date: '3/6/26' },
+        ctx(),
+      );
+      const data = parse(result);
 
-    expect(data.status).toBe('success');
-    expect(data.project_id).toBe('research');
-    expect(data.root_page_text).toContain('General research notes');
-    expect(data.note_page_text).toContain('3/6/26');
-    expect(data.note_page_text).toContain('3/3/26');
+      expect(data.status).toBe('success');
+      expect(Array.isArray(data.entries)).toBe(true);
+      expect(data.entries.length).toBeGreaterThanOrEqual(5);
+
+      // Newest first: first entry date >= last entry date
+      const dates = data.entries.map((e: any) => e.date);
+      for (let i = 0; i < dates.length - 1; i++) {
+        expect(dates[i] >= dates[i + 1]).toBe(true);
+      }
+
+      // Should include entries from both projects
+      const files = data.entries.map((e: any) => e.file);
+      expect(files.some((f: string) => f.includes('Lite'))).toBe(true);
+      expect(files.some((f: string) => f.includes('Research'))).toBe(true);
+    });
+
+    it('should return exactly 1 entry for a single-day range (3/5/26)', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
+        { start_date: '3/5/26', end_date: '3/5/26' },
+        ctx(),
+      );
+      const data = parse(result);
+
+      expect(data.status).toBe('success');
+      expect(data.entries.length).toBe(1);
+      expect(data.entries[0].date_str).toBe('3/5/26');
+      expect(data.entries[0].content).toContain('extension parity');
+    });
+
+    it('should return 0 entries for a range with no matches (no error)', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
+        { start_date: '1/1/20', end_date: '1/2/20' },
+        ctx(),
+      );
+      const data = parse(result);
+
+      expect(data.status).toBe('success');
+      expect(data.entries.length).toBe(0);
+      expect(result.isError).toBeFalsy();
+    });
+
+    it('should auto-swap when end_date is before start_date', async () => {
+      // Normal order result for comparison
+      const normalResult = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
+        { start_date: '3/1/26', end_date: '3/6/26' },
+        ctx(),
+      );
+      const normalData = parse(normalResult);
+
+      // Swapped order: start=3/6/26 end=3/1/26
+      const swappedResult = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
+        { start_date: '3/6/26', end_date: '3/1/26' },
+        ctx(),
+      );
+      const swappedData = parse(swappedResult);
+
+      expect(swappedData.status).toBe('success');
+      expect(swappedData.entries.length).toBe(normalData.entries.length);
+
+      // Same dates should appear in both results
+      const normalDates = normalData.entries.map((e: any) => e.date_str).sort();
+      const swappedDates = swappedData.entries.map((e: any) => e.date_str).sort();
+      expect(swappedDates).toEqual(normalDates);
+    });
+
+    it('should return error for invalid date format', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
+        { start_date: 'invalid', end_date: '3/6/26' },
+        ctx(),
+      );
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('MM/DD/YY');
+    });
+
+    it('should include file, date, date_str, and content fields on each entry', async () => {
+      const result = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
+        { start_date: '3/1/26', end_date: '3/6/26' },
+        ctx(),
+      );
+      const data = parse(result);
+
+      expect(data.entries.length).toBeGreaterThan(0);
+
+      for (const entry of data.entries) {
+        expect(entry).toHaveProperty('file');
+        expect(entry).toHaveProperty('date');
+        expect(entry).toHaveProperty('date_str');
+        expect(entry).toHaveProperty('content');
+
+        expect(typeof entry.file).toBe('string');
+        expect(typeof entry.date).toBe('string');
+        expect(typeof entry.date_str).toBe('string');
+        expect(typeof entry.content).toBe('string');
+
+        // date should be ISO format (YYYY-MM-DD)
+        expect(entry.date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+        // date_str should be MM/DD/YY format
+        expect(entry.date_str).toMatch(/^\d{1,2}\/\d{1,2}\/\d{2}$/);
+        // file should be a .md path
+        expect(entry.file).toMatch(/\.md$/);
+        // content should be non-empty
+        expect(entry.content.length).toBeGreaterThan(0);
+      }
+    });
   });
 
-  // -------------------------------------------------------------------------
-  // get_project_text — not found
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // Missing credentials
+  // =========================================================================
 
-  it('should return an error for a non-existent project', async () => {
-    const result = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'nonexistent' }, ctx());
+  describe('missing credentials', () => {
+    it('should return error when credentials are empty', async () => {
+      const noCredCtx = emptyCtx();
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('not found');
+      const hierarchyResult = await obsidianTools.OBSIDIAN_get_project_hierarchy.handler({}, noCredCtx);
+      expect(hierarchyResult.isError).toBe(true);
+      expect(hierarchyResult.content[0].text.toLowerCase()).toContain('credentials');
+
+      const textResult = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'luna-lite' }, noCredCtx);
+      expect(textResult.isError).toBe(true);
+      expect(textResult.content[0].text.toLowerCase()).toContain('credentials');
+
+      const rangeResult = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
+        { start_date: '3/1/26', end_date: '3/6/26' },
+        noCredCtx,
+      );
+      expect(rangeResult.isError).toBe(true);
+      expect(rangeResult.content[0].text.toLowerCase()).toContain('credentials');
+
+      const updateResult = await obsidianTools.OBSIDIAN_update_project_note.handler(
+        { project_id: 'research', content: 'test' },
+        noCredCtx,
+      );
+      expect(updateResult.isError).toBe(true);
+      expect(updateResult.content[0].text.toLowerCase()).toContain('credentials');
+    });
   });
 
-  // -------------------------------------------------------------------------
-  // get_notes_by_date_range — wide range
-  // -------------------------------------------------------------------------
+  // =========================================================================
+  // update_project_note (mutations — run LAST)
+  // =========================================================================
 
-  it('should return notes within a wide date range, newest first', async () => {
-    const result = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
-      { start_date: '3/1/26', end_date: '3/6/26' },
-      ctx(),
-    );
-    const data = parse(result);
+  describe('update_project_note', () => {
+    it('should append content to a project note and verify by re-reading', async () => {
+      const marker = `live-test-append-${Date.now()}`;
 
-    expect(data.status).toBe('success');
-    expect(Array.isArray(data.entries)).toBe(true);
-    expect(data.entries.length).toBeGreaterThanOrEqual(5);
+      const result = await obsidianTools.OBSIDIAN_update_project_note.handler(
+        { project_id: 'research', content: marker },
+        ctx(),
+      );
+      const data = parse(result);
 
-    // Newest first: first entry date >= last entry date
-    const dates = data.entries.map((e: any) => e.date);
-    expect(dates[0] >= dates[dates.length - 1]).toBe(true);
+      expect(data.status).toBe('success');
+      expect(data.project_id).toBe('research');
+      expect(data.note_file).toContain('Notes.md');
 
-    // Should include entries from both projects
-    const files = data.entries.map((e: any) => e.file);
-    expect(files.some((f: string) => f.includes('Lite'))).toBe(true);
-    expect(files.some((f: string) => f.includes('Research'))).toBe(true);
-  });
+      // Verify the content was written by re-reading the project
+      const readResult = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'research' }, ctx());
+      const readData = parse(readResult);
 
-  // -------------------------------------------------------------------------
-  // get_notes_by_date_range — narrow (single day)
-  // -------------------------------------------------------------------------
+      expect(readData.note_page_text).toContain(marker);
+    });
 
-  it('should return only matching entries for a single-day range', async () => {
-    const result = await obsidianTools.OBSIDIAN_get_notes_by_date_range.handler(
-      { start_date: '3/5/26', end_date: '3/5/26' },
-      ctx(),
-    );
-    const data = parse(result);
+    it('should append content under a specific section (Testing)', async () => {
+      const marker = `section-test-${Date.now()}`;
 
-    expect(data.status).toBe('success');
-    expect(data.entries.length).toBe(1);
-    expect(data.entries[0].date_str).toBe('3/5/26');
-    expect(data.entries[0].content).toContain('extension parity');
-  });
+      const result = await obsidianTools.OBSIDIAN_update_project_note.handler(
+        { project_id: 'research', content: marker, section_id: 'Testing' },
+        ctx(),
+      );
+      const data = parse(result);
 
-  // -------------------------------------------------------------------------
-  // update_project_note — append content
-  // -------------------------------------------------------------------------
+      expect(data.status).toBe('success');
+      expect(data.project_id).toBe('research');
 
-  it("should append content to today's note entry", async () => {
-    const result = await obsidianTools.OBSIDIAN_update_project_note.handler(
-      { project_id: 'research', content: 'Live test entry' },
-      ctx(),
-    );
-    const data = parse(result);
+      // Verify the section and content exist
+      const readResult = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'research' }, ctx());
+      const readData = parse(readResult);
 
-    expect(data.status).toBe('success');
-    expect(data.project_id).toBe('research');
-    expect(data.note_file).toContain('Notes.md');
+      expect(readData.note_page_text).toContain('## Testing');
+      expect(readData.note_page_text).toContain(marker);
+    });
 
-    // Verify the content was written by re-reading the project
-    const readResult = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'research' }, ctx());
-    const readData = parse(readResult);
+    it('should create a new section (Audit) when appending to luna-lite', async () => {
+      const marker = `new-section-${Date.now()}`;
 
-    expect(readData.note_page_text).toContain('Live test entry');
-  });
+      const result = await obsidianTools.OBSIDIAN_update_project_note.handler(
+        { project_id: 'luna-lite', content: marker, section_id: 'Audit' },
+        ctx(),
+      );
+      const data = parse(result);
 
-  // -------------------------------------------------------------------------
-  // update_project_note — with section
-  // -------------------------------------------------------------------------
+      expect(data.status).toBe('success');
+      expect(data.project_id).toBe('luna-lite');
 
-  it('should append content under a specific section', async () => {
-    const result = await obsidianTools.OBSIDIAN_update_project_note.handler(
-      { project_id: 'research', content: 'Section test entry', section_id: 'Testing' },
-      ctx(),
-    );
-    const data = parse(result);
+      // Verify the new section was created with content
+      const readResult = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'luna-lite' }, ctx());
+      const readData = parse(readResult);
 
-    expect(data.status).toBe('success');
-    expect(data.project_id).toBe('research');
+      expect(readData.note_page_text).toContain('## Audit');
+      expect(readData.note_page_text).toContain(marker);
+    });
 
-    // Verify the section and content exist
-    const readResult = await obsidianTools.OBSIDIAN_get_project_text.handler({ project_id: 'research' }, ctx());
-    const readData = parse(readResult);
+    it('should return isError for a non-existent project', async () => {
+      const result = await obsidianTools.OBSIDIAN_update_project_note.handler(
+        { project_id: 'nonexistent', content: 'test' },
+        ctx(),
+      );
 
-    expect(readData.note_page_text).toContain('## Testing');
-    expect(readData.note_page_text).toContain('Section test entry');
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text.toLowerCase()).toContain('not found');
+    });
   });
 });

@@ -1,19 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll } from 'vitest';
 import { homeassistantTools } from '../../../../../extensions/homeassistant/tools';
 import type { ExtensionToolContext } from '../../types';
 
 // ---------------------------------------------------------------------------
 // Home Assistant Live Integration Tests
 // ---------------------------------------------------------------------------
-// These tests hit a real Home Assistant instance. They require:
-//   HA_URL  — base URL (default: http://localhost:8123)
-//   HA_TOKEN — a valid short-lived or long-lived access token
+// These tests hit a real Home Assistant Docker instance with template entities:
+//   light.luna_test_light   — friendly_name "Luna Test Light", starts "off"
+//   switch.luna_test_switch — friendly_name "Luna Test Switch", starts "off"
+//   input_boolean.luna_backing_light  — backing for light template (NOT in ALLOWED_DOMAINS)
+//   input_boolean.luna_backing_switch — backing for switch template (NOT in ALLOWED_DOMAINS)
 //
-// On a fresh HA install the only entities are sun.sun, person.*, zone.home,
-// etc. None of those are in the ALLOWED_DOMAINS (light, switch, fan,
-// media_player), so most "happy path" calls return errors or empty lists.
-// That is expected — the tests verify API connectivity, auth, error handling,
-// and NL formatting.
+// Requires:
+//   HA_TOKEN — a valid long-lived access token
+//   HA_URL   — base URL (default: http://localhost:8123)
 // ---------------------------------------------------------------------------
 
 const HA_TOKEN = process.env.HA_TOKEN;
@@ -24,10 +24,15 @@ function ctx(): ExtensionToolContext {
   return {
     userId: 'test',
     supabase: {} as any,
-    credentials: {
-      ha_api_key: HA_TOKEN!,
-      ha_url: HA_URL,
-    },
+    credentials: { ha_api_key: HA_TOKEN!, ha_url: HA_URL },
+  };
+}
+
+function noCredsCtx(): ExtensionToolContext {
+  return {
+    userId: 'test',
+    supabase: {} as any,
+    credentials: {},
   };
 }
 
@@ -36,36 +41,147 @@ function parse(result: any) {
   return JSON.parse(result.content[0].text);
 }
 
+const delay = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 describe.skipIf(skip)('Home Assistant Live Integration Tests', () => {
   // -------------------------------------------------------------------------
-  // 1. API connectivity — proves the token + URL work
+  // Setup: reset all entities to "off" and verify connectivity
   // -------------------------------------------------------------------------
-  it('should connect to HA API without network errors', async () => {
-    const result = await homeassistantTools.HOMEASSISTANT_get_devices.handler({}, ctx());
-    // Should not be a network error (those include "Network error:" prefix)
-    if (result.isError) {
-      expect(result.content[0].text).not.toMatch(/Network error/);
-    } else {
-      expect(result.content[0].text).toBeTruthy();
+  beforeAll(async () => {
+    const headers = {
+      Authorization: `Bearer ${HA_TOKEN}`,
+      'Content-Type': 'application/json',
+    };
+
+    // Verify connectivity
+    const healthResp = await fetch(`${HA_URL}/api/`, { headers });
+    if (!healthResp.ok) {
+      throw new Error(`HA connectivity check failed: ${healthResp.status} ${healthResp.statusText}`);
     }
+
+    // Reset light to off
+    await fetch(`${HA_URL}/api/services/light/turn_off`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ entity_id: 'light.luna_test_light' }),
+    });
+
+    // Reset switch to off
+    await fetch(`${HA_URL}/api/services/switch/turn_off`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ entity_id: 'switch.luna_test_switch' }),
+    });
+
+    // Allow state to settle
+    await delay(500);
   });
 
-  // -------------------------------------------------------------------------
-  // 2. get_devices — returns empty list on fresh install (no allowed domains)
-  // -------------------------------------------------------------------------
-  it('should return empty device list on fresh install', async () => {
+  // =========================================================================
+  // State-reading tests
+  // =========================================================================
+
+  // 1. get_devices lists real devices
+  it('get_devices lists real devices with domain grouping', async () => {
     const result = await homeassistantTools.HOMEASSISTANT_get_devices.handler({}, ctx());
     const data = parse(result);
 
-    expect(data.formatted).toEqual(expect.any(String));
-    expect(data.formatted).toContain('No devices found');
-    expect(data.devices).toEqual([]);
+    // Should find at least our two test entities
+    expect(data.devices.length).toBeGreaterThanOrEqual(2);
+
+    // Check domain grouping — both light and switch present
+    const domains = new Set(data.devices.map((d: any) => d.domain));
+    expect(domains.has('light')).toBe(true);
+    expect(domains.has('switch')).toBe(true);
+
+    // Check friendly names in formatted output
+    expect(data.formatted).toContain('Luna Test Light');
+    expect(data.formatted).toContain('Luna Test Switch');
+
+    // Verify device objects have correct fields
+    const lightDev = data.devices.find((d: any) => d.entity_id === 'light.luna_test_light');
+    expect(lightDev).toBeDefined();
+    expect(lightDev.domain).toBe('light');
+    expect(lightDev.friendly_name).toBe('Luna Test Light');
+    expect(lightDev.state).toEqual(expect.any(String));
+
+    const switchDev = data.devices.find((d: any) => d.entity_id === 'switch.luna_test_switch');
+    expect(switchDev).toBeDefined();
+    expect(switchDev.domain).toBe('switch');
+    expect(switchDev.friendly_name).toBe('Luna Test Switch');
+    expect(switchDev.state).toEqual(expect.any(String));
   });
 
-  // -------------------------------------------------------------------------
-  // 3. get_entity_status — non-existent light entity
-  // -------------------------------------------------------------------------
-  it('should return error for non-existent entity', async () => {
+  // 2. get_devices domain filtering — input_boolean NOT listed
+  it('get_devices excludes entities not in ALLOWED_DOMAINS', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_get_devices.handler({}, ctx());
+    const data = parse(result);
+
+    // input_boolean entities should not appear
+    const entityIds = data.devices.map((d: any) => d.entity_id);
+    expect(entityIds).not.toContain('input_boolean.luna_backing_light');
+    expect(entityIds).not.toContain('input_boolean.luna_backing_switch');
+
+    // No input_boolean domain at all
+    const domains = data.devices.map((d: any) => d.domain);
+    expect(domains).not.toContain('input_boolean');
+
+    // Also no sun, person, zone, etc.
+    expect(domains).not.toContain('sun');
+    expect(domains).not.toContain('person');
+    expect(domains).not.toContain('zone');
+  });
+
+  // 3. get_entity_status by entity_id
+  it('get_entity_status by entity_id returns correct data', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { entity_id: 'light.luna_test_light' },
+      ctx(),
+    );
+    const data = parse(result);
+
+    expect(data.formatted).toContain('Luna Test Light');
+    expect(data.state).toBe('off');
+    expect(data.entity_id).toBe('light.luna_test_light');
+  });
+
+  // 4. get_entity_status by friendly_name
+  it('get_entity_status by friendly_name resolves correctly', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { friendly_name: 'Luna Test Light' },
+      ctx(),
+    );
+    const data = parse(result);
+
+    expect(data.entity_id).toBe('light.luna_test_light');
+    expect(data.formatted).toContain('Luna Test Light');
+    expect(data.state).toBe('off');
+  });
+
+  // 5. get_entity_status partial name match
+  it('get_entity_status resolves partial name match', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { friendly_name: 'Test Switch' },
+      ctx(),
+    );
+    const data = parse(result);
+
+    expect(data.entity_id).toBe('switch.luna_test_switch');
+  });
+
+  // 6. get_entity_status ambiguous name — matches both light and switch
+  it('get_entity_status errors on ambiguous name matching multiple entities', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { friendly_name: 'Luna Test' },
+      ctx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Multiple entities/i);
+  });
+
+  // 7. get_entity_status non-existent entity
+  it('get_entity_status errors for non-existent entity', async () => {
     const result = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
       { entity_id: 'light.nonexistent' },
       ctx(),
@@ -75,121 +191,171 @@ describe.skipIf(skip)('Home Assistant Live Integration Tests', () => {
     expect(result.content[0].text).toMatch(/not found/i);
   });
 
-  // -------------------------------------------------------------------------
-  // 4. get_entity_status — missing identifier
-  // -------------------------------------------------------------------------
-  it('should return error when no identifier is provided', async () => {
+  // 8. get_entity_status no identifier
+  it('get_entity_status errors when no identifier provided', async () => {
     const result = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler({}, ctx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/entity_id|friendly_name/i);
   });
 
-  // -------------------------------------------------------------------------
-  // 5. turn_on — non-existent entity
-  // -------------------------------------------------------------------------
-  it('should return error when turning on a non-existent entity', async () => {
+  // =========================================================================
+  // Mutation tests (sequential — they change shared state)
+  // =========================================================================
+
+  // 9. turn_on by entity_id
+  it('turn_on by entity_id turns on switch and verifies state', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_turn_on.handler(
+      { entity_id: 'switch.luna_test_switch' },
+      ctx(),
+    );
+    const data = parse(result);
+
+    expect(data.formatted).toContain("I've turned on the Luna Test Switch");
+    expect(data.entity_id).toBe('switch.luna_test_switch');
+    expect(data.action).toBe('turn_on');
+    expect(data.success).toBe(true);
+
+    // Verify state changed
+    await delay(500);
+    const statusResult = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { entity_id: 'switch.luna_test_switch' },
+      ctx(),
+    );
+    const statusData = parse(statusResult);
+    expect(statusData.state).toBe('on');
+  });
+
+  // 10. turn_off by entity_id
+  it('turn_off by entity_id turns off switch and verifies state', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_turn_off.handler(
+      { entity_id: 'switch.luna_test_switch' },
+      ctx(),
+    );
+    const data = parse(result);
+
+    expect(data.formatted).toContain("I've turned off the Luna Test Switch");
+    expect(data.entity_id).toBe('switch.luna_test_switch');
+    expect(data.action).toBe('turn_off');
+    expect(data.success).toBe(true);
+
+    // Verify state changed
+    await delay(500);
+    const statusResult = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { entity_id: 'switch.luna_test_switch' },
+      ctx(),
+    );
+    const statusData = parse(statusResult);
+    expect(statusData.state).toBe('off');
+  });
+
+  // 11. turn_on by friendly_name
+  it('turn_on by friendly_name resolves and turns on light', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_turn_on.handler({ friendly_name: 'Luna Test Light' }, ctx());
+    const data = parse(result);
+
+    expect(data.formatted).toContain("I've turned on the Luna Test Light");
+    expect(data.entity_id).toBe('light.luna_test_light');
+    expect(data.success).toBe(true);
+
+    // Verify state changed
+    await delay(500);
+    const statusResult = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { entity_id: 'light.luna_test_light' },
+      ctx(),
+    );
+    const statusData = parse(statusResult);
+    expect(statusData.state).toBe('on');
+  });
+
+  // 12. turn_off by friendly_name
+  it('turn_off by friendly_name resolves and turns off light', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_turn_off.handler({ friendly_name: 'Luna Test Light' }, ctx());
+    const data = parse(result);
+
+    expect(data.formatted).toContain("I've turned off the Luna Test Light");
+    expect(data.entity_id).toBe('light.luna_test_light');
+    expect(data.success).toBe(true);
+
+    // Verify state changed
+    await delay(500);
+    const statusResult = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { entity_id: 'light.luna_test_light' },
+      ctx(),
+    );
+    const statusData = parse(statusResult);
+    expect(statusData.state).toBe('off');
+  });
+
+  // 13. turn_on non-existent entity
+  it('turn_on errors for non-existent entity', async () => {
     const result = await homeassistantTools.HOMEASSISTANT_turn_on.handler({ entity_id: 'light.fake' }, ctx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/not found/i);
   });
 
-  // -------------------------------------------------------------------------
-  // 6. turn_off — non-existent entity
-  // -------------------------------------------------------------------------
-  it('should return error when turning off a non-existent entity', async () => {
-    const result = await homeassistantTools.HOMEASSISTANT_turn_off.handler({ entity_id: 'switch.nonexistent' }, ctx());
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/not found/i);
-  });
-
-  // -------------------------------------------------------------------------
-  // 7. tv_remote — no remote entity on fresh install
-  // -------------------------------------------------------------------------
-  it('should return error for tv_remote on fresh install', async () => {
-    const result = await homeassistantTools.HOMEASSISTANT_tv_remote.handler({ button: 'home' }, ctx());
-
-    // callService POST to remote.living_room_tv will fail (entity doesn't exist)
-    expect(result.isError).toBe(true);
-  });
-
-  // -------------------------------------------------------------------------
-  // 8. tv_remote — unknown button
-  // -------------------------------------------------------------------------
-  it('should return error for unknown tv_remote button', async () => {
-    const result = await homeassistantTools.HOMEASSISTANT_tv_remote.handler({ button: 'not_a_real_button' }, ctx());
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/Unknown button/i);
-  });
-
-  // -------------------------------------------------------------------------
-  // 9. Missing credentials — get_devices
-  // -------------------------------------------------------------------------
-  it('should return error when credentials are missing', async () => {
-    const badCtx: ExtensionToolContext = {
-      userId: 'test',
-      supabase: {} as any,
-      credentials: {},
-    };
-
-    const result = await homeassistantTools.HOMEASSISTANT_get_devices.handler({}, badCtx);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
-  });
-
-  // -------------------------------------------------------------------------
-  // 10. Missing credentials — turn_on
-  // -------------------------------------------------------------------------
-  it('should return error when credentials are missing for turn_on', async () => {
-    const badCtx: ExtensionToolContext = {
-      userId: 'test',
-      supabase: {} as any,
-      credentials: {},
-    };
-
-    const result = await homeassistantTools.HOMEASSISTANT_turn_on.handler({ entity_id: 'light.fake' }, badCtx);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
-  });
-
-  // -------------------------------------------------------------------------
-  // 11. Missing credentials — tv_remote
-  // -------------------------------------------------------------------------
-  it('should return error when credentials are missing for tv_remote', async () => {
-    const badCtx: ExtensionToolContext = {
-      userId: 'test',
-      supabase: {} as any,
-      credentials: {},
-    };
-
-    const result = await homeassistantTools.HOMEASSISTANT_tv_remote.handler({ button: 'home' }, badCtx);
-
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
-  });
-
-  // -------------------------------------------------------------------------
-  // 12. turn_on — missing identifier
-  // -------------------------------------------------------------------------
-  it('should return error when turn_on has no identifier', async () => {
+  // 14. turn_on no identifier
+  it('turn_on errors when no identifier provided', async () => {
     const result = await homeassistantTools.HOMEASSISTANT_turn_on.handler({}, ctx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/entity_id|friendly_name/i);
   });
 
-  // -------------------------------------------------------------------------
-  // 13. tv_remote — missing button
-  // -------------------------------------------------------------------------
-  it('should return error when tv_remote has no button', async () => {
+  // =========================================================================
+  // tv_remote tests
+  // =========================================================================
+
+  // 15. tv_remote unknown button
+  it('tv_remote errors for unknown button', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_tv_remote.handler({ button: 'not_a_button' }, ctx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Unknown button/i);
+  });
+
+  // 16. tv_remote missing button
+  it('tv_remote errors when no button provided', async () => {
     const result = await homeassistantTools.HOMEASSISTANT_tv_remote.handler({}, ctx());
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/button/i);
+  });
+
+  // 17. tv_remote empty string
+  it('tv_remote errors for empty string button', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_tv_remote.handler({ button: '' }, ctx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/button/i);
+  });
+
+  // =========================================================================
+  // Missing credentials tests
+  // =========================================================================
+
+  // 18. Missing credentials for get_devices
+  it('get_devices errors with missing credentials', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_get_devices.handler({}, noCredsCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
+  });
+
+  // 19. Missing credentials for turn_on
+  it('turn_on errors with missing credentials', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_turn_on.handler({ entity_id: 'light.fake' }, noCredsCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
+  });
+
+  // 20. Missing credentials for tv_remote
+  it('tv_remote errors with missing credentials', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_tv_remote.handler({ button: 'home' }, noCredsCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
   });
 });
