@@ -147,6 +147,7 @@ function stockStatusStyle(status: StockStatus): React.CSSProperties {
 export function RecipesPage() {
   const { user } = useAuth();
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [stockByProduct, setStockByProduct] = useState<Map<string, number>>(new Map());
@@ -177,13 +178,19 @@ export function RecipesPage() {
   const loadData = useCallback(async () => {
     if (!user) return;
 
-    const { data: recipeData } = await chefbyte()
+    setLoadError(null);
+    const { data: recipeData, error: recipeErr } = await chefbyte()
       .from('recipes')
       .select(
         '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
       )
       .eq('user_id', user.id)
       .order('name');
+    if (recipeErr) {
+      setLoadError(recipeErr.message);
+      setLoading(false);
+      return;
+    }
 
     // Load all stock lots to compute stock-per-product
     const { data: stockLots } = await chefbyte()
@@ -278,6 +285,21 @@ export function RecipesPage() {
 
   return (
     <ChefLayout title="Recipes">
+      {loadError && (
+        <div
+          style={{
+            background: '#fff3cd',
+            border: '1px solid #ffc107',
+            borderRadius: 8,
+            padding: '12px 16px',
+            marginBottom: 16,
+          }}
+          data-testid="load-error"
+        >
+          <strong>Error:</strong> {loadError}
+        </div>
+      )}
+
       {/* ============================================================ */}
       {/*  HEADER                                                       */}
       {/* ============================================================ */}

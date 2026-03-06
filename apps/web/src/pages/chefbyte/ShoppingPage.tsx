@@ -46,11 +46,16 @@ export function ShoppingPage() {
 
   const loadItems = useCallback(async () => {
     if (!user) return;
-    const { data } = await chefbyte()
+    const { data, error: loadErr } = await chefbyte()
       .from('shopping_list')
       .select('*, products:product_id(name, barcode, price)')
       .eq('user_id', user.id)
       .order('created_at');
+    if (loadErr) {
+      setError(loadErr.message);
+      setLoading(false);
+      return;
+    }
     setItems((data ?? []) as ShoppingItem[]);
     setLoading(false);
   }, [user]);

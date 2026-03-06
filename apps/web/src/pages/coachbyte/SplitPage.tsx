@@ -38,12 +38,18 @@ export function SplitPage() {
   const loadSplits = useCallback(async () => {
     if (!user) return;
 
-    const { data } = await supabase
+    const { data, error: loadErr } = await supabase
       .schema('coachbyte')
       .from('splits')
       .select('split_id, weekday, template_sets, split_notes')
       .eq('user_id', user.id)
       .order('weekday');
+
+    if (loadErr) {
+      setSaveError(loadErr.message);
+      setLoading(false);
+      return;
+    }
 
     const splitMap = new Map<number, any>();
     (data ?? []).forEach((s: any) => splitMap.set(s.weekday, s));

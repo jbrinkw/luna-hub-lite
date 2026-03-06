@@ -170,6 +170,15 @@ export function TodayPage() {
     loadTimer();
   }, [loadPlan, loadTimer]);
 
+  // Re-load on tab focus to catch midnight date changes
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadPlan();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
+  }, [loadPlan]);
+
   useEffect(() => {
     if (!user) return;
 

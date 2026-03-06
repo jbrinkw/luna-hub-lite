@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte, escapeIlike } from '@/shared/supabase';
+import { chefbyte, supabase, escapeIlike } from '@/shared/supabase';
 import { toDateStr } from '@/shared/dates';
 import { computeRecipeMacros } from './RecipesPage';
 
@@ -151,7 +151,7 @@ export function MealPlanPage() {
     const startDate = toDateStr(weekStart);
     const endDate = toDateStr(new Date(weekStart.getTime() + 6 * 86400000));
 
-    const { data } = await chefbyte()
+    const { data, error: loadErr } = await chefbyte()
       .from('meal_plan_entries')
       .select(
         '*, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving)',
@@ -161,6 +161,11 @@ export function MealPlanPage() {
       .lte('logical_date', endDate)
       .order('created_at');
 
+    if (loadErr) {
+      setError(loadErr.message);
+      setLoading(false);
+      return;
+    }
     setMeals((data ?? []) as MealEntry[]);
 
     // Also fetch consumed items for the week
@@ -188,6 +193,35 @@ export function MealPlanPage() {
 
     loadMeals();
   }, [loadMeals]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Realtime subscriptions                                           */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel('mealplan-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'chefbyte', table: 'meal_plan_entries', filter: `user_id=eq.${user.id}` },
+        () => loadMeals(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'chefbyte', table: 'food_logs', filter: `user_id=eq.${user.id}` },
+        () => loadMeals(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'chefbyte', table: 'temp_items', filter: `user_id=eq.${user.id}` },
+        () => loadMeals(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /* ---------------------------------------------------------------- */
   /*  Auto-select today on initial load                                */

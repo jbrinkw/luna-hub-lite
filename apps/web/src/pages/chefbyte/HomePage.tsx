@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { calcCaloriesFromMacros } from '@/pages/chefbyte/MacroPage';
@@ -285,6 +285,49 @@ export function HomePage() {
     // Async data fetching with setState is the standard pattern for this use case
 
     loadData();
+  }, [loadData]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Realtime subscriptions                                           */
+  /* ---------------------------------------------------------------- */
+
+  useEffect(() => {
+    if (!user) return;
+    const channel = supabase
+      .channel('home-changes')
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'chefbyte', table: 'meal_plan_entries', filter: `user_id=eq.${user.id}` },
+        () => loadData(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'chefbyte', table: 'food_logs', filter: `user_id=eq.${user.id}` },
+        () => loadData(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'chefbyte', table: 'temp_items', filter: `user_id=eq.${user.id}` },
+        () => loadData(),
+      )
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'chefbyte', table: 'stock_lots', filter: `user_id=eq.${user.id}` },
+        () => loadData(),
+      )
+      .subscribe();
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Re-load on tab focus to catch midnight date changes
+  useEffect(() => {
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') loadData();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => document.removeEventListener('visibilitychange', onVisibility);
   }, [loadData]);
 
   /* ---------------------------------------------------------------- */

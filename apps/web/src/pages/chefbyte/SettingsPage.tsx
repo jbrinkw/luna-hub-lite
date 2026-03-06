@@ -151,12 +151,17 @@ export function SettingsPage() {
 
   const loadProducts = useCallback(async () => {
     if (!user) return;
-    const { data } = await chefbyte()
+    const { data, error: loadErr } = await chefbyte()
       .from('products')
       .select('*')
       .eq('user_id', user.id)
       .not('name', 'ilike', '[MEAL]%')
       .order('name');
+    if (loadErr) {
+      setError(loadErr.message);
+      setLoading(false);
+      return;
+    }
     setProducts((data ?? []) as Product[]);
     setLoading(false);
   }, [user]);
