@@ -106,6 +106,41 @@ describe.skipIf(skip)('Todoist Live Integration Tests', () => {
   });
 
   // -----------------------------------------------------------------------
+  // 4b. Create task with section_id
+  // -----------------------------------------------------------------------
+  it('should create a task with section_id', async () => {
+    // First create a section via raw API to have a target
+    const secResp = await fetch('https://api.todoist.com/api/v1/sections', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${TODOIST_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ project_id: inboxProjectId, name: `Luna Test Section ${Date.now()}` }),
+    });
+    const section = await secResp.json();
+    const sectionId = section.id;
+
+    const result = await todoistTools.TODOIST_create_task.handler(
+      { content: 'Luna task in section', section_id: sectionId },
+      ctx(),
+    );
+    const task = parse(result);
+
+    expect(task.id).toBeTruthy();
+    expect(task.content).toBe('Luna task in section');
+    expect(task.section_id).toBe(sectionId);
+
+    createdTaskIds.push(task.id);
+
+    // Clean up the section
+    await fetch(`https://api.todoist.com/api/v1/sections/${sectionId}`, {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${TODOIST_API_KEY}` },
+    }).catch(() => {});
+  });
+
+  // -----------------------------------------------------------------------
   // 5. Create task with all fields
   // -----------------------------------------------------------------------
   it('should create a task with all fields', async () => {
@@ -168,6 +203,18 @@ describe.skipIf(skip)('Todoist Live Integration Tests', () => {
     for (const task of tasks) {
       expect(task.project_id).toBe(inboxProjectId);
     }
+  });
+
+  // -----------------------------------------------------------------------
+  // 8b. List tasks with filter expression
+  // -----------------------------------------------------------------------
+  it('should list tasks with filter expression', async () => {
+    const result = await todoistTools.TODOIST_get_tasks.handler({ filter: 'all' }, ctx());
+    const tasks = parse(result);
+
+    expect(Array.isArray(tasks)).toBe(true);
+    // Should include the tasks we created (they exist and match "all")
+    expect(tasks.length).toBeGreaterThanOrEqual(1);
   });
 
   // -----------------------------------------------------------------------

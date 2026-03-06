@@ -199,6 +199,44 @@ describe.skipIf(skip)('Home Assistant Live Integration Tests', () => {
     expect(result.content[0].text).toMatch(/entity_id|friendly_name/i);
   });
 
+  // 8b. get_entity_status media_player with playing state (NL formatting)
+  it('get_entity_status formats media_player playing state with details', async () => {
+    // Seed a media_player entity in "playing" state via POST /api/states
+    const headers = {
+      Authorization: `Bearer ${HA_TOKEN}`,
+      'Content-Type': 'application/json',
+    };
+    await fetch(`${HA_URL}/api/states/media_player.luna_test_tv`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        state: 'playing',
+        attributes: {
+          friendly_name: 'Luna Test TV',
+          media_title: 'Test Song',
+          media_artist: 'Test Artist',
+          app_name: 'Spotify',
+          volume_level: 0.75,
+        },
+      }),
+    });
+
+    const result = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { entity_id: 'media_player.luna_test_tv' },
+      ctx(),
+    );
+    const data = parse(result);
+
+    expect(data.entity_id).toBe('media_player.luna_test_tv');
+    expect(data.state).toBe('playing');
+    expect(data.formatted).toContain('Luna Test TV');
+    expect(data.formatted).toContain('playing');
+    expect(data.formatted).toContain('Test Song');
+    expect(data.formatted).toContain('Test Artist');
+    expect(data.formatted).toContain('Spotify');
+    expect(data.formatted).toContain('75%');
+  });
+
   // =========================================================================
   // Mutation tests (sequential — they change shared state)
   // =========================================================================
