@@ -229,6 +229,164 @@ describe('ChefByte InventoryPage queries', () => {
   });
 
   // -----------------------------------------------------------------------
+  // Grouped view filters out zero-stock products
+  // Source: InventoryPage.tsx filteredGrouped — g.totalStock > 0
+  // -----------------------------------------------------------------------
+  it('grouped view filters out zero-stock products', async () => {
+    // Load both datasets using page queries
+    const { data: prods } = await chefbyte(ctx.client)
+      .from('products')
+      .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount')
+      .eq('user_id', ctx.userId)
+      .order('name');
+
+    const { data: stockLots } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id,product_id,qty_containers,expires_on,locations:location_id(name)')
+      .eq('user_id', ctx.userId);
+
+    expect(prods).not.toBeNull();
+    expect(stockLots).not.toBeNull();
+
+    // Replicate page-side aggregation logic
+    const lotsByProduct = new Map<string, any[]>();
+    for (const lot of stockLots!) {
+      const existing = lotsByProduct.get(lot.product_id) ?? [];
+      existing.push(lot);
+      lotsByProduct.set(lot.product_id, existing);
+    }
+
+    const grouped = prods!.map((product: any) => {
+      const productLots = lotsByProduct.get(product.product_id) ?? [];
+      const totalStock = productLots.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+      return { product, totalStock };
+    });
+
+    // Apply the exact filter from InventoryPage.tsx filteredGrouped
+    const filteredGrouped = grouped.filter((g: any) => g.totalStock > 0);
+
+    // Bananas (0 stock) and Protein Powder (0 stock) should be excluded
+    expect(filteredGrouped.length).toBe(3); // Chicken, Rice, Eggs only
+    const names = filteredGrouped.map((g: any) => g.product.name).sort();
+    expect(names).toEqual(['Brown Rice', 'Chicken Breast', 'Eggs']);
+
+    // All zero-stock products should NOT appear
+    const zeroStockNames = grouped
+      .filter((g: any) => g.totalStock <= 0)
+      .map((g: any) => g.product.name)
+      .sort();
+    expect(zeroStockNames).toEqual(['Bananas', 'Protein Powder']);
+
+    // Verify none of the filtered items have zero stock
+    for (const item of filteredGrouped) {
+      expect(item.totalStock).toBeGreaterThan(0);
+    }
+  });
+
+  // -----------------------------------------------------------------------
+  // Consume by serving unit converts to containers
+  // Source: InventoryPage.tsx consumeStock() — consume_product RPC with unit='serving'
+  // The RPC internally converts: qty / servings_per_container
+  // -----------------------------------------------------------------------
+  it('consume by serving unit converts to containers', async () => {
+    const eggsId = seeds.productMap['Eggs']; // 12 servings_per_container, 0.5 containers
+    const today = todayDate();
+
+    // Get stock before
+    const { data: before } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('product_id', eggsId);
+    const totalBefore = before!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+    expect(totalBefore).toBeCloseTo(0.5, 1);
+
+    // Consume 1 serving (EXACT RPC from InventoryPage)
+    const result = await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: eggsId,
+      p_qty: 1,
+      p_unit: 'serving',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+    expect(result.error).toBeNull();
+
+    // Verify stock reduced by 1/12 containers (~0.083)
+    const { data: after } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('product_id', eggsId);
+    const totalAfter = after!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
+
+    // 0.5 - (1/12) = ~0.417
+    const expectedReduction = 1 / 12;
+    expect(totalAfter).toBeCloseTo(totalBefore - expectedReduction, 2);
+
+    // Cleanup food_logs
+    await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
+  });
+
+  // -----------------------------------------------------------------------
+  // Stock lot merge on same product/location/expiry
+  // Source: InventoryPage.tsx addStock() — looks for existing lot then updates qty
+  // -----------------------------------------------------------------------
+  it('stock lot merge on same product/location/expiry', async () => {
+    const chickenId = seeds.productMap['Chicken Breast'];
+    const locationId = seeds.locationId;
+
+    // Get existing lot details
+    const { data: lots } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id, qty_containers, expires_on')
+      .eq('product_id', chickenId)
+      .eq('user_id', ctx.userId);
+    expect(lots!.length).toBe(1);
+    const existingLot = lots![0] as any;
+    const originalQty = Number(existingLot.qty_containers);
+
+    // Replicate the merge logic from InventoryPage.tsx addStock():
+    // 1. Find existing lot with same product/location/expiry
+    let findQuery = chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id, qty_containers')
+      .eq('user_id', ctx.userId)
+      .eq('product_id', chickenId)
+      .eq('location_id', locationId);
+
+    if (existingLot.expires_on) {
+      findQuery = findQuery.eq('expires_on', existingLot.expires_on);
+    } else {
+      findQuery = findQuery.is('expires_on', null);
+    }
+
+    const { data: found } = await findQuery.limit(1).maybeSingle();
+    expect(found).not.toBeNull();
+    expect((found as any).lot_id).toBe(existingLot.lot_id);
+
+    // 2. Merge: update qty_containers on existing lot (EXACT pattern from InventoryPage)
+    const addQty = 2;
+    const mergeResult = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .update({ qty_containers: Number((found as any).qty_containers) + addQty })
+      .eq('lot_id', (found as any).lot_id);
+    expect(mergeResult.error).toBeNull();
+
+    // 3. Verify merged — same lot_id, increased quantity, no new lot created
+    const { data: afterLots } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id, qty_containers')
+      .eq('product_id', chickenId)
+      .eq('user_id', ctx.userId);
+    expect(afterLots!.length).toBe(1); // Still one lot, not two
+    expect(Number((afterLots![0] as any).qty_containers)).toBeCloseTo(originalQty + addQty, 1);
+
+    // Restore original qty
+    await chefbyte(ctx.client)
+      .from('stock_lots')
+      .update({ qty_containers: originalQty })
+      .eq('lot_id', existingLot.lot_id);
+  });
+
+  // -----------------------------------------------------------------------
   // Exact insert from InventoryPage.tsx addStock (line 163-171)
   // -----------------------------------------------------------------------
   it('addStock insert matches page pattern', async () => {

@@ -20,6 +20,26 @@ interface MacroTotals {
   goals: { calories: number; protein: number; carbs: number; fat: number };
 }
 
+interface FoodLogEntry {
+  log_id: string;
+  qty_consumed: number;
+  unit: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  products: { name: string } | null;
+}
+
+interface TempItemEntry {
+  temp_id: string;
+  name: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 interface MealPrepEntry {
   meal_id: string;
   servings: number;
@@ -94,6 +114,13 @@ export function HomePage() {
   /* ---- Today's meals (non-prep) ---- */
   const [todaysMeals, setTodaysMeals] = useState<MealEntry[]>([]);
   const [stockByProduct, setStockByProduct] = useState<Map<string, number>>(new Map());
+
+  /* ---- Consumed items (food_logs + temp_items) ---- */
+  const [foodLogs, setFoodLogs] = useState<FoodLogEntry[]>([]);
+  const [tempItems, setTempItems] = useState<TempItemEntry[]>([]);
+
+  /* ---- Two-click delete confirmation ---- */
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   /* ---- Target Macros modal ---- */
   const [showTargetModal, setShowTargetModal] = useState(false);
@@ -224,7 +251,22 @@ export function HomePage() {
       .eq('meal_prep', false);
     setTodaysMeals((mealsData ?? []) as MealEntry[]);
 
-    // 8. Stock by product — for stock availability badges on meals
+    // 8. Consumed items — food_logs + temp_items
+    const { data: logData } = await chefbyte()
+      .from('food_logs')
+      .select('log_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+      .eq('user_id', userId)
+      .eq('logical_date', today);
+    setFoodLogs((logData ?? []) as FoodLogEntry[]);
+
+    const { data: tempData } = await chefbyte()
+      .from('temp_items')
+      .select('temp_id, name, calories, protein, carbs, fat')
+      .eq('user_id', userId)
+      .eq('logical_date', today);
+    setTempItems((tempData ?? []) as TempItemEntry[]);
+
+    // 9. Stock by product — for stock availability badges on meals
     const { data: allStockLots } = await chefbyte()
       .from('stock_lots')
       .select('product_id, qty_containers')
@@ -469,6 +511,34 @@ export function HomePage() {
     if (!error) await loadData();
   };
 
+  /* ---------------------------------------------------------------- */
+  /*  Delete handlers (two-click confirm)                              */
+  /* ---------------------------------------------------------------- */
+
+  const handleDelete = (id: string, doDelete: () => Promise<void>) => {
+    if (confirmDeleteId === id) {
+      setConfirmDeleteId(null);
+      doDelete();
+    } else {
+      setConfirmDeleteId(id);
+    }
+  };
+
+  const deleteFoodLog = async (logId: string) => {
+    await chefbyte().from('food_logs').delete().eq('log_id', logId);
+    await loadData();
+  };
+
+  const deleteTempItem = async (tempId: string) => {
+    await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
+    await loadData();
+  };
+
+  const deleteMealEntry = async (mealId: string) => {
+    await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
+    await loadData();
+  };
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -550,6 +620,27 @@ export function HomePage() {
       </div>
     );
   };
+
+  /* Helper: two-click delete button */
+  const DeleteBtn = ({ id, onConfirm, testId }: { id: string; onConfirm: () => Promise<void>; testId: string }) => (
+    <button
+      onClick={() => handleDelete(id, onConfirm)}
+      data-testid={testId}
+      style={{
+        padding: '4px 10px',
+        background: confirmDeleteId === id ? '#d33' : 'transparent',
+        color: confirmDeleteId === id ? '#fff' : '#d33',
+        border: confirmDeleteId === id ? 'none' : '1px solid #d33',
+        borderRadius: '4px',
+        cursor: 'pointer',
+        fontWeight: 600,
+        fontSize: '12px',
+        whiteSpace: 'nowrap',
+      }}
+    >
+      {confirmDeleteId === id ? 'You sure?' : 'Delete'}
+    </button>
+  );
 
   /* Helper: button styles */
   const primaryBtnStyle: React.CSSProperties = {
@@ -745,6 +836,84 @@ export function HomePage() {
       </div>
 
       {/* ============================================================ */}
+      {/*  CONSUMED TODAY                                               */}
+      {/* ============================================================ */}
+      {(foodLogs.length > 0 || tempItems.length > 0) && (
+        <div data-testid="consumed-section" style={{ marginBottom: '24px' }}>
+          <h3>Consumed Today</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            {foodLogs.map((log) => (
+              <div
+                key={log.log_id}
+                data-testid={`consumed-log-${log.log_id}`}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid #e8e8e8',
+                  borderLeft: '4px solid #22c55e',
+                  borderRadius: '6px',
+                  background: '#f0faf4',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                  {log.products?.name ?? 'Unknown'}
+                  <span style={{ fontWeight: 400, color: '#666', fontSize: '13px', marginLeft: '8px' }}>
+                    {Number(log.qty_consumed)} {log.unit}
+                    {Number(log.qty_consumed) !== 1 ? 's' : ''}
+                  </span>
+                </span>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: '#555' }}>
+                    {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
+                    {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
+                  </span>
+                  <DeleteBtn
+                    id={`log-${log.log_id}`}
+                    onConfirm={() => deleteFoodLog(log.log_id)}
+                    testId={`delete-log-${log.log_id}`}
+                  />
+                </div>
+              </div>
+            ))}
+            {tempItems.map((item) => (
+              <div
+                key={item.temp_id}
+                data-testid={`consumed-temp-${item.temp_id}`}
+                style={{
+                  padding: '8px 12px',
+                  border: '1px solid #e8e8e8',
+                  borderLeft: '4px solid #f59e0b',
+                  borderRadius: '6px',
+                  background: '#fffbeb',
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                }}
+              >
+                <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                  {item.name}
+                  <span style={{ fontWeight: 400, color: '#888', fontSize: '12px', marginLeft: '6px' }}>quick-add</span>
+                </span>
+                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                  <span style={{ fontSize: '13px', color: '#555' }}>
+                    {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
+                    {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
+                  </span>
+                  <DeleteBtn
+                    id={`temp-${item.temp_id}`}
+                    onConfirm={() => deleteTempItem(item.temp_id)}
+                    testId={`delete-temp-${item.temp_id}`}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ============================================================ */}
       {/*  TODAY'S MEAL PREP                                            */}
       {/* ============================================================ */}
       <div data-testid="meal-prep-section" style={{ marginBottom: '24px' }}>
@@ -776,60 +945,67 @@ export function HomePage() {
                     {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
                   </span>
                 </div>
-                {confirmPrepId === entry.meal_id ? (
-                  <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
-                    <span style={{ fontSize: '12px', color: '#666' }}>Execute?</span>
+                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                  {confirmPrepId === entry.meal_id ? (
+                    <>
+                      <span style={{ fontSize: '12px', color: '#666' }}>Execute?</span>
+                      <button
+                        onClick={() => executePrepMeal(entry.meal_id)}
+                        data-testid={`prep-confirm-${entry.meal_id}`}
+                        style={{
+                          background: '#22c55e',
+                          color: '#fff',
+                          border: 'none',
+                          padding: '4px 10px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: '12px',
+                        }}
+                      >
+                        Yes
+                      </button>
+                      <button
+                        onClick={() => setConfirmPrepId(null)}
+                        data-testid={`prep-cancel-${entry.meal_id}`}
+                        style={{
+                          background: '#e5e7eb',
+                          color: '#333',
+                          border: 'none',
+                          padding: '4px 10px',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          fontSize: '12px',
+                        }}
+                      >
+                        No
+                      </button>
+                    </>
+                  ) : (
                     <button
-                      onClick={() => executePrepMeal(entry.meal_id)}
-                      data-testid={`prep-confirm-${entry.meal_id}`}
+                      onClick={() => setConfirmPrepId(entry.meal_id)}
+                      data-testid={`prep-execute-${entry.meal_id}`}
                       style={{
-                        background: '#22c55e',
+                        background: '#1e66f5',
                         color: '#fff',
                         border: 'none',
-                        padding: '4px 10px',
+                        padding: '5px 12px',
                         borderRadius: '4px',
                         cursor: 'pointer',
                         fontWeight: 600,
                         fontSize: '12px',
                       }}
                     >
-                      Yes
+                      Execute
                     </button>
-                    <button
-                      onClick={() => setConfirmPrepId(null)}
-                      data-testid={`prep-cancel-${entry.meal_id}`}
-                      style={{
-                        background: '#e5e7eb',
-                        color: '#333',
-                        border: 'none',
-                        padding: '4px 10px',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '12px',
-                      }}
-                    >
-                      No
-                    </button>
-                  </div>
-                ) : (
-                  <button
-                    onClick={() => setConfirmPrepId(entry.meal_id)}
-                    data-testid={`prep-execute-${entry.meal_id}`}
-                    style={{
-                      background: '#1e66f5',
-                      color: '#fff',
-                      border: 'none',
-                      padding: '5px 12px',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontWeight: 600,
-                      fontSize: '12px',
-                    }}
-                  >
-                    Execute
-                  </button>
-                )}
+                  )}
+                  <DeleteBtn
+                    id={`prep-${entry.meal_id}`}
+                    onConfirm={() => deleteMealEntry(entry.meal_id)}
+                    testId={`delete-prep-${entry.meal_id}`}
+                  />
+                </div>
               </div>
             ))}
           </div>
@@ -972,6 +1148,11 @@ export function HomePage() {
                           Mark Done
                         </button>
                       )}
+                      <DeleteBtn
+                        id={`meal-${entry.meal_id}`}
+                        onConfirm={() => deleteMealEntry(entry.meal_id)}
+                        testId={`delete-meal-${entry.meal_id}`}
+                      />
                     </div>
                   </div>
                   {mealMacros && (

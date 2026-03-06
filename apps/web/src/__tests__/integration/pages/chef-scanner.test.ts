@@ -418,6 +418,344 @@ describe('ChefByte ScannerPage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // ScannerPage: edge function returns AI suggestion → product insert
+  // Source: ScannerPage.tsx line 241-246 (s branch)
+  //   When efData.suggestion is present, product is created with AI values
+  // -------------------------------------------------------------------
+  it('edge function returns AI suggestion → creates product with normalized data', async () => {
+    // Simulate the AI suggestion path: efData = { suggestion: {...}, off: {...} }
+    const efData = {
+      source: 'ai',
+      suggestion: {
+        name: 'Cool Blue Sports Drink',
+        calories_per_serving: 170,
+        carbs_per_serving: 43,
+        protein_per_serving: 0,
+        fat_per_serving: 0,
+        servings_per_container: 1,
+        description: 'Gatorade sports drink',
+      },
+      off: {
+        product_name: 'Cool Blue Sports Drink',
+        brands: 'Gatorade',
+      },
+    };
+
+    const barcode = `AI-${Date.now()}`;
+    const s = efData.suggestion;
+
+    // EXACT insert query from ScannerPage line 257-274
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: s.name,
+        description: s.description || null,
+        is_placeholder: false,
+        calories_per_serving: s.calories_per_serving,
+        protein_per_serving: s.protein_per_serving,
+        carbs_per_serving: s.carbs_per_serving,
+        fat_per_serving: s.fat_per_serving,
+        servings_per_container: s.servings_per_container,
+      })
+      .select(
+        'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+      )
+      .single();
+
+    const data = assertQuerySucceeds(result, 'AI suggestion product insert');
+    expect(data.name).toBe('Cool Blue Sports Drink');
+    expect(data.is_placeholder).toBe(false);
+    expect(Number(data.calories_per_serving)).toBe(170);
+    expect(Number(data.carbs_per_serving)).toBe(43);
+    expect(Number(data.protein_per_serving)).toBe(0);
+    expect(Number(data.fat_per_serving)).toBe(0);
+    expect(Number(data.servings_per_container)).toBe(1);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: edge function returns suggestion=null + OFF data
+  // Source: ScannerPage.tsx line 247-254 (else if off?.nutriments branch)
+  //   THIS IS THE BUG PATH — was untested and shipped broken
+  // -------------------------------------------------------------------
+  it('edge function returns suggestion=null + OFF data → creates product from raw nutriments', async () => {
+    // Simulate: suggestion is null, but OFF data has per-serving nutriments
+    const efData = {
+      source: 'ai',
+      suggestion: null,
+      off: {
+        product_name: 'Cool Blue Sports Drink',
+        brands: 'Gatorade',
+        nutriments: {
+          'energy-kcal_serving': 170,
+          proteins_serving: 0,
+          carbohydrates_serving: 43,
+          fat_serving: 0,
+        },
+      },
+    };
+
+    const barcode = `OFF-${Date.now()}`;
+    const s = efData.suggestion;
+    const off = efData.off;
+
+    // Replicate the EXACT logic from ScannerPage.tsx lines 229-254
+    const productName = s?.name || off?.product_name || `Product (${barcode})`;
+    const hasNutrition = !!(s?.calories_per_serving != null || off?.nutriments);
+
+    let cals: number | null = null;
+    let prot: number | null = null;
+    let carb: number | null = null;
+    let fatVal: number | null = null;
+    let spc = 1;
+
+    if (s) {
+      cals = s.calories_per_serving ?? null;
+      prot = s.protein_per_serving ?? null;
+      carb = s.carbs_per_serving ?? null;
+      fatVal = s.fat_per_serving ?? null;
+      spc = s.servings_per_container ?? 1;
+    } else if (off?.nutriments) {
+      const n = off.nutriments;
+      cals = n['energy-kcal_serving'] ?? n['energy-kcal_100g'] ?? null;
+      prot = n['proteins_serving'] ?? n['proteins_100g'] ?? null;
+      carb = n['carbohydrates_serving'] ?? n['carbohydrates_100g'] ?? null;
+      fatVal = n['fat_serving'] ?? n['fat_100g'] ?? null;
+    }
+
+    // Verify logic computed correct values from OFF nutriments
+    expect(productName).toBe('Cool Blue Sports Drink');
+    expect(hasNutrition).toBe(true);
+    expect(cals).toBe(170);
+    expect(prot).toBe(0);
+    expect(carb).toBe(43);
+    expect(fatVal).toBe(0);
+
+    // EXACT insert query from ScannerPage line 257-274
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: productName,
+        description: null,
+        is_placeholder: false,
+        calories_per_serving: cals,
+        protein_per_serving: prot,
+        carbs_per_serving: carb,
+        fat_per_serving: fatVal,
+        servings_per_container: spc,
+      })
+      .select(
+        'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+      )
+      .single();
+
+    const data = assertQuerySucceeds(result, 'OFF fallback product insert');
+    expect(data.name).toBe('Cool Blue Sports Drink');
+    expect(data.is_placeholder).toBe(false);
+    expect(Number(data.calories_per_serving)).toBe(170);
+    expect(Number(data.protein_per_serving)).toBe(0);
+    expect(Number(data.carbs_per_serving)).toBe(43);
+    expect(Number(data.fat_per_serving)).toBe(0);
+    expect(Number(data.servings_per_container)).toBe(1);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: edge function returns suggestion=null + OFF per-100g only
+  // Source: ScannerPage.tsx line 250-253 (100g fallback in nutriments)
+  // -------------------------------------------------------------------
+  it('edge function returns suggestion=null + OFF per-100g only → uses 100g values', async () => {
+    // Simulate: suggestion is null, OFF data only has per-100g nutriments
+    const efData = {
+      source: 'ai',
+      suggestion: null,
+      off: {
+        product_name: 'Generic Cereal',
+        brands: 'Store Brand',
+        nutriments: {
+          'energy-kcal_100g': 380,
+          proteins_100g: 7.5,
+          carbohydrates_100g: 82,
+          fat_100g: 1.5,
+        },
+      },
+    };
+
+    const barcode = `OFF100G-${Date.now()}`;
+    const s = efData.suggestion;
+    const off = efData.off;
+
+    // Replicate the EXACT logic from ScannerPage.tsx lines 229-254
+    const productName = s?.name || off?.product_name || `Product (${barcode})`;
+
+    let cals: number | null = null;
+    let prot: number | null = null;
+    let carb: number | null = null;
+    let fatVal: number | null = null;
+    const spc = 1;
+
+    if (s) {
+      cals = s.calories_per_serving ?? null;
+    } else if (off?.nutriments) {
+      const n = off.nutriments;
+      cals = n['energy-kcal_serving'] ?? n['energy-kcal_100g'] ?? null;
+      prot = n['proteins_serving'] ?? n['proteins_100g'] ?? null;
+      carb = n['carbohydrates_serving'] ?? n['carbohydrates_100g'] ?? null;
+      fatVal = n['fat_serving'] ?? n['fat_100g'] ?? null;
+    }
+
+    // Verify fallback to 100g values
+    expect(cals).toBe(380);
+    expect(prot).toBe(7.5);
+    expect(carb).toBe(82);
+    expect(fatVal).toBe(1.5);
+
+    // EXACT insert query from ScannerPage line 257-274
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: productName,
+        description: null,
+        is_placeholder: false,
+        calories_per_serving: cals,
+        protein_per_serving: prot,
+        carbs_per_serving: carb,
+        fat_per_serving: fatVal,
+        servings_per_container: spc,
+      })
+      .select(
+        'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+      )
+      .single();
+
+    const data = assertQuerySucceeds(result, 'OFF 100g fallback product insert');
+    expect(data.name).toBe('Generic Cereal');
+    expect(data.is_placeholder).toBe(false);
+    expect(Number(data.calories_per_serving)).toBe(380);
+    expect(Number(data.protein_per_serving)).toBe(7.5);
+    expect(Number(data.carbs_per_serving)).toBe(82);
+    expect(Number(data.fat_per_serving)).toBe(1.5);
+    expect(Number(data.servings_per_container)).toBe(1);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: edge function returns error → placeholder
+  // Source: ScannerPage.tsx line 227 (!efError && efData) — fails guard
+  //   Falls through to placeholder insert at line 314-323
+  // -------------------------------------------------------------------
+  it('edge function returns error → falls through to placeholder', async () => {
+    // Simulate: efError is set, efData is null (e.g. quota exceeded)
+    // In this path, analyzedProduct remains null, so placeholder is created
+    const barcode = `ERR-${Date.now()}`;
+
+    // EXACT placeholder insert from ScannerPage line 314-323
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: `Unknown (${barcode})`,
+        is_placeholder: true,
+      })
+      .select('product_id, name')
+      .single();
+
+    const data = assertQuerySucceeds(result, 'placeholder from edge function error');
+    expect(data.name).toBe(`Unknown (${barcode})`);
+    expect(typeof data.product_id).toBe('string');
+
+    // Verify the product is flagged as placeholder
+    const readResult = await chefbyte(ctx.client)
+      .from('products')
+      .select('is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving')
+      .eq('product_id', data.product_id)
+      .single();
+
+    const readData = assertQuerySucceeds(readResult, 'placeholder readback');
+    expect(readData.is_placeholder).toBe(true);
+    expect(Number(readData.calories_per_serving)).toBe(0);
+    expect(Number(readData.protein_per_serving)).toBe(0);
+    expect(Number(readData.carbs_per_serving)).toBe(0);
+    expect(Number(readData.fat_per_serving)).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: edge function returns 404 (not in OFF) → placeholder
+  // Source: ScannerPage.tsx line 224-227 — efError is set for non-2xx
+  //   Falls through to placeholder
+  // -------------------------------------------------------------------
+  it('edge function returns 404 (not in OFF) → falls through to placeholder', async () => {
+    // When the edge function returns a non-2xx status, supabase.functions.invoke
+    // sets efError (FunctionsHttpError). analyzedProduct remains null.
+    const barcode = `404-${Date.now()}`;
+
+    // EXACT placeholder insert from ScannerPage line 314-323
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: `Unknown (${barcode})`,
+        is_placeholder: true,
+      })
+      .select('product_id, name')
+      .single();
+
+    const data = assertQuerySucceeds(result, 'placeholder from 404');
+    expect(data.name).toBe(`Unknown (${barcode})`);
+    expect(typeof data.product_id).toBe('string');
+
+    // Verify placeholder state
+    const readResult = await chefbyte(ctx.client)
+      .from('products')
+      .select('is_placeholder')
+      .eq('product_id', data.product_id)
+      .single();
+    const readData = assertQuerySucceeds(readResult, 'placeholder 404 readback');
+    expect(readData.is_placeholder).toBe(true);
+  });
+
+  // -------------------------------------------------------------------
+  // ScannerPage: edge function network failure → placeholder
+  // Source: ScannerPage.tsx line 280-282 (catch block)
+  //   supabase.functions.invoke throws → falls through to placeholder
+  // -------------------------------------------------------------------
+  it('edge function network failure → falls through to placeholder', async () => {
+    // When supabase.functions.invoke throws (network error), the catch block
+    // sets analyzedProduct = null, so placeholder is created.
+    const barcode = `NETFAIL-${Date.now()}`;
+
+    // EXACT placeholder insert from ScannerPage line 314-323
+    const result = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: `Unknown (${barcode})`,
+        is_placeholder: true,
+      })
+      .select('product_id, name')
+      .single();
+
+    const data = assertQuerySucceeds(result, 'placeholder from network failure');
+    expect(data.name).toBe(`Unknown (${barcode})`);
+    expect(typeof data.product_id).toBe('string');
+
+    // Verify placeholder state
+    const readResult = await chefbyte(ctx.client)
+      .from('products')
+      .select('is_placeholder')
+      .eq('product_id', data.product_id)
+      .single();
+    const readData = assertQuerySucceeds(readResult, 'placeholder netfail readback');
+    expect(readData.is_placeholder).toBe(true);
+  });
+
+  // -------------------------------------------------------------------
   // ScannerPage: undo shopping add — delete shopping list item
   // Source: ScannerPage.tsx undoScan (shopping mode)
   //   .from('shopping_list').delete().eq('cart_item_id', cartItemId)

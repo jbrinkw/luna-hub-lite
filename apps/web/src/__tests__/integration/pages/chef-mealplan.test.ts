@@ -484,6 +484,292 @@ describe('ChefByte MealPlanPage queries', () => {
   });
 
   /* ---------------------------------------------------------------- */
+  /*  food_logs query for selected day                                 */
+  /*  Exact from MealPlanPage.tsx loadMeals() — consumed items         */
+  /*  line 167-172                                                     */
+  /* ---------------------------------------------------------------- */
+  it('food_logs query for selected day', async () => {
+    const today = todayDate();
+    const monday = getMonday(new Date());
+    const startDate = toDateStr(monday);
+    const endDate = toDateStr(new Date(monday.getTime() + 6 * 86400000));
+
+    // Generate a food_log by consuming a product
+    const chickenId = productMap['Chicken Breast'];
+    await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: chickenId,
+      p_qty: 1,
+      p_unit: 'container',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+
+    // Exact query from MealPlanPage.tsx loadMeals()
+    const result = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id, logical_date, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+      .eq('user_id', ctx.userId)
+      .gte('logical_date', startDate)
+      .lte('logical_date', endDate);
+
+    const data = assertQuerySucceeds(result, 'food_logs for week');
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBeGreaterThanOrEqual(1);
+
+    const entry = data[0] as any;
+    expect(typeof entry.log_id).toBe('string');
+    expect(entry.logical_date).toBe(today);
+    expect(Number(entry.qty_consumed)).toBeGreaterThan(0);
+    expect(entry.unit).toBe('container');
+    expect(Number(entry.calories)).toBeGreaterThanOrEqual(0);
+    expect(Number(entry.protein)).toBeGreaterThanOrEqual(0);
+    expect(Number(entry.carbs)).toBeGreaterThanOrEqual(0);
+    expect(Number(entry.fat)).toBeGreaterThanOrEqual(0);
+    expect(entry.products).not.toBeNull();
+    expect(entry.products.name).toBe('Chicken Breast');
+
+    // Cleanup
+    await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  temp_items query for selected day                                */
+  /*  Exact from MealPlanPage.tsx loadMeals() — temp items             */
+  /*  line 175-181                                                     */
+  /* ---------------------------------------------------------------- */
+  it('temp_items query for selected day', async () => {
+    const today = todayDate();
+    const monday = getMonday(new Date());
+    const startDate = toDateStr(monday);
+    const endDate = toDateStr(new Date(monday.getTime() + 6 * 86400000));
+
+    // Insert a temp item
+    const insertResult = await chefbyte(ctx.client).from('temp_items').insert({
+      user_id: ctx.userId,
+      name: 'MealPlan Temp Item',
+      logical_date: today,
+      calories: 300,
+      protein: 20,
+      carbs: 40,
+      fat: 10,
+    });
+    expect(insertResult.error).toBeNull();
+
+    // Exact query from MealPlanPage.tsx loadMeals()
+    const result = await chefbyte(ctx.client)
+      .from('temp_items')
+      .select('temp_id, logical_date, name, calories, protein, carbs, fat')
+      .eq('user_id', ctx.userId)
+      .gte('logical_date', startDate)
+      .lte('logical_date', endDate);
+
+    const data = assertQuerySucceeds(result, 'temp_items for week');
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBe(1);
+
+    const entry = data[0] as any;
+    expect(typeof entry.temp_id).toBe('string');
+    expect(entry.logical_date).toBe(today);
+    expect(entry.name).toBe('MealPlan Temp Item');
+    expect(Number(entry.calories)).toBe(300);
+    expect(Number(entry.protein)).toBe(20);
+    expect(Number(entry.carbs)).toBe(40);
+    expect(Number(entry.fat)).toBe(10);
+
+    // Cleanup
+    await chefbyte(ctx.client).from('temp_items').delete().eq('temp_id', entry.temp_id);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  Delete food_log from meal plan page (two-click delete)           */
+  /*  Exact from MealPlanPage.tsx deleteFoodLog()                      */
+  /*  line 370: .from('food_logs').delete().eq('log_id', logId)        */
+  /* ---------------------------------------------------------------- */
+  it('delete food_log from meal plan page', async () => {
+    const today = todayDate();
+    const chickenId = productMap['Chicken Breast'];
+
+    // Generate a food_log
+    await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: chickenId,
+      p_qty: 1,
+      p_unit: 'container',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+
+    // Get log_id
+    const { data: logs } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('user_id', ctx.userId)
+      .eq('logical_date', today);
+    expect(logs).not.toBeNull();
+    expect(logs!.length).toBeGreaterThanOrEqual(1);
+    const logId = (logs![0] as any).log_id;
+
+    // Exact delete from MealPlanPage.tsx deleteFoodLog()
+    const delResult = await chefbyte(ctx.client).from('food_logs').delete().eq('log_id', logId);
+    expect(delResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: verify } = await chefbyte(ctx.client).from('food_logs').select('log_id').eq('log_id', logId);
+    expect(verify).toHaveLength(0);
+
+    // Cleanup remaining
+    await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  Delete temp_item from meal plan page (two-click delete)          */
+  /*  Exact from MealPlanPage.tsx deleteTempItem()                     */
+  /*  line 375: .from('temp_items').delete().eq('temp_id', tempId)     */
+  /* ---------------------------------------------------------------- */
+  it('delete temp_item from meal plan page', async () => {
+    const today = todayDate();
+
+    // Insert a temp item
+    const { data: inserted } = await chefbyte(ctx.client)
+      .from('temp_items')
+      .insert({
+        user_id: ctx.userId,
+        name: 'Temp to Delete on MealPlan',
+        logical_date: today,
+        calories: 150,
+        protein: 8,
+        carbs: 18,
+        fat: 5,
+      })
+      .select('temp_id')
+      .single();
+    expect(inserted).not.toBeNull();
+    const tempId = (inserted as any).temp_id;
+
+    // Exact delete from MealPlanPage.tsx deleteTempItem()
+    const delResult = await chefbyte(ctx.client).from('temp_items').delete().eq('temp_id', tempId);
+    expect(delResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: verify } = await chefbyte(ctx.client).from('temp_items').select('temp_id').eq('temp_id', tempId);
+    expect(verify).toHaveLength(0);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  Day total macros aggregation                                     */
+  /*  Exact from MealPlanPage.tsx — dayTotals computation              */
+  /*  line 503-515: selectedDayMeals.reduce(...)                       */
+  /* ---------------------------------------------------------------- */
+  it('day total macros aggregation', async () => {
+    const today = todayDate();
+
+    // Create two meal entries — one recipe, one product
+    const { data: recipeMeal } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: recipeId,
+        product_id: null,
+        logical_date: today,
+        servings: 2,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(recipeMeal).not.toBeNull();
+
+    const { data: productMeal } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: null,
+        product_id: productMap['Protein Powder'],
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(productMeal).not.toBeNull();
+
+    const monday = getMonday(new Date());
+    const startDate = toDateStr(monday);
+    const endDate = toDateStr(new Date(monday.getTime() + 6 * 86400000));
+
+    // Exact query from MealPlanPage.tsx loadMeals() — with full macro joins
+    const result = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .select(
+        '*, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving)',
+      )
+      .eq('user_id', ctx.userId)
+      .gte('logical_date', startDate)
+      .lte('logical_date', endDate)
+      .order('created_at');
+
+    const meals = assertQuerySucceeds(result, 'meals for day totals') as any[];
+    const todayMeals = meals.filter((m: any) => m.logical_date === today);
+    expect(todayMeals.length).toBe(2);
+
+    // Replicate dayTotals computation from MealPlanPage.tsx
+    const dayTotals = todayMeals.reduce(
+      (acc: any, meal: any) => {
+        // Compute macros per entry
+        if (meal.products) {
+          const s = Number(meal.servings);
+          acc.calories += Math.round(Number(meal.products.calories_per_serving) * s);
+          acc.protein += Math.round(Number(meal.products.protein_per_serving) * s);
+          acc.carbs += Math.round(Number(meal.products.carbs_per_serving) * s);
+          acc.fat += Math.round(Number(meal.products.fat_per_serving) * s);
+        } else if (meal.recipes?.recipe_ingredients?.length > 0) {
+          const baseServings = Number(meal.recipes.base_servings) || 1;
+          let totalCal = 0,
+            totalP = 0,
+            totalC = 0,
+            totalF = 0;
+          for (const ri of meal.recipes.recipe_ingredients) {
+            if (!ri.products) continue;
+            const qty = Number(ri.quantity);
+            const spc = Number(ri.products.servings_per_container) || 1;
+            const servingsUsed = ri.unit === 'container' ? qty * spc : qty;
+            totalCal += Number(ri.products.calories_per_serving) * servingsUsed;
+            totalP += Number(ri.products.protein_per_serving) * servingsUsed;
+            totalC += Number(ri.products.carbs_per_serving) * servingsUsed;
+            totalF += Number(ri.products.fat_per_serving) * servingsUsed;
+          }
+          const s = Number(meal.servings);
+          acc.calories += Math.round((totalCal / baseServings) * s);
+          acc.protein += Math.round((totalP / baseServings) * s);
+          acc.carbs += Math.round((totalC / baseServings) * s);
+          acc.fat += Math.round((totalF / baseServings) * s);
+        }
+        return acc;
+      },
+      { calories: 0, protein: 0, carbs: 0, fat: 0 },
+    );
+
+    // Verify aggregation produces non-zero values
+    expect(dayTotals.calories).toBeGreaterThan(0);
+    expect(dayTotals.protein).toBeGreaterThan(0);
+    expect(dayTotals.carbs).toBeGreaterThanOrEqual(0);
+    expect(dayTotals.fat).toBeGreaterThan(0);
+
+    // Product meal (Protein Powder, 1 serving): 120 cal, 24 protein, 3 carbs, 1.5 fat
+    // Recipe meal (Chicken & Rice, 2 servings): computed from ingredients
+    // Total should include both
+    expect(dayTotals.calories).toBeGreaterThanOrEqual(120); // At least the product meal
+
+    // Cleanup
+    await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .delete()
+      .eq('meal_id', (recipeMeal as any).meal_id);
+    await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .delete()
+      .eq('meal_id', (productMeal as any).meal_id);
+  });
+
+  /* ---------------------------------------------------------------- */
   /*  Search recipes query — exact from MealPlanPage.tsx searchItems() */
   /*  line 211-215                                                     */
   /* ---------------------------------------------------------------- */

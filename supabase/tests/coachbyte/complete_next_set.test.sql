@@ -1,6 +1,6 @@
 BEGIN;
 
-SELECT plan(18);
+SELECT plan(20);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -359,6 +359,33 @@ SELECT is(
      )),
     75,
     'completing order 1 returns rest_seconds of order 2 (75s)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Zero actual_load stored correctly (bodyweight exercise)
+-- Complete order 2 of plan 3 with actual_load=0.
+-- CHECK constraint allows actual_load >= 0, verify stored as 0.
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  $$
+    SELECT rest_seconds
+    FROM coachbyte.complete_next_set(
+        '00000000-0000-0000-0000-000000000003',
+        8,
+        0.0
+    )
+  $$,
+  'completing set with actual_load=0 succeeds (bodyweight exercise)'
+);
+
+SELECT is(
+    (SELECT actual_load
+     FROM coachbyte.completed_sets
+     WHERE plan_id = '00000000-0000-0000-0000-000000000003'
+       AND planned_set_id = '00000000-0000-0000-0000-000000000032'),
+    0.000::NUMERIC,
+    'actual_load=0 stored correctly (not NULL) for bodyweight exercise'
 );
 
 -- ─────────────────────────────────────────────────────────────

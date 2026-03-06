@@ -44,6 +44,28 @@ interface MealEntry {
   } | null;
 }
 
+interface FoodLogEntry {
+  log_id: string;
+  logical_date: string;
+  qty_consumed: number;
+  unit: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+  products: { name: string } | null;
+}
+
+interface TempItemEntry {
+  temp_id: string;
+  logical_date: string;
+  name: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+
 interface SearchResult {
   id: string;
   name: string;
@@ -108,6 +130,13 @@ export function MealPlanPage() {
   const [addMealType, setAddMealType] = useState<string | null>(null);
   const [addDate, setAddDate] = useState<string>('');
 
+  /* ---- Consumed items (food_logs + temp_items) ---- */
+  const [foodLogs, setFoodLogs] = useState<FoodLogEntry[]>([]);
+  const [tempItems, setTempItems] = useState<TempItemEntry[]>([]);
+
+  /* ---- Two-click delete confirmation ---- */
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+
   const [error, setError] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------- */
@@ -133,6 +162,24 @@ export function MealPlanPage() {
       .order('created_at');
 
     setMeals((data ?? []) as MealEntry[]);
+
+    // Also fetch consumed items for the week
+    const { data: logData } = await chefbyte()
+      .from('food_logs')
+      .select('log_id, logical_date, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+      .eq('user_id', userId)
+      .gte('logical_date', startDate)
+      .lte('logical_date', endDate);
+    setFoodLogs((logData ?? []) as FoodLogEntry[]);
+
+    const { data: tempData } = await chefbyte()
+      .from('temp_items')
+      .select('temp_id, logical_date, name, calories, protein, carbs, fat')
+      .eq('user_id', userId)
+      .gte('logical_date', startDate)
+      .lte('logical_date', endDate);
+    setTempItems((tempData ?? []) as TempItemEntry[]);
+
     setLoading(false);
   }, [userId, weekStart]);
 
@@ -204,6 +251,16 @@ export function MealPlanPage() {
     if (!selectedDay) return [];
     return mealsByDay.get(selectedDay) ?? [];
   }, [selectedDay, mealsByDay]);
+
+  const selectedDayLogs = useMemo(() => {
+    if (!selectedDay) return [];
+    return foodLogs.filter((l) => l.logical_date === selectedDay);
+  }, [selectedDay, foodLogs]);
+
+  const selectedDayTemps = useMemo(() => {
+    if (!selectedDay) return [];
+    return tempItems.filter((t) => t.logical_date === selectedDay);
+  }, [selectedDay, tempItems]);
 
   /* ---------------------------------------------------------------- */
   /*  Entry name helper                                                */
@@ -293,6 +350,29 @@ export function MealPlanPage() {
       setError(updateErr.message);
       return;
     }
+    await loadMeals();
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Delete consumed items (two-click confirm)                        */
+  /* ---------------------------------------------------------------- */
+
+  const handleDelete = (id: string, doDelete: () => Promise<void>) => {
+    if (confirmDeleteId === id) {
+      setConfirmDeleteId(null);
+      doDelete();
+    } else {
+      setConfirmDeleteId(id);
+    }
+  };
+
+  const deleteFoodLog = async (logId: string) => {
+    await chefbyte().from('food_logs').delete().eq('log_id', logId);
+    await loadMeals();
+  };
+
+  const deleteTempItem = async (tempId: string) => {
+    await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
     await loadMeals();
   };
 
@@ -827,21 +907,21 @@ export function MealPlanPage() {
                               </button>
                             )}
                             <button
-                              onClick={() => deleteMeal(meal.meal_id)}
+                              onClick={() => handleDelete(`meal-${meal.meal_id}`, () => deleteMeal(meal.meal_id))}
                               data-testid={`delete-meal-${meal.meal_id}`}
                               style={{
                                 padding: '5px 12px',
-                                background: 'transparent',
-                                color: '#d33',
-                                border: 'none',
+                                background: confirmDeleteId === `meal-${meal.meal_id}` ? '#d33' : 'transparent',
+                                color: confirmDeleteId === `meal-${meal.meal_id}` ? '#fff' : '#d33',
+                                border: confirmDeleteId === `meal-${meal.meal_id}` ? 'none' : '1px solid #d33',
+                                borderRadius: '4px',
                                 cursor: 'pointer',
                                 fontWeight: 600,
                                 fontSize: '12px',
                                 whiteSpace: 'nowrap',
-                                textAlign: 'right',
                               }}
                             >
-                              Delete
+                              {confirmDeleteId === `meal-${meal.meal_id}` ? 'You sure?' : 'Delete'}
                             </button>
                           </div>
                         </div>
@@ -866,6 +946,114 @@ export function MealPlanPage() {
                     <span style={{ fontSize: '14px', color: '#444', fontWeight: 600 }}>
                       {dayTotals.calories} cal | {dayTotals.protein}g P | {dayTotals.carbs}g C | {dayTotals.fat}g F
                     </span>
+                  </div>
+                </div>
+              )}
+
+              {/* Consumed items (food_logs + temp_items) */}
+              {(selectedDayLogs.length > 0 || selectedDayTemps.length > 0) && (
+                <div data-testid="consumed-section" style={{ marginTop: '20px' }}>
+                  <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#555' }}>Consumed</h4>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    {selectedDayLogs.map((log) => {
+                      const delId = `log-${log.log_id}`;
+                      return (
+                        <div
+                          key={log.log_id}
+                          data-testid={`consumed-log-${log.log_id}`}
+                          style={{
+                            padding: '8px 12px',
+                            border: '1px solid #e8e8e8',
+                            borderLeft: '4px solid #22c55e',
+                            borderRadius: '6px',
+                            background: '#f0faf4',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                            {log.products?.name ?? 'Unknown'}
+                            <span style={{ fontWeight: 400, color: '#666', fontSize: '13px', marginLeft: '8px' }}>
+                              {Number(log.qty_consumed)} {log.unit}
+                              {Number(log.qty_consumed) !== 1 ? 's' : ''}
+                            </span>
+                          </span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{ fontSize: '13px', color: '#555' }}>
+                              {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
+                              {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
+                            </span>
+                            <button
+                              onClick={() => handleDelete(delId, () => deleteFoodLog(log.log_id))}
+                              data-testid={`delete-log-${log.log_id}`}
+                              style={{
+                                padding: '4px 10px',
+                                background: confirmDeleteId === delId ? '#d33' : 'transparent',
+                                color: confirmDeleteId === delId ? '#fff' : '#d33',
+                                border: confirmDeleteId === delId ? 'none' : '1px solid #d33',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                fontSize: '12px',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {confirmDeleteId === delId ? 'You sure?' : 'Delete'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {selectedDayTemps.map((item) => {
+                      const delId = `temp-${item.temp_id}`;
+                      return (
+                        <div
+                          key={item.temp_id}
+                          data-testid={`consumed-temp-${item.temp_id}`}
+                          style={{
+                            padding: '8px 12px',
+                            border: '1px solid #e8e8e8',
+                            borderLeft: '4px solid #f59e0b',
+                            borderRadius: '6px',
+                            background: '#fffbeb',
+                            display: 'flex',
+                            justifyContent: 'space-between',
+                            alignItems: 'center',
+                          }}
+                        >
+                          <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                            {item.name}
+                            <span style={{ fontWeight: 400, color: '#888', fontSize: '12px', marginLeft: '6px' }}>
+                              quick-add
+                            </span>
+                          </span>
+                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                            <span style={{ fontSize: '13px', color: '#555' }}>
+                              {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
+                              {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
+                            </span>
+                            <button
+                              onClick={() => handleDelete(delId, () => deleteTempItem(item.temp_id))}
+                              data-testid={`delete-temp-${item.temp_id}`}
+                              style={{
+                                padding: '4px 10px',
+                                background: confirmDeleteId === delId ? '#d33' : 'transparent',
+                                color: confirmDeleteId === delId ? '#fff' : '#d33',
+                                border: confirmDeleteId === delId ? 'none' : '1px solid #d33',
+                                borderRadius: '4px',
+                                cursor: 'pointer',
+                                fontWeight: 600,
+                                fontSize: '12px',
+                                whiteSpace: 'nowrap',
+                              }}
+                            >
+                              {confirmDeleteId === delId ? 'You sure?' : 'Delete'}
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
               )}

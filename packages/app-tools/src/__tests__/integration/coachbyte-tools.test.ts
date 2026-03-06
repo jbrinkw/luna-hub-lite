@@ -12,6 +12,10 @@ import { getTimer } from '../../coachbyte/get-timer';
 import { getPrs } from '../../coachbyte/get-prs';
 import { updatePlan } from '../../coachbyte/update-plan';
 import { updateSummary } from '../../coachbyte/update-summary';
+import { pauseTimer } from '../../coachbyte/pause-timer';
+import { resumeTimer } from '../../coachbyte/resume-timer';
+import { resetTimer } from '../../coachbyte/reset-timer';
+import { getExercises } from '../../coachbyte/get-exercises';
 
 // ---------------------------------------------------------------------------
 // CoachByte Tool Integration Tests
@@ -679,5 +683,180 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(data2.timer_id).toBe(timerId);
     expect(data2.duration_seconds).toBe(90);
     expect(data2.state).toBe('running');
+  });
+
+  // -------------------------------------------------------------------------
+  // 12. pauseTimer — pause a running rest timer
+  // -------------------------------------------------------------------------
+
+  it('pauseTimer pauses a running timer and returns remaining seconds', async () => {
+    // Start a fresh timer with a large duration
+    await setTimer.handler({ duration_seconds: 300 }, ctx);
+
+    const result = await pauseTimer.handler({}, ctx);
+    const data = parseToolResult(result);
+
+    expect(data.state).toBe('paused');
+    expect(data.timer_id).toBeDefined();
+    expect(data.duration_seconds).toBe(300);
+    expect(data.elapsed_seconds).toBeDefined();
+    expect(typeof data.elapsed_seconds).toBe('number');
+    expect(data.remaining_seconds).toBeGreaterThan(0);
+    expect(data.remaining_seconds).toBeLessThanOrEqual(300);
+    expect(data.message).toContain('paused');
+  });
+
+  it('pauseTimer errors when no timer exists', async () => {
+    const freshUser = await createTestUser('coachbyte-pause-no-timer');
+    const freshCtx = createToolContext(freshUser.userId);
+
+    try {
+      const result = await pauseTimer.handler({}, freshCtx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('No active timer');
+    } finally {
+      await freshUser.cleanup();
+    }
+  });
+
+  it('pauseTimer errors when timer is already paused', async () => {
+    // Timer was paused in a previous test
+    const result = await pauseTimer.handler({}, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Cannot pause');
+    expect(result.content[0].text).toContain('paused');
+  });
+
+  // -------------------------------------------------------------------------
+  // 13. resumeTimer — resume a paused rest timer
+  // -------------------------------------------------------------------------
+
+  it('resumeTimer resumes a paused timer and returns running state', async () => {
+    // Timer is currently paused from previous tests
+    const result = await resumeTimer.handler({}, ctx);
+    const data = parseToolResult(result);
+
+    expect(data.state).toBe('running');
+    expect(data.timer_id).toBeDefined();
+    expect(data.duration_seconds).toBe(300);
+    expect(data.remaining_seconds).toBeGreaterThan(0);
+    expect(data.end_time).toBeDefined();
+    expect(data.message).toContain('resumed');
+  });
+
+  it('resumeTimer errors when no timer exists', async () => {
+    const freshUser = await createTestUser('coachbyte-resume-no-timer');
+    const freshCtx = createToolContext(freshUser.userId);
+
+    try {
+      const result = await resumeTimer.handler({}, freshCtx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('No active timer');
+    } finally {
+      await freshUser.cleanup();
+    }
+  });
+
+  it('resumeTimer errors when timer is already running', async () => {
+    // Timer was resumed in a previous test — it's running now
+    const result = await resumeTimer.handler({}, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Cannot resume');
+    expect(result.content[0].text).toContain('running');
+  });
+
+  // -------------------------------------------------------------------------
+  // 14. resetTimer — delete the current timer
+  // -------------------------------------------------------------------------
+
+  it('resetTimer deletes the running timer', async () => {
+    // Timer is currently running from previous tests
+    const result = await resetTimer.handler({}, ctx);
+    const data = parseToolResult(result);
+
+    expect(data.message).toBe('Timer reset');
+    expect(data.state).toBe('idle');
+
+    // Verify timer is gone
+    const timerResult = await getTimer.handler({}, ctx);
+    const timerData = parseToolResult(timerResult);
+    expect(timerData.state).toBe('idle');
+    expect(timerData.remaining_seconds).toBe(0);
+  });
+
+  it('resetTimer errors when no timer exists', async () => {
+    // Timer was just deleted
+    const result = await resetTimer.handler({}, ctx);
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('No active timer');
+  });
+
+  // -------------------------------------------------------------------------
+  // 15. getExercises — list exercises for the user
+  // -------------------------------------------------------------------------
+
+  describe('getExercises', () => {
+    let userExerciseId: string;
+
+    it('returns empty when user has no custom exercises', async () => {
+      // The handler filters by user_id, so global (seeded) exercises won't appear
+      const result = await getExercises.handler({}, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.exercises).toBeInstanceOf(Array);
+      // Global exercises have user_id=NULL, so they won't match .eq('user_id', ctx.userId)
+      // User has not created any custom exercises yet
+      expect(data.total).toBe(0);
+    });
+
+    it('returns user-created exercises after inserting one', async () => {
+      // Create a user-specific exercise
+      const { data: inserted, error } = await admin
+        .schema('coachbyte')
+        .from('exercises')
+        .insert({ user_id: userId, name: 'Bulgarian Split Squat' })
+        .select('exercise_id')
+        .single();
+
+      expect(error).toBeNull();
+      userExerciseId = inserted!.exercise_id;
+
+      const result = await getExercises.handler({}, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.total).toBe(1);
+      expect(data.exercises[0].name).toBe('Bulgarian Split Squat');
+      expect(data.exercises[0].exercise_id).toBe(userExerciseId);
+    });
+
+    it('filters exercises by search term', async () => {
+      // Add another exercise
+      await admin.schema('coachbyte').from('exercises').insert({ user_id: userId, name: 'Romanian Deadlift' });
+
+      // Search for "Bulgarian"
+      const result = await getExercises.handler({ search: 'Bulgarian' }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.total).toBe(1);
+      expect(data.exercises[0].name).toBe('Bulgarian Split Squat');
+    });
+
+    it('returns all user exercises without search filter', async () => {
+      const result = await getExercises.handler({}, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.total).toBe(2);
+      // Ordered alphabetically
+      expect(data.exercises[0].name).toBe('Bulgarian Split Squat');
+      expect(data.exercises[1].name).toBe('Romanian Deadlift');
+    });
+
+    it('returns empty for non-matching search', async () => {
+      const result = await getExercises.handler({ search: 'XYZNONEXISTENT' }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.total).toBe(0);
+      expect(data.exercises).toEqual([]);
+    });
   });
 });

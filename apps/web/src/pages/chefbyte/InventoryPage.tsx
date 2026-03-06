@@ -177,9 +177,12 @@ export function InventoryPage() {
   /* ---------------------------------------------------------------- */
 
   const filteredGrouped = useMemo(() => {
-    if (!searchText.trim()) return grouped;
-    const lower = searchText.toLowerCase();
-    return grouped.filter((g) => g.product.name.toLowerCase().includes(lower));
+    let result = grouped.filter((g) => g.totalStock > 0);
+    if (searchText.trim()) {
+      const lower = searchText.toLowerCase();
+      result = result.filter((g) => g.product.name.toLowerCase().includes(lower));
+    }
+    return result;
   }, [grouped, searchText]);
 
   /* ---------------------------------------------------------------- */

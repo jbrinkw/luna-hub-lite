@@ -557,6 +557,223 @@ describe('CoachByte TodayPage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // TodayPage: complete_next_set with zero actual_load (bodyweight exercise)
+  // -------------------------------------------------------------------
+  it('complete_next_set with zero actual_load (bodyweight exercise)', async () => {
+    // Create a fresh plan for a different date
+    const testDate = '2026-01-20';
+    const { data: freshPlan } = await (coachbyte(ctx.client) as any).rpc('ensure_daily_plan', {
+      p_day: testDate,
+    });
+    expect(freshPlan).not.toBeNull();
+
+    // Add a planned set so complete_next_set has something to complete
+    const exerciseId = Object.values(seeds.exerciseMap)[0]; // Squat
+    await coachbyte(ctx.client).from('planned_sets').insert({
+      plan_id: freshPlan.plan_id,
+      user_id: ctx.userId,
+      exercise_id: exerciseId,
+      target_reps: 10,
+      target_load: 0,
+      order: 1,
+    });
+
+    const result = await coachbyte(ctx.client).rpc('complete_next_set', {
+      p_plan_id: freshPlan.plan_id,
+      p_reps: 10,
+      p_load: 0,
+    });
+
+    const data = assertQuerySucceeds(result, 'complete_next_set bodyweight');
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBe(1);
+
+    // Verify the completed set stored actual_load = 0
+    const { data: completed } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('actual_load, actual_reps')
+      .eq('plan_id', freshPlan.plan_id);
+    expect(completed).not.toBeNull();
+    expect(completed!.length).toBeGreaterThanOrEqual(1);
+    expect(Number(completed![0].actual_load)).toBe(0);
+    expect(completed![0].actual_reps).toBe(10);
+
+    // Cleanup
+    await coachbyte(ctx.client).from('daily_plans').delete().eq('plan_id', freshPlan.plan_id);
+  });
+
+  // -------------------------------------------------------------------
+  // TodayPage: PR detection — complete_next_set + client-side PR check
+  // Source: TodayPage.tsx line 226-248 — handleCompleteSet PR check
+  //   Queries completed_sets for same exercise, computes Epley e1RM
+  //   If new e1RM > prev best and prev_best > 0 → "NEW PR!" toast
+  // -------------------------------------------------------------------
+  it('complete_next_set returns data enabling PR detection when new record set', async () => {
+    // Use the existing planId (has Squat sets already completed at 225 lb)
+    // Complete the 2nd Squat set at heavier weight (300 lb)
+    const result = await coachbyte(ctx.client).rpc('complete_next_set', {
+      p_plan_id: planId,
+      p_reps: 5,
+      p_load: 300,
+    });
+
+    const data = assertQuerySucceeds(result, 'complete_next_set heavier');
+    expect(Array.isArray(data)).toBe(true);
+
+    // Simulate client-side PR detection (same logic as TodayPage)
+    const exerciseId = Object.values(seeds.exerciseMap)[0]; // Squat
+    const { data: prevSets } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('actual_reps, actual_load')
+      .eq('exercise_id', exerciseId)
+      .eq('user_id', ctx.userId);
+
+    expect(prevSets).not.toBeNull();
+    expect(prevSets!.length).toBeGreaterThanOrEqual(2);
+
+    // Compute Epley e1RMs
+    const epley = (load: number, reps: number) => {
+      if (reps <= 0 || load <= 0) return 0;
+      if (reps === 1) return load;
+      return Math.round(load * (1 + reps / 30));
+    };
+
+    const newE1RM = epley(300, 5); // 300 * (1 + 5/30) = 350
+    const prevBests = prevSets!
+      .filter((ps: any) => !(ps.actual_reps === 5 && Number(ps.actual_load) === 300))
+      .map((ps: any) => epley(Number(ps.actual_load), ps.actual_reps));
+    const prevBest = Math.max(0, ...prevBests);
+
+    // 5x300 e1RM = 350, 5x225 e1RM = 263 → NEW PR detected
+    expect(newE1RM).toBe(350);
+    expect(prevBest).toBeLessThan(newE1RM);
+    expect(prevBest).toBeGreaterThan(0); // This triggers "NEW PR!" branch
+  });
+
+  // -------------------------------------------------------------------
+  // TodayPage: First ever completed set returns 'First record!' PR indicator
+  // Source: TodayPage.tsx line 246-248
+  //   } else if (newE1RM > 0 && prevBestWithout === 0) {
+  //     setPrToast(`First record! ...`)
+  // -------------------------------------------------------------------
+  it('first ever completed set for exercise triggers first-record branch', async () => {
+    // Insert a custom exercise so there are zero completed_sets for it
+    const insertExResult = await coachbyte(ctx.client)
+      .from('exercises')
+      .insert({ user_id: ctx.userId, name: 'Zercher Squat' })
+      .select('exercise_id')
+      .single();
+    expect(insertExResult.error).toBeNull();
+    const customExId = insertExResult.data!.exercise_id;
+
+    // Insert a completed set for this brand-new exercise
+    const { data: planData } = await coachbyte(ctx.client)
+      .from('daily_plans')
+      .select('logical_date')
+      .eq('plan_id', planId)
+      .single();
+
+    await coachbyte(ctx.client).from('completed_sets').insert({
+      plan_id: planId,
+      user_id: ctx.userId,
+      exercise_id: customExId,
+      actual_reps: 5,
+      actual_load: 135,
+      logical_date: planData!.logical_date,
+    });
+
+    // Simulate PR detection query (same as TodayPage handleCompleteSet)
+    const { data: prevSets } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('actual_reps, actual_load')
+      .eq('exercise_id', customExId)
+      .eq('user_id', ctx.userId);
+
+    expect(prevSets).not.toBeNull();
+    // Only 1 set (the one we just inserted)
+    expect(prevSets!.length).toBe(1);
+
+    const epley = (load: number, reps: number) => {
+      if (reps <= 0 || load <= 0) return 0;
+      if (reps === 1) return load;
+      return Math.round(load * (1 + reps / 30));
+    };
+
+    // Simulate prevBestWithout: exclude the current set
+    let prevBestWithout = 0;
+    for (const ps of prevSets as any[]) {
+      const r = ps.actual_reps;
+      const l = Number(ps.actual_load);
+      if (r === 5 && l === 135) continue; // skip current set
+      const e = epley(l, r);
+      if (e > prevBestWithout) prevBestWithout = e;
+    }
+
+    const newE1RM = epley(135, 5);
+    expect(newE1RM).toBeGreaterThan(0);
+    expect(prevBestWithout).toBe(0); // This triggers "First record!" branch
+
+    // Cleanup
+    await coachbyte(ctx.client).from('completed_sets').delete().eq('exercise_id', customExId);
+    await coachbyte(ctx.client).from('exercises').delete().eq('exercise_id', customExId);
+  });
+
+  // -------------------------------------------------------------------
+  // TodayPage: delete completed set by completed_set_id
+  // Source: TodayPage.tsx line 435 — deleteCompletedSet
+  //   .from('completed_sets').delete().eq('completed_set_id', completedSetId)
+  // -------------------------------------------------------------------
+  it('delete completed set by completed_set_id removes exactly that set', async () => {
+    // Insert a temporary completed set
+    const exerciseId = Object.values(seeds.exerciseMap)[0];
+    const { data: planData } = await coachbyte(ctx.client)
+      .from('daily_plans')
+      .select('logical_date')
+      .eq('plan_id', planId)
+      .single();
+
+    const { data: inserted } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .insert({
+        plan_id: planId,
+        user_id: ctx.userId,
+        exercise_id: exerciseId,
+        actual_reps: 3,
+        actual_load: 315,
+        logical_date: planData!.logical_date,
+      })
+      .select('completed_set_id')
+      .single();
+    expect(inserted).not.toBeNull();
+    const csId = inserted!.completed_set_id;
+
+    // Count before delete
+    const { data: before } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('completed_set_id')
+      .eq('plan_id', planId);
+    const countBefore = before!.length;
+
+    // Delete by completed_set_id (EXACT pattern from TodayPage)
+    const deleteResult = await coachbyte(ctx.client).from('completed_sets').delete().eq('completed_set_id', csId);
+    expect(deleteResult.error).toBeNull();
+
+    // Verify exactly one set removed
+    const { data: after } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('completed_set_id')
+      .eq('plan_id', planId);
+    expect(after!.length).toBe(countBefore - 1);
+
+    // Verify the specific set is gone
+    const { data: check } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('completed_set_id')
+      .eq('completed_set_id', csId);
+    expect(check!.length).toBe(0);
+  });
+
+  // -------------------------------------------------------------------
   // TodayPage: PR detection query (completed_sets for same exercise)
   // Source: TodayPage.tsx line 257-261 — handleCompleteSet PR check
   //   .from('completed_sets')

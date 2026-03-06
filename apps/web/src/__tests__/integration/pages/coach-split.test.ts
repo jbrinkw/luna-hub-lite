@@ -189,6 +189,105 @@ describe('CoachByte SplitPage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // SplitPage: template set with is_percentage=true stores relative load
+  // Source: SplitPage.tsx line 287-294 — checkbox toggles target_load_percentage
+  //   The UI stores target_load_percentage in the template_sets JSONB
+  // -------------------------------------------------------------------
+  it('template set with target_load_percentage stores relative load', async () => {
+    const squat = seeds.exerciseMap['Squat'];
+    const setsWithPct = [
+      { exercise_id: squat, target_reps: 5, target_load: null, target_load_percentage: 80, rest_seconds: 90, order: 1 },
+    ];
+
+    const updateResult = await coachbyte(ctx.client)
+      .from('splits')
+      .update({ template_sets: setsWithPct as any })
+      .eq('split_id', splitId);
+    expect(updateResult.error).toBeNull();
+
+    // Verify stored correctly
+    const result = await coachbyte(ctx.client).from('splits').select('template_sets').eq('split_id', splitId).single();
+    const data = assertQuerySucceeds(result, 'template_sets with percentage');
+    const sets = data.template_sets as any[];
+    expect(sets.length).toBe(1);
+    expect(sets[0].target_load_percentage).toBe(80);
+    expect(sets[0].target_load).toBeNull();
+    expect(sets[0].target_reps).toBe(5);
+  });
+
+  // -------------------------------------------------------------------
+  // SplitPage: template set with rest_seconds stores correctly
+  // Source: SplitPage.tsx line 298-309 — rest_seconds input
+  // -------------------------------------------------------------------
+  it('template set with rest_seconds stores correctly', async () => {
+    const bench = seeds.exerciseMap['Bench Press'];
+    const setsWithRest = [
+      { exercise_id: bench, target_reps: 8, target_load: 135, rest_seconds: 120, order: 1 },
+      { exercise_id: bench, target_reps: 8, target_load: 135, rest_seconds: 60, order: 2 },
+    ];
+
+    const updateResult = await coachbyte(ctx.client)
+      .from('splits')
+      .update({ template_sets: setsWithRest as any })
+      .eq('split_id', splitId);
+    expect(updateResult.error).toBeNull();
+
+    // Verify stored values
+    const result = await coachbyte(ctx.client).from('splits').select('template_sets').eq('split_id', splitId).single();
+    const data = assertQuerySucceeds(result, 'template_sets with rest');
+    const sets = data.template_sets as any[];
+    expect(sets.length).toBe(2);
+    expect(sets[0].rest_seconds).toBe(120);
+    expect(sets[1].rest_seconds).toBe(60);
+  });
+
+  // -------------------------------------------------------------------
+  // SplitPage: removing middle set renumbers order
+  // Source: SplitPage.tsx line 153-161 — removeSet
+  //   const sets = s.template_sets.filter((_, i) => i !== setIndex)
+  //     .map((set, i) => ({ ...set, order: i + 1 }));
+  // -------------------------------------------------------------------
+  it('removing middle set renumbers order correctly', async () => {
+    const squat = seeds.exerciseMap['Squat'];
+    const bench = seeds.exerciseMap['Bench Press'];
+
+    // Store 3 sets
+    const threeSets = [
+      { exercise_id: squat, target_reps: 5, target_load: 225, order: 1 },
+      { exercise_id: bench, target_reps: 8, target_load: 135, order: 2 },
+      { exercise_id: squat, target_reps: 3, target_load: 275, order: 3 },
+    ];
+
+    await coachbyte(ctx.client)
+      .from('splits')
+      .update({ template_sets: threeSets as any })
+      .eq('split_id', splitId);
+
+    // Simulate removing the middle set (index 1) and renumbering (same as SplitPage removeSet)
+    const remainingSets = threeSets.filter((_, i) => i !== 1).map((set, i) => ({ ...set, order: i + 1 }));
+
+    expect(remainingSets.length).toBe(2);
+    expect(remainingSets[0].order).toBe(1);
+    expect(remainingSets[0].exercise_id).toBe(squat);
+    expect(remainingSets[1].order).toBe(2);
+    expect(remainingSets[1].exercise_id).toBe(squat);
+
+    // Save and verify
+    const updateResult = await coachbyte(ctx.client)
+      .from('splits')
+      .update({ template_sets: remainingSets as any })
+      .eq('split_id', splitId);
+    expect(updateResult.error).toBeNull();
+
+    const result = await coachbyte(ctx.client).from('splits').select('template_sets').eq('split_id', splitId).single();
+    const data = assertQuerySucceeds(result, 'template_sets after remove');
+    const sets = data.template_sets as any[];
+    expect(sets.length).toBe(2);
+    expect(sets[0].order).toBe(1);
+    expect(sets[1].order).toBe(2);
+  });
+
+  // -------------------------------------------------------------------
   // SplitPage: weekday ordering is preserved in query
   // -------------------------------------------------------------------
   it('splits are ordered by weekday', async () => {

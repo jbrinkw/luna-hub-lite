@@ -224,29 +224,57 @@ export function ScannerPage() {
             const { data: efData, error: efError } = await supabase.functions.invoke('analyze-product', {
               body: { barcode },
             });
-            if (!efError && efData?.suggestion) {
-              // Edge function returned normalized product data from OpenFoodFacts + AI
+            if (!efError && efData) {
+              // Use AI suggestion if available, otherwise fall back to raw OFF data
               const s = efData.suggestion;
-              const { data: created } = await chefbyte()
-                .from('products')
-                .insert({
-                  user_id: user.id,
-                  barcode,
-                  name: s.name || `Product (${barcode})`,
-                  description: s.description || null,
-                  is_placeholder: false,
-                  calories_per_serving: s.calories_per_serving ?? null,
-                  protein_per_serving: s.protein_per_serving ?? null,
-                  carbs_per_serving: s.carbs_per_serving ?? null,
-                  fat_per_serving: s.fat_per_serving ?? null,
-                  servings_per_container: s.servings_per_container ?? 1,
-                })
-                .select(
-                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
-                )
-                .single();
-              if (created) {
-                analyzedProduct = created;
+              const off = efData.off;
+              const productName = s?.name || off?.product_name || `Product (${barcode})`;
+              const hasNutrition = !!(s?.calories_per_serving != null || off?.nutriments);
+
+              // Build nutrition from AI suggestion or raw OFF nutriments
+              let cals: number | null = null;
+              let prot: number | null = null;
+              let carb: number | null = null;
+              let fatVal: number | null = null;
+              let spc = 1;
+
+              if (s) {
+                cals = s.calories_per_serving ?? null;
+                prot = s.protein_per_serving ?? null;
+                carb = s.carbs_per_serving ?? null;
+                fatVal = s.fat_per_serving ?? null;
+                spc = s.servings_per_container ?? 1;
+              } else if (off?.nutriments) {
+                // Fall back to per-serving OFF data, or per-100g if no serving data
+                const n = off.nutriments;
+                cals = n['energy-kcal_serving'] ?? n['energy-kcal_100g'] ?? null;
+                prot = n['proteins_serving'] ?? n['proteins_100g'] ?? null;
+                carb = n['carbohydrates_serving'] ?? n['carbohydrates_100g'] ?? null;
+                fatVal = n['fat_serving'] ?? n['fat_100g'] ?? null;
+              }
+
+              if (productName !== `Product (${barcode})` || hasNutrition) {
+                const { data: created } = await chefbyte()
+                  .from('products')
+                  .insert({
+                    user_id: user.id,
+                    barcode,
+                    name: productName,
+                    description: s?.description || null,
+                    is_placeholder: false,
+                    calories_per_serving: cals,
+                    protein_per_serving: prot,
+                    carbs_per_serving: carb,
+                    fat_per_serving: fatVal,
+                    servings_per_container: spc,
+                  })
+                  .select(
+                    'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+                  )
+                  .single();
+                if (created) {
+                  analyzedProduct = created;
+                }
               }
             }
           } catch {

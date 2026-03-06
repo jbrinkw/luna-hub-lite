@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(22);
+SELECT plan(30);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -381,6 +381,157 @@ SELECT is(
       AND product_id = '10000000-0000-0000-0000-000000000099'),
   0,
   'no food_log created when attempting to consume another user product'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Zero quantity consumption raises exception
+-- The function validates p_qty > 0 and raises an exception.
+-- ─────────────────────────────────────────────────────────────
+
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.consume_product(
+      '10000000-0000-0000-0000-000000000001'::uuid,
+      0, 'container', true, '2026-03-03'::date
+    )
+  $$,
+  'Quantity must be positive, got 0',
+  'zero quantity consumption raises exception (qty must be positive)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: NULL-expiry lots consumed after dated lots (NULLS LAST)
+-- Create two lots: one dated 2026-04-01, one NULL expiry.
+-- Consume partial and verify dated lot is consumed first.
+-- ─────────────────────────────────────────────────────────────
+
+-- Create a fresh product for this test
+INSERT INTO chefbyte.products (
+  product_id, user_id, name,
+  servings_per_container, calories_per_serving,
+  protein_per_serving, fat_per_serving, carbs_per_serving
+) VALUES (
+  '10000000-0000-0000-0000-000000000010',
+  tests.get_supabase_uid('cf_tester'),
+  'NULLS LAST Test Product',
+  1, 100, 10, 5, 20
+);
+
+-- Dated lot: 2.0 containers, expires 2026-04-01
+INSERT INTO chefbyte.stock_lots (lot_id, user_id, product_id, location_id, qty_containers, expires_on)
+VALUES (
+  '20000000-0000-0000-0000-000000000010',
+  tests.get_supabase_uid('cf_tester'),
+  '10000000-0000-0000-0000-000000000010',
+  :'fridge_id',
+  2.0,
+  '2026-04-01'
+);
+
+-- NULL-expiry lot: 3.0 containers
+INSERT INTO chefbyte.stock_lots (lot_id, user_id, product_id, location_id, qty_containers, expires_on)
+VALUES (
+  '20000000-0000-0000-0000-000000000011',
+  tests.get_supabase_uid('cf_tester'),
+  '10000000-0000-0000-0000-000000000010',
+  :'fridge_id',
+  3.0,
+  NULL
+);
+
+-- Consume 1 container — should take from the dated lot first
+SELECT chefbyte.consume_product(
+  '10000000-0000-0000-0000-000000000010'::uuid,
+  1, 'container', false, '2026-03-03'::date
+);
+
+SELECT is(
+  (SELECT qty_containers FROM chefbyte.stock_lots
+    WHERE lot_id = '20000000-0000-0000-0000-000000000010'),
+  1.000::numeric,
+  'dated lot (expires 2026-04-01) reduced from 2.0 to 1.0 — consumed first'
+);
+
+SELECT is(
+  (SELECT qty_containers FROM chefbyte.stock_lots
+    WHERE lot_id = '20000000-0000-0000-0000-000000000011'),
+  3.000::numeric,
+  'NULL-expiry lot unchanged at 3.0 — NULLS LAST ordering works'
+);
+
+-- Consume 1.5 more — should deplete the dated lot (1.0) then take 0.5 from NULL lot
+SELECT chefbyte.consume_product(
+  '10000000-0000-0000-0000-000000000010'::uuid,
+  1.5, 'container', false, '2026-03-03'::date
+);
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.stock_lots
+    WHERE lot_id = '20000000-0000-0000-0000-000000000010'),
+  0,
+  'dated lot fully consumed and deleted after cross-lot consume'
+);
+
+SELECT is(
+  (SELECT qty_containers FROM chefbyte.stock_lots
+    WHERE lot_id = '20000000-0000-0000-0000-000000000011'),
+  2.500::numeric,
+  'NULL-expiry lot reduced from 3.0 to 2.5 after dated lot depleted'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Product with zero/default macro values produces 0 in food_log
+-- Schema enforces NOT NULL DEFAULT 0 on macro columns.
+-- Omitting macro columns lets them default to 0; COALESCE in the
+-- function handles them correctly, producing 0 in the food_log.
+-- ─────────────────────────────────────────────────────────────
+
+INSERT INTO chefbyte.products (
+  product_id, user_id, name, servings_per_container
+) VALUES (
+  '10000000-0000-0000-0000-000000000020',
+  tests.get_supabase_uid('cf_tester'),
+  'Zero Macros Product',
+  1
+);
+
+-- Add a stock lot so consumption has something to deduct
+INSERT INTO chefbyte.stock_lots (lot_id, user_id, product_id, location_id, qty_containers, expires_on)
+VALUES (
+  '20000000-0000-0000-0000-000000000020',
+  tests.get_supabase_uid('cf_tester'),
+  '10000000-0000-0000-0000-000000000020',
+  :'fridge_id',
+  5.0,
+  '2026-05-01'
+);
+
+SELECT lives_ok(
+  $$
+    SELECT chefbyte.consume_product(
+      '10000000-0000-0000-0000-000000000020'::uuid,
+      1, 'container', true, '2026-03-03'::date
+    )
+  $$,
+  'consuming product with zero/default macros succeeds'
+);
+
+SELECT is(
+  (SELECT calories FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = '10000000-0000-0000-0000-000000000020'
+    ORDER BY created_at DESC LIMIT 1),
+  0.000::numeric,
+  'food_log calories = 0 for product with default zero macros'
+);
+
+SELECT is(
+  (SELECT protein FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = '10000000-0000-0000-0000-000000000020'
+    ORDER BY created_at DESC LIMIT 1),
+  0.000::numeric,
+  'food_log protein = 0 for product with default zero macros'
 );
 
 -- ─────────────────────────────────────────────────────────────

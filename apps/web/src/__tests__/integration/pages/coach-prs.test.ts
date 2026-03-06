@@ -246,6 +246,126 @@ describe('CoachByte PrsPage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // PrsPage: PR cards sorted alphabetically by exercise name
+  // Source: PrsPage.tsx line 102 — result.sort((a, b) => a.exercise_name.localeCompare(b.exercise_name))
+  // -------------------------------------------------------------------
+  it('PR cards sorted alphabetically by exercise name', async () => {
+    const result = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('exercise_id, actual_reps, actual_load, exercises(name)')
+      .eq('user_id', ctx.userId);
+
+    const data = assertQuerySucceeds(result, 'completed_sets for PR sort') as any[];
+
+    // Group by exercise (same logic as PrsPage computePRs)
+    const exerciseMap = new Map<string, { name: string; e1rm: number }>();
+    for (const cs of data) {
+      const id = cs.exercise_id;
+      const name = cs.exercises?.name ?? 'Unknown';
+      const reps = cs.actual_reps;
+      const load = Number(cs.actual_load);
+      const e1rm = reps <= 0 || load <= 0 ? 0 : reps === 1 ? load : Math.round(load * (1 + reps / 30));
+
+      if (!exerciseMap.has(id)) {
+        exerciseMap.set(id, { name, e1rm });
+      }
+      const entry = exerciseMap.get(id)!;
+      if (e1rm > entry.e1rm) entry.e1rm = e1rm;
+    }
+
+    // Sort alphabetically (same as PrsPage)
+    const sorted = Array.from(exerciseMap.values()).sort((a, b) => a.name.localeCompare(b.name));
+    expect(sorted.length).toBe(2); // Bench Press, Squat
+    expect(sorted[0].name).toBe('Bench Press');
+    expect(sorted[1].name).toBe('Squat');
+  });
+
+  // -------------------------------------------------------------------
+  // PrsPage: search excludes already-tracked exercise_ids
+  // Source: PrsPage.tsx line 168-173 — searchResults
+  //   allExercises.filter(e => e.name.toLowerCase().includes(searchText) && !trackedIds.has(e.exercise_id))
+  // -------------------------------------------------------------------
+  it('search excludes already-tracked exercise_ids', async () => {
+    // Get all exercises
+    const { data: allExercises } = await coachbyte(ctx.client)
+      .from('exercises')
+      .select('exercise_id, name')
+      .or(`user_id.is.null,user_id.eq.${ctx.userId}`)
+      .order('name');
+
+    expect(allExercises).not.toBeNull();
+    expect(allExercises!.length).toBeGreaterThanOrEqual(2);
+
+    // Simulate tracking first 2 exercises
+    const trackedIds = new Set([allExercises![0].exercise_id, allExercises![1].exercise_id]);
+
+    // Simulate search (same as PrsPage searchResults)
+    const searchText = '';
+    const searchResults = allExercises!.filter(
+      (e: any) => (searchText === '' || e.name.toLowerCase().includes(searchText)) && !trackedIds.has(e.exercise_id),
+    );
+
+    // No tracked exercises should appear in results
+    for (const r of searchResults) {
+      expect(trackedIds.has(r.exercise_id)).toBe(false);
+    }
+    expect(searchResults.length).toBe(allExercises!.length - 2);
+  });
+
+  // -------------------------------------------------------------------
+  // PrsPage: removing all tracked exercises returns empty PR list
+  // Source: PrsPage.tsx line 166 — filteredPRs = prs.filter(pr => trackedIds.has(pr.exercise_id))
+  // -------------------------------------------------------------------
+  it('removing all tracked exercises returns empty PR list', async () => {
+    // Compute PRs (same as PrsPage)
+    const { data: completedSets } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('exercise_id, actual_reps, actual_load, exercises(name)')
+      .eq('user_id', ctx.userId);
+
+    expect(completedSets).not.toBeNull();
+    expect(completedSets!.length).toBeGreaterThan(0);
+
+    // Build PR list
+    const exerciseMap = new Map<string, string>();
+    for (const cs of completedSets as any[]) {
+      exerciseMap.set(cs.exercise_id, cs.exercises?.name ?? 'Unknown');
+    }
+    const prs = Array.from(exerciseMap.entries()).map(([id, name]) => ({
+      exercise_id: id,
+      exercise_name: name,
+    }));
+
+    expect(prs.length).toBeGreaterThan(0);
+
+    // Simulate removing all tracked exercises (empty set)
+    const trackedIds = new Set<string>();
+    const filteredPRs = prs.filter((pr) => trackedIds.has(pr.exercise_id));
+    expect(filteredPRs.length).toBe(0);
+
+    // Save empty tracked list to DB and verify round-trip
+    const updateResult = await coachbyte(ctx.client)
+      .from('user_settings')
+      .update({ pr_tracked_exercise_ids: [] })
+      .eq('user_id', ctx.userId);
+    expect(updateResult.error).toBeNull();
+
+    const { data: loaded } = await coachbyte(ctx.client)
+      .from('user_settings')
+      .select('pr_tracked_exercise_ids')
+      .eq('user_id', ctx.userId)
+      .maybeSingle();
+
+    expect(loaded!.pr_tracked_exercise_ids).toEqual([]);
+
+    // Cleanup — reset to null
+    await coachbyte(ctx.client)
+      .from('user_settings')
+      .update({ pr_tracked_exercise_ids: null })
+      .eq('user_id', ctx.userId);
+  });
+
+  // -------------------------------------------------------------------
   // PrsPage: completed_sets with date range filter
   // Source: PrsPage.tsx line 45-56 — computePRs with dateRange
   //   .from('completed_sets')

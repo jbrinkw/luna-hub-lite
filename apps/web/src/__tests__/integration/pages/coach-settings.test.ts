@@ -159,6 +159,126 @@ describe('CoachByte SettingsPage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // SettingsPage: delete custom exercise by exercise_id
+  // Source: SettingsPage.tsx line 107-120 — deleteExercise
+  //   .from('exercises').delete().eq('exercise_id', exerciseId)
+  // -------------------------------------------------------------------
+  it('delete custom exercise by exercise_id removes it and is gone on reload', async () => {
+    // Insert a custom exercise
+    const insertResult = await coachbyte(ctx.client)
+      .from('exercises')
+      .insert({ user_id: ctx.userId, name: 'Pendlay Row' })
+      .select('exercise_id')
+      .single();
+    expect(insertResult.error).toBeNull();
+    const exerciseId = insertResult.data!.exercise_id;
+
+    // Delete it (EXACT pattern from SettingsPage deleteExercise)
+    const deleteResult = await coachbyte(ctx.client).from('exercises').delete().eq('exercise_id', exerciseId);
+    expect(deleteResult.error).toBeNull();
+
+    // Reload exercises list (EXACT pattern from SettingsPage loadExercises)
+    const { data: reloaded } = await coachbyte(ctx.client)
+      .from('exercises')
+      .select('exercise_id, name, user_id')
+      .or(`user_id.is.null,user_id.eq.${ctx.userId}`)
+      .order('name');
+
+    const found = reloaded!.find((e: any) => e.exercise_id === exerciseId);
+    expect(found).toBeUndefined();
+  });
+
+  // -------------------------------------------------------------------
+  // SettingsPage: toggle plate checkbox updates plates array
+  // Source: SettingsPage.tsx line 188-207 — plate checkbox onChange
+  //   Toggle a plate off: available_plates.filter(p => p !== plate)
+  //   Toggle a plate on: [...available_plates, plate].sort((a, b) => b - a)
+  // -------------------------------------------------------------------
+  it('toggle plate checkbox updates plates array via DB round-trip', async () => {
+    // Reset to defaults first
+    const defaultPlates = [45, 35, 25, 10, 5, 2.5];
+    await coachbyte(ctx.client)
+      .from('user_settings')
+      .update({
+        default_rest_seconds: 90,
+        bar_weight_lbs: 45,
+        available_plates: defaultPlates as any,
+      })
+      .eq('user_id', ctx.userId);
+
+    // Toggle 35 OFF (same logic as SettingsPage checkbox onChange)
+    const plateToRemove = 35;
+    const newPlates = defaultPlates.filter((p) => p !== plateToRemove);
+    expect(newPlates).toEqual([45, 25, 10, 5, 2.5]);
+
+    // Save to DB (EXACT pattern from SettingsPage)
+    const updateResult = await coachbyte(ctx.client)
+      .from('user_settings')
+      .update({
+        default_rest_seconds: 90,
+        bar_weight_lbs: 45,
+        available_plates: newPlates as any,
+      })
+      .eq('user_id', ctx.userId);
+    expect(updateResult.error).toBeNull();
+
+    // Verify
+    const { data: afterRemove } = await coachbyte(ctx.client)
+      .from('user_settings')
+      .select('available_plates')
+      .eq('user_id', ctx.userId)
+      .single();
+    expect(afterRemove!.available_plates).toEqual([45, 25, 10, 5, 2.5]);
+
+    // Toggle 35 back ON
+    const restoredPlates = [...newPlates, plateToRemove].sort((a, b) => b - a);
+    expect(restoredPlates).toEqual([45, 35, 25, 10, 5, 2.5]);
+
+    const restoreResult = await coachbyte(ctx.client)
+      .from('user_settings')
+      .update({
+        default_rest_seconds: 90,
+        bar_weight_lbs: 45,
+        available_plates: restoredPlates as any,
+      })
+      .eq('user_id', ctx.userId);
+    expect(restoreResult.error).toBeNull();
+
+    const { data: afterRestore } = await coachbyte(ctx.client)
+      .from('user_settings')
+      .select('available_plates')
+      .eq('user_id', ctx.userId)
+      .single();
+    expect(afterRestore!.available_plates).toEqual([45, 35, 25, 10, 5, 2.5]);
+  });
+
+  // -------------------------------------------------------------------
+  // SettingsPage: add exercise with empty name
+  // Source: SettingsPage.tsx line 91 — addCustomExercise
+  //   if (!user || !newExerciseName.trim()) return;
+  // DB column: name TEXT NOT NULL (no CHECK constraint on empty string)
+  // The UI prevents empty names, but DB allows empty string ''
+  // -------------------------------------------------------------------
+  it('add exercise with empty name — DB allows empty string (UI prevents this)', async () => {
+    // The DB has name TEXT NOT NULL but no CHECK on length.
+    // An empty string '' is technically valid at DB level.
+    // The UI guard `if (!newExerciseName.trim()) return` prevents this.
+    // Verify the DB behavior to document what happens without the UI guard.
+    const insertResult = await coachbyte(ctx.client)
+      .from('exercises')
+      .insert({ user_id: ctx.userId, name: '' })
+      .select('exercise_id')
+      .single();
+
+    // DB allows empty string (no CHECK constraint)
+    expect(insertResult.error).toBeNull();
+    expect(insertResult.data).not.toBeNull();
+
+    // Cleanup — remove the empty-named exercise
+    await coachbyte(ctx.client).from('exercises').delete().eq('exercise_id', insertResult.data!.exercise_id);
+  });
+
+  // -------------------------------------------------------------------
   // SettingsPage: cannot delete global exercises (RLS enforcement)
   // -------------------------------------------------------------------
   it('cannot delete global exercises (RLS blocks it)', async () => {

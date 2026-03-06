@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(27);
+SELECT plan(31);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -309,6 +309,78 @@ SELECT is(
   (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'carbs'->>'consumed')::numeric),
   27::numeric,
   'carbs consumed = 27 after adding liquidtrack event (15 + 12)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Negative remaining when consumed exceeds goal
+-- Set goal to 1000 cal, already consumed 350 from earlier tests.
+-- Add 700 more to bring total to 1050, verify remaining = -50
+-- (goal 1000 was set earlier but actually the goal is 2000;
+-- we'll use a different date to isolate and set goal to 1000)
+-- ─────────────────────────────────────────────────────────────
+
+-- Use a new date to isolate this test
+INSERT INTO chefbyte.food_logs (user_id, product_id, logical_date,
+  qty_consumed, unit, calories, carbs, protein, fat)
+VALUES (
+  tests.get_supabase_uid('macro_tester'),
+  '60000000-0000-0000-0000-000000000001',
+  '2026-03-10', 5, 'container', 1500, 50, 150, 25
+);
+
+-- Update goal_calories to 1000 (applies to all dates since user_config is not per-date)
+UPDATE chefbyte.user_config
+SET value = '1000'
+WHERE user_id = tests.get_supabase_uid('macro_tester')
+  AND key = 'goal_calories';
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-10'::date))->'calories'->>'remaining')::numeric),
+  -500::numeric,
+  'negative remaining = 1000 - 1500 = -500 when consumed exceeds goal'
+);
+
+-- Reset goal back to 2000 for subsequent tests
+UPDATE chefbyte.user_config
+SET value = '2000'
+WHERE user_id = tests.get_supabase_uid('macro_tester')
+  AND key = 'goal_calories';
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Multiple food_logs on same date sum correctly
+-- Insert 3 food_logs for a fresh date with different calories
+-- and verify the total is the sum
+-- ─────────────────────────────────────────────────────────────
+
+INSERT INTO chefbyte.food_logs (user_id, product_id, logical_date,
+  qty_consumed, unit, calories, carbs, protein, fat)
+VALUES
+  (tests.get_supabase_uid('macro_tester'),
+   '60000000-0000-0000-0000-000000000001',
+   '2026-03-11', 1, 'container', 200, 10, 30, 5),
+  (tests.get_supabase_uid('macro_tester'),
+   '60000000-0000-0000-0000-000000000001',
+   '2026-03-11', 1, 'container', 350, 20, 40, 8),
+  (tests.get_supabase_uid('macro_tester'),
+   '60000000-0000-0000-0000-000000000001',
+   '2026-03-11', 1, 'container', 450, 30, 50, 12);
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-11'::date))->'calories'->>'consumed')::numeric),
+  1000::numeric,
+  'multiple food_logs on same date: calories sum = 200 + 350 + 450 = 1000'
+);
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-11'::date))->'protein'->>'consumed')::numeric),
+  120::numeric,
+  'multiple food_logs on same date: protein sum = 30 + 40 + 50 = 120'
+);
+
+SELECT is(
+  (SELECT ((chefbyte.get_daily_macros('2026-03-11'::date))->'fat'->>'consumed')::numeric),
+  25::numeric,
+  'multiple food_logs on same date: fat sum = 5 + 8 + 12 = 25'
 );
 
 -- ─────────────────────────────────────────────────────────────

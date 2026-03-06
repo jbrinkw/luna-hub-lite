@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(50);
+SELECT plan(57);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -652,6 +652,86 @@ SELECT is(
       AND meal_id = '50000000-0000-0000-0000-000000000003'),
   0,
   'food_logs for undone product-based meal are deleted'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Product-based meal with meal_prep=true creates [MEAL] product
+-- Oats: 2 spc, 150cal/5p/3f/27c per serving
+-- Consume 2 servings for meal prep → [MEAL] product with macros
+-- ─────────────────────────────────────────────────────────────
+
+INSERT INTO chefbyte.meal_plan_entries (
+  meal_id, user_id, product_id, logical_date, servings, meal_prep
+) VALUES (
+  '50000000-0000-0000-0000-000000000010',
+  tests.get_supabase_uid('meal_tester'),
+  '30000000-0000-0000-0000-000000000003',
+  '2026-03-05', 2, true
+);
+
+SELECT lives_ok(
+  $$
+    SELECT chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000010'::uuid)
+  $$,
+  'mark_meal_done on product-based meal with meal_prep=true succeeds'
+);
+
+-- [MEAL] product should be created with name matching pattern
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND name LIKE '[MEAL] Oats 03-05%'),
+  1,
+  'product-based meal_prep creates [MEAL] product with correct name pattern'
+);
+
+-- [MEAL] product macros: 2 servings consumed → total = 2*150=300cal, 2*5=10p, 2*3=6f, 2*27=54c
+-- servings_per_container=2 → per_serving = 300/2=150cal, 10/2=5p, 6/2=3f, 54/2=27c
+SELECT is(
+  (SELECT calories_per_serving FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND name LIKE '[MEAL] Oats 03-05%'),
+  150.000::numeric,
+  'product-based [MEAL] calories_per_serving = 300 / 2 = 150'
+);
+
+SELECT is(
+  (SELECT protein_per_serving FROM chefbyte.products
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND name LIKE '[MEAL] Oats 03-05%'),
+  5.000::numeric,
+  'product-based [MEAL] protein_per_serving = 10 / 2 = 5'
+);
+
+-- [MEAL] stock lot should exist with qty_containers=1
+SELECT is(
+  (SELECT sl.qty_containers FROM chefbyte.stock_lots sl
+    JOIN chefbyte.products p ON sl.product_id = p.product_id
+    WHERE p.user_id = tests.get_supabase_uid('meal_tester')
+      AND p.name LIKE '[MEAL] Oats 03-05%'),
+  1.000::numeric,
+  'product-based [MEAL] stock lot has qty_containers=1'
+);
+
+-- No food_log created (meal_prep skips logging)
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('meal_tester')
+      AND meal_id = '50000000-0000-0000-0000-000000000010'),
+  0,
+  'no food_logs created for product-based meal prep'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: mark non-existent meal_id raises exception
+-- ─────────────────────────────────────────────────────────────
+
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.mark_meal_done('99999999-9999-9999-9999-999999999999'::uuid)
+  $$,
+  'Meal not found or not owned by user',
+  'mark_meal_done with non-existent meal_id raises exception'
 );
 
 -- ─────────────────────────────────────────────────────────────

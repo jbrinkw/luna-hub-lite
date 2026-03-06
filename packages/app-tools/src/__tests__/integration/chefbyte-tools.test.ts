@@ -22,6 +22,11 @@ import { getCookable } from '../../chefbyte/get-cookable';
 import { addMeal } from '../../chefbyte/add-meal';
 import { getMealPlan } from '../../chefbyte/get-meal-plan';
 import { markDone } from '../../chefbyte/mark-done';
+import { updateProduct } from '../../chefbyte/update-product';
+import { deleteShoppingItem } from '../../chefbyte/delete-shopping-item';
+import { togglePurchased } from '../../chefbyte/toggle-purchased';
+import { importShoppingToInventory } from '../../chefbyte/import-shopping-to-inventory';
+import { deleteMealEntry } from '../../chefbyte/delete-meal-entry';
 
 // ---------------------------------------------------------------------------
 // ChefByte Tool Integration Tests
@@ -1160,6 +1165,268 @@ describe('ChefByte Tool Integration Tests', () => {
       expect(data.product_id).toBe(fakeId);
       expect(data.lots).toEqual([]);
       expect(data.total_lots).toBe(0);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 20. updateProduct — update product fields
+  // -----------------------------------------------------------------------
+
+  describe('updateProduct', () => {
+    it('updates product name', async () => {
+      const result = await updateProduct.handler({ product_id: productId, name: 'Grilled Chicken Breast' }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.message).toContain('Grilled Chicken Breast');
+      expect(data.product.product_id).toBe(productId);
+      expect(data.product.name).toBe('Grilled Chicken Breast');
+    });
+
+    it('updates macros (calories, protein, carbs, fat)', async () => {
+      const result = await updateProduct.handler(
+        {
+          product_id: secondProductId,
+          calories_per_serving: 165,
+          protein_per_serving: 31,
+          carbs_per_serving: 0,
+          fat_per_serving: 3.6,
+        },
+        ctx,
+      );
+      const data = parseToolResult(result);
+
+      expect(data.message).toContain('updated');
+      expect(data.product.product_id).toBe(secondProductId);
+
+      // Verify the macros were actually updated in the DB
+      const { data: dbProduct } = await admin
+        .schema('chefbyte')
+        .from('products')
+        .select('calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving')
+        .eq('product_id', secondProductId)
+        .single();
+
+      expect(Number(dbProduct!.calories_per_serving)).toBe(165);
+      expect(Number(dbProduct!.protein_per_serving)).toBe(31);
+      expect(Number(dbProduct!.carbs_per_serving)).toBe(0);
+      expect(Number(dbProduct!.fat_per_serving)).toBe(3.6);
+    });
+
+    it('updates barcode', async () => {
+      const result = await updateProduct.handler({ product_id: productId, barcode: '9876543210' }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.product.barcode).toBe('9876543210');
+    });
+
+    it('returns error when no fields provided besides product_id', async () => {
+      const result = await updateProduct.handler({ product_id: productId }, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('No fields to update');
+    });
+
+    it('returns error for non-existent product', async () => {
+      const fakeId = '00000000-0000-0000-0000-000000000000';
+      const result = await updateProduct.handler({ product_id: fakeId, name: 'Ghost' }, ctx);
+
+      expect(result.isError).toBe(true);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 21. deleteShoppingItem — delete a single shopping list item
+  // -----------------------------------------------------------------------
+
+  describe('deleteShoppingItem', () => {
+    let tempItemId: string;
+
+    it('deletes a shopping item successfully', async () => {
+      // Seed a shopping item
+      await addToShopping.handler({ product_id: productId, qty_containers: 1 }, ctx);
+      const listResult = await getShoppingList.handler({}, ctx);
+      const listData = parseToolResult(listResult);
+      const item = listData.items.find((i: any) => i.product_id === productId);
+      expect(item).toBeDefined();
+      tempItemId = item.id;
+
+      const result = await deleteShoppingItem.handler({ item_id: tempItemId }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.message).toBe('Shopping item deleted');
+      expect(data.item_id).toBe(tempItemId);
+
+      // Verify it's gone
+      const afterResult = await getShoppingList.handler({}, ctx);
+      const afterData = parseToolResult(afterResult);
+      const deleted = afterData.items.find((i: any) => i.id === tempItemId);
+      expect(deleted).toBeUndefined();
+    });
+
+    it('returns error for non-existent item', async () => {
+      const fakeId = '00000000-0000-0000-0000-000000000000';
+      const result = await deleteShoppingItem.handler({ item_id: fakeId }, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('not found');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 22. togglePurchased — toggle purchased status on shopping item
+  // -----------------------------------------------------------------------
+
+  describe('togglePurchased', () => {
+    let toggleItemId: string;
+
+    it('toggles item to purchased=true', async () => {
+      // Seed a shopping item
+      await addToShopping.handler({ product_id: secondProductId, qty_containers: 2 }, ctx);
+      const listResult = await getShoppingList.handler({}, ctx);
+      const listData = parseToolResult(listResult);
+      const item = listData.items.find((i: any) => i.product_id === secondProductId);
+      expect(item).toBeDefined();
+      toggleItemId = item.id;
+
+      // Toggle on (purchased = true)
+      const result = await togglePurchased.handler({ item_id: toggleItemId }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.message).toContain('purchased');
+      expect(data.item.purchased).toBe(true);
+      expect(data.item.id).toBe(toggleItemId);
+      expect(data.item.qty_containers).toBe(2);
+    });
+
+    it('toggles item back to purchased=false', async () => {
+      const result = await togglePurchased.handler({ item_id: toggleItemId }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.message).toContain('not purchased');
+      expect(data.item.purchased).toBe(false);
+    });
+
+    it('returns error for non-existent item', async () => {
+      const fakeId = '00000000-0000-0000-0000-000000000000';
+      const result = await togglePurchased.handler({ item_id: fakeId }, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('not found');
+    });
+
+    // Cleanup: clear shopping for subsequent tests
+    it('cleanup — clear shopping list', async () => {
+      await clearShopping.handler({}, ctx);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 23. importShoppingToInventory — import purchased items to stock
+  // -----------------------------------------------------------------------
+
+  describe('importShoppingToInventory', () => {
+    it('imports purchased shopping items into inventory and removes them', async () => {
+      // Seed two shopping items and mark them as purchased
+      await addToShopping.handler({ product_id: productId, qty_containers: 3 }, ctx);
+      await addToShopping.handler({ product_id: secondProductId, qty_containers: 1 }, ctx);
+
+      const listResult = await getShoppingList.handler({}, ctx);
+      const listData = parseToolResult(listResult);
+      expect(listData.total_items).toBe(2);
+
+      // Toggle both to purchased (getShoppingList returns items with `id`, not `cart_item_id`)
+      for (const item of listData.items) {
+        await togglePurchased.handler({ item_id: item.id }, ctx);
+      }
+
+      // Verify they are purchased via admin client (getShoppingList doesn't expose purchased)
+      const { data: dbItems } = await admin
+        .schema('chefbyte')
+        .from('shopping_list')
+        .select('cart_item_id, purchased')
+        .eq('user_id', userId);
+      expect(dbItems!.every((i: any) => i.purchased === true)).toBe(true);
+
+      // Import
+      const result = await importShoppingToInventory.handler({}, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.message).toContain('2 item(s)');
+      expect(data.lots_created).toBe(2);
+      expect(data.lots).toHaveLength(2);
+
+      // Verify stock lots were created
+      const lot1 = data.lots.find((l: any) => l.product_id === productId);
+      expect(lot1).toBeDefined();
+      expect(lot1.qty_containers).toBe(3);
+
+      const lot2 = data.lots.find((l: any) => l.product_id === secondProductId);
+      expect(lot2).toBeDefined();
+      expect(lot2.qty_containers).toBe(1);
+
+      // Verify shopping list is now empty (purchased items removed)
+      const afterList = await getShoppingList.handler({}, ctx);
+      const afterListData = parseToolResult(afterList);
+      expect(afterListData.total_items).toBe(0);
+    });
+
+    it('returns error when no purchased items exist', async () => {
+      // Shopping list should be empty after the previous test
+      const result = await importShoppingToInventory.handler({}, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('No purchased items');
+    });
+
+    it('does not import unpurchased items', async () => {
+      // Add an item but do NOT mark it as purchased
+      await addToShopping.handler({ product_id: productId, qty_containers: 5 }, ctx);
+
+      const result = await importShoppingToInventory.handler({}, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('No purchased items');
+
+      // Cleanup
+      await clearShopping.handler({}, ctx);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // 24. deleteMealEntry — delete a meal plan entry
+  // -----------------------------------------------------------------------
+
+  describe('deleteMealEntry', () => {
+    const today = new Date().toISOString().slice(0, 10);
+    let testMealId: string;
+
+    it('creates a meal entry for deletion test', async () => {
+      const result = await addMeal.handler({ logical_date: today, product_id: productId, servings: 1 }, ctx);
+      const data = parseToolResult(result);
+      testMealId = data.meal.meal_id;
+      expect(testMealId).toBeTruthy();
+    });
+
+    it('deletes the meal entry successfully', async () => {
+      const result = await deleteMealEntry.handler({ meal_id: testMealId }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.message).toBe('Meal plan entry deleted');
+      expect(data.meal_id).toBe(testMealId);
+
+      // Verify it's gone
+      const planResult = await getMealPlan.handler({ start_date: today, end_date: today }, ctx);
+      const planData = parseToolResult(planResult);
+      const found = planData.entries.find((e: any) => e.meal_id === testMealId);
+      expect(found).toBeUndefined();
+    });
+
+    it('returns error for non-existent meal entry', async () => {
+      const fakeId = '00000000-0000-0000-0000-000000000000';
+      const result = await deleteMealEntry.handler({ meal_id: fakeId }, ctx);
+
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('not found');
     });
   });
 });

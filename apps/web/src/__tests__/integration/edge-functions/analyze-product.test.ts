@@ -255,6 +255,96 @@ describe('Analyze-Product Edge Function', () => {
     expect(body.off.categories).toBeTruthy();
   }, 30_000);
 
+  // ─── Response shape assertions for OFF fallback path ──────
+
+  it('real barcode returns suggestion=null and valid OFF data when no API key', async () => {
+    // Without ANTHROPIC_API_KEY configured, the edge function returns
+    // suggestion=null but still returns valid OFF data
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+      },
+      body: JSON.stringify({ barcode: '0055577421024' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe('ai');
+
+    // suggestion may be null (no ANTHROPIC_API_KEY) or an object (with key)
+    // Either way, off must be present with valid product data
+    expect(body.off).toBeDefined();
+    expect(body.off.product_name).toBeTruthy();
+    expect(body.off.nutriments).toBeDefined();
+    expect(typeof body.off.nutriments).toBe('object');
+
+    // At least one calorie field must exist
+    const n = body.off.nutriments;
+    const hasCalories = n['energy-kcal_serving'] !== undefined || n['energy-kcal_100g'] !== undefined;
+    expect(hasCalories).toBe(true);
+  }, 30_000);
+
+  it('OFF response includes serving_size and nutriments fields', async () => {
+    // Use Pringles Original (US barcode) — a well-known product with stable OFF data
+    // (different barcode from other tests to avoid existing-product detection)
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+      },
+      body: JSON.stringify({ barcode: '038000845512' }),
+    });
+
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe('ai');
+    expect(body.off).toBeDefined();
+
+    // Verify the off object has all required fields
+    expect(body.off).toHaveProperty('product_name');
+    expect(body.off).toHaveProperty('brands');
+    expect(body.off).toHaveProperty('image_url');
+    expect(body.off).toHaveProperty('categories');
+    expect(body.off).toHaveProperty('serving_size');
+    expect(body.off).toHaveProperty('nutriments');
+
+    // Verify nutriments is a populated object
+    expect(typeof body.off.nutriments).toBe('object');
+    expect(Object.keys(body.off.nutriments).length).toBeGreaterThan(0);
+
+    // Pringles should have product_name and brands
+    expect(body.off.product_name).toBeTruthy();
+    expect(body.off.brands).toMatch(/pringles/i);
+  }, 30_000);
+
+  // ─── HTTP method tests ──────────────────────────────────
+
+  it('CORS preflight returns ok', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'OPTIONS',
+    });
+    expect(res.status).toBe(200);
+    const text = await res.text();
+    expect(text).toBe('ok');
+
+    // Verify CORS headers
+    expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
+    expect(res.headers.get('Access-Control-Allow-Methods')).toContain('POST');
+    expect(res.headers.get('Access-Control-Allow-Headers')).toContain('Authorization');
+  });
+
+  it('non-POST method returns 405', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'GET',
+    });
+    expect(res.status).toBe(405);
+    const body = await res.json();
+    expect(body.error).toMatch(/method not allowed/i);
+  });
+
   // ─── Direct OpenFoodFacts API verification ───────────────
   // Verifies raw OFF data for a known barcode. Uses a single well-known
   // product to minimize rate limiting from the OFF API.

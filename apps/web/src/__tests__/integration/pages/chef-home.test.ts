@@ -399,6 +399,227 @@ describe('ChefByte HomePage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // HomePage: food_logs query for consumed items display
+  // Source: HomePage.tsx line 255-259
+  //   .from('food_logs').select('log_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+  //     .eq('user_id', userId).eq('logical_date', today)
+  // -------------------------------------------------------------------
+  it('food_logs query returns consumed items for logical_date', async () => {
+    const today = todayDate();
+    const chickenId = seeds.productMap['Chicken Breast'];
+
+    // Consume a product to generate a food_log entry
+    await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: chickenId,
+      p_qty: 1,
+      p_unit: 'container',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+
+    // Exact query from HomePage.tsx loadData() — consumed items section
+    const result = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+      .eq('user_id', ctx.userId)
+      .eq('logical_date', today);
+
+    const data = assertQuerySucceeds(result, 'food_logs consumed items');
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBeGreaterThanOrEqual(1);
+
+    const entry = data[0] as any;
+    expect(typeof entry.log_id).toBe('string');
+    expect(Number(entry.qty_consumed)).toBeGreaterThan(0);
+    expect(entry.unit).toBe('container');
+    expect(Number(entry.calories)).toBeGreaterThanOrEqual(0);
+    expect(Number(entry.protein)).toBeGreaterThanOrEqual(0);
+    expect(Number(entry.carbs)).toBeGreaterThanOrEqual(0);
+    expect(Number(entry.fat)).toBeGreaterThanOrEqual(0);
+    expect(entry.products).not.toBeNull();
+    expect(entry.products.name).toBe('Chicken Breast');
+
+    // Cleanup: delete food_logs and restore consumed stock
+    await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
+    // Restore 1 container consumed by consume_product
+    const { data: chickenLots } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id, qty_containers')
+      .eq('product_id', chickenId)
+      .eq('user_id', ctx.userId);
+    if (chickenLots?.length) {
+      await chefbyte(ctx.client)
+        .from('stock_lots')
+        .update({ qty_containers: Number((chickenLots[0] as any).qty_containers) + 1 })
+        .eq('lot_id', (chickenLots[0] as any).lot_id);
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // HomePage: temp_items query for quick-add items display
+  // Source: HomePage.tsx line 262-266
+  //   .from('temp_items').select('temp_id, name, calories, protein, carbs, fat')
+  //     .eq('user_id', userId).eq('logical_date', today)
+  // -------------------------------------------------------------------
+  it('temp_items query returns quick-add items for logical_date', async () => {
+    const today = todayDate();
+
+    // Insert a temp item
+    const insertResult = await chefbyte(ctx.client).from('temp_items').insert({
+      user_id: ctx.userId,
+      name: 'Test Quick Add',
+      logical_date: today,
+      calories: 250,
+      protein: 15,
+      carbs: 30,
+      fat: 8,
+    });
+    expect(insertResult.error).toBeNull();
+
+    // Exact query from HomePage.tsx loadData() — temp_items section
+    const result = await chefbyte(ctx.client)
+      .from('temp_items')
+      .select('temp_id, name, calories, protein, carbs, fat')
+      .eq('user_id', ctx.userId)
+      .eq('logical_date', today);
+
+    const data = assertQuerySucceeds(result, 'temp_items quick-add');
+    expect(Array.isArray(data)).toBe(true);
+    expect(data.length).toBe(1);
+
+    const entry = data[0] as any;
+    expect(typeof entry.temp_id).toBe('string');
+    expect(entry.name).toBe('Test Quick Add');
+    expect(Number(entry.calories)).toBe(250);
+    expect(Number(entry.protein)).toBe(15);
+    expect(Number(entry.carbs)).toBe(30);
+    expect(Number(entry.fat)).toBe(8);
+
+    // Cleanup
+    await chefbyte(ctx.client).from('temp_items').delete().eq('temp_id', entry.temp_id);
+  });
+
+  // -------------------------------------------------------------------
+  // HomePage: delete food_log (two-click delete)
+  // Source: HomePage.tsx deleteFoodLog()
+  //   .from('food_logs').delete().eq('log_id', logId)
+  // -------------------------------------------------------------------
+  it('delete food_log by log_id', async () => {
+    const today = todayDate();
+    const chickenId = seeds.productMap['Chicken Breast'];
+
+    // Create a food_log via consume
+    await (chefbyte(ctx.client) as any).rpc('consume_product', {
+      p_product_id: chickenId,
+      p_qty: 1,
+      p_unit: 'container',
+      p_log_macros: true,
+      p_logical_date: today,
+    });
+
+    // Get the log_id
+    const { data: logs } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('user_id', ctx.userId)
+      .eq('logical_date', today);
+    expect(logs).not.toBeNull();
+    expect(logs!.length).toBeGreaterThanOrEqual(1);
+    const logId = (logs![0] as any).log_id;
+
+    // Exact delete from HomePage.tsx deleteFoodLog()
+    const delResult = await chefbyte(ctx.client).from('food_logs').delete().eq('log_id', logId);
+    expect(delResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: verify } = await chefbyte(ctx.client).from('food_logs').select('log_id').eq('log_id', logId);
+    expect(verify).toHaveLength(0);
+
+    // Cleanup remaining food_logs and restore consumed stock
+    await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
+    const { data: chickenLots2 } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id, qty_containers')
+      .eq('product_id', chickenId)
+      .eq('user_id', ctx.userId);
+    if (chickenLots2?.length) {
+      await chefbyte(ctx.client)
+        .from('stock_lots')
+        .update({ qty_containers: Number((chickenLots2[0] as any).qty_containers) + 1 })
+        .eq('lot_id', (chickenLots2[0] as any).lot_id);
+    }
+  });
+
+  // -------------------------------------------------------------------
+  // HomePage: delete temp_item (two-click delete)
+  // Source: HomePage.tsx deleteTempItem()
+  //   .from('temp_items').delete().eq('temp_id', tempId)
+  // -------------------------------------------------------------------
+  it('delete temp_item by temp_id', async () => {
+    const today = todayDate();
+
+    // Insert a temp item
+    const { data: inserted } = await chefbyte(ctx.client)
+      .from('temp_items')
+      .insert({
+        user_id: ctx.userId,
+        name: 'Temp to Delete',
+        logical_date: today,
+        calories: 100,
+        protein: 5,
+        carbs: 10,
+        fat: 3,
+      })
+      .select('temp_id')
+      .single();
+    expect(inserted).not.toBeNull();
+    const tempId = (inserted as any).temp_id;
+
+    // Exact delete from HomePage.tsx deleteTempItem()
+    const delResult = await chefbyte(ctx.client).from('temp_items').delete().eq('temp_id', tempId);
+    expect(delResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: verify } = await chefbyte(ctx.client).from('temp_items').select('temp_id').eq('temp_id', tempId);
+    expect(verify).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------
+  // HomePage: delete meal_plan_entry (two-click delete)
+  // Source: HomePage.tsx deleteMealEntry()
+  //   .from('meal_plan_entries').delete().eq('meal_id', mealId)
+  // -------------------------------------------------------------------
+  it('delete meal_plan_entry by meal_id', async () => {
+    const today = todayDate();
+
+    // Insert a meal entry
+    const { data: meal } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: seeds.recipeId,
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(meal).not.toBeNull();
+    const mealId = (meal as any).meal_id;
+
+    // Exact delete from HomePage.tsx deleteMealEntry()
+    const delResult = await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', mealId);
+    expect(delResult.error).toBeNull();
+
+    // Verify deleted
+    const { data: verify } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .select('meal_id')
+      .eq('meal_id', mealId);
+    expect(verify).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------
   // HomePage: stock_lots query for stock availability badges
   // Source: HomePage.tsx line ~227-230
   //   .from('stock_lots').select('product_id, qty_containers').eq('user_id', userId)

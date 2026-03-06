@@ -189,6 +189,44 @@ describe('Auth lifecycle', () => {
     expect(error).toBeNull();
   });
 
+  it('forgot password request sends reset email', async () => {
+    const client = anonClient();
+    const email = `lifecycle-forgot-${crypto.randomUUID().slice(0, 8)}@test.com`;
+
+    const { data: created } = await adminClient.auth.admin.createUser({
+      email,
+      password: 'password123',
+      email_confirm: true,
+    });
+    userIds.push(created.user!.id);
+
+    // Request password reset — goes to Inbucket in local dev
+    const { error } = await client.auth.resetPasswordForEmail(email, {
+      redirectTo: 'http://localhost:5173/hub/reset-password',
+    });
+    expect(error).toBeNull();
+  });
+
+  it('login with empty email returns validation error', async () => {
+    // Login.tsx: if (!email.trim()) { setError('Email is required'); return; }
+    // The component prevents calling signInWithPassword when email is empty.
+    // Verify the Supabase client also rejects empty email if it did reach the server.
+    const client = anonClient();
+    const { error } = await client.auth.signInWithPassword({ email: '', password: 'password123' });
+    expect(error).not.toBeNull();
+  });
+
+  it('login with empty password returns validation error', async () => {
+    // Login.tsx: if (!password) { setError('Password is required'); return; }
+    // Verify the Supabase client rejects empty password if it reaches the server.
+    const client = anonClient();
+    const { error } = await client.auth.signInWithPassword({
+      email: 'test@example.com',
+      password: '',
+    });
+    expect(error).not.toBeNull();
+  });
+
   it('password update via admin: can login with new password', async () => {
     const email = `lifecycle-newpw-${crypto.randomUUID().slice(0, 8)}@test.com`;
 
