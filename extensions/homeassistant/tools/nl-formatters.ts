@@ -101,6 +101,7 @@ export function formatTvRemoteAction(
     ok: 'pressed OK',
     enter: 'pressed Enter',
     select: 'pressed Select',
+    center: 'pressed Center',
     back: 'pressed Back',
     home: 'pressed Home',
   };
@@ -113,6 +114,7 @@ export function formatTvRemoteAction(
     stop: 'stopped playback',
     next: 'skipped to the next track',
     previous: 'gone back to the previous track',
+    prev: 'gone back to the previous track',
     rewind: 'rewound',
     'fast forward': 'fast forwarded',
     ff: 'fast forwarded',

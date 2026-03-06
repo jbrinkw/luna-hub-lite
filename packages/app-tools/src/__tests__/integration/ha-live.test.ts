@@ -345,12 +345,21 @@ describe.skipIf(skip)('Home Assistant Live Integration Tests', () => {
   // tv_remote tests
   // =========================================================================
 
-  // 15. tv_remote unknown button
-  it('tv_remote errors for unknown button', async () => {
+  // 15. tv_remote unknown button passes through as raw uppercase (legacy behavior)
+  it('tv_remote passes unknown button as raw uppercase command', async () => {
+    // Legacy behavior: unknown buttons are sent as uppercase command strings to HA
+    // Without a real remote entity, HA will return an error — but it's an API error, not a client-side "Unknown button" error
     const result = await homeassistantTools.HOMEASSISTANT_tv_remote.handler({ button: 'not_a_button' }, ctx());
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toMatch(/Unknown button/i);
+    // May succeed or fail depending on HA remote entity config, but the button should be passed through
+    if (result.isError) {
+      // Error should be from HA API, not client-side validation
+      expect(result.content[0].text).not.toMatch(/Unknown button/i);
+    } else {
+      const data = parse(result);
+      expect(data.button).toBe('not_a_button');
+      expect(data.success).toBe(true);
+    }
   });
 
   // 16. tv_remote missing button

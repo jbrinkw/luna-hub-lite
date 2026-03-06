@@ -83,7 +83,14 @@ export async function resolveEntityId(
   if (isEntityId(candidate)) {
     const state = await getEntityState(creds, candidate);
     if (state) return [candidate, null];
-    // Fall through to try friendly name resolution
+    // Legacy fallback: derive a friendly-name query from the entity_id
+    // e.g. "fan.living_room" → "living room"
+    const fallbackQuery = candidate.replace(/[_.]/g, ' ').trim();
+    if (fallbackQuery) {
+      const [resolved] = await resolveEntityId(creds, fallbackQuery);
+      if (resolved) return [resolved, null];
+    }
+    return [null, `Entity '${identifier}' not found`];
   }
 
   const states = await fetchStates(creds);

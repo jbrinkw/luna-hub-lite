@@ -993,12 +993,20 @@ describe('HOMEASSISTANT_tv_remote', () => {
     expect(body.entity_id).toBe('remote.living_room_tv');
   });
 
-  it('returns error for unknown button', async () => {
-    const result = await handler({ button: 'invalid_button' }, haCtx());
+  it('passes unknown button through as raw uppercase command (legacy behavior)', async () => {
+    // Legacy: unknown buttons are sent as uppercase command strings
+    mockFetch.mockReturnValueOnce(mockFetchResponse([]));
 
-    expect(result.isError).toBe(true);
-    expect(result.content[0].text).toContain('Unknown button');
-    expect(mockFetch).not.toHaveBeenCalled();
+    const result = await handler({ button: 'power' }, haCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.success).toBe(true);
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://homeassistant.local:8123/api/services/remote/send_command');
+    const body = JSON.parse(opts.body);
+    expect(body.command).toBe('POWER');
   });
 
   it('returns toolError when credentials are missing', async () => {

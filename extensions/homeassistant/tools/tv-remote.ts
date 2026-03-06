@@ -12,6 +12,7 @@ const COMMAND_MAP: Record<string, string> = {
   ok: 'DPAD_CENTER',
   enter: 'DPAD_CENTER',
   select: 'DPAD_CENTER',
+  center: 'DPAD_CENTER',
   back: 'BACK',
   home: 'HOME',
   // Media
@@ -21,6 +22,7 @@ const COMMAND_MAP: Record<string, string> = {
   stop: 'MEDIA_STOP',
   next: 'MEDIA_NEXT',
   previous: 'MEDIA_PREVIOUS',
+  prev: 'MEDIA_PREVIOUS',
   rewind: 'MEDIA_REWIND',
   'fast forward': 'MEDIA_FAST_FORWARD',
   ff: 'MEDIA_FAST_FORWARD',
@@ -40,24 +42,25 @@ const APP_MAP: Record<string, string> = {
   'disney+': 'com.disney.disneyplus',
 };
 
-function parseIntent(button: string): { type: 'command'; command: string } | { type: 'app'; activity: string } | null {
+function parseIntent(button: string): { type: 'command'; command: string } | { type: 'app'; activity: string } {
   const b = button.toLowerCase().trim();
 
-  // Check for "open X" / "launch X" pattern
+  // Check for "open X" / "launch X" pattern — fall back to raw name if not in APP_MAP
   if (b.startsWith('open ') || b.startsWith('launch ')) {
     const appName = b.split(' ').slice(1).join(' ').trim();
-    const activity = APP_MAP[appName];
-    if (activity) return { type: 'app', activity };
-    return null;
+    return { type: 'app', activity: APP_MAP[appName] || appName };
   }
 
   // Check direct app name
   if (APP_MAP[b]) return { type: 'app', activity: APP_MAP[b] };
 
-  // Check command map
-  if (COMMAND_MAP[b]) return { type: 'command', command: COMMAND_MAP[b] };
+  // URL-like strings → treat as app activity
+  if (b.startsWith('http://') || b.startsWith('https://') || (b.includes('.') && !b.includes(' ') && !COMMAND_MAP[b])) {
+    return { type: 'app', activity: button.trim() };
+  }
 
-  return null;
+  // Check command map — fall back to raw uppercase for unknown commands
+  return { type: 'command', command: COMMAND_MAP[b] || button.trim().toUpperCase() };
 }
 
 export const HOMEASSISTANT_tv_remote: ExtensionToolDefinition = {
@@ -86,11 +89,6 @@ export const HOMEASSISTANT_tv_remote: ExtensionToolDefinition = {
     const remoteEntity = (ctx as ExtensionToolContext).credentials.ha_remote_entity_id || 'remote.living_room_tv';
 
     const intent = parseIntent(button);
-    if (!intent) {
-      return toolError(
-        `Unknown button '${button}'. Supported: navigation (up/down/left/right/ok/back/home), media (play/pause/stop/next/previous/rewind/ff), volume (mute/volume up/volume down), apps (youtube/netflix/spotify/disney).`,
-      );
-    }
 
     try {
       if (intent.type === 'command') {
