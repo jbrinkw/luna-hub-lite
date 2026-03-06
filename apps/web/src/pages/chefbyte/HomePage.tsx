@@ -88,6 +88,30 @@ export function pctOf(val: number, goal: number): number {
   return Math.min(Math.round((val / goal) * 100), 100);
 }
 
+export function computeMealEntryMacros(
+  entry: MealEntry,
+): { calories: number; protein: number; carbs: number; fat: number } | null {
+  if (entry.recipes?.recipe_ingredients) {
+    const perServing = computeRecipeMacros(entry.recipes.recipe_ingredients, 1);
+    const servings = Number(entry.servings);
+    return {
+      calories: Math.round(perServing.calories * servings),
+      protein: Math.round(perServing.protein * servings),
+      carbs: Math.round(perServing.carbs * servings),
+      fat: Math.round(perServing.fat * servings),
+    };
+  } else if (entry.products) {
+    const servings = Number(entry.servings);
+    return {
+      calories: Math.round(Number(entry.products.calories_per_serving) * servings),
+      protein: Math.round(Number(entry.products.protein_per_serving) * servings),
+      carbs: Math.round(Number(entry.products.carbs_per_serving) * servings),
+      fat: Math.round(Number(entry.products.fat_per_serving) * servings),
+    };
+  }
+  return null;
+}
+
 /* ================================================================== */
 /*  HomePage                                                           */
 /* ================================================================== */
@@ -601,6 +625,19 @@ export function HomePage() {
   const consumed = macros?.consumed ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const goals = macros?.goals ?? { ...DEFAULT_MACRO_GOALS };
 
+  // Compute planned macros from uncompleted meal entries
+  const planned = { calories: 0, protein: 0, carbs: 0, fat: 0 };
+  for (const entry of todaysMeals) {
+    if (entry.completed_at) continue;
+    const m = computeMealEntryMacros(entry);
+    if (m) {
+      planned.calories += m.calories;
+      planned.protein += m.protein;
+      planned.carbs += m.carbs;
+      planned.fat += m.fat;
+    }
+  }
+
   /* Helper: progress bar colors */
   const macroColors = {
     calories: '#1e66f5',
@@ -609,9 +646,10 @@ export function HomePage() {
     fat: '#ef4444',
   } as const;
 
-  /* Helper: inline progress bar */
+  /* Helper: inline progress bar with optional planned segment */
   const ProgressBar = ({
     value,
+    plannedValue,
     goal,
     color,
     label,
@@ -619,6 +657,7 @@ export function HomePage() {
     testId,
   }: {
     value: number;
+    plannedValue?: number;
     goal: number;
     color: string;
     label: string;
@@ -626,6 +665,7 @@ export function HomePage() {
     testId: string;
   }) => {
     const pct = pctOf(value, goal);
+    const plannedPct = plannedValue ? Math.min(pctOf(value + plannedValue, goal), 100) : 0;
     return (
       <div
         data-testid={testId}
@@ -644,10 +684,25 @@ export function HomePage() {
             borderRadius: '4px',
             overflow: 'hidden',
             marginBottom: '4px',
+            position: 'relative',
           }}
         >
+          {plannedPct > pct && (
+            <div
+              data-testid={`${testId}-planned`}
+              style={{
+                position: 'absolute',
+                width: `${plannedPct}%`,
+                height: '100%',
+                background: color,
+                opacity: 0.3,
+                borderRadius: '4px',
+              }}
+            />
+          )}
           <div
             style={{
+              position: 'relative',
               width: `${pct}%`,
               height: '100%',
               background: color,
@@ -657,7 +712,8 @@ export function HomePage() {
           />
         </div>
         <div style={{ fontSize: '13px', color: '#555' }}>
-          {Math.round(value)} / {goal}
+          {Math.round(value)}
+          {plannedValue ? ` + ${Math.round(plannedValue)} planned` : ''} / {goal}
           {unit}
         </div>
       </div>
@@ -751,6 +807,7 @@ export function HomePage() {
               testId="compact-calories"
               label="Calories"
               value={consumed.calories}
+              plannedValue={planned.calories}
               goal={goals.calories}
               color={macroColors.calories}
               unit=""
@@ -759,6 +816,7 @@ export function HomePage() {
               testId="compact-protein"
               label="Protein"
               value={consumed.protein}
+              plannedValue={planned.protein}
               goal={goals.protein}
               color={macroColors.protein}
               unit="g"
@@ -767,6 +825,7 @@ export function HomePage() {
               testId="compact-carbs"
               label="Carbs"
               value={consumed.carbs}
+              plannedValue={planned.carbs}
               goal={goals.carbs}
               color={macroColors.carbs}
               unit="g"
@@ -775,6 +834,7 @@ export function HomePage() {
               testId="compact-fats"
               label="Fats"
               value={consumed.fat}
+              plannedValue={planned.fat}
               goal={goals.fat}
               color={macroColors.fat}
               unit="g"
@@ -1088,26 +1148,7 @@ export function HomePage() {
                 }
               }
 
-              // Calculate per-serving macros for this meal entry
-              let mealMacros: { calories: number; protein: number; carbs: number; fat: number } | null = null;
-              if (entry.recipes?.recipe_ingredients) {
-                const perServing = computeRecipeMacros(entry.recipes.recipe_ingredients, 1);
-                const servings = Number(entry.servings);
-                mealMacros = {
-                  calories: Math.round(perServing.calories * servings),
-                  protein: Math.round(perServing.protein * servings),
-                  carbs: Math.round(perServing.carbs * servings),
-                  fat: Math.round(perServing.fat * servings),
-                };
-              } else if (entry.products) {
-                const servings = Number(entry.servings);
-                mealMacros = {
-                  calories: Math.round(Number(entry.products.calories_per_serving) * servings),
-                  protein: Math.round(Number(entry.products.protein_per_serving) * servings),
-                  carbs: Math.round(Number(entry.products.carbs_per_serving) * servings),
-                  fat: Math.round(Number(entry.products.fat_per_serving) * servings),
-                };
-              }
+              const mealMacros = computeMealEntryMacros(entry);
 
               return (
                 <div
