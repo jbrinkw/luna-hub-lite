@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 
 interface CoachLayoutProps {
   title: string;
@@ -22,6 +23,7 @@ function isTabActive(tabTo: string, pathname: string): boolean {
 
 export function CoachLayout({ children }: CoachLayoutProps) {
   const { signOut } = useAuth();
+  const { online } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -99,8 +101,17 @@ export function CoachLayout({ children }: CoachLayoutProps) {
         )}
       </div>
 
+      {/* Offline banner */}
+      {!online && (
+        <div className="offline-banner" data-testid="offline-banner">
+          You are offline — actions are disabled until connection is restored.
+        </div>
+      )}
+
       {/* Content */}
-      <div className="coach-content">{children}</div>
+      <div className="coach-content" style={online ? undefined : { pointerEvents: 'none', opacity: 0.6 }}>
+        {children}
+      </div>
     </div>
   );
 }
