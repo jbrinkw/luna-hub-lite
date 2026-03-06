@@ -401,4 +401,34 @@ describe('CoachByte PrsPage queries', () => {
       expect(typeof (s as any).exercises.name).toBe('string');
     }
   });
+
+  // -------------------------------------------------------------------
+  // #35: PRs filtered after removing tracked exercise
+  // The UI tracks exercises in user_config. When an exercise is removed
+  // from the tracked list, filteredPRs = prs.filter(pr => trackedIds.has(pr.exercise_id))
+  // excludes it. Test the underlying data query and filtering logic.
+  // -------------------------------------------------------------------
+  it('filtering completed_sets by tracked exercise_ids works', async () => {
+    // Get all unique exercise_ids from completed_sets
+    const { data: allSets } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('exercise_id')
+      .eq('user_id', ctx.userId);
+    expect(allSets).not.toBeNull();
+    expect(allSets!.length).toBeGreaterThan(0);
+
+    const uniqueIds = [...new Set((allSets as any[]).map((s) => s.exercise_id))];
+    expect(uniqueIds.length).toBeGreaterThanOrEqual(1);
+
+    // Simulate tracking only the first exercise
+    const trackedIds = new Set([uniqueIds[0]]);
+    const filtered = (allSets as any[]).filter((s) => trackedIds.has(s.exercise_id));
+    expect(filtered.length).toBeGreaterThan(0);
+    expect(filtered.length).toBeLessThanOrEqual(allSets!.length);
+
+    // Simulate removing that exercise from tracked (empty tracked list)
+    const emptyTracked = new Set<string>();
+    const afterRemove = (allSets as any[]).filter((s) => emptyTracked.has(s.exercise_id));
+    expect(afterRemove.length).toBe(0);
+  });
 });

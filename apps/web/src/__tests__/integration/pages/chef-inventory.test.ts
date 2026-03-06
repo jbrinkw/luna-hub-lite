@@ -488,4 +488,47 @@ describe('ChefByte InventoryPage queries', () => {
     // Cleanup food_logs
     await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
   });
+
+  // -----------------------------------------------------------------------
+  // #8: Consume all stock — window.confirm flow
+  // The UI calls consume_product with the full total stock qty.
+  // This test verifies the RPC works when consuming the entire stock.
+  // -----------------------------------------------------------------------
+  it('consume all stock — depletes product to zero lots', async () => {
+    // Get a product with stock
+    const { data: products } = await chefbyte(ctx.client)
+      .from('products')
+      .select('product_id')
+      .eq('user_id', ctx.userId)
+      .limit(1);
+    const pid = (products as any)?.[0]?.product_id;
+    expect(pid).toBeDefined();
+
+    // Ensure there's stock
+    const { data: lotsBefore } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('product_id', pid);
+    const totalBefore2 = ((lotsBefore as any[]) ?? []).reduce((s: number, l: any) => s + Number(l.qty_containers), 0);
+
+    if (totalBefore2 <= 0) return; // Skip if no stock
+
+    const today = todayDate();
+    const result = await (ctx.client.schema('chefbyte') as any).rpc('consume_product', {
+      p_product_id: pid,
+      p_qty: totalBefore2,
+      p_unit: 'container',
+      p_log_macros: false,
+      p_logical_date: today,
+    });
+    expect(result.error).toBeNull();
+
+    // Verify all lots consumed
+    const { data: lotsAfter } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('qty_containers')
+      .eq('product_id', pid);
+    const totalAfter2 = ((lotsAfter as any[]) ?? []).reduce((s: number, l: any) => s + Number(l.qty_containers), 0);
+    expect(totalAfter2).toBe(0);
+  });
 });

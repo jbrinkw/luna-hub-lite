@@ -319,4 +319,26 @@ describe('CoachByte HistoryPage queries', () => {
     expect(planIds!.length).toBeGreaterThan(0);
     expect(typeof planIds![0].plan_id).toBe('string');
   });
+
+  // -------------------------------------------------------------------
+  // #33: History toggle collapse — click View Details, then click Hide
+  // The UI toggles expandedPlan state and queries completed_sets for
+  // the clicked plan_id. Verify the detail query returns data.
+  // -------------------------------------------------------------------
+  it('plan detail query returns completed_sets for expand/collapse', async () => {
+    // Expand: query completed_sets for a specific plan_id
+    const { data: detail } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('completed_set_id, exercise_id, actual_reps, actual_load')
+      .eq('plan_id', planId)
+      .eq('user_id', ctx.userId);
+
+    expect(detail).not.toBeNull();
+    expect(detail!.length).toBeGreaterThan(0);
+
+    // Collapse is pure UI state (expandedPlan = null), no query needed
+    // The point is the query works both ways — data is available for expand
+    expect(detail![0].completed_set_id).toBeDefined();
+    expect(detail![0].actual_reps).toBeDefined();
+  });
 });
