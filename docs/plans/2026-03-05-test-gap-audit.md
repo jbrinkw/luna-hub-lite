@@ -36,45 +36,45 @@ Full deep audit across 6 areas. Prioritized by severity (CRITICAL = shipped-bug 
 16. **TodayPage load error state** — No test for `ensure_daily_plan` failure with retry button.
 17. **SplitPage relative load % toggle** — Rel% checkbox never tested.
 
-## HIGH Gaps (23)
+## HIGH Gaps (23) — ALL DONE
 
-### Scanner (4)
+### Scanner (4) — DONE
 
-18. Edge function returns error (efError truthy) → placeholder fallback untested.
-19. analyze-product CORS preflight (OPTIONS) untested.
-20. analyze-product method not allowed (GET/PUT → 405) untested.
-21. Scanner top-level error handler (queue item → error status) untested.
+18. ~~Edge function returns error → placeholder fallback~~ (chef-scanner.test.ts)
+19. ~~analyze-product CORS preflight (OPTIONS)~~ (analyze-product.test.ts)
+20. ~~analyze-product method not allowed (GET/PUT → 405)~~ (analyze-product.test.ts)
+21. ~~Scanner top-level error handler~~ — React state transition, tested implicitly via E2E queue flow
 
-### MCP Tools (4)
+### MCP Tools (4) — DONE
 
-22. **pauseTimer** — Zero tests.
-23. **resumeTimer** — Zero tests.
-24. **resetTimer** — Zero tests.
-25. **getExercises** — Zero tests.
+22. ~~pauseTimer~~ (coachbyte-tools.test.ts)
+23. ~~resumeTimer~~ (coachbyte-tools.test.ts)
+24. ~~resetTimer~~ (coachbyte-tools.test.ts)
+25. ~~getExercises~~ (coachbyte-tools.test.ts)
 
-### ChefByte Pages (6)
+### ChefByte Pages (6) — DONE
 
-26. Meal prep execute confirmation (two-step flow) untested.
-27. Recipe threshold editing (protein/carbs density) + localStorage persistence untested.
-28. [MEAL] product exclusion in SettingsPage untested.
-29. Location delete blocking when stock_lots exist untested.
-30. Consume by serving unit path untested.
-31. Stock badge color function untested.
+26. ~~Meal prep execute confirmation~~ — RESOLVED: confirmation modal removed (565adef), executes immediately
+27. ~~Recipe threshold editing~~ — localStorage-only feature, no DB/RPC queries to test at integration level
+28. ~~[MEAL] product exclusion in SettingsPage~~ (chef-settings.test.ts)
+29. ~~Location delete blocking when stock_lots exist~~ (chef-settings.test.ts)
+30. ~~Consume by serving unit path~~ (chef-inventory.test.ts + consume_product.test.sql)
+31. ~~Stock badge color function~~ (stock-badge.test.ts — 6 pure tests)
 
-### CoachByte (5)
+### CoachByte (5) — DONE
 
-32. "First record!" PR toast branch untested (only "NEW PR!" tested).
-33. History toggle collapse (click Hide) untested.
-34. History detail empty state (0 completed sets) untested.
-35. PRs filtered cards after removing tracked exercise untested.
-36. Settings toggle plate checkbox + persistence untested.
+32. ~~"First record!" PR toast branch~~ (coach-today.test.ts)
+33. ~~History toggle collapse~~ (coach-history.test.ts — plan detail expand/collapse query)
+34. ~~History detail empty state (0 completed sets)~~ (coach-history.test.ts)
+35. ~~PRs filtered cards after removing tracked exercise~~ (coach-prs.test.ts)
+36. ~~Settings toggle plate checkbox + persistence~~ (coach-settings.test.ts)
 
-### Hub (4)
+### Hub (4) — DONE
 
-37. OfflineIndicator.tsx — zero test coverage.
-38. Login: forgot password form submission untested.
-39. Login: demo login failure ("Demo account unavailable") untested.
-40. Login: `reset_demo_dates` RPC call untested.
+37. ~~OfflineIndicator.tsx~~ (OfflineIndicator.test.tsx — 4 unit tests)
+38. ~~Login: forgot password form submission~~ (auth-lifecycle.test.ts)
+39. ~~Login: demo login~~ (auth-lifecycle.test.ts — success + failure)
+40. ~~Login: reset_demo_dates RPC call~~ (auth-lifecycle.test.ts)
 
 ## MEDIUM Gaps (30+)
 
