@@ -32,6 +32,14 @@ export function RestTimer({
   const [remaining, setRemaining] = useState(0);
   const [customDuration, setCustomDuration] = useState('');
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const stateRef = useRef(state);
+  const endTimeRef = useRef(endTime);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+  useEffect(() => {
+    endTimeRef.current = endTime;
+  }, [endTime]);
 
   const clearTimer = useCallback(() => {
     if (intervalRef.current) {
@@ -72,13 +80,14 @@ export function RestTimer({
 
   useEffect(() => {
     const handleVisibility = () => {
-      if (!document.hidden && state === 'running' && endTime) {
-        setRemaining(calcRemaining());
+      if (!document.hidden && stateRef.current === 'running' && endTimeRef.current) {
+        const r = Math.max(0, Math.ceil((new Date(endTimeRef.current).getTime() - Date.now()) / 1000));
+        setRemaining(r);
       }
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
-  }, [state, endTime, calcRemaining]);
+  }, []);
 
   const handleCustomStart = () => {
     const secs = parseInt(customDuration, 10);

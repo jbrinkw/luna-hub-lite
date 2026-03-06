@@ -190,6 +190,29 @@ Deno.serve(async (req) => {
     // Normalize with Claude Haiku 4.5
     const suggestion = await normalizeWithAI(offProduct);
 
+    // Validate required fields in AI response before returning
+    if (suggestion) {
+      const required = ['name', 'calories_per_serving', 'protein_per_serving', 'carbs_per_serving', 'fat_per_serving'];
+      const missing = required.filter((k) => suggestion[k] == null);
+      if (missing.length > 0) {
+        console.warn('AI response missing fields:', missing, suggestion);
+        return jsonResponse({ error: 'AI could not parse product data — enter manually' }, 422);
+      }
+      // Ensure numeric fields are numbers
+      for (const k of [
+        'calories_per_serving',
+        'protein_per_serving',
+        'carbs_per_serving',
+        'fat_per_serving',
+        'servings_per_container',
+      ]) {
+        if (suggestion[k] != null) suggestion[k] = Number(suggestion[k]) || 0;
+      }
+      if (!suggestion.servings_per_container || suggestion.servings_per_container < 1) {
+        suggestion.servings_per_container = 1;
+      }
+    }
+
     return jsonResponse({
       source: 'ai',
       suggestion,

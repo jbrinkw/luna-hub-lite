@@ -11,7 +11,9 @@ interface ActivationGuardProps {
 export function ActivationGuard({ appName, children }: ActivationGuardProps) {
   const { activations, activationsLoading } = useAppContext();
 
-  if (activationsLoading) return null;
+  if (activationsLoading) {
+    return <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>Loading...</div>;
+  }
 
   if (!activations[appName]) {
     return <Navigate to="/hub/apps" replace />;

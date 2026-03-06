@@ -31,10 +31,10 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 | M7  | pgTAP       | Missing error/invalid input tests for get_logical_date, ensure_daily_plan, consume_product    | logical_date.test.sql, ensure_daily_plan.test.sql, consume_product.test.sql        | OPEN   |
 | M8  | Integration | reset_demo_dates test passes whether function exists or not                                   | auth-lifecycle.test.ts:285-306                                                     | OPEN   |
 | M9  | Integration | API key auth not round-trip tested — hash stored but no test plaintext authenticates          | api-key-lifecycle.test.ts                                                          | OPEN   |
-| M10 | Source      | Dead WalmartPage.tsx — just a Navigate redirect                                               | WalmartPage.tsx                                                                    | OPEN   |
+| M10 | Source      | Dead WalmartPage.tsx — just a Navigate redirect                                               | WalmartPage.tsx                                                                    | DONE   |
 | M11 | Integration | chef-home unmark_meal_done doesn't verify food_logs restored                                  | chef-home.test.ts:232-277                                                          | OPEN   |
 | M12 | Integration | analyze-product quota test doesn't verify daily reset logic                                   | analyze-product.test.ts:118-144                                                    | OPEN   |
-| M13 | Source      | Edge function analyze-product doesn't validate Claude response before DB insert               | analyze-product/index.ts                                                           | OPEN   |
+| M13 | Source      | Edge function analyze-product doesn't validate Claude response before DB insert               | analyze-product/index.ts                                                           | DONE   |
 
 ## LOW Priority
 
@@ -65,9 +65,9 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 
 | #   | Layer     | Issue                                                                                          | Files                                                                    | Status |
 | --- | --------- | ---------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------ | ------ |
-| H8  | Schema    | Missing NOT NULL on products macro columns (calories/protein/carbs/fat/servings_per_container) | 20260303040000_chefbyte_tables.sql:25-29                                 | OPEN   |
-| H9  | Schema    | Missing NOT NULL on recipes.base_servings and meal_plan_entries.servings                       | 20260303040000_chefbyte_tables.sql:54,79                                 | OPEN   |
-| H10 | Schema    | Missing index on completed_sets(user_id, exercise_id) for PR lookup                            | 20260303030435_coachbyte_functions.sql                                   | OPEN   |
+| H8  | Schema    | Missing NOT NULL on products macro columns (calories/protein/carbs/fat/servings_per_container) | 20260303040000_chefbyte_tables.sql:25-29                                 | DONE   |
+| H9  | Schema    | Missing NOT NULL on recipes.base_servings and meal_plan_entries.servings                       | 20260303040000_chefbyte_tables.sql:54,79                                 | DONE   |
+| H10 | Schema    | Missing index on completed_sets(user_id, exercise_id) for PR lookup                            | 20260303030435_coachbyte_functions.sql                                   | DONE   |
 | H11 | Routing   | Link to non-existent /chef/recipes/finder route — navigates to 404                             | RecipesPage.tsx:310                                                      | DONE   |
 | H12 | Source    | dayStartHour never passed to todayStr() — all pages use calendar day instead of logical day    | dates.ts + all page callers (HomePage, InventoryPage, ScannerPage, etc.) | DONE   |
 | H13 | Source    | AppProvider silently fails loadActivations — user locked out of apps if DB query fails         | AppProvider.tsx:32-47                                                    | DONE   |
@@ -81,9 +81,9 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 
 | #   | Layer  | Issue                                                                                              | Files                                      | Status |
 | --- | ------ | -------------------------------------------------------------------------------------------------- | ------------------------------------------ | ------ |
-| M14 | Schema | Missing CHECK constraints on liquidtrack_events weight columns                                     | 20260303040000_chefbyte_tables.sql:138-152 | OPEN   |
-| M15 | Source | ActivationGuard returns null during loading — causes blank screen + remount                        | ActivationGuard.tsx:14                     | OPEN   |
-| M16 | Source | RestTimer stale closure in visibilitychange handler — timer may not sync on tab refocus            | RestTimer.tsx:73-81                        | OPEN   |
+| M14 | Schema | Missing CHECK constraints on liquidtrack_events weight columns                                     | 20260303040000_chefbyte_tables.sql:138-152 | DONE   |
+| M15 | Source | ActivationGuard returns null during loading — causes blank screen + remount                        | ActivationGuard.tsx:14                     | DONE   |
+| M16 | Source | RestTimer stale closure in visibilitychange handler — timer may not sync on tab refocus            | RestTimer.tsx:73-81                        | DONE   |
 | M17 | Source | AuthProvider getSession + onAuthStateChange race — redundant state updates on init                 | AuthProvider.tsx:31-59                     | OPEN   |
 | M18 | MCP    | SSE reconnection race condition — messages lost during controller swap                             | session.ts:67-83                           | OPEN   |
 | M19 | MCP    | Unknown tool returns jsonRpcSuccess with isError instead of jsonRpcError — JSON-RPC spec violation | session.ts:179                             | DONE   |
@@ -95,7 +95,7 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 | --- | --------- | ---------------------------------------------------------------------------------------- | -------------------------------------------- | ------ |
 | L17 | Seed      | recipe_ingredients.note column inconsistently seeded (some NULL, some text)              | seed.sql:242-275                             | OPEN   |
 | L18 | Source    | ModalOverlay missing focus trap for accessibility                                        | ModalOverlay.tsx:17-78                       | OPEN   |
-| L19 | Source    | useSettingsAlerts ignores Supabase errors — alerts silently disappear on query failure   | useSettingsAlerts.ts:12-38                   | OPEN   |
+| L19 | Source    | useSettingsAlerts ignores Supabase errors — alerts silently disappear on query failure   | useSettingsAlerts.ts:12-38                   | DONE   |
 | L20 | Source    | useScannerDetection inefficient memoization — unnecessary event listener re-registration | useScannerDetection.ts:40-47                 | OPEN   |
 | L21 | App-tools | Todoist tools hardcode API URL in 4 files instead of shared constant                     | extensions/todoist/tools/\*.ts               | OPEN   |
 | L22 | App-tools | Extension error responses discard API response body details                              | extensions/homeassistant/tools/\*.ts         | OPEN   |

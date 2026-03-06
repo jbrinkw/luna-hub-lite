@@ -8,7 +8,7 @@ import {
   type ChefByteSeeds,
 } from './helpers';
 
-describe('ChefByte WalmartPage queries', () => {
+describe('ChefByte WalmartTab queries', () => {
   let ctx: PageTestContext;
   let seeds: ChefByteSeeds;
 
@@ -22,7 +22,7 @@ describe('ChefByte WalmartPage queries', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Exact query from WalmartPage.tsx line 48-53 (missing walmart links)
+  // Exact query from WalmartTab.tsx (missing walmart links)
   // -----------------------------------------------------------------------
   it('missing walmart links query matches page pattern', async () => {
     const result = await chefbyte(ctx.client)
@@ -44,7 +44,7 @@ describe('ChefByte WalmartPage queries', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Exact query from WalmartPage.tsx line 65-70 (missing prices)
+  // Exact query from WalmartTab.tsx (missing prices)
   // -----------------------------------------------------------------------
   it('missing prices query matches page pattern', async () => {
     // Initially no products have walmart_link set, so this should return empty
@@ -60,7 +60,7 @@ describe('ChefByte WalmartPage queries', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Exact update from WalmartPage.tsx line 94-97 (markNotOnWalmart)
+  // Exact update from WalmartTab.tsx (markNotOnWalmart)
   // -----------------------------------------------------------------------
   it('markNotOnWalmart update matches page pattern', async () => {
     const productId = seeds.productMap['Bananas'];
@@ -122,7 +122,7 @@ describe('ChefByte WalmartPage queries', () => {
   });
 
   // -----------------------------------------------------------------------
-  // Exact update from WalmartPage.tsx line 105-108 (savePrice)
+  // Exact update from WalmartTab.tsx (savePrice)
   // -----------------------------------------------------------------------
   it('savePrice update matches page pattern', async () => {
     const productId = seeds.productMap['Chicken Breast'];
