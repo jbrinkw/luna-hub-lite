@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(7);
+SELECT plan(9);
 
 -- Test 1: Afternoon → same date
 SELECT is(
@@ -81,6 +81,31 @@ SELECT is(
   ),
   '2026-03-07'::date,
   'DST spring-forward: 3:30am EDT (after jump) with day_start=6 returns Mar 7'
+);
+
+-- Test 8: DST fall-back boundary — 2026-11-01 America/New_York
+-- Clocks fall back at 2am → 1am. At 1:30am EDT (first occurrence, UTC 05:30)
+-- with day_start=6, local time 1:30am < 6 → previous logical date (Oct 31)
+SELECT is(
+  private.get_logical_date(
+    '2026-11-01 05:30:00+00'::timestamptz,
+    'America/New_York',
+    6
+  ),
+  '2026-10-31'::date,
+  'DST fall-back: 1:30am EDT (before clocks change) with day_start=6 returns Oct 31'
+);
+
+-- Test 9: DST fall-back — after clocks change back (second 1:30am EST = UTC 06:30)
+-- Still 1:30am local (now EST), still < 6 → previous logical date (Oct 31)
+SELECT is(
+  private.get_logical_date(
+    '2026-11-01 06:30:00+00'::timestamptz,
+    'America/New_York',
+    6
+  ),
+  '2026-10-31'::date,
+  'DST fall-back: 1:30am EST (after clocks change) with day_start=6 returns Oct 31'
 );
 
 SELECT * FROM finish();
