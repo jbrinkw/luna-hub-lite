@@ -30,10 +30,18 @@ describe('computeMealEntryMacros', () => {
       },
     } as any;
 
+    // computeRecipeMacros(ingredients, baseServings=1):
+    //   multiplier = qty(2) × servings_per_container(1) = 2
+    //   perServing = (200cal, 20p, 40c, 10f) / 1 = (200, 20, 40, 10)
+    // computeMealEntryMacros multiplies by entry.servings(2):
+    //   Final = (400, 40, 80, 20)
     const result = computeMealEntryMacros(entry);
-    expect(result).not.toBeNull();
-    expect(result!.calories).toBeGreaterThan(0);
-    expect(result!.protein).toBeGreaterThan(0);
+    expect(result).toEqual({
+      calories: 400,
+      protein: 40,
+      carbs: 80,
+      fat: 20,
+    });
   });
 
   it('computes macros from product (no recipe)', () => {

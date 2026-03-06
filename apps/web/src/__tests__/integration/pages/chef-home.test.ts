@@ -253,6 +253,16 @@ describe('ChefByte HomePage queries', () => {
     });
     expect(markResult.success).toBe(true);
 
+    // Verify food_logs were created by mark_meal_done (tagged with meal_id)
+    const { data: logsAfterMark } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id, meal_id, calories, protein, carbs, fat')
+      .eq('user_id', ctx.userId)
+      .eq('meal_id', meal!.meal_id);
+    expect(logsAfterMark).not.toBeNull();
+    expect(logsAfterMark!.length).toBeGreaterThanOrEqual(1);
+    const logCountBeforeUnmark = logsAfterMark!.length;
+
     // Exact RPC call from HomePage.tsx unmarkMealDone()
     const { data: undoResult, error: undoErr } = await (chefbyte(ctx.client) as any).rpc('unmark_meal_done', {
       p_meal_id: meal!.meal_id,
@@ -261,7 +271,16 @@ describe('ChefByte HomePage queries', () => {
     expect(undoResult).not.toBeNull();
     expect(undoResult.success).toBe(true);
     expect(typeof undoResult.deleted_logs).toBe('number');
+    expect(undoResult.deleted_logs).toBe(logCountBeforeUnmark);
     expect(typeof undoResult.restored_stock).toBe('number');
+
+    // Verify food_logs for this meal were actually deleted
+    const { data: logsAfterUnmark } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('user_id', ctx.userId)
+      .eq('meal_id', meal!.meal_id);
+    expect(logsAfterUnmark).toHaveLength(0);
 
     // Verify meal is uncompleted
     const { data: verify } = await chefbyte(ctx.client)

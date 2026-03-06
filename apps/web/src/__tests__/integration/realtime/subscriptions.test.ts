@@ -12,6 +12,19 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { createTestUser, cleanupUser } from '../../test-helpers';
 
+/** Wait for a channel to reach SUBSCRIBED status, resolved via event callback. */
+function waitForSubscription(channel: any, timeoutMs = 10_000): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('Subscribe timeout')), timeoutMs);
+    channel.subscribe((status: string) => {
+      if (status === 'SUBSCRIBED') {
+        clearTimeout(timer);
+        resolve(status);
+      }
+    });
+  });
+}
+
 describe('Realtime Subscriptions', () => {
   let userId: string;
   let userClient: any;
@@ -29,15 +42,7 @@ describe('Realtime Subscriptions', () => {
 
   it('subscribes to a channel successfully', async () => {
     const channel = userClient.channel('test-subscribe');
-    const status = await new Promise<string>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Subscribe timeout')), 10_000);
-      channel.subscribe((status: string) => {
-        if (status === 'SUBSCRIBED') {
-          clearTimeout(timeout);
-          resolve(status);
-        }
-      });
-    });
+    const status = await waitForSubscription(channel);
     expect(status).toBe('SUBSCRIBED');
     userClient.removeChannel(channel);
   });
@@ -45,37 +50,38 @@ describe('Realtime Subscriptions', () => {
   it('delivers broadcast events between channels', async () => {
     const userB = await createTestUser('rt-bcast');
 
+    // Set up receiver channel for user A
+    const receiverChannel = userClient.channel('broadcast-test', {
+      config: { broadcast: { self: false } },
+    });
+
+    // Promise that resolves when the broadcast event is received
     const receivedEvent = new Promise<any>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Broadcast timeout')), 10_000);
-      userClient
-        .channel('broadcast-test', { config: { broadcast: { self: false } } })
-        .on('broadcast', { event: 'test-event' }, (payload: any) => {
-          clearTimeout(timeout);
-          resolve(payload);
-        })
-        .subscribe(async (status: string) => {
-          if (status === 'SUBSCRIBED') {
-            // Give the subscription time to register
-            await new Promise((r) => setTimeout(r, 1000));
-            // Send broadcast from user B on the same channel
-            const channelB = userB.client.channel('broadcast-test').subscribe(async (s: string) => {
-              if (s === 'SUBSCRIBED') {
-                await channelB.send({
-                  type: 'broadcast',
-                  event: 'test-event',
-                  payload: { message: 'hello from B', ts: Date.now() },
-                });
-              }
-            });
-          }
-        });
+      const timer = setTimeout(() => reject(new Error('Broadcast receive timeout')), 10_000);
+      receiverChannel.on('broadcast', { event: 'test-event' }, (payload: any) => {
+        clearTimeout(timer);
+        resolve(payload);
+      });
+    });
+
+    // Subscribe receiver and wait for SUBSCRIBED status via event callback
+    await waitForSubscription(receiverChannel);
+
+    // Now that receiver is subscribed, set up sender on the same channel.
+    // Subscribe sender and wait for SUBSCRIBED, then send — no setTimeout needed.
+    const senderChannel = userB.client.channel('broadcast-test');
+    await waitForSubscription(senderChannel);
+    await senderChannel.send({
+      type: 'broadcast',
+      event: 'test-event',
+      payload: { message: 'hello from B', ts: Date.now() },
     });
 
     const event = await receivedEvent;
     expect(event.payload.message).toBe('hello from B');
     expect(event.payload.ts).toBeGreaterThan(0);
 
-    userClient.removeChannel(userClient.channel('broadcast-test'));
+    userClient.removeChannel(receiverChannel);
     userB.client.removeAllChannels();
     await cleanupUser(userB.userId);
   }, 15_000);
@@ -87,43 +93,27 @@ describe('Realtime Subscriptions', () => {
       config: { presence: { key: userId } },
     });
 
+    // Promise that resolves when user B's join event is detected
     const presenceJoin = new Promise<any>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Presence timeout')), 10_000);
+      const timer = setTimeout(() => reject(new Error('Presence join timeout')), 10_000);
       channel.on('presence', { event: 'join' }, (payload: any) => {
-        // Look for user B's join
         if (payload.newPresences?.some((p: any) => p.role === 'user-b')) {
-          clearTimeout(timeout);
+          clearTimeout(timer);
           resolve(payload);
         }
       });
     });
 
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Subscribe timeout')), 10_000);
-      channel.subscribe(async (status: string) => {
-        if (status === 'SUBSCRIBED') {
-          clearTimeout(timeout);
-          // Track user A's presence
-          await channel.track({ role: 'user-a' });
-          resolve();
-        }
-      });
-    });
+    // Subscribe user A and track presence via event callback
+    await waitForSubscription(channel);
+    await channel.track({ role: 'user-a' });
 
-    // User B joins the same channel
+    // Subscribe user B and track presence via event callback
     const channelB = userB.client.channel('presence-test', {
       config: { presence: { key: userB.userId } },
     });
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('B subscribe timeout')), 10_000);
-      channelB.subscribe(async (status: string) => {
-        if (status === 'SUBSCRIBED') {
-          clearTimeout(timeout);
-          await channelB.track({ role: 'user-b' });
-          resolve();
-        }
-      });
-    });
+    await waitForSubscription(channelB);
+    await channelB.track({ role: 'user-b' });
 
     const joinEvent = await presenceJoin;
     expect(joinEvent.newPresences).toBeDefined();

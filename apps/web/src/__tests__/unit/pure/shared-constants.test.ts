@@ -16,9 +16,18 @@ describe('DEFAULT_MACRO_GOALS', () => {
     expect(DEFAULT_MACRO_GOALS.fat).toBe(65);
   });
 
-  it('uses "fat" not "fats"', () => {
-    expect(DEFAULT_MACRO_GOALS).not.toHaveProperty('fats');
-    expect(DEFAULT_MACRO_GOALS).toHaveProperty('fat');
+  it('calories ≈ 4-4-9 macro sum (within 10%)', () => {
+    const computed = DEFAULT_MACRO_GOALS.protein * 4 + DEFAULT_MACRO_GOALS.carbs * 4 + DEFAULT_MACRO_GOALS.fat * 9;
+    const ratio = DEFAULT_MACRO_GOALS.calories / computed;
+    expect(ratio).toBeGreaterThan(0.9);
+    expect(ratio).toBeLessThan(1.1);
+  });
+
+  it('all macro values are positive integers', () => {
+    for (const val of Object.values(DEFAULT_MACRO_GOALS)) {
+      expect(val).toBeGreaterThan(0);
+      expect(Number.isInteger(val)).toBe(true);
+    }
   });
 });
 

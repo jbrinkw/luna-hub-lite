@@ -189,13 +189,29 @@ describe('MCP Worker E2E', () => {
 
   // ─── Test 6: Unknown tool returns error ───────────────────────────────
 
-  it('tools/call with unknown tool returns isError result', async () => {
-    const result = await client.callTool('FAKE_NONEXISTENT_TOOL', {});
+  it('tools/call with unknown tool returns JSON-RPC error', async () => {
+    await expect(client.callTool('FAKE_NONEXISTENT_TOOL', {})).rejects.toThrow(/unknown tool/i);
+  });
 
+  // ─── Test 6b: Invalid arguments returns validation error ──────────────
+
+  it('tools/call with invalid arguments returns validation error', async () => {
+    // CHEFBYTE_create_product requires 'name' (string) — pass a number instead
+    const result = await client.callTool('CHEFBYTE_create_product', {
+      name: 12345,
+      calories_per_serving: 200,
+    });
     expect(result.isError).toBe(true);
-    expect(result.content).toBeInstanceOf(Array);
-    expect(result.content.length).toBeGreaterThan(0);
-    expect(result.content[0].text).toMatch(/unknown tool/i);
+    expect(result.content[0].text).toMatch(/must be a string/i);
+  });
+
+  it('tools/call with missing required argument returns validation error', async () => {
+    // CHEFBYTE_create_product requires 'name' — omit it
+    const result = await client.callTool('CHEFBYTE_create_product', {
+      calories_per_serving: 200,
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/missing required/i);
   });
 
   // ─── Test 7: CHEFBYTE_create_product end-to-end ───────────────────────

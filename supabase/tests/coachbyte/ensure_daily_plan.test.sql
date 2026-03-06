@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(29);
+SELECT plan(32);
 
 -- Setup
 SELECT tests.create_supabase_user('edp_user');
@@ -398,8 +398,47 @@ SELECT is(
   'Squat load is 240 (0-rep set at 500lb excluded from PR calculation)'
 );
 
+------------------------------------------------------------
+-- TEST 30: Non-existent user (no profile) — should still
+-- succeed because COALESCE provides defaults for missing profile
+------------------------------------------------------------
+SELECT tests.create_supabase_user('edp_ghost');
+SELECT tests.authenticate_as('edp_ghost');
+SELECT hub.activate_app('coachbyte');
+
+-- edp_ghost has a profile (created by activate_app), but delete it
+-- to simulate a user with no profile row
+DELETE FROM hub.profiles WHERE user_id = tests.get_supabase_uid('edp_ghost');
+
+SELECT lives_ok(
+  $$SELECT coachbyte.ensure_daily_plan('2026-03-02'::date)$$,
+  'ensure_daily_plan succeeds for user with no profile row (COALESCE defaults)'
+);
+
+------------------------------------------------------------
+-- TEST 31: Plan is created even without profile (uses defaults)
+------------------------------------------------------------
+SELECT is(
+  (SELECT count(*)::integer FROM coachbyte.daily_plans
+   WHERE user_id = tests.get_supabase_uid('edp_ghost') AND plan_date = '2026-03-02'),
+  1,
+  'daily_plan created for user with no profile (default timezone/day_start_hour)'
+);
+
+------------------------------------------------------------
+-- TEST 32: NULL date parameter raises an error
+------------------------------------------------------------
+SELECT tests.authenticate_as('edp_user');
+
+SELECT throws_ok(
+  $$SELECT coachbyte.ensure_daily_plan(NULL::date)$$,
+  NULL,
+  'ensure_daily_plan with NULL date raises an error'
+);
+
 -- Cleanup
 SELECT tests.clear_authentication();
+SELECT tests.delete_supabase_user('edp_ghost');
 SELECT tests.delete_supabase_user('edp_user');
 SELECT tests.delete_supabase_user('edp_other');
 

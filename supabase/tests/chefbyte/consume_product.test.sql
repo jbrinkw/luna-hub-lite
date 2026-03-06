@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(30);
+SELECT plan(34);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -532,6 +532,78 @@ SELECT is(
     ORDER BY created_at DESC LIMIT 1),
   0.000::numeric,
   'food_log protein = 0 for product with default zero macros'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Negative quantity consumption raises exception
+-- ─────────────────────────────────────────────────────────────
+
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.consume_product(
+      '10000000-0000-0000-0000-000000000001'::uuid,
+      -5, 'container', true, '2026-03-03'::date
+    )
+  $$,
+  'Quantity must be positive, got -5',
+  'negative quantity consumption raises exception (qty must be positive)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Consuming from product with zero stock still succeeds
+-- (stock floors at 0, macros still logged for full amount)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  $$
+    SELECT chefbyte.consume_product(
+      '10000000-0000-0000-0000-000000000001'::uuid,
+      1, 'container', true, '2026-03-03'::date
+    )
+  $$,
+  'consuming from product with no stock lots succeeds (floors at 0)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: food_log still created even when stock was 0
+-- ─────────────────────────────────────────────────────────────
+
+SELECT ok(
+  EXISTS (
+    SELECT 1 FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('cf_tester')
+      AND product_id = '10000000-0000-0000-0000-000000000001'
+      AND calories = 660.000
+    ORDER BY created_at DESC
+    LIMIT 1
+  ),
+  'food_log created with full macro amount even when stock was 0'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test: Invalid unit treated as container (not 'serving')
+-- The function only checks for 'serving'; anything else is
+-- treated as container. Verify it does not raise an error.
+-- ─────────────────────────────────────────────────────────────
+
+INSERT INTO chefbyte.stock_lots (lot_id, user_id, product_id, location_id, qty_containers, expires_on)
+VALUES (
+  '20000000-0000-0000-0000-000000000030',
+  tests.get_supabase_uid('cf_tester'),
+  '10000000-0000-0000-0000-000000000001',
+  :'fridge_id',
+  2.0,
+  '2026-06-01'
+);
+
+SELECT lives_ok(
+  $$
+    SELECT chefbyte.consume_product(
+      '10000000-0000-0000-0000-000000000001'::uuid,
+      1, 'box', true, '2026-03-03'::date
+    )
+  $$,
+  'unknown unit treated as container — no error raised'
 );
 
 -- ─────────────────────────────────────────────────────────────

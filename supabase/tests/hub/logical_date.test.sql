@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(9);
+SELECT plan(13);
 
 -- Test 1: Afternoon → same date
 SELECT is(
@@ -106,6 +106,53 @@ SELECT is(
   ),
   '2026-10-31'::date,
   'DST fall-back: 1:30am EST (after clocks change) with day_start=6 returns Oct 31'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Error / edge case tests
+-- ─────────────────────────────────────────────────────────────
+
+-- Test 10: NULL timezone — returns NULL (AT TIME ZONE NULL propagates NULL)
+SELECT ok(
+  private.get_logical_date(
+    '2026-03-02 14:00:00-05'::timestamptz,
+    NULL::text,
+    6
+  ) IS NULL,
+  'NULL timezone returns NULL date'
+);
+
+-- Test 11: NULL timestamp — returns NULL (NULL propagation)
+SELECT ok(
+  private.get_logical_date(
+    NULL::timestamptz,
+    'America/New_York',
+    6
+  ) IS NULL,
+  'NULL timestamp returns NULL date'
+);
+
+-- Test 12: day_start_hour = 0 at midnight boundary — returns current date
+SELECT is(
+  private.get_logical_date(
+    '2026-03-02 00:00:00-05'::timestamptz,
+    'America/New_York',
+    0
+  ),
+  '2026-03-02'::date,
+  'day_start=0 at exactly midnight returns current date'
+);
+
+-- Test 13: Negative day_start_hour — function still computes (subtracts negative interval = adds hours)
+-- At 14:00 local, subtracting -2 hours = 16:00, date portion = Mar 2
+SELECT is(
+  private.get_logical_date(
+    '2026-03-02 14:00:00-05'::timestamptz,
+    'America/New_York',
+    -2
+  ),
+  '2026-03-02'::date,
+  'Negative day_start_hour (-2) computes without error'
 );
 
 SELECT * FROM finish();

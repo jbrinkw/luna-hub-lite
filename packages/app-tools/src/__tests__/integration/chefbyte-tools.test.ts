@@ -434,6 +434,27 @@ describe('ChefByte Tool Integration Tests', () => {
       // 1 container * 4 servings * 30g protein = 120
       expect(Number(data.macros.protein)).toBe(120);
       expect(Number(data.stock_remaining)).toBe(2);
+
+      // H6 fix: Re-query stock_lots to verify stock was actually decremented
+      const lotsResult = await getProductLots.handler({ product_id: productId }, ctx);
+      const lotsData = parseToolResult(lotsResult);
+      expect(lotsData.total_lots).toBe(1);
+      expect(Number(lotsData.lots[0].qty_containers)).toBe(2);
+
+      // H6 fix: Re-query food_logs to verify macro entry was created in DB
+      const { data: foodLogs } = await admin
+        .schema('chefbyte')
+        .from('food_logs')
+        .select('calories, protein, carbs, fat, qty_consumed, unit')
+        .eq('product_id', productId)
+        .eq('user_id', userId)
+        .order('created_at', { ascending: false })
+        .limit(1);
+      expect(foodLogs).toHaveLength(1);
+      expect(Number(foodLogs![0].calories)).toBe(800);
+      expect(Number(foodLogs![0].protein)).toBe(120);
+      expect(Number(foodLogs![0].qty_consumed)).toBe(1);
+      expect(foodLogs![0].unit).toBe('container');
     });
 
     it('rejects zero qty', async () => {
@@ -464,6 +485,12 @@ describe('ChefByte Tool Integration Tests', () => {
 
       expect(data.success).toBe(true);
       expect(Number(data.stock_remaining)).toBe(0);
+
+      // H6 fix: Re-query stock_lots to verify all lots were actually deleted
+      const lotsResult = await getProductLots.handler({ product_id: productId }, ctx);
+      const lotsData = parseToolResult(lotsResult);
+      expect(lotsData.total_lots).toBe(0);
+      expect(lotsData.lots).toHaveLength(0);
     });
   });
 
@@ -1105,6 +1132,12 @@ describe('ChefByte Tool Integration Tests', () => {
       // Should succeed with stock_remaining = 0 (stock floors at 0)
       expect(data.success).toBe(true);
       expect(Number(data.stock_remaining)).toBe(0);
+
+      // H6 fix: Re-query stock_lots to confirm no lots exist for this product
+      const lotsResult = await getProductLots.handler({ product_id: zeroProduct.product.product_id }, ctx);
+      const lotsData = parseToolResult(lotsResult);
+      expect(lotsData.total_lots).toBe(0);
+      expect(lotsData.lots).toHaveLength(0);
     });
 
     it('consumes by servings (converts to containers)', async () => {
@@ -1138,6 +1171,12 @@ describe('ChefByte Tool Integration Tests', () => {
       expect(data.success).toBe(true);
       // 2 - 1 = 1 container remaining
       expect(Number(data.stock_remaining)).toBe(1);
+
+      // H6 fix: Re-query stock_lots to verify actual DB state after serving-based consume
+      const lotsResult = await getProductLots.handler({ product_id: servProdId }, ctx);
+      const lotsData = parseToolResult(lotsResult);
+      expect(lotsData.total_lots).toBe(1);
+      expect(Number(lotsData.lots[0].qty_containers)).toBe(1);
     });
 
     it('setPrice updates price to zero', async () => {

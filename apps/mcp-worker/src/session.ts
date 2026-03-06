@@ -3,6 +3,7 @@ import { toolError } from '@luna-hub/app-tools';
 import { JsonRpcRequest, jsonRpcSuccess, jsonRpcError, sseEvent, McpToolSchema } from './protocol';
 import { buildUserTools } from './registry';
 import { createServiceClient } from './supabase';
+import { validateToolArgs } from './validate';
 
 interface Env {
   MCP_SESSION: DurableObjectNamespace;
@@ -200,6 +201,13 @@ export class McpSession implements DurableObject {
         if (!tool) {
           response = jsonRpcError(rpc.id, -32602, `Unknown tool: ${toolName}`);
         } else {
+          // Validate arguments against inputSchema
+          const validationError = validateToolArgs(toolArgs, tool.inputSchema);
+          if (validationError) {
+            response = jsonRpcSuccess(rpc.id, toolError(validationError));
+            break;
+          }
+
           const toolCtx: ToolContext = { userId: this.userId, supabase: this.supabase };
           try {
             if ('extensionName' in tool) {
@@ -261,7 +269,12 @@ export class McpSession implements DurableObject {
     }
 
     if (this.sseController && response) {
-      this.sseController.enqueue(new TextEncoder().encode(sseEvent('message', response)));
+      try {
+        this.sseController.enqueue(new TextEncoder().encode(sseEvent('message', response)));
+      } catch {
+        // Controller may have been closed during SSE reconnection — message lost
+        console.warn(`SSE write failed for ${rpc.method} — client may have reconnected`);
+      }
     }
 
     return new Response('', { status: 202 });

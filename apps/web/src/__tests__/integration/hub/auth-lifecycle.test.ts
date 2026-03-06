@@ -279,29 +279,33 @@ describe('Auth lifecycle', () => {
   });
 
   // -------------------------------------------------------------------
-  // #40: reset_demo_dates RPC — the function may not exist in test env
-  // but we can verify the RPC call pattern works or fails gracefully.
+  // #40: reset_demo_dates RPC — verify function exists, executes, and
+  // actually shifts demo data dates to today.
   // -------------------------------------------------------------------
-  it('reset_demo_dates RPC call pattern (graceful if function missing)', async () => {
-    const email = `demo-rpc-${crypto.randomUUID().slice(0, 8)}@test.com`;
-    const { data: created } = await adminClient.auth.admin.createUser({
-      email,
-      password: 'testpass123',
-      email_confirm: true,
-    });
-    userIds.push(created.user!.id);
-
+  it('reset_demo_dates RPC exists and executes successfully for demo user', async () => {
+    // Login as the demo user — reset_demo_dates only works for the demo account
     const client = anonClient();
-    await client.auth.signInWithPassword({ email, password: 'testpass123' });
+    const { data: session, error: loginErr } = await client.auth.signInWithPassword({
+      email: 'demo@lunahub.dev',
+      password: 'demo1234',
+    });
+    expect(loginErr).toBeNull();
+    expect(session.session).not.toBeNull();
 
-    // Call reset_demo_dates — may succeed or fail depending on whether
-    // the function exists. The point is the call doesn't crash.
+    // Call reset_demo_dates — must succeed (not just "not crash")
     const result = await (client.schema('hub') as any).rpc('reset_demo_dates');
-    // Either succeeds or returns a PostgREST error — both are valid
-    if (result.error) {
-      expect(typeof result.error.message).toBe('string');
-    } else {
-      expect(result.status).toBeLessThan(300);
-    }
+    expect(result.error).toBeNull();
+    expect(result.status).toBeLessThan(300);
+
+    // Verify the function actually did something:
+    // Demo meal plan entries for today should exist after reset
+    const today = new Date().toISOString().split('T')[0];
+    const { data: meals, error: mealsErr } = await (client.schema('chefbyte') as any)
+      .from('meal_plan_entries')
+      .select('meal_id, logical_date')
+      .eq('logical_date', today);
+    expect(mealsErr).toBeNull();
+    expect(meals).not.toBeNull();
+    expect(meals.length).toBeGreaterThanOrEqual(1);
   });
 });

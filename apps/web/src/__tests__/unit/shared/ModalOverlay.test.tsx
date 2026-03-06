@@ -68,4 +68,36 @@ describe('ModalOverlay', () => {
     expect(cardEl).toBeTruthy();
     expect(cardEl.style.maxWidth).toBe('500px');
   });
+
+  it('calls onClose when Escape key is pressed', () => {
+    const onClose = vi.fn();
+    render(
+      <ModalOverlay isOpen={true} onClose={onClose} title="Escape Test">
+        <p>Content</p>
+      </ModalOverlay>,
+    );
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it('does NOT call onClose on Escape when modal is closed', () => {
+    const onClose = vi.fn();
+    render(
+      <ModalOverlay isOpen={false} onClose={onClose} title="Closed">
+        <p>Content</p>
+      </ModalOverlay>,
+    );
+    fireEvent.keyDown(document, { key: 'Escape' });
+    expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it('locks body scroll when open', () => {
+    const { unmount } = render(
+      <ModalOverlay isOpen={true} onClose={vi.fn()} title="Scroll Lock">
+        <p>Content</p>
+      </ModalOverlay>,
+    );
+    expect(document.body.style.overflow).toBe('hidden');
+    unmount();
+  });
 });

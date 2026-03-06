@@ -31,17 +31,13 @@ describe('RestTimer', () => {
 
   it('displays countdown when running', () => {
     const endTime = new Date(Date.now() + 90_000).toISOString();
-    render(
-      <RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={90} />,
-    );
+    render(<RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={90} />);
     expect(screen.getByTestId('timer-display')).toHaveTextContent('1:30');
   });
 
   it('shows Pause button when running', () => {
     const endTime = new Date(Date.now() + 60_000).toISOString();
-    render(
-      <RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={60} />,
-    );
+    render(<RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={60} />);
     expect(screen.getByTestId('pause-btn')).toBeInTheDocument();
   });
 
@@ -49,24 +45,18 @@ describe('RestTimer', () => {
     vi.useRealTimers();
     const onPause = vi.fn();
     const endTime = new Date(Date.now() + 60_000).toISOString();
-    render(
-      <RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={60} onPause={onPause} />,
-    );
+    render(<RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={60} onPause={onPause} />);
     await userEvent.click(screen.getByTestId('pause-btn'));
     expect(onPause).toHaveBeenCalled();
   });
 
   it('shows Resume button when paused', () => {
-    render(
-      <RestTimer {...defaultProps} state="paused" durationSeconds={60} elapsedBeforePause={20} />,
-    );
+    render(<RestTimer {...defaultProps} state="paused" durationSeconds={60} elapsedBeforePause={20} />);
     expect(screen.getByTestId('resume-btn')).toBeInTheDocument();
   });
 
   it('displays remaining time when paused (duration - elapsed)', () => {
-    render(
-      <RestTimer {...defaultProps} state="paused" durationSeconds={90} elapsedBeforePause={30} />,
-    );
+    render(<RestTimer {...defaultProps} state="paused" durationSeconds={90} elapsedBeforePause={30} />);
     expect(screen.getByTestId('timer-display')).toHaveTextContent('1:00');
   });
 
@@ -88,7 +78,12 @@ describe('RestTimer', () => {
 
   it('shows Reset button in running, paused, and expired states', () => {
     const { rerender } = render(
-      <RestTimer {...defaultProps} state="running" endTime={new Date(Date.now() + 60_000).toISOString()} durationSeconds={60} />,
+      <RestTimer
+        {...defaultProps}
+        state="running"
+        endTime={new Date(Date.now() + 60_000).toISOString()}
+        durationSeconds={60}
+      />,
     );
     expect(screen.getByTestId('reset-btn')).toBeInTheDocument();
 
@@ -102,18 +97,14 @@ describe('RestTimer', () => {
   it('calls onReset when Reset is clicked', async () => {
     vi.useRealTimers();
     const onReset = vi.fn();
-    render(
-      <RestTimer {...defaultProps} state="expired" durationSeconds={60} onReset={onReset} />,
-    );
+    render(<RestTimer {...defaultProps} state="expired" durationSeconds={60} onReset={onReset} />);
     await userEvent.click(screen.getByTestId('reset-btn'));
     expect(onReset).toHaveBeenCalled();
   });
 
   it('countdown tick decrements the display after 1 second', async () => {
     const endTime = new Date(Date.now() + 90_000).toISOString();
-    render(
-      <RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={90} />,
-    );
+    render(<RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={90} />);
     expect(screen.getByTestId('timer-display')).toHaveTextContent('1:30');
 
     // Advance by 1 second — the interval fires and remaining should drop
@@ -134,6 +125,44 @@ describe('RestTimer', () => {
     await userEvent.type(input, '120');
     await userEvent.click(screen.getByTestId('custom-start-btn'));
     expect(onStart).toHaveBeenCalledWith(120);
+  });
+
+  it('custom start ignores 0 value', async () => {
+    vi.useRealTimers();
+    const onStart = vi.fn();
+    render(<RestTimer {...defaultProps} onStart={onStart} />);
+
+    const input = screen.getByTestId('custom-duration-input');
+    await userEvent.type(input, '0');
+    await userEvent.click(screen.getByTestId('custom-start-btn'));
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it('custom start ignores negative value', async () => {
+    vi.useRealTimers();
+    const onStart = vi.fn();
+    render(<RestTimer {...defaultProps} onStart={onStart} />);
+
+    const input = screen.getByTestId('custom-duration-input');
+    await userEvent.type(input, '-5');
+    await userEvent.click(screen.getByTestId('custom-start-btn'));
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it('custom start ignores non-numeric input', async () => {
+    vi.useRealTimers();
+    const onStart = vi.fn();
+    render(<RestTimer {...defaultProps} onStart={onStart} />);
+
+    await userEvent.click(screen.getByTestId('custom-start-btn'));
+    expect(onStart).not.toHaveBeenCalled();
+  });
+
+  it('does not show Pause/Resume/Reset in idle state', () => {
+    render(<RestTimer {...defaultProps} />);
+    expect(screen.queryByTestId('pause-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('resume-btn')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('reset-btn')).not.toBeInTheDocument();
   });
 });
 

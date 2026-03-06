@@ -48,6 +48,61 @@ describe('API key lifecycle', () => {
     expect(data!.api_key_hash).not.toBe(plaintext);
   });
 
+  it('round-trip auth: plaintext key hashes to match stored hash', async () => {
+    const { userId, client } = await createTestUser('key-roundtrip');
+    userIds.push(userId);
+
+    // Simulate key generation: create plaintext, hash it, store hash
+    const plaintext = `lh_${crypto.randomUUID()}`;
+    const hash = await sha256(plaintext);
+
+    const { error } = await client
+      .schema('hub')
+      .from('api_keys')
+      .insert({ user_id: userId, api_key_hash: hash, label: 'Round-trip Key' });
+    expect(error).toBeNull();
+
+    // Simulate authentication: re-hash the same plaintext and look up in DB
+    const authHash = await sha256(plaintext);
+    const { data: matchedKey, error: lookupErr } = await adminClient
+      .schema('hub')
+      .from('api_keys')
+      .select('user_id, label, revoked_at')
+      .eq('api_key_hash', authHash)
+      .is('revoked_at', null)
+      .single();
+
+    expect(lookupErr).toBeNull();
+    expect(matchedKey).not.toBeNull();
+    expect(matchedKey!.user_id).toBe(userId);
+    expect(matchedKey!.label).toBe('Round-trip Key');
+
+    // Verify wrong plaintext does NOT match
+    const wrongHash = await sha256('wrong-key-value');
+    const { data: noMatch } = await adminClient
+      .schema('hub')
+      .from('api_keys')
+      .select('user_id')
+      .eq('api_key_hash', wrongHash)
+      .is('revoked_at', null);
+    expect(noMatch).toHaveLength(0);
+
+    // Verify revoked key is excluded from auth lookup
+    await client
+      .schema('hub')
+      .from('api_keys')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('api_key_hash', hash);
+
+    const { data: revokedMatch } = await adminClient
+      .schema('hub')
+      .from('api_keys')
+      .select('user_id')
+      .eq('api_key_hash', authHash)
+      .is('revoked_at', null);
+    expect(revokedMatch).toHaveLength(0);
+  });
+
   it('query active keys returns non-revoked keys', async () => {
     const { userId, client } = await createTestUser('key-active');
     userIds.push(userId);

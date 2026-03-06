@@ -15,35 +15,35 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 | H3  | Integration | Extension tests 100% mocked — 45 tests mock all fetch, zero real API confidence                     | extensions.test.ts                                               | OPEN   |
 | H4  | pgTAP       | ~37 weak RLS tests — only check row counts, not actual values                                       | rls_core.test.sql, rls_extras.test.sql, rls_tables.test.sql      | OPEN   |
 | H5  | E2E         | 27 waitForTimeout calls — flaky timing waits across 10+ files                                       | scanner, settings, shopping, today, history, split, parity specs | OPEN   |
-| H6  | Integration | Stock consumption never re-verified — tests check RPC return but don't re-query DB                  | stock-consumption.test.ts, chefbyte-tools.test.ts                | OPEN   |
+| H6  | Integration | Stock consumption never re-verified — tests check RPC return but don't re-query DB                  | stock-consumption.test.ts, chefbyte-tools.test.ts                | DONE   |
 | H7  | Source      | ~10 unchecked Supabase queries in HomePage — stock lots, cart, meals, food logs                     | HomePage.tsx:201-280                                             | DONE   |
 
 ## MEDIUM Priority
 
 | #   | Layer       | Issue                                                                                         | Files                                                                              | Status   |
 | --- | ----------- | --------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- | -------- |
-| M1  | Unit        | 6 SkeletonScreen tests are tautologies — just count DOM elements                              | SkeletonScreen.test.tsx                                                            | OPEN     |
+| M1  | Unit        | 6 SkeletonScreen tests are tautologies — just count DOM elements                              | SkeletonScreen.test.tsx                                                            | DONE     |
 | M2  | Unit        | Component tests mock too much — ApiKeyGenerator, ToolToggle, ExtensionCard test mock behavior | ApiKeyGenerator.test.tsx, ToolToggle.test.tsx, ExtensionCard.test.tsx              | OPEN     |
 | M3  | E2E         | URL-only navigation checks — recipe-form, recipes, history verify URL not content             | recipe-form.spec.ts, recipes.spec.ts, history.spec.ts                              | OPEN     |
 | M4  | E2E         | Form tests don't verify persistence — meal-plan add, recipe save, shopping add                | meal-plan.spec.ts, recipe-form.spec.ts, shopping.spec.ts                           | OPEN     |
-| M5  | Integration | Realtime tests use setTimeout hacks instead of event waits                                    | subscriptions.test.ts                                                              | OPEN     |
+| M5  | Integration | Realtime tests use setTimeout hacks instead of event waits                                    | subscriptions.test.ts                                                              | DONE     |
 | M6  | Source      | 20+ `as any` casts hiding type errors                                                         | supabase.ts, Login.tsx, InventoryPage, MacroPage, ScannerPage, all CoachByte pages | DEFERRED |
-| M7  | pgTAP       | Missing error/invalid input tests for get_logical_date, ensure_daily_plan, consume_product    | logical_date.test.sql, ensure_daily_plan.test.sql, consume_product.test.sql        | OPEN     |
-| M8  | Integration | reset_demo_dates test passes whether function exists or not                                   | auth-lifecycle.test.ts:285-306                                                     | OPEN     |
-| M9  | Integration | API key auth not round-trip tested — hash stored but no test plaintext authenticates          | api-key-lifecycle.test.ts                                                          | OPEN     |
+| M7  | pgTAP       | Missing error/invalid input tests for get_logical_date, ensure_daily_plan, consume_product    | logical_date.test.sql, ensure_daily_plan.test.sql, consume_product.test.sql        | DONE     |
+| M8  | Integration | reset_demo_dates test passes whether function exists or not                                   | auth-lifecycle.test.ts:285-306                                                     | DONE     |
+| M9  | Integration | API key auth not round-trip tested — hash stored but no test plaintext authenticates          | api-key-lifecycle.test.ts                                                          | DONE     |
 | M10 | Source      | Dead WalmartPage.tsx — just a Navigate redirect                                               | WalmartPage.tsx                                                                    | DONE     |
-| M11 | Integration | chef-home unmark_meal_done doesn't verify food_logs restored                                  | chef-home.test.ts:232-277                                                          | OPEN     |
-| M12 | Integration | analyze-product quota test doesn't verify daily reset logic                                   | analyze-product.test.ts:118-144                                                    | OPEN     |
+| M11 | Integration | chef-home unmark_meal_done doesn't verify food_logs restored                                  | chef-home.test.ts:232-277                                                          | DONE     |
+| M12 | Integration | analyze-product quota test doesn't verify daily reset logic                                   | analyze-product.test.ts:118-144                                                    | DONE     |
 | M13 | Source      | Edge function analyze-product doesn't validate Claude response before DB insert               | analyze-product/index.ts                                                           | DONE     |
 
 ## LOW Priority
 
 | #   | Layer       | Issue                                                                                     | Files                                                       | Status |
 | --- | ----------- | ----------------------------------------------------------------------------------------- | ----------------------------------------------------------- | ------ |
-| L1  | Unit        | shared-constants tests trivially true — just verify hardcoded values                      | shared-constants.test.ts                                    | OPEN   |
-| L2  | Unit        | compute-meal-entry-macros first test checks calories > 0 not exact value                  | compute-meal-entry-macros.test.ts                           | OPEN   |
-| L3  | Unit        | RestTimer missing edge cases — no test for 0, negative, resume from pause                 | RestTimer.test.tsx                                          | OPEN   |
-| L4  | Unit        | ModalOverlay missing ESC key unit test                                                    | ModalOverlay.test.tsx                                       | OPEN   |
+| L1  | Unit        | shared-constants tests trivially true — just verify hardcoded values                      | shared-constants.test.ts                                    | DONE   |
+| L2  | Unit        | compute-meal-entry-macros first test checks calories > 0 not exact value                  | compute-meal-entry-macros.test.ts                           | DONE   |
+| L3  | Unit        | RestTimer missing edge cases — no test for 0, negative, resume from pause                 | RestTimer.test.tsx                                          | DONE   |
+| L4  | Unit        | ModalOverlay missing ESC key unit test                                                    | ModalOverlay.test.tsx                                       | DONE   |
 | L5  | pgTAP       | Incomplete JSONB return verification — ensure_daily_plan, consume_product check 1-2 keys  | ensure_daily_plan.test.sql, consume_product.test.sql        | OPEN   |
 | L6  | pgTAP       | Missing logical_date verification on DML — stock_lots, food_logs inserts                  | stock_lots.test.sql, mark_meal_done.test.sql                | OPEN   |
 | L7  | E2E         | hub/smoke.spec.ts only 1 test — just checks layout exists                                 | smoke.spec.ts                                               | OPEN   |
@@ -74,7 +74,7 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 | H14 | MCP       | Unhandled buildUserTools rejection — toolsReady promise hangs indefinitely on DB failure       | session.ts:46,60                                                         | DONE   |
 | H15 | MCP       | No timeout on toolsReady — one slow DB query freezes entire session                            | session.ts:160,173                                                       | DONE   |
 | H16 | MCP       | buildUserTools ignores DB errors — tools silently disappear on transient failures              | registry.ts:23-56                                                        | DONE   |
-| H17 | MCP       | No tool argument validation against inputSchema before calling handler                         | session.ts:174-175                                                       | OPEN   |
+| H17 | MCP       | No tool argument validation against inputSchema before calling handler                         | session.ts:174-175                                                       | DONE   |
 | H18 | App-tools | getLogicalDate() has no error handling — silent wrong timezone on profile query failure        | shared/index.ts:13-31 + 5 consumers                                      | DONE   |
 
 ### MEDIUM (from Pass 2)
@@ -85,7 +85,7 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 | M15 | Source | ActivationGuard returns null during loading — causes blank screen + remount                        | ActivationGuard.tsx:14                     | DONE   |
 | M16 | Source | RestTimer stale closure in visibilitychange handler — timer may not sync on tab refocus            | RestTimer.tsx:73-81                        | DONE   |
 | M17 | Source | AuthProvider getSession + onAuthStateChange race — redundant state updates on init                 | AuthProvider.tsx:31-59                     | DONE   |
-| M18 | MCP    | SSE reconnection race condition — messages lost during controller swap                             | session.ts:67-83                           | OPEN   |
+| M18 | MCP    | SSE reconnection race condition — messages lost during controller swap                             | session.ts:67-83                           | DONE   |
 | M19 | MCP    | Unknown tool returns jsonRpcSuccess with isError instead of jsonRpcError — JSON-RPC spec violation | session.ts:179                             | DONE   |
 | M20 | MCP    | Tool errors not logged to console — zero production visibility into handler crashes                | session.ts:229-231                         | DONE   |
 
@@ -113,23 +113,22 @@ Systematic audit of all code and tests. Each finding verified by grep/read.
 
 ## TOTALS: 54 findings (18H, 20M, 23L)
 
-## Fix Progress: 29 DONE, 24 OPEN (test quality), 1 DEFERRED
+## Fix Progress: 42 DONE, 11 OPEN, 1 DEFERRED
 
-### Fixed (29):
+### Fixed (42):
 
-- **All source code bugs** (H1,H2,H7,H8-H16,H18, M10,M13-M17,M19,M20, L8,L9,L14,L19-L23)
-- Schema: NOT NULL constraints, index, CHECK constraints
-- MCP Worker: error handling, timeout, JSON-RPC spec compliance
-- UI: dayStartHour, error surfacing, stale closures, loading states
-- Extensions: shared constants, response body in errors, input validation
-- Edge functions: response validation, input validation
+- **All source code bugs** (H1,H2,H7,H8-H18, M10,M13-M20, L8,L9,L14,L19-L23)
+- **MCP Worker**: error handling, timeout, JSON-RPC spec, tool arg validation (H17), SSE reconnect safety (M18)
+- **Schema**: NOT NULL constraints, index, CHECK constraints
+- **Test quality**: stock re-verification (H6), SkeletonScreen (M1), Realtime setTimeout→events (M5), pgTAP edge cases (M7), demo dates (M8), API key round-trip (M9), unmark food_logs (M11), quota reset (M12), ESC key (L4), RestTimer edges (L3), exact macros (L2), invariant checks (L1)
+- **UI**: dayStartHour, error surfacing, stale closures, loading states
+- **Extensions**: shared constants, response body in errors, input validation
 
-### Remaining OPEN (24) — all test quality improvements:
+### Remaining OPEN (11):
 
-- **H3-H6**: Extension test mocks, weak RLS tests, E2E waitForTimeout, stock re-verification
-- **H17, M18**: MCP tool argument validation, SSE reconnection race
-- **M1-M5, M7-M9, M11-M12**: Test tautologies, weak assertions, missing coverage
-- **L1-L7, L10-L13, L15-L18**: Low-priority test and seed improvements
+- **H3-H5**: Extension test mocks, weak RLS tests, E2E waitForTimeout
+- **M2-M4**: Over-mocked component tests, URL-only nav checks, no form persistence
+- **L5-L7, L10-L13, L15-L18**: Low-priority test, seed, and source improvements
 
 ### DEFERRED (1):
 

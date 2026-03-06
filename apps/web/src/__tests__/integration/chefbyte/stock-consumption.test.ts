@@ -153,6 +153,23 @@ describe('ChefByte stock consumption (consume_product RPC)', () => {
     expect(Number(logs![0].protein)).toBeCloseTo(62, 1);
     expect(Number(logs![0].carbs)).toBeCloseTo(0, 1);
     expect(Number(logs![0].fat)).toBeCloseTo(7.2, 1);
+
+    // H6 fix: Re-query stock_lots to verify stock was actually decremented
+    // 2 servings / 4 servings_per_container = 0.5 containers consumed
+    // Lot 1 (2026-03-10) should have: 2 - 0.5 = 1.5 containers
+    // Lot 2 (2026-04-15) should be untouched at 3
+    const { data: lots, error: lotsError } = await chef
+      .from('stock_lots')
+      .select('qty_containers, expires_on')
+      .eq('product_id', productId)
+      .order('expires_on', { ascending: true });
+    expect(lotsError).toBeNull();
+
+    expect(lots).toHaveLength(2);
+    expect(Number(lots![0].qty_containers)).toBeCloseTo(1.5, 1);
+    expect(lots![0].expires_on).toBe('2026-03-10');
+    expect(Number(lots![1].qty_containers)).toBeCloseTo(3, 1);
+    expect(lots![1].expires_on).toBe('2026-04-15');
   });
 
   it('consume_product with log_macros=false still depletes stock but creates no food_log', async () => {
@@ -184,6 +201,22 @@ describe('ChefByte stock consumption (consume_product RPC)', () => {
       .eq('user_id', userId);
     expect(logsError).toBeNull();
     expect(logs).toHaveLength(0);
+
+    // H6 fix: Re-query stock_lots to verify stock was actually decremented
+    // 1 container consumed from Lot 1 (2026-03-10): 2 - 1 = 1 container
+    // Lot 2 (2026-04-15) should be untouched at 3
+    const { data: lots, error: lotsError2 } = await chef
+      .from('stock_lots')
+      .select('qty_containers, expires_on')
+      .eq('product_id', productId)
+      .order('expires_on', { ascending: true });
+    expect(lotsError2).toBeNull();
+
+    expect(lots).toHaveLength(2);
+    expect(Number(lots![0].qty_containers)).toBeCloseTo(1, 1);
+    expect(lots![0].expires_on).toBe('2026-03-10');
+    expect(Number(lots![1].qty_containers)).toBeCloseTo(3, 1);
+    expect(lots![1].expires_on).toBe('2026-04-15');
   });
 
   it('consume_product beyond available stock floors at 0 and logs macros for full amount', async () => {

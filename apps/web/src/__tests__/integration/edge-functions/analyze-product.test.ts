@@ -143,6 +143,52 @@ describe('Analyze-Product Edge Function', () => {
     expect(body.error).toMatch(/limit reached/i);
   });
 
+  it('resets quota on a new day (yesterday quota does not block today)', async () => {
+    // Set the quota record to a past date with an exhausted count.
+    // The checkQuota function compares stored date vs today — if they
+    // differ, the counter resets to 0, allowing the request through.
+    const yesterday = new Date(Date.now() - 86_400_000).toISOString().slice(0, 10);
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('user_config')
+      .upsert(
+        {
+          user_id: userId,
+          key: 'analyze_quota',
+          value: JSON.stringify({ date: yesterday, count: 100 }),
+        },
+        { onConflict: 'user_id,key' },
+      );
+
+    // This should NOT return 429 — the old date means the quota resets
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+      },
+      body: JSON.stringify({ barcode: '0000000000000' }),
+    });
+
+    // The request passes quota check; it may 404 (barcode not in OFF) or 200,
+    // but crucially it must NOT be 429 (rate limited).
+    expect(res.status).not.toBe(429);
+
+    // Verify the quota record was reset to today with count=1
+    const { data: config } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('user_config')
+      .select('value')
+      .eq('user_id', userId)
+      .eq('key', 'analyze_quota')
+      .single();
+
+    const parsed = JSON.parse(config.value);
+    const today = new Date().toISOString().slice(0, 10);
+    expect(parsed.date).toBe(today);
+    expect(parsed.count).toBe(1);
+  });
+
   // ─── OpenFoodFacts lookup ──────────────────────────────────
 
   it('returns 404 for barcode not found in OpenFoodFacts', async () => {
