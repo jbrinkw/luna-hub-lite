@@ -4,6 +4,7 @@ import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
@@ -118,6 +119,7 @@ export function computeMealEntryMacros(
 
 export function HomePage() {
   const { user } = useAuth();
+  const { dayStartHour } = useAppContext();
   const userId = user?.id;
 
   const [loading, setLoading] = useState(true);
@@ -160,7 +162,7 @@ export function HomePage() {
   /*  Data loading                                                     */
   /* ---------------------------------------------------------------- */
 
-  const today = todayStr();
+  const today = todayStr(dayStartHour);
 
   const loadData = useCallback(async () => {
     if (!userId) return;
@@ -180,28 +182,40 @@ export function HomePage() {
     setMissingPrices((mp ?? []).length);
 
     // 2. Placeholders
-    const { data: ph } = await chefbyte()
+    const { data: ph, error: phErr } = await chefbyte()
       .from('products')
       .select('product_id')
       .eq('user_id', userId)
       .eq('is_placeholder', true);
+    if (phErr) {
+      setLoadError(phErr.message);
+      return;
+    }
     setPlaceholders((ph ?? []).length);
 
     // 3. Below min stock — fetch products with min_stock_amount > 0, then batch-fetch stock_lots
-    const { data: stockProducts } = await chefbyte()
+    const { data: stockProducts, error: spErr } = await chefbyte()
       .from('products')
       .select('product_id, min_stock_amount')
       .eq('user_id', userId)
       .gt('min_stock_amount', 0);
+    if (spErr) {
+      setLoadError(spErr.message);
+      return;
+    }
 
     let belowCount = 0;
     const spArr = (stockProducts ?? []) as any[];
     if (spArr.length > 0) {
       const productIds = spArr.map((p: any) => p.product_id);
-      const { data: allLots } = await chefbyte()
+      const { data: allLots, error: lotsErr } = await chefbyte()
         .from('stock_lots')
         .select('product_id, qty_containers')
         .in('product_id', productIds);
+      if (lotsErr) {
+        setLoadError(lotsErr.message);
+        return;
+      }
 
       // Group stock by product_id
       const stockByProduct = new Map<string, number>();
@@ -218,10 +232,14 @@ export function HomePage() {
     setBelowMinStock(belowCount);
 
     // 4. Cart value — shopping_list joined with products
-    const { data: cartItems } = await chefbyte()
+    const { data: cartItems, error: cartErr } = await chefbyte()
       .from('shopping_list')
       .select('qty_containers, products:product_id(price)')
       .eq('user_id', userId);
+    if (cartErr) {
+      setLoadError(cartErr.message);
+      return;
+    }
 
     const total = (cartItems ?? []).reduce((sum: number, item: any) => {
       const price = Number(item.products?.price ?? 0);
@@ -231,9 +249,13 @@ export function HomePage() {
     setCartValue(total);
 
     // 5. Macro day summary
-    const { data: macroData } = await (chefbyte() as any).rpc('get_daily_macros', {
+    const { data: macroData, error: macroErr } = await (chefbyte() as any).rpc('get_daily_macros', {
       p_logical_date: today,
     });
+    if (macroErr) {
+      setLoadError(macroErr.message);
+      return;
+    }
     if (macroData) {
       const rpc = macroData as Record<string, { consumed: number; goal: number; remaining: number }>;
       setMacros({
@@ -255,17 +277,21 @@ export function HomePage() {
     }
 
     // 6. Today's meal prep
-    const { data: prepData } = await chefbyte()
+    const { data: prepData, error: prepErr } = await chefbyte()
       .from('meal_plan_entries')
       .select('meal_id, servings, recipes:recipe_id(name), products:product_id(name)')
       .eq('user_id', userId)
       .eq('logical_date', today)
       .eq('meal_prep', true)
       .is('completed_at', null);
+    if (prepErr) {
+      setLoadError(prepErr.message);
+      return;
+    }
     setMealPrep((prepData ?? []) as MealPrepEntry[]);
 
     // 7. Today's meals (non-prep)
-    const { data: mealsData } = await chefbyte()
+    const { data: mealsData, error: mealsErr } = await chefbyte()
       .from('meal_plan_entries')
       .select(
         'meal_id, servings, meal_type, completed_at, product_id, recipes:recipe_id(name, base_servings, recipe_ingredients(product_id, quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container)',
@@ -273,28 +299,44 @@ export function HomePage() {
       .eq('user_id', userId)
       .eq('logical_date', today)
       .eq('meal_prep', false);
+    if (mealsErr) {
+      setLoadError(mealsErr.message);
+      return;
+    }
     setTodaysMeals((mealsData ?? []) as MealEntry[]);
 
     // 8. Consumed items — food_logs + temp_items
-    const { data: logData } = await chefbyte()
+    const { data: logData, error: logErr } = await chefbyte()
       .from('food_logs')
       .select('log_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
       .eq('user_id', userId)
       .eq('logical_date', today);
+    if (logErr) {
+      setLoadError(logErr.message);
+      return;
+    }
     setFoodLogs((logData ?? []) as FoodLogEntry[]);
 
-    const { data: tempData } = await chefbyte()
+    const { data: tempData, error: tempErr } = await chefbyte()
       .from('temp_items')
       .select('temp_id, name, calories, protein, carbs, fat')
       .eq('user_id', userId)
       .eq('logical_date', today);
+    if (tempErr) {
+      setLoadError(tempErr.message);
+      return;
+    }
     setTempItems((tempData ?? []) as TempItemEntry[]);
 
     // 9. Stock by product — for stock availability badges on meals
-    const { data: allStockLots } = await chefbyte()
+    const { data: allStockLots, error: stockErr } = await chefbyte()
       .from('stock_lots')
       .select('product_id, qty_containers')
       .eq('user_id', userId);
+    if (stockErr) {
+      setLoadError(stockErr.message);
+      return;
+    }
     const stockMap = new Map<string, number>();
     for (const lot of (allStockLots ?? []) as any[]) {
       const cur = stockMap.get(lot.product_id) ?? 0;
@@ -377,7 +419,13 @@ export function HomePage() {
       { key: 'goal_fat', value: String(targetFat) },
     ];
     for (const { key, value } of keys) {
-      await chefbyte().from('user_config').upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
+      const { error } = await chefbyte()
+        .from('user_config')
+        .upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
+      if (error) {
+        setLoadError(error.message);
+        return;
+      }
     }
     setShowTargetModal(false);
     await loadData();
@@ -401,9 +449,13 @@ export function HomePage() {
 
   const saveTasteProfile = async () => {
     if (!user) return;
-    await chefbyte()
+    const { error } = await chefbyte()
       .from('user_config')
       .upsert({ user_id: user.id, key: 'taste_profile', value: tasteProfile }, { onConflict: 'user_id,key' });
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
     setShowTasteModal(false);
   };
 
@@ -564,18 +616,30 @@ export function HomePage() {
 
   const markMealDone = async (mealId: string) => {
     const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
-    if (!error) await loadData();
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
+    await loadData();
   };
 
   const unmarkMealDone = async (mealId: string) => {
     const { error } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
-    if (!error) await loadData();
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
+    await loadData();
   };
 
   const executePrepMeal = async (mealId: string) => {
     setConfirmPrepId(null);
     const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
-    if (!error) await loadData();
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
+    await loadData();
   };
 
   /* ---------------------------------------------------------------- */
@@ -592,17 +656,29 @@ export function HomePage() {
   };
 
   const deleteFoodLog = async (logId: string) => {
-    await chefbyte().from('food_logs').delete().eq('log_id', logId);
+    const { error } = await chefbyte().from('food_logs').delete().eq('log_id', logId);
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
     await loadData();
   };
 
   const deleteTempItem = async (tempId: string) => {
-    await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
+    const { error } = await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
     await loadData();
   };
 
   const deleteMealEntry = async (mealId: string) => {
-    await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
+    const { error } = await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
     await loadData();
   };
 

@@ -19,6 +19,7 @@ describe('OfflineIndicator', () => {
       activationsLoading: false,
       online: true,
       lastSynced: new Date(),
+      dayStartHour: 0,
       refreshActivations: vi.fn(),
     });
 
@@ -32,6 +33,7 @@ describe('OfflineIndicator', () => {
       activationsLoading: false,
       online: false,
       lastSynced: new Date(),
+      dayStartHour: 0,
       refreshActivations: vi.fn(),
     });
 
@@ -45,6 +47,7 @@ describe('OfflineIndicator', () => {
       activationsLoading: false,
       online: false,
       lastSynced: null,
+      dayStartHour: 0,
       refreshActivations: vi.fn(),
     });
 
@@ -60,6 +63,7 @@ describe('OfflineIndicator', () => {
       activationsLoading: false,
       online: false,
       lastSynced: syncDate,
+      dayStartHour: 0,
       refreshActivations: vi.fn(),
     });
 

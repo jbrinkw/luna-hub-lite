@@ -4,6 +4,7 @@ import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
 import { RestTimer, formatTime } from '@/components/coachbyte/RestTimer';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { supabase, coachbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
@@ -34,6 +35,7 @@ const DEFAULT_TIMER: TimerState = {
 
 export function TodayPage() {
   const { user } = useAuth();
+  const { dayStartHour } = useAppContext();
   const [loading, setLoading] = useState(true);
   const [planId, setPlanId] = useState<string | null>(null);
   const [sets, setSets] = useState<PlannedSet[]>([]);
@@ -64,7 +66,7 @@ export function TodayPage() {
     };
   }, []);
 
-  const today = todayStr();
+  const today = todayStr(dayStartHour);
 
   const loadPlan = useCallback(async () => {
     if (!user) return;

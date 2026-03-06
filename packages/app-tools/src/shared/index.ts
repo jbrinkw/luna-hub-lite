@@ -11,12 +11,16 @@ export function toolError(message: string): ToolResult {
 
 /** Get today's logical date for a user (same logic as private.get_logical_date) */
 export async function getLogicalDate(supabase: any, userId: string): Promise<string> {
-  const { data: profile } = await supabase
+  const { data: profile, error } = await supabase
     .schema('hub')
     .from('profiles')
     .select('timezone, day_start_hour')
     .eq('user_id', userId)
     .single();
+
+  if (error) {
+    console.warn('getLogicalDate: failed to load profile, using defaults:', error.message);
+  }
 
   const tz = profile?.timezone || 'America/New_York';
   const dayStart = profile?.day_start_hour ?? 6;

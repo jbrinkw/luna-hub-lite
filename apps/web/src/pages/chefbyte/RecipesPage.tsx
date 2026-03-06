@@ -307,24 +307,6 @@ export function RecipesPage() {
         <h1 style={{ margin: 0 }}>Recipes</h1>
         <div className="headerActions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
           <Link
-            to="/chef/recipes/finder"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '12px 16px',
-              textDecoration: 'none',
-              borderRadius: '6px',
-              fontWeight: 600,
-              fontSize: '14px',
-              background: '#fff',
-              border: '1px solid #ddd',
-              color: '#4b5563',
-            }}
-          >
-            Recipe Finder
-          </Link>
-          <Link
             to="/chef/recipes/new"
             data-testid="new-recipe-btn"
             style={{

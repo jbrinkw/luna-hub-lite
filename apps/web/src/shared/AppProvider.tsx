@@ -7,6 +7,7 @@ interface AppContextType {
   activationsLoading: boolean;
   online: boolean;
   lastSynced: Date | null;
+  dayStartHour: number;
   refreshActivations: () => Promise<void>;
 }
 
@@ -15,6 +16,7 @@ const AppContext = createContext<AppContextType>({
   activationsLoading: true,
   online: true,
   lastSynced: null,
+  dayStartHour: 0,
   refreshActivations: async () => {},
 });
 
@@ -28,6 +30,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [activationsLoading, setActivationsLoading] = useState(true);
   const [online, setOnline] = useState(navigator.onLine);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
+  const [dayStartHour, setDayStartHour] = useState(0);
 
   const loadActivations = useCallback(async () => {
     if (!user) {
@@ -35,8 +38,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setActivationsLoading(false);
       return;
     }
-    const { data } = await supabase.schema('hub').from('app_activations').select('app_name').eq('user_id', user.id);
+    const { data, error } = await supabase
+      .schema('hub')
+      .from('app_activations')
+      .select('app_name')
+      .eq('user_id', user.id);
 
+    if (error) {
+      console.error('Failed to load activations:', error.message);
+    }
     const map: Record<string, boolean> = {};
     (data || []).forEach((row: any) => {
       map[row.app_name] = true;
@@ -44,6 +54,17 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setActivations(map);
     setActivationsLoading(false);
     setLastSynced(new Date());
+
+    // Load day_start_hour from profile
+    const { data: profile } = await supabase
+      .schema('hub')
+      .from('profiles')
+      .select('day_start_hour')
+      .eq('user_id', user.id)
+      .single();
+    if (profile?.day_start_hour != null) {
+      setDayStartHour(profile.day_start_hour);
+    }
   }, [user]);
 
   useEffect(() => {
@@ -85,7 +106,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   return (
     <AppContext.Provider
-      value={{ activations, activationsLoading, online, lastSynced, refreshActivations: loadActivations }}
+      value={{ activations, activationsLoading, online, lastSynced, dayStartHour, refreshActivations: loadActivations }}
     >
       {children}
     </AppContext.Provider>

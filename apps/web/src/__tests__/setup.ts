@@ -184,6 +184,7 @@ vi.mock('@/shared/AppProvider', () => ({
     activations: { coachbyte: true, chefbyte: true },
     online: true,
     lastSynced: new Date(),
+    dayStartHour: 0,
     refreshActivations: vi.fn(),
   })),
   AppProvider: ({ children }: any) => children,

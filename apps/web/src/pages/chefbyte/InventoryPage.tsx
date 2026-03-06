@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo } from 'react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 
@@ -41,6 +42,7 @@ type ViewMode = 'grouped' | 'lots';
 
 export function InventoryPage() {
   const { user } = useAuth();
+  const { dayStartHour } = useAppContext();
   const [loading, setLoading] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
 
@@ -208,7 +210,7 @@ export function InventoryPage() {
   /*  Actions                                                          */
   /* ---------------------------------------------------------------- */
 
-  const getLogicalDate = () => todayStr();
+  const getLogicalDate = () => todayStr(dayStartHour);
 
   const [error, setError] = useState<string | null>(null);
 

@@ -43,9 +43,14 @@ export class McpSession implements DurableObject {
 
     this.userId = userId;
     this.supabase = createServiceClient(this.env);
-    this.toolsReady = buildUserTools(this.supabase, this.userId).then((tools) => {
-      this.tools = tools;
-    });
+    this.toolsReady = buildUserTools(this.supabase, this.userId)
+      .then((tools) => {
+        this.tools = tools;
+      })
+      .catch((err) => {
+        console.error('Failed to build user tools:', err);
+        this.tools = {};
+      });
 
     return new Response('ok', { status: 200 });
   }
@@ -57,9 +62,14 @@ export class McpSession implements DurableObject {
     if (!this.userId && queryUserId) {
       this.userId = queryUserId;
       this.supabase = createServiceClient(this.env);
-      this.toolsReady = buildUserTools(this.supabase, this.userId).then((tools) => {
-        this.tools = tools;
-      });
+      this.toolsReady = buildUserTools(this.supabase, this.userId)
+        .then((tools) => {
+          this.tools = tools;
+        })
+        .catch((err) => {
+          console.error('Failed to build user tools:', err);
+          this.tools = {};
+        });
     }
 
     const sessionId = this.state.id.toString();
@@ -111,6 +121,18 @@ export class McpSession implements DurableObject {
     });
   }
 
+  private async awaitToolsReady(): Promise<void> {
+    const timeout = new Promise<void>((_, reject) =>
+      setTimeout(() => reject(new Error('Tools loading timed out')), 10_000),
+    );
+    try {
+      await Promise.race([this.toolsReady, timeout]);
+    } catch (err) {
+      console.error('awaitToolsReady failed:', err);
+      this.tools = {};
+    }
+  }
+
   private async handleMessage(request: Request): Promise<Response> {
     // Reject unauthenticated sessions — userId is set during SSE connect
     if (!this.userId) {
@@ -157,7 +179,7 @@ export class McpSession implements DurableObject {
         break;
 
       case 'tools/list':
-        await this.toolsReady;
+        await this.awaitToolsReady();
         response = jsonRpcSuccess(rpc.id, {
           tools: Object.values(this.tools).map(
             (t): McpToolSchema => ({
@@ -170,13 +192,13 @@ export class McpSession implements DurableObject {
         break;
 
       case 'tools/call': {
-        await this.toolsReady;
+        await this.awaitToolsReady();
         const toolName = (rpc.params as any)?.name;
         const toolArgs = (rpc.params as any)?.arguments || {};
         const tool = this.tools[toolName];
 
         if (!tool) {
-          response = jsonRpcSuccess(rpc.id, toolError(`Unknown tool: ${toolName}`));
+          response = jsonRpcError(rpc.id, -32602, `Unknown tool: ${toolName}`);
         } else {
           const toolCtx: ToolContext = { userId: this.userId, supabase: this.supabase };
           try {
@@ -227,6 +249,7 @@ export class McpSession implements DurableObject {
               response = jsonRpcSuccess(rpc.id, result);
             }
           } catch (err: any) {
+            console.error(`Tool ${toolName} error:`, err);
             response = jsonRpcSuccess(rpc.id, toolError(`Tool error: ${err.message}`));
           }
         }

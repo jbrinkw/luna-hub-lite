@@ -1,6 +1,7 @@
 import { useState, useRef, useCallback } from 'react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { useScannerDetection } from '@/hooks/useScannerDetection';
@@ -85,6 +86,7 @@ export function autoScaleNutrition(
 
 export function ScannerPage() {
   const { user } = useAuth();
+  const { dayStartHour } = useAppContext();
   const barcodeRef = useRef<HTMLInputElement>(null);
 
   /* ---- Mode & queue ---- */
@@ -405,7 +407,7 @@ export function ScannerPage() {
         return newLot ? { type: 'purchase', recordId: (newLot as any).lot_id } : undefined;
       }
       case 'consume_macros': {
-        const logicalDate = todayStr();
+        const logicalDate = todayStr(dayStartHour);
         await (chefbyte() as any).rpc('consume_product', {
           p_product_id: product.product_id,
           p_qty: qty,
@@ -453,7 +455,7 @@ export function ScannerPage() {
           p_qty: qty,
           p_unit: unitType,
           p_log_macros: false,
-          p_logical_date: todayStr(),
+          p_logical_date: todayStr(dayStartHour),
         });
 
         // Get the default location so undo can re-add stock

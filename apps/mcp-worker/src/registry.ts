@@ -20,21 +20,25 @@ export async function buildUserTools(
   userId: string,
 ): Promise<Record<string, ToolDefinition | ExtensionToolDefinition>> {
   // 1. Get active app modules
-  const { data: activations } = await supabase
+  const { data: activations, error: actErr } = await supabase
     .schema('hub')
     .from('app_activations')
     .select('app_name')
     .eq('user_id', userId);
 
+  if (actErr) throw new Error(`Failed to load activations: ${actErr.message}`);
+
   const activeApps = new Set((activations || []).map((a: any) => a.app_name));
 
   // 2. Get disabled tools
-  const { data: toolConfig } = await supabase
+  const { data: toolConfig, error: toolErr } = await supabase
     .schema('hub')
     .from('user_tool_config')
     .select('tool_name, enabled')
     .eq('user_id', userId)
     .eq('enabled', false);
+
+  if (toolErr) throw new Error(`Failed to load tool config: ${toolErr.message}`);
 
   const disabledTools = new Set((toolConfig || []).map((t: any) => t.tool_name));
 
@@ -49,11 +53,13 @@ export async function buildUserTools(
   }
 
   // 4. Get enabled extensions
-  const { data: extensionSettings } = await supabase
+  const { data: extensionSettings, error: extErr } = await supabase
     .schema('hub')
     .from('extension_settings')
     .select('extension_name, enabled')
     .eq('user_id', userId);
+
+  if (extErr) throw new Error(`Failed to load extension settings: ${extErr.message}`);
 
   const enabledExtensions = new Set(
     (extensionSettings || []).filter((e: any) => e.enabled).map((e: any) => e.extension_name),
