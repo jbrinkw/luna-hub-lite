@@ -174,7 +174,8 @@ export function MealPlanPage() {
       .select('log_id, logical_date, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
       .eq('user_id', userId)
       .gte('logical_date', startDate)
-      .lte('logical_date', endDate);
+      .lte('logical_date', endDate)
+      .order('created_at');
     setFoodLogs((logData ?? []) as FoodLogEntry[]);
 
     const { data: tempData } = await chefbyte()
@@ -182,7 +183,8 @@ export function MealPlanPage() {
       .select('temp_id, logical_date, name, calories, protein, carbs, fat')
       .eq('user_id', userId)
       .gte('logical_date', startDate)
-      .lte('logical_date', endDate);
+      .lte('logical_date', endDate)
+      .order('created_at');
     setTempItems((tempData ?? []) as TempItemEntry[]);
 
     setLoading(false);
@@ -283,7 +285,18 @@ export function MealPlanPage() {
 
   const selectedDayMeals = useMemo(() => {
     if (!selectedDay) return [];
-    return mealsByDay.get(selectedDay) ?? [];
+    const raw = mealsByDay.get(selectedDay) ?? [];
+    // Sort: meal prep first, then planned (not completed), then completed (earliest first)
+    return [...raw].sort((a, b) => {
+      const groupA = a.meal_prep && !a.completed_at ? 0 : !a.completed_at ? 1 : 2;
+      const groupB = b.meal_prep && !b.completed_at ? 0 : !b.completed_at ? 1 : 2;
+      if (groupA !== groupB) return groupA - groupB;
+      // Within completed group, sort by completed_at ascending (earliest first)
+      if (groupA === 2 && a.completed_at && b.completed_at) {
+        return a.completed_at.localeCompare(b.completed_at);
+      }
+      return 0;
+    });
   }, [selectedDay, mealsByDay]);
 
   const selectedDayLogs = useMemo(() => {
