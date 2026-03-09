@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 export interface Exercise {
   exercise_id: string;
@@ -15,6 +15,11 @@ export function AdHocSetForm({ exercises, onSubmit, onCancel }: AdHocSetFormProp
   const [exerciseId, setExerciseId] = useState('');
   const [reps, setReps] = useState('');
   const [load, setLoad] = useState('');
+  const formRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+  }, []);
 
   const canSubmit = exerciseId && reps && load && parseInt(reps, 10) >= 0 && parseFloat(load) >= 0;
 
@@ -25,7 +30,7 @@ export function AdHocSetForm({ exercises, onSubmit, onCancel }: AdHocSetFormProp
   };
 
   return (
-    <div className="card" data-testid="adhoc-form">
+    <div className="card" data-testid="adhoc-form" ref={formRef}>
       <h3 className="card-header">Ad-Hoc Set</h3>
       <div className="card-body">
         <form onSubmit={handleSubmit}>
