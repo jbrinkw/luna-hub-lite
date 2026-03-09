@@ -423,7 +423,8 @@ INSERT INTO chefbyte.user_config (config_id, user_id, key, value) VALUES
   ('aaaaaaaa-7001-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111', 'goal_calories', '2200'),
   ('aaaaaaaa-7002-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111', 'goal_protein', '180'),
   ('aaaaaaaa-7003-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111', 'goal_carbs', '220'),
-  ('aaaaaaaa-7004-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111', 'goal_fat', '73')
+  ('aaaaaaaa-7004-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111', 'goal_fat', '73'),
+  ('aaaaaaaa-7005-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111', 'taste_profile', 'High protein, low sugar. Prefer chicken, salmon, eggs, Greek yogurt, and rice. No shellfish or pork. Like simple meals that can be prepped in bulk.')
 ON CONFLICT (user_id, key) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
