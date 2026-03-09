@@ -86,7 +86,7 @@ describe('ChefByte HomePage queries', () => {
   //   .from('stock_lots').select('qty_containers').eq('product_id', p.product_id)
   // -------------------------------------------------------------------
   it('stock_lots query by product_id returns qty_containers', async () => {
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
     const result = await chefbyte(ctx.client).from('stock_lots').select('qty_containers').eq('product_id', chickenId);
 
     const data = assertQuerySucceeds(result, 'stock lots for product');
@@ -119,7 +119,7 @@ describe('ChefByte HomePage queries', () => {
   // -------------------------------------------------------------------
   it('shopping_list with product price join returns data after insert', async () => {
     // Add an item to shopping list
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
     const insertResult = await chefbyte(ctx.client).from('shopping_list').insert({
       user_id: ctx.userId,
       product_id: chickenId,
@@ -368,7 +368,7 @@ describe('ChefByte HomePage queries', () => {
     const locId = locations[0].location_id;
 
     // Add item to shopping list
-    const riceId = seeds.productMap['Brown Rice'];
+    const riceId = seeds.productMap['Great Value Long Grain Brown Rice'];
     await chefbyte(ctx.client).from('shopping_list').insert({
       user_id: ctx.userId,
       product_id: riceId,
@@ -425,7 +425,7 @@ describe('ChefByte HomePage queries', () => {
   // -------------------------------------------------------------------
   it('food_logs query returns consumed items for logical_date', async () => {
     const today = todayDate();
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     // Consume a product to generate a food_log entry
     await (chefbyte(ctx.client) as any).rpc('consume_product', {
@@ -456,7 +456,7 @@ describe('ChefByte HomePage queries', () => {
     expect(Number(entry.carbs)).toBeGreaterThanOrEqual(0);
     expect(Number(entry.fat)).toBeGreaterThanOrEqual(0);
     expect(entry.products).not.toBeNull();
-    expect(entry.products.name).toBe('Chicken Breast');
+    expect(entry.products.name).toBe('Great Value Boneless Skinless Chicken Breasts');
 
     // Cleanup: delete food_logs and restore consumed stock
     await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
@@ -525,7 +525,7 @@ describe('ChefByte HomePage queries', () => {
   // -------------------------------------------------------------------
   it('delete food_log by log_id', async () => {
     const today = todayDate();
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     // Create a food_log via consume
     await (chefbyte(ctx.client) as any).rpc('consume_product', {
@@ -661,6 +661,6 @@ describe('ChefByte HomePage queries', () => {
     }
     expect(stockMap.size).toBeGreaterThanOrEqual(3);
     // Chicken has at least 3.0 containers from seed
-    expect(stockMap.get(seeds.productMap['Chicken Breast'])).toBeGreaterThanOrEqual(3.0);
+    expect(stockMap.get(seeds.productMap['Great Value Boneless Skinless Chicken Breasts'])).toBeGreaterThanOrEqual(3.0);
   });
 });

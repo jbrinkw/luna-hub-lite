@@ -31,18 +31,18 @@ describe('ChefByte SettingsPage queries', () => {
     const data = assertQuerySucceeds(result, 'products *');
     expect(data.length).toBeGreaterThanOrEqual(5);
 
-    // Verify first product (alphabetically: Bananas) with exact seed values
+    // Verify first product (alphabetically: Banquet Chicken Breast Patties) with exact seed values
     const first = data[0];
     expect(typeof first.product_id).toBe('string');
     expect(first.user_id).toBe(ctx.userId);
-    expect(first.name).toBe('Bananas');
+    expect(first.name).toBe('Banquet Chicken Breast Patties');
     expect(first.barcode).toBeNull();
     expect(first.description).toBeNull();
-    expect(Number(first.servings_per_container)).toBe(1);
-    expect(Number(first.calories_per_serving)).toBe(105);
-    expect(Number(first.carbs_per_serving)).toBe(27);
-    expect(Number(first.protein_per_serving)).toBeCloseTo(1.3, 1);
-    expect(Number(first.fat_per_serving)).toBeCloseTo(0.4, 1);
+    expect(Number(first.servings_per_container)).toBe(6);
+    expect(Number(first.calories_per_serving)).toBe(190);
+    expect(Number(first.carbs_per_serving)).toBe(13);
+    expect(Number(first.protein_per_serving)).toBe(10);
+    expect(Number(first.fat_per_serving)).toBe(11);
     expect(Number(first.min_stock_amount)).toBe(3);
     expect(first.is_placeholder).toBe(false);
     expect(first.walmart_link).toBeNull();
@@ -108,7 +108,7 @@ describe('ChefByte SettingsPage queries', () => {
   // Exact update from SettingsPage.tsx saveProduct (line 154-158)
   // -----------------------------------------------------------------------
   it('save product update matches page pattern', async () => {
-    const productId = seeds.productMap['Eggs'];
+    const productId = seeds.productMap['Great Value Large White Eggs'];
 
     // Simulate the page: spread product, remove product_id and user_id, update remaining
     const updates = {
@@ -251,7 +251,7 @@ describe('ChefByte SettingsPage queries', () => {
     const locationId = loc!.location_id;
 
     // Add a stock lot at that location
-    const productId = seeds.productMap['Bananas'];
+    const productId = seeds.productMap['Banquet Chicken Breast Patties'];
     const insertResult = await chefbyte(ctx.client).from('stock_lots').insert({
       user_id: ctx.userId,
       product_id: productId,
@@ -327,7 +327,7 @@ describe('ChefByte SettingsPage queries', () => {
     const hashArray = Array.from(new Uint8Array(hashBuffer));
     const keyHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 
-    const productId = seeds.productMap['Protein Powder'];
+    const productId = seeds.productMap['Birds Eye Sweet Peas'];
 
     const insertResult = await chefbyte(ctx.client).from('liquidtrack_devices').insert({
       device_id: deviceId,
@@ -356,7 +356,7 @@ describe('ChefByte SettingsPage queries', () => {
 
     // Verify products join with exact values
     expect(device.products).not.toBeNull();
-    expect(device.products.name).toBe('Protein Powder');
+    expect(device.products.name).toBe('Birds Eye Sweet Peas');
   });
 
   // -----------------------------------------------------------------------

@@ -46,8 +46,8 @@ test.describe('ChefByte Shopping', () => {
       await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
 
       const toBuySection = page.getByTestId('to-buy-section');
-      await expect(toBuySection).toContainText('Eggs');
-      await expect(toBuySection).toContainText('Bananas');
+      await expect(toBuySection).toContainText('Great Value Large White Eggs');
+      await expect(toBuySection).toContainText('Banquet Chicken Breast Patties');
 
       // Empty state should be gone now
       await expect(page.getByTestId('no-to-buy')).not.toBeVisible();
@@ -83,7 +83,7 @@ test.describe('ChefByte Shopping', () => {
 
       // Verify the item appears in the to-buy list
       await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('to-buy-section')).toContainText('Chicken Breast');
+      await expect(page.getByTestId('to-buy-section')).toContainText('Great Value Boneless Skinless Chicken Breasts');
     } finally {
       await cleanup();
     }
@@ -136,8 +136,8 @@ test.describe('ChefByte Shopping', () => {
 
       // Seed shopping items so we have items to clear
       await seedShoppingItems(client, userId, [
-        { productId: productMap['Chicken Breast'], qtyContainers: 2 },
-        { productId: productMap['Brown Rice'], qtyContainers: 1 },
+        { productId: productMap['Great Value Boneless Skinless Chicken Breasts'], qtyContainers: 2 },
+        { productId: productMap['Great Value Long Grain Brown Rice'], qtyContainers: 1 },
       ]);
 
       await page.goto('/chef/shopping');
@@ -145,7 +145,7 @@ test.describe('ChefByte Shopping', () => {
 
       // Verify items are in the to-buy list
       await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('to-buy-section')).toContainText('Chicken Breast');
+      await expect(page.getByTestId('to-buy-section')).toContainText('Great Value Boneless Skinless Chicken Breasts');
 
       // Click clear all button (this opens an IonAlert confirmation)
       await page.getByTestId('clear-all-btn').click();
@@ -171,7 +171,7 @@ test.describe('ChefByte Shopping', () => {
 
       // Seed a single shopping item
       const [cartItemId] = await seedShoppingItems(client, userId, [
-        { productId: productMap['Eggs'], qtyContainers: 1 },
+        { productId: productMap['Great Value Large White Eggs'], qtyContainers: 1 },
       ]);
 
       await page.goto('/chef/shopping');
@@ -181,7 +181,7 @@ test.describe('ChefByte Shopping', () => {
       await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
       const itemRow = page.getByTestId(`item-${cartItemId}`);
       await expect(itemRow).toBeVisible();
-      await expect(itemRow).toContainText('Eggs');
+      await expect(itemRow).toContainText('Great Value Large White Eggs');
 
       // Click the remove button for this specific item
       await page.getByTestId(`remove-${cartItemId}`).click();
@@ -211,7 +211,7 @@ test.describe('ChefByte Shopping', () => {
       await expect(dropdown).toBeVisible({ timeout: 5000 });
 
       // Dropdown should contain "Chicken Breast" as a matching product
-      await expect(dropdown).toContainText('Chicken Breast');
+      await expect(dropdown).toContainText('Great Value Boneless Skinless Chicken Breasts');
 
       // Dropdown items should have data-testid prefix
       const dropdownItems = dropdown.locator('[data-testid^="dropdown-item-"]');
@@ -221,7 +221,7 @@ test.describe('ChefByte Shopping', () => {
       // Click the Chicken Breast item — search field should be populated and dropdown should close
       await dropdownItems.first().click();
       await expect(dropdown).not.toBeVisible({ timeout: 3000 });
-      await expect(searchInput).toHaveValue('Chicken Breast');
+      await expect(searchInput).toHaveValue('Great Value Boneless Skinless Chicken Breasts');
 
       // Clear and type something with no matches
       await searchInput.fill('');
@@ -243,7 +243,7 @@ test.describe('ChefByte Shopping', () => {
 
       // Seed one item already marked as purchased
       const [cartItemId] = await seedShoppingItems(client, userId, [
-        { productId: productMap['Protein Powder'], qtyContainers: 1, purchased: true },
+        { productId: productMap['Birds Eye Sweet Peas'], qtyContainers: 1, purchased: true },
       ]);
 
       await page.goto('/chef/shopping');
@@ -251,7 +251,7 @@ test.describe('ChefByte Shopping', () => {
 
       // Verify it starts in the purchased section
       await expect(page.getByTestId('purchased-list')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('purchased-section')).toContainText('Protein Powder');
+      await expect(page.getByTestId('purchased-section')).toContainText('Birds Eye Sweet Peas');
 
       // To-buy section should be empty
       await expect(page.getByTestId('no-to-buy')).toBeVisible();
@@ -261,7 +261,7 @@ test.describe('ChefByte Shopping', () => {
 
       // Item should move back to the to-buy section
       await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('to-buy-section')).toContainText('Protein Powder');
+      await expect(page.getByTestId('to-buy-section')).toContainText('Birds Eye Sweet Peas');
 
       // Purchased section should now be empty
       await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 5000 });

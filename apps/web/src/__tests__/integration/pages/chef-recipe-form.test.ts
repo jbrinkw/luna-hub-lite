@@ -60,12 +60,14 @@ describe('ChefByte RecipeFormPage queries', () => {
     expect(recipe.recipe_ingredients.length).toBe(2);
 
     // Verify Chicken Breast ingredient (0.5 container)
-    const chickenIng = recipe.recipe_ingredients.find((ri: any) => ri.product_id === productMap['Chicken Breast']);
+    const chickenIng = recipe.recipe_ingredients.find(
+      (ri: any) => ri.product_id === productMap['Great Value Boneless Skinless Chicken Breasts'],
+    );
     expect(chickenIng).toBeDefined();
     expect(Number(chickenIng.quantity)).toBe(0.5);
     expect(chickenIng.unit).toBe('container');
     expect(chickenIng.note).toBeNull();
-    expect(chickenIng.products.name).toBe('Chicken Breast');
+    expect(chickenIng.products.name).toBe('Great Value Boneless Skinless Chicken Breasts');
     expect(Number(chickenIng.products.calories_per_serving)).toBe(165);
     expect(Number(chickenIng.products.protein_per_serving)).toBe(31);
     expect(Number(chickenIng.products.carbs_per_serving)).toBe(0);
@@ -73,11 +75,13 @@ describe('ChefByte RecipeFormPage queries', () => {
     expect(Number(chickenIng.products.servings_per_container)).toBe(4);
 
     // Verify Brown Rice ingredient (0.25 container)
-    const riceIng = recipe.recipe_ingredients.find((ri: any) => ri.product_id === productMap['Brown Rice']);
+    const riceIng = recipe.recipe_ingredients.find(
+      (ri: any) => ri.product_id === productMap['Great Value Long Grain Brown Rice'],
+    );
     expect(riceIng).toBeDefined();
     expect(Number(riceIng.quantity)).toBe(0.25);
     expect(riceIng.unit).toBe('container');
-    expect(riceIng.products.name).toBe('Brown Rice');
+    expect(riceIng.products.name).toBe('Great Value Long Grain Brown Rice');
     expect(Number(riceIng.products.calories_per_serving)).toBe(216);
     expect(Number(riceIng.products.servings_per_container)).toBe(8);
   });
@@ -117,7 +121,7 @@ describe('ChefByte RecipeFormPage queries', () => {
     }
 
     // Check a specific product with exact seed values
-    const chicken = products.find((p: any) => p.name === 'Chicken Breast');
+    const chicken = products.find((p: any) => p.name === 'Great Value Boneless Skinless Chicken Breasts');
     expect(chicken).toBeDefined();
     expect(Number(chicken.calories_per_serving)).toBe(165);
     expect(Number(chicken.protein_per_serving)).toBe(31);
@@ -154,7 +158,7 @@ describe('ChefByte RecipeFormPage queries', () => {
     const ingResult = await chefbyte(ctx.client).from('recipe_ingredients').insert({
       user_id: ctx.userId,
       recipe_id: newRecipe.recipe_id,
-      product_id: productMap['Eggs'],
+      product_id: productMap['Great Value Large White Eggs'],
       quantity: 3,
       unit: 'serving',
       note: 'scrambled',
@@ -178,7 +182,7 @@ describe('ChefByte RecipeFormPage queries', () => {
     expect(Number(fetched.total_time)).toBe(45);
     expect(fetched.instructions).toBe('Step 1: Do the thing.\nStep 2: Do the other thing.');
     expect(fetched.recipe_ingredients.length).toBe(1);
-    expect(fetched.recipe_ingredients[0].products.name).toBe('Eggs');
+    expect(fetched.recipe_ingredients[0].products.name).toBe('Great Value Large White Eggs');
 
     // Cleanup
     await chefbyte(ctx.client).from('recipe_ingredients').delete().eq('recipe_id', newRecipe.recipe_id);
@@ -254,7 +258,7 @@ describe('ChefByte RecipeFormPage queries', () => {
     await chefbyte(ctx.client).from('recipe_ingredients').insert({
       user_id: ctx.userId,
       recipe_id: rid,
-      product_id: productMap['Eggs'],
+      product_id: productMap['Great Value Large White Eggs'],
       quantity: 2,
       unit: 'serving',
       note: null,
@@ -268,7 +272,7 @@ describe('ChefByte RecipeFormPage queries', () => {
     const ing1Result = await chefbyte(ctx.client).from('recipe_ingredients').insert({
       user_id: ctx.userId,
       recipe_id: rid,
-      product_id: productMap['Bananas'],
+      product_id: productMap['Banquet Chicken Breast Patties'],
       quantity: 1,
       unit: 'container',
       note: 'ripe',
@@ -278,7 +282,7 @@ describe('ChefByte RecipeFormPage queries', () => {
     const ing2Result = await chefbyte(ctx.client).from('recipe_ingredients').insert({
       user_id: ctx.userId,
       recipe_id: rid,
-      product_id: productMap['Protein Powder'],
+      product_id: productMap['Birds Eye Sweet Peas'],
       quantity: 1,
       unit: 'serving',
       note: null,
@@ -292,13 +296,13 @@ describe('ChefByte RecipeFormPage queries', () => {
       .eq('recipe_id', rid);
     expect(ings).toHaveLength(2);
 
-    const banana = ings!.find((i: any) => i.product_id === productMap['Bananas']);
+    const banana = ings!.find((i: any) => i.product_id === productMap['Banquet Chicken Breast Patties']);
     expect(banana).toBeDefined();
     expect(Number(banana!.quantity)).toBe(1);
     expect(banana!.unit).toBe('container');
     expect(banana!.note).toBe('ripe');
 
-    const protein = ings!.find((i: any) => i.product_id === productMap['Protein Powder']);
+    const protein = ings!.find((i: any) => i.product_id === productMap['Birds Eye Sweet Peas']);
     expect(protein).toBeDefined();
     expect(Number(protein!.quantity)).toBe(1);
     expect(protein!.unit).toBe('serving');
@@ -330,7 +334,7 @@ describe('ChefByte RecipeFormPage queries', () => {
     await chefbyte(ctx.client).from('recipe_ingredients').insert({
       user_id: ctx.userId,
       recipe_id: deleteId,
-      product_id: productMap['Eggs'],
+      product_id: productMap['Great Value Large White Eggs'],
       quantity: 1,
       unit: 'serving',
       note: null,

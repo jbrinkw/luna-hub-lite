@@ -21,7 +21,7 @@ describe('ChefByte MacroPage queries', () => {
 
     // Seed a food_log for today so consumed queries return data
     const today = todayDate();
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
     await chefbyte(ctx.client).from('food_logs').insert({
       user_id: ctx.userId,
       product_id: chickenId,
@@ -157,9 +157,9 @@ describe('ChefByte MacroPage queries', () => {
 
     const log = data[0];
     expect(typeof log.log_id).toBe('string');
-    expect(log.product_id).toBe(seeds.productMap['Chicken Breast']);
+    expect(log.product_id).toBe(seeds.productMap['Great Value Boneless Skinless Chicken Breasts']);
     expect(log.products).not.toBeNull();
-    expect(log.products.name).toBe('Chicken Breast');
+    expect(log.products.name).toBe('Great Value Boneless Skinless Chicken Breasts');
 
     // Verify exact macro values from seed (1 serving of Chicken Breast)
     expect(Number(log.calories)).toBe(165);

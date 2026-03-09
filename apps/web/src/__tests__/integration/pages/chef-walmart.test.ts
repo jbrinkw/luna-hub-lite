@@ -63,7 +63,7 @@ describe('ChefByte WalmartTab queries', () => {
   // Exact update from WalmartTab.tsx (markNotOnWalmart)
   // -----------------------------------------------------------------------
   it('markNotOnWalmart update matches page pattern', async () => {
-    const productId = seeds.productMap['Bananas'];
+    const productId = seeds.productMap['Banquet Chicken Breast Patties'];
 
     const updateResult = await chefbyte(ctx.client)
       .from('products')
@@ -97,7 +97,7 @@ describe('ChefByte WalmartTab queries', () => {
   // Set a walmart link, then test missing prices query returns it
   // -----------------------------------------------------------------------
   it('product with walmart_link but no price appears in missing prices', async () => {
-    const productId = seeds.productMap['Chicken Breast'];
+    const productId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     // Set walmart_link (but NOT price)
     await chefbyte(ctx.client)
@@ -116,7 +116,7 @@ describe('ChefByte WalmartTab queries', () => {
     const data = assertQuerySucceeds(result, 'missing prices after link');
     const chicken = data.find((p: any) => p.product_id === productId);
     expect(chicken).toBeDefined();
-    expect(chicken.name).toBe('Chicken Breast');
+    expect(chicken.name).toBe('Great Value Boneless Skinless Chicken Breasts');
     expect(chicken.walmart_link).toBe('https://walmart.com/chicken');
     expect(chicken.price).toBeNull();
   });
@@ -125,7 +125,7 @@ describe('ChefByte WalmartTab queries', () => {
   // Exact update from WalmartTab.tsx (savePrice)
   // -----------------------------------------------------------------------
   it('savePrice update matches page pattern', async () => {
-    const productId = seeds.productMap['Chicken Breast'];
+    const productId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
     const price = 8.99;
 
     const updateResult = await chefbyte(ctx.client).from('products').update({ price }).eq('product_id', productId);
@@ -157,7 +157,7 @@ describe('ChefByte WalmartTab queries', () => {
   // Verify the full flow: link -> set price -> neither query returns it
   // -----------------------------------------------------------------------
   it('fully linked and priced product does not appear in either missing query', async () => {
-    const productId = seeds.productMap['Brown Rice'];
+    const productId = seeds.productMap['Great Value Long Grain Brown Rice'];
 
     // Set walmart_link AND price
     await chefbyte(ctx.client)

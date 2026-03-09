@@ -22,7 +22,7 @@ describe('ChefByte ScannerPage queries', () => {
     await seedMacroGoals(ctx);
 
     // Seed stock for consume_product to work
-    const chickenId = productMap['Chicken Breast'];
+    const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
     await chefbyte(ctx.client).from('stock_lots').insert({
       user_id: ctx.userId,
       product_id: chickenId,
@@ -111,7 +111,7 @@ describe('ChefByte ScannerPage queries', () => {
   //   }).eq('product_id', product.product_id)
   // -------------------------------------------------------------------
   it('product nutrition update by product_id works', async () => {
-    const chickenId = productMap['Chicken Breast'];
+    const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     const result = await chefbyte(ctx.client)
       .from('products')
@@ -146,7 +146,7 @@ describe('ChefByte ScannerPage queries', () => {
   // NOTE: location_id is NOT NULL — must always provide
   // -------------------------------------------------------------------
   it('stock_lots insert with explicit location_id (purchase mode)', async () => {
-    const eggsId = productMap['Eggs'];
+    const eggsId = productMap['Great Value Large White Eggs'];
     const result = await chefbyte(ctx.client).from('stock_lots').insert({
       user_id: ctx.userId,
       product_id: eggsId,
@@ -198,7 +198,7 @@ describe('ChefByte ScannerPage queries', () => {
   // NOTE: p_unit = 'serving' (singular, NOT 'servings')
   // -------------------------------------------------------------------
   it('consume_product RPC with p_unit=serving and p_log_macros=true', async () => {
-    const chickenId = productMap['Chicken Breast'];
+    const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
     const today = todayDate();
 
     const result = await (chefbyte(ctx.client) as any).rpc('consume_product', {
@@ -240,7 +240,7 @@ describe('ChefByte ScannerPage queries', () => {
   //   })
   // -------------------------------------------------------------------
   it('consume_product RPC with p_log_macros=false skips food_log', async () => {
-    const riceId = productMap['Brown Rice'];
+    const riceId = productMap['Great Value Long Grain Brown Rice'];
     const today = todayDate();
 
     // First add stock for rice
@@ -291,7 +291,7 @@ describe('ChefByte ScannerPage queries', () => {
   //   })
   // -------------------------------------------------------------------
   it('shopping_list insert for shopping mode works', async () => {
-    const bananaId = productMap['Bananas'];
+    const bananaId = productMap['Banquet Chicken Breast Patties'];
 
     const result = await chefbyte(ctx.client).from('shopping_list').insert({
       user_id: ctx.userId,
@@ -320,7 +320,7 @@ describe('ChefByte ScannerPage queries', () => {
   // Source: ScannerPage.tsx line 273-279 (unitType can be 'container')
   // -------------------------------------------------------------------
   it('consume_product RPC with p_unit=container works', async () => {
-    const eggsId = productMap['Eggs'];
+    const eggsId = productMap['Great Value Large White Eggs'];
     const today = todayDate();
 
     const result = await (chefbyte(ctx.client) as any).rpc('consume_product', {
@@ -342,7 +342,7 @@ describe('ChefByte ScannerPage queries', () => {
   //   .from('stock_lots').delete().eq('lot_id', lotId)
   // -------------------------------------------------------------------
   it('undo purchase deletes the stock lot created during scan', async () => {
-    const chickenId = productMap['Chicken Breast'];
+    const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     // Insert a stock lot with unique expires_on to avoid merge_key conflict
     const { data: lot } = await chefbyte(ctx.client)
@@ -372,7 +372,7 @@ describe('ChefByte ScannerPage queries', () => {
   // Source: ScannerPage.tsx undoScan (consume mode)
   // -------------------------------------------------------------------
   it('undo consume re-adds stock lot and deletes food_log', async () => {
-    const chickenId = productMap['Chicken Breast'];
+    const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
     const today = todayDate();
 
     // Consume product (simulating consume scan)
@@ -761,7 +761,7 @@ describe('ChefByte ScannerPage queries', () => {
   //   .from('shopping_list').delete().eq('cart_item_id', cartItemId)
   // -------------------------------------------------------------------
   it('undo shopping add deletes the shopping list item', async () => {
-    const chickenId = productMap['Chicken Breast'];
+    const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     // Add to shopping list (simulating shopping scan)
     const { data: item } = await chefbyte(ctx.client)

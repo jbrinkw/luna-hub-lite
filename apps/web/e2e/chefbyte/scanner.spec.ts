@@ -131,7 +131,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-known');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Add barcode to Chicken Breast product
       const chef = (client as any).schema('chefbyte');
@@ -146,10 +146,12 @@ test.describe('ChefByte Scanner', () => {
 
       // Wait for queue item to appear with product name (processing complete)
       const queueList = page.getByTestId('queue-list');
-      await expect(queueList).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(queueList).toContainText('Great Value Boneless Skinless Chicken Breasts', { timeout: 15000 });
 
       // Active item display should show "Chicken Breast"
-      await expect(page.getByTestId('active-item-display')).toContainText('Chicken Breast');
+      await expect(page.getByTestId('active-item-display')).toContainText(
+        'Great Value Boneless Skinless Chicken Breasts',
+      );
     } finally {
       await cleanup();
     }
@@ -182,7 +184,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-consume');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Add barcode to Chicken Breast product
       const chef = (client as any).schema('chefbyte');
@@ -203,10 +205,12 @@ test.describe('ChefByte Scanner', () => {
 
       // Wait for queue item to finish processing (shows product name)
       const queueList = page.getByTestId('queue-list');
-      await expect(queueList).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(queueList).toContainText('Great Value Boneless Skinless Chicken Breasts', { timeout: 15000 });
 
       // Active item display should show the product
-      await expect(page.getByTestId('active-item-display')).toContainText('Chicken Breast');
+      await expect(page.getByTestId('active-item-display')).toContainText(
+        'Great Value Boneless Skinless Chicken Breasts',
+      );
 
       // Screen value should reset to "1" after scan
       await expect(page.getByTestId('screen-value')).toHaveText('1');
@@ -219,7 +223,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-shop');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Add barcode to Chicken Breast product
       const chef = (client as any).schema('chefbyte');
@@ -237,7 +241,7 @@ test.describe('ChefByte Scanner', () => {
 
       // Wait for queue item to finish processing
       const queueList = page.getByTestId('queue-list');
-      await expect(queueList).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(queueList).toContainText('Great Value Boneless Skinless Chicken Breasts', { timeout: 15000 });
 
       // Verify shopping list has entry
       const { data: shoppingItems } = await chef.from('shopping_list').select('*').eq('product_id', chickenId);
@@ -253,7 +257,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-delete');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Add barcode to Chicken Breast product
       const chef = (client as any).schema('chefbyte');
@@ -268,7 +272,7 @@ test.describe('ChefByte Scanner', () => {
 
       // Wait for queue item to finish processing
       const queueList = page.getByTestId('queue-list');
-      await expect(queueList).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(queueList).toContainText('Great Value Boneless Skinless Chicken Breasts', { timeout: 15000 });
 
       // Find and click the delete button
       const deleteBtn = page.locator('[data-testid^="delete-item-"]').first();
@@ -319,7 +323,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-autoscale');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Add barcode and scan to populate nutrition fields from the product
       const chef = (client as any).schema('chefbyte');
@@ -331,7 +335,9 @@ test.describe('ChefByte Scanner', () => {
       // Scan the barcode so nutrition fields populate from the product
       await page.getByTestId('barcode-input').fill('000000111111');
       await page.getByTestId('barcode-input').press('Enter');
-      await expect(page.getByTestId('queue-list')).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Boneless Skinless Chicken Breasts', {
+        timeout: 15000,
+      });
 
       // Nutrition editor should now have Chicken Breast values:
       // calories=165, protein=31, carbs=0, fat=3.6
@@ -354,7 +360,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-undo');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const riceId = productMap['Brown Rice'];
+      const riceId = productMap['Great Value Long Grain Brown Rice'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000222222' }).eq('product_id', riceId);
@@ -367,7 +373,7 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').press('Enter');
 
       const queueList = page.getByTestId('queue-list');
-      await expect(queueList).toContainText('Brown Rice', { timeout: 15000 });
+      await expect(queueList).toContainText('Great Value Long Grain Brown Rice', { timeout: 15000 });
 
       // Click the undo/delete button for that item
       const undoBtn = page.locator('[data-testid^="delete-item-"]').first();
@@ -398,9 +404,9 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-batch');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
-      const riceId = productMap['Brown Rice'];
-      const eggsId = productMap['Eggs'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
+      const riceId = productMap['Great Value Long Grain Brown Rice'];
+      const eggsId = productMap['Great Value Large White Eggs'];
 
       // Assign unique barcodes to 3 products
       const chef = (client as any).schema('chefbyte');
@@ -428,15 +434,19 @@ test.describe('ChefByte Scanner', () => {
       // Scan 3 barcodes in purchase mode
       await page.getByTestId('barcode-input').fill('000000333301');
       await page.getByTestId('barcode-input').press('Enter');
-      await expect(page.getByTestId('queue-list')).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Boneless Skinless Chicken Breasts', {
+        timeout: 15000,
+      });
 
       await page.getByTestId('barcode-input').fill('000000333302');
       await page.getByTestId('barcode-input').press('Enter');
-      await expect(page.getByTestId('queue-list')).toContainText('Brown Rice', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Long Grain Brown Rice', {
+        timeout: 15000,
+      });
 
       await page.getByTestId('barcode-input').fill('000000333303');
       await page.getByTestId('barcode-input').press('Enter');
-      await expect(page.getByTestId('queue-list')).toContainText('Eggs', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Large White Eggs', { timeout: 15000 });
 
       // Verify each product got a new stock lot in the DB
       const chickenLotsAfter = await countDbRows(client, 'chefbyte', 'stock_lots', {
@@ -464,7 +474,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-nomacro');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000444444' }).eq('product_id', chickenId);
@@ -486,7 +496,9 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').press('Enter');
 
       // Wait for queue item to finish processing
-      await expect(page.getByTestId('queue-list')).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Boneless Skinless Chicken Breasts', {
+        timeout: 15000,
+      });
 
       // Verify no new food_log entry was created (consume_no_macros sets p_log_macros=false)
       const logsAfter = await countDbRows(client, 'chefbyte', 'food_logs', {
@@ -503,9 +515,9 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-rapid');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
-      const riceId = productMap['Brown Rice'];
-      const eggsId = productMap['Eggs'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
+      const riceId = productMap['Great Value Long Grain Brown Rice'];
+      const eggsId = productMap['Great Value Large White Eggs'];
 
       // Assign unique barcodes
       const chef = (client as any).schema('chefbyte');
@@ -528,9 +540,9 @@ test.describe('ChefByte Scanner', () => {
 
       // Wait for all 3 items to finish processing in the queue
       const queueList = page.getByTestId('queue-list');
-      await expect(queueList).toContainText('Chicken Breast', { timeout: 15000 });
-      await expect(queueList).toContainText('Brown Rice', { timeout: 15000 });
-      await expect(queueList).toContainText('Eggs', { timeout: 15000 });
+      await expect(queueList).toContainText('Great Value Boneless Skinless Chicken Breasts', { timeout: 15000 });
+      await expect(queueList).toContainText('Great Value Long Grain Brown Rice', { timeout: 15000 });
+      await expect(queueList).toContainText('Great Value Large White Eggs', { timeout: 15000 });
 
       // Verify exactly 3 queue items rendered
       const queueItems = page.locator('[data-testid^="queue-item-"]');
@@ -544,7 +556,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-dbverify');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const proteinPowderId = productMap['Protein Powder'];
+      const proteinPowderId = productMap['Birds Eye Sweet Peas'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000666666' }).eq('product_id', proteinPowderId);
@@ -570,7 +582,7 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').press('Enter');
 
       // Wait for queue item to finish
-      await expect(page.getByTestId('queue-list')).toContainText('Protein Powder', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Birds Eye Sweet Peas', { timeout: 15000 });
 
       // Verify DB: new stock_lot row was created
       const lotsAfter = await countDbRows(client, 'chefbyte', 'stock_lots', {
@@ -608,7 +620,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-consumeqty');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000777701' }).eq('product_id', chickenId);
@@ -643,7 +655,9 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').press('Enter');
 
       // Wait for queue to show Chicken Breast
-      await expect(page.getByTestId('queue-list')).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Boneless Skinless Chicken Breasts', {
+        timeout: 15000,
+      });
 
       // Verify food_log was created:
       // 3 servings * 165 cal = 495 cal, 3 * 31 = 93 protein
@@ -664,7 +678,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-containerunit');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const riceId = productMap['Brown Rice'];
+      const riceId = productMap['Great Value Long Grain Brown Rice'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000777702' }).eq('product_id', riceId);
@@ -699,7 +713,9 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').press('Enter');
 
       // Wait for queue
-      await expect(page.getByTestId('queue-list')).toContainText('Brown Rice', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Long Grain Brown Rice', {
+        timeout: 15000,
+      });
 
       // Verify food_log: 1 container of Brown Rice = 8 servings
       // 8 * 216 cal = 1728 cal, 8 * 5 = 40 protein
@@ -720,7 +736,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-undoconsume');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const eggsId = productMap['Eggs'];
+      const eggsId = productMap['Great Value Large White Eggs'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000777703' }).eq('product_id', eggsId);
@@ -755,7 +771,7 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').press('Enter');
 
       // Wait for queue to show Eggs
-      await expect(page.getByTestId('queue-list')).toContainText('Eggs', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Large White Eggs', { timeout: 15000 });
 
       // Count food_logs after scan — should be +1
       const logsAfterScan = await countDbRows(client, 'chefbyte', 'food_logs', {
@@ -787,7 +803,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-undoshop');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const bananasId = productMap['Bananas'];
+      const bananasId = productMap['Banquet Chicken Breast Patties'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000777704' }).eq('product_id', bananasId);
@@ -803,7 +819,7 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').press('Enter');
 
       // Wait for queue to show Bananas
-      await expect(page.getByTestId('queue-list')).toContainText('Bananas', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Banquet Chicken Breast Patties', { timeout: 15000 });
 
       // Count shopping_list items for this product — should be >= 1
       const cartCountAfterScan = await countDbRows(client, 'chefbyte', 'shopping_list', {
@@ -835,7 +851,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-filternew');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000777705' }).eq('product_id', chickenId);
@@ -846,7 +862,9 @@ test.describe('ChefByte Scanner', () => {
       // Scan known barcode first (Chicken Breast)
       await page.getByTestId('barcode-input').fill('000000777705');
       await page.getByTestId('barcode-input').press('Enter');
-      await expect(page.getByTestId('queue-list')).toContainText('Chicken Breast', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Boneless Skinless Chicken Breasts', {
+        timeout: 15000,
+      });
 
       // Scan unknown barcode (will create placeholder)
       await page.getByTestId('barcode-input').fill('999999777706');
@@ -874,7 +892,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-nutsave');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const proteinPowderId = productMap['Protein Powder'];
+      const proteinPowderId = productMap['Birds Eye Sweet Peas'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000777707' }).eq('product_id', proteinPowderId);
@@ -887,7 +905,7 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').press('Enter');
 
       // Wait for queue to show Protein Powder
-      await expect(page.getByTestId('queue-list')).toContainText('Protein Powder', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Birds Eye Sweet Peas', { timeout: 15000 });
 
       // Nutrition editor should have values: calories=120, protein=24
       const caloriesInput = page.getByTestId('nut-calories');
@@ -920,7 +938,7 @@ test.describe('ChefByte Scanner', () => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-twolots');
     try {
       const { productMap } = await seedChefByteData(client, userId);
-      const eggsId = productMap['Eggs'];
+      const eggsId = productMap['Great Value Large White Eggs'];
 
       const chef = (client as any).schema('chefbyte');
       await chef.from('products').update({ barcode: '000000777708' }).eq('product_id', eggsId);
@@ -937,7 +955,7 @@ test.describe('ChefByte Scanner', () => {
       // Scan barcode once, wait for queue
       await page.getByTestId('barcode-input').fill('000000777708');
       await page.getByTestId('barcode-input').press('Enter');
-      await expect(page.getByTestId('queue-list')).toContainText('Eggs', { timeout: 15000 });
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Large White Eggs', { timeout: 15000 });
 
       // Scan barcode again, wait for 2 items in queue
       await page.getByTestId('barcode-input').fill('000000777708');

@@ -84,14 +84,14 @@ test.describe('MCP Tools — ChefByte', () => {
 
       expect(data.total).toBe(5);
       const names = data.products.map((p: any) => p.name);
-      expect(names).toContain('Chicken Breast');
-      expect(names).toContain('Brown Rice');
-      expect(names).toContain('Eggs');
-      expect(names).toContain('Protein Powder');
-      expect(names).toContain('Bananas');
+      expect(names).toContain('Great Value Boneless Skinless Chicken Breasts');
+      expect(names).toContain('Great Value Long Grain Brown Rice');
+      expect(names).toContain('Great Value Large White Eggs');
+      expect(names).toContain('Birds Eye Sweet Peas');
+      expect(names).toContain('Banquet Chicken Breast Patties');
 
       // Verify nutritional data is returned
-      const chicken = data.products.find((p: any) => p.name === 'Chicken Breast');
+      const chicken = data.products.find((p: any) => p.name === 'Great Value Boneless Skinless Chicken Breasts');
       expect(chicken.calories_per_serving).toBe(165);
       expect(chicken.protein_per_serving).toBe(31);
     } finally {
@@ -106,7 +106,7 @@ test.describe('MCP Tools — ChefByte', () => {
       ctx = await setupMcpUser('mcp-chef-consume');
       const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
 
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Get stock before consuming
       const chef = (ctx.client as any).schema('chefbyte');
@@ -159,7 +159,7 @@ test.describe('MCP Tools — ChefByte', () => {
 
       // Consume 1 container of Chicken Breast (4 servings x 165 cal = 660 cal)
       await ctx.mcp.callTool('CHEFBYTE_consume', {
-        product_id: productMap['Chicken Breast'],
+        product_id: productMap['Great Value Boneless Skinless Chicken Breasts'],
         qty: 1,
         unit: 'container',
       });
@@ -191,9 +191,9 @@ test.describe('MCP Tools — ChefByte', () => {
         description: 'High protein post-workout meal',
         base_servings: 1,
         ingredients: [
-          { product_id: productMap['Chicken Breast'], quantity: 0.5, unit: 'container' },
-          { product_id: productMap['Brown Rice'], quantity: 0.25, unit: 'container' },
-          { product_id: productMap['Eggs'], quantity: 3, unit: 'serving' },
+          { product_id: productMap['Great Value Boneless Skinless Chicken Breasts'], quantity: 0.5, unit: 'container' },
+          { product_id: productMap['Great Value Long Grain Brown Rice'], quantity: 0.25, unit: 'container' },
+          { product_id: productMap['Great Value Large White Eggs'], quantity: 3, unit: 'serving' },
         ],
       });
       const data = parseResult(result);
@@ -260,12 +260,12 @@ test.describe('MCP Tools — ChefByte', () => {
       expect(data.total).toBeGreaterThanOrEqual(1);
       const names = data.below_min.map((item: any) => item.product_name);
       // Bananas: stock=0, min=3 -> definitely below
-      expect(names).toContain('Bananas');
+      expect(names).toContain('Banquet Chicken Breast Patties');
       // Eggs: stock=0.5, min=1 -> below
-      expect(names).toContain('Eggs');
+      expect(names).toContain('Great Value Large White Eggs');
 
       // Each below-min item should have deficit info
-      const bananas = data.below_min.find((item: any) => item.product_name === 'Bananas');
+      const bananas = data.below_min.find((item: any) => item.product_name === 'Banquet Chicken Breast Patties');
       expect(bananas.deficit).toBeGreaterThan(0);
       expect(bananas.current_stock).toBe(0);
     } finally {
@@ -311,7 +311,7 @@ test.describe('MCP Tools — ChefByte', () => {
       ctx = await setupMcpUser('mcp-chef-update');
       const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
 
-      const riceId = productMap['Brown Rice'];
+      const riceId = productMap['Great Value Long Grain Brown Rice'];
 
       const result = await ctx.mcp.callTool('CHEFBYTE_update_product', {
         product_id: riceId,
@@ -349,8 +349,8 @@ test.describe('MCP Tools — ChefByte', () => {
 
       // Seed 2 shopping items
       await seedShoppingItems(ctx.client, ctx.userId, [
-        { productId: productMap['Chicken Breast'], qtyContainers: 2 },
-        { productId: productMap['Brown Rice'], qtyContainers: 1 },
+        { productId: productMap['Great Value Boneless Skinless Chicken Breasts'], qtyContainers: 2 },
+        { productId: productMap['Great Value Long Grain Brown Rice'], qtyContainers: 1 },
       ]);
 
       const result = await ctx.mcp.callTool('CHEFBYTE_get_shopping_list', {});
@@ -358,12 +358,12 @@ test.describe('MCP Tools — ChefByte', () => {
 
       expect(data.total_items).toBe(2);
       const names = data.items.map((i: any) => i.product_name);
-      expect(names).toContain('Chicken Breast');
-      expect(names).toContain('Brown Rice');
+      expect(names).toContain('Great Value Boneless Skinless Chicken Breasts');
+      expect(names).toContain('Great Value Long Grain Brown Rice');
 
       // Verify item structure
-      const chicken = data.items.find((i: any) => i.product_name === 'Chicken Breast');
-      expect(chicken.product_id).toBe(productMap['Chicken Breast']);
+      const chicken = data.items.find((i: any) => i.product_name === 'Great Value Boneless Skinless Chicken Breasts');
+      expect(chicken.product_id).toBe(productMap['Great Value Boneless Skinless Chicken Breasts']);
       expect(chicken.qty_containers).toBe(2);
     } finally {
       await ctx?.mcp.disconnect();
@@ -379,8 +379,8 @@ test.describe('MCP Tools — ChefByte', () => {
 
       // Seed shopping items
       await seedShoppingItems(ctx.client, ctx.userId, [
-        { productId: productMap['Eggs'], qtyContainers: 1 },
-        { productId: productMap['Bananas'], qtyContainers: 5 },
+        { productId: productMap['Great Value Large White Eggs'], qtyContainers: 1 },
+        { productId: productMap['Banquet Chicken Breast Patties'], qtyContainers: 5 },
       ]);
 
       // Verify items exist before clearing
@@ -408,7 +408,7 @@ test.describe('MCP Tools — ChefByte', () => {
       ctx = await setupMcpUser('mcp-chef-setprice');
       const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
 
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       const result = await ctx.mcp.callTool('CHEFBYTE_set_price', {
         product_id: chickenId,
@@ -416,7 +416,7 @@ test.describe('MCP Tools — ChefByte', () => {
       });
       const data = parseResult(result);
 
-      expect(data.message).toContain('Chicken Breast');
+      expect(data.message).toContain('Great Value Boneless Skinless Chicken Breasts');
       expect(data.message).toContain('$8.49');
       expect(data.product.product_id).toBe(chickenId);
       expect(Number(data.product.price)).toBeCloseTo(8.49, 2);
@@ -439,7 +439,7 @@ test.describe('MCP Tools — ChefByte', () => {
 
       // Seed an unpurchased item
       const [itemId] = await seedShoppingItems(ctx.client, ctx.userId, [
-        { productId: productMap['Protein Powder'], qtyContainers: 1, purchased: false },
+        { productId: productMap['Birds Eye Sweet Peas'], qtyContainers: 1, purchased: false },
       ]);
 
       // Toggle to purchased
@@ -471,8 +471,8 @@ test.describe('MCP Tools — ChefByte', () => {
 
       // Seed 2 items
       const [itemId1, itemId2] = await seedShoppingItems(ctx.client, ctx.userId, [
-        { productId: productMap['Chicken Breast'], qtyContainers: 2 },
-        { productId: productMap['Eggs'], qtyContainers: 1 },
+        { productId: productMap['Great Value Boneless Skinless Chicken Breasts'], qtyContainers: 2 },
+        { productId: productMap['Great Value Large White Eggs'], qtyContainers: 1 },
       ]);
 
       // Delete the first item
@@ -504,15 +504,15 @@ test.describe('MCP Tools — ChefByte', () => {
 
       // Seed shopping items: 1 purchased, 1 not purchased
       await seedShoppingItems(ctx.client, ctx.userId, [
-        { productId: productMap['Bananas'], qtyContainers: 3, purchased: true },
-        { productId: productMap['Protein Powder'], qtyContainers: 1, purchased: false },
+        { productId: productMap['Banquet Chicken Breast Patties'], qtyContainers: 3, purchased: true },
+        { productId: productMap['Birds Eye Sweet Peas'], qtyContainers: 1, purchased: false },
       ]);
 
       // Get stock before import
       const { data: lotsBefore } = await chef
         .from('stock_lots')
         .select('lot_id')
-        .eq('product_id', productMap['Bananas'])
+        .eq('product_id', productMap['Banquet Chicken Breast Patties'])
         .eq('user_id', ctx.userId);
       const countBefore = lotsBefore!.length;
 
@@ -524,14 +524,14 @@ test.describe('MCP Tools — ChefByte', () => {
 
       expect(data.lots_created).toBe(1); // Only the purchased Bananas
       expect(data.lots.length).toBe(1);
-      expect(data.lots[0].product_id).toBe(productMap['Bananas']);
+      expect(data.lots[0].product_id).toBe(productMap['Banquet Chicken Breast Patties']);
       expect(data.lots[0].qty_containers).toBe(3);
 
       // Verify new stock lot was created
       const { data: lotsAfter } = await chef
         .from('stock_lots')
         .select('lot_id')
-        .eq('product_id', productMap['Bananas'])
+        .eq('product_id', productMap['Banquet Chicken Breast Patties'])
         .eq('user_id', ctx.userId);
       expect(lotsAfter!.length).toBe(countBefore + 1);
 
@@ -565,7 +565,9 @@ test.describe('MCP Tools — ChefByte', () => {
       expect(recipe.ingredients.length).toBe(2);
 
       // Verify ingredient structure includes product names and macros
-      const chickenIngredient = recipe.ingredients.find((i: any) => i.product_name === 'Chicken Breast');
+      const chickenIngredient = recipe.ingredients.find(
+        (i: any) => i.product_name === 'Great Value Boneless Skinless Chicken Breasts',
+      );
       expect(chickenIngredient).toBeTruthy();
       expect(chickenIngredient.quantity).toBe(0.5);
       expect(chickenIngredient.unit).toBe('container');
@@ -653,13 +655,15 @@ test.describe('MCP Tools — ChefByte', () => {
       expect(data.inventory.length).toBeGreaterThanOrEqual(1);
 
       // Chicken Breast should appear with total_containers = 3 (seeded)
-      const chicken = data.inventory.find((i: any) => i.product_name === 'Chicken Breast');
+      const chicken = data.inventory.find(
+        (i: any) => i.product_name === 'Great Value Boneless Skinless Chicken Breasts',
+      );
       expect(chicken).toBeTruthy();
       expect(Number(chicken.total_containers)).toBe(3);
       expect(chicken.nearest_expiry).toBeTruthy();
 
       // Brown Rice should have total_containers = 2
-      const rice = data.inventory.find((i: any) => i.product_name === 'Brown Rice');
+      const rice = data.inventory.find((i: any) => i.product_name === 'Great Value Long Grain Brown Rice');
       expect(rice).toBeTruthy();
       expect(Number(rice.total_containers)).toBe(2);
     } finally {
@@ -674,7 +678,7 @@ test.describe('MCP Tools — ChefByte', () => {
       ctx = await setupMcpUser('mcp-chef-lots');
       const { productMap } = await seedChefByteData(ctx.client, ctx.userId);
 
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       const result = await ctx.mcp.callTool('CHEFBYTE_get_product_lots', {
         product_id: chickenId,
@@ -715,7 +719,7 @@ test.describe('MCP Tools — ChefByte', () => {
       const { data: chickenBefore } = await chef
         .from('stock_lots')
         .select('qty_containers')
-        .eq('product_id', productMap['Chicken Breast'])
+        .eq('product_id', productMap['Great Value Boneless Skinless Chicken Breasts'])
         .eq('user_id', ctx.userId)
         .gt('qty_containers', 0);
       const chickenStockBefore = chickenBefore!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
@@ -735,7 +739,7 @@ test.describe('MCP Tools — ChefByte', () => {
       const { data: chickenAfter } = await chef
         .from('stock_lots')
         .select('qty_containers')
-        .eq('product_id', productMap['Chicken Breast'])
+        .eq('product_id', productMap['Great Value Boneless Skinless Chicken Breasts'])
         .eq('user_id', ctx.userId)
         .gte('qty_containers', 0);
       const chickenStockAfter = chickenAfter!.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);

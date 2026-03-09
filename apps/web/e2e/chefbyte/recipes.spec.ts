@@ -134,8 +134,8 @@ test.describe('ChefByte Recipes', () => {
 
       // Create a recipe using Chicken Breast (3 ctn in stock) + Bananas (0 ctn in stock)
       const partialRecipeId = await seedRecipe(client, userId, 'Partial Bowl', [
-        { productId: productMap['Chicken Breast'], quantity: 1, unit: 'container' },
-        { productId: productMap['Bananas'], quantity: 2, unit: 'container' },
+        { productId: productMap['Great Value Boneless Skinless Chicken Breasts'], quantity: 1, unit: 'container' },
+        { productId: productMap['Banquet Chicken Breast Patties'], quantity: 2, unit: 'container' },
       ]);
 
       await page.goto('/chef/recipes');
@@ -157,7 +157,7 @@ test.describe('ChefByte Recipes', () => {
 
       // Create a recipe using only Bananas (0 ctn in stock)
       const noStockRecipeId = await seedRecipe(client, userId, 'Banana Only', [
-        { productId: productMap['Bananas'], quantity: 1, unit: 'container' },
+        { productId: productMap['Banquet Chicken Breast Patties'], quantity: 1, unit: 'container' },
       ]);
 
       await page.goto('/chef/recipes');

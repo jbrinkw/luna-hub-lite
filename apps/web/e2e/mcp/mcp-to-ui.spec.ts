@@ -98,7 +98,7 @@ test.describe('MCP-to-UI E2E', () => {
 
       // Add Chicken Breast to shopping list via MCP
       await mcp.callTool('CHEFBYTE_add_to_shopping', {
-        product_id: productMap['Chicken Breast'],
+        product_id: productMap['Great Value Boneless Skinless Chicken Breasts'],
         qty_containers: 3,
       });
 
@@ -109,7 +109,7 @@ test.describe('MCP-to-UI E2E', () => {
       await page.goto('/chef/shopping');
 
       // Verify Chicken Breast appears in the shopping list
-      await expect(page.getByText('Chicken Breast')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText('Great Value Boneless Skinless Chicken Breasts')).toBeVisible({ timeout: 15000 });
     } finally {
       await mcp?.disconnect();
       await cleanup();

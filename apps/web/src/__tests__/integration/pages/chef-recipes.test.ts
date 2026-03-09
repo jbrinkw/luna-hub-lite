@@ -62,10 +62,12 @@ describe('ChefByte RecipesPage queries', () => {
     expect(recipe.recipe_ingredients.length).toBe(2);
 
     // Verify Chicken Breast ingredient with exact seed values
-    const chickenIng = recipe.recipe_ingredients.find((i: any) => i.product_id === productMap['Chicken Breast']);
+    const chickenIng = recipe.recipe_ingredients.find(
+      (i: any) => i.product_id === productMap['Great Value Boneless Skinless Chicken Breasts'],
+    );
     expect(chickenIng).toBeDefined();
     expect(chickenIng.products).not.toBeNull();
-    expect(chickenIng.products.name).toBe('Chicken Breast');
+    expect(chickenIng.products.name).toBe('Great Value Boneless Skinless Chicken Breasts');
     expect(Number(chickenIng.products.calories_per_serving)).toBe(165);
     expect(Number(chickenIng.products.protein_per_serving)).toBe(31);
     expect(Number(chickenIng.products.carbs_per_serving)).toBe(0);
@@ -75,10 +77,12 @@ describe('ChefByte RecipesPage queries', () => {
     expect(chickenIng.unit).toBe('container');
 
     // Verify Brown Rice ingredient with exact seed values
-    const riceIng = recipe.recipe_ingredients.find((i: any) => i.product_id === productMap['Brown Rice']);
+    const riceIng = recipe.recipe_ingredients.find(
+      (i: any) => i.product_id === productMap['Great Value Long Grain Brown Rice'],
+    );
     expect(riceIng).toBeDefined();
     expect(riceIng.products).not.toBeNull();
-    expect(riceIng.products.name).toBe('Brown Rice');
+    expect(riceIng.products.name).toBe('Great Value Long Grain Brown Rice');
     expect(Number(riceIng.products.calories_per_serving)).toBe(216);
     expect(Number(riceIng.products.protein_per_serving)).toBe(5);
     expect(Number(riceIng.products.carbs_per_serving)).toBe(45);

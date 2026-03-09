@@ -180,8 +180,8 @@ test.describe('ChefByte Home Page', () => {
       const chef = (client as any).schema('chefbyte');
 
       // Seed purchased shopping items for two products
-      const chickenId = productMap['Chicken Breast'];
-      const riceId = productMap['Brown Rice'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
+      const riceId = productMap['Great Value Long Grain Brown Rice'];
 
       await seedShoppingItems(client, userId, [
         { productId: chickenId, qtyContainers: 2, purchased: true },
@@ -317,12 +317,14 @@ test.describe('ChefByte Home Page', () => {
       // With 2 servings and base_servings=2, ratio = 1
       // Chicken: 0.5 * 1 = 0.5 → ceil = 1 container
       // Rice: 0.25 * 1 = 0.25 → ceil = 1 container
-      const chickenItem = shopItems.find((i: any) => i.product_id === productMap['Chicken Breast']);
+      const chickenItem = shopItems.find(
+        (i: any) => i.product_id === productMap['Great Value Boneless Skinless Chicken Breasts'],
+      );
       expect(chickenItem).toBeTruthy();
       expect(chickenItem.qty_containers).toBe(1);
       expect(chickenItem.purchased).toBe(false);
 
-      const riceItem = shopItems.find((i: any) => i.product_id === productMap['Brown Rice']);
+      const riceItem = shopItems.find((i: any) => i.product_id === productMap['Great Value Long Grain Brown Rice']);
       expect(riceItem).toBeTruthy();
       expect(riceItem.qty_containers).toBe(1);
       expect(riceItem.purchased).toBe(false);

@@ -37,15 +37,21 @@ describe('ChefByte InventoryPage queries', () => {
 
     // Verify exact seeded product names in alphabetical order
     const names = data.map((p: any) => p.name);
-    expect(names).toEqual(['Bananas', 'Brown Rice', 'Chicken Breast', 'Eggs', 'Protein Powder']);
+    expect(names).toEqual([
+      'Banquet Chicken Breast Patties',
+      'Birds Eye Sweet Peas',
+      'Great Value Boneless Skinless Chicken Breasts',
+      'Great Value Large White Eggs',
+      'Great Value Long Grain Brown Rice',
+    ]);
 
     // Verify shape of returned rows matches InventoryPage Product interface
     const first = data[0];
     expect(typeof first.product_id).toBe('string');
     expect(first.user_id).toBe(ctx.userId);
-    expect(first.name).toBe('Bananas');
+    expect(first.name).toBe('Banquet Chicken Breast Patties');
     expect(first.barcode).toBeNull();
-    expect(Number(first.servings_per_container)).toBe(1);
+    expect(Number(first.servings_per_container)).toBe(6);
     expect(Number(first.min_stock_amount)).toBe(3);
   });
 
@@ -78,9 +84,12 @@ describe('ChefByte InventoryPage queries', () => {
       const existing = qtyByProduct.get(lot.product_id) ?? 0;
       qtyByProduct.set(lot.product_id, existing + Number(lot.qty_containers));
     }
-    expect(Number(qtyByProduct.get(seeds.productMap['Chicken Breast']))).toBeCloseTo(3.0, 1);
-    expect(Number(qtyByProduct.get(seeds.productMap['Brown Rice']))).toBeCloseTo(2.0, 1);
-    expect(Number(qtyByProduct.get(seeds.productMap['Eggs']))).toBeCloseTo(0.5, 1);
+    expect(Number(qtyByProduct.get(seeds.productMap['Great Value Boneless Skinless Chicken Breasts']))).toBeCloseTo(
+      3.0,
+      1,
+    );
+    expect(Number(qtyByProduct.get(seeds.productMap['Great Value Long Grain Brown Rice']))).toBeCloseTo(2.0, 1);
+    expect(Number(qtyByProduct.get(seeds.productMap['Great Value Large White Eggs']))).toBeCloseTo(0.5, 1);
   });
 
   // -----------------------------------------------------------------------
@@ -145,32 +154,32 @@ describe('ChefByte InventoryPage queries', () => {
     });
 
     // Verify exact stock values for each seeded product
-    const chicken = grouped.find((g: any) => g.product.name === 'Chicken Breast');
+    const chicken = grouped.find((g: any) => g.product.name === 'Great Value Boneless Skinless Chicken Breasts');
     expect(chicken).toBeDefined();
     expect(chicken!.totalStock).toBeCloseTo(3.0, 1);
     expect(chicken!.lotCount).toBe(1);
     expect(typeof chicken!.nearestExpiry).toBe('string');
 
-    const rice = grouped.find((g: any) => g.product.name === 'Brown Rice');
+    const rice = grouped.find((g: any) => g.product.name === 'Great Value Long Grain Brown Rice');
     expect(rice).toBeDefined();
     expect(rice!.totalStock).toBeCloseTo(2.0, 1);
     expect(rice!.lotCount).toBe(1);
     expect(typeof rice!.nearestExpiry).toBe('string');
 
-    const eggs = grouped.find((g: any) => g.product.name === 'Eggs');
+    const eggs = grouped.find((g: any) => g.product.name === 'Great Value Large White Eggs');
     expect(eggs).toBeDefined();
     expect(eggs!.totalStock).toBeCloseTo(0.5, 1);
     expect(eggs!.lotCount).toBe(1);
     expect(typeof eggs!.nearestExpiry).toBe('string');
 
-    const bananas = grouped.find((g: any) => g.product.name === 'Bananas');
+    const bananas = grouped.find((g: any) => g.product.name === 'Banquet Chicken Breast Patties');
     expect(bananas).toBeDefined();
     expect(bananas!.totalStock).toBe(0);
     expect(bananas!.lotCount).toBe(0);
     expect(bananas!.nearestExpiry).toBeNull();
 
     // "Protein Powder" has no stock lots
-    const protein = grouped.find((g: any) => g.product.name === 'Protein Powder');
+    const protein = grouped.find((g: any) => g.product.name === 'Birds Eye Sweet Peas');
     expect(protein).toBeDefined();
     expect(protein!.totalStock).toBe(0);
     expect(protein!.lotCount).toBe(0);
@@ -268,14 +277,18 @@ describe('ChefByte InventoryPage queries', () => {
     // Bananas (0 stock) and Protein Powder (0 stock) should be excluded
     expect(filteredGrouped.length).toBe(3); // Chicken, Rice, Eggs only
     const names = filteredGrouped.map((g: any) => g.product.name).sort();
-    expect(names).toEqual(['Brown Rice', 'Chicken Breast', 'Eggs']);
+    expect(names).toEqual([
+      'Great Value Boneless Skinless Chicken Breasts',
+      'Great Value Large White Eggs',
+      'Great Value Long Grain Brown Rice',
+    ]);
 
     // All zero-stock products should NOT appear
     const zeroStockNames = grouped
       .filter((g: any) => g.totalStock <= 0)
       .map((g: any) => g.product.name)
       .sort();
-    expect(zeroStockNames).toEqual(['Bananas', 'Protein Powder']);
+    expect(zeroStockNames).toEqual(['Banquet Chicken Breast Patties', 'Birds Eye Sweet Peas']);
 
     // Verify none of the filtered items have zero stock
     for (const item of filteredGrouped) {
@@ -289,7 +302,7 @@ describe('ChefByte InventoryPage queries', () => {
   // The RPC internally converts: qty / servings_per_container
   // -----------------------------------------------------------------------
   it('consume by serving unit converts to containers', async () => {
-    const eggsId = seeds.productMap['Eggs']; // 12 servings_per_container, 0.5 containers
+    const eggsId = seeds.productMap['Great Value Large White Eggs']; // 12 servings_per_container, 0.5 containers
     const today = todayDate();
 
     // Get stock before
@@ -330,7 +343,7 @@ describe('ChefByte InventoryPage queries', () => {
   // Source: InventoryPage.tsx addStock() — looks for existing lot then updates qty
   // -----------------------------------------------------------------------
   it('stock lot merge on same product/location/expiry', async () => {
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
     const locationId = seeds.locationId;
 
     // Get existing lot details
@@ -390,7 +403,7 @@ describe('ChefByte InventoryPage queries', () => {
   // Exact insert from InventoryPage.tsx addStock (line 163-171)
   // -----------------------------------------------------------------------
   it('addStock insert matches page pattern', async () => {
-    const productId = seeds.productMap['Protein Powder'];
+    const productId = seeds.productMap['Birds Eye Sweet Peas'];
     const locationId = seeds.locationId;
 
     const result = await chefbyte(ctx.client).from('stock_lots').insert({
@@ -420,7 +433,7 @@ describe('ChefByte InventoryPage queries', () => {
   // When product/location/expiry match an existing lot, update qty
   // -----------------------------------------------------------------------
   it('addStock merges into existing lot when product/location/expiry match', async () => {
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     // Get existing lot
     const { data: lots } = await chefbyte(ctx.client)
@@ -457,7 +470,7 @@ describe('ChefByte InventoryPage queries', () => {
   // consume_product RPC from inventory page
   // -----------------------------------------------------------------------
   it('consume_product RPC depletes stock from inventory', async () => {
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
     const today = todayDate();
 
     // Get stock before

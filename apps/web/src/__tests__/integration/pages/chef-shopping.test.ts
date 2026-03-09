@@ -58,14 +58,14 @@ describe('ChefByte ShoppingPage queries', () => {
     const searchText = 'chicken';
     const filtered = data.filter((p: any) => p.name.toLowerCase().includes(searchText.toLowerCase()));
     expect(filtered.length).toBeGreaterThanOrEqual(1);
-    expect(filtered[0].name).toBe('Chicken Breast');
+    expect(filtered[0].name).toBe('Great Value Boneless Skinless Chicken Breasts');
   });
 
   // -----------------------------------------------------------------------
   // Exact insert from ShoppingPage.tsx line 142-146 (addItem)
   // -----------------------------------------------------------------------
   it('add item to shopping list matches page pattern', async () => {
-    const productId = seeds.productMap['Chicken Breast'];
+    const productId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     const insertResult = await chefbyte(ctx.client).from('shopping_list').insert({
       user_id: ctx.userId,
@@ -92,7 +92,7 @@ describe('ChefByte ShoppingPage queries', () => {
 
     // Verify products join with exact seed values
     expect(item.products).not.toBeNull();
-    expect(item.products.name).toBe('Chicken Breast');
+    expect(item.products.name).toBe('Great Value Boneless Skinless Chicken Breasts');
     expect(item.products.barcode).toBeNull();
     expect(item.products.price).toBeNull();
   });
@@ -135,7 +135,7 @@ describe('ChefByte ShoppingPage queries', () => {
   // -----------------------------------------------------------------------
   it('delete item by cart_item_id matches page pattern', async () => {
     // Add a second item to delete
-    const productId = seeds.productMap['Bananas'];
+    const productId = seeds.productMap['Banquet Chicken Breast Patties'];
     await chefbyte(ctx.client).from('shopping_list').insert({
       user_id: ctx.userId,
       product_id: productId,
@@ -230,8 +230,8 @@ describe('ChefByte ShoppingPage queries', () => {
     await chefbyte(ctx.client).from('shopping_list').delete().eq('user_id', ctx.userId);
 
     // Insert 2 items
-    const p1 = seeds.productMap['Brown Rice'];
-    const p2 = seeds.productMap['Eggs'];
+    const p1 = seeds.productMap['Great Value Long Grain Brown Rice'];
+    const p2 = seeds.productMap['Great Value Large White Eggs'];
 
     await chefbyte(ctx.client).from('shopping_list').insert({
       user_id: ctx.userId,
@@ -291,7 +291,7 @@ describe('ChefByte ShoppingPage queries', () => {
   // Exact flow from ShoppingPage.tsx importToInventory
   // -----------------------------------------------------------------------
   it('importToInventory creates stock lots and removes purchased items', async () => {
-    const riceId = seeds.productMap['Brown Rice'];
+    const riceId = seeds.productMap['Great Value Long Grain Brown Rice'];
 
     // Clean up any existing shopping items first
     await chefbyte(ctx.client).from('shopping_list').delete().eq('user_id', ctx.userId);
@@ -363,7 +363,7 @@ describe('ChefByte ShoppingPage queries', () => {
   // Exact pattern from ShoppingPage.tsx addItem when product already on list
   // -----------------------------------------------------------------------
   it('shopping list qty increment updates existing item', async () => {
-    const chickenId = seeds.productMap['Chicken Breast'];
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     // Clean up any existing shopping items first
     await chefbyte(ctx.client).from('shopping_list').delete().eq('user_id', ctx.userId);
@@ -420,9 +420,9 @@ describe('ChefByte ShoppingPage queries', () => {
       .ilike('name', '%Chicken%')
       .order('name');
 
-    // Should find "Chicken Breast" but NOT "[MEAL] Chicken Bowl"
+    // Should find "Great Value Boneless Skinless Chicken Breasts" but NOT "[MEAL] Chicken Bowl"
     const names = (data ?? []).map((p: any) => p.name);
-    expect(names).toContain('Chicken Breast');
+    expect(names).toContain('Great Value Boneless Skinless Chicken Breasts');
     expect(names.every((n: string) => !n.startsWith('[MEAL]'))).toBe(true);
   });
 

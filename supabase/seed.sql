@@ -118,48 +118,48 @@ ON CONFLICT (user_id, name) DO NOTHING;
 INSERT INTO chefbyte.products (product_id, user_id, name, barcode, description, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, min_stock_amount, price) VALUES
   -- Proteins
   ('aaaaaaaa-2001-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Chicken Breast', '012345678901', 'Boneless skinless chicken breast, ~4oz serving',
-   4.000, 120.000, 0.000, 26.000, 1.500, 2.000, 8.990),
+   'Great Value Boneless Skinless Chicken Breasts', '078742370460', 'Frozen chicken breasts, ~4oz serving',
+   4.000, 120.000, 0.000, 26.000, 1.500, 2.000, NULL),
 
   ('aaaaaaaa-2002-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Salmon Fillet', '012345678902', 'Atlantic salmon fillet, ~4oz serving',
-   2.000, 208.000, 0.000, 20.000, 13.000, 1.000, 12.490),
+   'Great Value Wild Caught Pink Salmon', '078742236490', 'Frozen salmon fillets, ~4oz serving',
+   2.000, 208.000, 0.000, 20.000, 13.000, 1.000, NULL),
 
   ('aaaaaaaa-2003-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Eggs', '012345678903', 'Large eggs, 1 egg per serving',
-   12.000, 70.000, 0.000, 6.000, 5.000, 1.000, 3.490),
+   'Great Value Large White Eggs', '078742229713', 'Large white eggs, 12 count',
+   12.000, 70.000, 0.000, 6.000, 5.000, 1.000, NULL),
 
   ('aaaaaaaa-2004-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Greek Yogurt', '012345678904', 'Plain nonfat Greek yogurt, 170g cup',
-   1.000, 100.000, 6.000, 17.000, 0.700, 3.000, 1.290),
+   'Chobani Non-Fat Plain Greek Yogurt', '894700010151', 'Plain nonfat Greek yogurt, 32oz tub',
+   1.000, 100.000, 6.000, 17.000, 0.700, 3.000, NULL),
 
   -- Carbs
   ('aaaaaaaa-2005-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Brown Rice', '012345678905', 'Long grain brown rice, 1/4 cup dry per serving',
-   16.000, 170.000, 35.000, 4.000, 1.500, 1.000, 2.990),
+   'Great Value Long Grain Brown Rice', '078742011554', 'Long grain brown rice, 2lb bag',
+   16.000, 170.000, 35.000, 4.000, 1.500, 1.000, NULL),
 
   ('aaaaaaaa-2006-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Oats', '012345678906', 'Old fashioned rolled oats, 1/2 cup dry per serving',
-   13.000, 150.000, 27.000, 5.000, 3.000, 1.000, 4.490),
+   'Quaker Old Fashioned Oats', '030000010204', 'Old fashioned rolled oats, 42oz canister',
+   13.000, 150.000, 27.000, 5.000, 3.000, 1.000, NULL),
 
   ('aaaaaaaa-2007-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Bananas', '012345678907', 'Medium banana, ~118g',
-   1.000, 105.000, 27.000, 1.300, 0.400, 3.000, 0.290),
+   'Banquet Chicken Breast Patties', '031000116545', 'Frozen breaded chicken breast patties, 24oz bag',
+   6.000, 190.000, 13.000, 10.000, 11.000, 2.000, NULL),
 
-  -- Fats
+  -- Dairy
   ('aaaaaaaa-2008-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Olive Oil', '012345678908', 'Extra virgin olive oil, 1 tbsp per serving',
-   33.000, 120.000, 0.000, 0.000, 14.000, 1.000, 7.990),
+   'Great Value Whole Milk', '078742370002', 'Whole milk, 1 gallon',
+   16.000, 150.000, 12.000, 8.000, 8.000, 1.000, NULL),
 
-  -- Supplements
+  -- Frozen
   ('aaaaaaaa-2009-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Protein Powder', '012345678909', 'Whey protein isolate, 1 scoop (30g) per serving',
-   30.000, 120.000, 3.000, 25.000, 1.000, 1.000, 34.990),
+   'Birds Eye Sweet Peas', '014500001108', 'Frozen sweet peas, 13oz bag',
+   3.500, 60.000, 10.000, 4.000, 0.000, 2.000, NULL),
 
   -- Vegetables
   ('aaaaaaaa-200a-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
-   'Broccoli', '012345678910', 'Fresh broccoli crowns, ~1 cup chopped per serving',
-   3.000, 55.000, 11.000, 3.700, 0.600, 2.000, 2.490)
+   'Marketside Fresh Broccoli Florets', '681131329828', 'Fresh broccoli florets, 12oz bag',
+   3.000, 25.000, 4.000, 2.000, 0.000, 2.000, NULL)
 ON CONFLICT (product_id) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────

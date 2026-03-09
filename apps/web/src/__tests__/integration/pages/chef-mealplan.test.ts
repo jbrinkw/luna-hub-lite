@@ -133,7 +133,7 @@ describe('ChefByte MealPlanPage queries', () => {
       .insert({
         user_id: ctx.userId,
         recipe_id: null,
-        product_id: productMap['Protein Powder'],
+        product_id: productMap['Birds Eye Sweet Peas'],
         logical_date: today,
         servings: 1,
         meal_prep: false,
@@ -162,7 +162,7 @@ describe('ChefByte MealPlanPage queries', () => {
     // Recipe join is null, product join has name
     expect(entry.recipes).toBeNull();
     expect(entry.products).not.toBeNull();
-    expect(entry.products.name).toBe('Protein Powder');
+    expect(entry.products.name).toBe('Birds Eye Sweet Peas');
 
     // Cleanup
     await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
@@ -214,7 +214,7 @@ describe('ChefByte MealPlanPage queries', () => {
     const result = await chefbyte(ctx.client).from('meal_plan_entries').insert({
       user_id: ctx.userId,
       recipe_id: null,
-      product_id: productMap['Eggs'],
+      product_id: productMap['Great Value Large White Eggs'],
       logical_date: today,
       servings: 3,
       meal_prep: true,
@@ -226,7 +226,7 @@ describe('ChefByte MealPlanPage queries', () => {
       .from('meal_plan_entries')
       .select('meal_id, servings, meal_prep')
       .eq('user_id', ctx.userId)
-      .eq('product_id', productMap['Eggs'])
+      .eq('product_id', productMap['Great Value Large White Eggs'])
       .eq('logical_date', today)
       .eq('meal_prep', true);
     expect(verify).not.toBeNull();
@@ -495,7 +495,7 @@ describe('ChefByte MealPlanPage queries', () => {
     const endDate = toDateStr(new Date(monday.getTime() + 6 * 86400000));
 
     // Generate a food_log by consuming a product
-    const chickenId = productMap['Chicken Breast'];
+    const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
     await (chefbyte(ctx.client) as any).rpc('consume_product', {
       p_product_id: chickenId,
       p_qty: 1,
@@ -526,7 +526,7 @@ describe('ChefByte MealPlanPage queries', () => {
     expect(Number(entry.carbs)).toBeGreaterThanOrEqual(0);
     expect(Number(entry.fat)).toBeGreaterThanOrEqual(0);
     expect(entry.products).not.toBeNull();
-    expect(entry.products.name).toBe('Chicken Breast');
+    expect(entry.products.name).toBe('Great Value Boneless Skinless Chicken Breasts');
 
     // Cleanup
     await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
@@ -587,7 +587,7 @@ describe('ChefByte MealPlanPage queries', () => {
   /* ---------------------------------------------------------------- */
   it('delete food_log from meal plan page', async () => {
     const today = todayDate();
-    const chickenId = productMap['Chicken Breast'];
+    const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
     // Generate a food_log
     await (chefbyte(ctx.client) as any).rpc('consume_product', {
@@ -682,7 +682,7 @@ describe('ChefByte MealPlanPage queries', () => {
       .insert({
         user_id: ctx.userId,
         recipe_id: null,
-        product_id: productMap['Protein Powder'],
+        product_id: productMap['Birds Eye Sweet Peas'],
         logical_date: today,
         servings: 1,
         meal_prep: false,
@@ -753,10 +753,10 @@ describe('ChefByte MealPlanPage queries', () => {
     expect(dayTotals.carbs).toBeGreaterThanOrEqual(0);
     expect(dayTotals.fat).toBeGreaterThan(0);
 
-    // Product meal (Protein Powder, 1 serving): 120 cal, 24 protein, 3 carbs, 1.5 fat
+    // Product meal (Birds Eye Sweet Peas, 1 serving): 60 cal, 4 protein, 10 carbs, 0 fat
     // Recipe meal (Chicken & Rice, 2 servings): computed from ingredients
     // Total should include both
-    expect(dayTotals.calories).toBeGreaterThanOrEqual(120); // At least the product meal
+    expect(dayTotals.calories).toBeGreaterThanOrEqual(60); // At least the product meal
 
     // Cleanup
     await chefbyte(ctx.client)

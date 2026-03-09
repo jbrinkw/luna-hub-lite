@@ -242,7 +242,7 @@ test.describe('MCP-UI Parity', () => {
     try {
       mcpCtx = await setupMcpUser('parity-stock-mcp');
       const { productMap } = await seedChefByteData(mcpCtx.client, mcpCtx.userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       const result = await mcpCtx.mcp.callTool('CHEFBYTE_add_stock', {
         product_id: chickenId,
@@ -264,7 +264,7 @@ test.describe('MCP-UI Parity', () => {
     let uiLotRows: Record<string, any>[];
     try {
       const { productMap: uiProductMap } = await seedChefByteData(uiClient, uiUserId);
-      const uiChickenId = uiProductMap['Chicken Breast'];
+      const uiChickenId = uiProductMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Get existing stock lots count for Chicken Breast (from seed data)
       const existingLots = await fetchRows(uiClient, 'chefbyte', 'stock_lots', {
@@ -339,7 +339,7 @@ test.describe('MCP-UI Parity', () => {
     try {
       mcpCtx = await setupMcpUser('parity-consume-mcp');
       const { productMap } = await seedChefByteData(mcpCtx.client, mcpCtx.userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Get stock before
       const lotsBefore = await fetchRows(mcpCtx.client, 'chefbyte', 'stock_lots', {
@@ -385,7 +385,7 @@ test.describe('MCP-UI Parity', () => {
     let uiStockAfter: number;
     try {
       const { productMap: uiProductMap } = await seedChefByteData(uiClient, uiUserId);
-      const uiChickenId = uiProductMap['Chicken Breast'];
+      const uiChickenId = uiProductMap['Great Value Boneless Skinless Chicken Breasts'];
 
       // Set barcode
       await (uiClient as any)
@@ -466,7 +466,7 @@ test.describe('MCP-UI Parity', () => {
     try {
       mcpCtx = await setupMcpUser('parity-shop-mcp');
       const { productMap } = await seedChefByteData(mcpCtx.client, mcpCtx.userId);
-      const chickenId = productMap['Chicken Breast'];
+      const chickenId = productMap['Great Value Boneless Skinless Chicken Breasts'];
 
       await mcpCtx.mcp.callTool('CHEFBYTE_add_to_shopping', {
         product_id: chickenId,
@@ -500,7 +500,10 @@ test.describe('MCP-UI Parity', () => {
       const dropdown = page.getByTestId('product-dropdown');
       if (await dropdown.isVisible()) {
         // Click the Chicken Breast option from the dropdown
-        const chickenOption = dropdown.locator('div').filter({ hasText: 'Chicken Breast' }).first();
+        const chickenOption = dropdown
+          .locator('div')
+          .filter({ hasText: 'Great Value Boneless Skinless Chicken Breasts' })
+          .first();
         await chickenOption.click();
       }
 
@@ -514,7 +517,7 @@ test.describe('MCP-UI Parity', () => {
       // Wait for the item to appear in the list
       await page.waitForTimeout(1000);
 
-      const uiChickenId = uiProductMap['Chicken Breast'];
+      const uiChickenId = uiProductMap['Great Value Boneless Skinless Chicken Breasts'];
       uiShoppingRow = await fetchRow(uiClient, 'chefbyte', 'shopping_list', {
         user_id: uiUserId,
         product_id: uiChickenId,

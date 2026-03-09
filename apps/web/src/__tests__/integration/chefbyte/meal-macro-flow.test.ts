@@ -48,7 +48,7 @@ async function setupMealScenario(client: any, userId: string) {
     .from('products')
     .insert({
       user_id: userId,
-      name: 'Chicken Breast',
+      name: 'Great Value Boneless Skinless Chicken Breasts',
       servings_per_container: 4,
       calories_per_serving: 165,
       protein_per_serving: 31,
@@ -64,7 +64,7 @@ async function setupMealScenario(client: any, userId: string) {
     .from('products')
     .insert({
       user_id: userId,
-      name: 'Brown Rice',
+      name: 'Great Value Long Grain Brown Rice',
       servings_per_container: 8,
       calories_per_serving: 216,
       protein_per_serving: 5,

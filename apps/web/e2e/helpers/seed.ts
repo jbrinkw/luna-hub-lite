@@ -130,7 +130,7 @@ export async function seedChefByteData(client: SupabaseClient, userId: string): 
   const products = [
     {
       user_id: userId,
-      name: 'Chicken Breast',
+      name: 'Great Value Boneless Skinless Chicken Breasts',
       servings_per_container: 4,
       calories_per_serving: 165,
       protein_per_serving: 31,
@@ -140,7 +140,7 @@ export async function seedChefByteData(client: SupabaseClient, userId: string): 
     },
     {
       user_id: userId,
-      name: 'Brown Rice',
+      name: 'Great Value Long Grain Brown Rice',
       servings_per_container: 8,
       calories_per_serving: 216,
       protein_per_serving: 5,
@@ -150,7 +150,7 @@ export async function seedChefByteData(client: SupabaseClient, userId: string): 
     },
     {
       user_id: userId,
-      name: 'Eggs',
+      name: 'Great Value Large White Eggs',
       servings_per_container: 12,
       calories_per_serving: 72,
       protein_per_serving: 6.3,
@@ -160,22 +160,22 @@ export async function seedChefByteData(client: SupabaseClient, userId: string): 
     },
     {
       user_id: userId,
-      name: 'Protein Powder',
-      servings_per_container: 30,
-      calories_per_serving: 120,
-      protein_per_serving: 24,
-      carbs_per_serving: 3,
-      fat_per_serving: 1.5,
+      name: 'Birds Eye Sweet Peas',
+      servings_per_container: 3.5,
+      calories_per_serving: 60,
+      protein_per_serving: 4,
+      carbs_per_serving: 10,
+      fat_per_serving: 0,
       min_stock_amount: 0.5,
     },
     {
       user_id: userId,
-      name: 'Bananas',
-      servings_per_container: 1,
-      calories_per_serving: 105,
-      protein_per_serving: 1.3,
-      carbs_per_serving: 27,
-      fat_per_serving: 0.4,
+      name: 'Banquet Chicken Breast Patties',
+      servings_per_container: 6,
+      calories_per_serving: 190,
+      protein_per_serving: 10,
+      carbs_per_serving: 13,
+      fat_per_serving: 11,
       min_stock_amount: 3,
     },
   ];
@@ -195,28 +195,28 @@ export async function seedChefByteData(client: SupabaseClient, userId: string): 
   const stockLots = [
     {
       user_id: userId,
-      product_id: productMap['Chicken Breast'],
+      product_id: productMap['Great Value Boneless Skinless Chicken Breasts'],
       location_id: fridgeId,
       qty_containers: 3,
       expires_on: futureDate(5),
     },
     {
       user_id: userId,
-      product_id: productMap['Brown Rice'],
+      product_id: productMap['Great Value Long Grain Brown Rice'],
       location_id: pantryId,
       qty_containers: 2,
       expires_on: futureDate(90),
     },
     {
       user_id: userId,
-      product_id: productMap['Eggs'],
+      product_id: productMap['Great Value Large White Eggs'],
       location_id: fridgeId,
       qty_containers: 0.5,
       expires_on: futureDate(14),
     },
     {
       user_id: userId,
-      product_id: productMap['Protein Powder'],
+      product_id: productMap['Birds Eye Sweet Peas'],
       location_id: pantryId,
       qty_containers: 0.5,
       expires_on: futureDate(180),
@@ -224,7 +224,7 @@ export async function seedChefByteData(client: SupabaseClient, userId: string): 
     // Bananas: qty_containers = 0 (out of stock)
     {
       user_id: userId,
-      product_id: productMap['Bananas'],
+      product_id: productMap['Banquet Chicken Breast Patties'],
       location_id: fridgeId,
       qty_containers: 0,
       expires_on: futureDate(3),
@@ -254,14 +254,14 @@ export async function seedChefByteData(client: SupabaseClient, userId: string): 
   const { error: ingredErr } = await chef.from('recipe_ingredients').insert([
     {
       recipe_id: recipeId,
-      product_id: productMap['Chicken Breast'],
+      product_id: productMap['Great Value Boneless Skinless Chicken Breasts'],
       user_id: userId,
       quantity: 0.5,
       unit: 'container',
     },
     {
       recipe_id: recipeId,
-      product_id: productMap['Brown Rice'],
+      product_id: productMap['Great Value Long Grain Brown Rice'],
       user_id: userId,
       quantity: 0.25,
       unit: 'container',
