@@ -279,41 +279,137 @@ ON CONFLICT (ingredient_id) DO NOTHING;
 -- ─────────────────────────────────────────────────────────────────────────────
 
 INSERT INTO chefbyte.meal_plan_entries (meal_id, user_id, recipe_id, product_id, logical_date, servings, meal_prep, completed_at) VALUES
-  -- Today: Greek Yogurt Bowl for breakfast (completed)
+  -- ── 5 days ago: full day (all completed) ──
+  ('aaaaaaaa-5a01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4003-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 5, 1.000, false, now() - INTERVAL '5 days 6 hours'),
+  ('aaaaaaaa-5a02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4001-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 5, 1.000, false, now() - INTERVAL '5 days 1 hour'),
+  ('aaaaaaaa-5a03-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4002-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 5, 1.000, false, now() - INTERVAL '5 days'),
+
+  -- ── 4 days ago: 2 meals (all completed) ──
+  ('aaaaaaaa-5b01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4001-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 4, 1.000, false, now() - INTERVAL '4 days 4 hours'),
+  ('aaaaaaaa-5b02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4003-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 4, 1.000, false, now() - INTERVAL '4 days 1 hour'),
+
+  -- ── 3 days ago: meal prep day (completed) ──
+  ('aaaaaaaa-5c01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4001-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 3, 4.000, true, now() - INTERVAL '3 days 2 hours'),
+  ('aaaaaaaa-5c02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4002-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 3, 1.000, false, now() - INTERVAL '3 days'),
+
+  -- ── 2 days ago: full day (all completed) ──
+  ('aaaaaaaa-5d01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4003-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 2, 1.000, false, now() - INTERVAL '2 days 7 hours'),
+  ('aaaaaaaa-5d02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4001-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 2, 1.000, false, now() - INTERVAL '2 days 3 hours'),
+  ('aaaaaaaa-5d03-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4002-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 2, 1.000, false, now() - INTERVAL '2 days'),
+
+  -- ── Yesterday: 2 meals completed, 1 skipped ──
+  ('aaaaaaaa-5e01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4003-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 1, 1.000, false, now() - INTERVAL '1 day 6 hours'),
+  ('aaaaaaaa-5e02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4001-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 1, 1.000, false, now() - INTERVAL '1 day 2 hours'),
+  ('aaaaaaaa-5e03-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4002-0000-0000-000000000000', NULL,
+   CURRENT_DATE - 1, 1.000, false, NULL),
+
+  -- ── Today: breakfast done, lunch + shake pending ──
   ('aaaaaaaa-5001-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
    'aaaaaaaa-4003-0000-0000-000000000000', NULL,
    CURRENT_DATE, 1.000, false, now() - INTERVAL '4 hours'),
-
-  -- Today: Chicken & Rice Bowl for lunch (not yet completed)
   ('aaaaaaaa-5002-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
    'aaaaaaaa-4001-0000-0000-000000000000', NULL,
    CURRENT_DATE, 1.000, false, NULL),
-
-  -- Today: Protein Shake post-workout (not yet completed)
   ('aaaaaaaa-5003-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
    'aaaaaaaa-4002-0000-0000-000000000000', NULL,
    CURRENT_DATE, 1.000, false, NULL),
 
-  -- Tomorrow: Chicken & Rice Bowl x3 (meal prep)
+  -- ── Tomorrow: meal prep + regular meal ──
   ('aaaaaaaa-5004-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
    'aaaaaaaa-4001-0000-0000-000000000000', NULL,
-   CURRENT_DATE + 1, 3.000, true, NULL)
+   CURRENT_DATE + 1, 3.000, true, NULL),
+  ('aaaaaaaa-5f01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4003-0000-0000-000000000000', NULL,
+   CURRENT_DATE + 1, 1.000, false, NULL),
+
+  -- ── Day after tomorrow: 2 planned meals ──
+  ('aaaaaaaa-5f02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4001-0000-0000-000000000000', NULL,
+   CURRENT_DATE + 2, 1.000, false, NULL),
+  ('aaaaaaaa-5f03-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4002-0000-0000-000000000000', NULL,
+   CURRENT_DATE + 2, 1.000, false, NULL),
+
+  -- ── 3 days out: planned breakfast ──
+  ('aaaaaaaa-5f04-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-4003-0000-0000-000000000000', NULL,
+   CURRENT_DATE + 3, 1.000, false, NULL)
 ON CONFLICT (meal_id) DO NOTHING;
 
 -- ─────────────────────────────────────────────────────────────────────────────
 -- 10. Food log (1 entry: eggs today) + temp item (coffee with cream)
 -- ─────────────────────────────────────────────────────────────────────────────
 
--- Eggs: 2 eggs consumed = 2 servings
 INSERT INTO chefbyte.food_logs (log_id, user_id, product_id, logical_date, qty_consumed, unit, calories, carbs, protein, fat) VALUES
+  -- 4 days ago: eggs + milk
+  ('aaaaaaaa-6a01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-2003-0000-0000-000000000000',
+   CURRENT_DATE - 4, 3.000, 'serving', 210.000, 0.000, 18.000, 15.000),
+  ('aaaaaaaa-6a02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-2008-0000-0000-000000000000',
+   CURRENT_DATE - 4, 2.000, 'serving', 300.000, 24.000, 16.000, 16.000),
+
+  -- 3 days ago: eggs
+  ('aaaaaaaa-6b01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-2003-0000-0000-000000000000',
+   CURRENT_DATE - 3, 2.000, 'serving', 140.000, 0.000, 12.000, 10.000),
+
+  -- 2 days ago: eggs + salmon
+  ('aaaaaaaa-6c01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-2003-0000-0000-000000000000',
+   CURRENT_DATE - 2, 2.000, 'serving', 140.000, 0.000, 12.000, 10.000),
+  ('aaaaaaaa-6c02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-2002-0000-0000-000000000000',
+   CURRENT_DATE - 2, 1.000, 'serving', 200.000, 0.000, 34.000, 8.000),
+
+  -- Yesterday: eggs
+  ('aaaaaaaa-6d01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'aaaaaaaa-2003-0000-0000-000000000000',
+   CURRENT_DATE - 1, 2.000, 'serving', 140.000, 0.000, 12.000, 10.000),
+
+  -- Today: eggs
   ('aaaaaaaa-6001-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
    'aaaaaaaa-2003-0000-0000-000000000000',
-   CURRENT_DATE, 2.000, 'serving',
-   140.000, 0.000, 12.000, 10.000)
+   CURRENT_DATE, 2.000, 'serving', 140.000, 0.000, 12.000, 10.000)
 ON CONFLICT (log_id) DO NOTHING;
 
--- Temp item: Coffee with cream (not a tracked product)
 INSERT INTO chefbyte.temp_items (temp_id, user_id, name, logical_date, calories, carbs, protein, fat) VALUES
+  -- 3 days ago: protein bar
+  ('aaaaaaaa-6e01-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'Protein Bar', CURRENT_DATE - 3,
+   200.000, 22.000, 20.000, 8.000),
+
+  -- Yesterday: coffee
+  ('aaaaaaaa-6e02-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
+   'Coffee with Cream', CURRENT_DATE - 1,
+   50.000, 1.000, 1.000, 5.000),
+
+  -- Today: coffee
   ('aaaaaaaa-6101-0000-0000-000000000000', '11111111-1111-1111-1111-111111111111',
    'Coffee with Cream', CURRENT_DATE,
    50.000, 1.000, 1.000, 5.000)
