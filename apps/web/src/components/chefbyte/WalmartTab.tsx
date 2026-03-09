@@ -28,8 +28,15 @@ interface ProductWithOptions {
 interface MissingPriceProduct {
   product_id: string;
   name: string;
-  walmart_link: string | null;
+  walmart_link: string;
+}
+
+interface PriceResult {
+  product_id: string;
+  name: string;
   price: number | null;
+  source: string | null; // title of matched result
+  saved: boolean;
 }
 
 /* ------------------------------------------------------------------ */
@@ -63,11 +70,13 @@ export function WalmartTab() {
 
   const [loading, setLoading] = useState(true);
   const [missingLinksCount, setMissingLinksCount] = useState<number>(0);
-  const [missingPrices, setMissingPrices] = useState<MissingPriceProduct[]>([]);
-  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
+  const [missingPricesCount, setMissingPricesCount] = useState<number>(0);
   const [products, setProducts] = useState<ProductWithOptions[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [priceFinding, setPriceFinding] = useState(false);
+  const [priceResults, setPriceResults] = useState<PriceResult[]>([]);
+  const [priceProgress, setPriceProgress] = useState('');
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -86,22 +95,16 @@ export function WalmartTab() {
 
     setMissingLinksCount(noLinkCount ?? 0);
 
-    // Missing Prices: products with no price and no walmart_link, exclude [MEAL]
-    const { data: noPrices } = await chefbyte()
+    // Missing Prices: products WITH a walmart_link but NO price
+    const { count: noPriceCount } = await chefbyte()
       .from('products')
-      .select('product_id, name, walmart_link, price')
+      .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
       .is('price', null)
-      .is('walmart_link', null)
-      .not('name', 'ilike', '[MEAL]%');
+      .not('walmart_link', 'is', null)
+      .neq('walmart_link', 'NOT_ON_WALMART');
 
-    setMissingPrices((noPrices ?? []) as MissingPriceProduct[]);
-
-    const inputs: Record<string, string> = {};
-    for (const p of (noPrices ?? []) as MissingPriceProduct[]) {
-      inputs[p.product_id] = p.price != null ? String(p.price) : '';
-    }
-    setPriceInputs(inputs);
+    setMissingPricesCount(noPriceCount ?? 0);
 
     setLoading(false);
   }, [userId]);
@@ -284,24 +287,94 @@ export function WalmartTab() {
   };
 
   /* ---------------------------------------------------------------- */
-  /*  Save manual price                                                */
+  /*  Find Missing Prices                                              */
   /* ---------------------------------------------------------------- */
 
-  const savePrice = async (productId: string) => {
-    if (!user) return;
+  const findMissingPrices = async () => {
+    if (!userId) return;
+    setPriceFinding(true);
+    setPriceResults([]);
+    setPriceProgress('');
     setError(null);
-    const price = parseFloat(priceInputs[productId] ?? '');
-    if (isNaN(price)) return;
-    const { error: err } = await chefbyte()
-      .from('products')
-      .update({ price })
-      .eq('product_id', productId)
-      .eq('user_id', user.id);
-    if (err) {
-      setError(err.message);
-      return;
+
+    try {
+      // Fetch products with walmart_link but no price
+      const { data: noPrices } = await chefbyte()
+        .from('products')
+        .select('product_id, name, walmart_link')
+        .eq('user_id', userId)
+        .is('price', null)
+        .not('walmart_link', 'is', null)
+        .neq('walmart_link', 'NOT_ON_WALMART');
+
+      const toFind = (noPrices ?? []) as MissingPriceProduct[];
+
+      if (toFind.length === 0) {
+        setPriceFinding(false);
+        return;
+      }
+
+      const results: PriceResult[] = [];
+      let done = 0;
+
+      for (const p of toFind) {
+        setPriceProgress(`${done + 1}/${toFind.length}`);
+
+        try {
+          const { data, error: fnError } = await supabase.functions.invoke('walmart-scrape', {
+            body: { search_term: p.name },
+          });
+
+          if (!fnError && data?.results?.length > 0) {
+            // Try to match the stored walmart_link first, fall back to first result
+            const match = data.results.find(
+              (r: { url: string }) =>
+                r.url && p.walmart_link && r.url.replace(/\?.*$/, '') === p.walmart_link.replace(/\?.*$/, ''),
+            );
+            const best = match || data.results[0];
+            const price = best?.price ?? null;
+
+            if (price != null) {
+              await chefbyte().from('products').update({ price }).eq('product_id', p.product_id).eq('user_id', userId);
+            }
+
+            results.push({
+              product_id: p.product_id,
+              name: p.name,
+              price,
+              source: best?.title || null,
+              saved: price != null,
+            });
+          } else {
+            results.push({
+              product_id: p.product_id,
+              name: p.name,
+              price: null,
+              source: null,
+              saved: false,
+            });
+          }
+        } catch {
+          results.push({
+            product_id: p.product_id,
+            name: p.name,
+            price: null,
+            source: null,
+            saved: false,
+          });
+        }
+
+        done++;
+        setPriceResults([...results]);
+      }
+
+      await loadData();
+    } catch {
+      setError('Failed to find prices');
+    } finally {
+      setPriceFinding(false);
+      setPriceProgress('');
     }
-    await loadData();
   };
 
   /* ---------------------------------------------------------------- */
@@ -670,59 +743,98 @@ export function WalmartTab() {
       {/* ============================================================ */}
       <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
         <div data-testid="missing-prices-section">
-          <h2 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: 700 }}>
-            Missing Prices ({missingPrices.length})
-          </h2>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '16px',
+              flexWrap: 'wrap',
+              gap: '12px',
+            }}
+          >
+            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Missing Prices ({missingPricesCount})</h2>
+            <button
+              className="primary-btn"
+              onClick={findMissingPrices}
+              disabled={priceFinding || missingPricesCount === 0}
+              data-testid="find-missing-prices-btn"
+              style={{ background: '#1e66f5', whiteSpace: 'nowrap' }}
+            >
+              {priceFinding ? `Searching ${priceProgress}...` : 'Find Missing Prices'}
+            </button>
+          </div>
 
-          {missingPrices.length === 0 ? (
+          {missingPricesCount === 0 && priceResults.length === 0 && (
             <p
               data-testid="no-missing-prices"
               style={{ color: '#666', fontStyle: 'italic', padding: '20px 0', textAlign: 'center' }}
             >
               All linked products have prices
             </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {missingPrices.map((product) => (
+          )}
+
+          {/* Progress bar */}
+          {priceFinding && priceProgress && (
+            <div style={{ marginBottom: '16px' }}>
+              <div
+                style={{
+                  height: '8px',
+                  backgroundColor: '#e0e0e0',
+                  borderRadius: '4px',
+                  overflow: 'hidden',
+                }}
+              >
                 <div
-                  key={product.product_id}
-                  data-testid={`price-item-${product.product_id}`}
+                  style={{
+                    height: '100%',
+                    width: `${(() => {
+                      const parts = priceProgress.split('/');
+                      const current = parseInt(parts[0] || '0');
+                      const total = parseInt(parts[1] || '1');
+                      return total > 0 ? (current / total) * 100 : 0;
+                    })()}%`,
+                    backgroundColor: '#4caf50',
+                    transition: 'width 0.3s',
+                  }}
+                />
+              </div>
+              <div style={{ fontSize: '13px', color: '#666', marginTop: '6px' }}>Progress: {priceProgress}</div>
+            </div>
+          )}
+
+          {/* Results display */}
+          {priceResults.length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {priceResults.map((r) => (
+                <div
+                  key={r.product_id}
+                  data-testid={`price-result-${r.product_id}`}
                   style={{
                     ...cardStyle,
-                    display: 'grid',
-                    gridTemplateColumns: '2fr 1fr auto',
+                    display: 'flex',
+                    justifyContent: 'space-between',
                     alignItems: 'center',
                     gap: '12px',
                     marginBottom: 0,
+                    borderLeft: r.saved ? '4px solid #4caf50' : '4px solid #f44336',
                   }}
                 >
-                  <span style={{ fontWeight: 500 }}>{product.name}</span>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span style={{ color: '#666' }}>$</span>
-                    <input
-                      type="number"
-                      min="0"
-                      aria-label={`Price for ${product.name}`}
-                      value={priceInputs[product.product_id] ?? ''}
-                      onChange={(e) => {
-                        setPriceInputs((prev) => ({
-                          ...prev,
-                          [product.product_id]: e.target.value,
-                        }));
-                      }}
-                      style={{ ...inputStyle, width: '100px' }}
-                      data-testid={`price-input-${product.product_id}`}
-                      placeholder="0.00"
-                    />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 500 }}>{r.name}</div>
+                    {r.source && (
+                      <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>Matched: {r.source}</div>
+                    )}
                   </div>
-                  <button
-                    className="primary-btn"
-                    onClick={() => savePrice(product.product_id)}
-                    data-testid={`save-price-${product.product_id}`}
-                    style={{ background: '#1e66f5', whiteSpace: 'nowrap' }}
+                  <div
+                    style={{
+                      fontWeight: 600,
+                      fontSize: '16px',
+                      color: r.saved ? '#2e7d32' : '#d32f2f',
+                    }}
                   >
-                    Save Price
-                  </button>
+                    {r.price != null ? `$${r.price.toFixed(2)}` : 'Not found'}
+                  </div>
                 </div>
               ))}
             </div>
