@@ -161,7 +161,14 @@ export function WalmartTab() {
 
             if (fnError) throw new Error(fnError.message || 'Search failed');
 
-            const results = data?.results || [];
+            const raw = data?.results || [];
+            // Deduplicate by URL — SerpApi can return the same product twice
+            const seen = new Set<string>();
+            const results = raw.filter((r: WalmartOption) => {
+              if (!r.url || seen.has(r.url)) return false;
+              seen.add(r.url);
+              return true;
+            });
             return {
               ...p,
               options: results,
