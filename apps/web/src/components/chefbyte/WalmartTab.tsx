@@ -6,11 +6,23 @@ import { supabase, chefbyte } from '@/shared/supabase';
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface MissingLinkProduct {
+interface WalmartOption {
+  url: string;
+  title: string | null;
+  price: number | null;
+  image_url: string | null;
+}
+
+interface ProductWithOptions {
   product_id: string;
   name: string;
   barcode: string | null;
-  notOnWalmart: boolean;
+  options: WalmartOption[];
+  selectedOption: WalmartOption | null;
+  customUrl: string;
+  notWalmart: boolean;
+  loading: boolean;
+  error: string | null;
 }
 
 interface MissingPriceProduct {
@@ -50,9 +62,12 @@ export function WalmartTab() {
   const userId = user?.id;
 
   const [loading, setLoading] = useState(true);
-  const [missingLinks, setMissingLinks] = useState<MissingLinkProduct[]>([]);
+  const [missingLinksCount, setMissingLinksCount] = useState<number>(0);
   const [missingPrices, setMissingPrices] = useState<MissingPriceProduct[]>([]);
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
+  const [products, setProducts] = useState<ProductWithOptions[]>([]);
+  const [searchLoading, setSearchLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -61,25 +76,17 @@ export function WalmartTab() {
   const loadData = useCallback(async () => {
     if (!userId) return;
 
-    // 1. Missing Walmart Links: products where walmart_link IS NULL and is_placeholder=false
-    const { data: noLinks } = await chefbyte()
+    // Count products missing Walmart links (not placeholders)
+    const { count: noLinkCount } = await chefbyte()
       .from('products')
-      .select('product_id, name, barcode')
+      .select('*', { count: 'exact', head: true })
       .eq('user_id', userId)
       .eq('is_placeholder', false)
       .is('walmart_link', null);
 
-    setMissingLinks(
-      ((noLinks ?? []) as any[]).map((p) => ({
-        product_id: p.product_id,
-        name: p.name,
-        barcode: p.barcode,
-        notOnWalmart: false,
-      })),
-    );
+    setMissingLinksCount(noLinkCount ?? 0);
 
-    // 2. Missing Prices: products with NO walmart_link that need manual price entry
-    //    Exclude [MEAL] lots — they are temporary meal-prep containers, not purchasable
+    // Missing Prices: products with no price and no walmart_link, exclude [MEAL]
     const { data: noPrices } = await chefbyte()
       .from('products')
       .select('product_id, name, walmart_link, price')
@@ -90,7 +97,6 @@ export function WalmartTab() {
 
     setMissingPrices((noPrices ?? []) as MissingPriceProduct[]);
 
-    // Initialize price inputs
     const inputs: Record<string, string> = {};
     for (const p of (noPrices ?? []) as MissingPriceProduct[]) {
       inputs[p.product_id] = p.price != null ? String(p.price) : '';
@@ -101,15 +107,195 @@ export function WalmartTab() {
   }, [userId]);
 
   useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-
     loadData();
   }, [loadData]);
 
   const [error, setError] = useState<string | null>(null);
 
-  /* ---- Per-product Walmart URL inputs ---- */
-  const [urlInputs, setUrlInputs] = useState<Record<string, string>>({});
+  /* ---------------------------------------------------------------- */
+  /*  Load Next 5 Products + Search                                    */
+  /* ---------------------------------------------------------------- */
+
+  const loadNext5Products = async () => {
+    if (!userId) return;
+    setSearchLoading(true);
+    setProducts([]);
+    setError(null);
+
+    try {
+      // Get up to 5 products missing walmart links
+      const { data: rawProducts } = await chefbyte()
+        .from('products')
+        .select('product_id, name, barcode')
+        .eq('user_id', userId)
+        .eq('is_placeholder', false)
+        .is('walmart_link', null)
+        .limit(5);
+
+      if (!rawProducts || rawProducts.length === 0) {
+        setSearchLoading(false);
+        return;
+      }
+
+      // Initialize with loading state
+      const initial: ProductWithOptions[] = rawProducts.map((p: any) => ({
+        product_id: p.product_id,
+        name: p.name,
+        barcode: p.barcode,
+        options: [],
+        selectedOption: null,
+        customUrl: '',
+        notWalmart: false,
+        loading: true,
+        error: null,
+      }));
+      setProducts(initial);
+
+      // Fetch search results for each product in parallel via edge function
+      const enriched = await Promise.all(
+        initial.map(async (p) => {
+          try {
+            const { data, error: fnError } = await supabase.functions.invoke('walmart-scrape', {
+              body: { search_term: p.name },
+            });
+
+            if (fnError) throw new Error(fnError.message || 'Search failed');
+
+            const results = data?.results || [];
+            return {
+              ...p,
+              options: results,
+              loading: false,
+              error: results.length === 0 ? 'No results found' : null,
+            };
+          } catch (err: any) {
+            return {
+              ...p,
+              loading: false,
+              error: err.message || 'Search failed',
+            };
+          }
+        }),
+      );
+
+      setProducts(enriched);
+    } catch {
+      setError('Failed to load products');
+    } finally {
+      setSearchLoading(false);
+    }
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Selection handlers                                               */
+  /* ---------------------------------------------------------------- */
+
+  const selectOption = (productId: string, option: WalmartOption) => {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.product_id === productId ? { ...p, selectedOption: option, customUrl: '', notWalmart: false } : p,
+      ),
+    );
+  };
+
+  const handleCustomUrlChange = (productId: string, url: string) => {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.product_id === productId ? { ...p, customUrl: url, selectedOption: null, notWalmart: false } : p,
+      ),
+    );
+  };
+
+  const handleNotWalmartChange = (productId: string, checked: boolean) => {
+    setProducts((prev) =>
+      prev.map((p) =>
+        p.product_id === productId ? { ...p, notWalmart: checked, selectedOption: null, customUrl: '' } : p,
+      ),
+    );
+  };
+
+  const hasSelections = products.some((p) => p.selectedOption || p.customUrl.trim() || p.notWalmart);
+
+  /* ---------------------------------------------------------------- */
+  /*  URL cleaning                                                     */
+  /* ---------------------------------------------------------------- */
+
+  const cleanWalmartUrl = (raw: string): string => {
+    try {
+      const match = raw.match(/^(https?:\/\/(?:www\.)?walmart\.com\/ip\/[^/]+\/\d+)/);
+      return match ? match[1] : new URL(raw).origin + new URL(raw).pathname;
+    } catch {
+      return raw.trim();
+    }
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Complete & Update Selected                                       */
+  /* ---------------------------------------------------------------- */
+
+  const completeUpdates = async () => {
+    if (!userId) return;
+    setSaving(true);
+    setError(null);
+
+    try {
+      for (const product of products) {
+        if (product.notWalmart) {
+          // Mark as NOT_ON_WALMART sentinel
+          await chefbyte()
+            .from('products')
+            .update({ walmart_link: 'NOT_ON_WALMART' })
+            .eq('product_id', product.product_id)
+            .eq('user_id', userId);
+        } else if (product.selectedOption) {
+          // Save selected option's URL + price
+          const updates: Record<string, any> = {
+            walmart_link: cleanWalmartUrl(product.selectedOption.url),
+          };
+          if (product.selectedOption.price != null) {
+            updates.price = product.selectedOption.price;
+          }
+          await chefbyte().from('products').update(updates).eq('product_id', product.product_id).eq('user_id', userId);
+        } else if (product.customUrl.trim()) {
+          // Save custom URL without price
+          await chefbyte()
+            .from('products')
+            .update({ walmart_link: cleanWalmartUrl(product.customUrl) })
+            .eq('product_id', product.product_id)
+            .eq('user_id', userId);
+        }
+      }
+
+      // Clear batch and refresh counts
+      setProducts([]);
+      await loadData();
+    } catch {
+      setError('Failed to save updates');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Save manual price                                                */
+  /* ---------------------------------------------------------------- */
+
+  const savePrice = async (productId: string) => {
+    if (!user) return;
+    setError(null);
+    const price = parseFloat(priceInputs[productId] ?? '');
+    if (isNaN(price)) return;
+    const { error: err } = await chefbyte()
+      .from('products')
+      .update({ price })
+      .eq('product_id', productId)
+      .eq('user_id', user.id);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    await loadData();
+  };
 
   /* ---------------------------------------------------------------- */
   /*  Refresh All Prices                                               */
@@ -124,15 +310,14 @@ export function WalmartTab() {
     setError(null);
 
     try {
-      // Fetch all products with a walmart_link (excluding NOT_ON_WALMART sentinel)
-      const { data: products } = await chefbyte()
+      const { data: linked } = await chefbyte()
         .from('products')
         .select('product_id, name, walmart_link')
         .eq('user_id', userId)
         .not('walmart_link', 'is', null)
         .neq('walmart_link', 'NOT_ON_WALMART');
 
-      const toRefresh = (products ?? []) as Array<{
+      const toRefresh = (linked ?? []) as Array<{
         product_id: string;
         name: string;
         walmart_link: string;
@@ -152,7 +337,6 @@ export function WalmartTab() {
         });
 
         if (!fnError && data?.results?.length > 0) {
-          // Try to find a result matching the stored walmart_link
           const match = data.results.find(
             (r: { url: string }) =>
               r.url && p.walmart_link && r.url.replace(/\?.*$/, '') === p.walmart_link.replace(/\?.*$/, ''),
@@ -173,81 +357,6 @@ export function WalmartTab() {
       setRefreshing(false);
       setRefreshProgress('');
     }
-  };
-
-  /* ---------------------------------------------------------------- */
-  /*  Actions                                                          */
-  /* ---------------------------------------------------------------- */
-
-  const markNotOnWalmart = async (productId: string) => {
-    if (!user) return;
-    setError(null);
-    const { error: err } = await chefbyte()
-      .from('products')
-      .update({ walmart_link: 'NOT_ON_WALMART' })
-      .eq('product_id', productId)
-      .eq('user_id', user.id);
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    await loadData();
-  };
-
-  const savePrice = async (productId: string) => {
-    if (!user) return;
-    setError(null);
-    const price = parseFloat(priceInputs[productId] ?? '');
-    if (isNaN(price)) return;
-    const { error: err } = await chefbyte()
-      .from('products')
-      .update({ price })
-      .eq('product_id', productId)
-      .eq('user_id', user.id);
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    await loadData();
-  };
-
-  /* ---------------------------------------------------------------- */
-  /*  Save custom Walmart URL                                          */
-  /* ---------------------------------------------------------------- */
-
-  const cleanWalmartUrl = (raw: string): string => {
-    // Strip query params and hash, normalize
-    try {
-      const url = new URL(raw);
-      return `${url.origin}${url.pathname}`.replace(/\/+$/, '');
-    } catch {
-      // If not a valid URL, return as-is (trimmed)
-      return raw.trim();
-    }
-  };
-
-  const saveWalmartUrl = async (productId: string) => {
-    if (!user) return;
-    setError(null);
-    const raw = (urlInputs[productId] ?? '').trim();
-    if (!raw) return;
-
-    const cleaned = cleanWalmartUrl(raw);
-    const { error: err } = await chefbyte()
-      .from('products')
-      .update({ walmart_link: cleaned })
-      .eq('product_id', productId)
-      .eq('user_id', user.id);
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    setUrlInputs((prev) => {
-      const next = { ...prev };
-      delete next[productId];
-      return next;
-    });
-    await loadData();
   };
 
   /* ================================================================ */
@@ -287,91 +396,264 @@ export function WalmartTab() {
       )}
 
       {/* ============================================================ */}
-      {/*  MISSING WALMART LINKS                                        */}
+      {/*  SEARCH & PICK — MISSING WALMART LINKS                       */}
       {/* ============================================================ */}
       <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
         <div data-testid="missing-links-section">
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+          <div
+            style={{
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              marginBottom: '16px',
+              flexWrap: 'wrap',
+              gap: '12px',
+            }}
+          >
             <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>
-              Missing Walmart Links ({missingLinks.length})
+              Missing Walmart Links ({missingLinksCount})
             </h2>
+            <button
+              className="primary-btn"
+              onClick={loadNext5Products}
+              disabled={searchLoading || saving}
+              data-testid="load-next-5-btn"
+              style={{ background: '#1e66f5', whiteSpace: 'nowrap' }}
+            >
+              {searchLoading ? 'Searching Walmart...' : 'Load Next 5 Products'}
+            </button>
           </div>
 
-          {missingLinks.length === 0 ? (
+          {/* Loading indicator */}
+          {searchLoading && (
+            <div
+              style={{
+                padding: '40px 20px',
+                textAlign: 'center',
+                backgroundColor: '#e3f2fd',
+                borderRadius: '8px',
+                margin: '12px 0',
+              }}
+            >
+              <div style={{ fontSize: '16px', fontWeight: 600, color: '#1976d2' }}>Searching Walmart...</div>
+              <div style={{ fontSize: '14px', color: '#666', marginTop: '8px' }}>
+                Fetching search results for {products.filter((p) => p.loading).length} products
+              </div>
+            </div>
+          )}
+
+          {/* Empty state */}
+          {products.length === 0 && !searchLoading && missingLinksCount === 0 && (
             <p
               data-testid="no-missing-links"
               style={{ color: '#666', fontStyle: 'italic', padding: '20px 0', textAlign: 'center' }}
             >
               All products have Walmart links
             </p>
-          ) : (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              {missingLinks.map((product) => (
-                <div key={product.product_id} data-testid={`link-item-${product.product_id}`} style={cardStyle}>
-                  <div
-                    style={{
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                      marginBottom: '12px',
-                      flexWrap: 'wrap',
-                      gap: '8px',
-                    }}
-                  >
-                    <span style={{ flex: 1, fontWeight: 600, fontSize: '16px' }}>{product.name}</span>
-                    {product.barcode && <span style={{ fontSize: '13px', color: '#666' }}>({product.barcode})</span>}
-                    <a
-                      href={`https://www.walmart.com/search?q=${encodeURIComponent(product.name)}`}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      style={{ color: '#1976d2', textDecoration: 'none', fontSize: '14px' }}
+          )}
+
+          {products.length === 0 && !searchLoading && missingLinksCount > 0 && (
+            <p style={{ color: '#666', textAlign: 'center', padding: '20px' }}>
+              Click "Load Next 5 Products" to start linking products to Walmart
+            </p>
+          )}
+
+          {/* Product cards with search results */}
+          {products.map((product) => (
+            <div key={product.product_id} data-testid={`link-item-${product.product_id}`} style={cardStyle}>
+              {/* Product header */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  marginBottom: '12px',
+                  flexWrap: 'wrap',
+                }}
+              >
+                <span style={{ flex: 1, fontWeight: 600, fontSize: '16px' }}>{product.name}</span>
+                {product.barcode && <span style={{ fontSize: '13px', color: '#666' }}>({product.barcode})</span>}
+                <a
+                  href={`https://www.walmart.com/search?q=${encodeURIComponent(product.name)}`}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  style={{ color: '#1976d2', textDecoration: 'none', fontSize: '14px' }}
+                >
+                  Search Walmart
+                </a>
+                <label
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    fontSize: '14px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={product.notWalmart}
+                    onChange={(e) => handleNotWalmartChange(product.product_id, e.target.checked)}
+                    data-testid={`not-on-walmart-${product.product_id}`}
+                  />
+                  Not on Walmart
+                </label>
+              </div>
+
+              {/* Loading state for individual product */}
+              {product.loading && (
+                <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>Loading options...</div>
+              )}
+
+              {/* Error state */}
+              {product.error && !product.loading && (
+                <div style={{ padding: '10px', color: '#d32f2f', fontSize: '14px' }}>{product.error}</div>
+              )}
+
+              {/* Options grid */}
+              {!product.loading && product.options.length > 0 && !product.notWalmart && (
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
+                    gap: '12px',
+                    marginBottom: '12px',
+                  }}
+                  data-testid={`options-grid-${product.product_id}`}
+                >
+                  {product.options.map((option, index) => (
+                    <div
+                      key={index}
+                      onClick={() => selectOption(product.product_id, option)}
+                      data-testid={`option-${product.product_id}-${index}`}
+                      style={{
+                        border: product.selectedOption?.url === option.url ? '3px solid #4caf50' : '1px solid #ddd',
+                        borderRadius: '8px',
+                        padding: '12px',
+                        cursor: 'pointer',
+                        backgroundColor: product.selectedOption?.url === option.url ? '#f0fff0' : '#fafafa',
+                        transition: 'all 0.2s',
+                      }}
                     >
-                      Search Walmart
-                    </a>
-                  </div>
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: '8px',
-                      alignItems: 'center',
-                      marginBottom: '8px',
-                    }}
-                  >
-                    <input
-                      placeholder="Paste Walmart URL..."
-                      value={urlInputs[product.product_id] ?? ''}
-                      onChange={(e) =>
-                        setUrlInputs((prev) => ({
-                          ...prev,
-                          [product.product_id]: e.target.value,
-                        }))
-                      }
-                      style={{ ...inputStyle, flex: 1 }}
-                      data-testid={`url-input-${product.product_id}`}
-                    />
-                    <button
-                      className="primary-btn"
-                      onClick={() => saveWalmartUrl(product.product_id)}
-                      disabled={!(urlInputs[product.product_id] ?? '').trim()}
-                      data-testid={`save-url-${product.product_id}`}
-                      style={{ background: '#1e66f5', whiteSpace: 'nowrap' }}
-                    >
-                      Save URL
-                    </button>
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px' }}>
-                    <button
-                      className="primary-btn"
-                      onClick={() => markNotOnWalmart(product.product_id)}
-                      data-testid={`not-on-walmart-${product.product_id}`}
-                      style={{ background: '#6b7280', fontSize: '13px', padding: '6px 12px' }}
-                    >
-                      Not on Walmart
-                    </button>
-                  </div>
+                      {/* Radio indicator */}
+                      <div
+                        style={{
+                          width: '18px',
+                          height: '18px',
+                          borderRadius: '50%',
+                          border: '2px solid #4caf50',
+                          marginBottom: '8px',
+                          backgroundColor: product.selectedOption?.url === option.url ? '#4caf50' : 'transparent',
+                        }}
+                      />
+
+                      {/* Product image */}
+                      <div
+                        style={{
+                          width: '100%',
+                          height: '100px',
+                          backgroundColor: '#f5f5f5',
+                          borderRadius: '4px',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          marginBottom: '8px',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {option.image_url ? (
+                          <img
+                            src={option.image_url}
+                            alt={option.title || 'Product'}
+                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).style.display = 'none';
+                            }}
+                          />
+                        ) : (
+                          <span style={{ color: '#999', fontSize: '12px' }}>No image</span>
+                        )}
+                      </div>
+
+                      {/* Product name */}
+                      <div
+                        style={{
+                          fontSize: '12px',
+                          lineHeight: '1.3',
+                          marginBottom: '6px',
+                          maxHeight: '40px',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        {option.title || 'Unknown Product'}
+                      </div>
+
+                      {/* Price as link */}
+                      <a
+                        href={option.url}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{
+                          color: '#2e7d32',
+                          fontWeight: 600,
+                          fontSize: '14px',
+                          textDecoration: 'none',
+                        }}
+                      >
+                        {option.price ? `$${option.price.toFixed(2)}` : 'Price N/A'}
+                      </a>
+                    </div>
+                  ))}
                 </div>
-              ))}
+              )}
+
+              {/* Custom URL fallback */}
+              {!product.notWalmart && !product.loading && (
+                <div
+                  style={{
+                    borderTop: product.options.length > 0 ? '1px solid #eee' : 'none',
+                    paddingTop: product.options.length > 0 ? '12px' : '0',
+                  }}
+                >
+                  <label style={{ fontSize: '13px', color: '#666', display: 'block', marginBottom: '6px' }}>
+                    Or paste a custom Walmart link:
+                  </label>
+                  <input
+                    type="text"
+                    value={product.customUrl}
+                    onChange={(e) => handleCustomUrlChange(product.product_id, e.target.value)}
+                    placeholder="https://www.walmart.com/ip/..."
+                    style={{ ...inputStyle }}
+                    data-testid={`url-input-${product.product_id}`}
+                  />
+                </div>
+              )}
             </div>
+          ))}
+
+          {/* Complete & Update Selected button */}
+          {hasSelections && (
+            <button
+              className="primary-btn"
+              onClick={completeUpdates}
+              disabled={saving}
+              data-testid="complete-updates-btn"
+              style={{
+                width: '100%',
+                padding: '14px',
+                backgroundColor: '#4caf50',
+                color: 'white',
+                border: 'none',
+                borderRadius: '6px',
+                fontSize: '16px',
+                fontWeight: 600,
+                cursor: 'pointer',
+                marginTop: '12px',
+              }}
+            >
+              {saving ? 'Updating...' : 'Complete & Update Selected'}
+            </button>
           )}
         </div>
       </div>
