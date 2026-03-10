@@ -4,6 +4,20 @@ import type { Database } from '@luna-hub/db-types';
 import { createTestUser, cleanupUser } from '../../test-helpers';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../setup.integration';
 
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function withRetry<T extends { error: any }>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const result = await fn();
+    if (!result.error) return result;
+    const msg = result.error?.message ?? '';
+    if (!msg.includes('rate limit') && !msg.includes('Rate limit')) return result;
+    if (attempt === 4) return result;
+    await sleep(1000 * Math.pow(2, attempt));
+  }
+  throw new Error('Unreachable');
+}
+
 let userIds: string[] = [];
 
 afterEach(async () => {
@@ -87,10 +101,9 @@ describe('AccountPage queries', () => {
     const freshClient = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { error: signInErr } = await freshClient.auth.signInWithPassword({
-      email,
-      password: newPassword,
-    });
+    const { error: signInErr } = await withRetry(() =>
+      freshClient.auth.signInWithPassword({ email, password: newPassword }),
+    );
     expect(signInErr).toBeNull();
 
     // Restore original password for cleanup
