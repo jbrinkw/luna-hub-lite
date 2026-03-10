@@ -13,3 +13,9 @@ supabase/.temp/
 coverage/
 playwright-report/
 test-results/
+
+# Temp files
+*.png
+.playwright-mcp/
+qa-screenshots/
+.vercel/
