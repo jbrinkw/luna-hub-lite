@@ -27,19 +27,39 @@ export interface CoachByteSeeds {
 // Context creation
 // ---------------------------------------------------------------------------
 
-/** Create a test user, sign in, activate both apps. */
+function isRateLimitError(error: any): boolean {
+  const msg = error?.message ?? '';
+  return msg.includes('rate limit') || msg.includes('Rate limit');
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Create a test user, sign in, activate both apps. Retries on rate limits. */
 export async function createPageTestContext(suffix: string): Promise<PageTestContext> {
   const email = `page-test-${suffix}-${Date.now()}@test.com`;
   const password = 'test-password-123';
 
-  const { data: created, error: createError } = await adminClient.auth.admin.createUser({
-    email,
-    password,
-    email_confirm: true,
-  });
+  let created: any;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { data, error } = await adminClient.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+    });
+    if (!error) {
+      created = data;
+      break;
+    }
+    if (!isRateLimitError(error) || attempt === 4) {
+      throw new Error(`Failed to create test user: ${error.message}`);
+    }
+    await sleep(1000 * Math.pow(2, attempt));
+  }
 
-  if (createError || !created.user) {
-    throw new Error(`Failed to create test user: ${createError?.message}`);
+  if (!created?.user) {
+    throw new Error('Failed to create test user: no user returned');
   }
 
   const userId = created.user.id;
@@ -48,8 +68,14 @@ export async function createPageTestContext(suffix: string): Promise<PageTestCon
     auth: { autoRefreshToken: false, persistSession: false },
   });
 
-  const { error: signInError } = await client.auth.signInWithPassword({ email, password });
-  if (signInError) throw new Error(`Failed to sign in: ${signInError.message}`);
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const { error } = await client.auth.signInWithPassword({ email, password });
+    if (!error) break;
+    if (!isRateLimitError(error) || attempt === 4) {
+      throw new Error(`Failed to sign in: ${error.message}`);
+    }
+    await sleep(1000 * Math.pow(2, attempt));
+  }
 
   // Activate both apps
   for (const app of ['coachbyte', 'chefbyte']) {

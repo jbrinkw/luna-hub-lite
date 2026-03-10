@@ -72,59 +72,64 @@ async function normalizeWithAI(offProduct: any): Promise<any> {
     return null;
   }
 
-  const anthropic = new Anthropic({ apiKey });
+  try {
+    const anthropic = new Anthropic({ apiKey });
 
-  const brand = (offProduct.brands || '').toString().trim();
-  const food = (offProduct.product_name || offProduct.generic_name || '').toString().trim();
-  const proposed = brand && food ? `${brand} ${food}` : food || brand || 'Unknown Product';
+    const brand = (offProduct.brands || '').toString().trim();
+    const food = (offProduct.product_name || offProduct.generic_name || '').toString().trim();
+    const proposed = brand && food ? `${brand} ${food}` : food || brand || 'Unknown Product';
 
-  const systemPrompt = [
-    'You normalize Open Food Facts product data into a structured JSON format.',
-    'Return STRICT JSON only, no markdown, no explanation:',
-    '{',
-    '  "name": "<final product name>",',
-    '  "servings_per_container": <number, default 1>,',
-    '  "calories_per_serving": <number>,',
-    '  "carbs_per_serving": <number>,',
-    '  "protein_per_serving": <number>,',
-    '  "fat_per_serving": <number>,',
-    '  "description": "<brief 1-line description>"',
-    '}',
-    '',
-    'Rules:',
-    `- Base name: "${proposed}". Fix formatting (spacing, casing, punctuation) only.`,
-    '- Nutrition must be PER SERVING. If OFF data only has per-100g, calculate using serving_size.',
-    '- If serving info missing, treat 100g as one serving.',
-    '- Apply 4-4-9 validation: carbs×4 + protein×4 + fat×9 should ≈ calories. If >10% off, adjust calories to match.',
-    '- servings_per_container: product_quantity / serving_size, or 1 if unknown.',
-    '- All numeric values rounded to 1 decimal.',
-  ].join('\n');
+    const systemPrompt = [
+      'You normalize Open Food Facts product data into a structured JSON format.',
+      'Return STRICT JSON only, no markdown, no explanation:',
+      '{',
+      '  "name": "<final product name>",',
+      '  "servings_per_container": <number, default 1>,',
+      '  "calories_per_serving": <number>,',
+      '  "carbs_per_serving": <number>,',
+      '  "protein_per_serving": <number>,',
+      '  "fat_per_serving": <number>,',
+      '  "description": "<brief 1-line description>"',
+      '}',
+      '',
+      'Rules:',
+      `- Base name: "${proposed}". Fix formatting (spacing, casing, punctuation) only.`,
+      '- Nutrition must be PER SERVING. If OFF data only has per-100g, calculate using serving_size.',
+      '- If serving info missing, treat 100g as one serving.',
+      '- Apply 4-4-9 validation: carbs×4 + protein×4 + fat×9 should ≈ calories. If >10% off, adjust calories to match.',
+      '- servings_per_container: product_quantity / serving_size, or 1 if unknown.',
+      '- All numeric values rounded to 1 decimal.',
+    ].join('\n');
 
-  const userPrompt =
-    'Normalize this Open Food Facts product:\n' +
-    JSON.stringify({
-      product_name: offProduct.product_name,
-      generic_name: offProduct.generic_name,
-      brands: offProduct.brands,
-      categories: offProduct.categories,
-      serving_size: offProduct.serving_size,
-      serving_quantity: offProduct.serving_quantity,
-      product_quantity: offProduct.product_quantity,
-      nutriments: offProduct.nutriments,
+    const userPrompt =
+      'Normalize this Open Food Facts product:\n' +
+      JSON.stringify({
+        product_name: offProduct.product_name,
+        generic_name: offProduct.generic_name,
+        brands: offProduct.brands,
+        categories: offProduct.categories,
+        serving_size: offProduct.serving_size,
+        serving_quantity: offProduct.serving_quantity,
+        product_quantity: offProduct.product_quantity,
+        nutriments: offProduct.nutriments,
+      });
+
+    const message = await anthropic.messages.create({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 512,
+      system: systemPrompt,
+      messages: [{ role: 'user', content: userPrompt }],
     });
 
-  const message = await anthropic.messages.create({
-    model: 'claude-haiku-4-5-20251001',
-    max_tokens: 512,
-    system: systemPrompt,
-    messages: [{ role: 'user', content: userPrompt }],
-  });
-
-  const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
-  try {
-    return JSON.parse(text);
-  } catch {
-    console.error('Failed to parse AI response:', text);
+    const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
+    try {
+      return JSON.parse(text);
+    } catch {
+      console.error('Failed to parse AI response:', text);
+      return null;
+    }
+  } catch (err: any) {
+    console.error('AI normalization failed:', err?.message ?? err);
     return null;
   }
 }

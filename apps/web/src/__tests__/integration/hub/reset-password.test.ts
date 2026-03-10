@@ -4,6 +4,25 @@ import type { Database } from '@luna-hub/db-types';
 import { createTestUser, cleanupUser } from '../../test-helpers';
 import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../../setup.integration';
 
+function isRateLimitError(error: any): boolean {
+  const msg = error?.message ?? '';
+  return msg.includes('rate limit') || msg.includes('Rate limit');
+}
+
+async function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+async function withRetry<T extends { error: any }>(fn: () => Promise<T>): Promise<T> {
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const result = await fn();
+    if (!result.error || !isRateLimitError(result.error)) return result;
+    if (attempt === 4) return result;
+    await sleep(1000 * Math.pow(2, attempt));
+  }
+  throw new Error('Unreachable');
+}
+
 /**
  * Integration tests for the ResetPassword page logic.
  *
@@ -83,20 +102,18 @@ describe('ResetPassword integration', () => {
     const freshClient = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { error: signInErr } = await freshClient.auth.signInWithPassword({
-      email,
-      password: newPassword,
-    });
+    const { error: signInErr } = await withRetry(() =>
+      freshClient.auth.signInWithPassword({ email, password: newPassword }),
+    );
     expect(signInErr).toBeNull();
 
     // Verify the old password no longer works
     const anotherClient = createClient<Database>(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
-    const { error: oldErr } = await anotherClient.auth.signInWithPassword({
-      email,
-      password: 'test-password-123', // original password from createTestUser
-    });
+    const { error: oldErr } = await withRetry(() =>
+      anotherClient.auth.signInWithPassword({ email, password: 'test-password-123' }),
+    );
     expect(oldErr).not.toBeNull();
   });
 

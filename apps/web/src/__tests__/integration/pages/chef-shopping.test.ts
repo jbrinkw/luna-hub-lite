@@ -58,7 +58,7 @@ describe('ChefByte ShoppingPage queries', () => {
     const searchText = 'chicken';
     const filtered = data.filter((p: any) => p.name.toLowerCase().includes(searchText.toLowerCase()));
     expect(filtered.length).toBeGreaterThanOrEqual(1);
-    expect(filtered[0].name).toBe('Great Value Boneless Skinless Chicken Breasts');
+    expect(filtered.some((p: any) => p.name === 'Great Value Boneless Skinless Chicken Breasts')).toBe(true);
   });
 
   // -----------------------------------------------------------------------

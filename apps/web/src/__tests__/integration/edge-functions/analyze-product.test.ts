@@ -9,10 +9,10 @@
  * via supabase.auth.getUser(). Error responses use {error: "..."} format.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { adminClient } from '../../setup.integration';
+import { adminClient, SUPABASE_URL } from '../../setup.integration';
 import { createTestUser, cleanupUser } from '../../test-helpers';
 
-const EDGE_URL = 'http://127.0.0.1:54321/functions/v1/analyze-product';
+const EDGE_URL = `${SUPABASE_URL}/functions/v1/analyze-product`;
 
 describe('Analyze-Product Edge Function', () => {
   let userId: string;

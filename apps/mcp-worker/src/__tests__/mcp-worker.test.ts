@@ -11,13 +11,12 @@ import { generateTestApiKey } from './helpers/api-key';
 
 const SUPABASE_URL = 'http://127.0.0.1:54321';
 const ANON_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6ImFub24iLCJleHAiOjE5ODM4MTI5OTZ9.CRXP1A7WOeoJeXxjNni43kdQwgnWNReilDMblYTn_I0';
+  'eyJhbGciOiJFUzI1NiIsImtpZCI6ImI4MTI2OWYxLTIxZDgtNGYyZS1iNzE5LWMyMjQwYTg0MGQ5MCIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjY3MTcyNjEsImlhdCI6MTc3MzExNzI2MSwicm9sZSI6ImFub24ifQ.P9z45GEzGXk9RpkTeiFK1jgzU0N1T-w6rvXILbKT7BP4uNhe6hbyojDijLra28qrOc3GmcSDxmFFNPEZz6YU8w';
 
-// Local Supabase uses HS256 JWTs signed with the demo secret.
-// Newer CLI versions generate ES256 via `supabase gen bearer-jwt`, which GoTrue rejects.
-// Use the well-known demo service_role key directly.
+// Local Supabase uses ES256 JWTs signed with a per-project key.
+// Use `supabase gen bearer-jwt` to generate long-lived tokens.
 const DEFAULT_SERVICE_ROLE_KEY =
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZS1kZW1vIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImV4cCI6MTk4MzgxMjk5Nn0.EGIM96RAZx35lJzdJsyH-qQwv8Hdp7fsn3W0YpN81IU';
+  'eyJhbGciOiJFUzI1NiIsImtpZCI6ImI4MTI2OWYxLTIxZDgtNGYyZS1iNzE5LWMyMjQwYTg0MGQ5MCIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjY3MTcyNjEsImlhdCI6MTc3MzExNzI2MSwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9.fDBVbcn1yiwrN85kw3c70Yhm__37cMWWZPhf8cqMY5QJ46pzGo5MfHQ-jPzgXLKecXWTRrW261e0ALQQqx-rUw';
 
 function getServiceRoleKey(): string {
   return process.env.SUPABASE_SERVICE_ROLE_KEY ?? DEFAULT_SERVICE_ROLE_KEY;
@@ -109,7 +108,7 @@ describe('MCP Worker E2E', () => {
 
   afterAll(async () => {
     if (client?.isConnected) await client.disconnect();
-    await primaryCleanup();
+    if (primaryCleanup) await primaryCleanup();
   });
 
   // ─── Test 1: Health endpoint ──────────────────────────────────────────

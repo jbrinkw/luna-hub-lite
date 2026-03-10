@@ -335,6 +335,10 @@ SELECT ok(
 
 -- Verify 'empty' return: plan_id is non-null UUID, status='empty'
 -- 2026-03-24 is a Tuesday (no split)
+-- Call ensure_daily_plan first to create the plan, then verify the DB row matches.
+-- (Avoids non-deterministic subquery evaluation order in SELECT is(A, B).)
+SELECT coachbyte.ensure_daily_plan('2026-03-24'::date);
+
 SELECT is(
   (SELECT (coachbyte.ensure_daily_plan('2026-03-24'::date))->>'plan_id'),
   (SELECT plan_id::text FROM coachbyte.daily_plans

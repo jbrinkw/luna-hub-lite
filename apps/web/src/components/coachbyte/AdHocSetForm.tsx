@@ -18,7 +18,7 @@ export function AdHocSetForm({ exercises, onSubmit, onCancel }: AdHocSetFormProp
   const formRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    formRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'nearest' });
   }, []);
 
   const canSubmit = exerciseId && reps && load && parseInt(reps, 10) >= 0 && parseFloat(load) >= 0;
