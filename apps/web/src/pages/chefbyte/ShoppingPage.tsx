@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, supabase, escapeIlike } from '@/shared/supabase';
+import { generateWalmartCartLink } from '@/lib/walmart';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -14,7 +15,13 @@ interface ShoppingItem {
   qty_containers: number;
   purchased: boolean;
   created_at: string;
-  products: { name: string; barcode: string | null; price: number | null } | null;
+  products: {
+    name: string;
+    barcode: string | null;
+    price: number | null;
+    walmart_link: string | null;
+    is_placeholder: boolean;
+  } | null;
 }
 
 interface ProductSearchResult {
@@ -48,7 +55,7 @@ export function ShoppingPage() {
     if (!user) return;
     const { data, error: loadErr } = await chefbyte()
       .from('shopping_list')
-      .select('*, products:product_id(name, barcode, price)')
+      .select('*, products:product_id(name, barcode, price, walmart_link, is_placeholder)')
       .eq('user_id', user.id)
       .order('created_at');
     if (loadErr) {
@@ -384,22 +391,64 @@ export function ShoppingPage() {
       <div style={{ padding: '20px' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
           <h1 style={{ margin: 0 }}>Shopping List</h1>
-          <button
-            onClick={autoAddBelowMinStock}
-            data-testid="auto-add-btn"
-            style={{
-              padding: '10px 16px',
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-              fontWeight: 600,
-            }}
-          >
-            Auto-Add Below Min Stock
-          </button>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <button
+              onClick={() => {
+                const missingLink = toBuy.filter(
+                  (i) =>
+                    !i.products?.is_placeholder &&
+                    !i.products?.walmart_link &&
+                    i.products?.walmart_link !== 'NOT_ON_WALMART',
+                );
+                const link = generateWalmartCartLink(toBuy);
+                if (!link) {
+                  alert('No items with Walmart links found.');
+                  return;
+                }
+                if (missingLink.length > 0) {
+                  const names = missingLink.map((i) => i.products?.name ?? 'Unknown').join(', ');
+                  if (
+                    !window.confirm(
+                      `${missingLink.length} item${missingLink.length > 1 ? 's' : ''} missing Walmart links and won't be in the cart:\n\n${names}\n\nContinue?`,
+                    )
+                  )
+                    return;
+                }
+                window.open(link, '_blank');
+              }}
+              disabled={toBuy.length === 0}
+              data-testid="walmart-cart-btn"
+              style={{
+                padding: '10px 16px',
+                background: '#0071ce',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: toBuy.length === 0 ? 'not-allowed' : 'pointer',
+                fontSize: '14px',
+                fontWeight: 600,
+                opacity: toBuy.length === 0 ? 0.5 : 1,
+              }}
+            >
+              Open in Walmart
+            </button>
+            <button
+              onClick={autoAddBelowMinStock}
+              data-testid="auto-add-btn"
+              style={{
+                padding: '10px 16px',
+                background: '#1e66f5',
+                color: '#fff',
+                border: 'none',
+                borderRadius: '6px',
+                cursor: 'pointer',
+                fontSize: '14px',
+                fontWeight: 600,
+              }}
+            >
+              Auto-Add Below Min Stock
+            </button>
+          </div>
         </div>
 
         {error && <div style={{ color: '#d33', fontSize: '14px', padding: '8px' }}>{error}</div>}
