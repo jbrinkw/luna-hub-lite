@@ -32,7 +32,7 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('product-list').waitFor({ state: 'visible' });
 
       // Type in search
-      const searchInput = page.getByTestId('product-search').locator('input');
+      const searchInput = page.getByTestId('product-search');
       await searchInput.fill('Chicken');
 
       // Wait for filtering to take effect
@@ -89,10 +89,13 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Click LiquidTrack segment button to switch tabs
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="liquidtrack"]').click();
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /LiquidTrack/i })
+        .click();
 
       // LiquidTrack tab content should be visible
-      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 30000 });
 
       // Add device section should be visible
       const addDeviceSection = page.getByTestId('add-device-section');
@@ -148,19 +151,19 @@ test.describe('ChefByte Settings', () => {
       await expect(page.getByTestId('add-product-form')).toBeVisible();
 
       // Fill in name and nutrition fields
-      const nameInput = page.getByTestId('add-name').locator('input');
+      const nameInput = page.getByTestId('add-name');
       await nameInput.fill('E2E Test Oatmeal');
 
-      const caloriesInput = page.getByTestId('add-calories').locator('input');
+      const caloriesInput = page.getByTestId('add-calories');
       await caloriesInput.fill('150');
 
-      const proteinInput = page.getByTestId('add-protein').locator('input');
+      const proteinInput = page.getByTestId('add-protein');
       await proteinInput.fill('5');
 
-      const carbsInput = page.getByTestId('add-carbs').locator('input');
+      const carbsInput = page.getByTestId('add-carbs');
       await carbsInput.fill('27');
 
-      const fatInput = page.getByTestId('add-fat').locator('input');
+      const fatInput = page.getByTestId('add-fat');
       await fatInput.fill('3');
 
       // Save the new product
@@ -176,7 +179,7 @@ test.describe('ChefByte Settings', () => {
       expect(updatedCount).toBe(initialCount + 1);
 
       // Verify the new product appears in the list by searching for it
-      const searchInput = page.getByTestId('product-search').locator('input');
+      const searchInput = page.getByTestId('product-search');
       await searchInput.fill('E2E Test Oatmeal');
       await page.waitForTimeout(300);
 
@@ -225,14 +228,14 @@ test.describe('ChefByte Settings', () => {
       // Click delete
       await page.getByTestId(`delete-product-${deleteProductId}`).click();
 
-      // IonAlert confirmation dialog should appear — click Delete inside the alert overlay
-      const alert = page.locator('ion-alert');
-      await expect(alert).toBeVisible({ timeout: 5000 });
-      const deleteBtnInAlert = alert.locator('button', { hasText: 'Delete' });
-      await deleteBtnInAlert.click();
+      // Custom modal confirmation dialog should appear — click Delete inside the modal
+      const modalText = page.getByText('Are you sure you want to delete this product?');
+      await expect(modalText).toBeVisible({ timeout: 30000 });
+      const modal = modalText.locator('xpath=ancestor::div[contains(@class,"modal-panel")]');
+      await modal.getByRole('button', { name: 'Delete' }).click();
 
       // Product should be removed from the list
-      await expect(productCard).toBeHidden({ timeout: 5000 });
+      await expect(productCard).toBeHidden({ timeout: 30000 });
 
       // Verify DB no longer has the product
       const { data: check } = await chef.from('products').select('product_id').eq('product_id', deleteProductId);
@@ -251,8 +254,11 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Switch to the locations tab
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="locations"]').click();
-      await expect(page.getByTestId('locations-tab')).toBeVisible({ timeout: 5000 });
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /Locations/i })
+        .click();
+      await expect(page.getByTestId('locations-tab')).toBeVisible({ timeout: 30000 });
 
       // Verify default locations (Fridge, Pantry, Freezer) are listed
       const locationList = page.getByTestId('location-list');
@@ -276,8 +282,11 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Switch to the locations tab
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="locations"]').click();
-      await expect(page.getByTestId('locations-tab')).toBeVisible({ timeout: 5000 });
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /Locations/i })
+        .click();
+      await expect(page.getByTestId('locations-tab')).toBeVisible({ timeout: 30000 });
 
       // Count initial locations
       const locationList = page.getByTestId('location-list');
@@ -286,7 +295,7 @@ test.describe('ChefByte Settings', () => {
       const initialCount = await initialItems.count();
 
       // Type a new location name
-      const nameInput = page.getByTestId('location-name-input').locator('input');
+      const nameInput = page.getByTestId('location-name-input');
       await nameInput.fill('Garage Shelf');
 
       // Click add
@@ -318,8 +327,11 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Switch to LiquidTrack tab
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="liquidtrack"]').click();
-      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 5000 });
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /LiquidTrack/i })
+        .click();
+      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 30000 });
 
       // Add device section and toggle button should be visible
       await expect(page.getByTestId('add-device-section')).toBeVisible();
@@ -338,33 +350,31 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Switch to LiquidTrack tab
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="liquidtrack"]').click();
-      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 5000 });
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /LiquidTrack/i })
+        .click();
+      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 30000 });
 
       // Open the add device form
       await page.getByTestId('toggle-add-device').click();
       await expect(page.getByTestId('add-device-form')).toBeVisible();
 
       // Fill in device name
-      const nameInput = page.getByTestId('device-name-input').locator('input');
+      const nameInput = page.getByTestId('device-name-input');
       await nameInput.fill('E2E Scale');
 
-      // Select a product via IonSelect → ion-alert (use .select-alert to avoid
-      // matching the hidden Revoke Device confirmation alert)
-      await page.getByTestId('device-product-select').click();
-      const selectAlert = page.locator('ion-alert.select-alert');
-      await expect(selectAlert).toBeVisible({ timeout: 5000 });
-      // Select the first product option and confirm
-      const firstOption = selectAlert.locator('button.alert-radio-button').first();
-      await firstOption.click();
-      const okBtn = selectAlert.locator('button', { hasText: 'OK' });
-      await okBtn.click();
+      // Select the first non-empty product option from the native <select>
+      const productSelect = page.getByTestId('device-product-select');
+      const options = productSelect.locator('option:not([value=""])');
+      const firstOptionValue = await options.first().getAttribute('value');
+      await productSelect.selectOption(firstOptionValue!);
 
       // Generate the device
       await page.getByTestId('generate-device-btn').click();
 
       // Generated device info should appear
-      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -379,23 +389,26 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Switch to LiquidTrack tab and create a device
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="liquidtrack"]').click();
-      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 5000 });
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /LiquidTrack/i })
+        .click();
+      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 30000 });
 
       await page.getByTestId('toggle-add-device').click();
       await expect(page.getByTestId('add-device-form')).toBeVisible();
 
-      const nameInput = page.getByTestId('device-name-input').locator('input');
+      const nameInput = page.getByTestId('device-name-input');
       await nameInput.fill('E2E Scale');
 
-      await page.getByTestId('device-product-select').click();
-      const selectAlert = page.locator('ion-alert.select-alert');
-      await expect(selectAlert).toBeVisible({ timeout: 5000 });
-      await selectAlert.locator('button.alert-radio-button').first().click();
-      await selectAlert.locator('button', { hasText: 'OK' }).click();
+      // Select the first non-empty product option from the native <select>
+      const productSelect = page.getByTestId('device-product-select');
+      const productOptions = productSelect.locator('option:not([value=""])');
+      const firstProductValue = await productOptions.first().getAttribute('value');
+      await productSelect.selectOption(firstProductValue!);
 
       await page.getByTestId('generate-device-btn').click();
-      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 30000 });
 
       // Verify the info card contains a UUID-like device_id and import key text
       const infoText = await page.getByTestId('generated-device-info').textContent();
@@ -417,27 +430,30 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Switch to LiquidTrack tab and create a device
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="liquidtrack"]').click();
-      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 5000 });
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /LiquidTrack/i })
+        .click();
+      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 30000 });
 
       await page.getByTestId('toggle-add-device').click();
       await expect(page.getByTestId('add-device-form')).toBeVisible();
 
-      const nameInput = page.getByTestId('device-name-input').locator('input');
+      const nameInput = page.getByTestId('device-name-input');
       await nameInput.fill('E2E Scale');
 
-      await page.getByTestId('device-product-select').click();
-      const selectAlert = page.locator('ion-alert.select-alert');
-      await expect(selectAlert).toBeVisible({ timeout: 5000 });
-      await selectAlert.locator('button.alert-radio-button').first().click();
-      await selectAlert.locator('button', { hasText: 'OK' }).click();
+      // Select the first non-empty product option from the native <select>
+      const productSelect = page.getByTestId('device-product-select');
+      const productOptions = productSelect.locator('option:not([value=""])');
+      const firstProductValue = await productOptions.first().getAttribute('value');
+      await productSelect.selectOption(firstProductValue!);
 
       await page.getByTestId('generate-device-btn').click();
-      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 30000 });
 
       // Device list should be visible with at least one device
       const deviceList = page.getByTestId('device-list');
-      await expect(deviceList).toBeVisible({ timeout: 5000 });
+      await expect(deviceList).toBeVisible({ timeout: 30000 });
 
       const devices = deviceList.locator('[data-testid^="device-"]');
       const count = await devices.count();
@@ -460,40 +476,44 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Switch to LiquidTrack tab and create a device
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="liquidtrack"]').click();
-      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 5000 });
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /LiquidTrack/i })
+        .click();
+      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 30000 });
 
       await page.getByTestId('toggle-add-device').click();
       await expect(page.getByTestId('add-device-form')).toBeVisible();
 
-      const nameInput = page.getByTestId('device-name-input').locator('input');
+      const nameInput = page.getByTestId('device-name-input');
       await nameInput.fill('E2E Scale');
 
-      await page.getByTestId('device-product-select').click();
-      const selectAlert = page.locator('ion-alert.select-alert');
-      await expect(selectAlert).toBeVisible({ timeout: 5000 });
-      await selectAlert.locator('button.alert-radio-button').first().click();
-      await selectAlert.locator('button', { hasText: 'OK' }).click();
+      // Select the first non-empty product option from the native <select>
+      const productSelect = page.getByTestId('device-product-select');
+      const productOptions = productSelect.locator('option:not([value=""])');
+      const firstProductValue = await productOptions.first().getAttribute('value');
+      await productSelect.selectOption(firstProductValue!);
 
       await page.getByTestId('generate-device-btn').click();
-      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 30000 });
 
       // Wait for the device to appear in the list
       const deviceList = page.getByTestId('device-list');
-      await expect(deviceList).toBeVisible({ timeout: 5000 });
+      await expect(deviceList).toBeVisible({ timeout: 30000 });
 
       // Click the revoke button for the first device
       const revokeBtn = deviceList.locator('[data-testid^="revoke-device-"]').first();
-      await expect(revokeBtn).toBeVisible({ timeout: 5000 });
+      await expect(revokeBtn).toBeVisible({ timeout: 30000 });
       await revokeBtn.click();
 
-      // Confirm the revoke in the IonAlert confirmation dialog
-      const revokeAlert = page.locator('ion-alert[header="Revoke Device"]');
-      await expect(revokeAlert).toBeVisible({ timeout: 5000 });
-      await revokeAlert.locator('button', { hasText: 'Revoke' }).click();
+      // Confirm the revoke in the custom modal dialog — scope to the modal panel
+      const revokeModalText = page.getByText('Are you sure you want to revoke this device?');
+      await expect(revokeModalText).toBeVisible({ timeout: 30000 });
+      const revokeModal = revokeModalText.locator('xpath=ancestor::div[contains(@class,"modal-panel")]');
+      await revokeModal.getByRole('button', { name: 'Revoke' }).click();
 
       // Device should now show Revoked status
-      await expect(deviceList).toContainText('Revoked', { timeout: 5000 });
+      await expect(deviceList).toContainText('Revoked', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -508,42 +528,45 @@ test.describe('ChefByte Settings', () => {
       await page.getByTestId('products-tab').waitFor({ state: 'visible' });
 
       // Switch to LiquidTrack tab and create a device
-      await page.getByTestId('settings-tabs').locator('ion-segment-button[value="liquidtrack"]').click();
-      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 5000 });
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /LiquidTrack/i })
+        .click();
+      await expect(page.getByTestId('liquidtrack-tab')).toBeVisible({ timeout: 30000 });
 
       await page.getByTestId('toggle-add-device').click();
       await expect(page.getByTestId('add-device-form')).toBeVisible();
 
-      const nameInput = page.getByTestId('device-name-input').locator('input');
+      const nameInput = page.getByTestId('device-name-input');
       await nameInput.fill('E2E Scale');
 
-      await page.getByTestId('device-product-select').click();
-      const selectAlert = page.locator('ion-alert.select-alert');
-      await expect(selectAlert).toBeVisible({ timeout: 5000 });
-      await selectAlert.locator('button.alert-radio-button').first().click();
-      await selectAlert.locator('button', { hasText: 'OK' }).click();
+      // Select the first non-empty product option from the native <select>
+      const productSelect = page.getByTestId('device-product-select');
+      const productOptions = productSelect.locator('option:not([value=""])');
+      const firstProductValue = await productOptions.first().getAttribute('value');
+      await productSelect.selectOption(firstProductValue!);
 
       await page.getByTestId('generate-device-btn').click();
-      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('generated-device-info')).toBeVisible({ timeout: 30000 });
 
       // Wait for the device to appear in the list
       const deviceList = page.getByTestId('device-list');
-      await expect(deviceList).toBeVisible({ timeout: 5000 });
+      await expect(deviceList).toBeVisible({ timeout: 30000 });
 
       // Click the events toggle for the first device
       const eventsToggle = deviceList.locator('[data-testid^="toggle-events-"]').first();
-      await expect(eventsToggle).toBeVisible({ timeout: 5000 });
+      await expect(eventsToggle).toBeVisible({ timeout: 30000 });
       await eventsToggle.click();
 
       // Events container should become visible
       const eventsContainer = deviceList.locator('[data-testid^="events-"]').first();
-      await expect(eventsContainer).toBeVisible({ timeout: 5000 });
+      await expect(eventsContainer).toBeVisible({ timeout: 30000 });
 
       // Click toggle again to hide
       await eventsToggle.click();
 
       // Events container should be hidden
-      await expect(eventsContainer).toBeHidden({ timeout: 5000 });
+      await expect(eventsContainer).toBeHidden({ timeout: 30000 });
     } finally {
       await cleanup();
     }

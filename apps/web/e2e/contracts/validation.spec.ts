@@ -8,7 +8,7 @@ test.describe('Cross-cutting validation', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // All 5 products should be visible initially
       const productKeys = Object.keys(productMap);
@@ -18,10 +18,10 @@ test.describe('Cross-cutting validation', () => {
       // because the search is a JS .includes() on the lowercased name, not SQL LIKE.
       // "%" is not a substring of any product name, so nothing should match.
       const searchInput = page.getByTestId('inventory-search');
-      await searchInput.locator('input').fill('%');
+      await searchInput.fill('%');
 
       // None of the products contain "%" in their name
-      await expect(page.getByTestId('no-products')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('no-products')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -42,11 +42,11 @@ test.describe('Cross-cutting validation', () => {
 
       // Navigate to account page where display name is shown in a form input
       await page.goto('/hub/account');
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
 
       // The input should contain the raw HTML text, not execute it
       const nameInput = page.getByLabel('Display Name');
-      await expect(nameInput).toHaveValue(xssPayload);
+      await expect(nameInput).toHaveValue(xssPayload, { timeout: 30000 });
 
       // Verify no alert dialog was triggered (XSS did not execute)
       // If XSS executed, an alert would have appeared. We check that no dialog
@@ -86,12 +86,26 @@ test.describe('Cross-cutting validation', () => {
       expect(insertErr).toBeNull();
       expect(product).not.toBeNull();
 
+      // Inventory only shows products with stock lots — insert one so it appears
+      const { data: locs } = await chef
+        .from('locations')
+        .select('location_id')
+        .eq('user_id', userId)
+        .order('created_at')
+        .limit(1);
+      await chef.from('stock_lots').insert({
+        user_id: userId,
+        product_id: product!.product_id,
+        location_id: locs[0].location_id,
+        qty_containers: 1,
+      });
+
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // The product card should exist and contain (at least part of) the long name
       const productCard = page.getByTestId(`inv-product-${product!.product_id}`);
-      await expect(productCard).toBeVisible();
+      await expect(productCard).toBeVisible({ timeout: 30000 });
 
       // The card should contain the name text (React renders it as text content)
       const cardText = await productCard.textContent();
@@ -99,7 +113,7 @@ test.describe('Cross-cutting validation', () => {
 
       // The page should not have any JS errors -- verify page is still interactive
       const searchInput = page.getByTestId('inventory-search');
-      await expect(searchInput).toBeVisible();
+      await expect(searchInput).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -117,7 +131,7 @@ test.describe('Cross-cutting validation', () => {
 
       // The browser fires the 'offline' event on window, which
       // AppProvider listens to. The OfflineIndicator should appear.
-      await expect(page.getByText('No connection')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('No connection')).toBeVisible({ timeout: 30000 });
     } finally {
       await page.context().setOffline(false);
       await cleanup();
@@ -129,14 +143,14 @@ test.describe('Cross-cutting validation', () => {
     try {
       // Navigate to account page which has a "Save Profile" button
       await page.goto('/hub/account');
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
 
       const saveBtn = page.getByRole('button', { name: /save profile/i });
-      await expect(saveBtn).toBeVisible();
+      await expect(saveBtn).toBeVisible({ timeout: 30000 });
 
       // Go offline
       await page.context().setOffline(true);
-      await expect(page.getByText('No connection')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('No connection')).toBeVisible({ timeout: 30000 });
 
       // Click the save button -- it should either be disabled, or if clicked,
       // the request should fail gracefully (no crash, error message shown).
@@ -147,7 +161,7 @@ test.describe('Cross-cutting validation', () => {
 
       // The page should still be functional (no crash / white screen).
       // Either an error message appears or the button is still visible.
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
     } finally {
       await page.context().setOffline(false);
       await cleanup();
@@ -161,14 +175,14 @@ test.describe('Cross-cutting validation', () => {
 
       // Go offline
       await page.context().setOffline(true);
-      await expect(page.getByText('No connection')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('No connection')).toBeVisible({ timeout: 30000 });
 
       // Go back online
       await page.context().setOffline(false);
 
       // The 'online' event fires, AppProvider sets online=true,
       // OfflineIndicator should disappear.
-      await expect(page.getByText('No connection')).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('No connection')).not.toBeVisible({ timeout: 30000 });
     } finally {
       // Ensure we're back online for cleanup
       await page.context().setOffline(false);

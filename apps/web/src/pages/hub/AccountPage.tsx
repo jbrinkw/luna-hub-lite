@@ -52,8 +52,10 @@ export function AccountPage() {
       .select('display_name, timezone, day_start_hour')
       .eq('user_id', user.id)
       .single()
-      .then(({ data }) => {
-        if (data) {
+      .then(({ data, error: err }) => {
+        if (err) {
+          console.error('Failed to load profile:', err.message);
+        } else if (data) {
           setDisplayName(data.display_name ?? '');
           setTimezone(data.timezone);
           setDayStartHour(data.day_start_hour);

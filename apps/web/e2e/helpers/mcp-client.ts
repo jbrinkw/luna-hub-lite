@@ -67,7 +67,7 @@ export class McpE2EClient {
 
     // Promise that resolves when we receive the endpoint event
     const endpointReady = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timed out waiting for endpoint event')), 10_000);
+      const timeout = setTimeout(() => reject(new Error('Timed out waiting for endpoint event')), 30_000);
 
       let buffer = '';
 

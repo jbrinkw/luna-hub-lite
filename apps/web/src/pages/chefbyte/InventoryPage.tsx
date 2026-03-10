@@ -179,7 +179,7 @@ export function InventoryPage() {
   /* ---------------------------------------------------------------- */
 
   const filteredGrouped = useMemo(() => {
-    let result = grouped.filter((g) => g.totalStock > 0);
+    let result = grouped.filter((g) => g.totalStock > 0 || Number(g.product.min_stock_amount) > 0);
     if (searchText.trim()) {
       const lower = searchText.toLowerCase();
       result = result.filter((g) => g.product.name.toLowerCase().includes(lower));

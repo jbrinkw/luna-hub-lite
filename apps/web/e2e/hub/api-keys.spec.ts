@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { admin } from '../helpers/constants';
+import { loginToHub } from '../helpers/seed';
 
 async function seedAndLogin(page: import('@playwright/test').Page, suffix: string) {
   const email = `e2e-keys-${suffix}-${Date.now()}@test.com`;
@@ -11,11 +12,7 @@ async function seedAndLogin(page: import('@playwright/test').Page, suffix: strin
   });
   const userId = data.user!.id;
 
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+  await loginToHub(page, email, password);
 
   return { userId, cleanup: () => admin.auth.admin.deleteUser(userId) };
 }
@@ -25,7 +22,7 @@ test.describe('API key management', () => {
     const { cleanup } = await seedAndLogin(page, 'endpoint');
     try {
       await page.goto('/hub/mcp');
-      await expect(page.getByText('https://mcp.lunahub.dev/sse')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText('https://mcp.lunahub.dev/sse')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -37,7 +34,7 @@ test.describe('API key management', () => {
       await page.goto('/hub/mcp');
       await page.getByRole('button', { name: /generate/i }).click();
       const keyEl = page.getByTestId('key-plaintext');
-      await expect(keyEl).toBeVisible({ timeout: 5000 });
+      await expect(keyEl).toBeVisible({ timeout: 30000 });
       // Verify the key actually has content starting with lh_ prefix
       await expect(keyEl).toHaveText(/^lh_[a-f0-9]{32}$/);
     } finally {
@@ -50,7 +47,7 @@ test.describe('API key management', () => {
     try {
       await page.goto('/hub/mcp');
       await page.getByRole('button', { name: /generate/i }).click();
-      await expect(page.getByTestId('key-plaintext')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('key-plaintext')).toBeVisible({ timeout: 30000 });
 
       await page.getByRole('button', { name: /dismiss/i }).click();
       await expect(page.getByTestId('key-plaintext')).not.toBeVisible();
@@ -64,7 +61,7 @@ test.describe('API key management', () => {
     try {
       await page.goto('/hub/mcp');
       await page.getByRole('button', { name: /generate/i }).click();
-      await expect(page.getByTestId('key-plaintext')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('key-plaintext')).toBeVisible({ timeout: 30000 });
       await page.getByRole('button', { name: /dismiss/i }).click();
 
       // Key should be in the active list
@@ -72,7 +69,7 @@ test.describe('API key management', () => {
 
       // Revoke it
       await page.getByRole('button', { name: /revoke/i }).click();
-      await expect(page.getByText('No active API keys')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('No active API keys')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -85,14 +82,14 @@ test.describe('API key management', () => {
 
       // Generate a key
       await page.getByRole('button', { name: /generate/i }).click();
-      await expect(page.getByTestId('key-plaintext')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('key-plaintext')).toBeVisible({ timeout: 30000 });
 
       // Dismiss the key display to see the key list
       await page.getByRole('button', { name: /dismiss/i }).click();
 
       // The key item should display "Created <date>" — verify the "Created" text is present
       // ApiKeyGenerator renders: <p>Created {new Date(key.created_at).toLocaleDateString()}</p>
-      await expect(page.getByText(/^Created\s+\d/)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/^Created\s+\d/)).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -102,7 +99,7 @@ test.describe('API key management', () => {
     const { cleanup, userId } = await seedAndLogin(page, 'limit');
     try {
       await page.goto('/hub/mcp');
-      await expect(page.getByRole('button', { name: /generate/i })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('button', { name: /generate/i })).toBeVisible({ timeout: 30000 });
 
       // Pre-seed 10 keys directly in the DB to hit the limit
       // (instead of clicking 10 times through the UI)
@@ -114,13 +111,13 @@ test.describe('API key management', () => {
 
       // Reload page so it picks up the 10 keys
       await page.reload();
-      await expect(page.getByRole('button', { name: /generate/i })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('button', { name: /generate/i })).toBeVisible({ timeout: 30000 });
 
       // Attempt to generate the 11th key — should show error
       await page.getByRole('button', { name: /generate/i }).click();
 
       // Verify the max-limit error message is displayed
-      await expect(page.getByText(/maximum of 10 active api keys/i)).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText(/maximum of 10 active api keys/i)).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }

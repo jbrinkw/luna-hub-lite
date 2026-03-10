@@ -2,6 +2,46 @@ import { type Page, expect } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { admin, SUPABASE_URL, ANON_KEY } from './constants';
 
+const USE_SESSION_INJECTION = process.env.E2E_SESSION_INJECTION === '1';
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+async function rpcWithRetry(client: any, schema: string, fn: string, args: Record<string, any>) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const { error } = await (client as any).schema(schema).rpc(fn, args);
+    if (!error) return;
+    if (!error.message?.toLowerCase().includes('rate limit') || attempt === 2) {
+      throw new Error(`RPC ${fn} failed: ${error.message}`);
+    }
+    await new Promise((r) => setTimeout(r, 2000 * Math.pow(2, attempt)));
+  }
+}
+
+export async function signInWithRetry(client: any, email: string, password: string) {
+  for (let attempt = 0; attempt < 8; attempt++) {
+    const result = await client.auth.signInWithPassword({ email, password });
+    if (!result.error) return result;
+    const msg = result.error.message ?? '';
+    if (!msg.toLowerCase().includes('rate limit')) return result;
+    if (attempt === 7) return result;
+    // Exponential backoff with jitter to avoid thundering herd
+    const base = Math.min(2000 * Math.pow(2, attempt), 15000);
+    const jitter = Math.random() * base * 0.5;
+    await sleep(base + jitter);
+  }
+  throw new Error('Unreachable');
+}
+
+/**
+ * Compute the localStorage key Supabase JS SDK uses for session storage.
+ * Format: sb-{hostname-first-segment}-auth-token
+ */
+function getSupabaseStorageKey(url: string): string {
+  const hostname = new URL(url).hostname;
+  const ref = hostname.split('.')[0];
+  return `sb-${ref}-auth-token`;
+}
+
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -25,6 +65,38 @@ interface SeedChefByteDataResult {
 
 interface SeedCoachByteDataResult {
   exerciseMap: Record<string, string>; // name -> exercise_id
+}
+
+// ---------------------------------------------------------------------------
+// loginToHub — login via session injection (production) or UI (local)
+// ---------------------------------------------------------------------------
+
+export async function loginToHub(page: Page, email: string, password: string): Promise<void> {
+  if (USE_SESSION_INJECTION) {
+    const client = createClient(SUPABASE_URL, ANON_KEY, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+    const { data, error } = await signInWithRetry(client, email, password);
+    if (error || !data.session) {
+      throw new Error(`Sign-in failed for ${email}: ${error?.message ?? 'no session'}`);
+    }
+    const storageKey = getSupabaseStorageKey(SUPABASE_URL);
+    await page.goto('/login');
+    await page.evaluate(
+      ({ key, session }) => {
+        localStorage.setItem(key, JSON.stringify(session));
+      },
+      { key: storageKey, session: data.session },
+    );
+    await page.goto('/hub');
+    await expect(page).toHaveURL(/\/hub/, { timeout: 10_000 });
+  } else {
+    await page.goto('/login');
+    await page.getByLabel('Email').fill(email);
+    await page.getByLabel('Password').fill(password);
+    await page.getByRole('button', { name: /sign in/i }).click();
+    await expect(page).toHaveURL(/\/hub/, { timeout: 10_000 });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -78,29 +150,31 @@ export async function seedFullAndLogin(page: Page, suffix: string, options?: See
   const client = createClient(SUPABASE_URL, ANON_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  await client.auth.signInWithPassword({ email, password });
 
-  // 3. Activate modules via RPC (requires authenticated session)
-  if (activateCoach) {
-    const { error } = await (client as any).schema('hub').rpc('activate_app', {
-      p_app_name: 'coachbyte',
-    });
-    if (error) throw new Error(`Failed to activate CoachByte: ${error.message}`);
+  try {
+    const { data: signInData, error: signInErr } = await signInWithRetry(client, email, password);
+    if (signInErr || !signInData.session) {
+      throw new Error(`Sign-in failed for ${email}: ${signInErr?.message ?? 'no session'}`);
+    }
+
+    // 3. Activate modules via RPC (requires authenticated session) — with retry for rate limits
+    if (activateCoach) {
+      await rpcWithRetry(client, 'hub', 'activate_app', { p_app_name: 'coachbyte' });
+    }
+
+    if (activateChef) {
+      await rpcWithRetry(client, 'hub', 'activate_app', { p_app_name: 'chefbyte' });
+    }
+
+    // 4. Login via shared helper (session injection for production, UI for local)
+    await loginToHub(page, email, password);
+  } catch (err) {
+    // Attach cleanup to the error so the caller's afterAll/afterEach can still
+    // delete the orphaned user instead of leaking it.
+    const augmented = err instanceof Error ? err : new Error(String(err));
+    (augmented as any).cleanup = cleanup;
+    throw augmented;
   }
-
-  if (activateChef) {
-    const { error } = await (client as any).schema('hub').rpc('activate_app', {
-      p_app_name: 'chefbyte',
-    });
-    if (error) throw new Error(`Failed to activate ChefByte: ${error.message}`);
-  }
-
-  // 4. Login via browser UI
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
 
   return { userId, email, password, cleanup, client };
 }

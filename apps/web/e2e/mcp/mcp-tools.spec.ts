@@ -8,6 +8,7 @@ import {
   seedCompletedSet,
   seedShoppingItems,
   todayStr,
+  signInWithRetry,
 } from '../helpers/seed';
 import { generateTestApiKey, McpE2EClient } from '../helpers/mcp-client';
 import { SUPABASE_URL, ANON_KEY } from '../helpers/constants';
@@ -37,7 +38,9 @@ async function setupMcpUser(suffix: string): Promise<TestContext> {
   const client = createClient(SUPABASE_URL, ANON_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  await client.auth.signInWithPassword({ email, password });
+  const { data: signInData, error: signInErr } = await signInWithRetry(client, email, password);
+  if (signInErr || !signInData?.session)
+    throw new Error(`Sign-in failed for ${email}: ${signInErr?.message ?? 'no session'}`);
 
   // Activate both modules
   const { error: coachErr } = await (client as any).schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
@@ -1154,13 +1157,14 @@ test.describe('MCP Tools — CoachByte', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('MCP Tools — Error Handling', () => {
-  test('invalid tool name returns isError: true', async () => {
+  test('invalid tool name returns error', async () => {
     let ctx: TestContext | null = null;
     try {
       ctx = await setupMcpUser('mcp-err-unknown');
 
-      const result = await ctx.mcp.callTool('NONEXISTENT_TOOL', {});
-      expectError(result, 'Unknown tool');
+      // The MCP server returns a JSON-RPC error for unknown tools,
+      // which the client throws as an exception
+      await expect(ctx.mcp.callTool('NONEXISTENT_TOOL', {})).rejects.toThrow(/Unknown tool/);
     } finally {
       await ctx?.mcp.disconnect();
       await ctx?.cleanup();

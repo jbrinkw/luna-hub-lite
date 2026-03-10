@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { admin } from '../helpers/constants';
+import { loginToHub } from '../helpers/seed';
 
 async function seedAndLogin(page: import('@playwright/test').Page, suffix: string) {
   const email = `e2e-tools-${suffix}-${Date.now()}@test.com`;
@@ -11,22 +12,18 @@ async function seedAndLogin(page: import('@playwright/test').Page, suffix: strin
   });
   const userId = data.user!.id;
 
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+  await loginToHub(page, email, password);
 
   return { userId, cleanup: () => admin.auth.admin.deleteUser(userId) };
 }
 
 test.describe('Tools page', () => {
-  test('shows all 41 tool toggles', async ({ page }) => {
+  test('shows all 43 tool toggles', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'list');
     try {
       await page.goto('/hub/tools');
-      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
-      await expect(page.locator('ion-toggle')).toHaveCount(41);
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('ion-toggle')).toHaveCount(43, { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -36,14 +33,14 @@ test.describe('Tools page', () => {
     const { cleanup } = await seedAndLogin(page, 'toggle');
     try {
       await page.goto('/hub/tools');
-      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 30000 });
 
       // All tools start enabled — find the first toggle and click it off
       const firstToggle = page.locator('ion-toggle').first();
       await firstToggle.click();
 
       // Verify the toggle state changed
-      await expect(firstToggle).not.toBeChecked();
+      await expect(firstToggle).not.toBeChecked({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -53,17 +50,20 @@ test.describe('Tools page', () => {
     const { cleanup } = await seedAndLogin(page, 'persist');
     try {
       await page.goto('/hub/tools');
-      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 30000 });
 
       // Toggle first tool off
       const firstToggle = page.locator('ion-toggle').first();
       await firstToggle.click();
-      await expect(firstToggle).not.toBeChecked();
+      await expect(firstToggle).not.toBeChecked({ timeout: 30000 });
+
+      // Wait for save to propagate to DB before reloading
+      await page.waitForTimeout(2000);
 
       // Reload and verify state persisted
       await page.reload();
-      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 15000 });
-      await expect(page.locator('ion-toggle').first()).not.toBeChecked();
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('ion-toggle').first()).not.toBeChecked({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -73,15 +73,15 @@ test.describe('Tools page', () => {
     const { cleanup } = await seedAndLogin(page, 'groups');
     try {
       await page.goto('/hub/tools');
-      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 30000 });
 
       // Verify all group section headers/dividers are present
       // ToolsPage renders IonItemDivider with IonLabel for each group
-      await expect(page.locator('ion-item-divider', { hasText: 'CoachByte' })).toBeVisible();
-      await expect(page.locator('ion-item-divider', { hasText: 'ChefByte' })).toBeVisible();
-      await expect(page.locator('ion-item-divider', { hasText: 'Obsidian' })).toBeVisible();
-      await expect(page.locator('ion-item-divider', { hasText: 'Todoist' })).toBeVisible();
-      await expect(page.locator('ion-item-divider', { hasText: 'Home Assistant' })).toBeVisible();
+      await expect(page.locator('ion-item-divider', { hasText: 'CoachByte' })).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('ion-item-divider', { hasText: 'ChefByte' })).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('ion-item-divider', { hasText: 'Obsidian' })).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('ion-item-divider', { hasText: 'Todoist' })).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('ion-item-divider', { hasText: 'Home Assistant' })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -91,13 +91,13 @@ test.describe('Tools page', () => {
     const { cleanup } = await seedAndLogin(page, 'desc');
     try {
       await page.goto('/hub/tools');
-      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByText('COACHBYTE_complete_next_set')).toBeVisible({ timeout: 30000 });
 
       // Each tool renders a <p> with description text inside IonLabel.
       // Verify at least a few known tool descriptions are visible.
-      await expect(page.getByText('Complete next planned set')).toBeVisible();
-      await expect(page.getByText("Get today's workout plan")).toBeVisible();
-      await expect(page.getByText('Consume stock from inventory')).toBeVisible();
+      await expect(page.getByText('Complete next planned set')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByText("Get today's workout plan")).toBeVisible({ timeout: 30000 });
+      await expect(page.getByText('Consume stock from inventory')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }

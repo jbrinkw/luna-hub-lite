@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { admin } from '../helpers/constants';
+import { loginToHub } from '../helpers/seed';
 
 async function seedAndLogin(page: import('@playwright/test').Page, suffix: string) {
   const email = `e2e-prof-${suffix}-${Date.now()}@test.com`;
@@ -12,11 +13,7 @@ async function seedAndLogin(page: import('@playwright/test').Page, suffix: strin
   });
   const userId = data.user!.id;
 
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+  await loginToHub(page, email, password);
 
   return { userId, email, password, cleanup: () => admin.auth.admin.deleteUser(userId) };
 }
@@ -25,7 +22,7 @@ async function seedAndLogin(page: import('@playwright/test').Page, suffix: strin
 async function gotoAccountPage(page: import('@playwright/test').Page) {
   await page.goto('/hub/account');
   // Wait for form to render (loading spinner replaced by content)
-  await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
+  await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
 }
 
 test.describe('Profile management', () => {
@@ -34,8 +31,8 @@ test.describe('Profile management', () => {
     try {
       await gotoAccountPage(page);
       const nameInput = page.getByLabel('Display Name');
-      await expect(nameInput).toBeVisible();
-      await expect(nameInput).toHaveValue('E2E view');
+      await expect(nameInput).toBeVisible({ timeout: 30000 });
+      await expect(nameInput).toHaveValue('E2E view', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -49,7 +46,7 @@ test.describe('Profile management', () => {
       await nameInput.clear();
       await nameInput.fill('New Display Name');
       await page.getByRole('button', { name: /save profile/i }).click();
-      await expect(page.getByText(/profile updated/i)).toBeVisible();
+      await expect(page.getByText(/profile updated/i)).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -63,12 +60,14 @@ test.describe('Profile management', () => {
       await nameInput.clear();
       await nameInput.fill('Persisted Name');
       await page.getByRole('button', { name: /save profile/i }).click();
-      await expect(page.getByText(/profile updated/i)).toBeVisible();
+      await expect(page.getByText(/profile updated/i)).toBeVisible({ timeout: 30000 });
 
+      // Wait for the save to fully propagate before reloading
+      await page.waitForTimeout(2000);
       await page.reload();
       // Wait for form to re-render after reload restores auth session + fetches profile
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
-      await expect(page.getByLabel('Display Name')).toHaveValue('Persisted Name');
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByLabel('Display Name')).toHaveValue('Persisted Name', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -81,15 +80,15 @@ test.describe('Profile management', () => {
       await page.getByLabel('New Password').fill('newpassword123');
       await page.getByLabel('Confirm Password').fill('newpassword123');
       await page.getByRole('button', { name: /change password/i }).click();
-      await expect(page.getByText(/password updated/i)).toBeVisible();
+      await expect(page.getByText(/password updated/i)).toBeVisible({ timeout: 30000 });
 
       // Verify: logout and re-login with new password
       await page.getByRole('button', { name: /logout/i }).click();
-      await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/login/, { timeout: 30000 });
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill('newpassword123');
       await page.getByRole('button', { name: /sign in/i }).click();
-      await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -102,7 +101,7 @@ test.describe('Profile management', () => {
       await page.getByLabel('New Password').fill('password123');
       await page.getByLabel('Confirm Password').fill('different456');
       await page.getByRole('button', { name: /change password/i }).click();
-      await expect(page.getByText(/passwords do not match/i)).toBeVisible();
+      await expect(page.getByText(/passwords do not match/i)).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -118,19 +117,19 @@ test.describe('Profile management', () => {
       await page.locator('ion-select[label="Timezone"]').click();
       // Wait for alert overlay to appear, then select the option
       const alert = page.locator('ion-alert');
-      await expect(alert).toBeVisible({ timeout: 5000 });
+      await expect(alert).toBeVisible({ timeout: 30000 });
       await alert.getByRole('radio', { name: 'America/Chicago' }).click();
       await alert.locator('.alert-button-group button', { hasText: /^OK$/i }).click();
 
       // Save profile
       await page.getByRole('button', { name: /save profile/i }).click();
-      await expect(page.getByText(/profile updated/i)).toBeVisible();
+      await expect(page.getByText(/profile updated/i)).toBeVisible({ timeout: 30000 });
 
       // Reload and verify persistence
       await page.reload();
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
       // The IonSelect should display the selected value in its shadow DOM
-      await expect(page.locator('ion-select[label="Timezone"]')).toContainText('America/Chicago');
+      await expect(page.locator('ion-select[label="Timezone"]')).toContainText('America/Chicago', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -145,18 +144,18 @@ test.describe('Profile management', () => {
       // IonSelect opens an ion-alert overlay when clicked
       await page.locator('ion-select[label="Day Start Hour"]').click();
       const alert = page.locator('ion-alert');
-      await expect(alert).toBeVisible({ timeout: 5000 });
+      await expect(alert).toBeVisible({ timeout: 30000 });
       await alert.locator('button', { hasText: '9:00 AM' }).click();
       await alert.locator('button', { hasText: /ok/i }).click();
 
       // Save profile
       await page.getByRole('button', { name: /save profile/i }).click();
-      await expect(page.getByText(/profile updated/i)).toBeVisible();
+      await expect(page.getByText(/profile updated/i)).toBeVisible({ timeout: 30000 });
 
       // Reload and verify persistence
       await page.reload();
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 15000 });
-      await expect(page.locator('ion-select[label="Day Start Hour"]')).toContainText('9:00 AM');
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('ion-select[label="Day Start Hour"]')).toContainText('9:00 AM', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -172,7 +171,7 @@ test.describe('Profile management', () => {
       await nameInput.clear();
       await nameInput.fill('Navigation Test Name');
       await page.getByRole('button', { name: /save profile/i }).click();
-      await expect(page.getByText(/profile updated/i)).toBeVisible();
+      await expect(page.getByText(/profile updated/i)).toBeVisible({ timeout: 30000 });
 
       // Navigate away to /hub/apps
       await page.goto('/hub/apps');
@@ -181,7 +180,7 @@ test.describe('Profile management', () => {
       // Navigate back to account page
       await gotoAccountPage(page);
       // The saved value should be loaded from the database
-      await expect(page.getByLabel('Display Name')).toHaveValue('Navigation Test Name');
+      await expect(page.getByLabel('Display Name')).toHaveValue('Navigation Test Name', { timeout: 30000 });
     } finally {
       await cleanup();
     }

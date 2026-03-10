@@ -1,6 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { seedUser, seedFullAndLogin, seedChefByteData, seedCoachByteData } from '../helpers/seed';
+import { seedUser, seedFullAndLogin, seedChefByteData, seedCoachByteData, signInWithRetry } from '../helpers/seed';
 import { generateTestApiKey, McpE2EClient } from '../helpers/mcp-client';
 import { SUPABASE_URL, ANON_KEY } from '../helpers/constants';
 
@@ -27,7 +27,9 @@ async function setupMcpUser(suffix: string): Promise<McpContext> {
   const client = createClient(SUPABASE_URL, ANON_KEY, {
     auth: { autoRefreshToken: false, persistSession: false },
   });
-  await client.auth.signInWithPassword({ email, password });
+  const { data: signInData, error: signInErr } = await signInWithRetry(client, email, password);
+  if (signInErr || !signInData?.session)
+    throw new Error(`Sign-in failed for ${email}: ${signInErr?.message ?? 'no session'}`);
 
   // Activate both modules
   const { error: coachErr } = await (client as any).schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
@@ -173,26 +175,29 @@ test.describe('MCP-UI Parity', () => {
     let uiProductRow: Record<string, any>;
     try {
       await page.goto('/chef/settings');
-      await page.getByTestId('product-list').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('toggle-add-product').waitFor({ state: 'visible', timeout: 30000 });
 
       // Open add product form
       await page.getByTestId('toggle-add-product').click();
-      await expect(page.getByTestId('add-product-form')).toBeVisible();
+      await expect(page.getByTestId('add-product-form')).toBeVisible({ timeout: 30000 });
+
+      // Wait for form fields to be ready
+      await expect(page.getByTestId('add-name')).toBeVisible({ timeout: 30000 });
 
       // Fill in the same values
-      await page.getByTestId('add-name').locator('input').fill('Parity Oatmeal');
-      await page.getByTestId('add-servings').locator('input').fill('10');
-      await page.getByTestId('add-calories').locator('input').fill('150');
-      await page.getByTestId('add-protein').locator('input').fill('5');
-      await page.getByTestId('add-carbs').locator('input').fill('27');
-      await page.getByTestId('add-fat').locator('input').fill('3');
+      await page.getByTestId('add-name').fill('Parity Oatmeal');
+      await page.getByTestId('add-servings').fill('10');
+      await page.getByTestId('add-calories').fill('150');
+      await page.getByTestId('add-protein').fill('5');
+      await page.getByTestId('add-carbs').fill('27');
+      await page.getByTestId('add-fat').fill('3');
 
       // Save
       await page.getByTestId('save-new-product').click();
-      await expect(page.getByTestId('add-product-form')).toBeHidden({ timeout: 5000 });
+      await expect(page.getByTestId('add-product-form')).toBeHidden({ timeout: 30000 });
 
       // Wait for DB write to propagate
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(2000);
 
       // Fetch the UI-created product
       const uiProducts = await fetchRows(uiClient, 'chefbyte', 'products', {
@@ -281,10 +286,10 @@ test.describe('MCP-UI Parity', () => {
         .eq('product_id', uiChickenId);
 
       await page.goto('/chef/scanner');
-      await page.getByTestId('scanner-container').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('scanner-container').waitFor({ state: 'visible', timeout: 30000 });
 
       // Ensure mode is purchase (default)
-      await expect(page.getByTestId('mode-purchase')).toBeVisible();
+      await expect(page.getByTestId('mode-purchase')).toBeVisible({ timeout: 30000 });
 
       // Set quantity to 2 via keypad
       await page.getByTestId('key-2').click();
@@ -295,7 +300,7 @@ test.describe('MCP-UI Parity', () => {
       await barcodeInput.press('Enter');
 
       // Wait for the queue item to show success
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(5000);
 
       // Fetch all lots after the scanner action
       uiLotRows = await fetchRows(uiClient, 'chefbyte', 'stock_lots', {
@@ -402,7 +407,7 @@ test.describe('MCP-UI Parity', () => {
       const uiStockBefore = uiLotsBefore.reduce((sum, l) => sum + Number(l.qty_containers), 0);
 
       await page.goto('/chef/scanner');
-      await page.getByTestId('scanner-container').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('scanner-container').waitFor({ state: 'visible', timeout: 30000 });
 
       // Switch to consume_macros mode
       await page.getByTestId('mode-consume_macros').click();
@@ -418,7 +423,7 @@ test.describe('MCP-UI Parity', () => {
       await barcodeInput.press('Enter');
 
       // Wait for processing
-      await page.waitForTimeout(3000);
+      await page.waitForTimeout(5000);
 
       // Verify stock decreased
       const uiLotsAfter = await fetchRows(uiClient, 'chefbyte', 'stock_lots', {
@@ -489,14 +494,14 @@ test.describe('MCP-UI Parity', () => {
       const { productMap: uiProductMap } = await seedChefByteData(uiClient, uiUserId);
 
       await page.goto('/chef/shopping');
-      await page.getByTestId('add-item-form').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('add-item-form').waitFor({ state: 'visible', timeout: 30000 });
 
       // Type "Chicken" in the search to find the product
-      const nameInput = page.getByTestId('add-item-name').locator('input');
+      const nameInput = page.getByTestId('add-item-name');
       await nameInput.fill('Chicken');
 
       // Wait for the dropdown to appear
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(2000);
       const dropdown = page.getByTestId('product-dropdown');
       if (await dropdown.isVisible()) {
         // Click the Chicken Breast option from the dropdown
@@ -508,14 +513,14 @@ test.describe('MCP-UI Parity', () => {
       }
 
       // Set qty to 3
-      const qtyInput = page.getByTestId('add-item-qty').locator('input');
+      const qtyInput = page.getByTestId('add-item-qty');
       await qtyInput.fill('3');
 
       // Add
       await page.getByTestId('add-item-btn').click();
 
       // Wait for the item to appear in the list
-      await page.waitForTimeout(1000);
+      await page.waitForTimeout(2000);
 
       const uiChickenId = uiProductMap['Great Value Boneless Skinless Chicken Breasts'];
       uiShoppingRow = await fetchRow(uiClient, 'chefbyte', 'shopping_list', {
@@ -584,17 +589,17 @@ test.describe('MCP-UI Parity', () => {
       await page.goto('/coach');
 
       // Wait for the plan to bootstrap
-      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 30000 });
 
       // Complete the first set (Squat) by clicking the Complete Set button
       // The default values should be pre-filled from the split template (5 reps, 225 lbs)
       await page.getByTestId('complete-set-btn').click();
 
       // Wait for the completed row to appear
-      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 30000 });
 
       // Wait for DB write
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(2000);
 
       // Fetch the completed set
       const uiCompletedSets = await fetchRows(uiClient, 'coachbyte', 'completed_sets', { user_id: uiUserId });
@@ -654,25 +659,25 @@ test.describe('MCP-UI Parity', () => {
       await page.goto('/chef/macros');
 
       // Wait for the page to load
-      await page.getByTestId('macro-summary').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('macro-summary').waitFor({ state: 'visible', timeout: 30000 });
 
       // Open the temp item modal
       await page.getByTestId('log-temp-btn').click();
-      await expect(page.getByTestId('temp-item-modal')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('temp-item-modal')).toBeVisible({ timeout: 30000 });
 
       // Fill in the form with the same values
-      await page.getByTestId('temp-name').locator('input').fill('Parity Snack');
-      await page.getByTestId('temp-calories').locator('input').fill('250');
-      await page.getByTestId('temp-protein').locator('input').fill('10');
-      await page.getByTestId('temp-carbs').locator('input').fill('30');
-      await page.getByTestId('temp-fat').locator('input').fill('12');
+      await page.getByTestId('temp-name').fill('Parity Snack');
+      await page.getByTestId('temp-calories').fill('250');
+      await page.getByTestId('temp-protein').fill('10');
+      await page.getByTestId('temp-carbs').fill('30');
+      await page.getByTestId('temp-fat').fill('12');
 
       // Save
       await page.getByTestId('temp-save-btn').click();
 
       // Wait for the modal to close and data to persist
-      await expect(page.getByTestId('temp-item-modal')).toBeHidden({ timeout: 5000 });
-      await page.waitForTimeout(500);
+      await expect(page.getByTestId('temp-item-modal')).toBeHidden({ timeout: 30000 });
+      await page.waitForTimeout(2000);
 
       // Fetch the temp item from DB
       const uiTempItems = await fetchRows(uiClient, 'chefbyte', 'temp_items', {

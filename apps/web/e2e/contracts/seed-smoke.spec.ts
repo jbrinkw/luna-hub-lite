@@ -6,8 +6,10 @@ test.describe('Seed smoke tests', () => {
   test('global exercises exist after DB start (20 exercises with user_id IS NULL)', async ({ page }) => {
     const { cleanup, client } = await seedFullAndLogin(page, 'seed-ex');
     try {
-      const count = await countDbRows(client, 'coachbyte', 'exercises', { user_id: null });
-      expect(count).toBe(20);
+      await expect(async () => {
+        const count = await countDbRows(client, 'coachbyte', 'exercises', { user_id: null });
+        expect(count).toBe(20);
+      }).toPass({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -39,9 +41,11 @@ test.describe('Seed smoke tests', () => {
     // and starts empty for a fresh activation (no default rows seeded by activate_app).
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'seed-cfg');
     try {
-      const count = await countDbRows(client, 'chefbyte', 'user_config', { user_id: userId });
-      // activate_app does not seed user_config, so count should be 0 for a fresh user
-      expect(count).toBe(0);
+      await expect(async () => {
+        const count = await countDbRows(client, 'chefbyte', 'user_config', { user_id: userId });
+        // activate_app does not seed user_config, so count should be 0 for a fresh user
+        expect(count).toBe(0);
+      }).toPass({ timeout: 30000 });
     } finally {
       await cleanup();
     }

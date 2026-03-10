@@ -34,20 +34,52 @@ export const addStock: ToolDefinition = {
       resolvedLocationId = (locs[0] as any).location_id;
     }
 
-    const row: Record<string, any> = {
-      user_id: ctx.userId,
-      product_id,
-      qty_containers,
-      location_id: resolvedLocationId,
-    };
-    if (expires_on) row.expires_on = expires_on;
-
-    const { data, error } = await ctx.supabase
+    // Check for existing lot with same (product_id, location_id, expires_on) to avoid UNIQUE violation
+    let existingQuery = ctx.supabase
       .schema('chefbyte')
       .from('stock_lots')
-      .insert(row)
-      .select('lot_id, qty_containers, expires_on, location_id')
-      .single();
+      .select('lot_id, qty_containers')
+      .eq('user_id', ctx.userId)
+      .eq('product_id', product_id)
+      .eq('location_id', resolvedLocationId);
+    if (expires_on) {
+      existingQuery = existingQuery.eq('expires_on', expires_on);
+    } else {
+      existingQuery = existingQuery.is('expires_on', null);
+    }
+    const { data: existingLot } = await existingQuery.single();
+
+    let data: any;
+    let error: any;
+    if (existingLot) {
+      // Merge: increment qty on existing lot
+      const result = await ctx.supabase
+        .schema('chefbyte')
+        .from('stock_lots')
+        .update({ qty_containers: Number((existingLot as any).qty_containers) + qty_containers })
+        .eq('lot_id', (existingLot as any).lot_id)
+        .select('lot_id, qty_containers, expires_on, location_id')
+        .single();
+      data = result.data;
+      error = result.error;
+    } else {
+      // Insert new lot
+      const row: Record<string, any> = {
+        user_id: ctx.userId,
+        product_id,
+        qty_containers,
+        location_id: resolvedLocationId,
+      };
+      if (expires_on) row.expires_on = expires_on;
+      const result = await ctx.supabase
+        .schema('chefbyte')
+        .from('stock_lots')
+        .insert(row)
+        .select('lot_id, qty_containers, expires_on, location_id')
+        .single();
+      data = result.data;
+      error = result.error;
+    }
 
     if (error) return toolError(`Failed to add stock: ${error.message}`);
 

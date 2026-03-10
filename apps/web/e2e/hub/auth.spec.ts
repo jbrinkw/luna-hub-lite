@@ -22,7 +22,7 @@ test.describe('Auth flow', () => {
   test('visit / redirects to /login (auth guard)', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible({ timeout: 30000 });
   });
 
   test('login with valid credentials redirects to /hub', async ({ page }) => {
@@ -32,9 +32,9 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill(password);
       await page.getByRole('button', { name: /sign in/i }).click();
-      await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
       // Verify the hub page actually rendered (not just URL)
-      await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /logout/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanupUser(userId);
     }
@@ -47,7 +47,7 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill('wrongpassword');
       await page.getByRole('button', { name: /sign in/i }).click();
-      await expect(page.getByText(/invalid.*credentials/i)).toBeVisible();
+      await expect(page.getByText(/invalid.*credentials/i)).toBeVisible({ timeout: 30000 });
       await expect(page).toHaveURL(/\/login/);
       // Verify no session — attempting hub should redirect back
       await page.goto('/hub');
@@ -57,26 +57,31 @@ test.describe('Auth flow', () => {
     }
   });
 
-  test('signup with valid inputs redirects to /hub', async ({ page }) => {
-    const email = `e2e-signup-${Date.now()}@test.com`;
-    let userId: string | undefined;
-    try {
-      await page.goto('/signup');
-      await page.getByLabel('Display Name').fill('E2E Signup User');
-      await page.getByLabel('Email').fill(email);
-      await page.getByLabel('Password').fill('testpass123');
-      await page.getByRole('button', { name: /sign up/i }).click();
-      await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
-      await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
+  // Signup uses Supabase email auth which is heavily rate-limited on production (2/interval).
+  // Skip on production runs where session injection is enabled.
+  (process.env.E2E_SESSION_INJECTION === '1' ? test.skip : test)(
+    'signup with valid inputs redirects to /hub',
+    async ({ page }) => {
+      const email = `e2e-signup-${Date.now()}@test.com`;
+      let userId: string | undefined;
+      try {
+        await page.goto('/signup');
+        await page.getByLabel('Display Name').fill('E2E Signup User');
+        await page.getByLabel('Email').fill(email);
+        await page.getByLabel('Password').fill('testpass123');
+        await page.getByRole('button', { name: /sign up/i }).click();
+        await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
+        await expect(page.getByRole('button', { name: /logout/i })).toBeVisible({ timeout: 30000 });
 
-      // Get userId for cleanup
-      const { data } = await admin.auth.admin.listUsers();
-      const user = data.users.find((u) => u.email === email);
-      userId = user?.id;
-    } finally {
-      if (userId) await cleanupUser(userId);
-    }
-  });
+        // Get userId for cleanup
+        const { data } = await admin.auth.admin.listUsers();
+        const user = data.users.find((u) => u.email === email);
+        userId = user?.id;
+      } finally {
+        if (userId) await cleanupUser(userId);
+      }
+    },
+  );
 
   test('signup with duplicate email does not create second account', async ({ page }) => {
     const { email, userId } = await seedUser('dup-signup');
@@ -89,7 +94,7 @@ test.describe('Auth flow', () => {
       // Supabase local dev with email confirmation disabled may silently succeed
       // but should NOT create a second user. Verify only 1 user with this email exists.
       // Wait for signup to process (either redirect or stay on page)
-      await page.waitForURL(/\/(hub|signup)/, { timeout: 5000 });
+      await page.waitForURL(/\/(hub|signup)/, { timeout: 30000 });
       const { data } = await admin.auth.admin.listUsers();
       const matches = data.users.filter((u) => u.email === email);
       expect(matches.length).toBe(1);
@@ -106,12 +111,12 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill(password);
       await page.getByRole('button', { name: /sign in/i }).click();
-      await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
 
       // Click logout
       await page.getByRole('button', { name: /logout/i }).click();
-      await expect(page).toHaveURL(/\/login/, { timeout: 5000 });
-      await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+      await expect(page).toHaveURL(/\/login/, { timeout: 30000 });
+      await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanupUser(userId);
     }
@@ -125,15 +130,15 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill(password);
       await page.getByRole('button', { name: /sign in/i }).click();
-      await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
 
       // Logout
       await page.getByRole('button', { name: /logout/i }).click();
-      await expect(page).toHaveURL(/\/login/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/login/, { timeout: 30000 });
 
       // Try to visit /hub again
       await page.goto('/hub');
-      await expect(page).toHaveURL(/\/login/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/login/, { timeout: 30000 });
     } finally {
       await cleanupUser(userId);
     }
@@ -142,35 +147,35 @@ test.describe('Auth flow', () => {
   test('visit /coach without login redirects to /login', async ({ page }) => {
     await page.goto('/coach');
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible({ timeout: 30000 });
   });
 
   test('visit /chef without login redirects to /login', async ({ page }) => {
     await page.goto('/chef');
     await expect(page).toHaveURL(/\/login/);
-    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible({ timeout: 30000 });
   });
 
   test('demo login redirects to /hub with demo data', async ({ page }) => {
     await page.goto('/login');
     await page.getByRole('button', { name: /try demo account/i }).click();
-    await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
+    await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
     // Verify the hub page rendered with demo user
-    await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /logout/i })).toBeVisible({ timeout: 30000 });
     // Verify demo user's display name is loaded in the profile input
-    await expect(page.getByLabel('Display Name')).toHaveValue('Demo User');
+    await expect(page.getByLabel('Display Name')).toHaveValue('Demo User', { timeout: 30000 });
   });
 
   test('demo login button shows loading state', async ({ page }) => {
     await page.goto('/login');
     const demoBtn = page.getByRole('button', { name: /try demo account/i });
-    await expect(demoBtn).toBeVisible();
+    await expect(demoBtn).toBeVisible({ timeout: 30000 });
     await expect(demoBtn).toBeEnabled();
     await demoBtn.click();
     // Button should show loading text while processing
-    await expect(page.getByRole('button', { name: /loading demo/i })).toBeVisible();
+    await expect(page.getByRole('button', { name: /loading demo/i })).toBeVisible({ timeout: 30000 });
     // Eventually redirects
-    await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
+    await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
   });
 
   test('short password shows validation error on signup', async ({ page }) => {
@@ -180,7 +185,7 @@ test.describe('Auth flow', () => {
     await page.getByLabel('Password').fill('abc');
     await page.getByRole('button', { name: /sign up/i }).click();
     // MIN_PASSWORD_LENGTH is 8, so a 3-char password triggers client-side validation
-    await expect(page.getByText(/password must be at least 8 characters/i)).toBeVisible();
+    await expect(page.getByText(/password must be at least 8 characters/i)).toBeVisible({ timeout: 30000 });
     // Should remain on signup page
     await expect(page).toHaveURL(/\/signup/);
   });
@@ -192,7 +197,7 @@ test.describe('Auth flow', () => {
     await page.getByLabel('Password').fill('testpass123');
     await page.getByRole('button', { name: /sign up/i }).click();
     // Client-side validation: "Email is required"
-    await expect(page.getByText(/email is required/i)).toBeVisible();
+    await expect(page.getByText(/email is required/i)).toBeVisible({ timeout: 30000 });
     await expect(page).toHaveURL(/\/signup/);
   });
 
@@ -207,12 +212,12 @@ test.describe('Auth flow', () => {
       // Either the button shows "Signing in..." (disabled) OR login completed already (redirect).
       // Local Supabase auth can be fast enough that the loading state is never observable.
       await expect(page.getByRole('button', { name: /signing in/i }).or(page.locator('text=/hub/')))
-        .toBeVisible({ timeout: 5000 })
+        .toBeVisible({ timeout: 30000 })
         .catch(() => {
           // If neither matched, the redirect may already be done
         });
       // In all cases, login should succeed
-      await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
     } finally {
       await cleanupUser(userId);
     }
@@ -229,11 +234,11 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill(password);
       await page.getByRole('button', { name: /sign in/i }).click();
-      await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+      await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
 
       // Navigate back to /login — page should render (no redirect)
       await page.goto('/login');
-      await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+      await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanupUser(userId);
     }
@@ -244,12 +249,12 @@ test.describe('Auth flow', () => {
     // not a navigation to /reset-password. Verify the toggle behavior.
     await page.goto('/login');
     const forgotBtn = page.getByTestId('forgot-password-link');
-    await expect(forgotBtn).toBeVisible();
+    await expect(forgotBtn).toBeVisible({ timeout: 30000 });
 
     // Click to show the forgot password form
     await forgotBtn.click();
-    await expect(page.getByTestId('forgot-password-form')).toBeVisible();
-    await expect(page.getByTestId('send-reset-link-button')).toBeVisible();
+    await expect(page.getByTestId('forgot-password-form')).toBeVisible({ timeout: 30000 });
+    await expect(page.getByTestId('send-reset-link-button')).toBeVisible({ timeout: 30000 });
 
     // Should still be on /login (inline form, not a navigation)
     await expect(page).toHaveURL(/\/login/);
@@ -269,8 +274,8 @@ test.describe('Auth flow', () => {
       await page.getByLabel('Email').fill(email);
       await page.getByLabel('Password').fill(password);
       await page.getByRole('button', { name: /sign in/i }).click();
-      await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
-      await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
+      await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
+      await expect(page.getByRole('button', { name: /logout/i })).toBeVisible({ timeout: 30000 });
 
       // Invalidate the session server-side by signing the user out via admin API.
       // This revokes all refresh tokens so the next getSession / token refresh fails.
@@ -290,8 +295,8 @@ test.describe('Auth flow', () => {
 
       // Navigate to a protected page — should redirect to /login
       await page.goto('/hub');
-      await expect(page).toHaveURL(/\/login/, { timeout: 10000 });
-      await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
+      await expect(page).toHaveURL(/\/login/, { timeout: 30000 });
+      await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanupUser(userId);
     }

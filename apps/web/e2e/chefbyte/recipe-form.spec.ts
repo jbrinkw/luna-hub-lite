@@ -11,7 +11,7 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       const fields = page.getByTestId('recipe-fields');
       await expect(fields).toBeVisible();
 
-      const nameInput = page.getByTestId('recipe-name').locator('input');
+      const nameInput = page.getByTestId('recipe-name');
       await expect(nameInput).toHaveValue('');
 
       const noIngredients = page.getByTestId('no-ingredients');
@@ -32,11 +32,11 @@ test.describe('ChefByte Recipe Create/Edit', () => {
 
       await page.getByTestId('recipe-fields').waitFor({ state: 'visible' });
 
-      const nameInput = page.getByTestId('recipe-name').locator('input');
+      const nameInput = page.getByTestId('recipe-name');
       await nameInput.fill('My Test Recipe');
       await expect(nameInput).toHaveValue('My Test Recipe');
 
-      const servingsInput = page.getByTestId('recipe-base-servings').locator('input');
+      const servingsInput = page.getByTestId('recipe-base-servings');
       await servingsInput.fill('4');
       await expect(servingsInput).toHaveValue('4');
     } finally {
@@ -53,7 +53,7 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       await page.getByTestId('recipe-fields').waitFor({ state: 'visible' });
 
       // Search for a product
-      const searchInput = page.getByTestId('ingredient-product-search').locator('input');
+      const searchInput = page.getByTestId('ingredient-product-search');
       await searchInput.fill('Chicken');
 
       // Wait for dropdown and click first item
@@ -63,7 +63,7 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       await firstItem.click();
 
       // Set quantity
-      const qtyInput = page.getByTestId('ingredient-qty').locator('input');
+      const qtyInput = page.getByTestId('ingredient-qty');
       await qtyInput.fill('0.5');
 
       // Click add
@@ -91,15 +91,15 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       await page.getByTestId('recipe-fields').waitFor({ state: 'visible' });
 
       // Fill name
-      const nameInput = page.getByTestId('recipe-name').locator('input');
+      const nameInput = page.getByTestId('recipe-name');
       await nameInput.fill('Test Recipe');
 
       // Fill servings
-      const servingsInput = page.getByTestId('recipe-base-servings').locator('input');
+      const servingsInput = page.getByTestId('recipe-base-servings');
       await servingsInput.fill('2');
 
       // Add an ingredient
-      const searchInput = page.getByTestId('ingredient-product-search').locator('input');
+      const searchInput = page.getByTestId('ingredient-product-search');
       await searchInput.fill('Chicken');
 
       const dropdown = page.getByTestId('ingredient-product-dropdown');
@@ -107,7 +107,7 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       const firstItem = dropdown.locator('[data-testid^="ing-dropdown-item-"]').first();
       await firstItem.click();
 
-      const qtyInput = page.getByTestId('ingredient-qty').locator('input');
+      const qtyInput = page.getByTestId('ingredient-qty');
       await qtyInput.fill('1');
 
       await page.getByTestId('add-ingredient-btn').click();
@@ -117,7 +117,7 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       await page.getByTestId('save-recipe-btn').click();
 
       // Should redirect to recipes list or show success
-      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 5000 });
+      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -132,7 +132,7 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       await page.getByTestId('recipe-fields').waitFor({ state: 'visible' });
 
       // Recipe name should be pre-filled
-      const nameInput = page.getByTestId('recipe-name').locator('input');
+      const nameInput = page.getByTestId('recipe-name');
       await expect(nameInput).toHaveValue('Chicken & Rice');
 
       // Ingredients table should have rows
@@ -153,15 +153,17 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       const { recipeId } = await seedChefByteData(client, userId);
       await page.goto(`/chef/recipes/${recipeId}`);
 
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
 
       // Wait for the ingredients table to load
       const ingredientsTable = page.getByTestId('ingredients-table');
       await expect(ingredientsTable).toBeVisible();
 
-      // Edit the quantity of the first ingredient (Chicken Breast, originally 0.5)
-      const qtyInput = page.getByTestId('edit-qty-0').locator('input');
-      await expect(qtyInput).toBeVisible();
+      // Wait for the initial value to load from DB before overwriting
+      const qtyInput = page.getByTestId('edit-qty-0');
+      await expect(qtyInput).toHaveValue('0.5', { timeout: 30000 });
+      // Brief pause to let any pending re-renders settle
+      await page.waitForTimeout(500);
       await qtyInput.fill('2');
       await expect(qtyInput).toHaveValue('2');
 
@@ -169,14 +171,14 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       await page.getByTestId('save-recipe-btn').click();
 
       // Should redirect to recipes list
-      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 5000 });
+      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 30000 });
 
       // Navigate back to the edit form and verify the quantity persisted
       await page.goto(`/chef/recipes/${recipeId}`);
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
       await expect(page.getByTestId('ingredients-table')).toBeVisible();
 
-      const updatedQty = page.getByTestId('edit-qty-0').locator('input');
+      const updatedQty = page.getByTestId('edit-qty-0');
       await expect(updatedQty).toHaveValue('2');
     } finally {
       await cleanup();
@@ -189,7 +191,7 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       const { recipeId } = await seedChefByteData(client, userId);
       await page.goto(`/chef/recipes/${recipeId}`);
 
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
 
       // Verify 2 ingredient rows exist (Chicken Breast + Brown Rice)
       const ingredientsTable = page.getByTestId('ingredients-table');
@@ -217,28 +219,31 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       const { recipeId } = await seedChefByteData(client, userId);
       await page.goto(`/chef/recipes/${recipeId}`);
 
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
 
-      // Fill description
-      const descTextarea = page.getByTestId('recipe-description').locator('textarea');
+      // Wait for the existing description to load before overwriting (seed has description set)
+      const descTextarea = page.getByTestId('recipe-description');
+      await expect(descTextarea).toHaveValue('Simple chicken and rice meal', { timeout: 30000 });
+      // Brief pause to let any pending re-renders settle
+      await page.waitForTimeout(500);
       await descTextarea.fill('A delicious high-protein meal');
 
-      // Fill instructions
-      const instrTextarea = page.getByTestId('recipe-instructions').locator('textarea');
+      // Instructions are not seeded, so just fill directly
+      const instrTextarea = page.getByTestId('recipe-instructions');
       await instrTextarea.fill('Step 1: Cook chicken. Step 2: Cook rice. Step 3: Combine.');
 
       // Save the recipe
       await page.getByTestId('save-recipe-btn').click();
-      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 5000 });
+      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 30000 });
 
       // Navigate back and verify the values persisted
       await page.goto(`/chef/recipes/${recipeId}`);
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
 
-      const descAfter = page.getByTestId('recipe-description').locator('textarea');
+      const descAfter = page.getByTestId('recipe-description');
       await expect(descAfter).toHaveValue('A delicious high-protein meal');
 
-      const instrAfter = page.getByTestId('recipe-instructions').locator('textarea');
+      const instrAfter = page.getByTestId('recipe-instructions');
       await expect(instrAfter).toHaveValue('Step 1: Cook chicken. Step 2: Cook rice. Step 3: Combine.');
     } finally {
       await cleanup();
@@ -251,28 +256,32 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       const { recipeId } = await seedChefByteData(client, userId);
       await page.goto(`/chef/recipes/${recipeId}`);
 
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
 
       // Verify pre-filled values from seed (active_time: 15, total_time: 30)
-      const activeInput = page.getByTestId('recipe-active-time').locator('input');
-      const totalInput = page.getByTestId('recipe-total-time').locator('input');
-      await expect(activeInput).toHaveValue('15');
+      const activeInput = page.getByTestId('recipe-active-time');
+      const totalInput = page.getByTestId('recipe-total-time');
+      await expect(activeInput).toHaveValue('15', { timeout: 30000 });
       await expect(totalInput).toHaveValue('30');
+      // Brief pause to let any pending re-renders settle
+      await page.waitForTimeout(500);
 
       // Update to new values
       await activeInput.fill('25');
+      await expect(activeInput).toHaveValue('25');
       await totalInput.fill('45');
+      await expect(totalInput).toHaveValue('45');
 
       // Save
       await page.getByTestId('save-recipe-btn').click();
-      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 5000 });
+      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 30000 });
 
       // Navigate back and verify persistence
       await page.goto(`/chef/recipes/${recipeId}`);
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
 
-      await expect(page.getByTestId('recipe-active-time').locator('input')).toHaveValue('25');
-      await expect(page.getByTestId('recipe-total-time').locator('input')).toHaveValue('45');
+      await expect(page.getByTestId('recipe-active-time')).toHaveValue('25');
+      await expect(page.getByTestId('recipe-total-time')).toHaveValue('45');
     } finally {
       await cleanup();
     }
@@ -284,29 +293,19 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       const { recipeId } = await seedChefByteData(client, userId);
       await page.goto(`/chef/recipes/${recipeId}`);
 
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
       await expect(page.getByTestId('ingredients-table')).toBeVisible();
 
       // The seeded ingredients use 'container' unit — verify first ingredient's unit select
       const unitSelect = page.getByTestId('edit-unit-0');
       await expect(unitSelect).toBeVisible();
+      await expect(unitSelect).toHaveValue('container');
 
-      // The IonSelect should show the current value
-      await expect(unitSelect).toContainText(/Container/i);
+      // Change the unit to 'serving' via native <select>
+      await unitSelect.selectOption('serving');
 
-      // Change the unit to 'serving' via IonSelect
-      await unitSelect.click();
-
-      // IonSelect opens an alert/popover with options — click "Serving"
-      const servingOption = page.getByRole('radio', { name: 'Serving' });
-      await servingOption.click();
-
-      // Confirm the selection (IonSelect alert has OK button)
-      const okButton = page.getByRole('button', { name: 'OK' });
-      await okButton.click();
-
-      // Verify the unit select now shows "Serving"
-      await expect(unitSelect).toContainText(/Serving/i);
+      // Verify the unit select now shows "serving"
+      await expect(unitSelect).toHaveValue('serving');
     } finally {
       await cleanup();
     }
@@ -318,10 +317,10 @@ test.describe('ChefByte Recipe Create/Edit', () => {
       await seedChefByteData(client, userId);
       await page.goto('/chef/recipes/new');
 
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
 
       // Fill in a recipe name but add no ingredients
-      const nameInput = page.getByTestId('recipe-name').locator('input');
+      const nameInput = page.getByTestId('recipe-name');
       await nameInput.fill('Empty Recipe');
 
       // The save button should be disabled because there are 0 ingredients

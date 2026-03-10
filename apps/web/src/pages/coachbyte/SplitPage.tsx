@@ -81,7 +81,10 @@ export function SplitPage() {
       .select('exercise_id, name')
       .or(`user_id.is.null,user_id.eq.${user.id}`)
       .order('name')
-      .then(({ data }) => setExercises((data ?? []) as Exercise[]));
+      .then(({ data, error: err }) => {
+        if (err) console.error('Failed to load exercises:', err.message);
+        setExercises((data ?? []) as Exercise[]);
+      });
   }, [user]);
 
   const saveSplit = async (day: DaySplit) => {

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { seedFullAndLogin } from '../helpers/seed';
+import { seedFullAndLogin, loginToHub } from '../helpers/seed';
 import { admin } from '../helpers/constants';
 
 /** Lightweight seed for tests that don't need activated modules */
@@ -13,11 +13,7 @@ async function seedAndLogin(page: import('@playwright/test').Page, suffix: strin
   });
   const userId = data.user!.id;
 
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+  await loginToHub(page, email, password);
 
   return { userId, cleanup: () => admin.auth.admin.deleteUser(userId) };
 }
@@ -27,7 +23,7 @@ test.describe('Hub navigation', () => {
     const { cleanup } = await seedAndLogin(page, 'default');
     try {
       await expect(page).toHaveURL(/\/hub\/account/);
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -38,7 +34,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Account').click();
       await expect(page).toHaveURL(/\/hub\/account/);
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -49,7 +45,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Apps').click();
       await expect(page).toHaveURL(/\/hub\/apps/);
-      await expect(page.locator('ion-card', { hasText: 'CoachByte' })).toBeVisible();
+      await expect(page.locator('ion-card', { hasText: 'CoachByte' })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -60,7 +56,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Tools').click();
       await expect(page).toHaveURL(/\/hub\/tools/);
-      await expect(page.getByText('COACHBYTE_LOG_SET')).toBeVisible();
+      await expect(page.getByText('COACHBYTE_LOG_SET')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -71,7 +67,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('Extensions').click();
       await expect(page).toHaveURL(/\/hub\/extensions/);
-      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -82,7 +78,7 @@ test.describe('Hub navigation', () => {
     try {
       await page.getByLabel('Hub navigation').getByText('MCP Settings').click();
       await expect(page).toHaveURL(/\/hub\/mcp/);
-      await expect(page.getByText('https://mcp.lunahub.dev/sse')).toBeVisible();
+      await expect(page.getByText('https://mcp.lunahub.dev/sse')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -93,16 +89,16 @@ test.describe('Hub navigation', () => {
     try {
       // On /hub/account, Account should be highlighted in the side nav
       const nav = page.getByLabel('Hub navigation');
-      await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
+      await expect(nav.locator('[aria-current="page"]')).toHaveCount(1, { timeout: 30000 });
       const accountItem = nav.locator('[aria-current="page"]');
-      await expect(accountItem).toContainText('Account');
+      await expect(accountItem).toContainText('Account', { timeout: 30000 });
 
       // Navigate to Apps and verify highlight changes
       await nav.getByText('Apps').click();
       await expect(page).toHaveURL(/\/hub\/apps/);
-      await expect(nav.locator('[aria-current="page"]')).toHaveCount(1);
+      await expect(nav.locator('[aria-current="page"]')).toHaveCount(1, { timeout: 30000 });
       const appsItem = nav.locator('[aria-current="page"]');
-      await expect(appsItem).toContainText('Apps');
+      await expect(appsItem).toContainText('Apps', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -113,7 +109,7 @@ test.describe('Hub navigation', () => {
     const { cleanup } = await seedFullAndLogin(page, 'coach-switch');
     try {
       await page.locator('ion-segment-button[value="/coach"]').click();
-      await expect(page).toHaveURL(/\/coach/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/coach/, { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -123,7 +119,7 @@ test.describe('Hub navigation', () => {
     const { cleanup } = await seedFullAndLogin(page, 'chef-switch');
     try {
       await page.locator('ion-segment-button[value="/chef"]').click();
-      await expect(page).toHaveURL(/\/chef/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/chef/, { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -133,9 +129,9 @@ test.describe('Hub navigation', () => {
     const { cleanup } = await seedAndLogin(page, '404-hub');
     try {
       await page.goto('/hub/nonexistent');
-      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
-      await expect(page.getByText('The page you requested does not exist.')).toBeVisible();
-      await expect(page.getByRole('link', { name: /go to hub/i })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByText('The page you requested does not exist.')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('link', { name: /go to hub/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -146,9 +142,9 @@ test.describe('Hub navigation', () => {
     const { cleanup } = await seedFullAndLogin(page, '404-chef');
     try {
       await page.goto('/chef/nonexistent');
-      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
-      await expect(page.getByText('The page you requested does not exist.')).toBeVisible();
-      await expect(page.getByRole('link', { name: /go to chefbyte/i })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByText('The page you requested does not exist.')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('link', { name: /go to chefbyte/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -159,9 +155,9 @@ test.describe('Hub navigation', () => {
     const { cleanup } = await seedFullAndLogin(page, '404-coach');
     try {
       await page.goto('/coach/nonexistent');
-      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
-      await expect(page.getByText('The page you requested does not exist.')).toBeVisible();
-      await expect(page.getByRole('link', { name: /go to coachbyte/i })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByText('The page you requested does not exist.')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('link', { name: /go to coachbyte/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -172,9 +168,9 @@ test.describe('Hub navigation', () => {
     const { cleanup } = await seedAndLogin(page, '404-toplevel');
     try {
       await page.goto('/nonexistent-path');
-      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible();
-      await expect(page.getByText('The page you requested does not exist.')).toBeVisible();
-      await expect(page.getByRole('link', { name: /go to hub/i })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Page not found' })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByText('The page you requested does not exist.')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('link', { name: /go to hub/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }

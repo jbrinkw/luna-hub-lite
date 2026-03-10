@@ -25,7 +25,9 @@ async function searchWalmart(query: string, storeId?: string) {
   });
   if (storeId) params.set('store_id', storeId);
 
-  const resp = await fetch(`https://serpapi.com/search.json?${params}`);
+  const resp = await fetch(`https://serpapi.com/search.json?${params}`, {
+    signal: AbortSignal.timeout(15_000),
+  });
   if (!resp.ok) {
     const text = await resp.text();
     throw new Error(`SerpApi HTTP ${resp.status}: ${text}`);

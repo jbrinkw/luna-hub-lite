@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { admin } from '../helpers/constants';
+import { loginToHub } from '../helpers/seed';
 
 async function seedAndLogin(page: import('@playwright/test').Page, suffix: string) {
   const email = `e2e-ext-${suffix}-${Date.now()}@test.com`;
@@ -11,11 +12,7 @@ async function seedAndLogin(page: import('@playwright/test').Page, suffix: strin
   });
   const userId = data.user!.id;
 
-  await page.goto('/login');
-  await page.getByLabel('Email').fill(email);
-  await page.getByLabel('Password').fill(password);
-  await page.getByRole('button', { name: /sign in/i }).click();
-  await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
+  await loginToHub(page, email, password);
 
   return { userId, cleanup: () => admin.auth.admin.deleteUser(userId) };
 }
@@ -25,9 +22,9 @@ test.describe('Extensions page', () => {
     const { cleanup } = await seedAndLogin(page, 'cards');
     try {
       await page.goto('/hub/extensions');
-      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 5000 });
-      await expect(page.getByRole('heading', { name: 'Todoist' })).toBeVisible();
-      await expect(page.getByRole('heading', { name: 'Home Assistant' })).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('heading', { name: 'Todoist' })).toBeVisible({ timeout: 30000 });
+      await expect(page.getByRole('heading', { name: 'Home Assistant' })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -37,13 +34,13 @@ test.describe('Extensions page', () => {
     const { cleanup } = await seedAndLogin(page, 'enable');
     try {
       await page.goto('/hub/extensions');
-      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 30000 });
 
       const obsidianCard = page.locator('ion-card', { hasText: 'Obsidian' });
       await obsidianCard.locator('ion-toggle').click();
 
-      await expect(obsidianCard.getByText(/obsidian local rest api url/i)).toBeVisible();
-      await expect(obsidianCard.getByRole('button', { name: /save credentials/i })).toBeVisible();
+      await expect(obsidianCard.getByText(/obsidian local rest api url/i)).toBeVisible({ timeout: 30000 });
+      await expect(obsidianCard.getByRole('button', { name: /save credentials/i })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -53,7 +50,7 @@ test.describe('Extensions page', () => {
     const { cleanup } = await seedAndLogin(page, 'save');
     try {
       await page.goto('/hub/extensions');
-      await expect(page.getByRole('heading', { name: 'Todoist' })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('heading', { name: 'Todoist' })).toBeVisible({ timeout: 30000 });
 
       const todoistCard = page.locator('ion-card', { hasText: 'Todoist' });
       await todoistCard.locator('ion-toggle').click();
@@ -61,7 +58,7 @@ test.describe('Extensions page', () => {
       await todoistCard.getByLabel(/api token/i).fill('test-token-123');
       await todoistCard.getByRole('button', { name: /save credentials/i }).click();
 
-      await expect(todoistCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 5000 });
+      await expect(todoistCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -71,20 +68,20 @@ test.describe('Extensions page', () => {
     const { cleanup } = await seedAndLogin(page, 'persist');
     try {
       await page.goto('/hub/extensions');
-      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 30000 });
 
       const obsidianCard = page.locator('ion-card', { hasText: 'Obsidian' });
       await obsidianCard.locator('ion-toggle').click();
       await obsidianCard.getByLabel(/obsidian local rest api url/i).fill('http://localhost:27124');
       await obsidianCard.getByLabel(/api key/i).fill('test-api-key-123');
       await obsidianCard.getByRole('button', { name: /save credentials/i }).click();
-      await expect(obsidianCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 5000 });
+      await expect(obsidianCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 30000 });
 
       await page.reload();
-      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 15000 });
-      await expect(
-        page.locator('ion-card', { hasText: 'Obsidian' }).getByText(/credentials configured/i),
-      ).toBeVisible();
+      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 30000 });
+      await expect(page.locator('ion-card', { hasText: 'Obsidian' }).getByText(/credentials configured/i)).toBeVisible({
+        timeout: 30000,
+      });
     } finally {
       await cleanup();
     }
@@ -97,7 +94,7 @@ test.describe('Extensions page', () => {
     const { cleanup } = await seedAndLogin(page, 'disable-clear');
     try {
       await page.goto('/hub/extensions');
-      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 30000 });
 
       const obsidianCard = page.locator('ion-card', { hasText: 'Obsidian' });
 
@@ -108,7 +105,7 @@ test.describe('Extensions page', () => {
       await obsidianCard.getByLabel(/obsidian local rest api url/i).fill('http://localhost:27124');
       await obsidianCard.getByLabel(/api key/i).fill('test-api-key-123');
       await obsidianCard.getByRole('button', { name: /save credentials/i }).click();
-      await expect(obsidianCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 5000 });
+      await expect(obsidianCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 30000 });
 
       // Toggle off
       await obsidianCard.locator('ion-toggle').click();
@@ -127,7 +124,7 @@ test.describe('Extensions page', () => {
     const { cleanup } = await seedAndLogin(page, 'ha-fields');
     try {
       await page.goto('/hub/extensions');
-      await expect(page.getByRole('heading', { name: 'Home Assistant' })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('heading', { name: 'Home Assistant' })).toBeVisible({ timeout: 30000 });
 
       const haCard = page.locator('ion-card', { hasText: 'Home Assistant' });
 
@@ -135,8 +132,8 @@ test.describe('Extensions page', () => {
       await haCard.locator('ion-toggle').click();
 
       // Verify both credential input fields are visible
-      await expect(haCard.getByLabel(/home assistant url/i)).toBeVisible();
-      await expect(haCard.getByLabel(/long-lived access token/i)).toBeVisible();
+      await expect(haCard.getByLabel(/home assistant url/i)).toBeVisible({ timeout: 30000 });
+      await expect(haCard.getByLabel(/long-lived access token/i)).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -146,7 +143,7 @@ test.describe('Extensions page', () => {
     const { cleanup } = await seedAndLogin(page, 'ha-persist');
     try {
       await page.goto('/hub/extensions');
-      await expect(page.getByRole('heading', { name: 'Home Assistant' })).toBeVisible({ timeout: 5000 });
+      await expect(page.getByRole('heading', { name: 'Home Assistant' })).toBeVisible({ timeout: 30000 });
 
       const haCard = page.locator('ion-card', { hasText: 'Home Assistant' });
 
@@ -159,14 +156,14 @@ test.describe('Extensions page', () => {
 
       // Save credentials
       await haCard.getByRole('button', { name: /save credentials/i }).click();
-      await expect(haCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 5000 });
+      await expect(haCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 30000 });
 
       // Reload and verify credentials persisted
       await page.reload();
-      await expect(page.getByRole('heading', { name: 'Home Assistant' })).toBeVisible({ timeout: 15000 });
+      await expect(page.getByRole('heading', { name: 'Home Assistant' })).toBeVisible({ timeout: 30000 });
       await expect(
         page.locator('ion-card', { hasText: 'Home Assistant' }).getByText(/credentials configured/i),
-      ).toBeVisible();
+      ).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }

@@ -131,7 +131,10 @@ export function HistoryPage() {
       .select('exercise_id, name')
       .or(`user_id.is.null,user_id.eq.${user.id}`)
       .order('name')
-      .then(({ data }) => setExercises((data ?? []) as any));
+      .then(({ data, error: err }) => {
+        if (err) console.error('Failed to load exercises:', err.message);
+        setExercises((data ?? []) as any);
+      });
   }, [user]);
 
   const loadDetail = async (planId: string) => {
@@ -173,7 +176,8 @@ export function HistoryPage() {
       .select('plan_id')
       .eq('user_id', user.id)
       .eq('exercise_id', exerciseFilter)
-      .then(({ data }) => {
+      .then(({ data, error: err }) => {
+        if (err) console.error('Failed to filter by exercise:', err.message);
         const ids = new Set((data ?? []).map((r: any) => r.plan_id as string));
         setExercisePlanIds(ids);
       });

@@ -485,16 +485,45 @@ export function HomePage() {
 
     const validItems = ((items ?? []) as any[]).filter((item) => !item.products?.is_placeholder);
     if (validItems.length > 0) {
-      const stockRows = validItems.map((item) => ({
-        user_id: user.id,
-        product_id: item.product_id,
-        qty_containers: Number(item.qty_containers),
-        location_id: defaultLocationId,
-      }));
-      const { error: insertErr } = await chefbyte().from('stock_lots').insert(stockRows);
+      // Merge stock lots: check for existing lot per item, increment qty or insert new
+      let stockError = false;
+      for (const item of validItems) {
+        const { data: existingLot } = await chefbyte()
+          .from('stock_lots')
+          .select('lot_id, qty_containers')
+          .eq('user_id', user.id)
+          .eq('product_id', item.product_id)
+          .eq('location_id', defaultLocationId)
+          .is('expires_on', null)
+          .single();
 
-      // Only delete shopping items if stock insert succeeded
-      if (!insertErr) {
+        if (existingLot) {
+          const { error: updateErr } = await chefbyte()
+            .from('stock_lots')
+            .update({ qty_containers: Number((existingLot as any).qty_containers) + Number(item.qty_containers) })
+            .eq('lot_id', (existingLot as any).lot_id);
+          if (updateErr) {
+            stockError = true;
+            break;
+          }
+        } else {
+          const { error: insertErr } = await chefbyte()
+            .from('stock_lots')
+            .insert({
+              user_id: user.id,
+              product_id: item.product_id,
+              qty_containers: Number(item.qty_containers),
+              location_id: defaultLocationId,
+            });
+          if (insertErr) {
+            stockError = true;
+            break;
+          }
+        }
+      }
+
+      // Only delete shopping items if all stock operations succeeded
+      if (!stockError) {
         const cartIds = validItems.map((item: any) => item.cart_item_id);
         await chefbyte().from('shopping_list').delete().in('cart_item_id', cartIds);
       }

@@ -22,6 +22,10 @@ interface UndoInfo {
   qtyContainers?: number;
   /** For consume+macros reversal: also delete the food_log */
   logId?: string;
+  /** For purchase: qty added in this scan (used to decrement on undo for merged lots) */
+  purchaseQty?: number;
+  /** For purchase: true if a new lot was created (delete on undo), false if merged (decrement on undo) */
+  wasNewLot?: boolean;
 }
 
 interface QueueItem {
@@ -380,17 +384,39 @@ export function ScannerPage() {
         const locId = (locs?.[0] as any)?.location_id;
         if (!locId) break; // No locations — can't add stock
 
-        // Insert stock lot + optional nutrition update
-        const { data: newLot } = await chefbyte()
+        // Check for existing lot with same merge key (product + location + no expiry)
+        // If found, increment qty; otherwise insert new lot
+        const { data: existingLot } = await chefbyte()
           .from('stock_lots')
-          .insert({
-            user_id: user.id,
-            product_id: product.product_id,
-            qty_containers: qty,
-            location_id: locId,
-          })
-          .select('lot_id')
+          .select('lot_id, qty_containers')
+          .eq('user_id', user.id)
+          .eq('product_id', product.product_id)
+          .eq('location_id', locId)
+          .is('expires_on', null)
           .single();
+
+        let newLot: { lot_id: string } | null = null;
+        if (existingLot) {
+          const { data: updated } = await chefbyte()
+            .from('stock_lots')
+            .update({ qty_containers: (existingLot as any).qty_containers + qty })
+            .eq('lot_id', (existingLot as any).lot_id)
+            .select('lot_id')
+            .single();
+          newLot = updated as any;
+        } else {
+          const { data: inserted } = await chefbyte()
+            .from('stock_lots')
+            .insert({
+              user_id: user.id,
+              product_id: product.product_id,
+              qty_containers: qty,
+              location_id: locId,
+            })
+            .select('lot_id')
+            .single();
+          newLot = inserted as any;
+        }
         // Update product nutrition if changed
         if (nutData.calories || nutData.protein || nutData.carbs || nutData.fat) {
           await chefbyte()
@@ -404,7 +430,9 @@ export function ScannerPage() {
             })
             .eq('product_id', product.product_id);
         }
-        return newLot ? { type: 'purchase', recordId: (newLot as any).lot_id } : undefined;
+        return newLot
+          ? { type: 'purchase', recordId: (newLot as any).lot_id, purchaseQty: qty, wasNewLot: !existingLot }
+          : undefined;
       }
       case 'consume_macros': {
         const logicalDate = todayStr(dayStartHour);
@@ -537,9 +565,26 @@ export function ScannerPage() {
         const info = target.undoInfo;
         switch (info.type) {
           case 'purchase':
-            // Delete the stock lot that was created
             if (info.recordId) {
-              await chefbyte().from('stock_lots').delete().eq('lot_id', info.recordId);
+              if (info.wasNewLot) {
+                // New lot — delete it entirely
+                await chefbyte().from('stock_lots').delete().eq('lot_id', info.recordId);
+              } else {
+                // Merged lot — decrement qty by the amount added in this scan
+                const { data: lot } = await chefbyte()
+                  .from('stock_lots')
+                  .select('qty_containers')
+                  .eq('lot_id', info.recordId)
+                  .single();
+                if (lot) {
+                  const newQty = Number((lot as any).qty_containers) - (info.purchaseQty ?? 1);
+                  if (newQty <= 0) {
+                    await chefbyte().from('stock_lots').delete().eq('lot_id', info.recordId);
+                  } else {
+                    await chefbyte().from('stock_lots').update({ qty_containers: newQty }).eq('lot_id', info.recordId);
+                  }
+                }
+              }
             }
             break;
           case 'consume':

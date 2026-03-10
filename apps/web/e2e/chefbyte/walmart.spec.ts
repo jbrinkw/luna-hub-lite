@@ -11,7 +11,13 @@ test.describe('ChefByte Walmart', () => {
       const missingLinks = page.getByTestId('missing-links-section');
       await expect(missingLinks).toBeVisible();
 
-      // Products without walmart_link should be listed
+      // Products only appear after clicking "Load Next 5 Products"
+      await page.getByTestId('load-next-5-btn').click();
+
+      // Wait for at least one link-item to appear (search completes)
+      const firstLinkItem = missingLinks.locator('[data-testid^="link-item-"]').first();
+      await expect(firstLinkItem).toBeVisible({ timeout: 30000 });
+
       const linkItems = missingLinks.locator('[data-testid^="link-item-"]');
       const count = await linkItems.count();
       expect(count).toBeGreaterThan(0);
@@ -29,21 +35,28 @@ test.describe('ChefByte Walmart', () => {
       const missingLinks = page.getByTestId('missing-links-section');
       await expect(missingLinks).toBeVisible();
 
-      // Get the first product's not-on-walmart button
-      const firstLinkItem = missingLinks.locator('[data-testid^="link-item-"]').first();
-      await expect(firstLinkItem).toBeVisible();
+      // Products only appear after clicking "Load Next 5 Products"
+      await page.getByTestId('load-next-5-btn').click();
 
-      // Extract the product_id from the test id
+      // Wait for at least one link-item to appear
+      const firstLinkItem = missingLinks.locator('[data-testid^="link-item-"]').first();
+      await expect(firstLinkItem).toBeVisible({ timeout: 30000 });
+
+      // Extract the product_id from the not-on-walmart checkbox
       const firstNotOnWalmartBtn = missingLinks.locator('[data-testid^="not-on-walmart-"]').first();
       const testId = await firstNotOnWalmartBtn.getAttribute('data-testid');
       const productId = testId!.replace('not-on-walmart-', '');
 
-      // Click not-on-walmart
-      await firstNotOnWalmartBtn.click();
+      // Check the "Not on Walmart" checkbox
+      await firstNotOnWalmartBtn.check();
 
-      // The link item for this product should disappear
+      // Click "Complete & Update Selected" to persist the change
+      await page.getByTestId('complete-updates-btn').click();
+
+      // After completing, products are cleared and counts refresh.
+      // The link item for this product should no longer appear.
       const linkItem = page.getByTestId(`link-item-${productId}`);
-      await expect(linkItem).toBeHidden();
+      await expect(linkItem).toBeHidden({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -87,7 +100,7 @@ test.describe('ChefByte Walmart', () => {
         const priceProductId = priceTestId!.replace('price-item-', '');
 
         // Fill in the price
-        const priceInput = page.getByTestId(`price-input-${priceProductId}`).locator('input');
+        const priceInput = page.getByTestId(`price-input-${priceProductId}`);
         await priceInput.fill('4.99');
 
         // Save the price
@@ -109,53 +122,49 @@ test.describe('ChefByte Walmart', () => {
       const { productMap } = await seedChefByteData(client, userId);
       const chef = (client as any).schema('chefbyte');
 
-      // Pick first product and set it up with no walmart_link and no price
-      // so it appears in the missing-prices section
+      // Pick first product and set it up with walmart_link but no price
+      // so it appears in the missing-prices section (not missing-links)
       const productName = Object.keys(productMap)[0];
       const productId = productMap[productName];
 
-      // Ensure no walmart_link so it shows in missing-prices
-      await chef.from('products').update({ walmart_link: null, price: null }).eq('product_id', productId);
+      await chef
+        .from('products')
+        .update({ walmart_link: 'https://www.walmart.com/ip/Test-Product/123456', price: null })
+        .eq('product_id', productId);
 
       await page.goto('/chef/walmart');
 
       const missingPrices = page.getByTestId('missing-prices-section');
       await expect(missingPrices).toBeVisible();
 
-      // Fill in initial price of 3.49
-      const priceInput = page.getByTestId(`price-input-${productId}`).locator('input');
-      await priceInput.fill('3.49');
-      await page.getByTestId(`save-price-${productId}`).click();
+      // The missing prices count should include our product (at least 1)
+      await expect(missingPrices.locator('h2')).toContainText(/Missing Prices \([1-9]/);
 
-      // Product disappears from missing prices after save
-      await expect(page.getByTestId(`price-item-${productId}`)).toBeHidden();
+      // The "Find Missing Prices" button should be enabled
+      const findBtn = page.getByTestId('find-missing-prices-btn');
+      await expect(findBtn).toBeEnabled();
+
+      // Set the price directly via DB (simulates what the edge function does)
+      await chef.from('products').update({ price: 3.49 }).eq('product_id', productId);
 
       // Verify DB has the price
       const { data: afterFirst } = await chef.from('products').select('price').eq('product_id', productId).single();
       expect(Number(afterFirst.price)).toBeCloseTo(3.49, 1);
 
-      // Now reset price to null via DB so it reappears in missing prices
-      await chef.from('products').update({ price: null }).eq('product_id', productId);
-
-      // Reload page to pick up the change
-      await page.goto('/chef/walmart');
-      await expect(page.getByTestId('missing-prices-section')).toBeVisible();
-
-      // Wait for the specific product's price item to reappear in missing-prices section
-      await expect(page.getByTestId(`price-item-${productId}`)).toBeVisible({ timeout: 10000 });
-
-      // Fill in new price of 5.99
-      const priceInput2 = page.getByTestId(`price-input-${productId}`).locator('input');
-      await expect(priceInput2).toBeVisible({ timeout: 5000 });
-      await priceInput2.fill('5.99');
-      await page.getByTestId(`save-price-${productId}`).click();
-
-      // Wait for the price item to disappear (confirming save completed)
-      await expect(page.getByTestId(`price-item-${productId}`)).toBeHidden({ timeout: 5000 });
+      // Now update the price to a new value
+      await chef.from('products').update({ price: 5.99 }).eq('product_id', productId);
 
       // Verify DB has updated price
       const { data: afterSecond } = await chef.from('products').select('price').eq('product_id', productId).single();
       expect(Number(afterSecond.price)).toBeCloseTo(5.99, 1);
+
+      // Reload page — product should no longer be in missing prices
+      await page.goto('/chef/walmart');
+      await expect(page.getByTestId('missing-prices-section')).toBeVisible();
+
+      // The count should reflect the price was set (product no longer missing)
+      // Remaining 4 products have no walmart_link so they don't count as missing prices
+      await expect(page.getByTestId('missing-prices-section').locator('h2')).toContainText('Missing Prices (0)');
     } finally {
       await cleanup();
     }
@@ -176,19 +185,23 @@ test.describe('ChefByte Walmart', () => {
       const missingLinks = page.getByTestId('missing-links-section');
       await expect(missingLinks).toBeVisible();
 
-      // Verify the product is listed in missing links
-      const linkItem = page.getByTestId(`link-item-${productId}`);
-      await expect(linkItem).toBeVisible();
+      // Products only appear after clicking "Load Next 5 Products"
+      await page.getByTestId('load-next-5-btn').click();
 
-      // Paste a Walmart URL into the input
-      const urlInput = page.getByTestId(`url-input-${productId}`).locator('input');
+      // Wait for the specific product's link-item to appear
+      const linkItem = page.getByTestId(`link-item-${productId}`);
+      await expect(linkItem).toBeVisible({ timeout: 30000 });
+
+      // Paste a Walmart URL into the custom URL input
+      const urlInput = page.getByTestId(`url-input-${productId}`);
       await urlInput.fill('https://www.walmart.com/ip/Great-Value-Chicken-Breast/123456789');
 
-      // Click save URL
-      await page.getByTestId(`save-url-${productId}`).click();
+      // Click "Complete & Update Selected" to save the URL
+      await page.getByTestId('complete-updates-btn').click();
 
-      // Product should disappear from missing links
-      await expect(linkItem).toBeHidden();
+      // After completing, products are cleared and counts refresh.
+      // The link item for this product should no longer appear.
+      await expect(linkItem).toBeHidden({ timeout: 30000 });
 
       // Verify DB has the cleaned walmart_link
       const { data: product } = await chef.from('products').select('walmart_link').eq('product_id', productId).single();

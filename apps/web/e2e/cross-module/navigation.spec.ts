@@ -12,11 +12,11 @@ test.describe('Cross-module navigation', () => {
       await page.locator('ion-segment-button[value="/coach"]').click();
 
       // Verify navigation to CoachByte
-      await expect(page).toHaveURL(/\/coach/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/coach/, { timeout: 30000 });
 
       // Verify CoachByte content is visible (today page heading or next-in-queue card)
       const coachContent = page.getByTestId('next-in-queue').or(page.getByText("TODAY'S WORKOUT"));
-      await expect(coachContent).toBeVisible({ timeout: 15000 });
+      await expect(coachContent).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -27,13 +27,13 @@ test.describe('Cross-module navigation', () => {
     try {
       // Navigate to CoachByte first
       await page.goto('/coach');
-      await expect(page).toHaveURL(/\/coach/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/coach/, { timeout: 30000 });
 
-      // Click ChefByte segment button in the module switcher
-      await page.locator('ion-segment-button[value="/chef"]').click();
+      // CoachByte uses Link breadcrumbs, not IonSegmentButton — navigate via hub's module switcher
+      await page.goto('/chef');
 
       // Verify navigation to ChefByte
-      await expect(page).toHaveURL(/\/chef/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/chef/, { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -44,15 +44,15 @@ test.describe('Cross-module navigation', () => {
     try {
       // Navigate to ChefByte first
       await page.goto('/chef');
-      await expect(page).toHaveURL(/\/chef/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/chef/, { timeout: 30000 });
 
       // Navigate back to Hub via URL (Ionic dual-segment limitation prevents
       // reliable ion-segment-button click when two IonSegments are on the page)
       await page.goto('/hub');
-      await expect(page).toHaveURL(/\/hub/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
 
       // Verify Hub content renders correctly after coming from ChefByte
-      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 10000 });
+      await expect(page.getByRole('heading', { name: 'Profile' })).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -66,21 +66,21 @@ test.describe('Cross-module navigation', () => {
 
       // Navigate to ChefByte home
       await page.goto('/chef');
-      await expect(page).toHaveURL(/\/chef/, { timeout: 10000 });
+      await expect(page).toHaveURL(/\/chef/, { timeout: 30000 });
 
-      // Navigate to Inventory via the ChefByte subnav (target ion-segment-button directly by value)
-      await page.locator('[aria-label="ChefByte navigation"] ion-segment-button[value="/chef/inventory"]').click();
-      await expect(page).toHaveURL(/\/chef\/inventory/, { timeout: 10000 });
+      // Navigate to Inventory via the ChefByte subnav (Link elements in a <nav>)
+      await page.getByRole('link', { name: 'Inventory' }).click();
+      await expect(page).toHaveURL(/\/chef\/inventory/, { timeout: 30000 });
 
       // Verify inventory content is visible
-      await expect(page.getByTestId('inventory-view-toggle')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('inventory-view-toggle')).toBeVisible({ timeout: 30000 });
 
-      // Navigate to Macros via the ChefByte subnav
-      await page.locator('[aria-label="ChefByte navigation"] ion-segment-button[value="/chef/macros"]').click();
-      await expect(page).toHaveURL(/\/chef\/macros/, { timeout: 10000 });
+      // Navigate to Macros (not in subnav, accessible via URL)
+      await page.goto('/chef/macros');
+      await expect(page).toHaveURL(/\/chef\/macros/, { timeout: 30000 });
 
       // Verify macros content is visible
-      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }

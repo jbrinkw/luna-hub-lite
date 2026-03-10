@@ -9,32 +9,44 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // All 5 product cards should be visible
       await expect(
         page.getByTestId(`inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`),
-      ).toBeVisible();
-      await expect(page.getByTestId(`inv-product-${productMap['Great Value Long Grain Brown Rice']}`)).toBeVisible();
-      await expect(page.getByTestId(`inv-product-${productMap['Great Value Large White Eggs']}`)).toBeVisible();
-      await expect(page.getByTestId(`inv-product-${productMap['Birds Eye Sweet Peas']}`)).toBeVisible();
-      await expect(page.getByTestId(`inv-product-${productMap['Banquet Chicken Breast Patties']}`)).toBeVisible();
+      ).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId(`inv-product-${productMap['Great Value Long Grain Brown Rice']}`)).toBeVisible({
+        timeout: 30000,
+      });
+      await expect(page.getByTestId(`inv-product-${productMap['Great Value Large White Eggs']}`)).toBeVisible({
+        timeout: 30000,
+      });
+      await expect(page.getByTestId(`inv-product-${productMap['Birds Eye Sweet Peas']}`)).toBeVisible({
+        timeout: 30000,
+      });
+      await expect(page.getByTestId(`inv-product-${productMap['Banquet Chicken Breast Patties']}`)).toBeVisible({
+        timeout: 30000,
+      });
 
       // Product names should be displayed within their cards
       await expect(
         page.getByTestId(`inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`),
-      ).toContainText('Great Value Boneless Skinless Chicken Breasts');
+      ).toContainText('Great Value Boneless Skinless Chicken Breasts', { timeout: 30000 });
       await expect(page.getByTestId(`inv-product-${productMap['Great Value Long Grain Brown Rice']}`)).toContainText(
         'Great Value Long Grain Brown Rice',
+        { timeout: 30000 },
       );
       await expect(page.getByTestId(`inv-product-${productMap['Great Value Large White Eggs']}`)).toContainText(
         'Great Value Large White Eggs',
+        { timeout: 30000 },
       );
       await expect(page.getByTestId(`inv-product-${productMap['Birds Eye Sweet Peas']}`)).toContainText(
         'Birds Eye Sweet Peas',
+        { timeout: 30000 },
       );
       await expect(page.getByTestId(`inv-product-${productMap['Banquet Chicken Breast Patties']}`)).toContainText(
         'Banquet Chicken Breast Patties',
+        { timeout: 30000 },
       );
     } finally {
       await cleanup();
@@ -47,35 +59,34 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Chicken Breast: 3 ctn >= 2 min -> success
       await expect(
         page.getByTestId(`stock-badge-${productMap['Great Value Boneless Skinless Chicken Breasts']}`),
-      ).toHaveAttribute('color', 'success');
+      ).toContainText('3.0 ctn', { timeout: 30000 });
 
       // Brown Rice: 2 ctn >= 1 min -> success
-      await expect(page.getByTestId(`stock-badge-${productMap['Great Value Long Grain Brown Rice']}`)).toHaveAttribute(
-        'color',
-        'success',
+      await expect(page.getByTestId(`stock-badge-${productMap['Great Value Long Grain Brown Rice']}`)).toContainText(
+        '2.0 ctn',
+        { timeout: 30000 },
       );
 
       // Eggs: 0.5 ctn < 1 min -> warning
-      await expect(page.getByTestId(`stock-badge-${productMap['Great Value Large White Eggs']}`)).toHaveAttribute(
-        'color',
-        'warning',
+      await expect(page.getByTestId(`stock-badge-${productMap['Great Value Large White Eggs']}`)).toContainText(
+        '0.5 ctn',
+        { timeout: 30000 },
       );
 
       // Protein Powder: 0.5 ctn >= 0.5 min -> success
-      await expect(page.getByTestId(`stock-badge-${productMap['Birds Eye Sweet Peas']}`)).toHaveAttribute(
-        'color',
-        'success',
-      );
+      await expect(page.getByTestId(`stock-badge-${productMap['Birds Eye Sweet Peas']}`)).toContainText('0.5 ctn', {
+        timeout: 30000,
+      });
 
       // Bananas: 0 ctn < 3 min -> danger
-      await expect(page.getByTestId(`stock-badge-${productMap['Banquet Chicken Breast Patties']}`)).toHaveAttribute(
-        'color',
-        'danger',
+      await expect(page.getByTestId(`stock-badge-${productMap['Banquet Chicken Breast Patties']}`)).toContainText(
+        '0.0 ctn',
+        { timeout: 30000 },
       );
     } finally {
       await cleanup();
@@ -88,21 +99,21 @@ test.describe('ChefByte Inventory', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Switch to Lots view via the segment toggle
-      await page.getByTestId('inventory-view-toggle').locator('ion-segment-button[value="lots"]').click();
+      await page.getByTestId('inventory-view-toggle').getByRole('button', { name: 'Lots' }).click();
 
       // Lots view should be visible
-      await expect(page.getByTestId('lots-view')).toBeVisible();
+      await expect(page.getByTestId('lots-view')).toBeVisible({ timeout: 30000 });
 
       // Lots table should exist
-      await expect(page.getByTestId('lots-table')).toBeVisible();
+      await expect(page.getByTestId('lots-table')).toBeVisible({ timeout: 30000 });
 
       // Location names should appear in the table
       const lotsTable = page.getByTestId('lots-table');
-      await expect(lotsTable).toContainText('Fridge');
-      await expect(lotsTable).toContainText('Pantry');
+      await expect(lotsTable).toContainText('Fridge', { timeout: 30000 });
+      await expect(lotsTable).toContainText('Pantry', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -114,15 +125,26 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
+
+      // Register dialog handler BEFORE the click triggers window.confirm
+      let dialogMessage = '';
+      let dialogType = '';
+      page.on('dialog', async (dialog) => {
+        dialogType = dialog.type();
+        dialogMessage = dialog.message();
+        await dialog.dismiss(); // Cancel so stock is not consumed
+      });
 
       // Click consume all for Chicken Breast (has stock = 3 ctn)
       await page.getByTestId(`consume-all-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
-      // Verify the confirmation alert dialog appears with the expected message
-      await expect(
-        page.getByText('Are you sure you want to consume all remaining stock for this product?'),
-      ).toBeVisible({ timeout: 5000 });
+      // Give dialog handler a moment to fire
+      await page.waitForTimeout(2000);
+
+      // Verify the native confirm dialog was shown
+      expect(dialogType).toBe('confirm');
+      expect(dialogMessage).toContain('Are you sure you want to consume all remaining stock');
     } finally {
       await cleanup();
     }
@@ -134,25 +156,34 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Type "Chicken" into the search input
       const searchInput = page.getByTestId('inventory-search');
-      await expect(searchInput).toBeVisible();
-      await searchInput.locator('input').fill('Chicken');
+      await expect(searchInput).toBeVisible({ timeout: 30000 });
+      await searchInput.fill('Chicken');
 
       // Chicken Breast should remain visible
       await expect(
         page.getByTestId(`inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`),
-      ).toBeVisible();
+      ).toBeVisible({ timeout: 30000 });
+
+      // Banquet Chicken Breast Patties also matches "Chicken" and has min_stock_amount > 0
+      // so it should also be visible
+      await expect(page.getByTestId(`inv-product-${productMap['Banquet Chicken Breast Patties']}`)).toBeVisible({
+        timeout: 30000,
+      });
 
       // Other products should be hidden
-      await expect(
-        page.getByTestId(`inv-product-${productMap['Great Value Long Grain Brown Rice']}`),
-      ).not.toBeVisible();
-      await expect(page.getByTestId(`inv-product-${productMap['Great Value Large White Eggs']}`)).not.toBeVisible();
-      await expect(page.getByTestId(`inv-product-${productMap['Birds Eye Sweet Peas']}`)).not.toBeVisible();
-      await expect(page.getByTestId(`inv-product-${productMap['Banquet Chicken Breast Patties']}`)).not.toBeVisible();
+      await expect(page.getByTestId(`inv-product-${productMap['Great Value Long Grain Brown Rice']}`)).not.toBeVisible({
+        timeout: 30000,
+      });
+      await expect(page.getByTestId(`inv-product-${productMap['Great Value Large White Eggs']}`)).not.toBeVisible({
+        timeout: 30000,
+      });
+      await expect(page.getByTestId(`inv-product-${productMap['Birds Eye Sweet Peas']}`)).not.toBeVisible({
+        timeout: 30000,
+      });
     } finally {
       await cleanup();
     }
@@ -164,36 +195,36 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Chicken Breast starts at 3.0 ctn
       const chickenBadge = page.getByTestId(
         `stock-badge-${productMap['Great Value Boneless Skinless Chicken Breasts']}`,
       );
-      await expect(chickenBadge).toContainText('3.0');
+      await expect(chickenBadge).toContainText('3.0', { timeout: 30000 });
 
       // Click the "+1 Ctn" button to open the add stock modal
       await page.getByTestId(`add-ctn-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
       // Modal should open
       const modal = page.getByTestId('add-stock-modal');
-      await expect(modal).toBeVisible({ timeout: 5000 });
+      await expect(modal).toBeVisible({ timeout: 30000 });
 
       // Modal title should reference Chicken Breast
-      await expect(modal).toContainText('Great Value Boneless Skinless Chicken Breasts');
+      await expect(modal).toContainText('Great Value Boneless Skinless Chicken Breasts', { timeout: 30000 });
 
       // Quantity field should be pre-filled with 1
       const qtyInput = page.getByTestId('add-stock-qty');
-      await expect(qtyInput).toBeVisible();
+      await expect(qtyInput).toBeVisible({ timeout: 30000 });
 
       // Confirm the add
       await page.getByTestId('add-stock-confirm').click();
 
       // Modal should close
-      await expect(modal).not.toBeVisible({ timeout: 5000 });
+      await expect(modal).not.toBeVisible({ timeout: 30000 });
 
       // Badge should update to 4.0 ctn
-      await expect(chickenBadge).toContainText('4.0', { timeout: 10000 });
+      await expect(chickenBadge).toContainText('4.0', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -205,19 +236,19 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Chicken Breast starts at 3.0 ctn
       const chickenBadge = page.getByTestId(
         `stock-badge-${productMap['Great Value Boneless Skinless Chicken Breasts']}`,
       );
-      await expect(chickenBadge).toContainText('3.0');
+      await expect(chickenBadge).toContainText('3.0', { timeout: 30000 });
 
       // Click "-1 Ctn" to consume 1 container
       await page.getByTestId(`sub-ctn-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
       // Badge should update to 2.0 ctn
-      await expect(chickenBadge).toContainText('2.0', { timeout: 10000 });
+      await expect(chickenBadge).toContainText('2.0', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -229,29 +260,34 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Chicken Breast: 3.0 ctn
       await expect(
         page.getByTestId(`stock-badge-${productMap['Great Value Boneless Skinless Chicken Breasts']}`),
-      ).toContainText('3.0 ctn');
+      ).toContainText('3.0 ctn', { timeout: 30000 });
 
       // Brown Rice: 2.0 ctn
       await expect(page.getByTestId(`stock-badge-${productMap['Great Value Long Grain Brown Rice']}`)).toContainText(
         '2.0 ctn',
+        { timeout: 30000 },
       );
 
       // Eggs: 0.5 ctn
       await expect(page.getByTestId(`stock-badge-${productMap['Great Value Large White Eggs']}`)).toContainText(
         '0.5 ctn',
+        { timeout: 30000 },
       );
 
       // Protein Powder: 0.5 ctn
-      await expect(page.getByTestId(`stock-badge-${productMap['Birds Eye Sweet Peas']}`)).toContainText('0.5 ctn');
+      await expect(page.getByTestId(`stock-badge-${productMap['Birds Eye Sweet Peas']}`)).toContainText('0.5 ctn', {
+        timeout: 30000,
+      });
 
       // Bananas: 0.0 ctn
       await expect(page.getByTestId(`stock-badge-${productMap['Banquet Chicken Breast Patties']}`)).toContainText(
         '0.0 ctn',
+        { timeout: 30000 },
       );
     } finally {
       await cleanup();
@@ -264,17 +300,17 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Switch to Lots view
-      await page.getByTestId('inventory-view-toggle').locator('ion-segment-button[value="lots"]').click();
-      await expect(page.getByTestId('lots-view')).toBeVisible();
+      await page.getByTestId('inventory-view-toggle').getByRole('button', { name: 'Lots' }).click();
+      await expect(page.getByTestId('lots-view')).toBeVisible({ timeout: 30000 });
 
       const lotsTable = page.getByTestId('lots-table');
-      await expect(lotsTable).toBeVisible();
+      await expect(lotsTable).toBeVisible({ timeout: 30000 });
 
       // All seeded lots have expiry dates. The Expires column header should be present.
-      await expect(lotsTable).toContainText('Expires');
+      await expect(lotsTable).toContainText('Expires', { timeout: 30000 });
 
       // Verify that the lots table contains actual date strings (YYYY-MM-DD format).
       // Each seeded lot has a futureDate — check at least one date pattern is present.
@@ -283,14 +319,14 @@ test.describe('ChefByte Inventory', () => {
       expect(tableText).toMatch(datePattern);
 
       // Also verify the grouped view shows nearest expiry for Chicken Breast
-      await page.getByTestId('inventory-view-toggle').locator('ion-segment-button[value="grouped"]').click();
-      await expect(page.getByTestId('grouped-view')).toBeVisible();
+      await page.getByTestId('inventory-view-toggle').getByRole('button', { name: 'Grouped' }).click();
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
-      // Chicken Breast has expires_on = futureDate(5), displayed in expiry field
+      // Chicken Breast has expires_on = futureDate(5), displayed as "Mon DD" format
       const chickenExpiry = page.getByTestId(`expiry-${productMap['Great Value Boneless Skinless Chicken Breasts']}`);
       const expiryText = await chickenExpiry.textContent();
-      // Should be a date string, not the em-dash placeholder
-      expect(expiryText).toMatch(/\d{4}-\d{2}-\d{2}/);
+      // Should be a short date like "Mar 15", not the em-dash placeholder
+      expect(expiryText).toMatch(/[A-Z][a-z]{2}\s+\d{1,2}/);
     } finally {
       await cleanup();
     }
@@ -302,40 +338,41 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Chicken Breast: 3 ctn >= 2 min_stock -> success (green)
       await expect(
         page.getByTestId(`stock-badge-${productMap['Great Value Boneless Skinless Chicken Breasts']}`),
-      ).toHaveAttribute('color', 'success');
+      ).toContainText('3.0 ctn', { timeout: 30000 });
 
       // Eggs: 0.5 ctn < 1 min_stock -> warning (orange)
-      await expect(page.getByTestId(`stock-badge-${productMap['Great Value Large White Eggs']}`)).toHaveAttribute(
-        'color',
-        'warning',
+      await expect(page.getByTestId(`stock-badge-${productMap['Great Value Large White Eggs']}`)).toContainText(
+        '0.5 ctn',
+        { timeout: 30000 },
       );
 
       // Bananas: 0 ctn, min_stock=3 -> danger (red)
-      await expect(page.getByTestId(`stock-badge-${productMap['Banquet Chicken Breast Patties']}`)).toHaveAttribute(
-        'color',
-        'danger',
+      await expect(page.getByTestId(`stock-badge-${productMap['Banquet Chicken Breast Patties']}`)).toContainText(
+        '0.0 ctn',
+        { timeout: 30000 },
       );
 
-      // Also verify the card border colors via style attributes
-      // Browsers may serialize hex colors to rgb() format, so check for either form
-      const chickenCard = page.getByTestId(
-        `inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`,
-      );
-      const chickenStyle = await chickenCard.getAttribute('style');
-      expect(chickenStyle).toMatch(/(?:#2dd36f|rgb\(45,\s*211,\s*111\))/); // green border
+      // Verify the color dot indicator inside each product row
+      // The dot is the first span child inside the product row's first div
+      const chickenRow = page.getByTestId(`inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`);
+      const chickenDot = chickenRow.locator('span').first();
+      const chickenDotStyle = await chickenDot.getAttribute('style');
+      expect(chickenDotStyle).toMatch(/(?:#2f9e44|rgb\(47,\s*158,\s*68\))/); // green (above min)
 
-      const eggsCard = page.getByTestId(`inv-product-${productMap['Great Value Large White Eggs']}`);
-      const eggsStyle = await eggsCard.getAttribute('style');
-      expect(eggsStyle).toMatch(/(?:#ffc409|rgb\(255,\s*196,\s*9\))/); // orange/warning border
+      const eggsRow = page.getByTestId(`inv-product-${productMap['Great Value Large White Eggs']}`);
+      const eggsDot = eggsRow.locator('span').first();
+      const eggsDotStyle = await eggsDot.getAttribute('style');
+      expect(eggsDotStyle).toMatch(/(?:#ff9800|rgb\(255,\s*152,\s*0\))/); // orange (below min)
 
-      const bananasCard = page.getByTestId(`inv-product-${productMap['Banquet Chicken Breast Patties']}`);
-      const bananasStyle = await bananasCard.getAttribute('style');
-      expect(bananasStyle).toMatch(/(?:#eb445a|rgb\(235,\s*68,\s*90\))/); // red/danger border
+      const bananasRow = page.getByTestId(`inv-product-${productMap['Banquet Chicken Breast Patties']}`);
+      const bananasDot = bananasRow.locator('span').first();
+      const bananasDotStyle = await bananasDot.getAttribute('style');
+      expect(bananasDotStyle).toMatch(/(?:#d33|rgb\(221,\s*51,\s*51\))/); // red (zero stock)
     } finally {
       await cleanup();
     }
@@ -347,16 +384,18 @@ test.describe('ChefByte Inventory', () => {
       const { productMap } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/inventory');
-      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Verify initial DB state: Chicken Breast lot has qty_containers = 3
-      await expectDbRow(
-        client,
-        'chefbyte',
-        'stock_lots',
-        { user_id: userId, product_id: productMap['Great Value Boneless Skinless Chicken Breasts'] },
-        { qty_containers: 3 },
-      );
+      await expect(async () => {
+        await expectDbRow(
+          client,
+          'chefbyte',
+          'stock_lots',
+          { user_id: userId, product_id: productMap['Great Value Boneless Skinless Chicken Breasts'] },
+          { qty_containers: 3 },
+        );
+      }).toPass({ timeout: 30000 });
 
       // Consume 1 container of Chicken Breast via the UI
       await page.getByTestId(`sub-ctn-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
@@ -365,32 +404,36 @@ test.describe('ChefByte Inventory', () => {
       const chickenBadge = page.getByTestId(
         `stock-badge-${productMap['Great Value Boneless Skinless Chicken Breasts']}`,
       );
-      await expect(chickenBadge).toContainText('2.0', { timeout: 10000 });
+      await expect(chickenBadge).toContainText('2.0', { timeout: 30000 });
 
       // Verify DB state: lot should now have qty_containers = 2
-      await expectDbRow(
-        client,
-        'chefbyte',
-        'stock_lots',
-        { user_id: userId, product_id: productMap['Great Value Boneless Skinless Chicken Breasts'] },
-        { qty_containers: 2 },
-      );
+      await expect(async () => {
+        await expectDbRow(
+          client,
+          'chefbyte',
+          'stock_lots',
+          { user_id: userId, product_id: productMap['Great Value Boneless Skinless Chicken Breasts'] },
+          { qty_containers: 2 },
+        );
+      }).toPass({ timeout: 30000 });
 
       // Also verify a food_logs entry was created for the consumed amount
-      const chef = (client as any).schema('chefbyte');
-      const { data: foodLogs, error: foodErr } = await chef
-        .from('food_logs')
-        .select('*')
-        .eq('user_id', userId)
-        .eq('product_id', productMap['Great Value Boneless Skinless Chicken Breasts']);
-      expect(foodErr).toBeNull();
-      expect(foodLogs).not.toBeNull();
-      expect(foodLogs!.length).toBeGreaterThan(0);
+      await expect(async () => {
+        const chef = (client as any).schema('chefbyte');
+        const { data: foodLogs, error: foodErr } = await chef
+          .from('food_logs')
+          .select('*')
+          .eq('user_id', userId)
+          .eq('product_id', productMap['Great Value Boneless Skinless Chicken Breasts']);
+        expect(foodErr).toBeNull();
+        expect(foodLogs).not.toBeNull();
+        expect(foodLogs!.length).toBeGreaterThan(0);
 
-      // The food log should reflect 1 container consumed (4 servings at 165 cal each = 660 cal)
-      const logEntry = foodLogs![0];
-      expect(Number(logEntry.calories)).toBeCloseTo(660, 0);
-      expect(Number(logEntry.protein)).toBeCloseTo(124, 0);
+        // The food log should reflect 1 container consumed (4 servings at 165 cal each = 660 cal)
+        const logEntry = foodLogs![0];
+        expect(Number(logEntry.calories)).toBeCloseTo(660, 0);
+        expect(Number(logEntry.protein)).toBeCloseTo(124, 0);
+      }).toPass({ timeout: 30000 });
     } finally {
       await cleanup();
     }

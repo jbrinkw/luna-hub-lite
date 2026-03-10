@@ -46,21 +46,48 @@ export const importShoppingToInventory: ToolDefinition = {
       resolvedLocationId = (locs[0] as any).location_id;
     }
 
-    // 3. Create stock lots for each purchased item
-    const lots = purchased.map((item: any) => ({
-      user_id: ctx.userId,
-      product_id: item.product_id,
-      qty_containers: item.qty_containers,
-      location_id: resolvedLocationId,
-    }));
+    // 3. Create or merge stock lots for each purchased item
+    const resultLots: Array<{ lot_id: string; product_id: string; qty_containers: number }> = [];
+    for (const item of purchased as any[]) {
+      // Check for existing lot with same (product_id, location_id, expires_on=null)
+      const { data: existingLot } = await ctx.supabase
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id, qty_containers')
+        .eq('user_id', ctx.userId)
+        .eq('product_id', item.product_id)
+        .eq('location_id', resolvedLocationId)
+        .is('expires_on', null)
+        .single();
 
-    const { data: insertedLots, error: insertError } = await ctx.supabase
-      .schema('chefbyte')
-      .from('stock_lots')
-      .insert(lots)
-      .select('lot_id, product_id, qty_containers');
-
-    if (insertError) return toolError(`Failed to create stock lots: ${insertError.message}`);
+      if (existingLot) {
+        // Merge: increment qty on existing lot
+        const { data: updated, error: updateErr } = await ctx.supabase
+          .schema('chefbyte')
+          .from('stock_lots')
+          .update({ qty_containers: Number((existingLot as any).qty_containers) + Number(item.qty_containers) })
+          .eq('lot_id', (existingLot as any).lot_id)
+          .select('lot_id, product_id, qty_containers')
+          .single();
+        if (updateErr) return toolError(`Failed to update stock lot: ${updateErr.message}`);
+        if (updated) resultLots.push(updated as any);
+      } else {
+        // Insert new lot
+        const { data: inserted, error: insertErr } = await ctx.supabase
+          .schema('chefbyte')
+          .from('stock_lots')
+          .insert({
+            user_id: ctx.userId,
+            product_id: item.product_id,
+            qty_containers: item.qty_containers,
+            location_id: resolvedLocationId,
+          })
+          .select('lot_id, product_id, qty_containers')
+          .single();
+        if (insertErr) return toolError(`Failed to create stock lot: ${insertErr.message}`);
+        if (inserted) resultLots.push(inserted as any);
+      }
+    }
 
     // 4. Remove purchased items from shopping list
     const purchasedIds = purchased.map((item: any) => item.cart_item_id);
@@ -76,9 +103,9 @@ export const importShoppingToInventory: ToolDefinition = {
     }
 
     return toolSuccess({
-      message: `Imported ${insertedLots?.length ?? 0} item(s) into inventory`,
-      lots_created: insertedLots?.length ?? 0,
-      lots: (insertedLots || []).map((lot: any) => ({
+      message: `Imported ${resultLots.length} item(s) into inventory`,
+      lots_created: resultLots.length,
+      lots: resultLots.map((lot: any) => ({
         lot_id: lot.lot_id,
         product_id: lot.product_id,
         qty_containers: Number(lot.qty_containers),

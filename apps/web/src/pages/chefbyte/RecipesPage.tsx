@@ -161,12 +161,20 @@ export function RecipesPage() {
 
   /* ---- Macro density thresholds (g per 100 cal, persisted) ---- */
   const [proteinThreshold, setProteinThreshold] = useState(() => {
-    const saved = localStorage.getItem('chefbyte_protein_threshold');
-    return saved ? Number(saved) : 8;
+    try {
+      const saved = localStorage.getItem('chefbyte_protein_threshold');
+      return saved ? Number(saved) : 8;
+    } catch {
+      return 8;
+    }
   });
   const [carbsThreshold, setCarbsThreshold] = useState(() => {
-    const saved = localStorage.getItem('chefbyte_carbs_threshold');
-    return saved ? Number(saved) : 10;
+    try {
+      const saved = localStorage.getItem('chefbyte_carbs_threshold');
+      return saved ? Number(saved) : 10;
+    } catch {
+      return 10;
+    }
   });
   const [editingThreshold, setEditingThreshold] = useState<'protein' | 'carbs' | null>(null);
   const [thresholdInput, setThresholdInput] = useState('');
@@ -429,7 +437,11 @@ export function RecipesPage() {
                   const val = parseFloat(thresholdInput);
                   if (!isNaN(val) && val > 0) {
                     setProteinThreshold(val);
-                    localStorage.setItem('chefbyte_protein_threshold', String(val));
+                    try {
+                      localStorage.setItem('chefbyte_protein_threshold', String(val));
+                    } catch {
+                      /* Safari private */
+                    }
                   }
                   setEditingThreshold(null);
                 }}
@@ -455,7 +467,11 @@ export function RecipesPage() {
                     const val = parseFloat(thresholdInput);
                     if (!isNaN(val) && val > 0) {
                       setProteinThreshold(val);
-                      localStorage.setItem('chefbyte_protein_threshold', String(val));
+                      try {
+                        localStorage.setItem('chefbyte_protein_threshold', String(val));
+                      } catch {
+                        /* Safari private */
+                      }
                     }
                     setEditingThreshold(null);
                   }}
@@ -527,7 +543,11 @@ export function RecipesPage() {
                   const val = parseFloat(thresholdInput);
                   if (!isNaN(val) && val > 0) {
                     setCarbsThreshold(val);
-                    localStorage.setItem('chefbyte_carbs_threshold', String(val));
+                    try {
+                      localStorage.setItem('chefbyte_carbs_threshold', String(val));
+                    } catch {
+                      /* Safari private */
+                    }
                   }
                   setEditingThreshold(null);
                 }}
@@ -553,7 +573,11 @@ export function RecipesPage() {
                     const val = parseFloat(thresholdInput);
                     if (!isNaN(val) && val > 0) {
                       setCarbsThreshold(val);
-                      localStorage.setItem('chefbyte_carbs_threshold', String(val));
+                      try {
+                        localStorage.setItem('chefbyte_carbs_threshold', String(val));
+                      } catch {
+                        /* Safari private */
+                      }
                     }
                     setEditingThreshold(null);
                   }}

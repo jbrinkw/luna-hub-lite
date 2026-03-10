@@ -223,7 +223,7 @@ export function MealPlanPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [user]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [user, loadMeals]);
 
   /* ---------------------------------------------------------------- */
   /*  Auto-select today on initial load                                */

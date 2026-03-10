@@ -27,7 +27,16 @@ export async function setup(): Promise<() => Promise<void>> {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const cwd = resolve(__dirname, '..', '..', '..');
 
-  wranglerProcess = spawn('pnpm', ['exec', 'wrangler', 'dev', '--port', String(WRANGLER_PORT)], {
+  // Build wrangler args, passing Supabase bindings via --var if set in env
+  // (overrides .dev.vars for production testing)
+  const args = ['exec', 'wrangler', 'dev', '--port', String(WRANGLER_PORT)];
+  for (const key of ['SUPABASE_URL', 'SUPABASE_SERVICE_ROLE_KEY', 'SUPABASE_ANON_KEY']) {
+    if (process.env[key]) {
+      args.push('--var', `${key}:${process.env[key]}`);
+    }
+  }
+
+  wranglerProcess = spawn('pnpm', args, {
     cwd,
     stdio: ['ignore', 'pipe', 'pipe'],
     detached: true,

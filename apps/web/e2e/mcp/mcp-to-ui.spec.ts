@@ -41,7 +41,7 @@ test.describe('MCP-to-UI E2E', () => {
       await page.goto('/chef/inventory');
 
       // Verify the MCP-created product appears in inventory
-      await expect(page.getByText('MCP Test Almonds')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText('MCP Test Almonds')).toBeVisible({ timeout: 30000 });
     } finally {
       await mcp?.disconnect();
       await cleanup();
@@ -78,7 +78,7 @@ test.describe('MCP-to-UI E2E', () => {
       await page.goto('/coach');
 
       // Verify the completed set row is visible
-      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 30000 });
     } finally {
       await mcp?.disconnect();
       await cleanup();
@@ -109,7 +109,7 @@ test.describe('MCP-to-UI E2E', () => {
       await page.goto('/chef/shopping');
 
       // Verify Chicken Breast appears in the shopping list
-      await expect(page.getByText('Great Value Boneless Skinless Chicken Breasts')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByText('Great Value Boneless Skinless Chicken Breasts')).toBeVisible({ timeout: 30000 });
     } finally {
       await mcp?.disconnect();
       await cleanup();

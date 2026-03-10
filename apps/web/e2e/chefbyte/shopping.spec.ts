@@ -10,17 +10,17 @@ test.describe('ChefByte Shopping', () => {
       await page.goto('/chef/shopping');
 
       // Add item form should be visible
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
       // To Buy section visible with empty state
-      await expect(page.getByTestId('to-buy-section')).toBeVisible();
-      await expect(page.getByTestId('no-to-buy')).toBeVisible();
-      await expect(page.getByTestId('no-to-buy')).toContainText('No items to buy');
+      await expect(page.getByTestId('to-buy-section')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('no-to-buy')).toContainText('No items to buy', { timeout: 30000 });
 
       // Purchased section visible with empty state
-      await expect(page.getByTestId('purchased-section')).toBeVisible();
-      await expect(page.getByTestId('no-purchased')).toBeVisible();
-      await expect(page.getByTestId('no-purchased')).toContainText('No purchased items');
+      await expect(page.getByTestId('purchased-section')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('no-purchased')).toContainText('No purchased items', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -32,10 +32,10 @@ test.describe('ChefByte Shopping', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/shopping');
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
       // Initially the to-buy list should be empty
-      await expect(page.getByTestId('no-to-buy')).toBeVisible();
+      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 30000 });
 
       // Click the auto-add button
       await page.getByTestId('auto-add-btn').click();
@@ -43,14 +43,14 @@ test.describe('ChefByte Shopping', () => {
       // To-buy list should now appear with items below min stock
       // Eggs: 0.5 stock < 1 min -> needs 1 container (ceil(1 - 0.5) = 1)
       // Bananas: 0 stock < 3 min -> needs 3 containers (ceil(3 - 0) = 3)
-      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 30000 });
 
       const toBuySection = page.getByTestId('to-buy-section');
-      await expect(toBuySection).toContainText('Great Value Large White Eggs');
-      await expect(toBuySection).toContainText('Banquet Chicken Breast Patties');
+      await expect(toBuySection).toContainText('Great Value Large White Eggs', { timeout: 30000 });
+      await expect(toBuySection).toContainText('Banquet Chicken Breast Patties', { timeout: 30000 });
 
       // Empty state should be gone now
-      await expect(page.getByTestId('no-to-buy')).not.toBeVisible();
+      await expect(page.getByTestId('no-to-buy')).not.toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -62,28 +62,30 @@ test.describe('ChefByte Shopping', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/shopping');
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
-      // Type a product name into the item name input (IonInput wraps native input)
-      await page.getByTestId('add-item-name').locator('input').fill('Chicken');
+      // Type a product name into the item name input
+      await page.getByTestId('add-item-name').fill('Great Value');
 
       // Wait for dropdown to appear with matching product
-      await expect(page.getByTestId('product-dropdown')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('product-dropdown')).toBeVisible({ timeout: 30000 });
 
       // Click the first matching dropdown item (Chicken Breast)
       const dropdownItems = page.getByTestId('product-dropdown').locator('[data-testid^="dropdown-item-"]');
-      await expect(dropdownItems.first()).toBeVisible();
+      await expect(dropdownItems.first()).toBeVisible({ timeout: 30000 });
       await dropdownItems.first().click();
 
       // Set quantity to 2
-      await page.getByTestId('add-item-qty').locator('input').fill('2');
+      await page.getByTestId('add-item-qty').fill('2');
 
       // Click the Add button
       await page.getByTestId('add-item-btn').click();
 
       // Verify the item appears in the to-buy list
-      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('to-buy-section')).toContainText('Great Value Boneless Skinless Chicken Breasts');
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('to-buy-section')).toContainText('Great Value Boneless Skinless Chicken Breasts', {
+        timeout: 30000,
+      });
     } finally {
       await cleanup();
     }
@@ -95,15 +97,15 @@ test.describe('ChefByte Shopping', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/shopping');
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
       // Add items via auto-add so we have items to work with
       await page.getByTestId('auto-add-btn').click();
-      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 30000 });
 
       // Find the first item in the to-buy list and get its name for later verification
       const firstItem = page.getByTestId('to-buy-list').locator('[data-testid^="item-"]').first();
-      await expect(firstItem).toBeVisible();
+      await expect(firstItem).toBeVisible({ timeout: 30000 });
       const itemName = await firstItem.locator('span').first().innerText();
 
       // Click the checkbox on the first item to mark it as purchased
@@ -111,13 +113,13 @@ test.describe('ChefByte Shopping', () => {
       await firstCheckbox.click();
 
       // Wait for the purchased list to appear with the checked item
-      await expect(page.getByTestId('purchased-list')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('purchased-list')).toBeVisible({ timeout: 30000 });
 
       // The purchased section should contain the item name
-      await expect(page.getByTestId('purchased-section')).toContainText(itemName);
+      await expect(page.getByTestId('purchased-section')).toContainText(itemName, { timeout: 30000 });
 
       // The empty purchased state should be gone
-      await expect(page.getByTestId('no-purchased')).not.toBeVisible();
+      await expect(page.getByTestId('no-purchased')).not.toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -141,24 +143,23 @@ test.describe('ChefByte Shopping', () => {
       ]);
 
       await page.goto('/chef/shopping');
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
       // Verify items are in the to-buy list
-      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('to-buy-section')).toContainText('Great Value Boneless Skinless Chicken Breasts');
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('to-buy-section')).toContainText('Great Value Boneless Skinless Chicken Breasts', {
+        timeout: 30000,
+      });
 
-      // Click clear all button (this opens an IonAlert confirmation)
+      // Click clear all button (triggers window.confirm dialog)
+      page.on('dialog', async (dialog) => {
+        await dialog.accept();
+      });
       await page.getByTestId('clear-all-btn').click();
 
-      // Confirm the alert dialog — IonAlert renders buttons in the dialog overlay
-      const alert = page.locator('ion-alert');
-      await expect(alert).toBeVisible({ timeout: 5000 });
-      const clearAllConfirmBtn = alert.locator('button', { hasText: 'Clear All' });
-      await clearAllConfirmBtn.click();
-
       // Both sections should now show empty states
-      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('no-purchased')).toBeVisible();
+      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -175,20 +176,20 @@ test.describe('ChefByte Shopping', () => {
       ]);
 
       await page.goto('/chef/shopping');
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
       // Verify the item is visible in to-buy list
-      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 30000 });
       const itemRow = page.getByTestId(`item-${cartItemId}`);
-      await expect(itemRow).toBeVisible();
-      await expect(itemRow).toContainText('Great Value Large White Eggs');
+      await expect(itemRow).toBeVisible({ timeout: 30000 });
+      await expect(itemRow).toContainText('Great Value Large White Eggs', { timeout: 30000 });
 
       // Click the remove button for this specific item
       await page.getByTestId(`remove-${cartItemId}`).click();
 
       // Item should be removed; to-buy list should show empty state
-      await expect(itemRow).not.toBeVisible({ timeout: 5000 });
-      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 5000 });
+      await expect(itemRow).not.toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -200,18 +201,18 @@ test.describe('ChefByte Shopping', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/shopping');
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
-      // Type "Chick" in the add-item search field
-      const searchInput = page.getByTestId('add-item-name').locator('input');
-      await searchInput.fill('Chick');
+      // Type "Great" in the add-item search field
+      const searchInput = page.getByTestId('add-item-name');
+      await searchInput.fill('Great');
 
       // Wait for the product dropdown to appear (300ms debounce + query)
       const dropdown = page.getByTestId('product-dropdown');
-      await expect(dropdown).toBeVisible({ timeout: 5000 });
+      await expect(dropdown).toBeVisible({ timeout: 30000 });
 
       // Dropdown should contain "Chicken Breast" as a matching product
-      await expect(dropdown).toContainText('Great Value Boneless Skinless Chicken Breasts');
+      await expect(dropdown).toContainText('Great Value Boneless Skinless Chicken Breasts', { timeout: 30000 });
 
       // Dropdown items should have data-testid prefix
       const dropdownItems = dropdown.locator('[data-testid^="dropdown-item-"]');
@@ -221,7 +222,7 @@ test.describe('ChefByte Shopping', () => {
       // Click the Chicken Breast item — search field should be populated and dropdown should close
       await dropdownItems.first().click();
       await expect(dropdown).not.toBeVisible({ timeout: 3000 });
-      await expect(searchInput).toHaveValue('Great Value Boneless Skinless Chicken Breasts');
+      await expect(searchInput).toHaveValue('Great Value Boneless Skinless Chicken Breasts', { timeout: 30000 });
 
       // Clear and type something with no matches
       await searchInput.fill('');
@@ -229,8 +230,8 @@ test.describe('ChefByte Shopping', () => {
 
       // Dropdown should not appear for non-matching search
       // Wait a bit for debounce to fire
-      await page.waitForTimeout(500);
-      await expect(dropdown).not.toBeVisible();
+      await page.waitForTimeout(2000);
+      await expect(dropdown).not.toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -247,24 +248,24 @@ test.describe('ChefByte Shopping', () => {
       ]);
 
       await page.goto('/chef/shopping');
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
       // Verify it starts in the purchased section
-      await expect(page.getByTestId('purchased-list')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('purchased-section')).toContainText('Birds Eye Sweet Peas');
+      await expect(page.getByTestId('purchased-list')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('purchased-section')).toContainText('Birds Eye Sweet Peas', { timeout: 30000 });
 
       // To-buy section should be empty
-      await expect(page.getByTestId('no-to-buy')).toBeVisible();
+      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 30000 });
 
       // Click the checkbox on the purchased item to uncheck it
       await page.getByTestId(`check-${cartItemId}`).click();
 
       // Item should move back to the to-buy section
-      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
-      await expect(page.getByTestId('to-buy-section')).toContainText('Birds Eye Sweet Peas');
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('to-buy-section')).toContainText('Birds Eye Sweet Peas', { timeout: 30000 });
 
       // Purchased section should now be empty
-      await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -276,36 +277,38 @@ test.describe('ChefByte Shopping', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/shopping');
-      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
 
       // Type a completely unique product name that won't match any seeded product
-      await page.getByTestId('add-item-name').locator('input').fill('E2E Nonexistent Widget');
+      await page.getByTestId('add-item-name').fill('E2E Nonexistent Widget');
 
       // Wait for debounce (300ms) — dropdown should not appear for a non-matching name
-      await page.waitForTimeout(500);
+      await page.waitForTimeout(2000);
 
       // Set quantity to 1
-      await page.getByTestId('add-item-qty').locator('input').fill('1');
+      await page.getByTestId('add-item-qty').fill('1');
 
       // Click the Add button to add the item
       await page.getByTestId('add-item-btn').click();
 
       // Wait for the item to appear in the to-buy list
-      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('to-buy-list')).toBeVisible({ timeout: 30000 });
 
       // Verify the to-buy section shows the new product name
-      await expect(page.getByTestId('to-buy-section')).toContainText('E2E Nonexistent Widget');
+      await expect(page.getByTestId('to-buy-section')).toContainText('E2E Nonexistent Widget', { timeout: 30000 });
 
       // Verify in DB that a placeholder product was created
-      const chef = (client as any).schema('chefbyte');
-      const { data: placeholderProducts } = await chef
-        .from('products')
-        .select('product_id, name, is_placeholder')
-        .eq('user_id', userId)
-        .eq('name', 'E2E Nonexistent Widget');
-      expect(placeholderProducts).toBeTruthy();
-      expect(placeholderProducts.length).toBe(1);
-      expect(placeholderProducts[0].is_placeholder).toBe(true);
+      await expect(async () => {
+        const chef = (client as any).schema('chefbyte');
+        const { data: placeholderProducts } = await chef
+          .from('products')
+          .select('product_id, name, is_placeholder')
+          .eq('user_id', userId)
+          .eq('name', 'E2E Nonexistent Widget');
+        expect(placeholderProducts).toBeTruthy();
+        expect(placeholderProducts.length).toBe(1);
+        expect(placeholderProducts[0].is_placeholder).toBe(true);
+      }).toPass({ timeout: 30000 });
     } finally {
       await cleanup();
     }

@@ -361,7 +361,7 @@ export function MacroPage() {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [userId]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [userId, loadData]);
 
   /* ---------------------------------------------------------------- */
   /*  Date navigation                                                  */

@@ -141,7 +141,8 @@ export function TodayPage() {
       .select('exercise_id, name')
       .or(`user_id.is.null,user_id.eq.${user.id}`)
       .order('name')
-      .then(({ data }: { data: any }) => {
+      .then(({ data, error: err }: { data: any; error: any }) => {
+        if (err) console.error('Failed to load exercises:', err.message);
         setExercises((data ?? []) as Exercise[]);
       });
   }, [user]);

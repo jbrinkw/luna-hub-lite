@@ -252,18 +252,38 @@ export function ShoppingPage() {
     const locationId = locs?.[0]?.location_id;
     if (!locationId) return;
 
-    // Batch insert stock lots for all purchased items
-    const stockRows = purchased.map((item) => ({
-      user_id: user.id,
-      product_id: item.product_id,
-      location_id: locationId,
-      qty_containers: item.qty_containers,
-      expires_on: null,
-    }));
-    const { error: stockErr } = await chefbyte().from('stock_lots').insert(stockRows);
-    if (stockErr) {
-      setError(stockErr.message);
-      return;
+    // Merge stock lots: check for existing lot per item, increment qty or insert new
+    for (const item of purchased) {
+      const { data: existingLot } = await chefbyte()
+        .from('stock_lots')
+        .select('lot_id, qty_containers')
+        .eq('user_id', user.id)
+        .eq('product_id', item.product_id)
+        .eq('location_id', locationId)
+        .is('expires_on', null)
+        .single();
+
+      if (existingLot) {
+        const { error: updateErr } = await chefbyte()
+          .from('stock_lots')
+          .update({ qty_containers: Number((existingLot as any).qty_containers) + Number(item.qty_containers) })
+          .eq('lot_id', (existingLot as any).lot_id);
+        if (updateErr) {
+          setError(updateErr.message);
+          return;
+        }
+      } else {
+        const { error: insertErr } = await chefbyte().from('stock_lots').insert({
+          user_id: user.id,
+          product_id: item.product_id,
+          location_id: locationId,
+          qty_containers: item.qty_containers,
+        });
+        if (insertErr) {
+          setError(insertErr.message);
+          return;
+        }
+      }
     }
 
     // Delete purchased items from shopping list

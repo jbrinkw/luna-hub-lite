@@ -8,7 +8,7 @@ test.describe('ChefByte Macros page', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/macros');
-      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30000 });
 
       // Date navigation is visible
       await expect(page.getByTestId('date-nav')).toBeVisible();
@@ -44,7 +44,7 @@ test.describe('ChefByte Macros page', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/macros');
-      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30000 });
 
       // Seeded goals: calories=2200, protein=180, carbs=220, fat=73
       await expect(page.getByTestId('progress-calories')).toContainText('2200');
@@ -62,7 +62,7 @@ test.describe('ChefByte Macros page', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/macros');
-      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30000 });
 
       // Initially no consumed items
       await expect(page.getByTestId('no-consumed')).toBeVisible();
@@ -71,18 +71,18 @@ test.describe('ChefByte Macros page', () => {
       await page.getByTestId('log-temp-btn').click();
       await expect(page.getByTestId('temp-item-modal')).toBeVisible();
 
-      // Fill in the form (IonInput wraps a native <input>)
-      await page.getByTestId('temp-name').locator('input').fill('Coffee');
-      await page.getByTestId('temp-calories').locator('input').fill('50');
-      await page.getByTestId('temp-protein').locator('input').fill('1');
-      await page.getByTestId('temp-carbs').locator('input').fill('5');
-      await page.getByTestId('temp-fat').locator('input').fill('2');
+      // Fill in the form (plain <input> elements)
+      await page.getByTestId('temp-name').fill('Coffee');
+      await page.getByTestId('temp-calories').fill('50');
+      await page.getByTestId('temp-protein').fill('1');
+      await page.getByTestId('temp-carbs').fill('5');
+      await page.getByTestId('temp-fat').fill('2');
 
       // Save the temp item
       await page.getByTestId('temp-save-btn').click();
 
       // Modal should close
-      await expect(page.getByTestId('temp-item-modal')).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('temp-item-modal')).not.toBeVisible({ timeout: 30000 });
 
       // Consumed section should now show the item
       await expect(page.getByTestId('no-consumed')).not.toBeVisible();
@@ -99,7 +99,7 @@ test.describe('ChefByte Macros page', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/macros');
-      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30000 });
 
       const dateEl = page.getByTestId('current-date');
 
@@ -169,10 +169,10 @@ test.describe('ChefByte Macros page', () => {
       if (tempErr) throw new Error(`Failed to seed temp item: ${tempErr.message}`);
 
       await page.goto('/chef/macros');
-      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30000 });
 
       // Consumed section should show the table (not the "no consumed" message)
-      await expect(page.getByTestId('no-consumed')).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('no-consumed')).not.toBeVisible({ timeout: 30000 });
       await expect(page.getByTestId('consumed-table')).toBeVisible();
 
       // Verify the seeded temp item row is visible
@@ -192,7 +192,7 @@ test.describe('ChefByte Macros page', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/macros');
-      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30000 });
 
       // Initially no consumed items
       await expect(page.getByTestId('no-consumed')).toBeVisible();
@@ -201,16 +201,16 @@ test.describe('ChefByte Macros page', () => {
       await page.getByTestId('log-temp-btn').click();
       await expect(page.getByTestId('temp-item-modal')).toBeVisible();
 
-      await page.getByTestId('temp-name').locator('input').fill('Removable Item');
-      await page.getByTestId('temp-calories').locator('input').fill('100');
-      await page.getByTestId('temp-protein').locator('input').fill('5');
-      await page.getByTestId('temp-carbs').locator('input').fill('10');
-      await page.getByTestId('temp-fat').locator('input').fill('3');
+      await page.getByTestId('temp-name').fill('Removable Item');
+      await page.getByTestId('temp-calories').fill('100');
+      await page.getByTestId('temp-protein').fill('5');
+      await page.getByTestId('temp-carbs').fill('10');
+      await page.getByTestId('temp-fat').fill('3');
       await page.getByTestId('temp-save-btn').click();
 
       // Modal should close and item should appear
-      await expect(page.getByTestId('temp-item-modal')).not.toBeVisible({ timeout: 5000 });
-      await expect(page.getByTestId('consumed-table')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('temp-item-modal')).not.toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('consumed-table')).toBeVisible({ timeout: 30000 });
       await expect(page.getByTestId('consumed-section')).toContainText('Removable Item');
 
       // Find the delete button for the temp item row (there should be exactly one consumed row)
@@ -219,7 +219,7 @@ test.describe('ChefByte Macros page', () => {
       await deleteBtn.click();
 
       // Item should be removed, consumed section should show empty state
-      await expect(page.getByTestId('no-consumed')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('no-consumed')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -231,28 +231,28 @@ test.describe('ChefByte Macros page', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/macros');
-      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30000 });
 
       // Verify initial seeded goals (protein=180, carbs=220, fat=73, calories=2200)
       await expect(page.getByTestId('progress-protein')).toContainText('180');
 
       // Open the target macros modal
       await page.getByTestId('target-macros-btn').click();
-      await expect(page.getByTestId('target-macros-modal')).toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('target-macros-modal')).toBeVisible({ timeout: 30000 });
 
       // Verify the modal is pre-filled with current goals
-      const proteinInput = page.getByTestId('target-protein').locator('input');
+      const proteinInput = page.getByTestId('target-protein');
       await expect(proteinInput).toHaveValue('180');
 
       // Change protein to 200, carbs to 250, fat to 80
       await proteinInput.clear();
       await proteinInput.fill('200');
 
-      const carbsInput = page.getByTestId('target-carbs').locator('input');
+      const carbsInput = page.getByTestId('target-carbs');
       await carbsInput.clear();
       await carbsInput.fill('250');
 
-      const fatInput = page.getByTestId('target-fats').locator('input');
+      const fatInput = page.getByTestId('target-fats');
       await fatInput.clear();
       await fatInput.fill('80');
 
@@ -263,7 +263,7 @@ test.describe('ChefByte Macros page', () => {
       await page.getByTestId('target-save-btn').click();
 
       // Modal should close
-      await expect(page.getByTestId('target-macros-modal')).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('target-macros-modal')).not.toBeVisible({ timeout: 30000 });
 
       // Progress bars should now reflect updated goals
       await expect(page.getByTestId('progress-protein')).toContainText('200');

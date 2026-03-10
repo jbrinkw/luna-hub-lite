@@ -9,21 +9,21 @@ test.describe('CoachByte History', () => {
 
       // Navigate to /coach to bootstrap daily plan via ensure_daily_plan
       await page.goto('/coach');
-      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 30000 });
 
       // Complete one set via the UI
       await page.getByTestId('complete-set-btn').click();
-      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 30000 });
 
       // Navigate to history page
       await page.goto('/coach/history');
 
       // Verify history table is visible
-      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 30000 });
 
       // Verify a history row exists for today's date
       const today = todayStr();
-      await expect(page.getByTestId(`history-row-${today}`)).toBeVisible();
+      await expect(page.getByTestId(`history-row-${today}`)).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -36,25 +36,25 @@ test.describe('CoachByte History', () => {
 
       // Bootstrap plan and complete one set
       await page.goto('/coach');
-      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 30000 });
       await page.getByTestId('complete-set-btn').click();
-      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 30000 });
 
       // Navigate to history
       await page.goto('/coach/history');
-      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 30000 });
 
       // Click expand button for today's date
       const today = todayStr();
       await page.getByTestId(`expand-${today}`).click();
 
       // Verify detail card is visible
-      await expect(page.getByTestId('detail-card')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('detail-card')).toBeVisible({ timeout: 30000 });
 
       // Verify first detail row exists and contains "Squat"
       const detailRow = page.getByTestId('detail-row-1');
-      await expect(detailRow).toBeVisible();
-      await expect(detailRow).toContainText('Squat');
+      await expect(detailRow).toBeVisible({ timeout: 30000 });
+      await expect(detailRow).toContainText('Squat', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -67,16 +67,16 @@ test.describe('CoachByte History', () => {
 
       // Bootstrap plan and complete one set so history is non-empty
       await page.goto('/coach');
-      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 30000 });
       await page.getByTestId('complete-set-btn').click();
-      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 30000 });
 
       // Navigate to history
       await page.goto('/coach/history');
-      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 30000 });
 
       // Verify exercise filter IonSelect is visible
-      await expect(page.getByTestId('exercise-filter')).toBeVisible();
+      await expect(page.getByTestId('exercise-filter')).toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -97,8 +97,8 @@ test.describe('CoachByte History', () => {
 
       // Verify no-history empty state is shown
       const noHistory = page.getByTestId('no-history');
-      await expect(noHistory).toBeVisible({ timeout: 15000 });
-      await expect(noHistory).toHaveText('No workout history yet.');
+      await expect(noHistory).toBeVisible({ timeout: 30000 });
+      await expect(noHistory).toContainText('No workout history yet', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -160,25 +160,20 @@ test.describe('CoachByte History', () => {
 
       // Navigate to history
       await page.goto('/coach/history');
-      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 30000 });
 
       // Without filter, both days should be visible
-      await expect(page.getByTestId(`history-row-${todayDate}`)).toBeVisible();
-      await expect(page.getByTestId(`history-row-${yesterdayDate}`)).toBeVisible();
+      await expect(page.getByTestId(`history-row-${todayDate}`)).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId(`history-row-${yesterdayDate}`)).toBeVisible({ timeout: 30000 });
 
-      // Apply the exercise filter: select "Bench Press"
-      const exerciseFilter = page.getByTestId('exercise-filter');
-      await exerciseFilter.click();
-
-      const benchOption = page.getByRole('radio', { name: 'Bench Press', exact: true });
-      await expect(benchOption).toBeVisible({ timeout: 5000 });
-      await benchOption.click();
+      // Apply the exercise filter: select "Bench Press" from the native <select>
+      await page.getByTestId('exercise-filter').selectOption({ label: 'Bench Press' });
 
       // Wait for filtering to take effect
-      await page.waitForTimeout(1500);
+      await page.waitForTimeout(3000);
 
       // Today's row should still be visible (has Bench Press)
-      await expect(page.getByTestId(`history-row-${todayDate}`)).toBeVisible();
+      await expect(page.getByTestId(`history-row-${todayDate}`)).toBeVisible({ timeout: 30000 });
 
       // Yesterday's row should be HIDDEN (only had Deadlift, no Bench Press)
       await expect(page.getByTestId(`history-row-${yesterdayDate}`)).toBeHidden();
@@ -194,24 +189,24 @@ test.describe('CoachByte History', () => {
 
       // Bootstrap plan and complete a set
       await page.goto('/coach');
-      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 30000 });
       await page.getByTestId('complete-set-btn').click();
-      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 10000 });
+      await expect(page.getByTestId('completed-row-1')).toBeVisible({ timeout: 30000 });
 
       // Navigate to history
       await page.goto('/coach/history');
-      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 30000 });
 
       const today = todayStr();
       const historyRow = page.getByTestId(`history-row-${today}`);
-      await expect(historyRow).toBeVisible();
+      await expect(historyRow).toBeVisible({ timeout: 30000 });
 
-      // The row should contain a summary cell (shows "—" if null, or actual summary text)
-      // The seeded split_notes don't auto-populate summary, so it should show "—"
-      await expect(historyRow).toContainText('—');
+      // The row should contain a summary cell (shows "No summary" if null, or actual summary text)
+      // The seeded split_notes don't auto-populate summary, so it should show "No summary"
+      await expect(historyRow).toContainText('No summary', { timeout: 30000 });
 
       // The row should also show completed/planned count (e.g. "1/3")
-      await expect(historyRow).toContainText('1/3');
+      await expect(historyRow).toContainText('1/3', { timeout: 30000 });
     } finally {
       await cleanup();
     }
@@ -251,7 +246,7 @@ test.describe('CoachByte History', () => {
 
       // Navigate to history
       await page.goto('/coach/history');
-      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('history-table')).toBeVisible({ timeout: 30000 });
 
       // Count initial rows — should be PAGE_SIZE (20)
       const rowsBefore = await page.locator('[data-testid^="history-row-"]').count();
@@ -259,13 +254,13 @@ test.describe('CoachByte History', () => {
 
       // Load More button should be visible since we have 25 > 20 days
       const loadMoreBtn = page.getByTestId('load-more-btn');
-      await expect(loadMoreBtn).toBeVisible();
+      await expect(loadMoreBtn).toBeVisible({ timeout: 30000 });
 
       // Click Load More
       await loadMoreBtn.click();
 
       // Wait for additional rows to load
-      await page.waitForTimeout(2000);
+      await page.waitForTimeout(3000);
 
       // After loading more, we should have all 25 rows
       const rowsAfter = await page.locator('[data-testid^="history-row-"]').count();

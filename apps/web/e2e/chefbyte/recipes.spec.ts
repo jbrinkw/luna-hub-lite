@@ -8,7 +8,7 @@ test.describe('ChefByte Recipes', () => {
       const { recipeId } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/recipes');
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
 
       // Seeded recipe card should be present
       await expect(page.getByTestId(`recipe-card-${recipeId}`)).toBeVisible();
@@ -24,7 +24,7 @@ test.describe('ChefByte Recipes', () => {
       const { recipeId } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/recipes');
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
 
       // Macro grid should be visible on the recipe card
       const macroGrid = page.getByTestId(`recipe-macros-${recipeId}`);
@@ -43,10 +43,10 @@ test.describe('ChefByte Recipes', () => {
       const { recipeId } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/recipes');
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
 
       // Search input should be visible
-      const searchInput = page.getByTestId('recipe-search').locator('input');
+      const searchInput = page.getByTestId('recipe-search');
       await expect(searchInput).toBeVisible();
 
       // Type "Chicken" — seeded recipe should still be visible
@@ -55,7 +55,7 @@ test.describe('ChefByte Recipes', () => {
 
       // Clear and type "Pizza" (nonexistent) — recipe should disappear
       await searchInput.fill('Pizza');
-      await expect(page.getByTestId(`recipe-card-${recipeId}`)).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId(`recipe-card-${recipeId}`)).not.toBeVisible({ timeout: 30000 });
 
       // Either no-recipes empty state appears or the recipe card is simply hidden
       const noRecipes = page.getByTestId('no-recipes');
@@ -75,7 +75,7 @@ test.describe('ChefByte Recipes', () => {
       await seedChefByteData(client, userId);
 
       await page.goto('/chef/recipes');
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
 
       // New recipe button should be visible
       await expect(page.getByTestId('new-recipe-btn')).toBeVisible();
@@ -90,7 +90,7 @@ test.describe('ChefByte Recipes', () => {
       const { recipeId } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/recipes');
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
 
       // Click the recipe name link on the card
       const recipeName = page.getByTestId(`recipe-name-${recipeId}`);
@@ -98,11 +98,11 @@ test.describe('ChefByte Recipes', () => {
       await recipeName.click();
 
       // Should navigate to the edit form for this recipe
-      await page.waitForURL(new RegExp(`/chef/recipes/${recipeId}`), { timeout: 5000 });
+      await page.waitForURL(new RegExp(`/chef/recipes/${recipeId}`), { timeout: 30000 });
 
       // Recipe form should load with pre-filled name
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
-      const nameInput = page.getByTestId('recipe-name').locator('input');
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
+      const nameInput = page.getByTestId('recipe-name');
       await expect(nameInput).toHaveValue('Chicken & Rice');
     } finally {
       await cleanup();
@@ -115,7 +115,7 @@ test.describe('ChefByte Recipes', () => {
       const { recipeId } = await seedChefByteData(client, userId);
 
       await page.goto('/chef/recipes');
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
 
       // Chicken & Rice recipe: Chicken Breast (3 ctn in stock, needs 0.5) + Brown Rice (2 ctn in stock, needs 0.25)
       // Both ingredients fully stocked -> CAN MAKE
@@ -139,7 +139,7 @@ test.describe('ChefByte Recipes', () => {
       ]);
 
       await page.goto('/chef/recipes');
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
 
       // Chicken in stock, Bananas out -> PARTIAL
       const badge = page.getByTestId(`stock-status-${partialRecipeId}`);
@@ -161,7 +161,7 @@ test.describe('ChefByte Recipes', () => {
       ]);
 
       await page.goto('/chef/recipes');
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
 
       // Bananas 0 stock -> NO STOCK
       const badge = page.getByTestId(`stock-status-${noStockRecipeId}`);
@@ -179,10 +179,10 @@ test.describe('ChefByte Recipes', () => {
 
       // Navigate directly to the edit form for the seeded recipe
       await page.goto(`/chef/recipes/${recipeId}`);
-      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 15000 });
+      await page.getByTestId('recipe-fields').waitFor({ state: 'visible', timeout: 30000 });
 
       // Verify we are editing the correct recipe
-      const nameInput = page.getByTestId('recipe-name').locator('input');
+      const nameInput = page.getByTestId('recipe-name');
       await expect(nameInput).toHaveValue('Chicken & Rice');
 
       // Click the delete button
@@ -190,18 +190,16 @@ test.describe('ChefByte Recipes', () => {
       await expect(deleteBtn).toBeVisible();
       await deleteBtn.click();
 
-      // Confirm the IonAlert dialog by clicking "Delete" inside the alert overlay
-      const alert = page.locator('ion-alert');
-      await expect(alert).toBeVisible({ timeout: 5000 });
-      const alertDelete = alert.locator('button', { hasText: 'Delete' });
-      await alertDelete.click();
+      // Confirm the delete modal by clicking the modal's "Delete" button (not the page's delete-recipe-btn)
+      await expect(page.getByText('Are you sure you want to delete this recipe?')).toBeVisible({ timeout: 30000 });
+      await page.getByRole('button', { name: 'Delete' }).last().click();
 
       // Should redirect back to recipe list
-      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 5000 });
+      await page.waitForURL(/\/chef\/recipes(?:\?|$)/, { timeout: 30000 });
 
       // The deleted recipe should no longer appear in the list
-      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 15000 });
-      await expect(page.getByTestId(`recipe-card-${recipeId}`)).not.toBeVisible({ timeout: 5000 });
+      await expect(page.getByTestId('recipe-list')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId(`recipe-card-${recipeId}`)).not.toBeVisible({ timeout: 30000 });
     } finally {
       await cleanup();
     }

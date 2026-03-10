@@ -57,6 +57,7 @@ async function checkQuota(supabase: any, userId: string): Promise<boolean> {
 async function fetchOpenFoodFacts(barcode: string) {
   const resp = await fetch(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(barcode)}.json`, {
     headers: { 'User-Agent': 'LunaHub/1.0 (contact@lunahub.dev)' },
+    signal: AbortSignal.timeout(10_000),
   });
   if (!resp.ok) return null;
   const json = await resp.json();
@@ -117,6 +118,7 @@ async function normalizeWithAI(offProduct: any): Promise<any> {
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
+      timeout: 15_000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
