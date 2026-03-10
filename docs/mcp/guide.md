@@ -110,3 +110,35 @@ If credentials are missing or invalid, the tool returns `isError: true` with "Co
 | Home Assistant | Get devices, get entity status, turn on, turn off, TV remote                             | Home Assistant REST API   |
 
 Additional extensions can be added by creating a new folder in `extensions/` with the tool definitions and config manifest. The MCP server Worker must be updated to import the new tools.
+
+---
+
+## Authentication
+
+### OAuth 2.1 (Recommended for MCP Clients)
+
+MCP clients that support OAuth 2.1 (Claude Desktop, Cursor, etc.) authenticate via browser login — no manual key setup required.
+
+**How it works:**
+
+1. MCP client connects to `mcp.lunahub.dev` without credentials
+2. Worker returns `401` with `WWW-Authenticate` header pointing to `/.well-known/oauth-protected-resource`
+3. Client discovers Supabase as the authorization server (RFC 9728)
+4. Client dynamically registers as a public PKCE client with Supabase
+5. User logs in with email/password and approves access on the consent page (`/oauth/consent`)
+6. Client receives tokens, connects via `Authorization: Bearer <token>` on the SSE endpoint
+
+**Supabase Dashboard Setup (one-time):**
+
+1. Go to **Authentication > OAuth Server** in the Supabase project dashboard
+2. Toggle **Enable OAuth 2.1 Server** on
+3. Toggle **Enable Dynamic Client Registration** on
+4. Set **Authorization Path** to `/oauth/consent`
+5. Ensure **Site URL** (Authentication > URL Configuration) matches the web app URL (e.g., `https://lunahub.dev`)
+
+### API Keys (Manual Setup)
+
+Generate keys in Hub > Settings > MCP Keys. Two connection flows:
+
+1. **Preferred:** `POST /auth` with `{ "apiKey": "lh_..." }` → returns `{ sessionId, sseUrl }` → `GET /sse?sessionId=xxx`
+2. **Legacy:** `GET /sse?apiKey=lh_...` (key in URL — deprecated)

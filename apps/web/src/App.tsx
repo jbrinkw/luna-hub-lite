@@ -9,6 +9,7 @@ import { ActivationGuard } from './components/ActivationGuard';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { ResetPassword } from './pages/hub/ResetPassword';
+import { OAuthConsent } from './pages/OAuthConsent';
 import { HubRoutes } from './modules/hub/routes';
 import { CoachRoutes } from './modules/coachbyte/routes';
 import { ChefRoutes } from './modules/chefbyte/routes';
@@ -23,6 +24,7 @@ export default function App() {
             <Route path="/login" element={<Login />} />
             <Route path="/signup" element={<Signup />} />
             <Route path="/hub/reset-password" element={<ResetPassword />} />
+            <Route path="/oauth/consent" element={<OAuthConsent />} />
 
             {/* Protected routes */}
             <Route

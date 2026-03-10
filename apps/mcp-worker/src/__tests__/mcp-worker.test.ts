@@ -434,14 +434,43 @@ describe('MCP Worker E2E', () => {
 
   // ─── Test 16: GET /sse without params ──────────────────────────────────
 
-  it('GET /sse without sessionId or apiKey returns 401', async () => {
+  it('GET /sse without sessionId or apiKey returns 401 with WWW-Authenticate', async () => {
     const response = await fetch(`${WORKER_BASE}/sse`);
     expect(response.status).toBe(401);
-    const body = (await response.json()) as { error: string };
-    expect(body.error).toMatch(/missing/i);
+    const wwwAuth = response.headers.get('WWW-Authenticate');
+    expect(wwwAuth).toContain('Bearer');
+    expect(wwwAuth).toContain('oauth-protected-resource');
   });
 
-  // ─── Test 17: Tool filtering — deactivated app ─────────────────────────
+  // ─── Test 17: OAuth protected resource metadata ────────────────────────
+
+  it('serves OAuth protected resource metadata at well-known endpoint', async () => {
+    const res = await fetch(`${WORKER_BASE}/.well-known/oauth-protected-resource`);
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      resource: string;
+      authorization_servers: string[];
+      bearer_methods_supported: string[];
+    };
+    expect(body.resource).toBeDefined();
+    expect(body.authorization_servers).toBeInstanceOf(Array);
+    expect(body.authorization_servers.length).toBeGreaterThan(0);
+    expect(body.bearer_methods_supported).toContain('header');
+  });
+
+  // ─── Test 18: Invalid Bearer token returns 401 ────────────────────────
+
+  it('GET /sse with invalid Bearer token returns 401', async () => {
+    const res = await fetch(`${WORKER_BASE}/sse`, {
+      headers: { Authorization: 'Bearer invalid-token-xxx' },
+    });
+    expect(res.status).toBe(401);
+    const wwwAuth = res.headers.get('WWW-Authenticate');
+    expect(wwwAuth).toContain('Bearer');
+    expect(wwwAuth).toContain('oauth-protected-resource');
+  });
+
+  // ─── Test 19: Tool filtering — deactivated app ─────────────────────────
 
   it('tool filtering respects deactivated app (coachbyte only = no CHEFBYTE tools)', async () => {
     // Create a user with ONLY coachbyte active, but extensions enabled
@@ -477,7 +506,7 @@ describe('MCP Worker E2E', () => {
     }
   });
 
-  // ─── Test 10: Tool filtering — disabled tool ──────────────────────────
+  // ─── Test 20: Tool filtering — disabled tool ──────────────────────────
 
   it('tool filtering respects disabled tool in user_tool_config', async () => {
     // Create a fresh user with both apps active

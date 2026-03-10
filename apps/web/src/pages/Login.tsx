@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate, useSearchParams, Link } from 'react-router-dom';
 import {
   IonPage,
   IonContent,
@@ -32,6 +32,9 @@ export function Login() {
   const [forgotEmail, setForgotEmail] = useState('');
   const [forgotLoading, setForgotLoading] = useState(false);
   const [forgotMessage, setForgotMessage] = useState<string | null>(null);
+  const [searchParams] = useSearchParams();
+  const rawRedirect = searchParams.get('redirect');
+  const redirectTo = rawRedirect && rawRedirect.startsWith('/') && !rawRedirect.startsWith('//') ? rawRedirect : '/hub';
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
@@ -52,7 +55,7 @@ export function Login() {
       if (signInError) {
         setError(signInError.message);
       } else {
-        navigate('/hub');
+        navigate(redirectTo);
       }
     } finally {
       setLoading(false);
@@ -69,7 +72,7 @@ export function Login() {
       } else {
         // Shift all date-relative demo data to be relative to today
         await (supabase.schema('hub') as any).rpc('reset_demo_dates');
-        navigate('/hub');
+        navigate(redirectTo);
       }
     } finally {
       setDemoLoading(false);
