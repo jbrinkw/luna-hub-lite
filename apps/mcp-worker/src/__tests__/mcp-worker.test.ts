@@ -9,19 +9,10 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { McpTestClient } from './helpers/mcp-client';
 import { generateTestApiKey } from './helpers/api-key';
 
-const SUPABASE_URL = 'http://127.0.0.1:54321';
-const ANON_KEY =
-  'eyJhbGciOiJFUzI1NiIsImtpZCI6ImI4MTI2OWYxLTIxZDgtNGYyZS1iNzE5LWMyMjQwYTg0MGQ5MCIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjY3MTcyNjEsImlhdCI6MTc3MzExNzI2MSwicm9sZSI6ImFub24ifQ.P9z45GEzGXk9RpkTeiFK1jgzU0N1T-w6rvXILbKT7BP4uNhe6hbyojDijLra28qrOc3GmcSDxmFFNPEZz6YU8w';
-
-// Local Supabase uses ES256 JWTs signed with a per-project key.
-// Use `supabase gen bearer-jwt` to generate long-lived tokens.
-const DEFAULT_SERVICE_ROLE_KEY =
-  'eyJhbGciOiJFUzI1NiIsImtpZCI6ImI4MTI2OWYxLTIxZDgtNGYyZS1iNzE5LWMyMjQwYTg0MGQ5MCIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjY3MTcyNjEsImlhdCI6MTc3MzExNzI2MSwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9.fDBVbcn1yiwrN85kw3c70Yhm__37cMWWZPhf8cqMY5QJ46pzGo5MfHQ-jPzgXLKecXWTRrW261e0ALQQqx-rUw';
-
-function getServiceRoleKey(): string {
-  return process.env.SUPABASE_SERVICE_ROLE_KEY ?? DEFAULT_SERVICE_ROLE_KEY;
-}
-const SERVICE_ROLE_KEY = getServiceRoleKey();
+// Loaded from .env.test via vitest envFile config
+const SUPABASE_URL = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321';
+const ANON_KEY = process.env.SUPABASE_ANON_KEY!;
+const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
 
 const WORKER_BASE = 'http://localhost:8787';
 

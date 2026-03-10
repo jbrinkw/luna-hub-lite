@@ -2,6 +2,12 @@ import { defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+try {
+  process.loadEnvFile(path.resolve(__dirname, '../../.env.test'));
+} catch {
+  /* env file optional */
+}
+
 export default defineConfig({
   plugins: [react()],
   resolve: {

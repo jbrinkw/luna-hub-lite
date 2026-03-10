@@ -1,10 +1,16 @@
 import { createClient } from '@supabase/supabase-js';
+import path from 'path';
 
-export const SUPABASE_URL = 'http://127.0.0.1:54321';
-export const SERVICE_ROLE_KEY =
-  'eyJhbGciOiJFUzI1NiIsImtpZCI6ImI4MTI2OWYxLTIxZDgtNGYyZS1iNzE5LWMyMjQwYTg0MGQ5MCIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjY3MTcyNjEsImlhdCI6MTc3MzExNzI2MSwicm9sZSI6InNlcnZpY2Vfcm9sZSJ9.fDBVbcn1yiwrN85kw3c70Yhm__37cMWWZPhf8cqMY5QJ46pzGo5MfHQ-jPzgXLKecXWTRrW261e0ALQQqx-rUw';
-export const ANON_KEY =
-  'eyJhbGciOiJFUzI1NiIsImtpZCI6ImI4MTI2OWYxLTIxZDgtNGYyZS1iNzE5LWMyMjQwYTg0MGQ5MCIsInR5cCI6IkpXVCJ9.eyJleHAiOjQ5MjY3MTcyNjEsImlhdCI6MTc3MzExNzI2MSwicm9sZSI6ImFub24ifQ.P9z45GEzGXk9RpkTeiFK1jgzU0N1T-w6rvXILbKT7BP4uNhe6hbyojDijLra28qrOc3GmcSDxmFFNPEZz6YU8w';
+// Load env vars from root .env.test for Playwright E2E tests
+try {
+  process.loadEnvFile(path.resolve(__dirname, '../../../../.env.test'));
+} catch {
+  /* env file optional */
+}
+
+export const SUPABASE_URL = process.env.SUPABASE_URL ?? 'http://127.0.0.1:54321';
+export const SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY!;
+export const ANON_KEY = process.env.SUPABASE_ANON_KEY!;
 
 export const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
