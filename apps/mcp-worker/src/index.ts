@@ -53,6 +53,25 @@ export default {
       );
     }
 
+    // OAuth 2.1 Authorization Server Metadata (RFC 8414)
+    // Proxies Supabase's AS metadata so MCP clients can discover endpoints
+    // from the MCP server itself (required by MCP OAuth spec)
+    if (url.pathname === '/.well-known/oauth-authorization-server') {
+      const asMetadataUrl = `${env.SUPABASE_URL}/auth/v1/.well-known/oauth-authorization-server`;
+      const upstream = await fetch(asMetadataUrl, {
+        headers: { Accept: 'application/json' },
+      });
+      const metadata = await upstream.json();
+      return new Response(JSON.stringify(metadata), {
+        status: upstream.status,
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'public, max-age=3600',
+        },
+      });
+    }
+
     // Health check
     if (url.pathname === '/health') {
       return new Response('ok', { headers: CORS_HEADERS });
