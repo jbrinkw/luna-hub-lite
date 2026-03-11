@@ -15,7 +15,7 @@ export interface TabsProps extends Omit<HTMLAttributes<HTMLDivElement>, 'onChang
   accentColor?: string;
 }
 
-export function Tabs({ items, activeValue, onChange, className, ...rest }: TabsProps) {
+export function Tabs({ items, activeValue, onChange, accentColor: _, className, ...rest }: TabsProps) {
   return (
     <nav className={['flex gap-1', className].filter(Boolean).join(' ')} role="tablist" {...rest}>
       {items.map((item) => {

@@ -91,13 +91,7 @@ export function ChefLayout({ children }: ChefLayoutProps) {
           className="hidden md:flex items-center bg-white border-b border-slate-200 px-4 shrink-0"
           data-testid="chef-tabs"
         >
-          <Tabs
-            items={tabItems.map((tab) => ({
-              ...tab,
-              badge: tab.value === '/chef/settings' ? undefined : undefined,
-            }))}
-            activeValue={activeTab}
-          />
+          <Tabs items={tabItems} activeValue={activeTab} />
           <SettingsDot />
         </nav>
       )}

@@ -1,4 +1,4 @@
-import { useEffect, useCallback, type ReactNode } from 'react';
+import { useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 
 const maxWidthClasses = {
@@ -26,14 +26,23 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
     [onClose],
   );
 
-  /* Escape key listener + body scroll lock */
+  const dialogRef = useRef<HTMLDivElement>(null);
+
+  /* Escape key listener + body scroll lock + focus management */
   useEffect(() => {
     if (!open) return;
     document.addEventListener('keydown', handleEscape);
     document.body.style.overflow = 'hidden';
+
+    // Move focus into the dialog
+    const timer = requestAnimationFrame(() => {
+      dialogRef.current?.focus();
+    });
+
     return () => {
       document.removeEventListener('keydown', handleEscape);
       document.body.style.overflow = '';
+      cancelAnimationFrame(timer);
     };
   }, [open, handleEscape]);
 
@@ -46,9 +55,11 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
 
       {/* Dialog */}
       <div
+        ref={dialogRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        tabIndex={-1}
         className={['relative w-full bg-white rounded-xl shadow-xl', maxWidthClasses[maxWidth], className]
           .filter(Boolean)
           .join(' ')}

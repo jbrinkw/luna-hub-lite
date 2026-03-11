@@ -1161,7 +1161,7 @@ export function HomePage() {
                       </span>
                       {!isDone && mealStockStatus !== 'N/A' && (
                         <span data-testid={`meal-stock-${entry.meal_id}`} className={stockBadgeClass(mealStockStatus)}>
-                          {mealStockStatus === 'CAN MAKE' ? 'IN STOCK' : mealStockStatus}
+                          {mealStockStatus === 'CAN MAKE' ? '✓ IN STOCK' : mealStockStatus}
                         </span>
                       )}
                     </div>

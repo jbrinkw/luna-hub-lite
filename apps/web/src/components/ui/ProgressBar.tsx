@@ -42,7 +42,13 @@ export function ProgressBar({
       )}
 
       {/* Bar */}
-      <div className="relative h-2 w-full rounded-full bg-slate-100 overflow-hidden">
+      <div
+        className="relative h-2 w-full rounded-full bg-slate-100 overflow-hidden"
+        role="progressbar"
+        aria-valuenow={value}
+        aria-valuemin={0}
+        aria-valuemax={max}
+      >
         {/* Secondary fill (planned) — rendered behind primary */}
         {secondaryValue != null && secondaryPct > 0 && (
           <div
