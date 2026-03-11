@@ -17,7 +17,7 @@ Serverless refactor of the original self-hosted Luna Hub ecosystem. Replaces hea
 
 ## Tech Stack
 
-- **Frontend:** React 18 + TypeScript + Vite, Ionic React (UI components), React Router (path-based: `/hub/*`, `/coach/*`, `/chef/*`)
+- **Frontend:** React 18 + TypeScript + Vite, Tailwind CSS v4 (UI), Lucide React (icons), React Router (path-based: `/hub/*`, `/coach/*`, `/chef/*`)
 - **Backend:** Supabase (Postgres, Auth, Edge Functions, Realtime, Storage), schema-per-module (`hub`, `coachbyte`, `chefbyte`, `private`)
 - **MCP Server:** Cloudflare Workers + Durable Objects at `mcp.lunahub.dev`
 - **Monorepo:** pnpm workspaces + Turborepo
@@ -63,15 +63,14 @@ The `legacy/` folder contains the old repos. Use these as reference — copy wha
 - **`legacy/luna_ext_coachbyte/`** — Old Python CoachByte. DB schemas and logic are good reference. Try to match the look and functionality of the old ui with the new tech stack
 - **`legacy/luna-hub/`** — Original Python Hub with FastAPI/LangChain. Architecture reference only — the Lite version is fundamentally different.
 
-
 ## Database Schemas
 
-| Schema | Purpose |
-|--------|---------|
-| `hub` | User profiles (day_start_hour, timezone), app activation, MCP API keys (SHA-256 hashed), tool toggles, extension settings (Vault) |
-| `coachbyte` | Exercises, daily logs, planned/completed sets, splits, PRs, timers |
-| `chefbyte` | Products, stock, recipes, meal plans, shopping lists, macros, LiquidTrack device IDs/import keys |
-| `private` | All SECURITY DEFINER functions, not exposed via PostgREST API |
+| Schema      | Purpose                                                                                                                           |
+| ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
+| `hub`       | User profiles (day_start_hour, timezone), app activation, MCP API keys (SHA-256 hashed), tool toggles, extension settings (Vault) |
+| `coachbyte` | Exercises, daily logs, planned/completed sets, splits, PRs, timers                                                                |
+| `chefbyte`  | Products, stock, recipes, meal plans, shopping lists, macros, LiquidTrack device IDs/import keys                                  |
+| `private`   | All SECURITY DEFINER functions, not exposed via PostgREST API                                                                     |
 
 ## Edge Functions (Supabase, Deno/TypeScript)
 
