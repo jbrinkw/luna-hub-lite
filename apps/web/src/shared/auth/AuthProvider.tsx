@@ -1,7 +1,6 @@
-import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
-import { IonToast } from '@ionic/react';
 import { supabase } from '../supabase';
 
 interface AuthContextType {
@@ -17,6 +16,23 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
+/** Simple auto-dismissing toast (replaces IonToast). */
+function SessionToast({ message, onDismiss }: { message: string; onDismiss: () => void }) {
+  useEffect(() => {
+    const timer = setTimeout(onDismiss, 5000);
+    return () => clearTimeout(timer);
+  }, [onDismiss]);
+
+  return (
+    <div
+      role="alert"
+      className="fixed top-4 left-1/2 -translate-x-1/2 z-50 rounded-lg bg-amber-100 border border-amber-300 text-amber-900 px-4 py-3 shadow-lg text-sm font-medium"
+    >
+      {message}
+    </div>
+  );
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
@@ -26,7 +42,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // "no session on first load" from "session expired / token refresh failed".
   const initialLoadDone = useRef(false);
 
-  const clearSessionError = () => setSessionError(null);
+  const clearSessionError = useCallback(() => setSessionError(null), []);
 
   useEffect(() => {
     // onAuthStateChange fires INITIAL_SESSION on subscribe, providing the session.
@@ -83,14 +99,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   return (
     <AuthContext.Provider value={{ user, session, loading, sessionError, clearSessionError, signIn, signUp, signOut }}>
       {children}
-      <IonToast
-        isOpen={sessionError !== null}
-        message={sessionError ?? ''}
-        duration={5000}
-        color="warning"
-        position="top"
-        onDidDismiss={clearSessionError}
-      />
+      {sessionError && <SessionToast message={sessionError} onDismiss={clearSessionError} />}
     </AuthContext.Provider>
   );
 }

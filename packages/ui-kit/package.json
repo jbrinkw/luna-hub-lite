@@ -10,8 +10,6 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@ionic/react": "^8.7.18",
-    "ionicons": "^8.0.13",
     "react-router-dom": "^6.30.3"
   },
   "peerDependencies": {

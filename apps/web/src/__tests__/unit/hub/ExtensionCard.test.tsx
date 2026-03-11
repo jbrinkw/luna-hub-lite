@@ -9,15 +9,15 @@ const defaultProps = {
   description: 'Sync notes with Obsidian vault',
   enabled: false,
   hasCredentials: false,
-  credentialFields: [
-    { key: 'vault_path', label: 'Vault Path' },
-  ],
+  credentialFields: [{ key: 'vault_path', label: 'Vault Path' }],
   onToggle: vi.fn(),
   onSaveCredentials: vi.fn().mockResolvedValue({}),
 };
 
 describe('ExtensionCard', () => {
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
   it('renders extension name and description', () => {
     render(<ExtensionCard {...defaultProps} />);
     expect(screen.getByText('Obsidian')).toBeInTheDocument();
@@ -28,7 +28,7 @@ describe('ExtensionCard', () => {
     const onToggle = vi.fn();
     render(<ExtensionCard {...defaultProps} onToggle={onToggle} />);
 
-    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('switch'));
     expect(onToggle).toHaveBeenCalledWith(true);
   });
 
@@ -85,7 +85,7 @@ describe('ExtensionCard', () => {
     const onToggle = vi.fn();
     render(<ExtensionCard {...defaultProps} enabled={true} onToggle={onToggle} />);
 
-    await userEvent.click(screen.getByRole('checkbox'));
+    await userEvent.click(screen.getByRole('switch'));
     expect(onToggle).toHaveBeenCalledWith(false);
   });
 
@@ -101,10 +101,10 @@ describe('ExtensionCard', () => {
     // Click save — this will set saving=true and await the never-resolving promise
     await userEvent.click(screen.getByText('Save Credentials'));
 
-    // The button should now show "Saving..." and be disabled
+    // The button should now be disabled while save is in progress
     await waitFor(() => {
-      const savingButton = screen.getByText('Saving...');
-      expect(savingButton).toBeDisabled();
+      const saveButton = screen.getByRole('button', { name: /save credentials/i });
+      expect(saveButton).toBeDisabled();
     });
   });
 });

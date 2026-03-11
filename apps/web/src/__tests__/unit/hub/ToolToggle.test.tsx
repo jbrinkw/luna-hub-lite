@@ -22,17 +22,17 @@ describe('ToolToggle', () => {
 
   it('each tool has a toggle showing enabled/disabled', () => {
     render(<ToolToggle tools={tools} onToggle={vi.fn()} />);
-    const toggles = screen.getAllByRole('checkbox');
+    const toggles = screen.getAllByRole('switch');
     expect(toggles).toHaveLength(2);
-    expect(toggles[0]).toBeChecked();
-    expect(toggles[1]).not.toBeChecked();
+    expect(toggles[0]).toHaveAttribute('aria-checked', 'true');
+    expect(toggles[1]).toHaveAttribute('aria-checked', 'false');
   });
 
   it('toggling calls onToggle with correct args', async () => {
     const onToggle = vi.fn();
     render(<ToolToggle tools={tools} onToggle={onToggle} />);
 
-    const toggles = screen.getAllByRole('checkbox');
+    const toggles = screen.getAllByRole('switch');
     await userEvent.click(toggles[1]); // Toggle CHEFBYTE_SCAN_BARCODE
     expect(onToggle).toHaveBeenCalledWith('CHEFBYTE_SCAN_BARCODE', true);
   });
@@ -42,16 +42,16 @@ describe('ToolToggle', () => {
     expect(screen.getByText(/no tools configured/i)).toBeInTheDocument();
   });
 
-  it('shows spinner when loading', () => {
-    render(<ToolToggle tools={[]} loading onToggle={vi.fn()} />);
-    expect(screen.getByLabelText('loading')).toBeInTheDocument();
+  it('shows skeleton when loading', () => {
+    const { container } = render(<ToolToggle tools={[]} loading onToggle={vi.fn()} />);
+    expect(container.querySelector('.animate-pulse')).toBeInTheDocument();
   });
 
   it('toggle enabled tool off', async () => {
     const onToggle = vi.fn();
     render(<ToolToggle tools={tools} onToggle={onToggle} />);
 
-    const toggles = screen.getAllByRole('checkbox');
+    const toggles = screen.getAllByRole('switch');
     await userEvent.click(toggles[0]); // Toggle COACHBYTE_LOG_SET (currently enabled)
     expect(onToggle).toHaveBeenCalledWith('COACHBYTE_LOG_SET', false);
   });

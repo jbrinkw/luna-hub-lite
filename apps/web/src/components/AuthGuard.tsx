@@ -1,5 +1,4 @@
 import { Navigate } from 'react-router-dom';
-import { IonSpinner } from '@ionic/react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import type { ReactNode } from 'react';
 
@@ -8,8 +7,11 @@ export function AuthGuard({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '100vh' }}>
-        <IonSpinner />
+      <div className="flex items-center justify-center h-screen">
+        <div
+          className="h-8 w-8 animate-spin rounded-full border-4 border-slate-300 border-t-blue-600"
+          aria-label="loading"
+        />
       </div>
     );
   }

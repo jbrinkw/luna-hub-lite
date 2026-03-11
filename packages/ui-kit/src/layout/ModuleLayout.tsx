@@ -1,4 +1,3 @@
-import { IonContent, IonPage } from '@ionic/react';
 import type { ReactNode } from 'react';
 
 interface ModuleLayoutProps {
@@ -6,9 +5,5 @@ interface ModuleLayoutProps {
 }
 
 export function ModuleLayout({ children }: ModuleLayoutProps) {
-  return (
-    <IonPage>
-      <IonContent>{children}</IonContent>
-    </IonPage>
-  );
+  return <>{children}</>;
 }
