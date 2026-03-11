@@ -48,9 +48,9 @@ export function OAuthConsent() {
         const { data, error: fetchErr } = await (supabase.auth as any).oauth.getAuthorizationDetails(authorizationId);
         if (fetchErr) {
           setError(fetchErr.message);
-        } else if (data?.redirect_to) {
+        } else if (data?.redirect_url) {
           // User already consented — redirect immediately
-          window.location.href = data.redirect_to;
+          window.location.href = data.redirect_url;
           return;
         } else {
           setDetails(data);
@@ -74,7 +74,7 @@ export function OAuthConsent() {
         setError(approveErr.message);
         setDeciding(false);
       } else {
-        window.location.href = data.redirect_to;
+        window.location.href = data.redirect_url;
       }
     } catch (e: any) {
       setError(e.message || 'Failed to approve');
@@ -92,7 +92,7 @@ export function OAuthConsent() {
         setError(denyErr.message);
         setDeciding(false);
       } else {
-        window.location.href = data.redirect_to;
+        window.location.href = data.redirect_url;
       }
     } catch (e: any) {
       setError(e.message || 'Failed to deny');
