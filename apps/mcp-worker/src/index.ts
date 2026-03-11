@@ -160,7 +160,11 @@ export default {
 
         const doUrl = new URL(request.url);
         doUrl.pathname = '/sse';
-        return stub.fetch(new Request(doUrl.toString(), request));
+        const sseResponse = await stub.fetch(new Request(doUrl.toString(), request));
+        return new Response(sseResponse.body, {
+          status: sseResponse.status,
+          headers: { ...Object.fromEntries(sseResponse.headers), ...CORS_HEADERS },
+        });
       }
 
       const sessionId = url.searchParams.get('sessionId');
@@ -177,7 +181,11 @@ export default {
         const stub = env.MCP_SESSION.get(id);
         const doUrl = new URL(request.url);
         doUrl.pathname = '/sse';
-        return stub.fetch(new Request(doUrl.toString(), request));
+        const sseResponse = await stub.fetch(new Request(doUrl.toString(), request));
+        return new Response(sseResponse.body, {
+          status: sseResponse.status,
+          headers: { ...Object.fromEntries(sseResponse.headers), ...CORS_HEADERS },
+        });
       }
 
       if (apiKey) {
@@ -193,7 +201,11 @@ export default {
         const doUrl = new URL(request.url);
         doUrl.pathname = '/sse';
         doUrl.searchParams.set('userId', userId);
-        return stub.fetch(new Request(doUrl.toString(), request));
+        const sseResponse = await stub.fetch(new Request(doUrl.toString(), request));
+        return new Response(sseResponse.body, {
+          status: sseResponse.status,
+          headers: { ...Object.fromEntries(sseResponse.headers), ...CORS_HEADERS },
+        });
       }
 
       return new Response(null, {
@@ -221,7 +233,12 @@ export default {
       const stub = env.MCP_SESSION.get(id);
       const doUrl = new URL(request.url);
       doUrl.pathname = '/message';
-      return stub.fetch(new Request(doUrl.toString(), request));
+      const doResponse = await stub.fetch(new Request(doUrl.toString(), request));
+      // Add CORS headers — DO responses don't include them, but browser clients need them
+      return new Response(doResponse.body, {
+        status: doResponse.status,
+        headers: { ...Object.fromEntries(doResponse.headers), ...CORS_HEADERS },
+      });
     }
 
     return jsonResponse({ error: 'Not found' }, 404);
