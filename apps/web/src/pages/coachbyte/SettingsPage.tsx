@@ -2,6 +2,8 @@ import { useEffect, useState, useCallback } from 'react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 
 interface UserSettings {
   default_rest_seconds: number;
@@ -126,7 +128,7 @@ export function SettingsPage() {
   if (loading) {
     return (
       <CoachLayout title="Settings">
-        <p className="muted-text" data-testid="settings-loading">
+        <p className="text-slate-500 text-sm" data-testid="settings-loading">
           Loading settings...
         </p>
       </CoachLayout>
@@ -135,137 +137,147 @@ export function SettingsPage() {
 
   return (
     <CoachLayout title="Settings">
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '2px solid #eee',
-          paddingBottom: 10,
-          marginBottom: 20,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Settings</h2>
+      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-slate-900 m-0">Settings</h2>
       </div>
 
-      {error && <p className="error-text">{error}</p>}
+      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
-      <div className="settings-section" data-testid="defaults-card">
-        <h3>Defaults</h3>
-        <div className="form-group" style={{ maxWidth: 300 }}>
-          <label>Default Rest Duration (seconds)</label>
-          <input
-            type="number"
-            min="0"
-            value={settings.default_rest_seconds}
-            onChange={(e) => setSettings((prev) => ({ ...prev, default_rest_seconds: Number(e.target.value) || 90 }))}
-            onBlur={saveSettings}
-            data-testid="default-rest-input"
-          />
-        </div>
-      </div>
+      <Card className="mb-5" data-testid="defaults-card">
+        <CardHeader>
+          <CardTitle>Defaults</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-1 max-w-[300px]">
+            <label className="text-sm font-semibold text-slate-700">Default Rest Duration (seconds)</label>
+            <input
+              type="number"
+              min="0"
+              value={settings.default_rest_seconds}
+              onChange={(e) => setSettings((prev) => ({ ...prev, default_rest_seconds: Number(e.target.value) || 90 }))}
+              onBlur={saveSettings}
+              className="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              data-testid="default-rest-input"
+            />
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="settings-section" data-testid="plate-calc-card">
-        <h3>Plate Calculator</h3>
-        <div className="form-group" style={{ maxWidth: 300, marginBottom: 16 }}>
-          <label>Bar Weight (lbs)</label>
-          <input
-            type="number"
-            min="0"
-            value={settings.bar_weight_lbs}
-            onChange={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: Number(e.target.value) || 45 }))}
-            onBlur={saveSettings}
-            data-testid="bar-weight-input"
-          />
-        </div>
+      <Card className="mb-5" data-testid="plate-calc-card">
+        <CardHeader>
+          <CardTitle>Plate Calculator</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col gap-1 max-w-[300px] mb-4">
+            <label className="text-sm font-semibold text-slate-700">Bar Weight (lbs)</label>
+            <input
+              type="number"
+              min="0"
+              value={settings.bar_weight_lbs}
+              onChange={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: Number(e.target.value) || 45 }))}
+              onBlur={saveSettings}
+              className="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              data-testid="bar-weight-input"
+            />
+          </div>
 
-        <p style={{ marginBottom: 4, fontWeight: 'bold', fontSize: 14 }}>Available Plates:</p>
-        <div className="plate-grid">
-          {DEFAULT_PLATES.map((plate) => (
-            <label className="plate-item" key={plate}>
-              <input
-                type="checkbox"
-                checked={settings.available_plates.includes(plate)}
-                onChange={() => {
-                  const newPlates = settings.available_plates.includes(plate)
-                    ? settings.available_plates.filter((p) => p !== plate)
-                    : [...settings.available_plates, plate].sort((a, b) => b - a);
-                  const newSettings = { ...settings, available_plates: newPlates };
-                  setSettings(newSettings);
-                  (async () => {
-                    const { error: saveErr } = await supabase
-                      .schema('coachbyte')
-                      .from('user_settings')
-                      .update({
-                        default_rest_seconds: newSettings.default_rest_seconds,
-                        bar_weight_lbs: newSettings.bar_weight_lbs,
-                        available_plates: newSettings.available_plates as any,
-                      })
-                      .eq('user_id', user!.id);
-                    if (saveErr) setError(saveErr.message);
-                  })();
-                }}
-                data-testid={`plate-${plate}`}
-              />
-              {plate} lb
-            </label>
-          ))}
-        </div>
-      </div>
+          <p className="mb-1 font-bold text-sm text-slate-700">Available Plates:</p>
+          <div className="flex flex-wrap gap-3">
+            {DEFAULT_PLATES.map((plate) => (
+              <label className="flex items-center gap-1.5 text-sm cursor-pointer" key={plate}>
+                <input
+                  type="checkbox"
+                  checked={settings.available_plates.includes(plate)}
+                  onChange={() => {
+                    const newPlates = settings.available_plates.includes(plate)
+                      ? settings.available_plates.filter((p) => p !== plate)
+                      : [...settings.available_plates, plate].sort((a, b) => b - a);
+                    const newSettings = { ...settings, available_plates: newPlates };
+                    setSettings(newSettings);
+                    (async () => {
+                      const { error: saveErr } = await supabase
+                        .schema('coachbyte')
+                        .from('user_settings')
+                        .update({
+                          default_rest_seconds: newSettings.default_rest_seconds,
+                          bar_weight_lbs: newSettings.bar_weight_lbs,
+                          available_plates: newSettings.available_plates as any,
+                        })
+                        .eq('user_id', user!.id);
+                      if (saveErr) setError(saveErr.message);
+                    })();
+                  }}
+                  className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40"
+                  data-testid={`plate-${plate}`}
+                />
+                {plate} lb
+              </label>
+            ))}
+          </div>
+        </CardContent>
+      </Card>
 
-      <div className="settings-section" data-testid="exercise-library-card">
-        <h3>Exercise Library</h3>
+      <Card className="mb-5" data-testid="exercise-library-card">
+        <CardHeader>
+          <CardTitle>Exercise Library</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="mb-3">
+            <input
+              type="text"
+              placeholder="Search exercises..."
+              value={searchText}
+              onChange={(e) => setSearchText(e.target.value)}
+              data-testid="exercise-search"
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+            />
+          </div>
 
-        <div style={{ marginBottom: 12 }}>
-          <input
-            type="text"
-            placeholder="Search exercises..."
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            data-testid="exercise-search"
-            style={{ width: '100%' }}
-          />
-        </div>
+          <div data-testid="exercise-list">
+            {filteredExercises.map((ex) => (
+              <div
+                className="flex items-center justify-between py-2 border-b border-slate-100 last:border-b-0"
+                key={ex.exercise_id}
+                data-testid={`exercise-${ex.exercise_id}`}
+              >
+                <span className="text-sm text-slate-900">
+                  {ex.name}
+                  <span className="text-slate-400 ml-2 text-xs">({ex.user_id ? 'custom' : 'global'})</span>
+                </span>
+                {ex.user_id && (
+                  <Button
+                    variant="danger"
+                    size="sm"
+                    onClick={() => deleteExercise(ex.exercise_id)}
+                    data-testid={`delete-exercise-${ex.exercise_id}`}
+                  >
+                    Delete
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
 
-        <div data-testid="exercise-list">
-          {filteredExercises.map((ex) => (
-            <div className="exercise-list-item" key={ex.exercise_id} data-testid={`exercise-${ex.exercise_id}`}>
-              <span>
-                {ex.name}
-                <span className="exercise-tag">({ex.user_id ? 'custom' : 'global'})</span>
-              </span>
-              {ex.user_id && (
-                <button
-                  className="btn btn-red btn-sm"
-                  onClick={() => deleteExercise(ex.exercise_id)}
-                  data-testid={`delete-exercise-${ex.exercise_id}`}
-                >
-                  Delete
-                </button>
-              )}
-            </div>
-          ))}
-        </div>
-
-        <div style={{ display: 'flex', gap: 8, marginTop: 12 }}>
-          <input
-            type="text"
-            placeholder="New exercise name..."
-            value={newExerciseName}
-            onChange={(e) => setNewExerciseName(e.target.value)}
-            data-testid="new-exercise-input"
-            style={{ flex: 1 }}
-          />
-          <button
-            className="btn btn-green"
-            onClick={addCustomExercise}
-            disabled={!newExerciseName.trim()}
-            data-testid="add-exercise-btn"
-          >
-            + Add Custom Exercise
-          </button>
-        </div>
-      </div>
+          <div className="flex gap-2 mt-3">
+            <input
+              type="text"
+              placeholder="New exercise name..."
+              value={newExerciseName}
+              onChange={(e) => setNewExerciseName(e.target.value)}
+              data-testid="new-exercise-input"
+              className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+            />
+            <Button
+              variant="success"
+              onClick={addCustomExercise}
+              disabled={!newExerciseName.trim()}
+              data-testid="add-exercise-btn"
+            >
+              + Add Custom Exercise
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </CoachLayout>
   );
 }

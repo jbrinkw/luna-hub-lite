@@ -1,6 +1,8 @@
 import { useEffect, useState, useRef } from 'react';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 
 export interface PlannedSet {
   planned_set_id: string;
@@ -88,9 +90,9 @@ export function SetQueue({
 
   if (sets.length === 0) {
     return (
-      <div className="empty-state">
-        <h3>No workout planned for today.</h3>
-        <p>Add sets manually or configure your weekly split.</p>
+      <div className="text-center py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500">
+        <h3 className="text-lg font-semibold mb-1">No workout planned for today.</h3>
+        <p className="text-sm">Add sets manually or configure your weekly split.</p>
       </div>
     );
   }
@@ -98,181 +100,198 @@ export function SetQueue({
   return (
     <>
       {/* Next In Queue Section */}
-      <div className="next-in-queue-section" data-testid="next-in-queue">
-        <h3 style={{ marginTop: 0, marginBottom: 20, fontSize: 20, color: '#155724' }}>Next in Queue:</h3>
+      <div className="border border-emerald-400 rounded-xl p-5 mb-5 bg-emerald-50/50" data-testid="next-in-queue">
+        <h3 className="mt-0 mb-5 text-xl text-emerald-800 font-bold">Next in Queue:</h3>
 
         {nextSet ? (
           <>
             <div
-              className="next-set-box"
+              className="bg-emerald-100 p-4 rounded-lg mb-4 border-2 border-emerald-400 flex justify-between items-start"
               data-testid="next-exercise"
-              style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
             >
-              <div style={{ flex: 1 }}>
-                <div className="next-set-exercise">{nextSet.exercise_name}</div>
-                <div className="next-set-detail">
+              <div className="flex-1">
+                <div className="text-2xl font-bold text-emerald-800 mb-1.5">{nextSet.exercise_name}</div>
+                <div className="text-lg font-bold text-slate-900">
                   {nextSet.target_reps} reps @ {formatLoadDisplay(nextSet)}
                 </div>
-                <div className="next-set-rest">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
+                <div className="text-sm text-slate-500 mt-1">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
               </div>
               <div
-                className={`timer-display ${timerState === 'running' ? 'timer-running' : timerState === 'expired' ? 'timer-expired' : 'timer-idle'}`}
+                className={[
+                  'font-bold text-right ml-5 min-w-[100px]',
+                  timerState === 'running'
+                    ? 'text-violet-600'
+                    : timerState === 'expired'
+                      ? 'text-red-600'
+                      : 'text-slate-500',
+                ].join(' ')}
                 data-testid="inline-timer"
               >
-                <div style={{ fontSize: 13, marginBottom: 2 }}>{timerState === 'expired' ? 'Timer' : 'Rest Timer'}</div>
-                <div style={{ fontSize: 48, fontFamily: 'monospace', lineHeight: 1 }}>
+                <div className="text-xs mb-0.5">{timerState === 'expired' ? 'Timer' : 'Rest Timer'}</div>
+                <div className="text-5xl font-mono leading-none">
                   {timerState === 'expired' ? 'expired!' : timerDisplay || '0:00'}
                 </div>
               </div>
             </div>
 
             <form
-              className="completion-form"
+              className="flex gap-3 items-end flex-wrap mt-4"
               onSubmit={(e) => {
                 e.preventDefault();
                 handleComplete();
               }}
               data-testid="completion-form"
             >
-              <div className="form-group">
-                <label>Exercise</label>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-semibold text-slate-700">Exercise</label>
                 <input
                   type="text"
                   value={nextSet.exercise_name}
                   readOnly
-                  style={{ width: 180, padding: 8, fontSize: 16 }}
+                  className="w-44 px-3 py-2 text-base border border-slate-300 rounded-lg bg-slate-50 text-slate-900"
                   data-testid="override-exercise"
                 />
               </div>
-              <div className="form-group">
-                <label>Reps Done</label>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-semibold text-slate-700">Reps Done</label>
                 <input
                   type="number"
                   value={reps}
                   onChange={(e) => setReps(e.target.value)}
-                  style={{ width: 80, padding: 8, fontSize: 16, textAlign: 'center' }}
+                  className="w-20 px-3 py-2 text-base text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
                   data-testid="override-reps"
                 />
               </div>
-              <div className="form-group">
-                <label>Weight ({WEIGHT_UNIT})</label>
+              <div className="flex flex-col gap-1">
+                <label className="text-sm font-semibold text-slate-700">Weight ({WEIGHT_UNIT})</label>
                 <input
                   type="number"
                   value={load}
                   onChange={(e) => setLoad(e.target.value)}
-                  style={{ width: 80, padding: 8, fontSize: 16, textAlign: 'center' }}
+                  className="w-20 px-3 py-2 text-base text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
                   data-testid="override-load"
                 />
               </div>
-              <button type="submit" className="btn btn-green btn-lg" disabled={disabled} data-testid="complete-set-btn">
+              <Button type="submit" variant="success" size="lg" disabled={disabled} data-testid="complete-set-btn">
                 Complete Set
-              </button>
-              <button
-                type="button"
-                className="btn btn-cyan"
-                onClick={onAdHoc}
-                disabled={disabled}
-                data-testid="adhoc-btn"
-              >
+              </Button>
+              <Button variant="primary" onClick={onAdHoc} disabled={disabled} data-testid="adhoc-btn">
                 + Ad-Hoc Set
-              </button>
+              </Button>
             </form>
 
             {validationError && (
-              <p className="error-text" style={{ margin: '8px 0 0' }} data-testid="validation-error">
+              <p className="text-red-600 text-sm mt-2" data-testid="validation-error">
                 {validationError}
               </p>
             )}
           </>
         ) : (
-          <div className="all-done-box">
-            <div className="all-done-text">All sets completed!</div>
+          <div className="bg-slate-50 border-2 border-slate-400 p-4 rounded-lg text-center">
+            <div className="text-xl font-bold text-slate-500 py-2.5">All sets completed!</div>
           </div>
         )}
       </div>
 
       {/* Pending Queue Table */}
-      <div className="card">
-        <h3 className="card-header">Set Queue ({pendingSets.length} remaining)</h3>
-        <div className="card-body">
+      <Card className="mb-5">
+        <CardHeader>
+          <CardTitle>Set Queue ({pendingSets.length} remaining)</CardTitle>
+        </CardHeader>
+        <CardContent>
           {pendingSets.length === 0 && !nextSet ? (
-            <p className="muted-text" style={{ fontStyle: 'italic', textAlign: 'center' }}>
-              No sets remaining
-            </p>
+            <p className="text-slate-500 italic text-center text-sm">No sets remaining</p>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>Exercise</th>
-                  <th>Reps</th>
-                  <th>Load</th>
-                  <th>Rest</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {pendingSets.map((set) => (
-                  <tr key={set.planned_set_id} data-testid={`queue-row-${set.order}`}>
-                    <td>{set.exercise_name}</td>
-                    <td>
-                      <input
-                        type="number"
-                        className="input-narrow"
-                        defaultValue={set.target_reps ?? ''}
-                        onBlur={(e) => {
-                          const val = e.target.value ? Number(e.target.value) : null;
-                          if (val !== set.target_reps) onUpdateSet?.(set.planned_set_id, 'target_reps', val);
-                        }}
-                        data-testid={`edit-reps-${set.order}`}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        className="input-load"
-                        defaultValue={set.target_load_percentage ?? set.target_load ?? ''}
-                        onBlur={(e) => {
-                          const val = e.target.value ? Number(e.target.value) : null;
-                          const field = set.target_load_percentage ? 'target_load_percentage' : 'target_load';
-                          if (val !== (set.target_load_percentage ?? set.target_load))
-                            onUpdateSet?.(set.planned_set_id, field, val);
-                        }}
-                        data-testid={`edit-load-${set.order}`}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        className="input-rest"
-                        defaultValue={set.rest_seconds ?? 60}
-                        onBlur={(e) => {
-                          const val = e.target.value ? Number(e.target.value) : null;
-                          if (val !== set.rest_seconds) onUpdateSet?.(set.planned_set_id, 'rest_seconds', val);
-                        }}
-                        data-testid={`edit-rest-${set.order}`}
-                      />
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-red btn-sm"
-                        onClick={() => onDeleteSet?.(set.planned_set_id)}
-                        data-testid={`delete-set-${set.order}`}
-                      >
-                        Remove
-                      </button>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Exercise
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Reps
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Load
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Rest
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Action
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {pendingSets.map((set) => (
+                    <tr
+                      key={set.planned_set_id}
+                      data-testid={`queue-row-${set.order}`}
+                      className="border-b border-slate-100 last:border-b-0"
+                    >
+                      <td className="px-3 py-2 align-middle">{set.exercise_name}</td>
+                      <td className="px-3 py-2 align-middle">
+                        <input
+                          type="number"
+                          className="w-15 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                          defaultValue={set.target_reps ?? ''}
+                          onBlur={(e) => {
+                            const val = e.target.value ? Number(e.target.value) : null;
+                            if (val !== set.target_reps) onUpdateSet?.(set.planned_set_id, 'target_reps', val);
+                          }}
+                          data-testid={`edit-reps-${set.order}`}
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <input
+                          type="number"
+                          className="w-20 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                          defaultValue={set.target_load_percentage ?? set.target_load ?? ''}
+                          onBlur={(e) => {
+                            const val = e.target.value ? Number(e.target.value) : null;
+                            const field = set.target_load_percentage ? 'target_load_percentage' : 'target_load';
+                            if (val !== (set.target_load_percentage ?? set.target_load))
+                              onUpdateSet?.(set.planned_set_id, field, val);
+                          }}
+                          data-testid={`edit-load-${set.order}`}
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <input
+                          type="number"
+                          className="w-[70px] text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                          defaultValue={set.rest_seconds ?? 60}
+                          onBlur={(e) => {
+                            const val = e.target.value ? Number(e.target.value) : null;
+                            if (val !== set.rest_seconds) onUpdateSet?.(set.planned_set_id, 'rest_seconds', val);
+                          }}
+                          data-testid={`edit-rest-${set.order}`}
+                        />
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <Button
+                          variant="danger"
+                          size="sm"
+                          onClick={() => onDeleteSet?.(set.planned_set_id)}
+                          data-testid={`delete-set-${set.order}`}
+                        >
+                          Remove
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
           {onAddSet && (
-            <button className="btn btn-green btn-sm" onClick={onAddSet} style={{ marginTop: 8 }}>
+            <Button variant="success" size="sm" onClick={onAddSet} className="mt-2">
               + Add Set
-            </button>
+            </Button>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
     </>
   );
 }

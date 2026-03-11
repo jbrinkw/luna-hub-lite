@@ -10,6 +10,9 @@ import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { epley1RM } from '@/pages/coachbyte/PrsPage';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
 
 interface CompletedSet {
   completed_set_id: string;
@@ -497,73 +500,45 @@ export function TodayPage() {
   if (loading) {
     return (
       <CoachLayout title="Today">
-        <p className="muted-text">Loading workout...</p>
+        <p className="text-slate-500 text-sm">Loading workout...</p>
       </CoachLayout>
     );
   }
 
   return (
     <CoachLayout title="Today">
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '2px solid #eee',
-          paddingBottom: 10,
-          marginBottom: 20,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Today's Workout</h2>
-        <div style={{ display: 'flex', gap: 10, alignItems: 'center' }}>
-          <span className="muted-text" style={{ fontSize: 14 }}>
-            {today}
-          </span>
-          <button
-            className={`btn ${confirmReset ? 'btn-red' : 'btn-gray'} btn-sm`}
+      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-slate-900 m-0">Today's Workout</h2>
+        <div className="flex gap-2.5 items-center">
+          <span className="text-slate-500 text-sm">{today}</span>
+          <Button
+            variant={confirmReset ? 'danger' : 'secondary'}
+            size="sm"
             onClick={resetPlan}
             data-testid="reset-plan-btn"
           >
             {confirmReset ? 'Confirm Reset?' : 'Reset Plan'}
-          </button>
+          </Button>
         </div>
       </div>
 
       {loadError && (
-        <div className="card" style={{ borderColor: '#dc3545' }} data-testid="load-error">
-          <div className="card-body">
-            <p className="error-text">Failed to load data: {loadError}</p>
-            <button className="btn btn-blue" onClick={loadPlan}>
+        <Card className="border-red-300 mb-5" data-testid="load-error">
+          <CardContent>
+            <p className="text-red-600 text-sm mb-2">Failed to load data: {loadError}</p>
+            <Button variant="primary" size="sm" onClick={loadPlan}>
               Retry
-            </button>
-          </div>
-        </div>
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
-      {error && <p className="error-text">{error}</p>}
+      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
 
       {prToast && (
-        <div
-          style={{
-            background: '#d4edda',
-            color: '#155724',
-            padding: '12px 16px',
-            borderRadius: 8,
-            marginBottom: 16,
-            border: '1px solid #c3e6cb',
-            fontWeight: 'bold',
-          }}
-          data-testid="pr-toast"
-        >
-          {prToast}
-          <button
-            className="btn-clear"
-            onClick={() => setPrToast(null)}
-            style={{ float: 'right', cursor: 'pointer', background: 'none', border: 'none', fontWeight: 'bold' }}
-          >
-            x
-          </button>
-        </div>
+        <Alert variant="success" onDismiss={() => setPrToast(null)} className="mb-4" data-testid="pr-toast">
+          <span className="font-bold">{prToast}</span>
+        </Alert>
       )}
 
       <SetQueue
@@ -606,78 +581,97 @@ export function TodayPage() {
       )}
 
       {/* Completed Sets */}
-      <div className="card">
-        <h3 className="card-header">Completed Sets ({completedSets.length} done)</h3>
-        <div className="card-body">
+      <Card className="mb-5">
+        <CardHeader>
+          <CardTitle>Completed Sets ({completedSets.length} done)</CardTitle>
+        </CardHeader>
+        <CardContent>
           {completedSets.length === 0 ? (
-            <p className="muted-text" style={{ fontStyle: 'italic', textAlign: 'center' }}>
-              No sets completed yet
-            </p>
+            <p className="text-slate-500 italic text-center text-sm">No sets completed yet</p>
           ) : (
-            <table>
-              <thead>
-                <tr>
-                  <th>#</th>
-                  <th>Exercise</th>
-                  <th>Reps</th>
-                  <th>Load</th>
-                  <th>Action</th>
-                </tr>
-              </thead>
-              <tbody>
-                {completedSets.map((cs, i) => (
-                  <tr key={cs.completed_set_id} data-testid={`completed-row-${i + 1}`}>
-                    <td>{i + 1}</td>
-                    <td>
-                      <strong>{cs.exercise_name}</strong>
-                    </td>
-                    <td>
-                      <strong>{cs.actual_reps}</strong>
-                    </td>
-                    <td>
-                      <strong>
-                        {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
-                      </strong>
-                    </td>
-                    <td>
-                      <button
-                        className={`btn btn-sm ${confirmDeleteId === cs.completed_set_id ? 'btn-orange' : 'btn-gray'}`}
-                        onClick={() => deleteCompletedSet(cs.completed_set_id)}
-                        data-testid={`delete-completed-${i + 1}`}
-                      >
-                        {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
-                      </button>
-                    </td>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      #
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Exercise
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Reps
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Load
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Action
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {completedSets.map((cs, i) => (
+                    <tr
+                      key={cs.completed_set_id}
+                      data-testid={`completed-row-${i + 1}`}
+                      className="border-b border-slate-100 last:border-b-0"
+                    >
+                      <td className="px-3 py-2 align-middle">{i + 1}</td>
+                      <td className="px-3 py-2 align-middle">
+                        <strong>{cs.exercise_name}</strong>
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <strong>{cs.actual_reps}</strong>
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <strong>
+                          {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
+                        </strong>
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <Button
+                          variant={confirmDeleteId === cs.completed_set_id ? 'danger' : 'secondary'}
+                          size="sm"
+                          onClick={() => deleteCompletedSet(cs.completed_set_id)}
+                          data-testid={`delete-completed-${i + 1}`}
+                        >
+                          {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
-        </div>
-      </div>
+        </CardContent>
+      </Card>
 
       {/* Notes */}
-      <div className="summary-section" style={{ marginBottom: 20 }}>
-        <h3>Workout Notes</h3>
+      <div className="border border-slate-200 rounded-xl p-4 mb-5 bg-white">
+        <h3 className="text-lg font-semibold text-slate-900 mt-0 mb-2.5">Workout Notes</h3>
         <textarea
           rows={4}
           value={notes}
           onChange={(e) => handleNotesChange(e.target.value)}
           onBlur={handleNotesBlur}
           placeholder="How did the workout feel? Any observations..."
+          className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
           data-testid="notes-textarea"
         />
       </div>
 
       {/* Summary */}
-      <div className="summary-section">
-        <h3>Summary</h3>
+      <div className="border border-slate-200 rounded-xl p-4 bg-white">
+        <h3 className="text-lg font-semibold text-slate-900 mt-0 mb-2.5">Summary</h3>
         <textarea
           rows={3}
           value={summary}
           onChange={(e) => handleSummaryChange(e.target.value)}
           onBlur={handleSummaryBlur}
           placeholder="Add your workout summary here..."
+          className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
           data-testid="summary-textarea"
         />
       </div>

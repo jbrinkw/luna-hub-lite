@@ -4,6 +4,8 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { formatDateDisplay } from '@/shared/dates';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 
 interface HistoryDay {
   plan_id: string;
@@ -191,21 +193,12 @@ export function HistoryPage() {
 
   return (
     <CoachLayout title="History">
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '2px solid #eee',
-          paddingBottom: 10,
-          marginBottom: 20,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>Workout History</h2>
+      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-slate-900 m-0">Workout History</h2>
         <select
           value={exerciseFilter}
           onChange={(e) => setExerciseFilter(e.target.value)}
-          style={{ padding: '6px 10px' }}
+          className="appearance-none rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
           data-testid="exercise-filter"
         >
           <option value="all">All Exercises</option>
@@ -218,130 +211,166 @@ export function HistoryPage() {
       </div>
 
       {loadError && (
-        <div className="card" style={{ borderColor: '#dc3545' }} data-testid="load-error">
-          <div className="card-body">
-            <p className="error-text">Failed to load data: {loadError}</p>
-            <button className="btn btn-blue" onClick={() => loadHistory()}>
+        <Card className="border-red-300 mb-5" data-testid="load-error">
+          <CardContent>
+            <p className="text-red-600 text-sm mb-2">Failed to load data: {loadError}</p>
+            <Button variant="primary" size="sm" onClick={() => loadHistory()}>
               Retry
-            </button>
-          </div>
-        </div>
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
       {loading && days.length === 0 ? (
-        <p className="muted-text" data-testid="history-loading">
+        <p className="text-slate-500 text-sm" data-testid="history-loading">
           Loading workout history...
         </p>
       ) : filteredDays.length === 0 ? (
-        <div className="empty-state" data-testid="no-history">
-          <h3>No workout history yet</h3>
-          <p>Complete some workouts to see your history here.</p>
+        <div
+          className="text-center py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500"
+          data-testid="no-history"
+        >
+          <h3 className="text-lg font-semibold mb-1">No workout history yet</h3>
+          <p className="text-sm">Complete some workouts to see your history here.</p>
         </div>
       ) : (
         <>
-          <div className="history-table">
-            <table data-testid="history-table">
-              <thead>
-                <tr>
-                  <th>Date</th>
-                  <th>Summary</th>
-                  <th>Sets</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredDays.map((day) => (
-                  <tr key={day.plan_id} data-testid={`history-row-${day.plan_date}`}>
-                    <td>
-                      <strong>{formatDateDisplay(day.plan_date)}</strong>
-                    </td>
-                    <td>
-                      {day.summary ? (
-                        <div style={{ maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis' }}>{day.summary}</div>
-                      ) : (
-                        <em className="muted-text">No summary</em>
-                      )}
-                    </td>
-                    <td>
-                      {day.completed_count}/{day.planned_count}
-                    </td>
-                    <td>
-                      <button
-                        className="btn btn-blue btn-sm"
-                        onClick={() => loadDetail(day.plan_id)}
-                        data-testid={`expand-${day.plan_date}`}
-                        aria-label={
-                          expandedPlan === day.plan_id
-                            ? `Collapse ${day.plan_date} details`
-                            : `Expand ${day.plan_date} details`
-                        }
-                      >
-                        {expandedPlan === day.plan_id ? 'Hide' : 'View Details'}
-                      </button>
-                    </td>
+          <Card className="mb-5 overflow-hidden">
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm" data-testid="history-table">
+                <thead>
+                  <tr>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Date
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Summary
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Sets
+                    </th>
+                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      Actions
+                    </th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filteredDays.map((day) => (
+                    <tr
+                      key={day.plan_id}
+                      data-testid={`history-row-${day.plan_date}`}
+                      className="border-b border-slate-100 last:border-b-0"
+                    >
+                      <td className="px-3 py-2 align-middle">
+                        <strong>{formatDateDisplay(day.plan_date)}</strong>
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        {day.summary ? (
+                          <div className="max-w-[300px] overflow-hidden text-ellipsis">{day.summary}</div>
+                        ) : (
+                          <em className="text-slate-500">No summary</em>
+                        )}
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        {day.completed_count}/{day.planned_count}
+                      </td>
+                      <td className="px-3 py-2 align-middle">
+                        <Button
+                          variant="primary"
+                          size="sm"
+                          onClick={() => loadDetail(day.plan_id)}
+                          data-testid={`expand-${day.plan_date}`}
+                          aria-label={
+                            expandedPlan === day.plan_id
+                              ? `Collapse ${day.plan_date} details`
+                              : `Expand ${day.plan_date} details`
+                          }
+                        >
+                          {expandedPlan === day.plan_id ? 'Hide' : 'View Details'}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </Card>
 
           {expandedPlan && (
-            <div className="card" style={{ marginTop: 20 }} data-testid="detail-card">
-              <h3 className="card-header">Completed Sets</h3>
-              <div className="card-body">
+            <Card className="mb-5" data-testid="detail-card">
+              <CardHeader>
+                <CardTitle>Completed Sets</CardTitle>
+              </CardHeader>
+              <CardContent>
                 {detailLoading ? (
-                  <p className="muted-text">Loading...</p>
+                  <p className="text-slate-500 text-sm">Loading...</p>
                 ) : detail.length === 0 ? (
-                  <p className="muted-text">No sets completed.</p>
+                  <p className="text-slate-500 text-sm">No sets completed.</p>
                 ) : (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>#</th>
-                        <th>Exercise</th>
-                        <th>Reps</th>
-                        <th>Load</th>
-                        <th>Time</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {detail.map((d, i) => (
-                        <tr key={i} data-testid={`detail-row-${i + 1}`}>
-                          <td>{i + 1}</td>
-                          <td>
-                            <strong>{d.exercise_name}</strong>
-                          </td>
-                          <td>
-                            <strong>{d.actual_reps}</strong>
-                          </td>
-                          <td>
-                            <strong>
-                              {d.actual_load} {WEIGHT_UNIT}
-                            </strong>
-                          </td>
-                          <td>
-                            <span className="muted-text" style={{ fontSize: 12 }}>
-                              {timeFormatter.format(new Date(d.completed_at))}
-                            </span>
-                          </td>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr>
+                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                            #
+                          </th>
+                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                            Exercise
+                          </th>
+                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                            Reps
+                          </th>
+                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                            Load
+                          </th>
+                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                            Time
+                          </th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {detail.map((d, i) => (
+                          <tr
+                            key={i}
+                            data-testid={`detail-row-${i + 1}`}
+                            className="border-b border-slate-100 last:border-b-0"
+                          >
+                            <td className="px-3 py-2 align-middle">{i + 1}</td>
+                            <td className="px-3 py-2 align-middle">
+                              <strong>{d.exercise_name}</strong>
+                            </td>
+                            <td className="px-3 py-2 align-middle">
+                              <strong>{d.actual_reps}</strong>
+                            </td>
+                            <td className="px-3 py-2 align-middle">
+                              <strong>
+                                {d.actual_load} {WEIGHT_UNIT}
+                              </strong>
+                            </td>
+                            <td className="px-3 py-2 align-middle">
+                              <span className="text-slate-500 text-xs">
+                                {timeFormatter.format(new Date(d.completed_at))}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 )}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           )}
 
           {hasMore && (
-            <button
-              className="btn btn-outline"
+            <Button
+              variant="secondary"
               onClick={() => cursor && loadHistory(cursor)}
               data-testid="load-more-btn"
-              style={{ width: '100%', marginTop: 16 }}
+              className="w-full mt-4"
             >
               Load More
-            </button>
+            </Button>
           )}
         </>
       )}

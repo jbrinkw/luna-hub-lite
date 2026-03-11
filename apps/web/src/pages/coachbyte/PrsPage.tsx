@@ -3,6 +3,9 @@ import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase, coachbyte } from '@/shared/supabase';
 import { WEIGHT_UNIT } from '@/shared/constants';
+import { Card, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
 
 interface ExercisePR {
   exercise_id: string;
@@ -11,7 +14,7 @@ interface ExercisePR {
   rep_records: { reps: number; load: number }[];
 }
 
-/** Epley 1RM formula: load × (1 + reps/30) */
+/** Epley 1RM formula: load x (1 + reps/30) */
 export function epley1RM(load: number, reps: number): number {
   if (reps <= 0 || load <= 0) return 0;
   if (reps === 1) return load;
@@ -175,7 +178,7 @@ export function PrsPage() {
   if (loading) {
     return (
       <CoachLayout title="PRs">
-        <p className="muted-text" data-testid="prs-loading">
+        <p className="text-slate-500 text-sm" data-testid="prs-loading">
           Loading your PRs...
         </p>
       </CoachLayout>
@@ -184,67 +187,64 @@ export function PrsPage() {
 
   return (
     <CoachLayout title="PRs">
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          borderBottom: '2px solid #eee',
-          paddingBottom: 10,
-          marginBottom: 20,
-        }}
-      >
-        <h2 style={{ margin: 0 }}>PR Tracker</h2>
+      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-slate-900 m-0">PR Tracker</h2>
       </div>
 
       {loadError && (
-        <div className="card" style={{ borderColor: '#dc3545' }} data-testid="load-error">
-          <div className="card-body">
-            <p className="error-text">Failed to load data: {loadError}</p>
-            <button className="btn btn-blue" onClick={computePRs}>
+        <Card className="border-red-300 mb-5" data-testid="load-error">
+          <CardContent>
+            <p className="text-red-600 text-sm mb-2">Failed to load data: {loadError}</p>
+            <Button variant="primary" size="sm" onClick={computePRs}>
               Retry
-            </button>
-          </div>
-        </div>
+            </Button>
+          </CardContent>
+        </Card>
       )}
 
       {filteredPRs.length === 0 ? (
-        <div className="empty-state" data-testid="no-prs">
-          <h3>No PRs recorded yet</h3>
-          <p>Complete some sets to see your records.</p>
+        <div
+          className="text-center py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500"
+          data-testid="no-prs"
+        >
+          <h3 className="text-lg font-semibold mb-1">No PRs recorded yet</h3>
+          <p className="text-sm">Complete some sets to see your records.</p>
         </div>
       ) : (
         filteredPRs.map((pr) => (
-          <div className="pr-card" key={pr.exercise_id} data-testid={`pr-card-${pr.exercise_id}`}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 15 }}>
-              <span className="pr-exercise-name" style={{ marginBottom: 0 }} data-testid={`pr-name-${pr.exercise_id}`}>
+          <Card className="mb-5 p-5" key={pr.exercise_id} data-testid={`pr-card-${pr.exercise_id}`}>
+            <div className="flex justify-between items-center mb-4">
+              <span className="text-xl font-bold text-slate-900 capitalize" data-testid={`pr-name-${pr.exercise_id}`}>
                 {pr.exercise_name}
               </span>
-              <span
-                style={{ fontSize: 16, fontWeight: 'bold', color: '#007bff' }}
-                data-testid={`pr-e1rm-${pr.exercise_id}`}
-              >
+              <span className="text-base font-bold text-violet-600" data-testid={`pr-e1rm-${pr.exercise_id}`}>
                 e1RM: {pr.e1rm} {WEIGHT_UNIT}
               </span>
             </div>
-            <div className="pr-list">
+            <div className="flex flex-wrap gap-2.5">
               {pr.rep_records.map((r) => (
-                <div className="pr-chip" key={r.reps} data-testid={`pr-${pr.exercise_id}-${r.reps}rep`}>
+                <Badge
+                  key={r.reps}
+                  variant="default"
+                  className="px-3 py-2 text-sm font-bold"
+                  data-testid={`pr-${pr.exercise_id}-${r.reps}rep`}
+                >
                   {r.reps} rep{r.reps !== 1 ? 's' : ''}: {r.load} {WEIGHT_UNIT}
-                </div>
+                </Badge>
               ))}
             </div>
-          </div>
+          </Card>
         ))
       )}
 
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', margin: '8px 0' }}>
-        <p data-testid="date-range-info" className="muted-text" style={{ margin: 0, fontSize: '0.9em' }}>
+      <div className="flex items-center justify-between my-2">
+        <p data-testid="date-range-info" className="text-slate-500 text-sm m-0">
           {dateRange < 9999 ? `Showing PRs from last ${dateRange} days` : 'Showing PRs from all history'}
         </p>
         {dateRange < 9999 && (
-          <button
-            className="btn btn-outline btn-sm"
+          <Button
+            variant="secondary"
+            size="sm"
             data-testid="load-all-history-btn"
             onClick={() => {
               setLoading(true);
@@ -252,17 +252,17 @@ export function PrsPage() {
             }}
           >
             Load All History
-          </button>
+          </Button>
         )}
       </div>
 
-      <div className="tracked-section" data-testid="tracked-exercises-card">
-        <h3 style={{ marginBottom: 8, fontSize: 18, marginTop: 0 }}>Tracked Exercises</h3>
-        <p className="muted-text" style={{ fontSize: 13, marginBottom: 15 }}>
+      <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 mt-5" data-testid="tracked-exercises-card">
+        <h3 className="text-lg font-semibold text-slate-900 mb-2 mt-0">Tracked Exercises</h3>
+        <p className="text-slate-500 text-xs mb-4">
           Add exercises to track all rep ranges for those exercises automatically.
         </p>
 
-        <div style={{ display: 'flex', gap: 8, marginBottom: 15, alignItems: 'center' }}>
+        <div className="flex gap-2 mb-4 items-center">
           <input
             type="text"
             value={searchText}
@@ -270,47 +270,45 @@ export function PrsPage() {
             placeholder="Enter exercise name..."
             aria-label="Search exercises to track"
             data-testid="pr-search-input"
-            style={{ flex: 1 }}
+            className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
           />
         </div>
 
         {searchResults.length > 0 && (
-          <div data-testid="pr-search-results" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 15 }}>
+          <div data-testid="pr-search-results" className="flex flex-wrap gap-2 mb-4">
             {searchResults.slice(0, 5).map((ex) => (
-              <button
+              <Button
                 key={ex.exercise_id}
-                className="btn btn-outline btn-sm"
+                variant="secondary"
+                size="sm"
                 onClick={() => addTrackedExercise(ex.exercise_id)}
                 data-testid={`add-exercise-${ex.exercise_id}`}
               >
                 {ex.name}
-              </button>
+              </Button>
             ))}
           </div>
         )}
 
         {trackedExercises.length === 0 ? (
-          <p className="muted-text" style={{ fontStyle: 'italic', fontSize: 13 }}>
-            No exercises being tracked
-          </p>
+          <p className="text-slate-500 italic text-sm">No exercises being tracked</p>
         ) : (
           <>
-            <div style={{ fontSize: 14, fontWeight: 'bold', marginBottom: 10 }}>
+            <div className="text-sm font-bold text-slate-700 mb-2.5">
               Currently Tracking ({trackedExercises.length} exercises)
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }} data-testid="tracked-chips">
+            <div className="flex flex-wrap gap-2" data-testid="tracked-chips">
               {trackedExercises.map((ex) => (
                 <div
-                  className="tracked-chip"
+                  className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm cursor-pointer hover:border-slate-300 transition-colors"
                   key={ex.exercise_id}
                   data-testid={`tracked-${ex.exercise_id}`}
-                  style={{ cursor: 'pointer' }}
                   onClick={() => removeTrackedExercise(ex.exercise_id)}
                 >
                   <span>{ex.name}</span>
-                  <button className="btn btn-red btn-sm" style={{ padding: '2px 6px', fontSize: 11 }}>
+                  <Button variant="danger" size="sm" className="!px-1.5 !py-0.5 !text-[11px]">
                     Remove
-                  </button>
+                  </Button>
                 </div>
               ))}
             </div>

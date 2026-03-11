@@ -1,4 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
 
 interface RestTimerProps {
   endTime?: string | null;
@@ -98,54 +100,56 @@ export function RestTimer({
   };
 
   return (
-    <div className="card timer-card" data-testid="rest-timer">
-      <h3 className="card-header">Rest Timer</h3>
-      <div className="card-body">
-        <div className="timer-big" data-testid="timer-display">
+    <Card className="mb-5" data-testid="rest-timer">
+      <CardHeader>
+        <CardTitle>Rest Timer</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="text-5xl font-mono font-bold text-center my-4" data-testid="timer-display">
           {formatTime(remaining)}
         </div>
 
         {state === 'expired' && (
-          <p data-testid="timer-expired" style={{ textAlign: 'center', fontWeight: 'bold', color: '#dc3545' }}>
+          <p data-testid="timer-expired" className="text-center font-bold text-red-600">
             Timer expired
           </p>
         )}
 
-        <div className="timer-controls">
+        <div className="flex gap-2 justify-center flex-wrap">
           {state === 'running' && (
-            <button className="btn btn-blue" onClick={onPause} data-testid="pause-btn">
+            <Button variant="primary" onClick={onPause} data-testid="pause-btn">
               Pause
-            </button>
+            </Button>
           )}
           {state === 'paused' && (
-            <button className="btn btn-blue" onClick={onResume} data-testid="resume-btn">
+            <Button variant="primary" onClick={onResume} data-testid="resume-btn">
               Resume
-            </button>
+            </Button>
           )}
           {(state === 'running' || state === 'paused' || state === 'expired') && (
-            <button className="btn btn-gray" onClick={onReset} data-testid="reset-btn">
+            <Button variant="secondary" onClick={onReset} data-testid="reset-btn">
               Reset
-            </button>
+            </Button>
           )}
         </div>
 
-        <div className="timer-custom">
-          <div className="form-group" style={{ flex: 1 }}>
-            <label>Custom (seconds)</label>
+        <div className="flex gap-2 mt-3 items-end">
+          <div className="flex flex-col gap-1 flex-1">
+            <label className="text-sm font-semibold text-slate-700">Custom (seconds)</label>
             <input
               type="number"
               value={customDuration}
               onChange={(e) => setCustomDuration(e.target.value)}
-              className="input-full"
+              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
               data-testid="custom-duration-input"
             />
           </div>
-          <button className="btn btn-blue" onClick={handleCustomStart} data-testid="custom-start-btn">
+          <Button variant="primary" onClick={handleCustomStart} data-testid="custom-start-btn">
             Start
-          </button>
+          </Button>
         </div>
-      </div>
-    </div>
+      </CardContent>
+    </Card>
   );
 }
 
