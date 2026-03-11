@@ -1,19 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate } from 'react-router-dom';
-import {
-  IonPage,
-  IonContent,
-  IonCard,
-  IonCardHeader,
-  IonCardTitle,
-  IonCardContent,
-  IonItem,
-  IonInput,
-  IonButton,
-  IonText,
-} from '@ionic/react';
 import { supabase } from '@/shared/supabase';
 import { MIN_PASSWORD_LENGTH } from '@/shared/constants';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
 
 export function ResetPassword() {
   const navigate = useNavigate();
@@ -55,58 +47,42 @@ export function ResetPassword() {
   };
 
   return (
-    <IonPage>
-      <IonContent className="ion-padding">
-        <div style={{ maxWidth: 400, margin: '80px auto' }}>
-          <IonCard>
-            <IonCardHeader>
-              <IonCardTitle>Reset Password</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <form onSubmit={handleSubmit} data-testid="reset-password-form">
-                {error && (
-                  <IonText color="danger" data-testid="reset-password-error">
-                    <p>{error}</p>
-                  </IonText>
-                )}
-                <IonItem>
-                  <IonInput
-                    label="New Password"
-                    labelPlacement="stacked"
-                    type="password"
-                    value={password}
-                    onIonInput={(e) => setPassword(e.detail.value ?? '')}
-                    autocomplete="new-password"
-                    required
-                    data-testid="new-password-input"
-                  />
-                </IonItem>
-                <IonItem>
-                  <IonInput
-                    label="Confirm Password"
-                    labelPlacement="stacked"
-                    type="password"
-                    value={confirmPassword}
-                    onIonInput={(e) => setConfirmPassword(e.detail.value ?? '')}
-                    autocomplete="new-password"
-                    required
-                    data-testid="confirm-password-input"
-                  />
-                </IonItem>
-                <IonButton
-                  expand="block"
-                  type="submit"
-                  disabled={loading}
-                  style={{ marginTop: 16 }}
-                  data-testid="reset-password-button"
-                >
-                  {loading ? 'Updating...' : 'Update Password'}
-                </IonButton>
-              </form>
-            </IonCardContent>
-          </IonCard>
-        </div>
-      </IonContent>
-    </IonPage>
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Reset Password</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} data-testid="reset-password-form" className="space-y-4">
+            {error && (
+              <Alert variant="error" data-testid="reset-password-error">
+                {error}
+              </Alert>
+            )}
+            <Input
+              label="New Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+              data-testid="new-password-input"
+            />
+            <Input
+              label="Confirm Password"
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              autoComplete="new-password"
+              required
+              data-testid="confirm-password-input"
+            />
+            <Button type="submit" loading={loading} className="w-full" data-testid="reset-password-button">
+              Update Password
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

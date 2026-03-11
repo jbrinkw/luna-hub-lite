@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { IonCard, IonCardHeader, IonCardTitle, IonCardContent, IonButton, IonChip, IonAlert } from '@ionic/react';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Badge } from '@/components/ui/Badge';
+import { Modal } from '@/components/ui/Modal';
 
 interface AppActivationCardProps {
   appName: string;
@@ -10,51 +13,51 @@ interface AppActivationCardProps {
   onDeactivate: () => void;
 }
 
-export function AppActivationCard({
-  displayName,
-  active,
-  loading,
-  onActivate,
-  onDeactivate,
-}: AppActivationCardProps) {
+export function AppActivationCard({ displayName, active, loading, onActivate, onDeactivate }: AppActivationCardProps) {
   const [showConfirm, setShowConfirm] = useState(false);
 
   return (
-    <IonCard>
-      <IonCardHeader>
-        <IonCardTitle>{displayName}</IonCardTitle>
-      </IonCardHeader>
-      <IonCardContent>
-        <IonChip color={active ? 'success' : 'medium'}>
-          {active ? 'Active' : 'Inactive'}
-        </IonChip>
-        {active ? (
-          <IonButton color="danger" fill="outline" onClick={() => setShowConfirm(true)} disabled={loading}>
-            Deactivate
-          </IonButton>
-        ) : (
-          <IonButton color="primary" onClick={onActivate} disabled={loading}>
-            Activate
-          </IonButton>
-        )}
-        <IonAlert
-          isOpen={showConfirm}
-          header={`Deactivate ${displayName}?`}
-          message={`Are you sure you want to deactivate ${displayName}?`}
-          buttons={[
-            { text: 'Cancel', role: 'cancel', handler: () => setShowConfirm(false) },
-            {
-              text: 'Confirm',
-              role: 'destructive',
-              handler: () => {
+    <Card>
+      <CardHeader>
+        <CardTitle>{displayName}</CardTitle>
+      </CardHeader>
+      <CardContent>
+        <div className="flex items-center gap-3">
+          <Badge variant={active ? 'success' : 'default'}>{active ? 'Active' : 'Inactive'}</Badge>
+          {active ? (
+            <Button variant="danger" size="sm" onClick={() => setShowConfirm(true)} disabled={loading}>
+              Deactivate
+            </Button>
+          ) : (
+            <Button size="sm" onClick={onActivate} disabled={loading} loading={loading}>
+              Activate
+            </Button>
+          )}
+        </div>
+
+        <Modal
+          open={showConfirm}
+          onClose={() => setShowConfirm(false)}
+          title={`Deactivate ${displayName}?`}
+          maxWidth="sm"
+        >
+          <p className="text-sm text-slate-600 mb-4">Are you sure you want to deactivate {displayName}?</p>
+          <div className="flex gap-3 justify-end">
+            <Button variant="secondary" onClick={() => setShowConfirm(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="danger"
+              onClick={() => {
                 setShowConfirm(false);
                 onDeactivate();
-              },
-            },
-          ]}
-          onDidDismiss={() => setShowConfirm(false)}
-        />
-      </IonCardContent>
-    </IonCard>
+              }}
+            >
+              Confirm
+            </Button>
+          </div>
+        </Modal>
+      </CardContent>
+    </Card>
   );
 }

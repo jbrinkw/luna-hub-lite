@@ -1,19 +1,11 @@
 import { useState, type FormEvent } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
-import {
-  IonPage,
-  IonContent,
-  IonCard,
-  IonCardHeader,
-  IonCardTitle,
-  IonCardContent,
-  IonItem,
-  IonInput,
-  IonButton,
-  IonText,
-} from '@ionic/react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { MIN_PASSWORD_LENGTH } from '@/shared/constants';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
 
 export function Signup() {
   const { signUp } = useAuth();
@@ -59,61 +51,47 @@ export function Signup() {
   };
 
   return (
-    <IonPage>
-      <IonContent className="ion-padding">
-        <div style={{ maxWidth: 400, margin: '80px auto' }}>
-          <IonCard>
-            <IonCardHeader>
-              <IonCardTitle>Create Account</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              <form onSubmit={handleSubmit}>
-                {error && (
-                  <IonText color="danger">
-                    <p>{error}</p>
-                  </IonText>
-                )}
-                <IonItem>
-                  <IonInput
-                    label="Display Name"
-                    labelPlacement="stacked"
-                    type="text"
-                    value={displayName}
-                    onIonInput={(e) => setDisplayName(e.detail.value ?? '')}
-                    autocomplete="name"
-                  />
-                </IonItem>
-                <IonItem>
-                  <IonInput
-                    label="Email"
-                    labelPlacement="stacked"
-                    type="email"
-                    value={email}
-                    onIonInput={(e) => setEmail(e.detail.value ?? '')}
-                    autocomplete="email"
-                  />
-                </IonItem>
-                <IonItem>
-                  <IonInput
-                    label="Password"
-                    labelPlacement="stacked"
-                    type="password"
-                    value={password}
-                    onIonInput={(e) => setPassword(e.detail.value ?? '')}
-                    autocomplete="new-password"
-                  />
-                </IonItem>
-                <IonButton expand="block" type="submit" disabled={loading} style={{ marginTop: 16 }}>
-                  {loading ? 'Creating account...' : 'Sign Up'}
-                </IonButton>
-              </form>
-              <p style={{ textAlign: 'center', marginTop: 16 }}>
-                Already have an account? <Link to="/login">Sign in</Link>
-              </p>
-            </IonCardContent>
-          </IonCard>
-        </div>
-      </IonContent>
-    </IonPage>
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Create Account</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            {error && <Alert variant="error">{error}</Alert>}
+            <Input
+              label="Display Name"
+              type="text"
+              value={displayName}
+              onChange={(e) => setDisplayName(e.target.value)}
+              autoComplete="name"
+            />
+            <Input
+              label="Email"
+              type="email"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              autoComplete="email"
+            />
+            <Input
+              label="Password"
+              type="password"
+              value={password}
+              onChange={(e) => setPassword(e.target.value)}
+              autoComplete="new-password"
+            />
+            <Button type="submit" loading={loading} className="w-full">
+              Sign Up
+            </Button>
+          </form>
+          <p className="text-center text-sm text-slate-600 mt-4">
+            Already have an account?{' '}
+            <Link to="/login" className="text-blue-600 hover:text-blue-700 hover:underline font-medium">
+              Sign in
+            </Link>
+          </p>
+        </CardContent>
+      </Card>
+    </div>
   );
 }

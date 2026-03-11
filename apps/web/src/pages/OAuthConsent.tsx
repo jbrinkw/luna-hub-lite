@@ -1,17 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useSearchParams, useNavigate } from 'react-router-dom';
-import {
-  IonPage,
-  IonContent,
-  IonCard,
-  IonCardHeader,
-  IonCardTitle,
-  IonCardContent,
-  IonButton,
-  IonText,
-} from '@ionic/react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
 
 interface AuthorizationDetails {
   client: { name: string };
@@ -108,92 +101,66 @@ export function OAuthConsent() {
 
   if (!authorizationId) {
     return (
-      <IonPage>
-        <IonContent className="ion-padding">
-          <div style={{ maxWidth: 500, margin: '80px auto' }}>
-            <IonCard>
-              <IonCardContent>
-                <IonText color="danger">
-                  <p>Missing authorization_id parameter.</p>
-                </IonText>
-              </IonCardContent>
-            </IonCard>
-          </div>
-        </IonContent>
-      </IonPage>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <Card className="w-full max-w-md">
+          <CardContent>
+            <Alert variant="error">Missing authorization_id parameter.</Alert>
+          </CardContent>
+        </Card>
+      </div>
     );
   }
 
   if (loading) {
     return (
-      <IonPage>
-        <IonContent className="ion-padding">
-          <div style={{ maxWidth: 500, margin: '80px auto', textAlign: 'center' }}>
-            Loading authorization details...
-          </div>
-        </IonContent>
-      </IonPage>
+      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+        <p className="text-sm text-slate-500">Loading authorization details...</p>
+      </div>
     );
   }
 
   return (
-    <IonPage>
-      <IonContent className="ion-padding">
-        <div style={{ maxWidth: 500, margin: '80px auto' }}>
-          <IonCard>
-            <IonCardHeader>
-              <IonCardTitle>Authorize Application</IonCardTitle>
-            </IonCardHeader>
-            <IonCardContent>
-              {error && (
-                <IonText color="danger">
-                  <p>{error}</p>
-                </IonText>
-              )}
+    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Authorize Application</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {error && <Alert variant="error">{error}</Alert>}
 
-              {details && (
-                <>
-                  <p style={{ fontSize: '16px', marginBottom: '16px' }}>
-                    <strong>{details.client.name}</strong> wants to access your Luna Hub account.
+          {details && (
+            <>
+              <p className="text-base text-slate-700">
+                <span className="font-semibold">{details.client.name}</span> wants to access your Luna Hub account.
+              </p>
+
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+                <p className="text-xs text-slate-500">
+                  <span className="font-medium">Redirect URI:</span> {details.redirect_uri}
+                </p>
+                {details.scope && details.scope.trim() && (
+                  <p className="text-xs text-slate-500">
+                    <span className="font-medium">Scopes:</span> {details.scope}
                   </p>
+                )}
+              </div>
 
-                  <div style={{ background: '#f7f7f9', padding: '12px', borderRadius: '8px', marginBottom: '16px' }}>
-                    <p style={{ margin: '0 0 8px', fontSize: '13px', color: '#666' }}>
-                      <strong>Redirect URI:</strong> {details.redirect_uri}
-                    </p>
-                    {details.scope && details.scope.trim() && (
-                      <p style={{ margin: 0, fontSize: '13px', color: '#666' }}>
-                        <strong>Scopes:</strong> {details.scope}
-                      </p>
-                    )}
-                  </div>
+              <p className="text-xs text-slate-500">
+                This will allow the application to use your MCP tools (CoachByte, ChefByte, extensions) on your behalf.
+              </p>
 
-                  <p style={{ fontSize: '13px', color: '#666', marginBottom: '20px' }}>
-                    This will allow the application to use your MCP tools (CoachByte, ChefByte, extensions) on your
-                    behalf.
-                  </p>
-
-                  <div style={{ display: 'flex', gap: '12px' }}>
-                    <IonButton expand="block" onClick={handleApprove} disabled={deciding} style={{ flex: 1 }}>
-                      {deciding ? 'Processing...' : 'Approve'}
-                    </IonButton>
-                    <IonButton
-                      expand="block"
-                      fill="outline"
-                      color="medium"
-                      onClick={handleDeny}
-                      disabled={deciding}
-                      style={{ flex: 1 }}
-                    >
-                      Deny
-                    </IonButton>
-                  </div>
-                </>
-              )}
-            </IonCardContent>
-          </IonCard>
-        </div>
-      </IonContent>
-    </IonPage>
+              <div className="flex gap-3">
+                <Button className="flex-1" onClick={handleApprove} disabled={deciding} loading={deciding}>
+                  Approve
+                </Button>
+                <Button variant="secondary" className="flex-1" onClick={handleDeny} disabled={deciding}>
+                  Deny
+                </Button>
+              </div>
+            </>
+          )}
+        </CardContent>
+      </Card>
+    </div>
   );
 }

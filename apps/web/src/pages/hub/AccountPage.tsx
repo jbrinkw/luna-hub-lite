@@ -1,9 +1,14 @@
 import { useEffect, useState } from 'react';
-import { IonButton, IonInput, IonSelect, IonSelectOption, IonText, IonSpinner } from '@ionic/react';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { MIN_PASSWORD_LENGTH } from '@/shared/constants';
+import { Button } from '@/components/ui/Button';
+import { Input } from '@/components/ui/Input';
+import { Select } from '@/components/ui/Select';
+import { Alert } from '@/components/ui/Alert';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 const FALLBACK_TIMEZONES = [
   'America/New_York',
@@ -108,63 +113,74 @@ export function AccountPage() {
   return (
     <HubLayout title="Account">
       {loading ? (
-        <IonSpinner />
+        <div className="space-y-4">
+          <Skeleton className="h-5 w-1/4" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+          <Skeleton className="h-10 w-full" />
+        </div>
       ) : (
-        <>
-          <h3>Profile</h3>
-          <IonInput label="Display Name" value={displayName} onIonInput={(e) => setDisplayName(e.detail.value ?? '')} />
-          <IonSelect label="Timezone" value={timezone} onIonChange={(e) => setTimezone(e.detail.value)}>
-            {TIMEZONES.map((tz) => (
-              <IonSelectOption key={tz} value={tz}>
-                {tz}
-              </IonSelectOption>
-            ))}
-          </IonSelect>
-          <IonSelect
-            label="Day Start Hour"
-            value={dayStartHour}
-            onIonChange={(e) => setDayStartHour(Number(e.detail.value))}
-          >
-            {Array.from({ length: 24 }, (_, i) => (
-              <IonSelectOption key={i} value={i}>
-                {i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}
-              </IonSelectOption>
-            ))}
-          </IonSelect>
+        <div className="space-y-6">
+          <Card>
+            <CardHeader>
+              <CardTitle>Profile</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Input label="Display Name" value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
+              <Select label="Timezone" value={timezone} onChange={(e) => setTimezone(e.target.value)}>
+                {TIMEZONES.map((tz) => (
+                  <option key={tz} value={tz}>
+                    {tz}
+                  </option>
+                ))}
+              </Select>
+              <Select
+                label="Day Start Hour"
+                value={dayStartHour}
+                onChange={(e) => setDayStartHour(Number(e.target.value))}
+              >
+                {Array.from({ length: 24 }, (_, i) => (
+                  <option key={i} value={i}>
+                    {i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}
+                  </option>
+                ))}
+              </Select>
 
-          <IonButton onClick={handleSaveProfile} disabled={saving}>
-            {saving ? <IonSpinner /> : 'Save Profile'}
-          </IonButton>
+              <Button onClick={handleSaveProfile} loading={saving}>
+                Save Profile
+              </Button>
 
-          {message && (
-            <IonText color={message.type === 'success' ? 'success' : 'danger'}>
-              <p>{message.text}</p>
-            </IonText>
-          )}
+              {message && <Alert variant={message.type === 'success' ? 'success' : 'error'}>{message.text}</Alert>}
+            </CardContent>
+          </Card>
 
-          <h3 style={{ marginTop: '24px' }}>Change Password</h3>
-          <IonInput
-            label="New Password"
-            type="password"
-            value={newPassword}
-            onIonInput={(e) => setNewPassword(e.detail.value ?? '')}
-          />
-          <IonInput
-            label="Confirm Password"
-            type="password"
-            value={confirmPassword}
-            onIonInput={(e) => setConfirmPassword(e.detail.value ?? '')}
-          />
-          <IonButton onClick={handleChangePassword} disabled={pwSaving}>
-            {pwSaving ? <IonSpinner /> : 'Change Password'}
-          </IonButton>
+          <Card>
+            <CardHeader>
+              <CardTitle>Change Password</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              <Input
+                label="New Password"
+                type="password"
+                value={newPassword}
+                onChange={(e) => setNewPassword(e.target.value)}
+              />
+              <Input
+                label="Confirm Password"
+                type="password"
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+              />
+              <Button onClick={handleChangePassword} loading={pwSaving}>
+                Change Password
+              </Button>
 
-          {pwMessage && (
-            <IonText color={pwMessage.type === 'success' ? 'success' : 'danger'}>
-              <p>{pwMessage.text}</p>
-            </IonText>
-          )}
-        </>
+              {pwMessage && (
+                <Alert variant={pwMessage.type === 'success' ? 'success' : 'error'}>{pwMessage.text}</Alert>
+              )}
+            </CardContent>
+          </Card>
+        </div>
       )}
     </HubLayout>
   );

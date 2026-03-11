@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { IonSpinner, IonText } from '@ionic/react';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { ApiKeyGenerator } from '@/components/hub/ApiKeyGenerator';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { CardSkeleton } from '@/components/ui/Skeleton';
 
 interface ActiveKey {
   id: string;
@@ -106,22 +107,30 @@ export function McpSettingsPage() {
 
   return (
     <HubLayout title="MCP Settings">
-      <h3>Endpoint</h3>
-      <IonText>
-        <code>{import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/sse</code>
-      </IonText>
+      <div className="space-y-6">
+        <Card>
+          <CardHeader>
+            <CardTitle>Endpoint</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <code className="text-sm bg-slate-100 px-3 py-1.5 rounded-md text-slate-800">
+              {import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/sse
+            </code>
+          </CardContent>
+        </Card>
 
-      {loading ? (
-        <IonSpinner />
-      ) : (
-        <ApiKeyGenerator
-          activeKeys={activeKeys}
-          loading={loading}
-          error={error}
-          onGenerate={handleGenerate}
-          onRevoke={handleRevoke}
-        />
-      )}
+        {loading ? (
+          <CardSkeleton />
+        ) : (
+          <ApiKeyGenerator
+            activeKeys={activeKeys}
+            loading={loading}
+            error={error}
+            onGenerate={handleGenerate}
+            onRevoke={handleRevoke}
+          />
+        )}
+      </div>
     </HubLayout>
   );
 }

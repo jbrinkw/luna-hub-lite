@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import { IonCard, IonCardHeader, IonCardTitle, IonCardContent, IonToggle, IonInput, IonButton, IonText, IonItem, IonLabel } from '@ionic/react';
+import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Toggle } from '@/components/ui/Toggle';
+import { Input } from '@/components/ui/Input';
+import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
+import { Badge } from '@/components/ui/Badge';
 
 interface ExtensionCardProps {
   extensionName: string;
@@ -51,44 +56,37 @@ export function ExtensionCard({
   };
 
   return (
-    <IonCard>
-      <IonCardHeader>
-        <IonCardTitle>{displayName}</IonCardTitle>
-      </IonCardHeader>
-      <IonCardContent>
-        <p>{description}</p>
-        <IonItem>
-          <IonLabel>Enabled</IonLabel>
-          <IonToggle
-            checked={enabled}
-            onIonChange={(e) => onToggle(e.detail.checked)}
-            aria-label={`Enable ${displayName}`}
-          />
-        </IonItem>
-        {hasCredentials && (
-          <IonText color="success"><p>Credentials configured</p></IonText>
-        )}
+    <Card>
+      <CardHeader>
+        <div className="flex items-center justify-between">
+          <CardTitle>{displayName}</CardTitle>
+          <Toggle checked={enabled} onChange={onToggle} aria-label={`Enable ${displayName}`} />
+        </div>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <p className="text-sm text-slate-600">{description}</p>
+
+        {hasCredentials && <Badge variant="success">Credentials configured</Badge>}
+
         {enabled && (
-          <div style={{ marginTop: '12px' }}>
+          <div className="space-y-3 pt-2 border-t border-slate-100">
             {credentialFields.map((field) => (
-              <IonInput
+              <Input
                 key={field.key}
                 label={field.label}
                 type="password"
                 value={credentials[field.key] ?? ''}
-                onIonInput={(e) =>
-                  setCredentials((prev) => ({ ...prev, [field.key]: e.detail.value ?? '' }))
-                }
+                onChange={(e) => setCredentials((prev) => ({ ...prev, [field.key]: e.target.value }))}
               />
             ))}
-            <IonButton onClick={handleSave} disabled={saving}>
-              {saving ? 'Saving...' : 'Save Credentials'}
-            </IonButton>
-            {error && <IonText color="danger"><p>{error}</p></IonText>}
-            {success && <IonText color="success"><p>Credentials saved</p></IonText>}
+            <Button onClick={handleSave} loading={saving} size="sm">
+              Save Credentials
+            </Button>
+            {error && <Alert variant="error">{error}</Alert>}
+            {success && <Alert variant="success">Credentials saved</Alert>}
           </div>
         )}
-      </IonCardContent>
-    </IonCard>
+      </CardContent>
+    </Card>
   );
 }

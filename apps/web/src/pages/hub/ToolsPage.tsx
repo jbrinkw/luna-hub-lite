@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { IonItem, IonItemDivider, IonLabel, IonSpinner, IonToggle } from '@ionic/react';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { Toggle } from '@/components/ui/Toggle';
+import { ListSkeleton } from '@/components/ui/Skeleton';
 
 interface ToolDef {
   name: string;
@@ -136,27 +137,29 @@ export function ToolsPage() {
   return (
     <HubLayout title="Tools">
       {loading ? (
-        <IonSpinner />
+        <ListSkeleton count={8} />
       ) : (
-        <div>
+        <div className="space-y-6">
           {TOOL_GROUPS.map((group) => (
             <div key={group.label}>
-              <IonItemDivider>
-                <IonLabel>{group.label}</IonLabel>
-              </IonItemDivider>
-              {group.tools.map((tool) => (
-                <IonItem key={tool.name}>
-                  <IonLabel>
-                    <h2>{tool.name}</h2>
-                    <p>{tool.description}</p>
-                  </IonLabel>
-                  <IonToggle
-                    checked={toggles[tool.name] ?? true}
-                    onIonChange={(e) => handleToggle(tool.name, e.detail.checked)}
-                    aria-label={`Toggle ${tool.name}`}
-                  />
-                </IonItem>
-              ))}
+              <h3 className="text-sm font-semibold text-slate-500 uppercase tracking-wider mb-3 px-1">{group.label}</h3>
+              <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
+                {group.tools.map((tool) => (
+                  <div key={tool.name} className="flex items-center justify-between px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-slate-900 truncate">{tool.name}</p>
+                      <p className="text-sm text-slate-500">{tool.description}</p>
+                    </div>
+                    <div className="ml-4 shrink-0">
+                      <Toggle
+                        checked={toggles[tool.name] ?? true}
+                        onChange={(checked) => handleToggle(tool.name, checked)}
+                        aria-label={`Toggle ${tool.name}`}
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>

@@ -1,4 +1,5 @@
-import { IonItem, IonLabel, IonToggle, IonSpinner } from '@ionic/react';
+import { Toggle } from '@/components/ui/Toggle';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 interface Tool {
   tool_name: string;
@@ -15,24 +16,36 @@ interface ToolToggleProps {
 export function ToolToggle({ tools, loading, onToggle }: ToolToggleProps) {
   return (
     <div>
-      {loading && <IonSpinner />}
-      {tools.map((tool) => (
-        <IonItem key={tool.tool_name}>
-          <IonLabel>
-            <h2>{tool.tool_name}</h2>
-            <p>{tool.description}</p>
-          </IonLabel>
-          <IonToggle
-            checked={tool.enabled}
-            onIonChange={(e) => onToggle(tool.tool_name, e.detail.checked)}
-            aria-label={`Toggle ${tool.tool_name}`}
-          />
-        </IonItem>
-      ))}
-      {!loading && tools.length === 0 && (
-        <IonItem>
-          <IonLabel color="medium">No tools configured. Activate an app first.</IonLabel>
-        </IonItem>
+      {loading && (
+        <div className="space-y-3">
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+          <Skeleton className="h-12 w-full" />
+        </div>
+      )}
+      {!loading && (
+        <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
+          {tools.map((tool) => (
+            <div key={tool.tool_name} className="flex items-center justify-between px-4 py-3">
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-medium text-slate-900 truncate">{tool.tool_name}</p>
+                <p className="text-sm text-slate-500">{tool.description}</p>
+              </div>
+              <div className="ml-4 shrink-0">
+                <Toggle
+                  checked={tool.enabled}
+                  onChange={(checked) => onToggle(tool.tool_name, checked)}
+                  aria-label={`Toggle ${tool.tool_name}`}
+                />
+              </div>
+            </div>
+          ))}
+          {tools.length === 0 && (
+            <div className="px-4 py-8 text-center">
+              <p className="text-sm text-slate-500">No tools configured. Activate an app first.</p>
+            </div>
+          )}
+        </div>
       )}
     </div>
   );

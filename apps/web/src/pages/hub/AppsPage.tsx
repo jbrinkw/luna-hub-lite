@@ -1,9 +1,10 @@
 import { useEffect, useState, useCallback } from 'react';
-import { IonSpinner, IonText } from '@ionic/react';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { AppActivationCard } from '@/components/hub/AppActivationCard';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { Alert } from '@/components/ui/Alert';
+import { CardSkeleton } from '@/components/ui/Skeleton';
 
 const APPS = [
   { name: 'coachbyte', displayName: 'CoachByte' },
@@ -64,24 +65,29 @@ export function AppsPage() {
   return (
     <HubLayout title="Apps">
       {error && (
-        <IonText color="danger">
-          <p>{error}</p>
-        </IonText>
+        <Alert variant="error" className="mb-4">
+          {error}
+        </Alert>
       )}
       {loading ? (
-        <IonSpinner />
+        <div className="space-y-4">
+          <CardSkeleton />
+          <CardSkeleton />
+        </div>
       ) : (
-        APPS.map((app) => (
-          <AppActivationCard
-            key={app.name}
-            appName={app.name}
-            displayName={app.displayName}
-            active={!!activations[app.name]}
-            loading={mutating === app.name}
-            onActivate={() => handleActivate(app.name)}
-            onDeactivate={() => handleDeactivate(app.name)}
-          />
-        ))
+        <div className="space-y-4">
+          {APPS.map((app) => (
+            <AppActivationCard
+              key={app.name}
+              appName={app.name}
+              displayName={app.displayName}
+              active={!!activations[app.name]}
+              loading={mutating === app.name}
+              onActivate={() => handleActivate(app.name)}
+              onDeactivate={() => handleDeactivate(app.name)}
+            />
+          ))}
+        </div>
       )}
     </HubLayout>
   );

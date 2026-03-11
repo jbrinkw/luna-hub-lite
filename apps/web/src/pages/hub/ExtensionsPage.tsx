@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { IonSpinner } from '@ionic/react';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { ExtensionCard } from '@/components/hub/ExtensionCard';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { CardSkeleton } from '@/components/ui/Skeleton';
 
 const EXTENSIONS = [
   {
@@ -109,21 +109,27 @@ export function ExtensionsPage() {
   return (
     <HubLayout title="Extensions">
       {loading ? (
-        <IonSpinner />
+        <div className="space-y-4">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+        </div>
       ) : (
-        EXTENSIONS.map((ext) => (
-          <ExtensionCard
-            key={ext.name}
-            extensionName={ext.name}
-            displayName={ext.displayName}
-            description={ext.description}
-            enabled={states[ext.name]?.enabled ?? false}
-            hasCredentials={states[ext.name]?.hasCredentials ?? false}
-            credentialFields={ext.credentialFields}
-            onToggle={(enabled) => handleToggle(ext.name, enabled)}
-            onSaveCredentials={(creds) => handleSaveCredentials(ext.name, creds)}
-          />
-        ))
+        <div className="space-y-4">
+          {EXTENSIONS.map((ext) => (
+            <ExtensionCard
+              key={ext.name}
+              extensionName={ext.name}
+              displayName={ext.displayName}
+              description={ext.description}
+              enabled={states[ext.name]?.enabled ?? false}
+              hasCredentials={states[ext.name]?.hasCredentials ?? false}
+              credentialFields={ext.credentialFields}
+              onToggle={(enabled) => handleToggle(ext.name, enabled)}
+              onSaveCredentials={(creds) => handleSaveCredentials(ext.name, creds)}
+            />
+          ))}
+        </div>
       )}
     </HubLayout>
   );
