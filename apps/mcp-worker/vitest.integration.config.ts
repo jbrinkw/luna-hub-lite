@@ -9,8 +9,9 @@ try {
 
 export default defineConfig({
   test: {
-    include: ['src/__tests__/validate.test.ts'],
+    include: ['src/__tests__/**/*.test.ts'],
     environment: 'node',
-    testTimeout: 30_000,
+    testTimeout: 60_000,
+    globalSetup: './src/__tests__/helpers/setup.ts',
   },
 });
