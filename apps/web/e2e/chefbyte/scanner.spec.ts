@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { seedFullAndLogin, seedChefByteData } from '../helpers/seed';
+import { seedFullAndLogin, seedChefByteData, todayStr } from '../helpers/seed';
 import { expectDbRow, countDbRows } from '../helpers/assertions';
 
 test.describe('ChefByte Scanner', () => {
@@ -672,7 +672,7 @@ test.describe('ChefByte Scanner', () => {
 
       // Verify food_log was created:
       // 3 servings * 165 cal = 495 cal, 3 * 31 = 93 protein
-      const todayDate = new Date().toISOString().slice(0, 10);
+      const todayDate = todayStr();
       await expect(async () => {
         await expectDbRow(
           client,
@@ -732,7 +732,7 @@ test.describe('ChefByte Scanner', () => {
 
       // Verify food_log: 1 container of Brown Rice = 8 servings
       // 8 * 216 cal = 1728 cal, 8 * 5 = 40 protein
-      const todayDate = new Date().toISOString().slice(0, 10);
+      const todayDate = todayStr();
       await expect(async () => {
         await expectDbRow(
           client,
