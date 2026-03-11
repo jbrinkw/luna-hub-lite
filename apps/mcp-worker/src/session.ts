@@ -1,6 +1,6 @@
 import type { ToolDefinition, ToolContext, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolError } from '@luna-hub/app-tools';
-import { JsonRpcRequest, jsonRpcSuccess, jsonRpcError, sseEvent, McpToolSchema } from './protocol';
+import { JsonRpcRequest, JsonRpcResponse, jsonRpcSuccess, jsonRpcError, sseEvent, McpToolSchema } from './protocol';
 import { buildUserTools } from './registry';
 import { createServiceClient } from './supabase';
 import { validateToolArgs } from './validate';
@@ -29,6 +29,7 @@ export class McpSession implements DurableObject {
     if (url.pathname === '/init') return this.handleInit(url);
     if (url.pathname === '/sse') return this.handleSseConnect(url);
     if (url.pathname === '/message' && request.method === 'POST') return this.handleMessage(request);
+    if (url.pathname === '/streamable' && request.method === 'POST') return this.handleStreamablePost(request);
     return new Response('Not found', { status: 404 });
   }
 
@@ -134,8 +135,118 @@ export class McpSession implements DurableObject {
     }
   }
 
+  /** Process a JSON-RPC message and return the response (null for notifications). */
+  private async processRpcMessage(rpc: JsonRpcRequest): Promise<JsonRpcResponse | null> {
+    switch (rpc.method) {
+      case 'initialize': {
+        const clientVersion = (rpc.params as any)?.protocolVersion || '2024-11-05';
+        const supportedVersions = ['2024-11-05', '2025-03-26'];
+        const negotiatedVersion = supportedVersions.includes(clientVersion) ? clientVersion : '2025-03-26';
+        return jsonRpcSuccess(rpc.id, {
+          protocolVersion: negotiatedVersion,
+          capabilities: { tools: {} },
+          serverInfo: { name: 'luna-hub-mcp', version: '1.0.0' },
+        });
+      }
+
+      case 'ping':
+        return jsonRpcSuccess(rpc.id, {});
+
+      case 'notifications/initialized':
+      case 'notifications/cancelled':
+        return null;
+
+      case 'resources/list':
+        return jsonRpcSuccess(rpc.id, { resources: [] });
+
+      case 'prompts/list':
+        return jsonRpcSuccess(rpc.id, { prompts: [] });
+
+      case 'tools/list': {
+        await this.awaitToolsReady();
+        return jsonRpcSuccess(rpc.id, {
+          tools: Object.values(this.tools).map(
+            (t): McpToolSchema => ({
+              name: t.name,
+              description: t.description,
+              inputSchema: t.inputSchema,
+            }),
+          ),
+        });
+      }
+
+      case 'tools/call': {
+        await this.awaitToolsReady();
+        const toolName = (rpc.params as any)?.name;
+        const toolArgs = (rpc.params as any)?.arguments || {};
+        const tool = this.tools[toolName];
+
+        if (!tool) {
+          return jsonRpcError(rpc.id, -32602, `Unknown tool: ${toolName}`);
+        }
+
+        const validationError = validateToolArgs(toolArgs, tool.inputSchema);
+        if (validationError) {
+          return jsonRpcSuccess(rpc.id, toolError(validationError));
+        }
+
+        const toolCtx: ToolContext = { userId: this.userId, supabase: this.supabase };
+        try {
+          if ('extensionName' in tool) {
+            const extensionName = (tool as any).extensionName as string | undefined;
+            if (!extensionName) {
+              return jsonRpcSuccess(rpc.id, toolError('Invalid extension tool definition'));
+            }
+            const { data: settings } = await this.supabase
+              .schema('hub')
+              .from('extension_settings')
+              .select('enabled')
+              .eq('user_id', this.userId)
+              .eq('extension_name', extensionName)
+              .eq('enabled', true)
+              .single();
+
+            if (!settings) {
+              return jsonRpcSuccess(rpc.id, toolError(`Configure ${extensionName} credentials in Hub settings.`));
+            }
+
+            const { data: decryptedJson, error: decryptErr } = await this.supabase
+              .schema('hub')
+              .rpc('get_extension_credentials_admin', {
+                p_user_id: this.userId,
+                p_extension_name: extensionName,
+              });
+
+            if (decryptErr || !decryptedJson) {
+              return jsonRpcSuccess(rpc.id, toolError(`Configure ${extensionName} credentials in Hub settings.`));
+            }
+
+            let credentials: Record<string, string>;
+            try {
+              credentials = JSON.parse(decryptedJson);
+            } catch {
+              return jsonRpcSuccess(rpc.id, toolError('Failed to parse extension credentials.'));
+            }
+            const extCtx: ExtensionToolContext = { ...toolCtx, credentials };
+            const result = await tool.handler(toolArgs, extCtx);
+            return jsonRpcSuccess(rpc.id, result);
+          } else {
+            const result = await tool.handler(toolArgs, toolCtx);
+            return jsonRpcSuccess(rpc.id, result);
+          }
+        } catch (err: any) {
+          console.error(`Tool ${toolName} error:`, err);
+          return jsonRpcSuccess(rpc.id, toolError(`Tool error: ${err.message}`));
+        }
+      }
+
+      default:
+        return jsonRpcError(rpc.id, -32601, `Method not found: ${rpc.method}`);
+    }
+  }
+
+  /** Legacy SSE transport: POST /message — processes JSON-RPC and writes response to SSE stream. */
   private async handleMessage(request: Request): Promise<Response> {
-    // Reject unauthenticated sessions — userId is set during SSE connect
     if (!this.userId) {
       return new Response(JSON.stringify({ error: 'Session not authenticated' }), {
         status: 401,
@@ -153,141 +264,48 @@ export class McpSession implements DurableObject {
       }
       return new Response('', { status: 202 });
     }
-    let response;
 
-    switch (rpc.method) {
-      case 'initialize': {
-        // Negotiate protocol version: respond with what the client requested
-        // if we support it, otherwise fall back to our baseline.
-        const clientVersion = (rpc.params as any)?.protocolVersion || '2024-11-05';
-        const supportedVersions = ['2024-11-05', '2025-03-26'];
-        const negotiatedVersion = supportedVersions.includes(clientVersion) ? clientVersion : '2024-11-05';
-        response = jsonRpcSuccess(rpc.id, {
-          protocolVersion: negotiatedVersion,
-          capabilities: { tools: {} },
-          serverInfo: { name: 'luna-hub-mcp', version: '1.0.0' },
-        });
-        break;
-      }
+    const response = await this.processRpcMessage(rpc);
 
-      case 'ping':
-        response = jsonRpcSuccess(rpc.id, {});
-        break;
-
-      case 'notifications/initialized':
-      case 'notifications/cancelled':
-        return new Response('', { status: 202 });
-
-      case 'resources/list':
-        response = jsonRpcSuccess(rpc.id, { resources: [] });
-        break;
-
-      case 'prompts/list':
-        response = jsonRpcSuccess(rpc.id, { prompts: [] });
-        break;
-
-      case 'tools/list':
-        await this.awaitToolsReady();
-        response = jsonRpcSuccess(rpc.id, {
-          tools: Object.values(this.tools).map(
-            (t): McpToolSchema => ({
-              name: t.name,
-              description: t.description,
-              inputSchema: t.inputSchema,
-            }),
-          ),
-        });
-        break;
-
-      case 'tools/call': {
-        await this.awaitToolsReady();
-        const toolName = (rpc.params as any)?.name;
-        const toolArgs = (rpc.params as any)?.arguments || {};
-        const tool = this.tools[toolName];
-
-        if (!tool) {
-          response = jsonRpcError(rpc.id, -32602, `Unknown tool: ${toolName}`);
-        } else {
-          // Validate arguments against inputSchema
-          const validationError = validateToolArgs(toolArgs, tool.inputSchema);
-          if (validationError) {
-            response = jsonRpcSuccess(rpc.id, toolError(validationError));
-            break;
-          }
-
-          const toolCtx: ToolContext = { userId: this.userId, supabase: this.supabase };
-          try {
-            if ('extensionName' in tool) {
-              // Extension tool: check enabled status, then decrypt credentials via RPC
-              const extensionName = (tool as any).extensionName as string | undefined;
-              if (!extensionName) {
-                response = jsonRpcSuccess(rpc.id, toolError('Invalid extension tool definition'));
-                break;
-              }
-              const { data: settings } = await this.supabase
-                .schema('hub')
-                .from('extension_settings')
-                .select('enabled')
-                .eq('user_id', this.userId)
-                .eq('extension_name', extensionName)
-                .eq('enabled', true)
-                .single();
-
-              if (!settings) {
-                response = jsonRpcSuccess(rpc.id, toolError(`Configure ${extensionName} credentials in Hub settings.`));
-              } else {
-                // Decrypt credentials server-side via private.get_extension_credentials
-                const { data: decryptedJson, error: decryptErr } = await this.supabase
-                  .schema('hub')
-                  .rpc('get_extension_credentials_admin', {
-                    p_user_id: this.userId,
-                    p_extension_name: extensionName,
-                  });
-
-                if (decryptErr || !decryptedJson) {
-                  response = jsonRpcSuccess(
-                    rpc.id,
-                    toolError(`Configure ${extensionName} credentials in Hub settings.`),
-                  );
-                } else {
-                  let credentials: Record<string, string>;
-                  try {
-                    credentials = JSON.parse(decryptedJson);
-                  } catch {
-                    response = jsonRpcSuccess(rpc.id, toolError('Failed to parse extension credentials.'));
-                    break;
-                  }
-                  const extCtx: ExtensionToolContext = { ...toolCtx, credentials };
-                  const result = await tool.handler(toolArgs, extCtx);
-                  response = jsonRpcSuccess(rpc.id, result);
-                }
-              }
-            } else {
-              // App tool: call handler directly
-              const result = await tool.handler(toolArgs, toolCtx);
-              response = jsonRpcSuccess(rpc.id, result);
-            }
-          } catch (err: any) {
-            console.error(`Tool ${toolName} error:`, err);
-            response = jsonRpcSuccess(rpc.id, toolError(`Tool error: ${err.message}`));
-          }
-        }
-        break;
-      }
-
-      default:
-        response = jsonRpcError(rpc.id, -32601, `Method not found: ${rpc.method}`);
-    }
-
-    if (this.sseController && response) {
+    if (response !== null && this.sseController) {
       try {
         this.sseController.enqueue(new TextEncoder().encode(sseEvent('message', response)));
       } catch {
-        // Controller may have been closed during SSE reconnection — message lost
         console.warn(`SSE write failed for ${rpc.method} — client may have reconnected`);
       }
     }
 
     return new Response('', { status: 202 });
+  }
+
+  /** Streamable HTTP transport: POST /streamable — processes JSON-RPC and returns response directly. */
+  private async handleStreamablePost(request: Request): Promise<Response> {
+    if (!this.userId) {
+      return new Response(JSON.stringify(jsonRpcError(undefined, -32600, 'Session not authenticated')), {
+        status: 401,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    let rpc: JsonRpcRequest;
+    try {
+      rpc = await request.json();
+    } catch {
+      return new Response(JSON.stringify(jsonRpcError(undefined, -32700, 'Parse error: invalid JSON')), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const response = await this.processRpcMessage(rpc);
+
+    if (response === null) {
+      return new Response('', { status: 202 });
+    }
+
+    return new Response(JSON.stringify(response), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
   }
 }

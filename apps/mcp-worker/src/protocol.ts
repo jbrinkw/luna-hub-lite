@@ -27,5 +27,6 @@ export function jsonRpcError(id: string | number | undefined, code: number, mess
 }
 
 export function sseEvent(event: string, data: unknown): string {
-  return `event: ${event}\ndata: ${JSON.stringify(data)}\n\n`;
+  const serialized = typeof data === 'string' ? data : JSON.stringify(data);
+  return `event: ${event}\ndata: ${serialized}\n\n`;
 }

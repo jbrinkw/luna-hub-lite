@@ -9,8 +9,9 @@ export interface Env {
   SUPABASE_SERVICE_ROLE_KEY: string;
 }
 
-const CORS_HEADERS = {
+const CORS_HEADERS: Record<string, string> = {
   'Access-Control-Allow-Origin': '*',
+  'Access-Control-Expose-Headers': 'Mcp-Session-Id',
 };
 
 function jsonResponse(body: Record<string, unknown>, status: number): Response {
@@ -29,8 +30,8 @@ export default {
       return new Response(null, {
         headers: {
           ...CORS_HEADERS,
-          'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-          'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+          'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
+          'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id',
         },
       });
     }
@@ -127,7 +128,90 @@ export default {
       return jsonResponse({ sessionId, sseUrl: `/sse?sessionId=${sessionId}` }, 200);
     }
 
-    // SSE connection: GET /sse
+    // Streamable HTTP transport (MCP 2025-03-26): POST /sse
+    // Client sends JSON-RPC messages via POST, server responds with JSON or SSE.
+    // Session tracked via Mcp-Session-Id header.
+    if (url.pathname === '/sse' && request.method === 'POST') {
+      const authHeader = request.headers.get('Authorization');
+      if (!authHeader?.startsWith('Bearer ')) {
+        return new Response(null, {
+          status: 401,
+          headers: {
+            'WWW-Authenticate': `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+            ...CORS_HEADERS,
+          },
+        });
+      }
+
+      const token = authHeader.slice(7);
+      const supabase = createServiceClient(env);
+      const userId = await authenticateJwt(supabase, token);
+      if (!userId) {
+        return new Response(null, {
+          status: 401,
+          headers: {
+            'WWW-Authenticate': `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+            ...CORS_HEADERS,
+          },
+        });
+      }
+
+      const mcpSessionId = request.headers.get('Mcp-Session-Id');
+      let stub: DurableObjectStub;
+      let doId: string;
+
+      if (mcpSessionId) {
+        // Existing session — look up the DO
+        let id: DurableObjectId;
+        try {
+          id = env.MCP_SESSION.idFromString(mcpSessionId);
+        } catch {
+          return jsonResponse({ error: 'Invalid Mcp-Session-Id' }, 400);
+        }
+        stub = env.MCP_SESSION.get(id);
+        doId = mcpSessionId;
+      } else {
+        // New session — create DO and initialize with userId
+        const id = env.MCP_SESSION.newUniqueId();
+        doId = id.toString();
+        stub = env.MCP_SESSION.get(id);
+
+        const doInitUrl = new URL(request.url);
+        doInitUrl.pathname = '/init';
+        doInitUrl.searchParams.set('userId', userId);
+        const initResp = await stub.fetch(new Request(doInitUrl.toString()));
+        if (!initResp.ok) {
+          return jsonResponse({ error: 'Failed to initialize session' }, 500);
+        }
+      }
+
+      // Forward JSON-RPC to the DO's streamable handler
+      const doUrl = new URL(request.url);
+      doUrl.pathname = '/streamable';
+      const doResponse = await stub.fetch(
+        new Request(doUrl.toString(), {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: request.body,
+        }),
+      );
+
+      return new Response(doResponse.body, {
+        status: doResponse.status,
+        headers: {
+          ...Object.fromEntries(doResponse.headers),
+          ...CORS_HEADERS,
+          'Mcp-Session-Id': doId,
+        },
+      });
+    }
+
+    // Session termination: DELETE /sse — not supported
+    if (url.pathname === '/sse' && request.method === 'DELETE') {
+      return new Response(null, { status: 405, headers: CORS_HEADERS });
+    }
+
+    // Legacy SSE transport: GET /sse
     // Supports two flows:
     //   1. (Preferred) GET /sse?sessionId=xxx — uses pre-authenticated session from POST /auth
     //   2. (Legacy)    GET /sse?apiKey=xxx   — authenticates inline, creates new DO
