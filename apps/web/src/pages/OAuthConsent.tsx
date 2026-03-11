@@ -73,8 +73,11 @@ export function OAuthConsent() {
       if (approveErr) {
         setError(approveErr.message);
         setDeciding(false);
-      } else {
+      } else if (data?.redirect_url) {
         window.location.href = data.redirect_url;
+      } else {
+        setError('No redirect URL in approval response');
+        setDeciding(false);
       }
     } catch (e: any) {
       setError(e.message || 'Failed to approve');
@@ -91,8 +94,11 @@ export function OAuthConsent() {
       if (denyErr) {
         setError(denyErr.message);
         setDeciding(false);
-      } else {
+      } else if (data?.redirect_url) {
         window.location.href = data.redirect_url;
+      } else {
+        setError('No redirect URL in denial response');
+        setDeciding(false);
       }
     } catch (e: any) {
       setError(e.message || 'Failed to deny');

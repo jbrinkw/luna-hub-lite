@@ -156,19 +156,26 @@ export class McpSession implements DurableObject {
     let response;
 
     switch (rpc.method) {
-      case 'initialize':
+      case 'initialize': {
+        // Negotiate protocol version: respond with what the client requested
+        // if we support it, otherwise fall back to our baseline.
+        const clientVersion = (rpc.params as any)?.protocolVersion || '2024-11-05';
+        const supportedVersions = ['2024-11-05', '2025-03-26'];
+        const negotiatedVersion = supportedVersions.includes(clientVersion) ? clientVersion : '2024-11-05';
         response = jsonRpcSuccess(rpc.id, {
-          protocolVersion: '2024-11-05',
+          protocolVersion: negotiatedVersion,
           capabilities: { tools: {} },
           serverInfo: { name: 'luna-hub-mcp', version: '1.0.0' },
         });
         break;
+      }
 
       case 'ping':
         response = jsonRpcSuccess(rpc.id, {});
         break;
 
       case 'notifications/initialized':
+      case 'notifications/cancelled':
         return new Response('', { status: 202 });
 
       case 'resources/list':
@@ -212,7 +219,11 @@ export class McpSession implements DurableObject {
           try {
             if ('extensionName' in tool) {
               // Extension tool: check enabled status, then decrypt credentials via RPC
-              const extensionName = (tool as any).extensionName;
+              const extensionName = (tool as any).extensionName as string | undefined;
+              if (!extensionName) {
+                response = jsonRpcSuccess(rpc.id, toolError('Invalid extension tool definition'));
+                break;
+              }
               const { data: settings } = await this.supabase
                 .schema('hub')
                 .from('extension_settings')

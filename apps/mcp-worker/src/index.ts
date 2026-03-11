@@ -58,18 +58,31 @@ export default {
     // from the MCP server itself (required by MCP OAuth spec)
     if (url.pathname === '/.well-known/oauth-authorization-server') {
       const asMetadataUrl = `${env.SUPABASE_URL}/auth/v1/.well-known/oauth-authorization-server`;
-      const upstream = await fetch(asMetadataUrl, {
-        headers: { Accept: 'application/json' },
-      });
-      const metadata = await upstream.json();
-      return new Response(JSON.stringify(metadata), {
-        status: upstream.status,
-        headers: {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*',
-          'Cache-Control': 'public, max-age=3600',
-        },
-      });
+      try {
+        const upstream = await fetch(asMetadataUrl, {
+          headers: { Accept: 'application/json' },
+        });
+        if (!upstream.ok) {
+          return new Response(JSON.stringify({ error: 'OAuth AS metadata unavailable' }), {
+            status: 502,
+            headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+          });
+        }
+        const metadata = await upstream.json();
+        return new Response(JSON.stringify(metadata), {
+          status: 200,
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*',
+            'Cache-Control': 'public, max-age=3600',
+          },
+        });
+      } catch {
+        return new Response(JSON.stringify({ error: 'Failed to fetch OAuth AS metadata' }), {
+          status: 502,
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        });
+      }
     }
 
     // Health check
@@ -106,7 +119,10 @@ export default {
       const doInitUrl = new URL(request.url);
       doInitUrl.pathname = '/init';
       doInitUrl.searchParams.set('userId', userId);
-      await stub.fetch(new Request(doInitUrl.toString()));
+      const initResponse = await stub.fetch(new Request(doInitUrl.toString()));
+      if (!initResponse.ok) {
+        return jsonResponse({ error: 'Failed to initialize session' }, 500);
+      }
 
       return jsonResponse({ sessionId, sseUrl: `/sse?sessionId=${sessionId}` }, 200);
     }
@@ -137,7 +153,10 @@ export default {
         const doInitUrl = new URL(request.url);
         doInitUrl.pathname = '/init';
         doInitUrl.searchParams.set('userId', userId);
-        await stub.fetch(new Request(doInitUrl.toString()));
+        const initResp = await stub.fetch(new Request(doInitUrl.toString()));
+        if (!initResp.ok) {
+          return jsonResponse({ error: 'Failed to initialize session' }, 500);
+        }
 
         const doUrl = new URL(request.url);
         doUrl.pathname = '/sse';

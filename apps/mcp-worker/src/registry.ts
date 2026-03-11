@@ -26,7 +26,7 @@ export async function buildUserTools(
     .select('app_name')
     .eq('user_id', userId);
 
-  if (actErr) throw new Error(`Failed to load activations: ${actErr.message}`);
+  if (actErr) console.error(`Failed to load activations: ${actErr.message}`);
 
   const activeApps = new Set((activations || []).map((a: any) => a.app_name));
 
@@ -38,7 +38,7 @@ export async function buildUserTools(
     .eq('user_id', userId)
     .eq('enabled', false);
 
-  if (toolErr) throw new Error(`Failed to load tool config: ${toolErr.message}`);
+  if (toolErr) console.error(`Failed to load tool config: ${toolErr.message}`);
 
   const disabledTools = new Set((toolConfig || []).map((t: any) => t.tool_name));
 
@@ -59,7 +59,7 @@ export async function buildUserTools(
     .select('extension_name, enabled')
     .eq('user_id', userId);
 
-  if (extErr) throw new Error(`Failed to load extension settings: ${extErr.message}`);
+  if (extErr) console.error(`Failed to load extension settings: ${extErr.message}`);
 
   const enabledExtensions = new Set(
     (extensionSettings || []).filter((e: any) => e.enabled).map((e: any) => e.extension_name),
