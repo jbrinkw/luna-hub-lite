@@ -33,7 +33,7 @@ export function SideNav() {
                 onClick={() => navigate(item.path)}
                 aria-current={active ? 'page' : undefined}
                 className={[
-                  'flex items-center gap-3 w-full px-4 py-2.5 text-sm font-medium rounded-r-lg transition-colors cursor-pointer',
+                  'flex items-center gap-3 w-full px-4 py-2.5 text-sm font-medium rounded-r-lg transition-colors cursor-pointer focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-inset',
                   active
                     ? 'border-l-[3px] border-blue-600 bg-blue-50 text-blue-700'
                     : 'border-l-[3px] border-transparent text-slate-600 hover:bg-slate-50 hover:text-slate-900',

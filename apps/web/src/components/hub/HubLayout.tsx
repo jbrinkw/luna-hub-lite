@@ -15,7 +15,9 @@ export function HubLayout({ title, children }: HubLayoutProps) {
       <div className="px-6 py-2 border-b border-slate-200 bg-white">
         <ModuleSwitcher />
       </div>
-      <div className="flex min-h-[calc(100vh-theme(spacing.14)-theme(spacing.14))]">
+      {/* min-h subtracts header (3.5rem) + module switcher row (~2.75rem) */}
+      <div className="flex min-h-[calc(100vh-6.25rem)]">
+        {/* TODO: Add mobile hamburger menu — desktop-first, mobile nav deferred */}
         <aside className="hidden md:block w-60 border-r border-slate-200 bg-white">
           <SideNav />
         </aside>
