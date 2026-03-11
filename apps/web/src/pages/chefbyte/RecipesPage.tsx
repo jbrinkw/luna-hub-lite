@@ -119,24 +119,17 @@ export function computeStockStatus(
   return 'NO STOCK';
 }
 
-function stockStatusStyle(status: StockStatus): React.CSSProperties {
-  const base: React.CSSProperties = {
-    display: 'inline-block',
-    padding: '2px 8px',
-    borderRadius: '4px',
-    fontSize: '12px',
-    fontWeight: 600,
-    color: '#fff',
-  };
+function stockBadgeClass(status: StockStatus): string {
+  const base = 'inline-block px-2 py-0.5 rounded text-xs font-semibold text-white';
   switch (status) {
     case 'CAN MAKE':
-      return { ...base, background: '#2f9e44' };
+      return `${base} bg-green-600`;
     case 'PARTIAL':
-      return { ...base, background: '#ff9800' };
+      return `${base} bg-amber-500`;
     case 'NO STOCK':
-      return { ...base, background: '#d33' };
+      return `${base} bg-red-600`;
     case 'N/A':
-      return { ...base, background: '#9ca3af', color: '#fff' };
+      return `${base} bg-slate-400`;
   }
 }
 
@@ -284,7 +277,7 @@ export function RecipesPage() {
   if (loading) {
     return (
       <ChefLayout title="Recipes">
-        <div style={{ padding: '20px' }} data-testid="recipes-loading">
+        <div className="p-5" data-testid="recipes-loading">
           Loading recipes...
         </div>
       </ChefLayout>
@@ -294,16 +287,7 @@ export function RecipesPage() {
   return (
     <ChefLayout title="Recipes">
       {loadError && (
-        <div
-          style={{
-            background: '#fff3cd',
-            border: '1px solid #ffc107',
-            borderRadius: 8,
-            padding: '12px 16px',
-            marginBottom: 16,
-          }}
-          data-testid="load-error"
-        >
+        <div className="bg-amber-50 border border-amber-400 rounded-lg px-4 py-3 mb-4" data-testid="load-error">
           <strong>Error:</strong> {loadError}
         </div>
       )}
@@ -311,25 +295,13 @@ export function RecipesPage() {
       {/* ============================================================ */}
       {/*  HEADER                                                       */}
       {/* ============================================================ */}
-      <div className="recipesHeader">
-        <h1 style={{ margin: 0 }}>Recipes</h1>
-        <div className="headerActions" style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+      <div className="flex items-center justify-between mb-4">
+        <h1 className="m-0 text-2xl font-bold text-slate-900">Recipes</h1>
+        <div className="flex gap-2 flex-wrap">
           <Link
             to="/chef/recipes/new"
             data-testid="new-recipe-btn"
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              padding: '12px 16px',
-              textDecoration: 'none',
-              borderRadius: '6px',
-              fontWeight: 600,
-              fontSize: '14px',
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-            }}
+            className="inline-flex items-center justify-center px-4 py-3 no-underline rounded-md font-semibold text-sm bg-emerald-600 text-white hover:bg-emerald-700 transition-colors"
           >
             + New Recipe
           </Link>
@@ -339,7 +311,7 @@ export function RecipesPage() {
       {/* ============================================================ */}
       {/*  FILTERS                                                      */}
       {/* ============================================================ */}
-      <div data-testid="recipes-filters" style={{ margin: '16px 0' }}>
+      <div data-testid="recipes-filters" className="mb-4">
         <input
           type="text"
           placeholder="Search recipes..."
@@ -347,65 +319,47 @@ export function RecipesPage() {
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           data-testid="recipe-search"
-          style={{
-            width: '100%',
-            padding: '10px 12px',
-            border: '1px solid #ccc',
-            borderRadius: '6px',
-            fontSize: '14px',
-            marginBottom: '8px',
-          }}
+          className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
         />
-        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="flex gap-2 flex-wrap items-center">
           <button
             onClick={() => setCanBeMadeOnly(!canBeMadeOnly)}
             data-testid="can-be-made-filter"
-            style={{
-              padding: '6px 14px',
-              borderRadius: '16px',
-              border: canBeMadeOnly ? '1px solid #2f9e44' : '1px solid #ddd',
-              background: canBeMadeOnly ? '#ecfdf5' : '#fff',
-              color: canBeMadeOnly ? '#2f9e44' : '#4b5563',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 500,
-            }}
+            className={[
+              'px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors',
+              canBeMadeOnly
+                ? 'border border-green-600 bg-green-50 text-green-600'
+                : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
+            ].join(' ')}
           >
             Can Be Made
           </button>
           <button
             onClick={() => setMaxActiveTime(maxActiveTime === 30 ? null : 30)}
             data-testid="active-time-filter"
-            style={{
-              padding: '6px 14px',
-              borderRadius: '16px',
-              border: maxActiveTime === 30 ? '1px solid #1e66f5' : '1px solid #ddd',
-              background: maxActiveTime === 30 ? '#eff6ff' : '#fff',
-              color: maxActiveTime === 30 ? '#1e66f5' : '#4b5563',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: 500,
-            }}
+            className={[
+              'px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors',
+              maxActiveTime === 30
+                ? 'border border-emerald-600 bg-emerald-50 text-emerald-600'
+                : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
+            ].join(' ')}
           >
             &lt; 30 min
           </button>
 
           {/* High Protein filter + edit threshold */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+          <div className="inline-flex items-center gap-0.5">
             <button
               onClick={() => setHighProteinOnly(!highProteinOnly)}
               data-testid="high-protein-filter"
-              style={{
-                padding: '6px 14px',
-                borderRadius: editingThreshold === 'protein' ? '16px 0 0 16px' : '16px',
-                border: highProteinOnly ? '1px solid #7c3aed' : '1px solid #ddd',
-                borderRight: editingThreshold === 'protein' ? 'none' : undefined,
-                background: highProteinOnly ? '#f5f3ff' : '#fff',
-                color: highProteinOnly ? '#7c3aed' : '#4b5563',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: 500,
-              }}
+              className={[
+                'px-3.5 py-1.5 text-xs font-medium transition-colors',
+                editingThreshold === 'protein' ? 'rounded-l-full' : 'rounded-full',
+                highProteinOnly
+                  ? 'border border-violet-600 bg-violet-50 text-violet-600'
+                  : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
+                editingThreshold === 'protein' ? 'border-r-0' : '',
+              ].join(' ')}
             >
               High Protein ({proteinThreshold}g/100cal)
             </button>
@@ -417,18 +371,9 @@ export function RecipesPage() {
                 }}
                 data-testid="edit-protein-threshold"
                 title="Edit threshold"
-                style={{
-                  padding: '4px 6px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  background: '#f9fafb',
-                  cursor: 'pointer',
-                  fontSize: '11px',
-                  color: '#666',
-                  lineHeight: 1,
-                }}
+                className="px-1.5 py-1 border border-slate-300 rounded bg-slate-50 text-[11px] text-slate-500 hover:bg-slate-100 transition-colors"
               >
-                ✎
+                &#x270E;
               </button>
             ) : (
               <form
@@ -445,7 +390,7 @@ export function RecipesPage() {
                   }
                   setEditingThreshold(null);
                 }}
-                style={{ display: 'inline-flex', alignItems: 'center' }}
+                className="inline-flex items-center"
               >
                 <input
                   type="number"
@@ -455,14 +400,7 @@ export function RecipesPage() {
                   step="0.5"
                   min="0"
                   data-testid="protein-threshold-input"
-                  style={{
-                    width: '55px',
-                    padding: '5px 4px',
-                    border: '1px solid #7c3aed',
-                    borderRadius: '0',
-                    fontSize: '13px',
-                    textAlign: 'center',
-                  }}
+                  className="w-14 px-1 py-1 border border-violet-600 rounded-none text-xs text-center focus:outline-none"
                   onBlur={() => {
                     const val = parseFloat(thresholdInput);
                     if (!isNaN(val) && val > 0) {
@@ -479,16 +417,7 @@ export function RecipesPage() {
                 <button
                   type="submit"
                   data-testid="save-protein-threshold"
-                  style={{
-                    padding: '5px 8px',
-                    border: '1px solid #7c3aed',
-                    borderLeft: 'none',
-                    borderRadius: '0 16px 16px 0',
-                    background: '#7c3aed',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                  }}
+                  className="px-2 py-1 border border-violet-600 border-l-0 rounded-r-full bg-violet-600 text-white text-xs hover:bg-violet-700 transition-colors"
                 >
                   OK
                 </button>
@@ -497,21 +426,18 @@ export function RecipesPage() {
           </div>
 
           {/* High Carbs filter + edit threshold */}
-          <div style={{ display: 'inline-flex', alignItems: 'center', gap: '2px' }}>
+          <div className="inline-flex items-center gap-0.5">
             <button
               onClick={() => setHighCarbsOnly(!highCarbsOnly)}
               data-testid="high-carbs-filter"
-              style={{
-                padding: '6px 14px',
-                borderRadius: editingThreshold === 'carbs' ? '16px 0 0 16px' : '16px',
-                border: highCarbsOnly ? '1px solid #d97706' : '1px solid #ddd',
-                borderRight: editingThreshold === 'carbs' ? 'none' : undefined,
-                background: highCarbsOnly ? '#fffbeb' : '#fff',
-                color: highCarbsOnly ? '#d97706' : '#4b5563',
-                cursor: 'pointer',
-                fontSize: '13px',
-                fontWeight: 500,
-              }}
+              className={[
+                'px-3.5 py-1.5 text-xs font-medium transition-colors',
+                editingThreshold === 'carbs' ? 'rounded-l-full' : 'rounded-full',
+                highCarbsOnly
+                  ? 'border border-amber-600 bg-amber-50 text-amber-600'
+                  : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
+                editingThreshold === 'carbs' ? 'border-r-0' : '',
+              ].join(' ')}
             >
               High Carbs ({carbsThreshold}g/100cal)
             </button>
@@ -523,18 +449,9 @@ export function RecipesPage() {
                 }}
                 data-testid="edit-carbs-threshold"
                 title="Edit threshold"
-                style={{
-                  padding: '4px 6px',
-                  border: '1px solid #ddd',
-                  borderRadius: '4px',
-                  background: '#f9fafb',
-                  cursor: 'pointer',
-                  fontSize: '11px',
-                  color: '#666',
-                  lineHeight: 1,
-                }}
+                className="px-1.5 py-1 border border-slate-300 rounded bg-slate-50 text-[11px] text-slate-500 hover:bg-slate-100 transition-colors"
               >
-                ✎
+                &#x270E;
               </button>
             ) : (
               <form
@@ -551,7 +468,7 @@ export function RecipesPage() {
                   }
                   setEditingThreshold(null);
                 }}
-                style={{ display: 'inline-flex', alignItems: 'center' }}
+                className="inline-flex items-center"
               >
                 <input
                   type="number"
@@ -561,14 +478,7 @@ export function RecipesPage() {
                   step="0.5"
                   min="0"
                   data-testid="carbs-threshold-input"
-                  style={{
-                    width: '55px',
-                    padding: '5px 4px',
-                    border: '1px solid #d97706',
-                    borderRadius: '0',
-                    fontSize: '13px',
-                    textAlign: 'center',
-                  }}
+                  className="w-14 px-1 py-1 border border-amber-600 rounded-none text-xs text-center focus:outline-none"
                   onBlur={() => {
                     const val = parseFloat(thresholdInput);
                     if (!isNaN(val) && val > 0) {
@@ -585,16 +495,7 @@ export function RecipesPage() {
                 <button
                   type="submit"
                   data-testid="save-carbs-threshold"
-                  style={{
-                    padding: '5px 8px',
-                    border: '1px solid #d97706',
-                    borderLeft: 'none',
-                    borderRadius: '0 16px 16px 0',
-                    background: '#d97706',
-                    color: '#fff',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                  }}
+                  className="px-2 py-1 border border-amber-600 border-l-0 rounded-r-full bg-amber-600 text-white text-xs hover:bg-amber-700 transition-colors"
                 >
                   OK
                 </button>
@@ -607,8 +508,12 @@ export function RecipesPage() {
       {/* ============================================================ */}
       {/*  RECIPE CARDS                                                 */}
       {/* ============================================================ */}
-      <div data-testid="recipe-list" className="recipesList">
-        {filteredRecipes.length === 0 && <p data-testid="no-recipes">No recipes found.</p>}
+      <div data-testid="recipe-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        {filteredRecipes.length === 0 && (
+          <p data-testid="no-recipes" className="text-slate-500">
+            No recipes found.
+          </p>
+        )}
 
         {filteredRecipes.map((recipe) => {
           const macros = computeRecipeMacros(recipe.recipe_ingredients, Number(recipe.base_servings));
@@ -618,33 +523,21 @@ export function RecipesPage() {
             <Link
               key={recipe.recipe_id}
               to={`/chef/recipes/${recipe.recipe_id}`}
-              className="recipeListItem"
               data-testid={`recipe-card-${recipe.recipe_id}`}
-              style={{
-                background: '#fff',
-                border: '1px solid #eee',
-                borderRadius: '10px',
-                padding: '16px',
-                display: 'block',
-                textDecoration: 'none',
-                color: 'inherit',
-              }}
+              className="bg-white border border-slate-200 rounded-xl p-4 block no-underline text-inherit hover:border-emerald-300 hover:shadow-sm transition-all"
             >
               <h3
-                style={{ margin: '0 0 4px', fontSize: '16px', fontWeight: 600 }}
+                className="m-0 mb-1 text-base font-semibold text-slate-900"
                 data-testid={`recipe-name-${recipe.recipe_id}`}
               >
                 {recipe.name}
               </h3>
               {recipe.description && (
-                <p
-                  style={{ fontSize: '0.85em', color: '#666', margin: '4px 0 0' }}
-                  data-testid={`recipe-desc-${recipe.recipe_id}`}
-                >
+                <p className="text-sm text-slate-500 mt-1 mb-0" data-testid={`recipe-desc-${recipe.recipe_id}`}>
                   {recipe.description.length > 60 ? recipe.description.slice(0, 60) + '...' : recipe.description}
                 </p>
               )}
-              <div style={{ display: 'flex', gap: '12px', fontSize: '13px', color: '#888', margin: '6px 0 10px' }}>
+              <div className="flex gap-3 text-xs text-slate-400 my-1.5">
                 <span data-testid={`recipe-servings-${recipe.recipe_id}`}>
                   {Number(recipe.base_servings)} serving{Number(recipe.base_servings) !== 1 ? 's' : ''}
                 </span>
@@ -657,40 +550,28 @@ export function RecipesPage() {
               </div>
 
               {/* Per-serving macros */}
-              <div
-                data-testid={`recipe-macros-${recipe.recipe_id}`}
-                className="recipeMacros"
-                style={{ marginBottom: '10px' }}
-              >
-                <div className="macroItem">
-                  <span className="value">{macros.calories}</span>
-                  <span className="label" style={{ fontSize: '12px', color: '#888', marginLeft: '2px' }}>
-                    Cal
-                  </span>
+              <div data-testid={`recipe-macros-${recipe.recipe_id}`} className="flex gap-3 mb-2.5 text-sm">
+                <div>
+                  <span className="font-semibold text-slate-900">{macros.calories}</span>
+                  <span className="text-xs text-slate-400 ml-0.5">Cal</span>
                 </div>
-                <div className="macroItem">
-                  <span className="value">{macros.protein}g</span>
-                  <span className="label" style={{ fontSize: '12px', color: '#888', marginLeft: '2px' }}>
-                    P
-                  </span>
+                <div>
+                  <span className="font-semibold text-slate-900">{macros.protein}g</span>
+                  <span className="text-xs text-slate-400 ml-0.5">P</span>
                 </div>
-                <div className="macroItem">
-                  <span className="value">{macros.carbs}g</span>
-                  <span className="label" style={{ fontSize: '12px', color: '#888', marginLeft: '2px' }}>
-                    C
-                  </span>
+                <div>
+                  <span className="font-semibold text-slate-900">{macros.carbs}g</span>
+                  <span className="text-xs text-slate-400 ml-0.5">C</span>
                 </div>
-                <div className="macroItem">
-                  <span className="value">{macros.fat}g</span>
-                  <span className="label" style={{ fontSize: '12px', color: '#888', marginLeft: '2px' }}>
-                    F
-                  </span>
+                <div>
+                  <span className="font-semibold text-slate-900">{macros.fat}g</span>
+                  <span className="text-xs text-slate-400 ml-0.5">F</span>
                 </div>
               </div>
 
               {/* Stock status */}
-              <div style={{ marginBottom: '8px' }}>
-                <span style={stockStatusStyle(status)} data-testid={`stock-status-${recipe.recipe_id}`}>
+              <div className="mb-2">
+                <span className={stockBadgeClass(status)} data-testid={`stock-status-${recipe.recipe_id}`}>
                   {status}
                 </span>
               </div>

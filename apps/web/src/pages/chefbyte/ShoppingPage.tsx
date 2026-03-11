@@ -399,7 +399,7 @@ export function ShoppingPage() {
   if (loading) {
     return (
       <ChefLayout title="Shopping">
-        <div style={{ padding: '20px' }} data-testid="shopping-loading">
+        <div className="p-5" data-testid="shopping-loading">
           Loading shopping list...
         </div>
       </ChefLayout>
@@ -408,10 +408,10 @@ export function ShoppingPage() {
 
   return (
     <ChefLayout title="Shopping">
-      <div style={{ padding: '20px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-          <h1 style={{ margin: 0 }}>Shopping List</h1>
-          <div style={{ display: 'flex', gap: '8px' }}>
+      <div className="p-5">
+        <div className="flex justify-between items-center mb-5">
+          <h1 className="m-0 text-2xl font-bold text-slate-900">Shopping List</h1>
+          <div className="flex gap-2">
             <button
               onClick={() => {
                 const missingLink = toBuy.filter(
@@ -438,56 +438,27 @@ export function ShoppingPage() {
               }}
               disabled={toBuy.length === 0}
               data-testid="walmart-cart-btn"
-              style={{
-                padding: '10px 16px',
-                background: '#0071ce',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: toBuy.length === 0 ? 'not-allowed' : 'pointer',
-                fontSize: '14px',
-                fontWeight: 600,
-                opacity: toBuy.length === 0 ? 0.5 : 1,
-              }}
+              className="px-4 py-2.5 bg-[#0071ce] text-white border-none rounded-md cursor-pointer text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
             >
               Open in Walmart
             </button>
             <button
               onClick={autoAddBelowMinStock}
               data-testid="auto-add-btn"
-              style={{
-                padding: '10px 16px',
-                background: '#1e66f5',
-                color: '#fff',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: 'pointer',
-                fontSize: '14px',
-                fontWeight: 600,
-              }}
+              className="px-4 py-2.5 bg-emerald-600 text-white border-none rounded-md cursor-pointer text-sm font-semibold hover:bg-emerald-700"
             >
               Auto-Add Below Min Stock
             </button>
           </div>
         </div>
 
-        {error && <div style={{ color: '#d33', fontSize: '14px', padding: '8px' }}>{error}</div>}
+        {error && <div className="text-red-600 text-sm p-2">{error}</div>}
 
         {/* ============================================================ */}
         {/*  ADD ITEM FORM                                                */}
         {/* ============================================================ */}
-        <div
-          data-testid="add-item-form"
-          style={{
-            background: '#f7f7f9',
-            padding: '16px',
-            borderRadius: '8px',
-            marginBottom: '20px',
-            display: 'flex',
-            gap: '12px',
-          }}
-        >
-          <div style={{ flex: 1, position: 'relative' }}>
+        <div data-testid="add-item-form" className="bg-slate-50 p-4 rounded-lg mb-5 flex gap-3">
+          <div className="flex-1 relative">
             <input
               type="text"
               placeholder="Item name"
@@ -495,41 +466,20 @@ export function ShoppingPage() {
               onChange={(e) => handleSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addItem()}
               data-testid="add-item-name"
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-              }}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
             />
             {/* Autocomplete dropdown */}
             {showDropdown && (
               <div
                 data-testid="product-dropdown"
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  background: '#fff',
-                  border: '1px solid #ccc',
-                  borderRadius: '4px',
-                  zIndex: 10,
-                  maxHeight: '200px',
-                  overflow: 'auto',
-                }}
+                className="absolute top-full left-0 right-0 bg-white border border-slate-300 rounded z-10 max-h-[200px] overflow-auto shadow-md"
               >
                 {searchResults.map((p) => (
                   <div
                     key={p.product_id}
                     onClick={() => selectProduct(p)}
                     data-testid={`dropdown-item-${p.product_id}`}
-                    style={{
-                      padding: '8px 12px',
-                      cursor: 'pointer',
-                    }}
+                    className="px-3 py-2 cursor-pointer hover:bg-slate-50"
                   >
                     {p.name}
                   </div>
@@ -544,27 +494,13 @@ export function ShoppingPage() {
             value={addQty}
             onChange={(e) => setAddQty(Number(e.target.value) || 1)}
             data-testid="add-item-qty"
-            style={{
-              width: '100px',
-              padding: '10px',
-              border: '1px solid #ddd',
-              borderRadius: '6px',
-              fontSize: '14px',
-            }}
+            className="w-[100px] px-3 py-2.5 border border-slate-300 rounded-md text-sm"
           />
           <button
             onClick={addItem}
             disabled={!searchText.trim()}
             data-testid="add-item-btn"
-            style={{
-              padding: '10px 20px',
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 600,
-            }}
+            className="px-5 py-2.5 bg-emerald-600 text-white border-none rounded-md cursor-pointer font-semibold hover:bg-emerald-700 disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Add
           </button>
@@ -573,35 +509,19 @@ export function ShoppingPage() {
         {/* ============================================================ */}
         {/*  TO BUY SECTION                                               */}
         {/* ============================================================ */}
-        <div
-          data-testid="to-buy-section"
-          style={{
-            background: '#fff',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            padding: '16px',
-            marginBottom: '20px',
-          }}
-        >
-          <h3 style={{ margin: '0 0 12px', fontSize: '16px', fontWeight: 600 }}>To Buy ({toBuy.length})</h3>
+        <div data-testid="to-buy-section" className="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+          <h3 className="m-0 mb-3 text-base font-semibold">To Buy ({toBuy.length})</h3>
           {toBuy.length === 0 ? (
-            <div data-testid="no-to-buy" style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+            <div data-testid="no-to-buy" className="text-center text-slate-400 py-5">
               No items to buy.
             </div>
           ) : (
-            <div data-testid="to-buy-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div data-testid="to-buy-list" className="flex flex-col gap-2">
               {toBuy.map((item) => (
                 <div
                   key={item.cart_item_id}
                   data-testid={`item-${item.cart_item_id}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '10px',
-                    background: '#f7f7f9',
-                    borderRadius: '6px',
-                  }}
+                  className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-md"
                 >
                   <input
                     type="checkbox"
@@ -609,24 +529,16 @@ export function ShoppingPage() {
                     onChange={() => togglePurchased(item)}
                     aria-label={`Mark ${item.products?.name ?? 'Unknown Product'} as purchased`}
                     data-testid={`check-${item.cart_item_id}`}
-                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                    className="cursor-pointer w-[18px] h-[18px]"
                   />
-                  <div style={{ flex: 1 }}>
+                  <div className="flex-1">
                     <strong>{item.products?.name ?? 'Unknown Product'}</strong>
-                    <span style={{ marginLeft: '12px', color: '#666' }}>{formatQty(item.qty_containers)}</span>
+                    <span className="ml-3 text-slate-500">{formatQty(item.qty_containers)}</span>
                   </div>
                   <button
                     onClick={() => removeItem(item.cart_item_id)}
                     data-testid={`remove-${item.cart_item_id}`}
-                    style={{
-                      padding: '4px 12px',
-                      background: 'transparent',
-                      color: '#888',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '12px',
-                    }}
+                    className="px-3 py-1 bg-transparent text-slate-500 border border-slate-200 rounded cursor-pointer text-xs hover:bg-slate-100"
                   >
                     Remove
                   </button>
@@ -639,58 +551,30 @@ export function ShoppingPage() {
         {/* ============================================================ */}
         {/*  PURCHASED SECTION                                            */}
         {/* ============================================================ */}
-        <div
-          data-testid="purchased-section"
-          style={{
-            background: '#fff',
-            border: '1px solid #ddd',
-            borderRadius: '8px',
-            padding: '16px',
-            marginBottom: '20px',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-            <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 600, color: '#666' }}>
-              Purchased ({purchased.length})
-            </h3>
+        <div data-testid="purchased-section" className="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+          <div className="flex justify-between items-center mb-3">
+            <h3 className="m-0 text-base font-semibold text-slate-500">Purchased ({purchased.length})</h3>
             {purchased.length > 0 && (
               <button
                 onClick={importToInventory}
                 data-testid="import-inventory-btn"
-                style={{
-                  padding: '6px 12px',
-                  background: '#2f9e44',
-                  color: '#fff',
-                  border: 'none',
-                  borderRadius: '4px',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                }}
+                className="px-3 py-1.5 bg-green-600 text-white border-none rounded cursor-pointer text-[13px] font-semibold hover:bg-green-700"
               >
                 Import to Inventory
               </button>
             )}
           </div>
           {purchased.length === 0 ? (
-            <div data-testid="no-purchased" style={{ textAlign: 'center', color: '#999', padding: '20px' }}>
+            <div data-testid="no-purchased" className="text-center text-slate-400 py-5">
               No purchased items.
             </div>
           ) : (
-            <div data-testid="purchased-list" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div data-testid="purchased-list" className="flex flex-col gap-2">
               {purchased.map((item) => (
                 <div
                   key={item.cart_item_id}
                   data-testid={`item-${item.cart_item_id}`}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '12px',
-                    padding: '10px',
-                    background: '#f0f0f0',
-                    borderRadius: '6px',
-                    opacity: 0.7,
-                  }}
+                  className="flex items-center gap-3 p-2.5 bg-slate-100 rounded-md opacity-70"
                 >
                   <input
                     type="checkbox"
@@ -698,24 +582,16 @@ export function ShoppingPage() {
                     onChange={() => togglePurchased(item)}
                     aria-label={`Unmark ${item.products?.name ?? 'Unknown Product'} as purchased`}
                     data-testid={`check-${item.cart_item_id}`}
-                    style={{ cursor: 'pointer', width: '18px', height: '18px' }}
+                    className="cursor-pointer w-[18px] h-[18px]"
                   />
-                  <div style={{ flex: 1, textDecoration: 'line-through', color: '#666' }}>
+                  <div className="flex-1 line-through text-slate-500">
                     <strong>{item.products?.name ?? 'Unknown Product'}</strong>
-                    <span style={{ marginLeft: '12px' }}>{formatQty(item.qty_containers)}</span>
+                    <span className="ml-3">{formatQty(item.qty_containers)}</span>
                   </div>
                   <button
                     onClick={() => removeItem(item.cart_item_id)}
                     data-testid={`remove-${item.cart_item_id}`}
-                    style={{
-                      padding: '4px 12px',
-                      background: 'transparent',
-                      color: '#888',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      cursor: 'pointer',
-                      fontSize: '12px',
-                    }}
+                    className="px-3 py-1 bg-transparent text-slate-500 border border-slate-200 rounded cursor-pointer text-xs hover:bg-slate-100"
                   >
                     Remove
                   </button>
@@ -728,22 +604,12 @@ export function ShoppingPage() {
         {/* ============================================================ */}
         {/*  CLEAR ALL BUTTON                                             */}
         {/* ============================================================ */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+        <div className="flex justify-end">
           <button
             onClick={handleClearAll}
             disabled={items.length === 0}
             data-testid="clear-all-btn"
-            style={{
-              padding: '10px 16px',
-              background: '#d33',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: items.length === 0 ? 'not-allowed' : 'pointer',
-              fontSize: '14px',
-              fontWeight: 600,
-              opacity: items.length === 0 ? 0.5 : 1,
-            }}
+            className="px-4 py-2.5 bg-red-600 text-white border-none rounded-md cursor-pointer text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed hover:bg-red-700"
           >
             Clear All
           </button>

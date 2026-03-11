@@ -286,12 +286,10 @@ export function MealPlanPage() {
   const selectedDayMeals = useMemo(() => {
     if (!selectedDay) return [];
     const raw = mealsByDay.get(selectedDay) ?? [];
-    // Sort: meal prep first, then planned (not completed), then completed (earliest first)
     return [...raw].sort((a, b) => {
       const groupA = a.meal_prep && !a.completed_at ? 0 : !a.completed_at ? 1 : 2;
       const groupB = b.meal_prep && !b.completed_at ? 0 : !b.completed_at ? 1 : 2;
       if (groupA !== groupB) return groupA - groupB;
-      // Within completed group, sort by completed_at ascending (earliest first)
       if (groupA === 2 && a.completed_at && b.completed_at) {
         return a.completed_at.localeCompare(b.completed_at);
       }
@@ -530,6 +528,25 @@ export function MealPlanPage() {
     await loadMeals();
   };
 
+  /* Helper: two-click delete button */
+  const DeleteBtn = ({ id, onConfirm, testId }: { id: string; onConfirm: () => Promise<void>; testId: string }) => (
+    <button
+      onClick={() => handleDelete(id, onConfirm)}
+      data-testid={testId}
+      className={[
+        'px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors',
+        confirmDeleteId === id
+          ? 'bg-red-600 text-white border-none'
+          : 'bg-transparent text-red-600 border border-red-600 hover:bg-red-50',
+      ].join(' ')}
+    >
+      {confirmDeleteId === id ? 'You sure?' : 'Delete'}
+    </button>
+  );
+
+  const inputCls =
+    'w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -537,7 +554,7 @@ export function MealPlanPage() {
   if (loading) {
     return (
       <ChefLayout title="Meal Plan">
-        <div style={{ padding: '20px' }} data-testid="mealplan-loading">
+        <div className="p-5" data-testid="mealplan-loading">
           Loading meal plan...
         </div>
       </ChefLayout>
@@ -566,112 +583,57 @@ export function MealPlanPage() {
       {/* ============================================================ */}
       {/*  TOP BAR                                                      */}
       {/* ============================================================ */}
-      <div
-        data-testid="week-nav"
-        style={{
-          marginBottom: '16px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <h1 style={{ margin: 0, fontSize: '1.4em' }}>Meal Plan</h1>
+      <div data-testid="week-nav" className="mb-4 flex justify-between items-center flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="m-0 text-xl font-bold text-slate-900">Meal Plan</h1>
           <button
             onClick={openAddModal}
             data-testid="add-meal-btn"
-            style={{
-              padding: '6px 14px',
-              background: '#2f9e44',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '13px',
-            }}
+            className="px-3.5 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
           >
             + Add Meal
           </button>
         </div>
-        <div style={{ display: 'flex', gap: '6px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div className="flex gap-1.5 items-center flex-wrap">
           <button
             onClick={prevWeek}
             data-testid="prev-week-btn"
-            style={{
-              padding: '6px 12px',
-              background: '#fff',
-              border: '1px solid #ddd',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-            }}
+            className="px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs hover:bg-slate-50 transition-colors"
           >
             Prev
           </button>
           <button
             onClick={goToday}
             data-testid="today-btn"
-            style={{
-              padding: '6px 12px',
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontWeight: 600,
-              fontSize: '13px',
-            }}
+            className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
           >
             Today
           </button>
           <button
             onClick={nextWeek}
             data-testid="next-week-btn"
-            style={{
-              padding: '6px 12px',
-              background: '#fff',
-              border: '1px solid #ddd',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '13px',
-            }}
+            className="px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs hover:bg-slate-50 transition-colors"
           >
             Next
           </button>
-          <span
-            data-testid="week-range"
-            style={{ marginLeft: '8px', fontWeight: 'bold', fontSize: '13px', color: '#555' }}
-          >
+          <span data-testid="week-range" className="ml-2 font-bold text-xs text-slate-500">
             {formatWeekRange(weekStart)}
           </span>
         </div>
       </div>
 
-      {error && <p style={{ color: '#d33', margin: '0 0 12px' }}>{error}</p>}
+      {error && <p className="text-red-600 m-0 mb-3">{error}</p>}
 
       {/* ============================================================ */}
       {/*  SIDE-BY-SIDE LAYOUT                                          */}
       {/* ============================================================ */}
-      <div style={{ display: 'flex', gap: '16px', alignItems: 'flex-start' }}>
+      <div className="flex gap-4 items-start">
         {/* ---------------------------------------------------------- */}
-        {/*  LEFT PANEL — Compact week list                             */}
+        {/*  LEFT PANEL -- Compact week list                            */}
         {/* ---------------------------------------------------------- */}
         <div
           data-testid="week-grid"
-          style={{
-            width: '280px',
-            minWidth: '280px',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '2px',
-            background: '#f0f0f0',
-            borderRadius: '8px',
-            overflow: 'hidden',
-            border: '1px solid #ddd',
-          }}
+          className="w-[280px] min-w-[280px] flex flex-col gap-0.5 bg-slate-100 rounded-lg overflow-hidden border border-slate-200"
         >
           {dayDates.map((date, i) => {
             const dayMeals = mealsByDay.get(date) ?? [];
@@ -684,41 +646,33 @@ export function MealPlanPage() {
                 key={date}
                 data-testid={`day-col-${date}`}
                 onClick={() => setSelectedDay(date)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'space-between',
-                  padding: '10px 14px',
-                  cursor: 'pointer',
-                  background: isToday ? '#e8f4fd' : isSelected ? '#f5f5f5' : '#fff',
-                  borderLeft: isSelected || isToday ? '3px solid #1e66f5' : '3px solid transparent',
-                  transition: 'background 0.15s',
-                }}
+                className={[
+                  'flex items-center justify-between px-3.5 py-2.5 cursor-pointer transition-colors border-l-[3px]',
+                  isToday
+                    ? 'bg-emerald-50 border-l-emerald-600'
+                    : isSelected
+                      ? 'bg-slate-50 border-l-emerald-600'
+                      : 'bg-white border-l-transparent hover:bg-slate-50',
+                ].join(' ')}
               >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <div className="flex items-center gap-2">
                   <span
-                    style={{ fontWeight: 600, fontSize: '13px', color: isToday ? '#1e66f5' : '#333', minWidth: '30px' }}
+                    className={[
+                      'font-semibold text-xs min-w-[30px]',
+                      isToday ? 'text-emerald-600' : 'text-slate-700',
+                    ].join(' ')}
                   >
                     {DAY_NAMES[i]}
                   </span>
-                  <span style={{ fontSize: '13px', color: '#666' }}>{formatDateShort(date)}</span>
+                  <span className="text-xs text-slate-500">{formatDateShort(date)}</span>
                   {isToday && (
-                    <span
-                      style={{
-                        fontSize: '10px',
-                        fontWeight: 700,
-                        color: '#1e66f5',
-                        background: '#d0e8ff',
-                        padding: '1px 6px',
-                        borderRadius: '3px',
-                      }}
-                    >
+                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded">
                       TODAY
                     </span>
                   )}
                 </div>
                 {mealCount > 0 && (
-                  <span style={{ fontSize: '12px', color: '#888' }}>
+                  <span className="text-xs text-slate-400">
                     {mealCount} meal{mealCount !== 1 ? 's' : ''}
                   </span>
                 )}
@@ -728,108 +682,60 @@ export function MealPlanPage() {
         </div>
 
         {/* ---------------------------------------------------------- */}
-        {/*  RIGHT PANEL — Selected day detail                          */}
+        {/*  RIGHT PANEL -- Selected day detail                         */}
         {/* ---------------------------------------------------------- */}
-        <div style={{ flex: 1, minWidth: 0 }}>
+        <div className="flex-1 min-w-0">
           {!selectedDay ? (
-            <div
-              style={{
-                padding: '40px 20px',
-                textAlign: 'center',
-                color: '#999',
-                fontSize: '15px',
-                background: '#fafafa',
-                borderRadius: '8px',
-                border: '1px solid #eee',
-              }}
-            >
+            <div className="py-10 px-5 text-center text-slate-400 text-sm bg-slate-50 rounded-lg border border-slate-200">
               Select a day to view details
             </div>
           ) : (
             <div data-testid="day-detail">
-              <h3 data-testid="day-detail-title" style={{ margin: '0 0 16px', fontSize: '1.1em', color: '#222' }}>
+              <h3 data-testid="day-detail-title" className="m-0 mb-4 text-base font-semibold text-slate-800">
                 {formatDateLong(selectedDay, selectedDayIndex)}
               </h3>
 
               {selectedDayMeals.length === 0 ? (
-                <p data-testid="no-meals" style={{ color: '#888', fontSize: '14px' }}>
+                <p data-testid="no-meals" className="text-slate-400 text-sm">
                   No meals planned. Click + Add Meal to get started.
                 </p>
               ) : (
-                <div data-testid="day-detail-table" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div data-testid="day-detail-table" className="flex flex-col gap-2.5">
                   {selectedDayMeals.map((meal) => {
                     const macros = entryMacros(meal);
                     return (
                       <div
                         key={meal.meal_id}
                         data-testid={`detail-row-${meal.meal_id}`}
-                        style={{
-                          background: '#fff',
-                          border: '1px solid #e8e8e8',
-                          borderRadius: '8px',
-                          padding: '14px 16px',
-                        }}
+                        className="bg-white border border-slate-200 rounded-lg p-3.5"
                       >
-                        {/* Also keep grid-meal testid for E2E compat */}
-                        <div
-                          data-testid={`grid-meal-${meal.meal_id}`}
-                          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}
-                        >
-                          <div style={{ flex: 1, minWidth: 0 }}>
-                            {/* Name */}
-                            <div style={{ fontWeight: 600, fontSize: '15px', color: '#111' }}>{entryName(meal)}</div>
+                        <div data-testid={`grid-meal-${meal.meal_id}`} className="flex justify-between items-start">
+                          <div className="flex-1 min-w-0">
+                            <div className="font-semibold text-[15px] text-slate-900">{entryName(meal)}</div>
 
-                            {/* Meal type badge */}
                             {meal.meal_type && (
                               <span
                                 data-testid={`meal-type-label-${meal.meal_id}`}
-                                style={{
-                                  display: 'inline-block',
-                                  marginTop: '4px',
-                                  fontSize: '11px',
-                                  background: '#eee',
-                                  padding: '2px 8px',
-                                  borderRadius: '3px',
-                                  textTransform: 'capitalize',
-                                  color: '#555',
-                                }}
+                                className="inline-block mt-1 text-[11px] bg-slate-200 px-2 py-0.5 rounded text-slate-600 capitalize"
                               >
                                 {meal.meal_type}
                               </span>
                             )}
 
-                            {/* Macros — text format, no emoji */}
                             {macros && (macros.calories > 0 || macros.protein > 0) && (
                               <div
                                 data-testid={`grid-macros-${meal.meal_id}`}
-                                style={{ fontSize: '13px', color: '#666', marginTop: '6px' }}
+                                className="text-xs text-slate-500 mt-1.5"
                               >
                                 {macros.calories}cal | {macros.protein}g P | {macros.carbs}g C | {macros.fat}g F
                               </div>
                             )}
 
-                            {/* Status badges + mode */}
-                            <div
-                              style={{
-                                display: 'flex',
-                                alignItems: 'center',
-                                gap: '6px',
-                                marginTop: '8px',
-                                flexWrap: 'wrap',
-                              }}
-                            >
+                            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                               {meal.completed_at && (
                                 <span
                                   data-testid={`done-badge-${meal.meal_id}`}
-                                  style={{
-                                    display: 'inline-block',
-                                    fontSize: '11px',
-                                    background: '#2f9e44',
-                                    color: '#fff',
-                                    padding: '2px 8px',
-                                    borderRadius: '3px',
-                                    fontWeight: 600,
-                                  }}
+                                  className="inline-block text-[11px] bg-green-600 text-white px-2 py-0.5 rounded font-semibold"
                                 >
                                   Done
                                 </span>
@@ -837,39 +743,19 @@ export function MealPlanPage() {
                               {meal.meal_prep && !meal.completed_at && (
                                 <span
                                   data-testid={`prep-badge-${meal.meal_id}`}
-                                  style={{
-                                    display: 'inline-block',
-                                    fontSize: '11px',
-                                    background: '#6c5ce7',
-                                    color: '#fff',
-                                    padding: '2px 8px',
-                                    borderRadius: '3px',
-                                    fontWeight: 600,
-                                  }}
+                                  className="inline-block text-[11px] bg-violet-600 text-white px-2 py-0.5 rounded font-semibold"
                                 >
                                   PREP
                                 </span>
                               )}
                               {!meal.meal_prep && !meal.completed_at && (
-                                <span style={{ fontSize: '11px', color: '#888' }}>Regular</span>
+                                <span className="text-[11px] text-slate-400">Regular</span>
                               )}
                               {meal.completed_at && (
-                                <span style={{ fontSize: '11px', color: '#888' }}>
-                                  at {formatTime(meal.completed_at)}
-                                </span>
+                                <span className="text-[11px] text-slate-400">at {formatTime(meal.completed_at)}</span>
                               )}
-                              {/* Prep toggle (hidden label for accessibility) */}
                               {!meal.completed_at && (
-                                <label
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    gap: '3px',
-                                    fontSize: '11px',
-                                    color: '#888',
-                                    cursor: 'pointer',
-                                  }}
-                                >
+                                <label className="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer">
                                   <input
                                     type="checkbox"
                                     checked={meal.meal_prep}
@@ -877,7 +763,7 @@ export function MealPlanPage() {
                                     disabled={!!meal.completed_at}
                                     aria-label={`Toggle meal prep for ${entryName(meal)}`}
                                     data-testid={`toggle-prep-${meal.meal_id}`}
-                                    style={{ width: '13px', height: '13px' }}
+                                    className="w-3.5 h-3.5"
                                   />
                                   Prep
                                 </label>
@@ -886,31 +772,13 @@ export function MealPlanPage() {
                           </div>
 
                           {/* Action buttons */}
-                          <div
-                            style={{
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '4px',
-                              marginLeft: '12px',
-                              flexShrink: 0,
-                            }}
-                          >
+                          <div className="flex flex-col gap-1 ml-3 shrink-0">
                             {!meal.completed_at ? (
                               <>
                                 <button
                                   onClick={() => markDone(meal.meal_id)}
                                   data-testid={`mark-done-${meal.meal_id}`}
-                                  style={{
-                                    padding: '5px 12px',
-                                    background: '#2f9e44',
-                                    color: '#fff',
-                                    border: 'none',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer',
-                                    fontWeight: 600,
-                                    fontSize: '12px',
-                                    whiteSpace: 'nowrap',
-                                  }}
+                                  className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-green-700 transition-colors"
                                 >
                                   Mark Done
                                 </button>
@@ -918,17 +786,7 @@ export function MealPlanPage() {
                                   <button
                                     onClick={() => markDone(meal.meal_id)}
                                     data-testid={`exec-prep-${meal.meal_id}`}
-                                    style={{
-                                      padding: '5px 12px',
-                                      background: '#6c5ce7',
-                                      color: '#fff',
-                                      border: 'none',
-                                      borderRadius: '4px',
-                                      cursor: 'pointer',
-                                      fontWeight: 600,
-                                      fontSize: '12px',
-                                      whiteSpace: 'nowrap',
-                                    }}
+                                    className="px-3 py-1 bg-violet-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-violet-700 transition-colors"
                                   >
                                     Execute Prep
                                   </button>
@@ -938,38 +796,16 @@ export function MealPlanPage() {
                               <button
                                 onClick={() => unmarkDone(meal.meal_id)}
                                 data-testid={`undo-done-${meal.meal_id}`}
-                                style={{
-                                  padding: '5px 12px',
-                                  background: '#fff',
-                                  color: '#f59e0b',
-                                  border: '1px solid #f59e0b',
-                                  borderRadius: '4px',
-                                  cursor: 'pointer',
-                                  fontWeight: 600,
-                                  fontSize: '12px',
-                                  whiteSpace: 'nowrap',
-                                }}
+                                className="px-3 py-1 bg-white text-amber-500 border border-amber-500 rounded text-xs font-semibold whitespace-nowrap hover:bg-amber-50 transition-colors"
                               >
                                 Undo
                               </button>
                             )}
-                            <button
-                              onClick={() => handleDelete(`meal-${meal.meal_id}`, () => deleteMeal(meal.meal_id))}
-                              data-testid={`delete-meal-${meal.meal_id}`}
-                              style={{
-                                padding: '5px 12px',
-                                background: confirmDeleteId === `meal-${meal.meal_id}` ? '#d33' : 'transparent',
-                                color: confirmDeleteId === `meal-${meal.meal_id}` ? '#fff' : '#d33',
-                                border: confirmDeleteId === `meal-${meal.meal_id}` ? 'none' : '1px solid #d33',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                fontWeight: 600,
-                                fontSize: '12px',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {confirmDeleteId === `meal-${meal.meal_id}` ? 'You sure?' : 'Delete'}
-                            </button>
+                            <DeleteBtn
+                              id={`meal-${meal.meal_id}`}
+                              onConfirm={() => deleteMeal(meal.meal_id)}
+                              testId={`delete-meal-${meal.meal_id}`}
+                            />
                           </div>
                         </div>
                       </div>
@@ -979,18 +815,10 @@ export function MealPlanPage() {
                   {/* TOTAL macros row */}
                   <div
                     data-testid="day-detail-total-row"
-                    style={{
-                      background: '#f7f7f9',
-                      border: '1px solid #e0e0e0',
-                      borderRadius: '8px',
-                      padding: '12px 16px',
-                      display: 'flex',
-                      justifyContent: 'space-between',
-                      alignItems: 'center',
-                    }}
+                    className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex justify-between items-center"
                   >
-                    <span style={{ fontWeight: 700, fontSize: '14px', color: '#222' }}>TOTAL</span>
-                    <span style={{ fontSize: '14px', color: '#444', fontWeight: 600 }}>
+                    <span className="font-bold text-sm text-slate-800">TOTAL</span>
+                    <span className="text-sm text-slate-600 font-semibold">
                       {dayTotals.calories} cal | {dayTotals.protein}g P | {dayTotals.carbs}g C | {dayTotals.fat}g F
                     </span>
                   </div>
@@ -999,55 +827,34 @@ export function MealPlanPage() {
 
               {/* Consumed items (food_logs + temp_items) */}
               {(selectedDayLogs.length > 0 || selectedDayTemps.length > 0) && (
-                <div data-testid="consumed-section" style={{ marginTop: '20px' }}>
-                  <h4 style={{ margin: '0 0 10px', fontSize: '14px', color: '#555' }}>Consumed</h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                <div data-testid="consumed-section" className="mt-5">
+                  <h4 className="m-0 mb-2.5 text-sm font-semibold text-slate-600">Consumed</h4>
+                  <div className="flex flex-col gap-1.5">
                     {selectedDayLogs.map((log) => {
                       const delId = `log-${log.log_id}`;
                       return (
                         <div
                           key={log.log_id}
                           data-testid={`consumed-log-${log.log_id}`}
-                          style={{
-                            padding: '8px 12px',
-                            border: '1px solid #e8e8e8',
-                            borderLeft: '4px solid #22c55e',
-                            borderRadius: '6px',
-                            background: '#f0faf4',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                          }}
+                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-green-50 flex justify-between items-center"
                         >
-                          <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                          <span className="font-semibold text-sm">
                             {log.products?.name ?? 'Unknown'}
-                            <span style={{ fontWeight: 400, color: '#666', fontSize: '13px', marginLeft: '8px' }}>
+                            <span className="font-normal text-slate-500 text-xs ml-2">
                               {Number(log.qty_consumed)} {log.unit}
                               {Number(log.qty_consumed) !== 1 ? 's' : ''}
                             </span>
                           </span>
-                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            <span style={{ fontSize: '13px', color: '#555' }}>
+                          <div className="flex gap-2 items-center">
+                            <span className="text-xs text-slate-500">
                               {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
                               {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
                             </span>
-                            <button
-                              onClick={() => handleDelete(delId, () => deleteFoodLog(log.log_id))}
-                              data-testid={`delete-log-${log.log_id}`}
-                              style={{
-                                padding: '4px 10px',
-                                background: confirmDeleteId === delId ? '#d33' : 'transparent',
-                                color: confirmDeleteId === delId ? '#fff' : '#d33',
-                                border: confirmDeleteId === delId ? 'none' : '1px solid #d33',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                fontWeight: 600,
-                                fontSize: '12px',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {confirmDeleteId === delId ? 'You sure?' : 'Delete'}
-                            </button>
+                            <DeleteBtn
+                              id={delId}
+                              onConfirm={() => deleteFoodLog(log.log_id)}
+                              testId={`delete-log-${log.log_id}`}
+                            />
                           </div>
                         </div>
                       );
@@ -1058,45 +865,22 @@ export function MealPlanPage() {
                         <div
                           key={item.temp_id}
                           data-testid={`consumed-temp-${item.temp_id}`}
-                          style={{
-                            padding: '8px 12px',
-                            border: '1px solid #e8e8e8',
-                            borderLeft: '4px solid #f59e0b',
-                            borderRadius: '6px',
-                            background: '#fffbeb',
-                            display: 'flex',
-                            justifyContent: 'space-between',
-                            alignItems: 'center',
-                          }}
+                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-amber-50 flex justify-between items-center"
                         >
-                          <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                          <span className="font-semibold text-sm">
                             {item.name}
-                            <span style={{ fontWeight: 400, color: '#888', fontSize: '12px', marginLeft: '6px' }}>
-                              quick-add
-                            </span>
+                            <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
                           </span>
-                          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                            <span style={{ fontSize: '13px', color: '#555' }}>
+                          <div className="flex gap-2 items-center">
+                            <span className="text-xs text-slate-500">
                               {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
                               {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
                             </span>
-                            <button
-                              onClick={() => handleDelete(delId, () => deleteTempItem(item.temp_id))}
-                              data-testid={`delete-temp-${item.temp_id}`}
-                              style={{
-                                padding: '4px 10px',
-                                background: confirmDeleteId === delId ? '#d33' : 'transparent',
-                                color: confirmDeleteId === delId ? '#fff' : '#d33',
-                                border: confirmDeleteId === delId ? 'none' : '1px solid #d33',
-                                borderRadius: '4px',
-                                cursor: 'pointer',
-                                fontWeight: 600,
-                                fontSize: '12px',
-                                whiteSpace: 'nowrap',
-                              }}
-                            >
-                              {confirmDeleteId === delId ? 'You sure?' : 'Delete'}
-                            </button>
+                            <DeleteBtn
+                              id={delId}
+                              onConfirm={() => deleteTempItem(item.temp_id)}
+                              testId={`delete-temp-${item.temp_id}`}
+                            />
                           </div>
                         </div>
                       );
@@ -1118,62 +902,37 @@ export function MealPlanPage() {
         title="Add Meal"
         testId="add-meal-modal"
       >
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>Date</label>
+        <div className="mb-3">
+          <label className="block text-sm font-semibold mb-1 text-slate-700">Date</label>
           <input
             type="date"
             value={addDate}
             onChange={(e) => setAddDate(e.target.value)}
             data-testid="add-meal-date"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid #ccc',
-              borderRadius: '6px',
-              fontSize: '14px',
-            }}
+            className={inputCls}
           />
         </div>
-        <div style={{ marginBottom: '12px', position: 'relative' }}>
-          <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>
-            Search recipe or product
-          </label>
+        <div className="mb-3 relative">
+          <label className="block text-sm font-semibold mb-1 text-slate-700">Search recipe or product</label>
           <input
             type="text"
             value={addSearchText}
             onChange={(e) => handleAddSearchInput(e.target.value)}
             data-testid="add-meal-search"
             placeholder="Type to search..."
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid #ccc',
-              borderRadius: '6px',
-              fontSize: '14px',
-            }}
+            className={inputCls}
           />
           {addShowDropdown && (
             <div
               data-testid="add-meal-dropdown"
-              style={{
-                position: 'absolute',
-                top: '100%',
-                left: 0,
-                right: 0,
-                background: '#fff',
-                border: '1px solid #ccc',
-                borderRadius: '4px',
-                zIndex: 10,
-                maxHeight: '200px',
-                overflow: 'auto',
-              }}
+              className="absolute top-full left-0 right-0 bg-white border border-slate-300 rounded shadow-lg z-10 max-h-[200px] overflow-auto"
             >
               {addSearchResults.map((item) => (
                 <div
                   key={`${item.type}-${item.id}`}
                   onClick={() => selectAddItem(item)}
                   data-testid={`add-dropdown-${item.type}-${item.id}`}
-                  style={{ padding: '8px 12px', cursor: 'pointer' }}
+                  className="px-3 py-2 cursor-pointer hover:bg-slate-50 text-sm"
                 >
                   {item.name} ({item.type})
                 </div>
@@ -1181,37 +940,24 @@ export function MealPlanPage() {
             </div>
           )}
         </div>
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>Servings</label>
+        <div className="mb-3">
+          <label className="block text-sm font-semibold mb-1 text-slate-700">Servings</label>
           <input
             type="number"
             min={0}
             value={addServings}
             onChange={(e) => setAddServings(Number(e.target.value) || 1)}
             data-testid="add-meal-servings"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid #ccc',
-              borderRadius: '6px',
-              fontSize: '14px',
-            }}
+            className={inputCls}
           />
         </div>
-        <div style={{ marginBottom: '12px' }}>
-          <label style={{ display: 'block', fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>Meal Type</label>
+        <div className="mb-3">
+          <label className="block text-sm font-semibold mb-1 text-slate-700">Meal Type</label>
           <select
             value={addMealType ?? ''}
             onChange={(e) => setAddMealType(e.target.value || null)}
             data-testid="add-meal-type-select"
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              border: '1px solid #ccc',
-              borderRadius: '6px',
-              fontSize: '14px',
-              background: '#fff',
-            }}
+            className={inputCls}
           >
             <option value="">Select type (optional)</option>
             <option value="breakfast">Breakfast</option>
@@ -1220,8 +966,8 @@ export function MealPlanPage() {
             <option value="snack">Snack</option>
           </select>
         </div>
-        <div style={{ marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <label>Meal Prep</label>
+        <div className="mb-3 flex items-center gap-2">
+          <label className="text-sm text-slate-700">Meal Prep</label>
           <input
             type="checkbox"
             checked={addMealPrep}
@@ -1229,11 +975,11 @@ export function MealPlanPage() {
             data-testid="add-meal-prep-toggle"
           />
         </div>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+        <div className="flex gap-2 justify-end">
           <button
             onClick={() => setShowAddModal(false)}
             data-testid="add-meal-cancel"
-            style={{ padding: '8px 16px', background: '#eee', border: 'none', borderRadius: '4px', cursor: 'pointer' }}
+            className="px-4 py-2 bg-slate-100 text-slate-600 rounded-md text-sm hover:bg-slate-200 transition-colors"
           >
             Cancel
           </button>
@@ -1241,15 +987,7 @@ export function MealPlanPage() {
             onClick={addMeal}
             disabled={!addSelected}
             data-testid="add-meal-confirm"
-            style={{
-              padding: '8px 16px',
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-              fontWeight: 600,
-            }}
+            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"
           >
             Add
           </button>

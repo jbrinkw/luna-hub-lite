@@ -474,7 +474,7 @@ export function HomePage() {
       .order('created_at')
       .limit(1);
     const defaultLocationId = (locations?.[0] as any)?.location_id;
-    if (!defaultLocationId) return; // No locations — can't import
+    if (!defaultLocationId) return; // No locations -- can't import
 
     // Get non-placeholder items from shopping list
     const { data: items } = await chefbyte()
@@ -578,7 +578,7 @@ export function HomePage() {
           if (unit === 'container') {
             containers = qty * ratio;
           } else {
-            // 'serving' unit — convert to containers
+            // 'serving' unit -- convert to containers
             containers = (qty * ratio) / spc;
           }
 
@@ -745,7 +745,14 @@ export function HomePage() {
 
   /* Helper: progress bar colors */
   const macroColors = {
-    calories: '#1e66f5',
+    calories: 'bg-emerald-600',
+    protein: 'bg-green-500',
+    carbs: 'bg-amber-500',
+    fat: 'bg-red-500',
+  } as const;
+
+  const macroColorValues = {
+    calories: '#059669',
     protein: '#22c55e',
     carbs: '#f59e0b',
     fat: '#ef4444',
@@ -757,6 +764,7 @@ export function HomePage() {
     plannedValue,
     goal,
     color,
+    colorClass,
     label,
     unit,
     testId,
@@ -765,6 +773,7 @@ export function HomePage() {
     plannedValue?: number;
     goal: number;
     color: string;
+    colorClass: string;
     label: string;
     unit: string;
     testId: string;
@@ -772,51 +781,30 @@ export function HomePage() {
     const pct = pctOf(value, goal);
     const plannedPct = plannedValue ? Math.min(pctOf(value + plannedValue, goal), 100) : 0;
     return (
-      <div
-        data-testid={testId}
-        style={{ background: '#f7f7f9', border: '1px solid #eee', borderRadius: '8px', padding: '12px' }}
-      >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
-          <label style={{ fontWeight: 600, fontSize: '14px' }}>{label}</label>
-          <span style={{ fontSize: '12px', fontWeight: 600, color }}>{pct}%</span>
+      <div data-testid={testId} className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+        <div className="flex justify-between items-center mb-1.5">
+          <label className="font-semibold text-sm text-slate-700">{label}</label>
+          <span className="text-xs font-semibold tabular-nums" style={{ color }}>
+            {pct}%
+          </span>
         </div>
         <div
           data-testid={`${testId}-bar`}
-          style={{
-            width: '100%',
-            height: '8px',
-            background: '#e5e7eb',
-            borderRadius: '4px',
-            overflow: 'hidden',
-            marginBottom: '4px',
-            position: 'relative',
-          }}
+          className="w-full h-2 bg-slate-200 rounded-full overflow-hidden relative mb-1"
         >
           {plannedPct > pct && (
             <div
               data-testid={`${testId}-planned`}
-              style={{
-                position: 'absolute',
-                width: `${plannedPct}%`,
-                height: '100%',
-                background: color,
-                opacity: 0.3,
-                borderRadius: '4px',
-              }}
+              className={`absolute inset-y-0 left-0 rounded-full ${colorClass} opacity-30`}
+              style={{ width: `${plannedPct}%` }}
             />
           )}
           <div
-            style={{
-              position: 'relative',
-              width: `${pct}%`,
-              height: '100%',
-              background: color,
-              borderRadius: '4px',
-              transition: 'width 0.3s ease',
-            }}
+            className={`relative h-full rounded-full ${colorClass} transition-all duration-300`}
+            style={{ width: `${pct}%` }}
           />
         </div>
-        <div style={{ fontSize: '13px', color: '#555' }}>
+        <div className="text-xs text-slate-500">
           {Math.round(value)}
           {plannedValue ? ` + ${Math.round(plannedValue)} planned` : ''} / {goal}
           {unit}
@@ -830,91 +818,64 @@ export function HomePage() {
     <button
       onClick={() => handleDelete(id, onConfirm)}
       data-testid={testId}
-      style={{
-        padding: '4px 10px',
-        background: confirmDeleteId === id ? '#d33' : 'transparent',
-        color: confirmDeleteId === id ? '#fff' : '#d33',
-        border: confirmDeleteId === id ? 'none' : '1px solid #d33',
-        borderRadius: '4px',
-        cursor: 'pointer',
-        fontWeight: 600,
-        fontSize: '12px',
-        whiteSpace: 'nowrap',
-      }}
+      className={[
+        'px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors',
+        confirmDeleteId === id
+          ? 'bg-red-600 text-white border-none'
+          : 'bg-transparent text-red-600 border border-red-600 hover:bg-red-50',
+      ].join(' ')}
     >
       {confirmDeleteId === id ? 'You sure?' : 'Delete'}
     </button>
   );
 
-  /* Helper: button styles */
-  const primaryBtnStyle: React.CSSProperties = {
-    background: '#1e66f5',
-    color: '#fff',
-    border: 'none',
-    padding: '10px 16px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: 600,
-    fontSize: '14px',
-  };
-
-  const outlineBtnStyle: React.CSSProperties = {
-    background: '#fff',
-    color: '#1e66f5',
-    border: '2px solid #1e66f5',
-    padding: '10px 16px',
-    borderRadius: '6px',
-    cursor: 'pointer',
-    fontWeight: 600,
-    fontSize: '14px',
+  /* Helper: stock badge classes */
+  const stockBadgeClass = (status: StockStatus) => {
+    const base = 'inline-block px-1.5 py-0.5 rounded text-[10px] font-bold text-white';
+    switch (status) {
+      case 'CAN MAKE':
+        return `${base} bg-green-600`;
+      case 'PARTIAL':
+        return `${base} bg-amber-500`;
+      case 'NO STOCK':
+        return `${base} bg-red-600`;
+      case 'N/A':
+        return `${base} bg-slate-400`;
+    }
   };
 
   return (
     <ChefLayout title="Home">
       {loadError && (
-        <div
-          data-testid="load-error"
-          style={{
-            border: '1px solid #ef4444',
-            background: '#fef2f2',
-            borderRadius: '8px',
-            padding: '16px',
-            marginBottom: '16px',
-          }}
-        >
-          <p style={{ margin: '0 0 8px 0', color: '#d33' }}>Failed to load data: {loadError}</p>
-          <button onClick={loadData} className="primary-btn" style={{ background: '#d33' }}>
+        <div data-testid="load-error" className="border border-red-400 bg-red-50 rounded-lg p-4 mb-4">
+          <p className="m-0 mb-2 text-red-600">Failed to load data: {loadError}</p>
+          <button
+            onClick={loadData}
+            className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
+          >
             Retry
           </button>
         </div>
       )}
 
       {/* ============================================================ */}
-      {/*  MACRO SUMMARY — progress bars, clickable to /chef/macros     */}
+      {/*  MACRO SUMMARY -- progress bars, clickable to /chef/macros    */}
       {/* ============================================================ */}
-      <div data-testid="macro-summary" style={{ marginBottom: '16px' }}>
-        <div style={{ marginBottom: '8px' }}>
-          <span style={{ fontWeight: 600 }}>Today</span>{' '}
-          <span style={{ fontSize: '14px', color: '#666' }}>(6:00 AM - 5:59 AM)</span>
+      <div data-testid="macro-summary" className="mb-4">
+        <div className="mb-2">
+          <span className="font-semibold text-slate-900">Today</span>{' '}
+          <span className="text-sm text-slate-500">(6:00 AM - 5:59 AM)</span>
         </div>
-        <Link to="/chef/macros" style={{ textDecoration: 'none', color: 'inherit', display: 'block' }}>
-          <div
-            data-testid="status-cards"
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'repeat(4, 1fr)',
-              gap: '12px',
-              marginBottom: '12px',
-              cursor: 'pointer',
-            }}
-          >
+        <Link to="/chef/macros" className="no-underline text-inherit block">
+          <div data-testid="status-cards" className="grid grid-cols-4 gap-3 mb-3 cursor-pointer">
             <ProgressBar
               testId="compact-calories"
               label="Calories"
               value={consumed.calories}
               plannedValue={planned.calories}
               goal={goals.calories}
-              color={macroColors.calories}
+              color={macroColorValues.calories}
+              colorClass={macroColors.calories}
               unit=""
             />
             <ProgressBar
@@ -923,7 +884,8 @@ export function HomePage() {
               value={consumed.protein}
               plannedValue={planned.protein}
               goal={goals.protein}
-              color={macroColors.protein}
+              color={macroColorValues.protein}
+              colorClass={macroColors.protein}
               unit="g"
             />
             <ProgressBar
@@ -932,7 +894,8 @@ export function HomePage() {
               value={consumed.carbs}
               plannedValue={planned.carbs}
               goal={goals.carbs}
-              color={macroColors.carbs}
+              color={macroColorValues.carbs}
+              colorClass={macroColors.carbs}
               unit="g"
             />
             <ProgressBar
@@ -941,103 +904,82 @@ export function HomePage() {
               value={consumed.fat}
               plannedValue={planned.fat}
               goal={goals.fat}
-              color={macroColors.fat}
+              color={macroColorValues.fat}
+              colorClass={macroColors.fat}
               unit="g"
             />
           </div>
         </Link>
 
         {/* Alert Badge Cards */}
-        <div
-          data-testid="card-missing-prices"
-          style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', marginBottom: '12px' }}
-        >
+        <div data-testid="card-missing-prices" className="flex flex-wrap gap-2 mb-3">
           <Link
             to="/chef/inventory"
             data-testid="card-below-min"
-            style={{
-              textDecoration: 'none',
-              color: belowMinStock > 0 ? '#fff' : '#666',
-              background: belowMinStock > 0 ? '#f59e0b' : '#f0f0f0',
-              padding: '8px 14px',
-              borderRadius: '6px',
-              fontSize: '13px',
-              fontWeight: 600,
-              display: 'inline-block',
-            }}
+            className={[
+              'no-underline px-3.5 py-2 rounded-md text-xs font-semibold inline-block',
+              belowMinStock > 0 ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500',
+            ].join(' ')}
           >
             Below Min Stock: {belowMinStock}
           </Link>
           <Link
             to="/chef/settings?tab=walmart"
-            style={{
-              textDecoration: 'none',
-              color: missingPrices > 0 ? '#fff' : '#666',
-              background: missingPrices > 0 ? '#ef4444' : '#f0f0f0',
-              padding: '8px 14px',
-              borderRadius: '6px',
-              fontSize: '13px',
-              fontWeight: 600,
-              display: 'inline-block',
-            }}
+            className={[
+              'no-underline px-3.5 py-2 rounded-md text-xs font-semibold inline-block',
+              missingPrices > 0 ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500',
+            ].join(' ')}
           >
             Missing Prices: {missingPrices}
           </Link>
           <Link
             to="/chef/settings?tab=products"
             data-testid="card-placeholders"
-            style={{
-              textDecoration: 'none',
-              color: placeholders > 0 ? '#333' : '#666',
-              background: placeholders > 0 ? '#fde68a' : '#f0f0f0',
-              padding: '8px 14px',
-              borderRadius: '6px',
-              fontSize: '13px',
-              fontWeight: 600,
-              display: 'inline-block',
-            }}
+            className={[
+              'no-underline px-3.5 py-2 rounded-md text-xs font-semibold inline-block',
+              placeholders > 0 ? 'bg-yellow-300 text-slate-800' : 'bg-slate-100 text-slate-500',
+            ].join(' ')}
           >
             Placeholders: {placeholders}
           </Link>
           <Link
             to="/chef/shopping"
             data-testid="card-cart-value"
-            style={{
-              textDecoration: 'none',
-              color: '#666',
-              background: '#f0f0f0',
-              padding: '8px 14px',
-              borderRadius: '6px',
-              fontSize: '13px',
-              fontWeight: 600,
-              display: 'inline-block',
-            }}
+            className="no-underline bg-slate-100 text-slate-500 px-3.5 py-2 rounded-md text-xs font-semibold inline-block"
           >
             Cart: ${cartValue.toFixed(2)}
           </Link>
         </div>
 
-        {/* Action Buttons — standardized blue primary / outlined secondary */}
-        <div data-testid="quick-actions" style={{ display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
-          <button onClick={importShopping} data-testid="import-shopping-btn" style={primaryBtnStyle}>
+        {/* Action Buttons */}
+        <div data-testid="quick-actions" className="flex gap-3 flex-wrap">
+          <button
+            onClick={importShopping}
+            data-testid="import-shopping-btn"
+            className="px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          >
             Import Shopping List
           </button>
           <button
             onClick={syncMealPlanToCart}
             disabled={syncing}
             data-testid="meal-plan-cart-btn"
-            style={{
-              ...primaryBtnStyle,
-              opacity: syncing ? 0.6 : 1,
-              cursor: syncing ? 'not-allowed' : 'pointer',
-            }}
+            className="px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
           >
             {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
           </button>
-          <button onClick={openTasteModal} data-testid="taste-profile-btn" style={outlineBtnStyle}>
+          <button
+            onClick={openTasteModal}
+            data-testid="taste-profile-btn"
+            className="px-4 py-2.5 bg-white text-emerald-600 border-2 border-emerald-600 rounded-md font-semibold text-sm hover:bg-emerald-50 transition-colors"
+          >
             Taste Profile
           </button>
-          <button onClick={openTargetModal} data-testid="target-macros-btn" style={outlineBtnStyle}>
+          <button
+            onClick={openTargetModal}
+            data-testid="target-macros-btn"
+            className="px-4 py-2.5 bg-white text-emerald-600 border-2 border-emerald-600 rounded-md font-semibold text-sm hover:bg-emerald-50 transition-colors"
+          >
             Target Macros
           </button>
         </div>
@@ -1047,33 +989,24 @@ export function HomePage() {
       {/*  CONSUMED TODAY                                               */}
       {/* ============================================================ */}
       {(foodLogs.length > 0 || tempItems.length > 0) && (
-        <div data-testid="consumed-section" style={{ marginBottom: '24px' }}>
-          <h3>Consumed Today</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+        <div data-testid="consumed-section" className="mb-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-3">Consumed Today</h3>
+          <div className="flex flex-col gap-1.5">
             {foodLogs.map((log) => (
               <div
                 key={log.log_id}
                 data-testid={`consumed-log-${log.log_id}`}
-                style={{
-                  padding: '8px 12px',
-                  border: '1px solid #e8e8e8',
-                  borderLeft: '4px solid #22c55e',
-                  borderRadius: '6px',
-                  background: '#f0faf4',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
+                className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-green-50 flex justify-between items-center"
               >
-                <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                <span className="font-semibold text-sm text-slate-900">
                   {log.products?.name ?? 'Unknown'}
-                  <span style={{ fontWeight: 400, color: '#666', fontSize: '13px', marginLeft: '8px' }}>
+                  <span className="font-normal text-slate-500 text-xs ml-2">
                     {Number(log.qty_consumed)} {log.unit}
                     {Number(log.qty_consumed) !== 1 ? 's' : ''}
                   </span>
                 </span>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', color: '#555' }}>
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-slate-500">
                     {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
                     {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
                   </span>
@@ -1089,23 +1022,14 @@ export function HomePage() {
               <div
                 key={item.temp_id}
                 data-testid={`consumed-temp-${item.temp_id}`}
-                style={{
-                  padding: '8px 12px',
-                  border: '1px solid #e8e8e8',
-                  borderLeft: '4px solid #f59e0b',
-                  borderRadius: '6px',
-                  background: '#fffbeb',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
+                className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-amber-50 flex justify-between items-center"
               >
-                <span style={{ fontWeight: 600, fontSize: '14px' }}>
+                <span className="font-semibold text-sm text-slate-900">
                   {item.name}
-                  <span style={{ fontWeight: 400, color: '#888', fontSize: '12px', marginLeft: '6px' }}>quick-add</span>
+                  <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
                 </span>
-                <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                  <span style={{ fontSize: '13px', color: '#555' }}>
+                <div className="flex gap-2 items-center">
+                  <span className="text-xs text-slate-500">
                     {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
                     {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
                   </span>
@@ -1124,68 +1048,43 @@ export function HomePage() {
       {/* ============================================================ */}
       {/*  TODAY'S MEAL PREP                                            */}
       {/* ============================================================ */}
-      <div data-testid="meal-prep-section" style={{ marginBottom: '24px' }}>
-        <h3>Today&apos;s Meal Prep</h3>
+      <div data-testid="meal-prep-section" className="mb-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-3">Today&apos;s Meal Prep</h3>
         {mealPrep.length === 0 ? (
-          <p data-testid="no-meal-prep" style={{ color: '#666', fontStyle: 'italic' }}>
+          <p data-testid="no-meal-prep" className="text-slate-500 italic">
             No meal prep scheduled for today
           </p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="flex flex-col gap-2">
             {mealPrep.map((entry) => (
               <div
                 key={entry.meal_id}
                 data-testid={`prep-entry-${entry.meal_id}`}
-                style={{
-                  padding: '10px 12px',
-                  border: '1px solid #eee',
-                  borderLeft: '4px solid #1e66f5',
-                  borderRadius: '6px',
-                  background: '#f7f7f9',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
+                className="py-2.5 px-3 border border-slate-200 border-l-4 border-l-emerald-600 rounded-md bg-slate-50 flex justify-between items-center"
               >
                 <div>
-                  <span style={{ fontWeight: 600 }}>{entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}</span>
-                  <span style={{ color: '#666', fontSize: '0.9em', marginLeft: '8px' }}>
+                  <span className="font-semibold text-slate-900">
+                    {entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}
+                  </span>
+                  <span className="text-slate-500 text-sm ml-2">
                     {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                <div className="flex gap-1.5 items-center">
                   {confirmPrepId === entry.meal_id ? (
                     <>
-                      <span style={{ fontSize: '12px', color: '#666' }}>Execute?</span>
+                      <span className="text-xs text-slate-500">Execute?</span>
                       <button
                         onClick={() => executePrepMeal(entry.meal_id)}
                         data-testid={`prep-confirm-${entry.meal_id}`}
-                        style={{
-                          background: '#22c55e',
-                          color: '#fff',
-                          border: 'none',
-                          padding: '4px 10px',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          fontSize: '12px',
-                        }}
+                        className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
                       >
                         Yes
                       </button>
                       <button
                         onClick={() => setConfirmPrepId(null)}
                         data-testid={`prep-cancel-${entry.meal_id}`}
-                        style={{
-                          background: '#e5e7eb',
-                          color: '#333',
-                          border: 'none',
-                          padding: '4px 10px',
-                          borderRadius: '4px',
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          fontSize: '12px',
-                        }}
+                        className="px-2.5 py-1 bg-slate-200 text-slate-700 rounded text-xs font-semibold hover:bg-slate-300 transition-colors"
                       >
                         No
                       </button>
@@ -1194,16 +1093,7 @@ export function HomePage() {
                     <button
                       onClick={() => setConfirmPrepId(entry.meal_id)}
                       data-testid={`prep-execute-${entry.meal_id}`}
-                      style={{
-                        background: '#1e66f5',
-                        color: '#fff',
-                        border: 'none',
-                        padding: '5px 12px',
-                        borderRadius: '4px',
-                        cursor: 'pointer',
-                        fontWeight: 600,
-                        fontSize: '12px',
-                      }}
+                      className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700 transition-colors"
                     >
                       Execute
                     </button>
@@ -1223,14 +1113,14 @@ export function HomePage() {
       {/* ============================================================ */}
       {/*  TODAY'S MEALS                                                */}
       {/* ============================================================ */}
-      <div data-testid="todays-meals-section" style={{ marginBottom: '24px' }}>
-        <h3>Today&apos;s Meals</h3>
+      <div data-testid="todays-meals-section" className="mb-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-3">Today&apos;s Meals</h3>
         {todaysMeals.length === 0 ? (
-          <p data-testid="no-todays-meals" style={{ color: '#666', fontStyle: 'italic' }}>
+          <p data-testid="no-todays-meals" className="text-slate-500 italic">
             No meals planned for today
           </p>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <div className="flex flex-col gap-2">
             {todaysMeals.map((entry) => {
               const name = entry.recipes?.name ?? entry.products?.name ?? 'Unknown';
               const isDone = entry.completed_at !== null;
@@ -1259,46 +1149,25 @@ export function HomePage() {
                 <div
                   key={entry.meal_id}
                   data-testid={`meal-entry-${entry.meal_id}`}
-                  style={{
-                    padding: '10px 12px',
-                    border: '1px solid #eee',
-                    borderLeft: `4px solid ${isDone ? '#2f9e44' : '#ffc409'}`,
-                    borderRadius: '6px',
-                    background: isDone ? '#f0faf4' : '#f7f7f9',
-                    opacity: isDone ? 0.8 : 1,
-                  }}
+                  className={[
+                    'py-2.5 px-3 border border-slate-200 border-l-4 rounded-md',
+                    isDone ? 'border-l-green-600 bg-green-50 opacity-80' : 'border-l-amber-400 bg-slate-50',
+                  ].join(' ')}
                 >
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 600, textDecoration: isDone ? 'line-through' : 'none' }}>{name}</span>
+                  <div className="flex justify-between items-center">
+                    <div className="flex gap-2 items-center">
+                      <span className={['font-semibold text-slate-900', isDone ? 'line-through' : ''].join(' ')}>
+                        {name}
+                      </span>
                       {!isDone && mealStockStatus !== 'N/A' && (
-                        <span
-                          data-testid={`meal-stock-${entry.meal_id}`}
-                          style={{
-                            display: 'inline-block',
-                            padding: '1px 6px',
-                            borderRadius: '4px',
-                            fontSize: '10px',
-                            fontWeight: 700,
-                            color: '#fff',
-                            background:
-                              mealStockStatus === 'CAN MAKE'
-                                ? '#2f9e44'
-                                : mealStockStatus === 'PARTIAL'
-                                  ? '#ff9800'
-                                  : '#d33',
-                          }}
-                        >
-                          {mealStockStatus === 'CAN MAKE' ? '✓ IN STOCK' : mealStockStatus}
+                        <span data-testid={`meal-stock-${entry.meal_id}`} className={stockBadgeClass(mealStockStatus)}>
+                          {mealStockStatus === 'CAN MAKE' ? 'IN STOCK' : mealStockStatus}
                         </span>
                       )}
                     </div>
-                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                    <div className="flex gap-2 items-center">
                       {entry.meal_type && (
-                        <span
-                          data-testid={`meal-type-${entry.meal_id}`}
-                          style={{ fontSize: '0.75em', color: '#888', textTransform: 'capitalize' }}
-                        >
+                        <span data-testid={`meal-type-${entry.meal_id}`} className="text-xs text-slate-400 capitalize">
                           {entry.meal_type}
                         </span>
                       )}
@@ -1306,16 +1175,7 @@ export function HomePage() {
                         <button
                           onClick={() => unmarkMealDone(entry.meal_id)}
                           data-testid={`meal-undo-${entry.meal_id}`}
-                          style={{
-                            padding: '4px 10px',
-                            background: '#fff',
-                            color: '#f59e0b',
-                            border: '1px solid #f59e0b',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            fontSize: '12px',
-                          }}
+                          className="px-2.5 py-1 bg-white text-amber-500 border border-amber-500 rounded text-xs font-semibold hover:bg-amber-50 transition-colors"
                         >
                           Undo
                         </button>
@@ -1323,16 +1183,7 @@ export function HomePage() {
                         <button
                           onClick={() => markMealDone(entry.meal_id)}
                           data-testid={`meal-done-${entry.meal_id}`}
-                          style={{
-                            background: '#22c55e',
-                            color: '#fff',
-                            border: 'none',
-                            padding: '4px 10px',
-                            borderRadius: '4px',
-                            cursor: 'pointer',
-                            fontWeight: 600,
-                            fontSize: '12px',
-                          }}
+                          className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
                         >
                           Mark Done
                         </button>
@@ -1345,10 +1196,7 @@ export function HomePage() {
                     </div>
                   </div>
                   {mealMacros && (
-                    <div
-                      data-testid={`meal-macros-${entry.meal_id}`}
-                      style={{ fontSize: '0.8em', color: '#666', marginTop: '4px' }}
-                    >
+                    <div data-testid={`meal-macros-${entry.meal_id}`} className="text-xs text-slate-500 mt-1">
                       {mealMacros.calories} cal | {mealMacros.protein}g P | {mealMacros.carbs}g C | {mealMacros.fat}g F
                     </div>
                   )}
@@ -1368,101 +1216,56 @@ export function HomePage() {
         title="Target Macros"
         testId="target-macros-modal"
       >
-        <div style={{ display: 'grid', gap: '12px' }}>
+        <div className="grid gap-3">
           <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: '#555' }}>
-              Protein (g)
-            </label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Protein (g)</label>
             <input
               type="number"
               min={0}
               value={targetProtein}
               onChange={(e) => setTargetProtein(Number(e.target.value) || 0)}
               data-testid="target-protein"
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-              }}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
             />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: '#555' }}>
-              Carbs (g)
-            </label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Carbs (g)</label>
             <input
               type="number"
               min={0}
               value={targetCarbs}
               onChange={(e) => setTargetCarbs(Number(e.target.value) || 0)}
               data-testid="target-carbs"
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-              }}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
             />
           </div>
           <div>
-            <label style={{ display: 'block', fontSize: '13px', fontWeight: 600, marginBottom: '4px', color: '#555' }}>
-              Fats (g)
-            </label>
+            <label className="block text-xs font-semibold text-slate-600 mb-1">Fats (g)</label>
             <input
               type="number"
               min={0}
               value={targetFat}
               onChange={(e) => setTargetFat(Number(e.target.value) || 0)}
               data-testid="target-fats"
-              style={{
-                width: '100%',
-                padding: '10px',
-                border: '1px solid #ddd',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-              }}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
             />
           </div>
-          <div data-testid="target-calories" style={{ padding: '8px', background: '#f7f7f9', borderRadius: '4px' }}>
+          <div data-testid="target-calories" className="p-2 bg-slate-50 rounded text-sm">
             <strong>Calories (auto): </strong>
             {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
+        <div className="flex gap-2 justify-end mt-4">
           <button
             onClick={() => setShowTargetModal(false)}
-            className="primary-btn"
-            style={{
-              background: 'transparent',
-              color: '#1e66f5',
-              border: '1px solid #e5e7eb',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
+            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
             data-testid="target-cancel-btn"
           >
             Cancel
           </button>
           <button
             onClick={saveTargets}
-            className="primary-btn"
-            style={{
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
+            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
             data-testid="target-save-btn"
           >
             Save
@@ -1484,46 +1287,19 @@ export function HomePage() {
           onChange={(e) => setTasteProfile(e.target.value ?? '')}
           data-testid="taste-textarea"
           rows={5}
-          style={{
-            width: '100%',
-            padding: '10px',
-            border: '1px solid #ddd',
-            borderRadius: '6px',
-            fontSize: '14px',
-            resize: 'vertical',
-            boxSizing: 'border-box',
-            fontFamily: 'inherit',
-          }}
+          className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm resize-y font-[inherit] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
         />
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
+        <div className="flex gap-2 justify-end mt-4">
           <button
             onClick={() => setShowTasteModal(false)}
-            className="primary-btn"
-            style={{
-              background: 'transparent',
-              color: '#1e66f5',
-              border: '1px solid #e5e7eb',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
+            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
             data-testid="taste-cancel-btn"
           >
             Cancel
           </button>
           <button
             onClick={saveTasteProfile}
-            className="primary-btn"
-            style={{
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-              padding: '8px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
+            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
             data-testid="taste-save-btn"
           >
             Save

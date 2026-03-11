@@ -527,7 +527,7 @@ export function ScannerPage() {
   /* ---------------------------------------------------------------- */
 
   const handleKeypadClick = (key: string) => {
-    if (key === '←') {
+    if (key === '\u2190') {
       setScreenValue((prev) => prev.slice(0, -1) || '0');
       setOverwriteNext(false);
     } else if (key === '.') {
@@ -656,15 +656,25 @@ export function ScannerPage() {
   /*  RENDER                                                           */
   /* ================================================================ */
 
+  const queueItemBorderColor = (item: QueueItem) => {
+    if (item.status === 'error') return 'border-red-600';
+    if (item.status === 'pending') return 'border-amber-500';
+    if (item.isNew) return 'border-red-600';
+    return 'border-green-600';
+  };
+
   return (
     <ChefLayout title="Scanner">
-      <h1 style={{ margin: 0 }}>Scanner</h1>
+      <h1 className="text-2xl font-bold text-slate-900 mb-4">Scanner</h1>
 
-      <div data-testid="scanner-container" className="scanner-container">
+      <div
+        data-testid="scanner-container"
+        className="grid grid-cols-[1.5fr_2.5fr] gap-4 items-stretch flex-1 min-h-0 max-md:flex max-md:flex-col max-md:gap-3"
+      >
         {/* ========================================================== */}
         {/*  LEFT COLUMN — QUEUE                                        */}
         {/* ========================================================== */}
-        <div data-testid="queue-panel" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div data-testid="queue-panel" className="flex flex-col gap-2">
           {/* Barcode input */}
           <input
             ref={barcodeRef}
@@ -679,45 +689,29 @@ export function ScannerPage() {
                 handleBarcodeSubmit(e.currentTarget.value);
               }
             }}
-            style={{
-              width: '100%',
-              padding: '10px',
-              border: '1px solid #ddd',
-              borderRadius: '6px',
-              fontSize: '14px',
-            }}
+            className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
           />
 
           {/* Filter buttons */}
-          <div data-testid="filter-buttons" style={{ display: 'flex', gap: '4px' }}>
+          <div data-testid="filter-buttons" className="flex gap-1">
             <button
               onClick={() => setFilter('all')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontWeight: 500,
-                fontSize: '14px',
-                cursor: 'pointer',
-                border: filter === 'all' ? '1px solid #dbeafe' : '1px solid #ddd',
-                background: filter === 'all' ? '#eff6ff' : '#fff',
-                color: filter === 'all' ? '#1e66f5' : '#4b5563',
-              }}
+              className={`px-3.5 py-1.5 rounded-md font-medium text-sm cursor-pointer border ${
+                filter === 'all'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-slate-200 bg-white text-slate-600'
+              }`}
               data-testid="filter-all"
             >
               All
             </button>
             <button
               onClick={() => setFilter('new')}
-              style={{
-                padding: '6px 14px',
-                borderRadius: '6px',
-                fontWeight: 500,
-                fontSize: '14px',
-                cursor: 'pointer',
-                border: filter === 'new' ? '1px solid #dbeafe' : '1px solid #ddd',
-                background: filter === 'new' ? '#eff6ff' : '#fff',
-                color: filter === 'new' ? '#1e66f5' : '#4b5563',
-              }}
+              className={`px-3.5 py-1.5 rounded-md font-medium text-sm cursor-pointer border ${
+                filter === 'new'
+                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
+                  : 'border-slate-200 bg-white text-slate-600'
+              }`}
               data-testid="filter-new"
             >
               New
@@ -725,12 +719,9 @@ export function ScannerPage() {
           </div>
 
           {/* Queue list */}
-          <div
-            data-testid="queue-list"
-            style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '6px' }}
-          >
+          <div data-testid="queue-list" className="flex-1 overflow-y-auto flex flex-col gap-1.5">
             {filteredQueue.length === 0 && (
-              <p data-testid="queue-empty" style={{ color: '#666', fontStyle: 'italic', textAlign: 'center' }}>
+              <p data-testid="queue-empty" className="text-slate-500 italic text-center">
                 Scan a barcode to start
               </p>
             )}
@@ -739,26 +730,14 @@ export function ScannerPage() {
                 key={item.id}
                 data-testid={`queue-item-${item.id}`}
                 onClick={() => setActiveItemId(item.id)}
-                style={{
-                  padding: '8px 10px',
-                  border: `2px solid ${
-                    item.status === 'error'
-                      ? '#d33'
-                      : item.status === 'pending'
-                        ? '#ff9800'
-                        : item.isNew
-                          ? '#d33'
-                          : '#2f9e44'
-                  }`,
-                  borderRadius: '6px',
-                  background: activeItemId === item.id ? '#e8f0fe' : item.isNew ? '#ffe9e9' : '#fff',
-                  cursor: 'pointer',
-                }}
+                className={`px-2.5 py-2 border-2 rounded-md cursor-pointer ${queueItemBorderColor(item)} ${
+                  activeItemId === item.id ? 'bg-emerald-50' : item.isNew ? 'bg-red-50' : 'bg-white'
+                }`}
               >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontWeight: 600, fontSize: '0.9em' }}>
+                <div className="flex justify-between items-center">
+                  <span className="font-semibold text-[0.9em]">
                     {item.isNew && (
-                      <span data-testid={`new-badge-${item.id}`} style={{ color: '#d33', marginRight: '4px' }}>
+                      <span data-testid={`new-badge-${item.id}`} className="text-red-600 mr-1">
                         [!NEW]
                       </span>
                     )}
@@ -771,19 +750,12 @@ export function ScannerPage() {
                       undoScan(item);
                     }}
                     aria-label={`Undo and remove ${item.name}`}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      color: '#d33',
-                      cursor: 'pointer',
-                      fontWeight: 700,
-                      fontSize: '16px',
-                    }}
+                    className="bg-transparent border-none text-red-600 cursor-pointer font-bold text-base"
                   >
-                    ×
+                    &times;
                   </button>
                 </div>
-                <div style={{ fontSize: '0.8em', color: '#666' }}>
+                <div className="text-[0.8em] text-slate-500">
                   {item.mode === 'purchase' ? 'Purchased' : item.mode === 'shopping' ? 'Added to cart' : 'Consumed'}{' '}
                   {item.quantity} {item.unit}
                 </div>
@@ -795,12 +767,9 @@ export function ScannerPage() {
         {/* ========================================================== */}
         {/*  RIGHT COLUMN — KEYPAD                                      */}
         {/* ========================================================== */}
-        <div data-testid="keypad-panel" style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+        <div data-testid="keypad-panel" className="flex flex-col gap-2.5">
           {/* Mode selector */}
-          <div
-            data-testid="mode-selector"
-            style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '8px' }}
-          >
+          <div data-testid="mode-selector" className="grid grid-cols-2 gap-2">
             {(
               [
                 { key: 'purchase', label: 'Purchase' },
@@ -811,7 +780,11 @@ export function ScannerPage() {
             ).map((m) => (
               <button
                 key={m.key}
-                className={`scanner-mode-btn ${mode === m.key ? 'active' : ''}`}
+                className={`p-2.5 border rounded-lg cursor-pointer font-bold w-full text-[15px] flex items-center justify-center text-center leading-tight ${
+                  mode === m.key
+                    ? 'bg-slate-800 text-white border-slate-800'
+                    : 'bg-white text-slate-900 border-slate-300'
+                }`}
                 onClick={() => setMode(m.key)}
                 data-testid={`mode-${m.key}`}
               >
@@ -838,27 +811,12 @@ export function ScannerPage() {
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              style={{
-                padding: '8px',
-                background: '#f4f5f8',
-                borderRadius: '6px',
-                textAlign: 'center',
-                fontWeight: 600,
-                border: '1px solid #ccc',
-                width: '100%',
-                fontSize: 'inherit',
-              }}
+              className="px-2 py-2 bg-slate-100 rounded-md text-center font-semibold border border-slate-300 w-full text-inherit"
             />
           ) : (
             <div
               data-testid="active-item-display"
-              style={{
-                padding: '8px',
-                background: '#f4f5f8',
-                borderRadius: '6px',
-                textAlign: 'center',
-                fontWeight: 600,
-              }}
+              className="px-2 py-2 bg-slate-100 rounded-md text-center font-semibold"
             >
               {activeItem ? activeItem.name : 'No item selected'}
             </div>
@@ -867,26 +825,14 @@ export function ScannerPage() {
           {/* Screen value */}
           <div
             data-testid="screen-value"
-            style={{
-              padding: '12px',
-              background: '#fff',
-              border: '2px solid #ddd',
-              borderRadius: '6px',
-              textAlign: 'right',
-              fontSize: '24px',
-              fontWeight: 700,
-              fontFamily: 'monospace',
-            }}
+            className="px-3 py-3 bg-white border-2 border-slate-200 rounded-md text-right text-2xl font-bold font-mono"
           >
             {screenValue}
           </div>
 
           {/* Nutrition editor (purchase mode only) */}
           {mode === 'purchase' && (
-            <div
-              data-testid="nutrition-editor"
-              style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '6px' }}
-            >
+            <div data-testid="nutrition-editor" className="grid grid-cols-5 gap-1.5">
               {[
                 { key: 'servingsPerContainer' as const, label: 'Srv/Ctn' },
                 { key: 'calories' as const, label: 'Cal' },
@@ -894,8 +840,8 @@ export function ScannerPage() {
                 { key: 'fat' as const, label: 'Fat' },
                 { key: 'protein' as const, label: 'Protein' },
               ].map((f) => (
-                <div key={f.key} style={{ textAlign: 'center' }}>
-                  <label style={{ fontSize: '0.7em', color: '#666', display: 'block' }}>{f.label}</label>
+                <div key={f.key} className="text-center">
+                  <label className="text-[0.7em] text-slate-500 block">{f.label}</label>
                   <input
                     data-testid={`nut-${f.key}`}
                     type="text"
@@ -903,14 +849,7 @@ export function ScannerPage() {
                     aria-label={f.label}
                     value={nutrition[f.key]}
                     onChange={(e) => handleNutritionChange(f.key, e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '6px',
-                      textAlign: 'center',
-                      border: '1px solid #ddd',
-                      borderRadius: '4px',
-                      fontSize: '0.9em',
-                    }}
+                    className="w-full px-1.5 py-1.5 text-center border border-slate-200 rounded text-[0.9em]"
                   />
                 </div>
               ))}
@@ -918,14 +857,19 @@ export function ScannerPage() {
           )}
 
           {/* Numeric keypad */}
-          <div data-testid="keypad-grid" className="scanner-keys-grid">
-            {['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '←'].map((key) => (
+          <div
+            data-testid="keypad-grid"
+            className="grid grid-cols-4 auto-rows-[minmax(68px,1fr)] gap-2 max-md:auto-rows-[minmax(62px,1fr)] max-sm:grid-cols-3 max-sm:auto-rows-[minmax(64px,1fr)]"
+          >
+            {['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '\u2190'].map((key) => (
               <button
                 key={key}
-                className={`scanner-key ${key === '←' ? 'op' : ''}`}
-                data-testid={`key-${key === '←' ? 'backspace' : key}`}
+                className={`border rounded-lg text-2xl font-bold cursor-pointer select-none flex items-center justify-center min-h-14 text-slate-900 hover:bg-slate-100 ${
+                  key === '\u2190' ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-white border-slate-200'
+                }`}
+                data-testid={`key-${key === '\u2190' ? 'backspace' : key}`}
                 onClick={() => handleKeypadClick(key)}
-                aria-label={key === '←' ? 'Backspace' : key === '.' ? 'Decimal point' : key}
+                aria-label={key === '\u2190' ? 'Backspace' : key === '.' ? 'Decimal point' : key}
               >
                 {key}
               </button>
@@ -935,7 +879,7 @@ export function ScannerPage() {
           {/* Unit toggle (consume modes only) */}
           {(mode === 'consume_macros' || mode === 'consume_no_macros') && (
             <button
-              className="scanner-key unit-toggle"
+              className="bg-blue-50 border border-blue-300 rounded-lg text-sm font-semibold p-2 leading-tight cursor-pointer hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-100"
               data-testid="unit-toggle"
               onClick={() => {
                 const spc = parseFloat(nutrition.servingsPerContainer) || 1;

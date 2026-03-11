@@ -3,26 +3,30 @@ import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
 import { useSettingsAlerts } from '@/hooks/useSettingsAlerts';
+import { Tabs, type TabItem } from '@/components/ui/Tabs';
+import { Alert } from '@/components/ui/Alert';
+import { Menu, X, Camera } from 'lucide-react';
 
 interface ChefLayoutProps {
   title: string;
   children: ReactNode;
 }
 
-const tabs = [
-  { to: '/chef', label: 'Dashboard' },
-  { to: '/chef/meal-plan', label: 'Meal Plan' },
-  { to: '/chef/recipes', label: 'Recipes' },
-  { to: '/chef/shopping', label: 'Shopping' },
-  { to: '/chef/inventory', label: 'Inventory' },
-  { to: '/chef/settings', label: 'Settings' },
+const tabItems: TabItem[] = [
+  { label: 'Dashboard', value: '/chef', href: '/chef' },
+  { label: 'Meal Plan', value: '/chef/meal-plan', href: '/chef/meal-plan' },
+  { label: 'Recipes', value: '/chef/recipes', href: '/chef/recipes' },
+  { label: 'Shopping', value: '/chef/shopping', href: '/chef/shopping' },
+  { label: 'Inventory', value: '/chef/inventory', href: '/chef/inventory' },
+  { label: 'Settings', value: '/chef/settings', href: '/chef/settings' },
 ];
 
-function isTabActive(tabTo: string, pathname: string): boolean {
-  if (tabTo === '/chef') {
-    return pathname === '/chef' || pathname === '/chef/home' || pathname.startsWith('/chef/macros');
+function getActiveTab(pathname: string): string {
+  if (pathname === '/chef' || pathname === '/chef/home' || pathname.startsWith('/chef/macros')) {
+    return '/chef';
   }
-  return pathname.startsWith(tabTo);
+  const match = tabItems.find((t) => t.value !== '/chef' && pathname.startsWith(t.value));
+  return match?.value ?? '/chef';
 }
 
 export function ChefLayout({ children }: ChefLayoutProps) {
@@ -33,67 +37,88 @@ export function ChefLayout({ children }: ChefLayoutProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isScanner = location.pathname === '/chef/scanner';
 
+  const activeTab = getActiveTab(location.pathname);
+
   return (
-    <div className="chef-root">
+    <div className="flex flex-col h-full overflow-y-hidden bg-slate-50 text-slate-900">
       {/* Header */}
-      <header className="chef-header" data-testid="chef-header">
-        <div className="chef-brand">
+      <header
+        className="flex items-center justify-between h-14 px-6 bg-white border-b border-slate-200 shrink-0"
+        data-testid="chef-header"
+      >
+        <div className="flex items-center gap-2 font-bold text-xl text-slate-900">
           <Link
             to="/hub/account"
-            style={{ color: 'inherit', textDecoration: 'none' }}
+            className="text-inherit no-underline hover:text-emerald-600 transition-colors"
             onClick={() => setDrawerOpen(false)}
           >
             Luna Hub
           </Link>
-          <span style={{ color: '#999', margin: '0 6px' }}>/</span>
-          <Link to="/chef" style={{ color: 'inherit', textDecoration: 'none' }} onClick={() => setDrawerOpen(false)}>
-            <span className="chef-brand-icon">{'\u{1F373}'}</span>
-            <span className="chef-brand-text">ChefByte</span>
+          <span className="text-slate-400 mx-1.5">/</span>
+          <Link
+            to="/chef"
+            className="text-inherit no-underline hover:text-emerald-600 transition-colors"
+            onClick={() => setDrawerOpen(false)}
+          >
+            ChefByte
           </Link>
         </div>
-        <div className="chef-header-actions">
+        <div className="flex items-center gap-2.5">
           <button
-            className={`chef-scanner-btn${isScanner ? ' active' : ''}`}
+            className={[
+              'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors',
+              isScanner ? 'bg-emerald-700 text-white shadow-inner' : 'bg-emerald-600 text-white hover:bg-emerald-700',
+            ].join(' ')}
             onClick={() => navigate('/chef/scanner')}
             data-testid="scanner-btn"
           >
-            {'\u{1F4F7}'} Scanner
+            <Camera className="h-4 w-4" />
+            Scanner
           </button>
           <button
-            className="chef-hamburger mobile-only"
+            className="md:hidden inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors"
             aria-label="Toggle navigation"
             onClick={() => setDrawerOpen(!drawerOpen)}
           >
-            {'\u2630'}
+            {drawerOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
           </button>
         </div>
       </header>
 
-      {/* Tab bar — hidden on scanner page */}
+      {/* Tab bar — desktop, hidden on scanner page */}
       {!isScanner && (
-        <nav className="chef-tabs" data-testid="chef-tabs">
-          {tabs.map((tab) => (
-            <Link
-              key={tab.to}
-              to={tab.to}
-              className={`chef-tab${isTabActive(tab.to, location.pathname) ? ' active' : ''}`}
-            >
-              {tab.label}
-              {tab.to === '/chef/settings' && <SettingsDot />}
-            </Link>
-          ))}
+        <nav
+          className="hidden md:flex items-center bg-white border-b border-slate-200 px-4 shrink-0"
+          data-testid="chef-tabs"
+        >
+          <Tabs
+            items={tabItems.map((tab) => ({
+              ...tab,
+              badge: tab.value === '/chef/settings' ? undefined : undefined,
+            }))}
+            activeValue={activeTab}
+          />
+          <SettingsDot />
         </nav>
       )}
 
       {/* Mobile drawer */}
-      <div className={`chef-drawer${drawerOpen ? ' open' : ''}`}>
+      <div
+        className={[
+          'md:hidden flex-col bg-white border-b border-slate-200 overflow-hidden transition-all duration-200',
+          drawerOpen ? 'flex' : 'hidden',
+        ].join(' ')}
+      >
         {drawerOpen && (
-          <div className="chef-drawer-links">
-            {tabs.map((tab) => (
+          <div className="flex flex-col py-2 px-4">
+            {tabItems.map((tab) => (
               <Link
-                key={tab.to}
-                to={tab.to}
-                className={`chef-drawer-link${isTabActive(tab.to, location.pathname) ? ' active' : ''}`}
+                key={tab.value}
+                to={tab.href!}
+                className={[
+                  'block px-3 py-2.5 text-sm font-medium rounded-lg transition-colors no-underline',
+                  activeTab === tab.value ? 'text-emerald-600 bg-emerald-50' : 'text-slate-700 hover:bg-slate-100',
+                ].join(' ')}
                 onClick={() => setDrawerOpen(false)}
               >
                 {tab.label}
@@ -104,16 +129,16 @@ export function ChefLayout({ children }: ChefLayoutProps) {
                 setDrawerOpen(false);
                 navigate('/hub/account');
               }}
-              className="chef-drawer-link"
+              className="block px-3 py-2.5 text-sm font-medium rounded-lg text-slate-700 hover:bg-slate-100 text-left transition-colors"
             >
-              {'\u{1F3E0}'} Hub
+              Hub
             </button>
             <button
               onClick={() => {
                 setDrawerOpen(false);
                 signOut();
               }}
-              className="chef-drawer-link danger"
+              className="block px-3 py-2.5 text-sm font-medium rounded-lg text-red-600 hover:bg-red-50 text-left transition-colors"
             >
               Logout
             </button>
@@ -123,13 +148,16 @@ export function ChefLayout({ children }: ChefLayoutProps) {
 
       {/* Offline banner */}
       {!online && (
-        <div className="offline-banner" data-testid="offline-banner">
-          You are offline — actions are disabled until connection is restored.
+        <div className="px-4 pt-3" data-testid="offline-banner">
+          <Alert variant="warning">You are offline — actions are disabled until connection is restored.</Alert>
         </div>
       )}
 
       {/* Content */}
-      <div className="chef-content" style={online ? undefined : { pointerEvents: 'none', opacity: 0.6 }}>
+      <div
+        className="flex-1 overflow-y-auto p-5 max-w-[1200px] w-full mx-auto"
+        style={online ? undefined : { pointerEvents: 'none', opacity: 0.6 }}
+      >
         {children}
       </div>
     </div>
@@ -139,5 +167,5 @@ export function ChefLayout({ children }: ChefLayoutProps) {
 function SettingsDot() {
   const hasAlerts = useSettingsAlerts();
   if (!hasAlerts) return null;
-  return <span className="settings-dot" data-testid="settings-dot" />;
+  return <span className="w-2 h-2 rounded-full bg-red-500 ml-1" data-testid="settings-dot" />;
 }

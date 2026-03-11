@@ -33,33 +33,6 @@ interface LocalIngredient {
   servings_per_container: number;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Shared input styling                                               */
-/* ------------------------------------------------------------------ */
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px',
-  border: '1px solid #ddd',
-  borderRadius: '6px',
-  fontSize: '14px',
-  boxSizing: 'border-box',
-};
-
-const textareaStyle: React.CSSProperties = {
-  ...inputStyle,
-  resize: 'vertical',
-  minHeight: '60px',
-};
-
-const labelStyle: React.CSSProperties = {
-  display: 'block',
-  marginBottom: '4px',
-  fontWeight: 600,
-  fontSize: '14px',
-  color: '#374151',
-};
-
 /* ================================================================== */
 /*  RecipeFormPage                                                      */
 /* ================================================================== */
@@ -398,10 +371,14 @@ export function RecipeFormPage() {
   /*  RENDER                                                           */
   /* ================================================================ */
 
+  const inputCls =
+    'w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
+  const labelCls = 'block mb-1 font-semibold text-sm text-slate-700';
+
   if (loading) {
     return (
       <ChefLayout title={isEdit ? 'Edit Recipe' : 'New Recipe'}>
-        <div data-testid="recipe-form-loading" style={{ padding: '20px', color: '#666' }}>
+        <div data-testid="recipe-form-loading" className="p-5 text-slate-500">
           Loading...
         </div>
       </ChefLayout>
@@ -410,99 +387,84 @@ export function RecipeFormPage() {
 
   return (
     <ChefLayout title={isEdit ? 'Edit Recipe' : 'New Recipe'}>
-      <div style={{ marginBottom: '24px' }}>
-        <Link
-          to="/chef/recipes"
-          style={{ textDecoration: 'none', color: '#1e66f5', fontSize: '14px', fontWeight: 500 }}
-        >
+      <div className="mb-6">
+        <Link to="/chef/recipes" className="text-sm font-medium text-emerald-600 hover:text-emerald-700 no-underline">
           &larr; Recipes
         </Link>
-        <h1 style={{ margin: '8px 0 0', fontSize: '28px', fontWeight: 700, color: '#1a1a2e' }}>
-          {isEdit ? 'Edit Recipe' : 'New Recipe'}
-        </h1>
+        <h1 className="mt-2 mb-0 text-2xl font-bold text-slate-900">{isEdit ? 'Edit Recipe' : 'New Recipe'}</h1>
       </div>
 
       {saveError && (
-        <p
-          style={{
-            color: '#d33',
-            background: '#fef2f2',
-            padding: '10px 14px',
-            borderRadius: '6px',
-            border: '1px solid #fecaca',
-          }}
-        >
-          {saveError}
-        </p>
+        <p className="text-red-600 bg-red-50 px-3.5 py-2.5 rounded-md border border-red-200">{saveError}</p>
       )}
 
       {/* ============================================================ */}
       {/*  RECIPE FIELDS                                                */}
       {/* ============================================================ */}
-      <div data-testid="recipe-fields" className="card" style={{ padding: '20px', marginBottom: '16px' }}>
-        <div className="formGrid">
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={labelStyle}>Name</label>
+      <div data-testid="recipe-fields" className="bg-white border border-slate-200 rounded-lg p-5 mb-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div className="md:col-span-3">
+            <label className={labelCls}>Name</label>
             <input
               value={name}
               onChange={(e) => setName(e.target.value)}
               data-testid="recipe-name"
               required
               placeholder="Recipe name"
-              style={inputStyle}
+              className={inputCls}
             />
           </div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={labelStyle}>Description</label>
+          <div className="md:col-span-3">
+            <label className={labelCls}>Description</label>
             <textarea
               value={description}
               onChange={(e) => setDescription(e.target.value)}
               data-testid="recipe-description"
               placeholder="Brief description"
-              style={textareaStyle}
+              className={`${inputCls} resize-y min-h-[60px]`}
             />
           </div>
           <div>
-            <label style={labelStyle}>Base Servings</label>
+            <label className={labelCls}>Base Servings</label>
             <input
               type="number"
               min="0"
               value={baseServings}
               onChange={(e) => setBaseServings(Number(e.target.value) || 1)}
               data-testid="recipe-base-servings"
-              style={inputStyle}
+              className={inputCls}
             />
           </div>
           <div>
-            <label style={labelStyle}>Active Time (min)</label>
+            <label className={labelCls}>Active Time (min)</label>
             <input
               type="number"
               min="0"
               value={activeTime ?? ''}
               onChange={(e) => setActiveTime(e.target.value ? Number(e.target.value) : null)}
               data-testid="recipe-active-time"
-              style={inputStyle}
+              className={inputCls}
             />
           </div>
           <div>
-            <label style={labelStyle}>Total Time (min)</label>
+            <label className={labelCls}>Total Time (min)</label>
             <input
               type="number"
               min="0"
               value={totalTime ?? ''}
               onChange={(e) => setTotalTime(e.target.value ? Number(e.target.value) : null)}
               data-testid="recipe-total-time"
-              style={inputStyle}
+              className={inputCls}
             />
           </div>
-          <div style={{ gridColumn: '1 / -1' }}>
-            <label style={labelStyle}>Instructions</label>
+          <div className="md:col-span-3">
+            <label className={labelCls}>Instructions</label>
             <textarea
               value={instructions}
               onChange={(e) => setInstructions(e.target.value)}
               data-testid="recipe-instructions"
               placeholder="Step-by-step instructions"
-              style={{ ...textareaStyle, minHeight: '100px' }}
+              className={`${inputCls} resize-y min-h-[100px]`}
             />
           </div>
         </div>
@@ -511,58 +473,31 @@ export function RecipeFormPage() {
       {/* ============================================================ */}
       {/*  INGREDIENTS SECTION                                          */}
       {/* ============================================================ */}
-      <div data-testid="ingredients-section" className="card" style={{ padding: '20px', marginBottom: '16px' }}>
-        <h3 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: 700, color: '#1a1a2e' }}>Ingredients</h3>
+      <div data-testid="ingredients-section" className="bg-white border border-slate-200 rounded-lg p-5 mb-4">
+        <h3 className="m-0 mb-4 text-lg font-bold text-slate-900">Ingredients</h3>
 
         {/* Add ingredient form */}
-        <div
-          data-testid="add-ingredient-form"
-          style={{
-            display: 'flex',
-            gap: '8px',
-            flexWrap: 'wrap',
-            alignItems: 'flex-end',
-            marginBottom: '16px',
-          }}
-        >
-          <div style={{ flex: 1, minWidth: '150px', position: 'relative' }}>
-            <label style={labelStyle}>Product</label>
+        <div data-testid="add-ingredient-form" className="flex gap-2 flex-wrap items-end mb-4">
+          <div className="flex-1 min-w-[150px] relative">
+            <label className={labelCls}>Product</label>
             <input
               value={searchText}
               onChange={(e) => handleSearchInput(e.target.value)}
               data-testid="ingredient-product-search"
               placeholder="Search products..."
-              style={inputStyle}
+              className={inputCls}
             />
             {showDropdown && (
               <div
                 data-testid="ingredient-product-dropdown"
-                style={{
-                  position: 'absolute',
-                  top: '100%',
-                  left: 0,
-                  right: 0,
-                  background: '#fff',
-                  border: '1px solid #ccc',
-                  borderRadius: '4px',
-                  zIndex: 10,
-                  maxHeight: '200px',
-                  overflow: 'auto',
-                  boxShadow: '0 4px 12px rgba(0,0,0,0.1)',
-                }}
+                className="absolute top-full left-0 right-0 bg-white border border-slate-300 rounded shadow-lg z-10 max-h-[200px] overflow-auto"
               >
                 {searchResults.map((p) => (
                   <div
                     key={p.product_id}
                     onClick={() => selectProduct(p)}
                     data-testid={`ing-dropdown-item-${p.product_id}`}
-                    style={{ padding: '8px 12px', cursor: 'pointer', borderBottom: '1px solid #f0f0f0' }}
-                    onMouseOver={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.background = '#f5f5f5';
-                    }}
-                    onMouseOut={(e) => {
-                      (e.currentTarget as HTMLDivElement).style.background = '#fff';
-                    }}
+                    className="px-3 py-2 cursor-pointer border-b border-slate-100 hover:bg-slate-50 text-sm"
                   >
                     {p.name}
                   </div>
@@ -570,45 +505,44 @@ export function RecipeFormPage() {
               </div>
             )}
           </div>
-          <div style={{ width: '80px' }}>
-            <label style={labelStyle}>Qty</label>
+          <div className="w-20">
+            <label className={labelCls}>Qty</label>
             <input
               type="number"
               min="0"
               value={ingQuantity}
               onChange={(e) => setIngQuantity(Number(e.target.value) || 1)}
               data-testid="ingredient-qty"
-              style={inputStyle}
+              className={inputCls}
             />
           </div>
-          <div style={{ width: '120px' }}>
-            <label style={labelStyle}>Unit</label>
+          <div className="w-[120px]">
+            <label className={labelCls}>Unit</label>
             <select
               value={ingUnit}
               onChange={(e) => setIngUnit(e.target.value)}
               data-testid="ingredient-unit"
-              style={inputStyle}
+              className={inputCls}
             >
               <option value="serving">Serving</option>
               <option value="container">Container</option>
             </select>
           </div>
-          <div style={{ width: '120px' }}>
-            <label style={labelStyle}>Note</label>
+          <div className="w-[120px]">
+            <label className={labelCls}>Note</label>
             <input
               value={ingNote}
               onChange={(e) => setIngNote(e.target.value)}
               data-testid="ingredient-note"
               placeholder="Optional"
-              style={inputStyle}
+              className={inputCls}
             />
           </div>
           <button
-            className="primary-btn"
             onClick={addIngredient}
             disabled={!selectedProduct}
             data-testid="add-ingredient-btn"
-            style={{ background: '#1e66f5', alignSelf: 'flex-end' }}
+            className="px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50 self-end"
           >
             Add
           </button>
@@ -616,58 +550,15 @@ export function RecipeFormPage() {
 
         {/* Ingredients table */}
         {ingredients.length > 0 && (
-          <div className="table-responsive">
-            <table
-              style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '12px' }}
-              data-testid="ingredients-table"
-            >
+          <div className="overflow-x-auto rounded-lg border border-slate-200 mb-3">
+            <table className="w-full border-collapse text-sm" data-testid="ingredients-table">
               <thead>
-                <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: '#555',
-                    }}
-                  >
-                    Product
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'right',
-                      padding: '10px 12px',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: '#555',
-                    }}
-                  >
-                    Qty
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: '#555',
-                    }}
-                  >
-                    Unit
-                  </th>
-                  <th
-                    style={{
-                      textAlign: 'left',
-                      padding: '10px 12px',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      color: '#555',
-                    }}
-                  >
-                    Note
-                  </th>
-                  <th style={{ padding: '10px 12px', width: '80px' }}></th>
+                <tr className="bg-slate-50 border-b-2 border-slate-200">
+                  <th className="text-left p-2.5 text-xs font-semibold text-slate-600">Product</th>
+                  <th className="text-right p-2.5 text-xs font-semibold text-slate-600">Qty</th>
+                  <th className="text-left p-2.5 text-xs font-semibold text-slate-600">Unit</th>
+                  <th className="text-left p-2.5 text-xs font-semibold text-slate-600">Note</th>
+                  <th className="p-2.5 w-20"></th>
                 </tr>
               </thead>
               <tbody>
@@ -675,52 +566,44 @@ export function RecipeFormPage() {
                   <tr
                     key={`${ing.product_id}-${idx}`}
                     data-testid={`ingredient-row-${idx}`}
-                    style={{ borderBottom: '1px solid #eee' }}
+                    className="border-b border-slate-100"
                   >
-                    <td style={{ padding: '8px 12px', fontWeight: 500 }}>{ing.product_name}</td>
-                    <td style={{ textAlign: 'right', padding: '4px 8px' }}>
+                    <td className="p-2 font-medium text-slate-900">{ing.product_name}</td>
+                    <td className="text-right p-1">
                       <input
                         type="number"
                         min="0"
                         value={ing.quantity}
                         onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
-                        style={{ ...inputStyle, width: '70px', textAlign: 'right', padding: '6px 8px' }}
+                        className="w-[70px] px-2 py-1.5 border border-slate-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                         data-testid={`edit-qty-${idx}`}
                       />
                     </td>
-                    <td style={{ padding: '4px 8px' }}>
+                    <td className="p-1">
                       <select
                         value={ing.unit}
                         onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
                         data-testid={`edit-unit-${idx}`}
-                        style={{ ...inputStyle, width: '110px', padding: '6px 8px' }}
+                        className="w-[110px] px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                       >
                         <option value="serving">Serving</option>
                         <option value="container">Container</option>
                       </select>
                     </td>
-                    <td style={{ padding: '4px 8px' }}>
+                    <td className="p-1">
                       <input
                         value={ing.note}
                         placeholder={'\u2014'}
                         onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
-                        style={{ ...inputStyle, padding: '6px 8px' }}
+                        className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
                         data-testid={`edit-note-${idx}`}
                       />
                     </td>
-                    <td style={{ padding: '8px 12px' }}>
+                    <td className="p-2">
                       <button
                         onClick={() => removeIngredient(idx)}
                         data-testid={`remove-ingredient-${idx}`}
-                        style={{
-                          background: 'transparent',
-                          border: 'none',
-                          color: '#d33',
-                          cursor: 'pointer',
-                          fontWeight: 600,
-                          fontSize: '13px',
-                          padding: '4px 8px',
-                        }}
+                        className="bg-transparent border-none text-red-600 cursor-pointer font-semibold text-xs px-2 py-1 hover:text-red-700"
                       >
                         Remove
                       </button>
@@ -733,17 +616,14 @@ export function RecipeFormPage() {
         )}
 
         {ingredients.length === 0 && (
-          <p data-testid="no-ingredients" style={{ color: '#888', fontStyle: 'italic' }}>
+          <p data-testid="no-ingredients" className="text-slate-400 italic">
             No ingredients added yet.
           </p>
         )}
 
         {/* Dynamic macro display */}
-        <div
-          data-testid="macro-display"
-          style={{ marginTop: '16px', padding: '12px', background: '#f7f7f9', borderRadius: '8px' }}
-        >
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px', fontSize: '0.9em' }}>
+        <div data-testid="macro-display" className="mt-4 p-3 bg-slate-50 rounded-lg">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
             <div data-testid="total-macros">
               <strong>Total:</strong> {totalMacros.calories} cal | {totalMacros.protein}g P | {totalMacros.carbs}g C |{' '}
               {totalMacros.fat}g F
@@ -759,31 +639,28 @@ export function RecipeFormPage() {
       {/* ============================================================ */}
       {/*  ACTION BUTTONS                                               */}
       {/* ============================================================ */}
-      <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
+      <div className="flex gap-2 mt-4">
         <button
-          className="primary-btn"
           onClick={handleSave}
           disabled={!name.trim() || ingredients.length === 0}
           data-testid="save-recipe-btn"
-          style={{ flex: 'none', background: '#1e66f5', padding: '12px 24px', fontSize: '15px' }}
+          className="px-6 py-3 bg-emerald-600 text-white rounded-md font-semibold text-[15px] hover:bg-emerald-700 transition-colors disabled:opacity-50"
         >
           {isEdit ? 'Update Recipe' : 'Create Recipe'}
         </button>
 
         <button
-          className="primary-btn"
           onClick={() => navigate('/chef/recipes')}
-          style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
+          className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
         >
           Cancel
         </button>
 
         {isEdit && (
           <button
-            className="primary-btn"
             onClick={() => setShowDeleteAlert(true)}
             data-testid="delete-recipe-btn"
-            style={{ background: '#d33' }}
+            className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
           >
             Delete
           </button>
@@ -793,34 +670,25 @@ export function RecipeFormPage() {
       {/* Delete confirmation */}
       {showDeleteAlert && (
         <div
-          style={{
-            position: 'fixed',
-            top: 0,
-            left: 0,
-            right: 0,
-            bottom: 0,
-            background: 'rgba(0,0,0,0.5)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            zIndex: 1000,
-          }}
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setShowDeleteAlert(false)}
         >
-          <div className="modal-panel" onClick={(e) => e.stopPropagation()}>
-            <h3 style={{ margin: '0 0 12px', fontSize: '18px', fontWeight: 700 }}>Delete Recipe</h3>
-            <p style={{ color: '#666', margin: '0 0 20px' }}>
+          <div className="bg-white rounded-xl shadow-xl p-5 max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
+            <h3 className="m-0 mb-3 text-lg font-bold text-slate-900">Delete Recipe</h3>
+            <p className="text-slate-500 m-0 mb-5">
               Are you sure you want to delete this recipe? This cannot be undone.
             </p>
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+            <div className="flex gap-2 justify-end">
               <button
-                className="primary-btn"
                 onClick={() => setShowDeleteAlert(false)}
-                style={{ background: '#fff', border: '1px solid #ddd', color: '#4b5563' }}
+                className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
               >
                 Cancel
               </button>
-              <button className="primary-btn" onClick={handleDelete} style={{ background: '#d33' }}>
+              <button
+                onClick={handleDelete}
+                className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
+              >
                 Delete
               </button>
             </div>

@@ -45,95 +45,6 @@ export function calcCaloriesFromMacros(protein: number, carbs: number, fat: numb
   return protein * 4 + carbs * 4 + fat * 9;
 }
 
-/* ------------------------------------------------------------------ */
-/*  Shared inline styles                                               */
-/* ------------------------------------------------------------------ */
-
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px',
-  border: '1px solid #ddd',
-  borderRadius: '6px',
-  fontSize: '14px',
-  boxSizing: 'border-box',
-};
-
-const cardStyle: React.CSSProperties = {
-  background: '#fff',
-  border: '1px solid #eee',
-  borderRadius: '8px',
-  padding: '16px',
-};
-
-const thStyle: React.CSSProperties = {
-  padding: '10px',
-  textAlign: 'left',
-  fontWeight: 600,
-  fontSize: '13px',
-};
-
-const thRightStyle: React.CSSProperties = { ...thStyle, textAlign: 'right' };
-
-const dateNavBtn: React.CSSProperties = {
-  padding: '8px 16px',
-  background: '#fff',
-  border: '1px solid #ddd',
-  borderRadius: '6px',
-  cursor: 'pointer',
-};
-
-const todayBtn: React.CSSProperties = {
-  padding: '8px 16px',
-  background: '#1e66f5',
-  color: '#fff',
-  border: 'none',
-  borderRadius: '6px',
-  fontWeight: 600,
-  cursor: 'pointer',
-};
-
-const primaryBtn: React.CSSProperties = {
-  padding: '8px 16px',
-  background: '#1e66f5',
-  color: '#fff',
-  border: 'none',
-  borderRadius: '6px',
-  fontWeight: 600,
-  cursor: 'pointer',
-  fontSize: '14px',
-};
-
-const cancelBtn: React.CSSProperties = {
-  background: 'transparent',
-  border: '1px solid #ddd',
-  color: '#4b5563',
-  padding: '8px 16px',
-  borderRadius: '6px',
-  cursor: 'pointer',
-  fontSize: '14px',
-};
-
-const saveBtn: React.CSSProperties = {
-  padding: '8px 16px',
-  background: '#2f9e44',
-  color: '#fff',
-  border: 'none',
-  borderRadius: '6px',
-  fontWeight: 600,
-  cursor: 'pointer',
-  fontSize: '14px',
-};
-
-const dangerBtn: React.CSSProperties = {
-  padding: '2px 6px',
-  background: 'transparent',
-  border: 'none',
-  color: '#d33',
-  cursor: 'pointer',
-  fontWeight: 'bold',
-  fontSize: '16px',
-};
-
 /* ================================================================== */
 /*  MacroPage                                                          */
 /* ================================================================== */
@@ -523,7 +434,7 @@ export function MacroPage() {
   if (loading) {
     return (
       <ChefLayout title="Macros">
-        <div style={{ padding: '20px' }} data-testid="macro-loading">
+        <div className="p-5" data-testid="macro-loading">
           Loading macros...
         </div>
       </ChefLayout>
@@ -535,20 +446,23 @@ export function MacroPage() {
 
   return (
     <ChefLayout title="Macros">
-      <Link to="/chef" style={{ textDecoration: 'none', color: '#1e66f5', fontSize: '14px', fontWeight: 500 }}>
+      <Link to="/chef" className="text-sm font-medium text-emerald-600 hover:text-emerald-700 no-underline">
         &larr; Dashboard
       </Link>
-      <h1 style={{ margin: '8px 0 0' }}>Macros</h1>
+      <h1 className="mt-2 mb-0 text-2xl font-bold text-slate-900">Macros</h1>
       {loadError && (
-        <div style={{ ...cardStyle, borderColor: '#d33', background: '#fff5f5' }} data-testid="load-error">
-          <p style={{ color: '#d33', margin: '0 0 8px' }}>Failed to load data: {loadError}</p>
-          <button style={primaryBtn} onClick={loadData}>
+        <div className="border border-red-500 bg-red-50 rounded-lg p-4 mb-4" data-testid="load-error">
+          <p className="text-red-600 m-0 mb-2">Failed to load data: {loadError}</p>
+          <button
+            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+            onClick={loadData}
+          >
             Retry
           </button>
         </div>
       )}
       {mutationError && (
-        <div style={{ color: '#d33', marginBottom: '12px' }}>
+        <div className="text-red-600 mb-3">
           <p>{mutationError}</p>
         </div>
       )}
@@ -556,38 +470,50 @@ export function MacroPage() {
       {/* ============================================================ */}
       {/*  DATE NAVIGATION                                              */}
       {/* ============================================================ */}
-      <div data-testid="date-nav" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '16px' }}>
-        <button style={dateNavBtn} onClick={prevDate} data-testid="prev-date-btn">
+      <div data-testid="date-nav" className="flex items-center gap-2 mb-4">
+        <button
+          className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm hover:bg-slate-50 transition-colors"
+          onClick={prevDate}
+          data-testid="prev-date-btn"
+        >
           Prev
         </button>
-        <button style={todayBtn} onClick={goToday} data-testid="today-date-btn">
+        <button
+          className="px-4 py-2 bg-emerald-600 text-white border-none rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          onClick={goToday}
+          data-testid="today-date-btn"
+        >
           Today
         </button>
-        <button style={dateNavBtn} onClick={nextDate} data-testid="next-date-btn">
+        <button
+          className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm hover:bg-slate-50 transition-colors"
+          onClick={nextDate}
+          data-testid="next-date-btn"
+        >
           Next
         </button>
-        <span data-testid="current-date" style={{ marginLeft: '8px', fontWeight: 'bold' }}>
+        <span data-testid="current-date" className="ml-2 font-bold text-slate-900">
           {formatDateDisplay(currentDate)}
         </span>
       </div>
 
       {/* ============================================================ */}
-      {/*  DAY SUMMARY — PROGRESS BARS                                  */}
+      {/*  DAY SUMMARY -- PROGRESS BARS                                 */}
       {/* ============================================================ */}
-      <div data-testid="macro-summary" style={{ marginBottom: '24px' }}>
-        <h3>Day Summary</h3>
+      <div data-testid="macro-summary" className="mb-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-3">Day Summary</h3>
         <MacroProgressBar
           label="Calories"
           current={consumedTotals.calories}
           goal={goals.calories}
-          color="#1e66f5"
+          color="#059669"
           testId="progress-calories"
         />
         <MacroProgressBar
           label="Protein"
           current={consumedTotals.protein}
           goal={goals.protein}
-          color="#2f9e44"
+          color="#22c55e"
           unit="g"
           testId="progress-protein"
         />
@@ -595,7 +521,7 @@ export function MacroPage() {
           label="Carbs"
           current={consumedTotals.carbs}
           goal={goals.carbs}
-          color="#ffc409"
+          color="#f59e0b"
           unit="g"
           testId="progress-carbs"
         />
@@ -603,7 +529,7 @@ export function MacroPage() {
           label="Fats"
           current={consumedTotals.fat}
           goal={goals.fat}
-          color="#d33"
+          color="#ef4444"
           unit="g"
           testId="progress-fats"
         />
@@ -612,122 +538,130 @@ export function MacroPage() {
       {/* ============================================================ */}
       {/*  CONSUMED ITEMS TABLE                                         */}
       {/* ============================================================ */}
-      <div data-testid="consumed-section" style={{ marginBottom: '24px' }}>
-        <h3>Consumed Items</h3>
+      <div data-testid="consumed-section" className="mb-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-3">Consumed Items</h3>
         {consumed.length === 0 ? (
-          <p data-testid="no-consumed">No consumed items for this day.</p>
+          <p data-testid="no-consumed" className="text-slate-500">
+            No consumed items for this day.
+          </p>
         ) : (
-          <table data-testid="consumed-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
-                <th style={thStyle}>Source</th>
-                <th style={thStyle}>Item</th>
-                <th style={thRightStyle}>Cal</th>
-                <th style={thRightStyle}>P</th>
-                <th style={thRightStyle}>C</th>
-                <th style={thRightStyle}>F</th>
-                <th style={{ ...thStyle, width: '40px' }}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {consumed.map((item) => (
-                <tr key={item.id} data-testid={`consumed-row-${item.id}`}>
-                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.source}</td>
-                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.name}</td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
-                    {item.calories}
-                  </td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
-                    {item.protein}g
-                  </td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.carbs}g</td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.fat}g</td>
-                  <td style={{ padding: '4px', borderBottom: '1px solid #eee', textAlign: 'center' }}>
-                    {item.source !== 'LiquidTrack' && (
-                      <button
-                        style={dangerBtn}
-                        data-testid={`delete-consumed-${item.id}`}
-                        onClick={() => deleteConsumedItem(item)}
-                        aria-label={`Remove ${item.name}`}
-                      >
-                        x
-                      </button>
-                    )}
-                  </td>
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table data-testid="consumed-table" className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b-2 border-slate-200">
+                  <th className="p-2.5 text-left font-semibold text-slate-700 text-xs">Source</th>
+                  <th className="p-2.5 text-left font-semibold text-slate-700 text-xs">Item</th>
+                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">Cal</th>
+                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">P</th>
+                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">C</th>
+                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">F</th>
+                  <th className="p-2.5 w-10"></th>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr data-testid="consumed-total-row" style={{ fontWeight: 'bold' }}>
-                <td style={{ padding: '8px', borderTop: '2px solid #999' }}></td>
-                <td style={{ padding: '8px', borderTop: '2px solid #999' }}>TOTAL</td>
-                <td style={{ textAlign: 'right', padding: '8px', borderTop: '2px solid #999' }}>
-                  {consumed.reduce((sum, i) => sum + i.calories, 0)}
-                </td>
-                <td style={{ textAlign: 'right', padding: '8px', borderTop: '2px solid #999' }}>
-                  {consumed.reduce((sum, i) => sum + i.protein, 0)}g
-                </td>
-                <td style={{ textAlign: 'right', padding: '8px', borderTop: '2px solid #999' }}>
-                  {consumed.reduce((sum, i) => sum + i.carbs, 0)}g
-                </td>
-                <td style={{ textAlign: 'right', padding: '8px', borderTop: '2px solid #999' }}>
-                  {consumed.reduce((sum, i) => sum + i.fat, 0)}g
-                </td>
-                <td style={{ borderTop: '2px solid #999' }}></td>
-              </tr>
-            </tfoot>
-          </table>
+              </thead>
+              <tbody>
+                {consumed.map((item) => (
+                  <tr key={item.id} data-testid={`consumed-row-${item.id}`} className="border-b border-slate-100">
+                    <td className="p-2 text-slate-600">{item.source}</td>
+                    <td className="p-2 text-slate-900 font-medium">{item.name}</td>
+                    <td className="p-2 text-right tabular-nums">{item.calories}</td>
+                    <td className="p-2 text-right tabular-nums">{item.protein}g</td>
+                    <td className="p-2 text-right tabular-nums">{item.carbs}g</td>
+                    <td className="p-2 text-right tabular-nums">{item.fat}g</td>
+                    <td className="p-1 text-center">
+                      {item.source !== 'LiquidTrack' && (
+                        <button
+                          className="text-red-500 hover:text-red-700 font-bold text-base bg-transparent border-none cursor-pointer"
+                          data-testid={`delete-consumed-${item.id}`}
+                          onClick={() => deleteConsumedItem(item)}
+                          aria-label={`Remove ${item.name}`}
+                        >
+                          x
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr data-testid="consumed-total-row" className="font-bold border-t-2 border-slate-400">
+                  <td className="p-2"></td>
+                  <td className="p-2 text-slate-900">TOTAL</td>
+                  <td className="p-2 text-right tabular-nums">{consumed.reduce((sum, i) => sum + i.calories, 0)}</td>
+                  <td className="p-2 text-right tabular-nums">{consumed.reduce((sum, i) => sum + i.protein, 0)}g</td>
+                  <td className="p-2 text-right tabular-nums">{consumed.reduce((sum, i) => sum + i.carbs, 0)}g</td>
+                  <td className="p-2 text-right tabular-nums">{consumed.reduce((sum, i) => sum + i.fat, 0)}g</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
         )}
       </div>
 
       {/* ============================================================ */}
       {/*  PLANNED ITEMS                                                */}
       {/* ============================================================ */}
-      <div data-testid="planned-section" style={{ marginBottom: '24px' }}>
-        <h3>Planned (not yet consumed)</h3>
+      <div data-testid="planned-section" className="mb-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-3">Planned (not yet consumed)</h3>
         {planned.length === 0 ? (
-          <p data-testid="no-planned">No planned items for this day.</p>
+          <p data-testid="no-planned" className="text-slate-500">
+            No planned items for this day.
+          </p>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
-                <th style={thStyle}>Item</th>
-                <th style={thRightStyle}>Cal</th>
-                <th style={thRightStyle}>P</th>
-                <th style={thRightStyle}>C</th>
-                <th style={thRightStyle}>F</th>
-              </tr>
-            </thead>
-            <tbody>
-              {planned.map((item) => (
-                <tr key={item.meal_id} data-testid={`planned-row-${item.meal_id}`}>
-                  <td style={{ padding: '8px', borderBottom: '1px solid #eee' }}>{item.name}</td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
-                    {item.calories}
-                  </td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>
-                    {item.protein}g
-                  </td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.carbs}g</td>
-                  <td style={{ textAlign: 'right', padding: '8px', borderBottom: '1px solid #eee' }}>{item.fat}g</td>
+          <div className="overflow-x-auto rounded-lg border border-slate-200">
+            <table className="w-full border-collapse text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b-2 border-slate-200">
+                  <th className="p-2.5 text-left font-semibold text-slate-700 text-xs">Item</th>
+                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">Cal</th>
+                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">P</th>
+                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">C</th>
+                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">F</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {planned.map((item) => (
+                  <tr
+                    key={item.meal_id}
+                    data-testid={`planned-row-${item.meal_id}`}
+                    className="border-b border-slate-100"
+                  >
+                    <td className="p-2 text-slate-900 font-medium">{item.name}</td>
+                    <td className="p-2 text-right tabular-nums">{item.calories}</td>
+                    <td className="p-2 text-right tabular-nums">{item.protein}g</td>
+                    <td className="p-2 text-right tabular-nums">{item.carbs}g</td>
+                    <td className="p-2 text-right tabular-nums">{item.fat}g</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
       {/* ============================================================ */}
       {/*  ACTION BUTTONS                                               */}
       {/* ============================================================ */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '24px' }}>
-        <button style={primaryBtn} onClick={openTempModal} data-testid="log-temp-btn">
+      <div className="flex gap-2 mb-6 flex-wrap">
+        <button
+          className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          onClick={openTempModal}
+          data-testid="log-temp-btn"
+        >
           + Log Temp Item
         </button>
-        <button style={primaryBtn} onClick={openTargetModal} data-testid="target-macros-btn">
+        <button
+          className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          onClick={openTargetModal}
+          data-testid="target-macros-btn"
+        >
           Edit Targets
         </button>
-        <button style={primaryBtn} onClick={openTasteModal} data-testid="taste-profile-btn">
+        <button
+          className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          onClick={openTasteModal}
+          data-testid="taste-profile-btn"
+        >
           Taste Profile
         </button>
       </div>
@@ -741,20 +675,20 @@ export function MacroPage() {
         title="Log Temp Item"
         testId="temp-item-modal"
       >
-        <div style={{ display: 'grid', gap: '12px' }}>
+        <div className="grid gap-3">
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Name</label>
+            <label className="block mb-1 text-xs font-semibold text-slate-700">Name</label>
             <input
-              style={inputStyle}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
               value={tempName}
               onChange={(e) => setTempName(e.target.value)}
               data-testid="temp-name"
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Calories</label>
+            <label className="block mb-1 text-xs font-semibold text-slate-700">Calories</label>
             <input
-              style={inputStyle}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
               type="number"
               min="0"
               value={tempCalories}
@@ -763,9 +697,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Protein</label>
+            <label className="block mb-1 text-xs font-semibold text-slate-700">Protein</label>
             <input
-              style={inputStyle}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
               type="number"
               min="0"
               value={tempProtein}
@@ -774,9 +708,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Carbs</label>
+            <label className="block mb-1 text-xs font-semibold text-slate-700">Carbs</label>
             <input
-              style={inputStyle}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
               type="number"
               min="0"
               value={tempCarbs}
@@ -785,9 +719,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Fat</label>
+            <label className="block mb-1 text-xs font-semibold text-slate-700">Fat</label>
             <input
-              style={inputStyle}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
               type="number"
               min="0"
               value={tempFat}
@@ -796,11 +730,20 @@ export function MacroPage() {
             />
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <button style={cancelBtn} onClick={() => setShowTempModal(false)} data-testid="temp-cancel-btn">
+        <div className="flex gap-2 justify-end mt-4">
+          <button
+            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+            onClick={() => setShowTempModal(false)}
+            data-testid="temp-cancel-btn"
+          >
             Cancel
           </button>
-          <button style={saveBtn} onClick={saveTempItem} disabled={!tempName.trim()} data-testid="temp-save-btn">
+          <button
+            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            onClick={saveTempItem}
+            disabled={!tempName.trim()}
+            data-testid="temp-save-btn"
+          >
             Log Item
           </button>
         </div>
@@ -815,13 +758,11 @@ export function MacroPage() {
         title="Target Macros"
         testId="target-macros-modal"
       >
-        <div style={{ display: 'grid', gap: '12px' }}>
+        <div className="grid gap-3">
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>
-              Protein (g)
-            </label>
+            <label className="block mb-1 text-xs font-semibold text-slate-700">Protein (g)</label>
             <input
-              style={inputStyle}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
               type="number"
               min="0"
               value={targetProtein}
@@ -830,11 +771,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>
-              Carbs (g)
-            </label>
+            <label className="block mb-1 text-xs font-semibold text-slate-700">Carbs (g)</label>
             <input
-              style={inputStyle}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
               type="number"
               min="0"
               value={targetCarbs}
@@ -843,9 +782,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label style={{ display: 'block', marginBottom: '4px', fontSize: '13px', fontWeight: 600 }}>Fats (g)</label>
+            <label className="block mb-1 text-xs font-semibold text-slate-700">Fats (g)</label>
             <input
-              style={inputStyle}
+              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
               type="number"
               min="0"
               value={targetFat}
@@ -853,17 +792,25 @@ export function MacroPage() {
               data-testid="target-fats"
             />
           </div>
-          <div data-testid="target-calories" style={{ padding: '8px', background: '#f4f5f8', borderRadius: '4px' }}>
+          <div data-testid="target-calories" className="p-2 bg-slate-50 rounded text-sm">
             <strong>Calories (auto): </strong>
             {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
-            <div style={{ fontSize: '0.8em', color: '#666' }}>(protein*4 + carbs*4 + fat*9)</div>
+            <div className="text-xs text-slate-500 mt-0.5">(protein*4 + carbs*4 + fat*9)</div>
           </div>
         </div>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <button style={cancelBtn} onClick={() => setShowTargetModal(false)} data-testid="target-cancel-btn">
+        <div className="flex gap-2 justify-end mt-4">
+          <button
+            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+            onClick={() => setShowTargetModal(false)}
+            data-testid="target-cancel-btn"
+          >
             Cancel
           </button>
-          <button style={saveBtn} onClick={saveTargets} data-testid="target-save-btn">
+          <button
+            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+            onClick={saveTargets}
+            data-testid="target-save-btn"
+          >
             Save
           </button>
         </div>
@@ -878,22 +825,30 @@ export function MacroPage() {
         title="Taste Profile"
         testId="taste-modal"
       >
-        <p style={{ fontSize: '0.9em', color: '#666', marginBottom: '12px' }}>
+        <p className="text-sm text-slate-500 mb-3">
           Dietary preferences and notes for recipe filtering and AI suggestions:
         </p>
         <textarea
-          style={{ ...inputStyle, resize: 'vertical', minHeight: '120px' }}
+          className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm resize-y min-h-[120px] font-[inherit] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
           value={tasteProfile}
           onChange={(e) => setTasteProfile(e.target.value)}
           data-testid="taste-textarea"
           aria-label="Taste profile"
           rows={5}
         />
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end', marginTop: '16px' }}>
-          <button style={cancelBtn} onClick={() => setShowTasteModal(false)} data-testid="taste-cancel-btn">
+        <div className="flex gap-2 justify-end mt-4">
+          <button
+            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+            onClick={() => setShowTasteModal(false)}
+            data-testid="taste-cancel-btn"
+          >
             Cancel
           </button>
-          <button style={saveBtn} onClick={saveTasteProfile} data-testid="taste-save-btn">
+          <button
+            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+            onClick={saveTasteProfile}
+            data-testid="taste-save-btn"
+          >
             Save
           </button>
         </div>

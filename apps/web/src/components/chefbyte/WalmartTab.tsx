@@ -40,25 +40,14 @@ interface PriceResult {
 }
 
 /* ------------------------------------------------------------------ */
-/*  Shared styles                                                      */
+/*  Reusable Tailwind class strings                                    */
 /* ------------------------------------------------------------------ */
 
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  padding: '10px',
-  border: '1px solid #ddd',
-  borderRadius: '6px',
-  fontSize: '14px',
-  boxSizing: 'border-box',
-};
-
-const cardStyle: React.CSSProperties = {
-  border: '1px solid #ddd',
-  borderRadius: '8px',
-  padding: '16px',
-  marginBottom: '16px',
-  background: '#fff',
-};
+const inputCls =
+  'w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
+const cardCls = 'border border-slate-200 rounded-lg p-4 mb-4 bg-white';
+const primaryBtnCls =
+  'bg-emerald-600 text-white border-none px-4 py-2.5 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed';
 
 /* ================================================================== */
 /*  WalmartTab                                                         */
@@ -439,13 +428,24 @@ export function WalmartTab() {
     }
   };
 
+  /* ---------------------------------------------------------------- */
+  /*  Progress bar helper                                              */
+  /* ---------------------------------------------------------------- */
+
+  const progressPercent = (progress: string): number => {
+    const parts = progress.split('/');
+    const current = parseInt(parts[0] || '0');
+    const total = parseInt(parts[1] || '1');
+    return total > 0 ? (current / total) * 100 : 0;
+  };
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
 
   if (loading) {
     return (
-      <div data-testid="walmart-loading" style={{ padding: '20px', color: '#666' }}>
+      <div data-testid="walmart-loading" className="p-5 text-slate-500">
         Loading...
       </div>
     );
@@ -453,52 +453,25 @@ export function WalmartTab() {
 
   return (
     <>
-      <div style={{ marginBottom: '24px' }}>
-        <h1 style={{ margin: 0, fontSize: '28px', fontWeight: 700, color: '#1a1a2e' }}>Walmart Price Manager</h1>
-        <p style={{ margin: '8px 0 0', color: '#666', fontSize: '14px' }}>
-          Link products to Walmart and manage pricing
-        </p>
+      <div className="mb-6">
+        <h1 className="m-0 text-2xl font-bold text-slate-900">Walmart Price Manager</h1>
+        <p className="mt-2 mb-0 text-slate-500 text-sm">Link products to Walmart and manage pricing</p>
       </div>
 
-      {error && (
-        <p
-          style={{
-            color: '#d33',
-            background: '#fef2f2',
-            padding: '10px 14px',
-            borderRadius: '6px',
-            border: '1px solid #fecaca',
-            marginBottom: '16px',
-          }}
-        >
-          {error}
-        </p>
-      )}
+      {error && <p className="text-red-600 bg-red-50 px-3.5 py-2.5 rounded-md border border-red-200 mb-4">{error}</p>}
 
       {/* ============================================================ */}
       {/*  SEARCH & PICK — MISSING WALMART LINKS                       */}
       {/* ============================================================ */}
-      <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 mb-6">
         <div data-testid="missing-links-section">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '16px',
-              flexWrap: 'wrap',
-              gap: '12px',
-            }}
-          >
-            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>
-              Missing Walmart Links ({missingLinksCount})
-            </h2>
+          <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
+            <h2 className="m-0 text-lg font-bold">Missing Walmart Links ({missingLinksCount})</h2>
             <button
-              className="primary-btn"
+              className={`${primaryBtnCls} whitespace-nowrap`}
               onClick={loadNext5Products}
               disabled={searchLoading || saving}
               data-testid="load-next-5-btn"
-              style={{ background: '#1e66f5', whiteSpace: 'nowrap' }}
             >
               {searchLoading ? 'Searching Walmart...' : 'Load Next 5 Products'}
             </button>
@@ -506,17 +479,9 @@ export function WalmartTab() {
 
           {/* Loading indicator */}
           {searchLoading && (
-            <div
-              style={{
-                padding: '40px 20px',
-                textAlign: 'center',
-                backgroundColor: '#e3f2fd',
-                borderRadius: '8px',
-                margin: '12px 0',
-              }}
-            >
-              <div style={{ fontSize: '16px', fontWeight: 600, color: '#1976d2' }}>Searching Walmart...</div>
-              <div style={{ fontSize: '14px', color: '#666', marginTop: '8px' }}>
+            <div className="py-10 px-5 text-center bg-emerald-50 rounded-lg my-3">
+              <div className="text-base font-semibold text-emerald-700">Searching Walmart...</div>
+              <div className="text-sm text-slate-500 mt-2">
                 Fetching search results for {products.filter((p) => p.loading).length} products
               </div>
             </div>
@@ -524,52 +489,33 @@ export function WalmartTab() {
 
           {/* Empty state */}
           {products.length === 0 && !searchLoading && missingLinksCount === 0 && (
-            <p
-              data-testid="no-missing-links"
-              style={{ color: '#666', fontStyle: 'italic', padding: '20px 0', textAlign: 'center' }}
-            >
+            <p data-testid="no-missing-links" className="text-slate-500 italic py-5 text-center">
               All products have Walmart links
             </p>
           )}
 
           {products.length === 0 && !searchLoading && missingLinksCount > 0 && (
-            <p style={{ color: '#666', textAlign: 'center', padding: '20px' }}>
+            <p className="text-slate-500 text-center py-5">
               Click "Load Next 5 Products" to start linking products to Walmart
             </p>
           )}
 
           {/* Product cards with search results */}
           {products.map((product) => (
-            <div key={product.product_id} data-testid={`link-item-${product.product_id}`} style={cardStyle}>
+            <div key={product.product_id} data-testid={`link-item-${product.product_id}`} className={cardCls}>
               {/* Product header */}
-              <div
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '12px',
-                  marginBottom: '12px',
-                  flexWrap: 'wrap',
-                }}
-              >
-                <span style={{ flex: 1, fontWeight: 600, fontSize: '16px' }}>{product.name}</span>
-                {product.barcode && <span style={{ fontSize: '13px', color: '#666' }}>({product.barcode})</span>}
+              <div className="flex items-center gap-3 mb-3 flex-wrap">
+                <span className="flex-1 font-semibold text-base">{product.name}</span>
+                {product.barcode && <span className="text-[13px] text-slate-500">({product.barcode})</span>}
                 <a
                   href={`https://www.walmart.com/search?q=${encodeURIComponent(product.name)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ color: '#1976d2', textDecoration: 'none', fontSize: '14px' }}
+                  className="text-blue-600 no-underline text-sm hover:underline"
                 >
                   Search Walmart
                 </a>
-                <label
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
-                    fontSize: '14px',
-                    cursor: 'pointer',
-                  }}
-                >
+                <label className="flex items-center gap-1.5 text-sm cursor-pointer">
                   <input
                     type="checkbox"
                     checked={product.notWalmart}
@@ -581,130 +527,84 @@ export function WalmartTab() {
               </div>
 
               {/* Loading state for individual product */}
-              {product.loading && (
-                <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>Loading options...</div>
-              )}
+              {product.loading && <div className="py-5 text-center text-slate-500">Loading options...</div>}
 
               {/* Error state */}
-              {product.error && !product.loading && (
-                <div style={{ padding: '10px', color: '#d32f2f', fontSize: '14px' }}>{product.error}</div>
-              )}
+              {product.error && !product.loading && <div className="p-2.5 text-red-600 text-sm">{product.error}</div>}
 
               {/* Options grid */}
               {!product.loading && product.options.length > 0 && !product.notWalmart && (
                 <div
-                  style={{
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))',
-                    gap: '12px',
-                    marginBottom: '12px',
-                  }}
+                  className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-3 mb-3"
                   data-testid={`options-grid-${product.product_id}`}
                 >
-                  {product.options.map((option, index) => (
-                    <div
-                      key={index}
-                      onClick={() => selectOption(product.product_id, option)}
-                      data-testid={`option-${product.product_id}-${index}`}
-                      style={{
-                        border: product.selectedOption?.url === option.url ? '3px solid #4caf50' : '1px solid #ddd',
-                        borderRadius: '8px',
-                        padding: '12px',
-                        cursor: 'pointer',
-                        backgroundColor: product.selectedOption?.url === option.url ? '#f0fff0' : '#fafafa',
-                        transition: 'all 0.2s',
-                      }}
-                    >
-                      {/* Radio indicator */}
+                  {product.options.map((option, index) => {
+                    const isSelected = product.selectedOption?.url === option.url;
+                    return (
                       <div
-                        style={{
-                          width: '18px',
-                          height: '18px',
-                          borderRadius: '50%',
-                          border: '2px solid #4caf50',
-                          marginBottom: '8px',
-                          backgroundColor: product.selectedOption?.url === option.url ? '#4caf50' : 'transparent',
-                        }}
-                      />
-
-                      {/* Product image */}
-                      <div
-                        style={{
-                          width: '100%',
-                          height: '100px',
-                          backgroundColor: '#f5f5f5',
-                          borderRadius: '4px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          marginBottom: '8px',
-                          overflow: 'hidden',
-                        }}
+                        key={index}
+                        onClick={() => selectOption(product.product_id, option)}
+                        data-testid={`option-${product.product_id}-${index}`}
+                        className={`rounded-lg p-3 cursor-pointer transition-all ${
+                          isSelected
+                            ? 'border-[3px] border-green-500 bg-green-50'
+                            : 'border border-slate-200 bg-slate-50 hover:border-slate-300'
+                        }`}
                       >
-                        {option.image_url ? (
-                          <img
-                            src={option.image_url}
-                            alt={option.title || 'Product'}
-                            style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                            onError={(e) => {
-                              (e.target as HTMLImageElement).style.display = 'none';
-                            }}
-                          />
-                        ) : (
-                          <span style={{ color: '#999', fontSize: '12px' }}>No image</span>
-                        )}
+                        {/* Radio indicator */}
+                        <div
+                          className={`w-[18px] h-[18px] rounded-full border-2 border-green-500 mb-2 ${
+                            isSelected ? 'bg-green-500' : 'bg-transparent'
+                          }`}
+                        />
+
+                        {/* Product image */}
+                        <div className="w-full h-[100px] bg-slate-100 rounded flex items-center justify-center mb-2 overflow-hidden">
+                          {option.image_url ? (
+                            <img
+                              src={option.image_url}
+                              alt={option.title || 'Product'}
+                              className="max-w-full max-h-full object-contain"
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).style.display = 'none';
+                              }}
+                            />
+                          ) : (
+                            <span className="text-slate-400 text-xs">No image</span>
+                          )}
+                        </div>
+
+                        {/* Product name */}
+                        <div className="text-xs leading-tight mb-1.5 max-h-10 overflow-hidden">
+                          {option.title || 'Unknown Product'}
+                        </div>
+
+                        {/* Price as link */}
+                        <a
+                          href={option.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          onClick={(e) => e.stopPropagation()}
+                          className="text-green-700 font-semibold text-sm no-underline hover:underline"
+                        >
+                          {option.price ? `$${option.price.toFixed(2)}` : 'Price N/A'}
+                        </a>
                       </div>
-
-                      {/* Product name */}
-                      <div
-                        style={{
-                          fontSize: '12px',
-                          lineHeight: '1.3',
-                          marginBottom: '6px',
-                          maxHeight: '40px',
-                          overflow: 'hidden',
-                        }}
-                      >
-                        {option.title || 'Unknown Product'}
-                      </div>
-
-                      {/* Price as link */}
-                      <a
-                        href={option.url}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        onClick={(e) => e.stopPropagation()}
-                        style={{
-                          color: '#2e7d32',
-                          fontWeight: 600,
-                          fontSize: '14px',
-                          textDecoration: 'none',
-                        }}
-                      >
-                        {option.price ? `$${option.price.toFixed(2)}` : 'Price N/A'}
-                      </a>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
 
               {/* Custom URL fallback */}
               {!product.notWalmart && !product.loading && (
-                <div
-                  style={{
-                    borderTop: product.options.length > 0 ? '1px solid #eee' : 'none',
-                    paddingTop: product.options.length > 0 ? '12px' : '0',
-                  }}
-                >
-                  <label style={{ fontSize: '13px', color: '#666', display: 'block', marginBottom: '6px' }}>
-                    Or paste a custom Walmart link:
-                  </label>
+                <div className={product.options.length > 0 ? 'border-t border-slate-100 pt-3' : ''}>
+                  <label className="text-[13px] text-slate-500 block mb-1.5">Or paste a custom Walmart link:</label>
                   <input
                     type="text"
                     value={product.customUrl}
                     onChange={(e) => handleCustomUrlChange(product.product_id, e.target.value)}
                     placeholder="https://www.walmart.com/ip/..."
-                    style={{ ...inputStyle }}
+                    className={inputCls}
                     data-testid={`url-input-${product.product_id}`}
                   />
                 </div>
@@ -715,22 +615,10 @@ export function WalmartTab() {
           {/* Complete & Update Selected button */}
           {hasSelections && (
             <button
-              className="primary-btn"
+              className="w-full py-3.5 bg-green-500 text-white border-none rounded-md text-base font-semibold cursor-pointer mt-3 hover:bg-green-600 disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={completeUpdates}
               disabled={saving}
               data-testid="complete-updates-btn"
-              style={{
-                width: '100%',
-                padding: '14px',
-                backgroundColor: '#4caf50',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                fontSize: '16px',
-                fontWeight: 600,
-                cursor: 'pointer',
-                marginTop: '12px',
-              }}
             >
               {saving ? 'Updating...' : 'Complete & Update Selected'}
             </button>
@@ -741,98 +629,55 @@ export function WalmartTab() {
       {/* ============================================================ */}
       {/*  MISSING PRICES                                               */}
       {/* ============================================================ */}
-      <div className="card" style={{ padding: '20px', marginBottom: '24px' }}>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 mb-6">
         <div data-testid="missing-prices-section">
-          <div
-            style={{
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginBottom: '16px',
-              flexWrap: 'wrap',
-              gap: '12px',
-            }}
-          >
-            <h2 style={{ margin: 0, fontSize: '18px', fontWeight: 700 }}>Missing Prices ({missingPricesCount})</h2>
+          <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
+            <h2 className="m-0 text-lg font-bold">Missing Prices ({missingPricesCount})</h2>
             <button
-              className="primary-btn"
+              className={`${primaryBtnCls} whitespace-nowrap`}
               onClick={findMissingPrices}
               disabled={priceFinding || missingPricesCount === 0}
               data-testid="find-missing-prices-btn"
-              style={{ background: '#1e66f5', whiteSpace: 'nowrap' }}
             >
               {priceFinding ? `Searching ${priceProgress}...` : 'Find Missing Prices'}
             </button>
           </div>
 
           {missingPricesCount === 0 && priceResults.length === 0 && (
-            <p
-              data-testid="no-missing-prices"
-              style={{ color: '#666', fontStyle: 'italic', padding: '20px 0', textAlign: 'center' }}
-            >
+            <p data-testid="no-missing-prices" className="text-slate-500 italic py-5 text-center">
               All linked products have prices
             </p>
           )}
 
           {/* Progress bar */}
           {priceFinding && priceProgress && (
-            <div style={{ marginBottom: '16px' }}>
-              <div
-                style={{
-                  height: '8px',
-                  backgroundColor: '#e0e0e0',
-                  borderRadius: '4px',
-                  overflow: 'hidden',
-                }}
-              >
+            <div className="mb-4">
+              <div className="h-2 bg-slate-200 rounded overflow-hidden">
                 <div
-                  style={{
-                    height: '100%',
-                    width: `${(() => {
-                      const parts = priceProgress.split('/');
-                      const current = parseInt(parts[0] || '0');
-                      const total = parseInt(parts[1] || '1');
-                      return total > 0 ? (current / total) * 100 : 0;
-                    })()}%`,
-                    backgroundColor: '#4caf50',
-                    transition: 'width 0.3s',
-                  }}
+                  className="h-full bg-green-500 transition-[width] duration-300"
+                  style={{ width: `${progressPercent(priceProgress)}%` }}
                 />
               </div>
-              <div style={{ fontSize: '13px', color: '#666', marginTop: '6px' }}>Progress: {priceProgress}</div>
+              <div className="text-[13px] text-slate-500 mt-1.5">Progress: {priceProgress}</div>
             </div>
           )}
 
           {/* Results display */}
           {priceResults.length > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            <div className="flex flex-col gap-2">
               {priceResults.map((r) => (
                 <div
                   key={r.product_id}
                   data-testid={`price-result-${r.product_id}`}
-                  style={{
-                    ...cardStyle,
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    gap: '12px',
-                    marginBottom: 0,
-                    borderLeft: r.saved ? '4px solid #4caf50' : '4px solid #f44336',
-                  }}
+                  className={`${cardCls} flex justify-between items-center gap-3 !mb-0 ${
+                    r.saved ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-red-500'
+                  }`}
                 >
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 500 }}>{r.name}</div>
-                    {r.source && (
-                      <div style={{ fontSize: '12px', color: '#666', marginTop: '2px' }}>Matched: {r.source}</div>
-                    )}
+                  <div className="flex-1">
+                    <div className="font-medium">{r.name}</div>
+                    {r.source && <div className="text-xs text-slate-500 mt-0.5">Matched: {r.source}</div>}
                   </div>
-                  <div
-                    style={{
-                      fontWeight: 600,
-                      fontSize: '16px',
-                      color: r.saved ? '#2e7d32' : '#d32f2f',
-                    }}
-                  >
+                  <div className={`font-semibold text-base ${r.saved ? 'text-green-700' : 'text-red-600'}`}>
                     {r.price != null ? `$${r.price.toFixed(2)}` : 'Not found'}
                   </div>
                 </div>
@@ -845,46 +690,27 @@ export function WalmartTab() {
       {/* ============================================================ */}
       {/*  REFRESH ALL PRICES                                           */}
       {/* ============================================================ */}
-      <div className="card" style={{ padding: '20px' }}>
-        <h2 style={{ margin: '0 0 16px', fontSize: '18px', fontWeight: 700 }}>Refresh All Prices</h2>
-        <p style={{ color: '#666', fontSize: '14px', margin: '0 0 16px' }}>
-          Update prices for all products with Walmart links
-        </p>
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+        <h2 className="m-0 mb-4 text-lg font-bold">Refresh All Prices</h2>
+        <p className="text-slate-500 text-sm m-0 mb-4">Update prices for all products with Walmart links</p>
 
         {refreshing && refreshProgress && (
-          <div style={{ marginBottom: '16px' }}>
-            <div
-              style={{
-                height: '8px',
-                backgroundColor: '#e0e0e0',
-                borderRadius: '4px',
-                overflow: 'hidden',
-              }}
-            >
+          <div className="mb-4">
+            <div className="h-2 bg-slate-200 rounded overflow-hidden">
               <div
-                style={{
-                  height: '100%',
-                  width: `${(() => {
-                    const parts = refreshProgress.split('/');
-                    const current = parseInt(parts[0] || '0');
-                    const total = parseInt(parts[1] || '1');
-                    return total > 0 ? (current / total) * 100 : 0;
-                  })()}%`,
-                  backgroundColor: '#4caf50',
-                  transition: 'width 0.3s',
-                }}
+                className="h-full bg-green-500 transition-[width] duration-300"
+                style={{ width: `${progressPercent(refreshProgress)}%` }}
               />
             </div>
-            <div style={{ fontSize: '13px', color: '#666', marginTop: '6px' }}>Progress: {refreshProgress}</div>
+            <div className="text-[13px] text-slate-500 mt-1.5">Progress: {refreshProgress}</div>
           </div>
         )}
 
         <button
-          className="primary-btn"
+          className={`${primaryBtnCls} py-3 px-5 text-[15px]`}
           data-testid="refresh-all-btn"
           onClick={refreshAllPrices}
           disabled={refreshing}
-          style={{ background: '#1e66f5', padding: '12px 20px', fontSize: '15px' }}
         >
           {refreshing ? `Refreshing ${refreshProgress}...` : 'Start Price Update'}
         </button>

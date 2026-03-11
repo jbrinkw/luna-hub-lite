@@ -310,20 +310,23 @@ export function InventoryPage() {
   /*  Stock badge color                                                */
   /* ---------------------------------------------------------------- */
 
-  const stockBadgeBg = (totalStock: number, minStock: number): string => {
-    if (totalStock <= 0) return '#d33';
-    if (totalStock < minStock) return '#ff9800';
-    return '#2f9e44';
+  const stockDotColor = (totalStock: number, minStock: number): string => {
+    if (totalStock <= 0) return 'bg-red-600';
+    if (totalStock < minStock) return 'bg-amber-500';
+    return 'bg-green-600';
   };
 
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
 
+  const inputCls =
+    'w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 box-border';
+
   if (loading) {
     return (
       <ChefLayout title="Inventory">
-        <div style={{ padding: '20px' }} data-testid="inventory-loading">
+        <div className="p-5" data-testid="inventory-loading">
           Loading inventory...
         </div>
       </ChefLayout>
@@ -332,65 +335,38 @@ export function InventoryPage() {
 
   return (
     <ChefLayout title="Inventory">
-      <h1 style={{ margin: 0 }}>Inventory</h1>
+      <h1 className="m-0 text-2xl font-bold text-slate-900">Inventory</h1>
       {loadError && (
-        <div
-          data-testid="load-error"
-          style={{
-            background: '#fff5f5',
-            border: '1px solid #d33',
-            borderRadius: '10px',
-            padding: '12px',
-            marginBottom: '12px',
-          }}
-        >
-          <p style={{ color: '#d33', margin: '0 0 8px 0' }}>Failed to load data: {loadError}</p>
+        <div data-testid="load-error" className="bg-red-50 border border-red-600 rounded-lg p-3 mb-3">
+          <p className="text-red-600 m-0 mb-2">Failed to load data: {loadError}</p>
           <button
-            className="primary-btn"
-            style={{
-              background: '#1e66f5',
-              color: '#fff',
-              border: 'none',
-              padding: '6px 16px',
-              borderRadius: '6px',
-              cursor: 'pointer',
-            }}
+            className="bg-emerald-600 text-white border-none px-4 py-1.5 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700"
             onClick={loadData}
           >
             Retry
           </button>
         </div>
       )}
-      {error && <p style={{ color: '#d33' }}>{error}</p>}
+      {error && <p className="text-red-600">{error}</p>}
 
       {/* View toggle */}
-      <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }} data-testid="inventory-view-toggle">
+      <div className="flex gap-2 mb-4" data-testid="inventory-view-toggle">
         <button
-          className="primary-btn"
-          style={{
-            background: viewMode === 'grouped' ? '#1e66f5' : '#fff',
-            color: viewMode === 'grouped' ? '#fff' : '#4b5563',
-            border: '1px solid #ddd',
-            padding: '6px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 600,
-          }}
+          className={`px-4 py-1.5 rounded-md cursor-pointer font-semibold border text-sm ${
+            viewMode === 'grouped'
+              ? 'bg-emerald-600 text-white border-emerald-600'
+              : 'bg-white text-slate-600 border-slate-200'
+          }`}
           onClick={() => setViewMode('grouped')}
         >
           Grouped
         </button>
         <button
-          className="primary-btn"
-          style={{
-            background: viewMode === 'lots' ? '#1e66f5' : '#fff',
-            color: viewMode === 'lots' ? '#fff' : '#4b5563',
-            border: '1px solid #ddd',
-            padding: '6px 16px',
-            borderRadius: '6px',
-            cursor: 'pointer',
-            fontWeight: 600,
-          }}
+          className={`px-4 py-1.5 rounded-md cursor-pointer font-semibold border text-sm ${
+            viewMode === 'lots'
+              ? 'bg-emerald-600 text-white border-emerald-600'
+              : 'bg-white text-slate-600 border-slate-200'
+          }`}
           onClick={() => setViewMode('lots')}
         >
           Lots
@@ -400,21 +376,14 @@ export function InventoryPage() {
       {/* ========================================================== */}
       {/*  SEARCH FILTER                                               */}
       {/* ========================================================== */}
-      <div style={{ margin: '12px 0' }}>
+      <div className="my-3">
         <input
           placeholder="Search products..."
           aria-label="Search products"
           value={searchText}
           onChange={(e) => setSearchText(e.target.value)}
           data-testid="inventory-search"
-          style={{
-            width: '100%',
-            padding: '10px 12px',
-            border: '1px solid #ccc',
-            borderRadius: '6px',
-            fontSize: '14px',
-            boxSizing: 'border-box',
-          }}
+          className={inputCls}
         />
       </div>
 
@@ -426,35 +395,14 @@ export function InventoryPage() {
           {filteredGrouped.length === 0 && <p data-testid="no-products">No products in inventory.</p>}
 
           {filteredGrouped.length > 0 && (
-            <div
-              style={{
-                background: '#fff',
-                border: '1px solid #e0e0e0',
-                borderRadius: '10px',
-                overflow: 'hidden',
-              }}
-            >
+            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               {/* Table header */}
-              <div
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: '1fr 140px 90px 60px 210px',
-                  gap: '0',
-                  padding: '8px 12px',
-                  background: '#f7f7f9',
-                  borderBottom: '2px solid #ddd',
-                  fontSize: '12px',
-                  fontWeight: 600,
-                  color: '#666',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.5px',
-                }}
-              >
+              <div className="grid grid-cols-[1fr_140px_90px_60px_210px] gap-0 px-3 py-2 bg-slate-50 border-b-2 border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <span>Product</span>
                 <span>Stock</span>
                 <span>Expiry</span>
                 <span>Min</span>
-                <span style={{ textAlign: 'right' }}>Actions</span>
+                <span className="text-right">Actions</span>
               </div>
 
               {/* Product rows */}
@@ -472,36 +420,23 @@ export function InventoryPage() {
                   <div
                     key={product.product_id}
                     data-testid={`inv-product-${product.product_id}`}
-                    style={{
-                      display: 'grid',
-                      gridTemplateColumns: '1fr 140px 90px 60px 210px',
-                      gap: '0',
-                      padding: '7px 12px',
-                      alignItems: 'center',
-                      borderBottom: idx < filteredGrouped.length - 1 ? '1px solid #f0f0f0' : 'none',
-                      opacity: isZeroStock ? 0.5 : 1,
-                      fontSize: '14px',
-                    }}
+                    className={`grid grid-cols-[1fr_140px_90px_60px_210px] gap-0 px-3 py-1.5 items-center text-sm ${
+                      idx < filteredGrouped.length - 1 ? 'border-b border-slate-100' : ''
+                    } ${isZeroStock ? 'opacity-50' : ''}`}
                   >
                     {/* Product name + stock dot */}
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                    <div className="flex items-center gap-2 min-w-0">
                       <span
-                        style={{
-                          width: '10px',
-                          height: '10px',
-                          borderRadius: '50%',
-                          background: stockBadgeBg(totalStock, Number(product.min_stock_amount)),
-                          flexShrink: 0,
-                        }}
+                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${stockDotColor(totalStock, Number(product.min_stock_amount))}`}
                       />
                       <span
-                        style={{ fontWeight: 600, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                        className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis"
                         title={`${product.name}${product.barcode ? ` | Barcode: ${product.barcode}` : ''} | ${Number(product.servings_per_container)} srv/ctn`}
                       >
                         {product.name}
                       </span>
                       {product.barcode && (
-                        <span style={{ display: 'none' }} data-testid={`barcode-${product.product_id}`}>
+                        <span className="hidden" data-testid={`barcode-${product.product_id}`}>
                           {product.barcode}
                         </span>
                       )}
@@ -509,11 +444,11 @@ export function InventoryPage() {
 
                     {/* Stock */}
                     <div>
-                      <span data-testid={`stock-badge-${product.product_id}`} style={{ fontWeight: 600 }}>
+                      <span data-testid={`stock-badge-${product.product_id}`} className="font-semibold">
                         {totalStock.toFixed(1)} ctn
                       </span>
                       <span
-                        style={{ fontSize: '12px', color: '#888', marginLeft: '4px' }}
+                        className="text-xs text-slate-400 ml-1"
                         data-testid={`stock-servings-${product.product_id}`}
                       >
                         ({servingsTotal.toFixed(1)} svgs)
@@ -521,50 +456,28 @@ export function InventoryPage() {
                     </div>
 
                     {/* Expiry */}
-                    <span data-testid={`expiry-${product.product_id}`} style={{ fontSize: '13px', color: '#555' }}>
+                    <span data-testid={`expiry-${product.product_id}`} className="text-[13px] text-slate-600">
                       {expiryLabel}
                     </span>
 
                     {/* Min stock */}
-                    <span data-testid={`min-stock-${product.product_id}`} style={{ fontSize: '13px', color: '#555' }}>
+                    <span data-testid={`min-stock-${product.product_id}`} className="text-[13px] text-slate-600">
                       {Number(product.min_stock_amount).toFixed(1)}
                     </span>
 
                     {/* Actions */}
-                    <div style={{ display: 'flex', gap: '4px', justifyContent: 'flex-end', alignItems: 'center' }}>
+                    <div className="flex gap-1 justify-end items-center">
                       {/* +/- Container pair */}
-                      <div style={{ display: 'inline-flex' }}>
+                      <div className="inline-flex">
                         <button
-                          className="primary-btn"
-                          style={{
-                            background: '#2f9e44',
-                            color: '#fff',
-                            border: 'none',
-                            padding: '3px 8px',
-                            borderRadius: '4px 0 0 4px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            lineHeight: '1.4',
-                          }}
+                          className="bg-green-600 text-white border-none px-2 py-0.5 rounded-l cursor-pointer text-xs font-semibold leading-snug hover:bg-green-700"
                           onClick={() => openAddStockModal(product.product_id, 1)}
                           data-testid={`add-ctn-${product.product_id}`}
                         >
                           +1
                         </button>
                         <button
-                          className="primary-btn"
-                          style={{
-                            background: '#d33',
-                            color: '#fff',
-                            border: 'none',
-                            padding: '3px 8px',
-                            borderRadius: '0 4px 4px 0',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            lineHeight: '1.4',
-                          }}
+                          className="bg-red-600 text-white border-none px-2 py-0.5 rounded-r cursor-pointer text-xs font-semibold leading-snug hover:bg-red-700"
                           onClick={() => consumeStock(product.product_id, 1, 'container')}
                           data-testid={`sub-ctn-${product.product_id}`}
                         >
@@ -573,21 +486,9 @@ export function InventoryPage() {
                       </div>
 
                       {/* +/- Serving pair */}
-                      <div style={{ display: 'inline-flex' }}>
+                      <div className="inline-flex">
                         <button
-                          className="primary-btn"
-                          style={{
-                            background: '#fff',
-                            color: '#2f9e44',
-                            border: '1px solid #2f9e44',
-                            padding: '3px 6px',
-                            borderRadius: '4px 0 0 4px',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            lineHeight: '1.4',
-                            borderRight: 'none',
-                          }}
+                          className="bg-white text-green-600 border border-green-600 border-r-0 px-1.5 py-0.5 rounded-l cursor-pointer text-xs font-semibold leading-snug hover:bg-green-50"
                           onClick={() =>
                             openAddStockModal(product.product_id, 1 / Number(product.servings_per_container))
                           }
@@ -596,18 +497,7 @@ export function InventoryPage() {
                           +S
                         </button>
                         <button
-                          className="primary-btn"
-                          style={{
-                            background: '#fff',
-                            color: '#d33',
-                            border: '1px solid #d33',
-                            padding: '3px 6px',
-                            borderRadius: '0 4px 4px 0',
-                            cursor: 'pointer',
-                            fontSize: '12px',
-                            fontWeight: 600,
-                            lineHeight: '1.4',
-                          }}
+                          className="bg-white text-red-600 border border-red-600 px-1.5 py-0.5 rounded-r cursor-pointer text-xs font-semibold leading-snug hover:bg-red-50"
                           onClick={() => consumeStock(product.product_id, 1, 'serving')}
                           data-testid={`sub-srv-${product.product_id}`}
                         >
@@ -617,17 +507,7 @@ export function InventoryPage() {
 
                       {/* Consume All */}
                       <button
-                        className="primary-btn"
-                        style={{
-                          background: 'transparent',
-                          color: '#666',
-                          border: 'none',
-                          padding: '3px 6px',
-                          cursor: 'pointer',
-                          fontSize: '11px',
-                          textDecoration: 'underline',
-                          lineHeight: '1.4',
-                        }}
+                        className="bg-transparent text-slate-500 border-none px-1.5 py-0.5 cursor-pointer text-[11px] underline leading-snug hover:text-slate-700"
                         onClick={() => handleConsumeAll(product.product_id)}
                         data-testid={`consume-all-${product.product_id}`}
                       >
@@ -650,26 +530,28 @@ export function InventoryPage() {
           {sortedLots.length === 0 && <p data-testid="no-lots">No stock lots.</p>}
 
           {sortedLots.length > 0 && (
-            <table style={{ width: '100%', borderCollapse: 'collapse', marginTop: '12px' }} data-testid="lots-table">
-              <thead>
-                <tr style={{ background: '#f7f7f9', borderBottom: '2px solid #ddd' }}>
-                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600 }}>Product</th>
-                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600 }}>Location</th>
-                  <th style={{ padding: '12px', textAlign: 'right', fontWeight: 600 }}>Qty (ctn)</th>
-                  <th style={{ padding: '12px', textAlign: 'left', fontWeight: 600 }}>Expires</th>
-                </tr>
-              </thead>
-              <tbody>
-                {sortedLots.map((lot) => (
-                  <tr key={lot.lot_id} data-testid={`lot-row-${lot.lot_id}`} style={{ borderBottom: '1px solid #eee' }}>
-                    <td style={{ padding: '12px' }}>{lot.productName}</td>
-                    <td style={{ padding: '12px' }}>{lot.locations?.name ?? '\u2014'}</td>
-                    <td style={{ textAlign: 'right', padding: '12px' }}>{Number(lot.qty_containers).toFixed(1)}</td>
-                    <td style={{ padding: '12px' }}>{lot.expires_on ?? '\u2014'}</td>
+            <div className="overflow-x-auto rounded-lg border border-slate-200 mt-3">
+              <table className="w-full border-collapse" data-testid="lots-table">
+                <thead>
+                  <tr className="bg-slate-50 border-b-2 border-slate-200">
+                    <th className="p-3 text-left font-semibold">Product</th>
+                    <th className="p-3 text-left font-semibold">Location</th>
+                    <th className="p-3 text-right font-semibold">Qty (ctn)</th>
+                    <th className="p-3 text-left font-semibold">Expires</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {sortedLots.map((lot) => (
+                    <tr key={lot.lot_id} data-testid={`lot-row-${lot.lot_id}`} className="border-b border-slate-100">
+                      <td className="p-3">{lot.productName}</td>
+                      <td className="p-3">{lot.locations?.name ?? '\u2014'}</td>
+                      <td className="text-right p-3">{Number(lot.qty_containers).toFixed(1)}</td>
+                      <td className="p-3">{lot.expires_on ?? '\u2014'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
       )}
@@ -680,14 +562,12 @@ export function InventoryPage() {
       <ModalOverlay
         isOpen={addingStockFor !== null}
         onClose={closeAddStockModal}
-        title={`Add Stock — ${products.find((p) => p.product_id === addingStockFor)?.name ?? ''}`}
+        title={`Add Stock \u2014 ${products.find((p) => p.product_id === addingStockFor)?.name ?? ''}`}
         testId="add-stock-modal"
       >
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+        <div className="flex flex-col gap-3">
           <div>
-            <label style={{ fontSize: '0.85em', color: '#888', display: 'block', marginBottom: '4px' }}>
-              Quantity (containers)
-            </label>
+            <label className="text-[0.85em] text-slate-400 block mb-1">Quantity (containers)</label>
             <input
               type="number"
               aria-label="Quantity in containers"
@@ -699,62 +579,32 @@ export function InventoryPage() {
                 if (!isNaN(val)) setAddStockQty(val);
               }}
               data-testid="add-stock-qty"
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #ccc',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-              }}
+              className={inputCls}
             />
           </div>
           <div>
-            <label style={{ fontSize: '0.85em', color: '#888', display: 'block', marginBottom: '4px' }}>
-              Expiry Date (optional)
-            </label>
+            <label className="text-[0.85em] text-slate-400 block mb-1">Expiry Date (optional)</label>
             <input
               type="date"
               aria-label="Expiry date"
               value={addStockExpiry}
               onChange={(e) => setAddStockExpiry(e.target.value)}
               data-testid="add-stock-expiry"
-              style={{
-                width: '100%',
-                padding: '10px 12px',
-                border: '1px solid #ccc',
-                borderRadius: '6px',
-                fontSize: '14px',
-                boxSizing: 'border-box',
-              }}
+              className={inputCls}
             />
           </div>
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+          <div className="flex justify-end gap-2 mt-2">
             <button
-              className="primary-btn"
-              style={{
-                background: 'transparent',
-                color: '#4b5563',
-                border: 'none',
-                padding: '6px 16px',
-                borderRadius: '6px',
-                cursor: 'pointer',
-              }}
+              className="bg-transparent text-slate-600 border-none px-4 py-1.5 rounded-md cursor-pointer hover:text-slate-900"
               onClick={closeAddStockModal}
               data-testid="add-stock-cancel"
             >
               Cancel
             </button>
             <button
-              className="primary-btn"
-              style={{
-                background: addStockQty <= 0 ? '#ccc' : '#1e66f5',
-                color: '#fff',
-                border: 'none',
-                padding: '6px 16px',
-                borderRadius: '6px',
-                cursor: addStockQty <= 0 ? 'not-allowed' : 'pointer',
-              }}
+              className={`text-white border-none px-4 py-1.5 rounded-md cursor-pointer font-semibold ${
+                addStockQty <= 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'
+              }`}
               onClick={confirmAddStock}
               disabled={addStockQty <= 0}
               data-testid="add-stock-confirm"
