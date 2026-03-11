@@ -51,6 +51,8 @@ export function TodayPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [notes, setNotes] = useState('');
   const [prToast, setPrToast] = useState<string | null>(null);
+  const summaryRef = useRef('');
+  const notesRef = useRef('');
   const summaryDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const notesDebounceRef = useRef<ReturnType<typeof setTimeout>>();
   const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
@@ -129,8 +131,12 @@ export function TodayPage() {
       .eq('plan_id', result.plan_id)
       .single();
 
-    setSummary(planData?.summary ?? '');
-    setNotes((planData as any)?.notes ?? '');
+    const loadedSummary = planData?.summary ?? '';
+    const loadedNotes = (planData as any)?.notes ?? '';
+    setSummary(loadedSummary);
+    summaryRef.current = loadedSummary;
+    setNotes(loadedNotes);
+    notesRef.current = loadedNotes;
     setLoading(false);
   }, [user, today]);
 
@@ -404,6 +410,7 @@ export function TodayPage() {
 
   const handleSummaryChange = (value: string) => {
     setSummary(value);
+    summaryRef.current = value;
     if (!planId) return;
     clearTimeout(summaryDebounceRef.current);
     summaryDebounceRef.current = setTimeout(() => saveSummary(value), 500);
@@ -411,7 +418,7 @@ export function TodayPage() {
 
   const handleSummaryBlur = () => {
     clearTimeout(summaryDebounceRef.current);
-    saveSummary(summary);
+    saveSummary(summaryRef.current);
   };
 
   const saveNotes = useCallback(
@@ -425,6 +432,7 @@ export function TodayPage() {
 
   const handleNotesChange = (value: string) => {
     setNotes(value);
+    notesRef.current = value;
     if (!planId) return;
     clearTimeout(notesDebounceRef.current);
     notesDebounceRef.current = setTimeout(() => saveNotes(value), 500);
@@ -432,7 +440,7 @@ export function TodayPage() {
 
   const handleNotesBlur = () => {
     clearTimeout(notesDebounceRef.current);
-    saveNotes(notes);
+    saveNotes(notesRef.current);
   };
 
   const deleteCompletedSet = async (completedSetId: string) => {

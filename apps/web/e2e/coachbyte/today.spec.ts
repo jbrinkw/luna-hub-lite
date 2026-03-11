@@ -318,15 +318,29 @@ test.describe('CoachByte Today Page', () => {
       const notesTextarea = page.getByTestId('notes-textarea');
       await expect(notesTextarea).toBeVisible({ timeout: 30000 });
 
-      // Use click + pressSequentially so input event fires properly.
-      await notesTextarea.click();
-      await notesTextarea.pressSequentially('Felt strong today, good form on squats');
+      // Fill the textarea (clear + type). Use fill() which is atomic.
+      await notesTextarea.fill('Felt strong today, good form on squats');
 
-      // Click away to trigger blur and save
-      await page.getByTestId('next-in-queue').click();
+      // Click away to trigger blur and save, wait for the PATCH to complete
+      await Promise.all([
+        page.waitForResponse(
+          (resp) =>
+            resp.url().includes('rest/v1/daily_plans') && resp.request().method() === 'PATCH' && resp.status() < 400,
+          { timeout: 15000 },
+        ),
+        page.getByTestId('next-in-queue').click(),
+      ]);
 
-      // Wait for the save to persist
-      await page.waitForTimeout(3000);
+      // Verify the value was saved in the DB before reloading
+      await expect(async () => {
+        const { data } = await client
+          .schema('coachbyte')
+          .from('daily_plans')
+          .select('notes')
+          .eq('user_id', userId)
+          .single();
+        expect((data as any)?.notes).toBe('Felt strong today, good form on squats');
+      }).toPass({ timeout: 15000 });
 
       // Reload the page
       await page.reload();
