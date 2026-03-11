@@ -624,6 +624,34 @@ export function ScannerPage() {
   const activeItem = queue.find((q) => q.id === activeItemId) ?? null;
   const filteredQueue = filter === 'new' ? queue.filter((q) => q.isNew) : queue;
 
+  /* ---- Inline name editing ---- */
+  const [editingName, setEditingName] = useState('');
+  const [nameEdited, setNameEdited] = useState(false);
+
+  // Sync editing name when active item changes or its name updates (e.g. async lookup)
+  const activeItemName = activeItem?.name ?? '';
+  const prevActiveRef = useRef(activeItemId);
+  const prevNameRef = useRef(activeItemName);
+  if (prevActiveRef.current !== activeItemId || (!nameEdited && prevNameRef.current !== activeItemName)) {
+    prevActiveRef.current = activeItemId;
+    prevNameRef.current = activeItemName;
+    setEditingName(activeItemName);
+    setNameEdited(false);
+  }
+
+  const saveName = async () => {
+    const trimmed = editingName.trim();
+    if (!trimmed || !activeItem?.productId || !nameEdited || trimmed === activeItem.name) return;
+    await chefbyte()
+      .from('products')
+      .update({ name: trimmed, is_placeholder: false })
+      .eq('product_id', activeItem.productId);
+    setQueue((prev) =>
+      prev.map((item) => (item.id === activeItem.id ? { ...item, name: trimmed, isNew: false } : item)),
+    );
+    setNameEdited(false);
+  };
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -792,13 +820,49 @@ export function ScannerPage() {
             ))}
           </div>
 
-          {/* Active item display */}
-          <div
-            data-testid="active-item-display"
-            style={{ padding: '8px', background: '#f4f5f8', borderRadius: '6px', textAlign: 'center', fontWeight: 600 }}
-          >
-            {activeItem ? activeItem.name : 'No item selected'}
-          </div>
+          {/* Active item display / name editor */}
+          {activeItem?.productId ? (
+            <input
+              data-testid="active-item-display"
+              type="text"
+              value={editingName}
+              onChange={(e) => {
+                setEditingName(e.target.value);
+                setNameEdited(true);
+              }}
+              onBlur={saveName}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  saveName();
+                  (e.target as HTMLInputElement).blur();
+                }
+              }}
+              style={{
+                padding: '8px',
+                background: '#f4f5f8',
+                borderRadius: '6px',
+                textAlign: 'center',
+                fontWeight: 600,
+                border: '1px solid #ccc',
+                width: '100%',
+                fontSize: 'inherit',
+              }}
+            />
+          ) : (
+            <div
+              data-testid="active-item-display"
+              style={{
+                padding: '8px',
+                background: '#f4f5f8',
+                borderRadius: '6px',
+                textAlign: 'center',
+                fontWeight: 600,
+              }}
+            >
+              {activeItem ? activeItem.name : 'No item selected'}
+            </div>
+          )}
 
           {/* Screen value */}
           <div
