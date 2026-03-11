@@ -21,8 +21,8 @@ export function MacroProgressBar({ label, current, goal, color, unit, testId }: 
   const suffix = unit ? unit : '';
 
   return (
-    <div data-testid={testId} style={{ marginBottom: '8px' }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9em' }}>
+    <div data-testid={testId} className="mb-2">
+      <div className="flex justify-between text-sm">
         <span>{label}</span>
         <span>
           {current}
@@ -30,13 +30,12 @@ export function MacroProgressBar({ label, current, goal, color, unit, testId }: 
           {suffix} ({percentage}%)
         </span>
       </div>
-      <div style={{ background: '#eee', borderRadius: '4px', height: '16px', overflow: 'hidden' }}>
+      <div className="bg-slate-200 rounded h-4 overflow-hidden">
         <div
+          className="h-full rounded"
           style={{
             width: `${percentage}%`,
-            height: '100%',
             background: color,
-            borderRadius: '4px',
           }}
         />
       </div>

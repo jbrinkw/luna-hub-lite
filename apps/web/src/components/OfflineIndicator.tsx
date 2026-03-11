@@ -1,4 +1,3 @@
-import { IonText } from '@ionic/react';
 import { useAppContext } from '../shared/AppProvider';
 
 export function OfflineIndicator() {
@@ -6,23 +5,11 @@ export function OfflineIndicator() {
 
   if (online) return null;
 
-  const syncedStr = lastSynced
-    ? `Last synced: ${lastSynced.toLocaleTimeString()}`
-    : 'Never synced';
+  const syncedStr = lastSynced ? `Last synced: ${lastSynced.toLocaleTimeString()}` : 'Never synced';
 
   return (
-    <div
-      style={{
-        background: 'var(--ion-color-warning)',
-        color: 'var(--ion-color-warning-contrast)',
-        padding: '8px 16px',
-        textAlign: 'center',
-        fontSize: '14px',
-      }}
-    >
-      <IonText>
-        <strong>No connection</strong> — {syncedStr}
-      </IonText>
+    <div className="w-full bg-amber-50 border-b border-amber-200 text-amber-800 px-4 py-2 text-sm text-center font-medium">
+      <strong>No connection</strong> — {syncedStr}
     </div>
   );
 }

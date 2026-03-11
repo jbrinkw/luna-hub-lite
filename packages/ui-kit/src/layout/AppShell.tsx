@@ -1,4 +1,3 @@
-import { IonApp } from '@ionic/react';
 import type { ReactNode } from 'react';
 
 interface AppShellProps {
@@ -6,5 +5,5 @@ interface AppShellProps {
 }
 
 export function AppShell({ children }: AppShellProps) {
-  return <IonApp>{children}</IonApp>;
+  return <div className="min-h-screen bg-slate-50">{children}</div>;
 }

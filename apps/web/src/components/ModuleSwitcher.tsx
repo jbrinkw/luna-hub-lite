@@ -1,5 +1,4 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { IonSegment, IonSegmentButton, IonLabel } from '@ionic/react';
 import { useAppContext } from '../shared/AppProvider';
 
 const allModules = [
@@ -19,19 +18,23 @@ export function ModuleSwitcher() {
 
   return (
     <nav aria-label="Module switcher">
-      <IonSegment
-        value={current}
-        onIonChange={(e) => {
-          const val = e.detail.value as string;
-          if (val && val !== current) navigate(val);
-        }}
-      >
+      <div className="flex bg-slate-100 rounded-lg p-1 gap-1">
         {modules.map((m) => (
-          <IonSegmentButton key={m.path} value={m.path}>
-            <IonLabel>{m.label}</IonLabel>
-          </IonSegmentButton>
+          <button
+            key={m.path}
+            type="button"
+            className={[
+              'px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer',
+              m.path === current ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700',
+            ].join(' ')}
+            onClick={() => {
+              if (m.path !== current) navigate(m.path);
+            }}
+          >
+            {m.label}
+          </button>
         ))}
-      </IonSegment>
+      </div>
     </nav>
   );
 }
