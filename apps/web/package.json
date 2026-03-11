@@ -22,6 +22,7 @@
     "@luna-hub/ui-kit": "workspace:*",
     "@supabase/supabase-js": "^2.98.0",
     "@tanstack/react-query": "^5.90.21",
+    "@vercel/analytics": "^2.0.0",
     "dayjs": "^1.11.19",
     "ionicons": "^8.0.13",
     "react": "^18.3.1",
