@@ -31,3 +31,4 @@ export {
 } from './Skeleton';
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Alert, type AlertProps } from './Alert';
+export { SaveIndicator } from './SaveIndicator';

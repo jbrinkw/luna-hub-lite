@@ -4,6 +4,8 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { SaveIndicator } from '@/components/ui/SaveIndicator';
+import { useSaveIndicator } from '@/hooks/useSaveIndicator';
 
 interface UserSettings {
   default_rest_seconds: number;
@@ -31,6 +33,7 @@ export function SettingsPage() {
   const [searchText, setSearchText] = useState('');
   const [newExerciseName, setNewExerciseName] = useState('');
   const [error, setError] = useState<string | null>(null);
+  const { showSaved: settingsSaved, flash: flashSettings } = useSaveIndicator();
 
   const loadSettings = useCallback(async () => {
     if (!user) return;
@@ -86,6 +89,8 @@ export function SettingsPage() {
       .eq('user_id', user.id);
     if (saveErr) {
       setError(saveErr.message);
+    } else {
+      flashSettings();
     }
   };
 
@@ -145,7 +150,10 @@ export function SettingsPage() {
 
       <Card className="mb-5" data-testid="defaults-card">
         <CardHeader>
-          <CardTitle>Defaults</CardTitle>
+          <div className="flex items-center gap-2">
+            <CardTitle>Defaults</CardTitle>
+            <SaveIndicator show={settingsSaved} />
+          </div>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-1 max-w-[300px]">
@@ -205,6 +213,7 @@ export function SettingsPage() {
                         })
                         .eq('user_id', user!.id);
                       if (saveErr) setError(saveErr.message);
+                      else flashSettings();
                     })();
                   }}
                   className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40"

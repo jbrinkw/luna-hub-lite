@@ -14,6 +14,8 @@ import { formatWeightWithPlates } from '@/shared/plateCalc';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
+import { SaveIndicator } from '@/components/ui/SaveIndicator';
+import { useSaveIndicator } from '@/hooks/useSaveIndicator';
 
 interface CompletedSet {
   completed_set_id: string;
@@ -58,6 +60,8 @@ export function TodayPage() {
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
+  const { showSaved: notesSaved, flash: flashNotes } = useSaveIndicator();
+  const { showSaved: summarySaved, flash: flashSummary } = useSaveIndicator();
   const summaryRef = useRef('');
   const notesRef = useRef('');
   const summaryDebounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -429,8 +433,9 @@ export function TodayPage() {
       if (!planId) return;
       const { error: err } = await coachbyte().from('daily_plans').update({ summary: value }).eq('plan_id', planId);
       if (err) setError(err.message);
+      else flashSummary();
     },
-    [planId],
+    [planId, flashSummary],
   );
 
   const handleSummaryChange = (value: string) => {
@@ -451,8 +456,9 @@ export function TodayPage() {
       if (!planId) return;
       const { error: err } = await coachbyte().from('daily_plans').update({ notes: value }).eq('plan_id', planId);
       if (err) setError(err.message);
+      else flashNotes();
     },
-    [planId],
+    [planId, flashNotes],
   );
 
   const handleNotesChange = (value: string) => {
@@ -684,7 +690,10 @@ export function TodayPage() {
           data-testid="toggle-notes"
           aria-expanded={notesExpanded}
         >
-          <h3 className="text-lg font-semibold text-slate-900 m-0">Notes</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold text-slate-900 m-0">Notes</h3>
+            <SaveIndicator show={notesSaved} />
+          </div>
           {notesExpanded ? (
             <ChevronUp className="w-5 h-5 text-slate-400" />
           ) : (
@@ -716,7 +725,10 @@ export function TodayPage() {
           data-testid="toggle-summary"
           aria-expanded={summaryExpanded}
         >
-          <h3 className="text-lg font-semibold text-slate-900 m-0">Summary</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="text-lg font-semibold text-slate-900 m-0">Summary</h3>
+            <SaveIndicator show={summarySaved} />
+          </div>
           {summaryExpanded ? (
             <ChevronUp className="w-5 h-5 text-slate-400" />
           ) : (
