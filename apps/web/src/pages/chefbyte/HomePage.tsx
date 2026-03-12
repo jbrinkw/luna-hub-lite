@@ -869,7 +869,7 @@ export function HomePage() {
               <span className="font-bold text-base text-slate-900">Today</span>{' '}
               <span className="text-sm text-slate-500">(6:00 AM - 5:59 AM)</span>
             </div>
-            <div data-testid="status-cards" className="grid grid-cols-4 gap-3 cursor-pointer">
+            <div data-testid="status-cards" className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 cursor-pointer">
               <ProgressBar
                 testId="compact-calories"
                 label="Calories"
@@ -918,12 +918,12 @@ export function HomePage() {
       {/* ============================================================ */}
       {/*  NOTIFICATION STRIP — compact alert badges                    */}
       {/* ============================================================ */}
-      <div data-testid="card-missing-prices" className="flex items-center gap-2 flex-wrap mb-3">
+      <div data-testid="card-missing-prices" className="grid grid-cols-2 sm:flex sm:items-center gap-1.5 sm:gap-2 mb-3">
         <Link
           to="/chef/inventory"
           data-testid="card-below-min"
           className={[
-            'no-underline inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors',
+            'no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium transition-colors',
             belowMinStock > 0 ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-slate-100 text-slate-400',
           ].join(' ')}
         >
@@ -933,7 +933,7 @@ export function HomePage() {
         <Link
           to="/chef/settings?tab=walmart"
           className={[
-            'no-underline inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors',
+            'no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium transition-colors',
             missingPrices > 0 ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-slate-100 text-slate-400',
           ].join(' ')}
         >
@@ -943,7 +943,7 @@ export function HomePage() {
         <Link
           to="/chef/settings?tab=products"
           data-testid="card-placeholders"
-          className="no-underline inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-slate-100 text-slate-400 hover:bg-slate-200 transition-colors"
+          className="no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium bg-slate-100 text-slate-400 hover:bg-slate-200 transition-colors"
         >
           <PackageSearch className="w-3 h-3" />
           Placeholders: {placeholders}
@@ -951,7 +951,7 @@ export function HomePage() {
         <Link
           to="/chef/shopping"
           data-testid="card-cart-value"
-          className="no-underline inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-slate-100 text-slate-400 hover:bg-slate-200 transition-colors"
+          className="no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium bg-slate-100 text-slate-400 hover:bg-slate-200 transition-colors"
         >
           <ShoppingCart className="w-3 h-3" />
           Cart: ${cartValue.toFixed(2)}
@@ -961,37 +961,40 @@ export function HomePage() {
       {/* ============================================================ */}
       {/*  ACTION BUTTONS — primary workflow + secondary settings        */}
       {/* ============================================================ */}
-      <div data-testid="quick-actions" className="flex items-center gap-2 flex-wrap mb-5">
-        <button
-          onClick={importShopping}
-          data-testid="import-shopping-btn"
-          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
-        >
-          Import Shopping List
-        </button>
-        <button
-          onClick={syncMealPlanToCart}
-          disabled={syncing}
-          data-testid="meal-plan-cart-btn"
-          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-        >
-          {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
-        </button>
-        <span className="text-slate-300 select-none">|</span>
-        <button
-          onClick={openTasteModal}
-          data-testid="taste-profile-btn"
-          className="px-2 py-1 text-slate-500 text-xs hover:text-emerald-600 hover:underline transition-colors bg-transparent border-none cursor-pointer"
-        >
-          Taste Profile
-        </button>
-        <button
-          onClick={openTargetModal}
-          data-testid="target-macros-btn"
-          className="px-2 py-1 text-slate-500 text-xs hover:text-emerald-600 hover:underline transition-colors bg-transparent border-none cursor-pointer"
-        >
-          Target Macros
-        </button>
+      <div data-testid="quick-actions" className="mb-5 space-y-2">
+        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2">
+          <button
+            onClick={importShopping}
+            data-testid="import-shopping-btn"
+            className="px-3 py-2 sm:py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+          >
+            Import Shopping List
+          </button>
+          <button
+            onClick={syncMealPlanToCart}
+            disabled={syncing}
+            data-testid="meal-plan-cart-btn"
+            className="px-3 py-2 sm:py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
+          </button>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={openTasteModal}
+            data-testid="taste-profile-btn"
+            className="px-2 py-1 text-slate-500 text-xs hover:text-emerald-600 hover:underline transition-colors bg-transparent border-none cursor-pointer"
+          >
+            Taste Profile
+          </button>
+          <button
+            onClick={openTargetModal}
+            data-testid="target-macros-btn"
+            className="px-2 py-1 text-slate-500 text-xs hover:text-emerald-600 hover:underline transition-colors bg-transparent border-none cursor-pointer"
+          >
+            Target Macros
+          </button>
+        </div>
       </div>
 
       {/* ============================================================ */}
@@ -1005,19 +1008,15 @@ export function HomePage() {
               <div
                 key={log.log_id}
                 data-testid={`consumed-log-${log.log_id}`}
-                className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-green-50 flex justify-between items-center"
+                className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-green-50"
               >
-                <span className="font-semibold text-sm text-slate-900">
-                  {log.products?.name ?? 'Unknown'}
-                  <span className="font-normal text-slate-500 text-xs ml-2">
-                    {Number(log.qty_consumed)} {log.unit}
-                    {Number(log.qty_consumed) !== 1 ? 's' : ''}
-                  </span>
-                </span>
-                <div className="flex gap-2 items-center">
-                  <span className="text-xs text-slate-500">
-                    {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
-                    {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
+                <div className="flex justify-between items-start gap-2">
+                  <span className="font-semibold text-sm text-slate-900 min-w-0">
+                    {log.products?.name ?? 'Unknown'}
+                    <span className="font-normal text-slate-500 text-xs ml-2">
+                      {Number(log.qty_consumed)} {log.unit}
+                      {Number(log.qty_consumed) !== 1 ? 's' : ''}
+                    </span>
                   </span>
                   <DeleteBtn
                     id={`log-${log.log_id}`}
@@ -1025,28 +1024,32 @@ export function HomePage() {
                     testId={`delete-log-${log.log_id}`}
                   />
                 </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
+                  {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
+                </div>
               </div>
             ))}
             {tempItems.map((item) => (
               <div
                 key={item.temp_id}
                 data-testid={`consumed-temp-${item.temp_id}`}
-                className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-amber-50 flex justify-between items-center"
+                className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-amber-50"
               >
-                <span className="font-semibold text-sm text-slate-900">
-                  {item.name}
-                  <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
-                </span>
-                <div className="flex gap-2 items-center">
-                  <span className="text-xs text-slate-500">
-                    {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
-                    {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
+                <div className="flex justify-between items-start gap-2">
+                  <span className="font-semibold text-sm text-slate-900 min-w-0">
+                    {item.name}
+                    <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
                   </span>
                   <DeleteBtn
                     id={`temp-${item.temp_id}`}
                     onConfirm={() => deleteTempItem(item.temp_id)}
                     testId={`delete-temp-${item.temp_id}`}
                   />
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
+                  {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
                 </div>
               </div>
             ))}
@@ -1072,49 +1075,51 @@ export function HomePage() {
               <div
                 key={entry.meal_id}
                 data-testid={`prep-entry-${entry.meal_id}`}
-                className="py-2.5 px-3 border border-slate-200 border-l-4 border-l-emerald-600 rounded-md bg-slate-50 flex justify-between items-center"
+                className="py-2.5 px-3 border border-slate-200 border-l-4 border-l-emerald-600 rounded-md bg-slate-50"
               >
-                <div>
-                  <span className="font-semibold text-slate-900">
-                    {entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}
-                  </span>
-                  <span className="text-slate-500 text-sm ml-2">
-                    {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
-                  </span>
-                </div>
-                <div className="flex gap-1.5 items-center">
-                  {confirmPrepId === entry.meal_id ? (
-                    <>
-                      <span className="text-xs text-slate-500">Execute?</span>
+                <div className="flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <span className="font-semibold text-slate-900">
+                      {entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}
+                    </span>
+                    <span className="text-slate-500 text-sm ml-2">
+                      {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="flex gap-1.5 items-center shrink-0">
+                    {confirmPrepId === entry.meal_id ? (
+                      <>
+                        <span className="text-xs text-slate-500">Execute?</span>
+                        <button
+                          onClick={() => executePrepMeal(entry.meal_id)}
+                          data-testid={`prep-confirm-${entry.meal_id}`}
+                          className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
+                        >
+                          Yes
+                        </button>
+                        <button
+                          onClick={() => setConfirmPrepId(null)}
+                          data-testid={`prep-cancel-${entry.meal_id}`}
+                          className="px-2.5 py-1 bg-slate-200 text-slate-700 rounded text-xs font-semibold hover:bg-slate-300 transition-colors"
+                        >
+                          No
+                        </button>
+                      </>
+                    ) : (
                       <button
-                        onClick={() => executePrepMeal(entry.meal_id)}
-                        data-testid={`prep-confirm-${entry.meal_id}`}
-                        className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
+                        onClick={() => setConfirmPrepId(entry.meal_id)}
+                        data-testid={`prep-execute-${entry.meal_id}`}
+                        className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700 transition-colors"
                       >
-                        Yes
+                        Execute
                       </button>
-                      <button
-                        onClick={() => setConfirmPrepId(null)}
-                        data-testid={`prep-cancel-${entry.meal_id}`}
-                        className="px-2.5 py-1 bg-slate-200 text-slate-700 rounded text-xs font-semibold hover:bg-slate-300 transition-colors"
-                      >
-                        No
-                      </button>
-                    </>
-                  ) : (
-                    <button
-                      onClick={() => setConfirmPrepId(entry.meal_id)}
-                      data-testid={`prep-execute-${entry.meal_id}`}
-                      className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700 transition-colors"
-                    >
-                      Execute
-                    </button>
-                  )}
-                  <DeleteBtn
-                    id={`prep-${entry.meal_id}`}
-                    onConfirm={() => deleteMealEntry(entry.meal_id)}
-                    testId={`delete-prep-${entry.meal_id}`}
-                  />
+                    )}
+                    <DeleteBtn
+                      id={`prep-${entry.meal_id}`}
+                      onConfirm={() => deleteMealEntry(entry.meal_id)}
+                      testId={`delete-prep-${entry.meal_id}`}
+                    />
+                  </div>
                 </div>
               </div>
             ))}
@@ -1169,23 +1174,37 @@ export function HomePage() {
                     isDone ? 'border-l-green-600 bg-green-50 opacity-80' : 'border-l-amber-400 bg-slate-50',
                   ].join(' ')}
                 >
-                  <div className="flex justify-between items-center">
-                    <div className="flex gap-2 items-center">
-                      <span className={['font-semibold text-slate-900', isDone ? 'line-through' : ''].join(' ')}>
-                        {name}
-                      </span>
-                      {!isDone && mealStockStatus !== 'N/A' && (
-                        <span data-testid={`meal-stock-${entry.meal_id}`} className={stockBadgeClass(mealStockStatus)}>
-                          {mealStockStatus === 'CAN MAKE' ? '✓ IN STOCK' : mealStockStatus}
+                  {/* Content + actions: stack on mobile, side-by-side on sm+ */}
+                  <div className="flex flex-col sm:flex-row sm:justify-between sm:items-start gap-2">
+                    {/* Top: name, badge, meal type, macros */}
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap gap-1.5 items-center">
+                        <span className={['font-semibold text-slate-900', isDone ? 'line-through' : ''].join(' ')}>
+                          {name}
                         </span>
-                      )}
-                    </div>
-                    <div className="flex gap-2 items-center">
+                        {!isDone && mealStockStatus !== 'N/A' && (
+                          <span
+                            data-testid={`meal-stock-${entry.meal_id}`}
+                            className={stockBadgeClass(mealStockStatus)}
+                          >
+                            {mealStockStatus === 'CAN MAKE' ? '✓ IN STOCK' : mealStockStatus}
+                          </span>
+                        )}
+                      </div>
                       {entry.meal_type && (
                         <span data-testid={`meal-type-${entry.meal_id}`} className="text-xs text-slate-400 capitalize">
                           {entry.meal_type}
                         </span>
                       )}
+                      {mealMacros && (
+                        <div data-testid={`meal-macros-${entry.meal_id}`} className="text-xs text-slate-500 mt-1">
+                          {mealMacros.calories} cal | {mealMacros.protein}g P | {mealMacros.carbs}g C | {mealMacros.fat}
+                          g F
+                        </div>
+                      )}
+                    </div>
+                    {/* Bottom on mobile, right side on sm+: action buttons */}
+                    <div className="flex gap-1.5 items-center sm:shrink-0 sm:ml-1">
                       {isDone ? (
                         <button
                           onClick={() => unmarkMealDone(entry.meal_id)}
@@ -1210,11 +1229,6 @@ export function HomePage() {
                       />
                     </div>
                   </div>
-                  {mealMacros && (
-                    <div data-testid={`meal-macros-${entry.meal_id}`} className="text-xs text-slate-500 mt-1">
-                      {mealMacros.calories} cal | {mealMacros.protein}g P | {mealMacros.carbs}g C | {mealMacros.fat}g F
-                    </div>
-                  )}
                 </div>
               );
             })}

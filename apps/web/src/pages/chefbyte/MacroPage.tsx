@@ -570,30 +570,36 @@ export function MacroPage() {
                 <div
                   key={item.id}
                   data-testid={`consumed-row-${item.id}`}
-                  className="bg-white border border-slate-200 rounded-lg px-3 py-2.5 flex items-center gap-3"
+                  className="bg-white border border-slate-200 rounded-lg px-3 py-2.5"
                 >
-                  <span
-                    className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${badgeColor}`}
-                  >
-                    {item.source}
-                  </span>
-                  <span className="flex-1 text-sm font-medium text-slate-900 min-w-0 truncate">{item.name}</span>
-                  <div className="flex gap-3 text-xs tabular-nums text-slate-600 whitespace-nowrap">
-                    <span>{item.calories} cal</span>
-                    <span>{item.protein}g P</span>
-                    <span>{item.carbs}g C</span>
-                    <span>{item.fat}g F</span>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${badgeColor}`}
+                        >
+                          {item.source}
+                        </span>
+                        <span className="text-sm font-medium text-slate-900">{item.name}</span>
+                      </div>
+                      <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-slate-600 mt-1 flex-wrap">
+                        <span>{item.calories} cal</span>
+                        <span>{item.protein}g P</span>
+                        <span>{item.carbs}g C</span>
+                        <span>{item.fat}g F</span>
+                      </div>
+                    </div>
+                    {item.source !== 'LiquidTrack' && (
+                      <button
+                        className="text-red-500 hover:text-red-700 font-bold text-base bg-transparent border-none cursor-pointer shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center"
+                        data-testid={`delete-consumed-${item.id}`}
+                        onClick={() => deleteConsumedItem(item)}
+                        aria-label={`Remove ${item.name}`}
+                      >
+                        x
+                      </button>
+                    )}
                   </div>
-                  {item.source !== 'LiquidTrack' && (
-                    <button
-                      className="text-red-500 hover:text-red-700 font-bold text-base bg-transparent border-none cursor-pointer ml-1 shrink-0"
-                      data-testid={`delete-consumed-${item.id}`}
-                      onClick={() => deleteConsumedItem(item)}
-                      aria-label={`Remove ${item.name}`}
-                    >
-                      x
-                    </button>
-                  )}
                 </div>
               );
             })}
@@ -601,13 +607,13 @@ export function MacroPage() {
             {/* Totals row */}
             <div
               data-testid="consumed-total-row"
-              className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 flex items-center gap-3 font-bold"
+              className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-2 font-bold"
             >
               <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 whitespace-nowrap">
                 Total
               </span>
               <span className="flex-1 text-sm text-slate-900">TOTAL</span>
-              <div className="flex gap-3 text-xs tabular-nums text-slate-900 whitespace-nowrap">
+              <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-slate-900 flex-wrap">
                 <span>{consumed.reduce((sum, i) => sum + i.calories, 0)} cal</span>
                 <span>{consumed.reduce((sum, i) => sum + i.protein, 0)}g P</span>
                 <span>{consumed.reduce((sum, i) => sum + i.carbs, 0)}g C</span>
@@ -628,41 +634,63 @@ export function MacroPage() {
             No planned items for this day.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="bg-slate-50 border-b-2 border-slate-200">
-                  <th className="p-2.5 text-left font-semibold text-slate-700 text-xs">Item</th>
-                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">Cal</th>
-                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">P</th>
-                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">C</th>
-                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">F</th>
-                </tr>
-              </thead>
-              <tbody>
-                {planned.map((item) => (
-                  <tr
-                    key={item.meal_id}
-                    data-testid={`planned-row-${item.meal_id}`}
-                    className="border-b border-slate-100"
-                  >
-                    <td className="p-2 text-slate-900 font-medium">{item.name}</td>
-                    <td className="p-2 text-right tabular-nums">{item.calories}</td>
-                    <td className="p-2 text-right tabular-nums">{item.protein}g</td>
-                    <td className="p-2 text-right tabular-nums">{item.carbs}g</td>
-                    <td className="p-2 text-right tabular-nums">{item.fat}g</td>
+          <>
+            {/* Mobile card list */}
+            <div data-testid="planned-table" className="flex flex-col gap-2 sm:hidden">
+              {planned.map((item) => (
+                <div
+                  key={item.meal_id}
+                  data-testid={`planned-row-${item.meal_id}`}
+                  className="bg-white border border-slate-200 rounded-lg px-3 py-2.5"
+                >
+                  <div className="text-sm font-medium text-slate-900">{item.name}</div>
+                  <div className="flex flex-wrap gap-x-3 text-xs text-slate-600 mt-1">
+                    <span>{item.calories} cal</span>
+                    <span>{item.protein}g P</span>
+                    <span>{item.carbs}g C</span>
+                    <span>{item.fat}g F</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden sm:block overflow-x-auto rounded-lg border border-slate-200">
+              <table data-testid="planned-table" className="w-full border-collapse text-sm">
+                <thead>
+                  <tr className="bg-slate-50 border-b-2 border-slate-200">
+                    <th className="p-2.5 text-left font-semibold text-slate-700 text-xs">Item</th>
+                    <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">Cal</th>
+                    <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">P</th>
+                    <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">C</th>
+                    <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">F</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {planned.map((item) => (
+                    <tr
+                      key={item.meal_id}
+                      data-testid={`planned-row-${item.meal_id}`}
+                      className="border-b border-slate-100"
+                    >
+                      <td className="p-2 text-slate-900 font-medium">{item.name}</td>
+                      <td className="p-2 text-right tabular-nums">{item.calories}</td>
+                      <td className="p-2 text-right tabular-nums">{item.protein}g</td>
+                      <td className="p-2 text-right tabular-nums">{item.carbs}g</td>
+                      <td className="p-2 text-right tabular-nums">{item.fat}g</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
       {/* ============================================================ */}
       {/*  ACTION BUTTONS                                               */}
       {/* ============================================================ */}
-      <div className="flex gap-2 mb-6 flex-wrap">
+      <div className="flex gap-2 mb-6 flex-wrap [&>button]:flex-1 [&>button]:sm:flex-initial">
         <button
           className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
           onClick={openTempModal}
