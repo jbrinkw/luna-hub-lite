@@ -10,7 +10,9 @@ describe('ApiKeyGenerator', () => {
     onRevoke: vi.fn(),
   };
 
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('click generate calls onGenerate and displays key', async () => {
     const onGenerate = vi.fn().mockResolvedValue('sk-plaintext-key');
@@ -67,9 +69,7 @@ describe('ApiKeyGenerator', () => {
   });
 
   it('multiple generates produce new keys each time', async () => {
-    const onGenerate = vi.fn()
-      .mockResolvedValueOnce('key-1')
-      .mockResolvedValueOnce('key-2');
+    const onGenerate = vi.fn().mockResolvedValueOnce('key-1').mockResolvedValueOnce('key-2');
 
     render(<ApiKeyGenerator {...defaultProps} onGenerate={onGenerate} />);
 
@@ -115,20 +115,47 @@ describe('ApiKeyGenerator', () => {
     expect(revokeButtons).toHaveLength(2);
   });
 
-  it('onRevoke called with correct ID', async () => {
+  it('revoke shows confirm modal and calls onRevoke on confirm', async () => {
     const onRevoke = vi.fn();
-    const activeKeys = [
-      { id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z' },
-    ];
+    const activeKeys = [{ id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z' }];
     render(<ApiKeyGenerator {...defaultProps} activeKeys={activeKeys} onRevoke={onRevoke} />);
 
+    // Click Revoke — should open confirm modal
     await userEvent.click(screen.getByText('Revoke'));
+
+    // Modal should be visible with the warning message
+    expect(screen.getByText('Revoke API Key')).toBeInTheDocument();
+    expect(
+      screen.getByText('This will permanently revoke this API key. Any integrations using it will stop working.'),
+    ).toBeInTheDocument();
+
+    // onRevoke should NOT have been called yet
+    expect(onRevoke).not.toHaveBeenCalled();
+
+    // Confirm the revoke
+    const confirmButtons = screen.getAllByRole('button', { name: /revoke/i });
+    // The confirm button in the modal (last one)
+    await userEvent.click(confirmButtons[confirmButtons.length - 1]);
+
     expect(onRevoke).toHaveBeenCalledWith('key-abc-123');
   });
 
-  it('empty state', () => {
+  it('revoke cancel does not call onRevoke', async () => {
+    const onRevoke = vi.fn();
+    const activeKeys = [{ id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z' }];
+    render(<ApiKeyGenerator {...defaultProps} activeKeys={activeKeys} onRevoke={onRevoke} />);
+
+    await userEvent.click(screen.getByText('Revoke'));
+    expect(screen.getByText('Revoke API Key')).toBeInTheDocument();
+
+    // Cancel
+    await userEvent.click(screen.getByText('Cancel'));
+    expect(onRevoke).not.toHaveBeenCalled();
+  });
+
+  it('empty state shows descriptive message', () => {
     render(<ApiKeyGenerator {...defaultProps} activeKeys={[]} />);
-    expect(screen.getByText('No active API keys')).toBeInTheDocument();
+    expect(screen.getByText('No API keys yet. Generate one to connect MCP clients.')).toBeInTheDocument();
   });
 
   it('loading disables generate', () => {

@@ -5,6 +5,8 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { CardSkeleton } from '@/components/ui/Skeleton';
+import { Button } from '@/components/ui/Button';
+import { Copy, Check } from 'lucide-react';
 
 interface ActiveKey {
   id: string;
@@ -38,6 +40,9 @@ export function McpSettingsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [refreshCounter, setRefreshCounter] = useState(0);
+  const [endpointCopied, setEndpointCopied] = useState(false);
+
+  const endpointUrl = `${import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/sse`;
 
   useEffect(() => {
     if (!user) return;
@@ -51,6 +56,16 @@ export function McpSettingsPage() {
 
     load();
   }, [user, refreshCounter]);
+
+  const handleCopyEndpoint = async () => {
+    try {
+      await navigator.clipboard.writeText(endpointUrl);
+      setEndpointCopied(true);
+      setTimeout(() => setEndpointCopied(false), 2000);
+    } catch {
+      // Clipboard API may not be available
+    }
+  };
 
   const handleGenerate = async (label: string): Promise<string | null> => {
     if (!user) return null;
@@ -113,9 +128,15 @@ export function McpSettingsPage() {
             <CardTitle>Endpoint</CardTitle>
           </CardHeader>
           <CardContent>
-            <code className="text-sm bg-slate-100 px-3 py-1.5 rounded-md text-slate-800">
-              {import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/sse
-            </code>
+            <div className="flex items-center gap-2">
+              <code className="text-sm bg-slate-100 px-3 py-1.5 rounded-md text-slate-800 flex-1 break-all">
+                {endpointUrl}
+              </code>
+              <Button variant="secondary" size="sm" onClick={handleCopyEndpoint} data-testid="copy-endpoint">
+                {endpointCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {endpointCopied ? 'Copied!' : 'Copy'}
+              </Button>
+            </div>
           </CardContent>
         </Card>
 

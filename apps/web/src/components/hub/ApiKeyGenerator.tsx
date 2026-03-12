@@ -3,6 +3,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Alert } from '@/components/ui/Alert';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { Copy, Check, Key, Trash2 } from 'lucide-react';
 
 interface ApiKey {
@@ -24,6 +25,7 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
   const [generating, setGenerating] = useState(false);
   const [label, setLabel] = useState('');
   const [copied, setCopied] = useState(false);
+  const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -44,6 +46,21 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
   const handleDismiss = () => {
     setGeneratedKey(null);
     setCopied(false);
+  };
+
+  const handleRevokeClick = (keyId: string) => {
+    setRevokeTarget(keyId);
+  };
+
+  const handleRevokeConfirm = () => {
+    if (revokeTarget) {
+      onRevoke(revokeTarget);
+      setRevokeTarget(null);
+    }
+  };
+
+  const handleRevokeCancel = () => {
+    setRevokeTarget(null);
   };
 
   return (
@@ -102,7 +119,7 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
               <Button
                 variant="ghost"
                 size="sm"
-                onClick={() => onRevoke(key.id)}
+                onClick={() => handleRevokeClick(key.id)}
                 className="text-red-600 hover:text-red-700 hover:bg-red-50"
               >
                 <Trash2 className="h-4 w-4" />
@@ -112,11 +129,22 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
           ))}
           {activeKeys.length === 0 && (
             <div className="px-4 py-8 text-center">
-              <p className="text-sm text-slate-500">No active API keys</p>
+              <Key className="h-8 w-8 text-slate-300 mx-auto mb-2" />
+              <p className="text-sm text-slate-500">No API keys yet. Generate one to connect MCP clients.</p>
             </div>
           )}
         </div>
       </CardContent>
+
+      <ConfirmModal
+        open={revokeTarget !== null}
+        onConfirm={handleRevokeConfirm}
+        onCancel={handleRevokeCancel}
+        title="Revoke API Key"
+        message="This will permanently revoke this API key. Any integrations using it will stop working."
+        confirmLabel="Revoke"
+        confirmVariant="danger"
+      />
     </Card>
   );
 }
