@@ -1,4 +1,5 @@
-import { Routes, Route, Navigate } from 'react-router-dom';
+import { Routes, Route } from 'react-router-dom';
+import { HubHomePage } from '@/pages/hub/HubHomePage';
 import { AccountPage } from '@/pages/hub/AccountPage';
 import { AppsPage } from '@/pages/hub/AppsPage';
 import { ToolsPage } from '@/pages/hub/ToolsPage';
@@ -8,7 +9,7 @@ import { McpSettingsPage } from '@/pages/hub/McpSettingsPage';
 export function HubRoutes() {
   return (
     <Routes>
-      <Route index element={<Navigate to="/hub/account" replace />} />
+      <Route index element={<HubHomePage />} />
       <Route path="account" element={<AccountPage />} />
       <Route path="apps" element={<AppsPage />} />
       <Route path="tools" element={<ToolsPage />} />
