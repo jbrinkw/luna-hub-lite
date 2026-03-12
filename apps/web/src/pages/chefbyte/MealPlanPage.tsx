@@ -625,16 +625,51 @@ export function MealPlanPage() {
       {error && <p className="text-red-600 m-0 mb-3">{error}</p>}
 
       {/* ============================================================ */}
-      {/*  SIDE-BY-SIDE LAYOUT                                          */}
+      {/*  RESPONSIVE LAYOUT: vertical on mobile, side-by-side on md+  */}
       {/* ============================================================ */}
-      <div className="flex gap-4 items-start">
+      <div className="flex flex-col md:flex-row gap-4 md:items-start">
         {/* ---------------------------------------------------------- */}
-        {/*  LEFT PANEL -- Compact week list                            */}
+        {/*  LEFT PANEL / TOP STRIP -- Week days                       */}
         {/* ---------------------------------------------------------- */}
-        <div
-          data-testid="week-grid"
-          className="w-[280px] min-w-[280px] flex flex-col gap-0.5 bg-slate-100 rounded-lg overflow-hidden border border-slate-200"
-        >
+
+        {/* Mobile: horizontal scrollable day strip */}
+        <div data-testid="week-grid" className="md:hidden flex gap-1.5 overflow-x-auto pb-2 -mx-1 px-1 scrollbar-hide">
+          {dayDates.map((date, i) => {
+            const dayMeals = mealsByDay.get(date) ?? [];
+            const isSelected = selectedDay === date;
+            const isToday = date === todayStr;
+            const mealCount = dayMeals.length;
+
+            return (
+              <button
+                key={date}
+                data-testid={`day-col-${date}`}
+                onClick={() => setSelectedDay(date)}
+                className={[
+                  'flex flex-col items-center px-3 py-2 rounded-lg cursor-pointer transition-colors shrink-0 border-none min-w-[56px]',
+                  isSelected
+                    ? 'bg-emerald-600 text-white'
+                    : isToday
+                      ? 'bg-emerald-50 text-emerald-700 ring-2 ring-emerald-300'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+                ].join(' ')}
+              >
+                <span className="font-bold text-xs">{DAY_NAMES[i]}</span>
+                <span className={['text-[11px] mt-0.5', isSelected ? 'text-white/80' : 'text-slate-500'].join(' ')}>
+                  {formatDateShort(date)}
+                </span>
+                {mealCount > 0 && (
+                  <span
+                    className={['mt-1 w-1.5 h-1.5 rounded-full', isSelected ? 'bg-white' : 'bg-emerald-500'].join(' ')}
+                  />
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Desktop: vertical week list */}
+        <div className="hidden md:flex w-[280px] min-w-[280px] flex-col gap-0.5 bg-slate-100 rounded-lg overflow-hidden border border-slate-200">
           {dayDates.map((date, i) => {
             const dayMeals = mealsByDay.get(date) ?? [];
             const isSelected = selectedDay === date;
@@ -644,7 +679,7 @@ export function MealPlanPage() {
             return (
               <div
                 key={date}
-                data-testid={`day-col-${date}`}
+                data-testid={`day-col-desktop-${date}`}
                 onClick={() => setSelectedDay(date)}
                 className={[
                   'flex items-center justify-between px-3.5 py-2.5 cursor-pointer transition-colors border-l-[3px]',
@@ -682,7 +717,7 @@ export function MealPlanPage() {
         </div>
 
         {/* ---------------------------------------------------------- */}
-        {/*  RIGHT PANEL -- Selected day detail                         */}
+        {/*  RIGHT PANEL / BOTTOM -- Selected day detail                */}
         {/* ---------------------------------------------------------- */}
         <div className="flex-1 min-w-0">
           {!selectedDay ? (
@@ -695,156 +730,169 @@ export function MealPlanPage() {
                 {formatDateLong(selectedDay, selectedDayIndex)}
               </h3>
 
-              {selectedDayMeals.length === 0 ? (
-                <p data-testid="no-meals" className="text-slate-400 text-sm">
-                  No meals planned for this day. Use the{' '}
-                  <button
-                    type="button"
-                    onClick={openAddModal}
-                    className="text-emerald-600 font-medium hover:underline bg-transparent border-none cursor-pointer p-0 text-sm"
-                  >
-                    + Add Meal
-                  </button>{' '}
-                  button to plan your meals.
-                </p>
-              ) : (
-                <div data-testid="day-detail-table" className="flex flex-col gap-2.5">
-                  {selectedDayMeals.map((meal) => {
-                    const macros = entryMacros(meal);
-                    return (
-                      <div
-                        key={meal.meal_id}
-                        data-testid={`detail-row-${meal.meal_id}`}
-                        className="bg-white border border-slate-200 rounded-lg p-3.5"
-                      >
-                        <div data-testid={`grid-meal-${meal.meal_id}`} className="flex justify-between items-start">
-                          <div className="flex-1 min-w-0">
-                            <div className="font-semibold text-[15px] text-slate-900">{entryName(meal)}</div>
+              {/* ------- Planned Meals Section ------- */}
+              <div className="bg-white border border-slate-200 rounded-lg overflow-hidden mb-4">
+                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
+                  <h4 className="m-0 text-sm font-bold text-slate-700 uppercase tracking-wide">Planned Meals</h4>
+                </div>
 
-                            {meal.meal_type && (
-                              <span
-                                data-testid={`meal-type-label-${meal.meal_id}`}
-                                className="inline-block mt-1 text-[11px] bg-slate-200 px-2 py-0.5 rounded text-slate-600 capitalize"
-                              >
-                                {meal.meal_type}
-                              </span>
-                            )}
+                {selectedDayMeals.length === 0 ? (
+                  <p data-testid="no-meals" className="text-slate-400 text-sm px-4 py-5 text-center m-0">
+                    No meals planned for this day. Use the{' '}
+                    <button
+                      type="button"
+                      onClick={openAddModal}
+                      className="text-emerald-600 font-medium hover:underline bg-transparent border-none cursor-pointer p-0 text-sm"
+                    >
+                      + Add Meal
+                    </button>{' '}
+                    button to plan your meals.
+                  </p>
+                ) : (
+                  <div data-testid="day-detail-table" className="flex flex-col gap-2.5 p-3">
+                    {selectedDayMeals.map((meal) => {
+                      const macros = entryMacros(meal);
+                      return (
+                        <div
+                          key={meal.meal_id}
+                          data-testid={`detail-row-${meal.meal_id}`}
+                          className="bg-white border border-slate-200 rounded-lg p-3.5"
+                        >
+                          <div data-testid={`grid-meal-${meal.meal_id}`} className="flex justify-between items-start">
+                            <div className="flex-1 min-w-0">
+                              <div className="font-semibold text-[15px] text-slate-900">{entryName(meal)}</div>
 
-                            {macros && (macros.calories > 0 || macros.protein > 0) && (
-                              <div
-                                data-testid={`grid-macros-${meal.meal_id}`}
-                                className="text-xs text-slate-500 mt-1.5"
-                              >
-                                {macros.calories}cal | {macros.protein}g P | {macros.carbs}g C | {macros.fat}g F
+                              {meal.meal_type && (
+                                <span
+                                  data-testid={`meal-type-label-${meal.meal_id}`}
+                                  className="inline-block mt-1 text-[11px] bg-slate-200 px-2 py-0.5 rounded text-slate-600 capitalize"
+                                >
+                                  {meal.meal_type}
+                                </span>
+                              )}
+
+                              {macros && (macros.calories > 0 || macros.protein > 0) && (
+                                <div
+                                  data-testid={`grid-macros-${meal.meal_id}`}
+                                  className="text-xs text-slate-500 mt-1.5"
+                                >
+                                  {macros.calories}cal | {macros.protein}g P | {macros.carbs}g C | {macros.fat}g F
+                                </div>
+                              )}
+
+                              <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                                {meal.completed_at && (
+                                  <span
+                                    data-testid={`done-badge-${meal.meal_id}`}
+                                    className="inline-block text-[11px] bg-green-600 text-white px-2 py-0.5 rounded font-semibold"
+                                  >
+                                    Done
+                                  </span>
+                                )}
+                                {meal.meal_prep && !meal.completed_at && (
+                                  <span
+                                    data-testid={`prep-badge-${meal.meal_id}`}
+                                    className="inline-block text-[11px] bg-violet-600 text-white px-2 py-0.5 rounded font-semibold"
+                                  >
+                                    PREP
+                                  </span>
+                                )}
+                                {!meal.meal_prep && !meal.completed_at && (
+                                  <span className="text-[11px] text-slate-400">Regular</span>
+                                )}
+                                {meal.completed_at && (
+                                  <span className="text-[11px] text-slate-400">at {formatTime(meal.completed_at)}</span>
+                                )}
+                                {!meal.completed_at && (
+                                  <label className="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer">
+                                    <input
+                                      type="checkbox"
+                                      checked={meal.meal_prep}
+                                      onChange={() => toggleMealPrep(meal)}
+                                      disabled={!!meal.completed_at}
+                                      aria-label={`Toggle meal prep for ${entryName(meal)}`}
+                                      data-testid={`toggle-prep-${meal.meal_id}`}
+                                      className="w-3.5 h-3.5"
+                                    />
+                                    Prep
+                                  </label>
+                                )}
                               </div>
-                            )}
-
-                            <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                              {meal.completed_at && (
-                                <span
-                                  data-testid={`done-badge-${meal.meal_id}`}
-                                  className="inline-block text-[11px] bg-green-600 text-white px-2 py-0.5 rounded font-semibold"
-                                >
-                                  Done
-                                </span>
-                              )}
-                              {meal.meal_prep && !meal.completed_at && (
-                                <span
-                                  data-testid={`prep-badge-${meal.meal_id}`}
-                                  className="inline-block text-[11px] bg-violet-600 text-white px-2 py-0.5 rounded font-semibold"
-                                >
-                                  PREP
-                                </span>
-                              )}
-                              {!meal.meal_prep && !meal.completed_at && (
-                                <span className="text-[11px] text-slate-400">Regular</span>
-                              )}
-                              {meal.completed_at && (
-                                <span className="text-[11px] text-slate-400">at {formatTime(meal.completed_at)}</span>
-                              )}
-                              {!meal.completed_at && (
-                                <label className="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer">
-                                  <input
-                                    type="checkbox"
-                                    checked={meal.meal_prep}
-                                    onChange={() => toggleMealPrep(meal)}
-                                    disabled={!!meal.completed_at}
-                                    aria-label={`Toggle meal prep for ${entryName(meal)}`}
-                                    data-testid={`toggle-prep-${meal.meal_id}`}
-                                    className="w-3.5 h-3.5"
-                                  />
-                                  Prep
-                                </label>
-                              )}
                             </div>
-                          </div>
 
-                          {/* Action buttons */}
-                          <div className="flex flex-col gap-1 ml-3 shrink-0">
-                            {!meal.completed_at ? (
-                              <>
-                                <button
-                                  onClick={() => markDone(meal.meal_id)}
-                                  data-testid={`mark-done-${meal.meal_id}`}
-                                  className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-green-700 transition-colors"
-                                >
-                                  Mark Done
-                                </button>
-                                {meal.meal_prep && (
+                            {/* Action buttons */}
+                            <div className="flex flex-col gap-1 ml-3 shrink-0">
+                              {!meal.completed_at ? (
+                                <>
                                   <button
                                     onClick={() => markDone(meal.meal_id)}
-                                    data-testid={`exec-prep-${meal.meal_id}`}
-                                    className="px-3 py-1 bg-violet-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-violet-700 transition-colors"
+                                    data-testid={`mark-done-${meal.meal_id}`}
+                                    className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-green-700 transition-colors"
                                   >
-                                    Execute Prep
+                                    Mark Done
                                   </button>
-                                )}
-                              </>
-                            ) : (
-                              <button
-                                onClick={() => unmarkDone(meal.meal_id)}
-                                data-testid={`undo-done-${meal.meal_id}`}
-                                className="px-3 py-1 bg-white text-amber-500 border border-amber-500 rounded text-xs font-semibold whitespace-nowrap hover:bg-amber-50 transition-colors"
-                              >
-                                Undo
-                              </button>
-                            )}
-                            <DeleteBtn
-                              id={`meal-${meal.meal_id}`}
-                              onConfirm={() => deleteMeal(meal.meal_id)}
-                              testId={`delete-meal-${meal.meal_id}`}
-                            />
+                                  {meal.meal_prep && (
+                                    <button
+                                      onClick={() => markDone(meal.meal_id)}
+                                      data-testid={`exec-prep-${meal.meal_id}`}
+                                      className="px-3 py-1 bg-violet-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-violet-700 transition-colors"
+                                    >
+                                      Execute Prep
+                                    </button>
+                                  )}
+                                </>
+                              ) : (
+                                <button
+                                  onClick={() => unmarkDone(meal.meal_id)}
+                                  data-testid={`undo-done-${meal.meal_id}`}
+                                  className="px-3 py-1 bg-white text-amber-500 border border-amber-500 rounded text-xs font-semibold whitespace-nowrap hover:bg-amber-50 transition-colors"
+                                >
+                                  Undo
+                                </button>
+                              )}
+                              <DeleteBtn
+                                id={`meal-${meal.meal_id}`}
+                                onConfirm={() => deleteMeal(meal.meal_id)}
+                                testId={`delete-meal-${meal.meal_id}`}
+                              />
+                            </div>
                           </div>
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
 
-                  {/* TOTAL macros row */}
-                  <div
-                    data-testid="day-detail-total-row"
-                    className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex justify-between items-center"
-                  >
-                    <span className="font-bold text-sm text-slate-800">TOTAL</span>
-                    <span className="text-sm text-slate-600 font-semibold">
-                      {dayTotals.calories} cal | {dayTotals.protein}g P | {dayTotals.carbs}g C | {dayTotals.fat}g F
-                    </span>
+                    {/* TOTAL macros row */}
+                    <div
+                      data-testid="day-detail-total-row"
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex justify-between items-center"
+                    >
+                      <span className="font-bold text-sm text-slate-800">TOTAL</span>
+                      <span className="text-sm text-slate-600 font-semibold">
+                        {dayTotals.calories} cal | {dayTotals.protein}g P | {dayTotals.carbs}g C | {dayTotals.fat}g F
+                      </span>
+                    </div>
                   </div>
-                </div>
-              )}
+                )}
+              </div>
+              {/* close Planned Meals wrapper */}
 
-              {/* Consumed items (food_logs + temp_items) */}
+              {/* ------- Consumed Items Section ------- */}
               {(selectedDayLogs.length > 0 || selectedDayTemps.length > 0) && (
-                <div data-testid="consumed-section" className="mt-5">
-                  <h4 className="m-0 mb-2.5 text-sm font-semibold text-slate-600">Consumed</h4>
-                  <div className="flex flex-col gap-1.5">
+                <div
+                  data-testid="consumed-section"
+                  className="bg-green-50/50 border border-green-200 rounded-lg overflow-hidden"
+                >
+                  <div className="px-4 py-2.5 bg-green-100/60 border-b border-green-200">
+                    <h4 className="m-0 text-sm font-bold text-green-800 uppercase tracking-wide">Consumed</h4>
+                  </div>
+                  <div className="flex flex-col gap-1.5 p-3">
                     {selectedDayLogs.map((log) => {
                       const delId = `log-${log.log_id}`;
                       return (
                         <div
                           key={log.log_id}
                           data-testid={`consumed-log-${log.log_id}`}
-                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-green-50 flex justify-between items-center"
+                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-white flex justify-between items-center"
                         >
                           <span className="font-semibold text-sm">
                             {log.products?.name ?? 'Unknown'}
@@ -873,7 +921,7 @@ export function MealPlanPage() {
                         <div
                           key={item.temp_id}
                           data-testid={`consumed-temp-${item.temp_id}`}
-                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-amber-50 flex justify-between items-center"
+                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-white flex justify-between items-center"
                         >
                           <span className="font-semibold text-sm">
                             {item.name}
