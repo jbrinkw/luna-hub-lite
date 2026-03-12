@@ -4,6 +4,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, supabase, escapeIlike } from '@/shared/supabase';
 import { generateWalmartCartLink } from '@/lib/walmart';
+import { PackageSearch } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -49,6 +50,9 @@ export function ShoppingPage() {
   const [showDropdown, setShowDropdown] = useState(false);
 
   /* ---- Confirm modal state ---- */
+  /* ---- Purchase animation state ---- */
+  const [justPurchasedIds, setJustPurchasedIds] = useState<Set<string>>(new Set());
+
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
     title: string;
@@ -230,6 +234,19 @@ export function ShoppingPage() {
 
   const togglePurchased = async (item: ShoppingItem) => {
     setError(null);
+
+    // Trigger green flash animation when marking as purchased
+    if (!item.purchased) {
+      setJustPurchasedIds((prev) => new Set(prev).add(item.cart_item_id));
+      setTimeout(() => {
+        setJustPurchasedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.cart_item_id);
+          return next;
+        });
+      }, 600);
+    }
+
     const { error: updateErr } = await chefbyte()
       .from('shopping_list')
       .update({ purchased: !item.purchased })
@@ -430,51 +447,57 @@ export function ShoppingPage() {
       <div className="p-5">
         <div className="flex justify-between items-center mb-5">
           <h1 className="m-0 text-2xl font-bold text-slate-900">Shopping List</h1>
-          <div className="flex gap-2">
-            <button
-              onClick={() => {
-                const missingLink = toBuy.filter(
-                  (i) =>
-                    !i.products?.is_placeholder &&
-                    !i.products?.walmart_link &&
-                    i.products?.walmart_link !== 'NOT_ON_WALMART',
-                );
-                const link = generateWalmartCartLink(toBuy);
-                if (!link) {
-                  alert('No items with Walmart links found.');
-                  return;
-                }
-                if (missingLink.length > 0) {
-                  const names = missingLink.map((i) => i.products?.name ?? 'Unknown').join(', ');
-                  setConfirmState({
-                    open: true,
-                    title: 'Missing Walmart Links',
-                    message: `${missingLink.length} item${missingLink.length > 1 ? 's' : ''} missing Walmart links and won't be in the cart: ${names}. Continue?`,
-                    confirmLabel: 'Continue',
-                    action: () => {
-                      closeConfirm();
-                      window.open(link, '_blank');
-                    },
-                  });
-                  return;
-                }
-                window.open(link, '_blank');
-              }}
-              disabled={toBuy.length === 0}
-              data-testid="walmart-cart-btn"
-              className="px-4 py-2.5 bg-[#0071ce] text-white border-none rounded-md cursor-pointer text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Open in Walmart
-            </button>
-            <button
-              onClick={autoAddBelowMinStock}
-              data-testid="auto-add-btn"
-              className="px-4 py-2.5 bg-emerald-600 text-white border-none rounded-md cursor-pointer text-sm font-semibold hover:bg-emerald-700"
-            >
-              Auto-Add Below Min Stock
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              const missingLink = toBuy.filter(
+                (i) =>
+                  !i.products?.is_placeholder &&
+                  !i.products?.walmart_link &&
+                  i.products?.walmart_link !== 'NOT_ON_WALMART',
+              );
+              const link = generateWalmartCartLink(toBuy);
+              if (!link) {
+                alert('No items with Walmart links found.');
+                return;
+              }
+              if (missingLink.length > 0) {
+                const names = missingLink.map((i) => i.products?.name ?? 'Unknown').join(', ');
+                setConfirmState({
+                  open: true,
+                  title: 'Missing Walmart Links',
+                  message: `${missingLink.length} item${missingLink.length > 1 ? 's' : ''} missing Walmart links and won't be in the cart: ${names}. Continue?`,
+                  confirmLabel: 'Continue',
+                  action: () => {
+                    closeConfirm();
+                    window.open(link, '_blank');
+                  },
+                });
+                return;
+              }
+              window.open(link, '_blank');
+            }}
+            disabled={toBuy.length === 0}
+            data-testid="walmart-cart-btn"
+            className="px-4 py-2.5 bg-[#0071ce] text-white border-none rounded-md cursor-pointer text-sm font-semibold disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Open in Walmart
+          </button>
         </div>
+
+        {/* Auto-Add Below Min Stock CTA */}
+        <button
+          onClick={autoAddBelowMinStock}
+          data-testid="auto-add-btn"
+          className="w-full mb-5 flex items-center gap-3 px-5 py-4 bg-emerald-50 border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer hover:bg-emerald-100 hover:border-emerald-400 transition-colors text-left"
+        >
+          <PackageSearch className="w-7 h-7 text-emerald-600 shrink-0" />
+          <div>
+            <span className="block text-base font-bold text-emerald-700">Auto-Add Below Min Stock</span>
+            <span className="block text-sm text-emerald-600/80 mt-0.5">
+              Add items that are below your minimum stock levels
+            </span>
+          </div>
+        </button>
 
         {error && <div className="text-red-600 text-sm p-2">{error}</div>}
 
@@ -541,33 +564,46 @@ export function ShoppingPage() {
             </div>
           ) : (
             <div data-testid="to-buy-list" className="flex flex-col gap-2">
-              {toBuy.map((item) => (
-                <div
-                  key={item.cart_item_id}
-                  data-testid={`item-${item.cart_item_id}`}
-                  className="flex items-center gap-3 p-2.5 bg-slate-50 rounded-md"
-                >
-                  <input
-                    type="checkbox"
-                    checked={item.purchased}
-                    onChange={() => togglePurchased(item)}
-                    aria-label={`Mark ${item.products?.name ?? 'Unknown Product'} as purchased`}
-                    data-testid={`check-${item.cart_item_id}`}
-                    className="cursor-pointer w-[18px] h-[18px]"
-                  />
-                  <div className="flex-1">
-                    <strong>{item.products?.name ?? 'Unknown Product'}</strong>
-                    <span className="ml-3 text-slate-500">{formatQty(item.qty_containers)}</span>
-                  </div>
-                  <button
-                    onClick={() => removeItem(item.cart_item_id)}
-                    data-testid={`remove-${item.cart_item_id}`}
-                    className="px-3 py-1 bg-transparent text-slate-500 border border-slate-200 rounded cursor-pointer text-xs hover:bg-slate-100"
+              {toBuy.map((item) => {
+                const justPurchased = justPurchasedIds.has(item.cart_item_id);
+                return (
+                  <div
+                    key={item.cart_item_id}
+                    data-testid={`item-${item.cart_item_id}`}
+                    className={[
+                      'flex items-center gap-3 p-2.5 rounded-md transition-colors duration-500',
+                      justPurchased ? 'bg-green-100' : 'bg-slate-50',
+                    ].join(' ')}
                   >
-                    Remove
-                  </button>
-                </div>
-              ))}
+                    <div className="relative flex items-center justify-center w-[22px] h-[22px]">
+                      <input
+                        type="checkbox"
+                        checked={item.purchased}
+                        onChange={() => togglePurchased(item)}
+                        aria-label={`Mark ${item.products?.name ?? 'Unknown Product'} as purchased`}
+                        data-testid={`check-${item.cart_item_id}`}
+                        className="cursor-pointer w-[18px] h-[18px] accent-green-600"
+                      />
+                      {justPurchased && (
+                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none animate-ping text-green-600 text-sm">
+                          &#10003;
+                        </span>
+                      )}
+                    </div>
+                    <div className="flex-1">
+                      <strong>{item.products?.name ?? 'Unknown Product'}</strong>
+                      <span className="ml-3 text-slate-500">{formatQty(item.qty_containers)}</span>
+                    </div>
+                    <button
+                      onClick={() => removeItem(item.cart_item_id)}
+                      data-testid={`remove-${item.cart_item_id}`}
+                      className="px-3 py-1 bg-transparent text-slate-500 border border-slate-200 rounded cursor-pointer text-xs hover:bg-slate-100"
+                    >
+                      Remove
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
