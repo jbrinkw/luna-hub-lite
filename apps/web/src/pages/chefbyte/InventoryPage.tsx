@@ -360,7 +360,10 @@ export function InventoryPage() {
               ? 'bg-emerald-600 text-white border-emerald-600'
               : 'bg-white text-slate-600 border-slate-200'
           }`}
-          onClick={() => setViewMode('grouped')}
+          onClick={() => {
+            setViewMode('grouped');
+            setExpandedProductId(null);
+          }}
         >
           Grouped
         </button>
@@ -370,7 +373,10 @@ export function InventoryPage() {
               ? 'bg-emerald-600 text-white border-emerald-600'
               : 'bg-white text-slate-600 border-slate-200'
           }`}
-          onClick={() => setViewMode('lots')}
+          onClick={() => {
+            setViewMode('lots');
+            setExpandedProductId(null);
+          }}
         >
           Lots
         </button>
@@ -384,7 +390,10 @@ export function InventoryPage() {
           placeholder="Search products..."
           aria-label="Search products"
           value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
+          onChange={(e) => {
+            setSearchText(e.target.value);
+            setExpandedProductId(null);
+          }}
           data-testid="inventory-search"
           className={inputCls}
         />
