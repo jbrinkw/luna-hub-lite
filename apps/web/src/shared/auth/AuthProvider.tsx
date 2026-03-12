@@ -45,6 +45,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const clearSessionError = useCallback(() => setSessionError(null), []);
 
   useEffect(() => {
+    // Timeout: if auth doesn't resolve within 10s, stop blocking the UI
+    const authTimeout = setTimeout(() => {
+      if (!initialLoadDone.current) {
+        setLoading(false);
+      }
+    }, 10_000);
+
     // onAuthStateChange fires INITIAL_SESSION on subscribe, providing the session.
     // No separate getSession() call needed — that would race with INITIAL_SESSION.
     const {
@@ -55,6 +62,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
 
       if (event === 'INITIAL_SESSION') {
+        clearTimeout(authTimeout);
         initialLoadDone.current = true;
         return;
       }
@@ -67,7 +75,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      clearTimeout(authTimeout);
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signIn = async (email: string, password: string) => {

@@ -12,7 +12,11 @@ export function ActivationGuard({ appName, children }: ActivationGuardProps) {
   const { activations, activationsLoading } = useAppContext();
 
   if (activationsLoading) {
-    return <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>Loading...</div>;
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="h-8 w-8 border-4 border-slate-200 border-t-blue-600 rounded-full animate-spin" />
+      </div>
+    );
   }
 
   if (!activations[appName]) {
