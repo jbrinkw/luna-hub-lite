@@ -114,8 +114,8 @@ export function Login() {
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
-      {/* Hero panel (after form on mobile so users see login first) */}
-      <div className="order-2 md:order-1 md:w-[55%] bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white flex flex-col justify-center px-6 py-8 md:px-14 md:py-0 md:overflow-y-auto md:max-h-screen">
+      {/* Hero panel (above form on mobile) */}
+      <div className="md:order-1 md:w-[55%] bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white flex flex-col justify-center px-6 py-8 md:px-14 md:py-0 md:overflow-y-auto md:max-h-screen">
         <div className="max-w-lg mx-auto md:mx-0 md:py-12">
           <h1 className="text-3xl md:text-5xl font-extrabold mb-1 md:mb-2 tracking-tight">Luna Hub</h1>
           <p className="text-sm md:text-lg text-slate-300 mb-5 md:mb-8">
@@ -245,8 +245,8 @@ export function Login() {
         </div>
       </div>
 
-      {/* Form panel (first on mobile) */}
-      <div className="order-1 md:order-2 md:w-[45%] flex items-center justify-center px-6 py-12 md:py-0 bg-white">
+      {/* Form panel */}
+      <div className="md:order-2 md:w-[45%] flex items-center justify-center px-6 py-12 md:py-0 bg-white">
         <div className="w-full max-w-sm">
           {view === 'login' ? (
             <>
