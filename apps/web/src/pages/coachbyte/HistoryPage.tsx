@@ -3,9 +3,9 @@ import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { WEIGHT_UNIT } from '@/shared/constants';
-import { formatDateDisplay } from '@/shared/dates';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { formatDateDisplay } from '@/shared/dates';
 
 interface HistoryDay {
   plan_id: string;
@@ -34,6 +34,7 @@ export function HistoryPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [days, setDays] = useState<HistoryDay[]>([]);
+  const [totalCount, setTotalCount] = useState<number | null>(null);
   const [cursor, setCursor] = useState<string | null>(null);
   const [hasMore, setHasMore] = useState(false);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
@@ -119,6 +120,19 @@ export function HistoryPage() {
     },
     [user],
   );
+
+  // Load total count for "Showing X-Y of Z" display
+  useEffect(() => {
+    if (!user) return;
+    supabase
+      .schema('coachbyte')
+      .from('daily_plans')
+      .select('plan_id', { count: 'exact', head: true })
+      .eq('user_id', user.id)
+      .then(({ count }) => {
+        setTotalCount(count ?? null);
+      });
+  }, [user]);
 
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -212,12 +226,12 @@ export function HistoryPage() {
 
       {loadError && (
         <Card className="border-red-300 mb-5" data-testid="load-error">
-          <CardContent>
+          <div className="p-4">
             <p className="text-red-600 text-sm mb-2">Failed to load data: {loadError}</p>
             <Button variant="primary" size="sm" onClick={() => loadHistory()}>
               Retry
             </Button>
-          </CardContent>
+          </div>
         </Card>
       )}
 
@@ -235,6 +249,12 @@ export function HistoryPage() {
         </div>
       ) : (
         <>
+          {/* Pagination context */}
+          <p className="text-slate-500 text-xs mb-2" data-testid="pagination-context">
+            Showing 1&ndash;{filteredDays.length}
+            {totalCount !== null ? ` of ${totalCount} workouts` : ' workouts'}
+          </p>
+
           <Card className="mb-5 overflow-hidden">
             <div className="overflow-x-auto">
               <table className="w-full text-sm" data-testid="history-table">
@@ -256,111 +276,101 @@ export function HistoryPage() {
                 </thead>
                 <tbody>
                   {filteredDays.map((day) => (
-                    <tr
-                      key={day.plan_id}
-                      data-testid={`history-row-${day.plan_date}`}
-                      className="border-b border-slate-100 last:border-b-0"
-                    >
-                      <td className="px-3 py-2 align-middle">
-                        <strong>{formatDateDisplay(day.plan_date)}</strong>
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        {day.summary ? (
-                          <div className="max-w-[300px] overflow-hidden text-ellipsis">{day.summary}</div>
-                        ) : (
-                          <em className="text-slate-500">No summary</em>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        {day.completed_count}/{day.planned_count}
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <Button
-                          variant="primary"
-                          size="sm"
-                          onClick={() => loadDetail(day.plan_id)}
-                          data-testid={`expand-${day.plan_date}`}
-                          aria-label={
-                            expandedPlan === day.plan_id
-                              ? `Collapse ${day.plan_date} details`
-                              : `Expand ${day.plan_date} details`
-                          }
-                        >
-                          {expandedPlan === day.plan_id ? 'Hide' : 'View Details'}
-                        </Button>
-                      </td>
-                    </tr>
+                    <>
+                      <tr
+                        key={day.plan_id}
+                        data-testid={`history-row-${day.plan_date}`}
+                        className="border-b border-slate-100 last:border-b-0"
+                      >
+                        <td className="px-3 py-2 align-middle">
+                          <strong>{formatDateDisplay(day.plan_date)}</strong>
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          {day.summary ? (
+                            <div
+                              className="max-w-[300px] overflow-hidden text-ellipsis whitespace-nowrap"
+                              title={day.summary}
+                            >
+                              {day.summary}
+                            </div>
+                          ) : (
+                            <em className="text-slate-500">No summary</em>
+                          )}
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          {day.completed_count}/{day.planned_count}
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          <Button
+                            variant="primary"
+                            size="sm"
+                            onClick={() => loadDetail(day.plan_id)}
+                            data-testid={`expand-${day.plan_date}`}
+                            aria-label={
+                              expandedPlan === day.plan_id
+                                ? `Collapse ${day.plan_date} details`
+                                : `Expand ${day.plan_date} details`
+                            }
+                          >
+                            {expandedPlan === day.plan_id ? 'Hide' : 'View Details'}
+                          </Button>
+                        </td>
+                      </tr>
+
+                      {/* Inline detail expansion row */}
+                      {expandedPlan === day.plan_id && (
+                        <tr key={`${day.plan_id}-detail`} data-testid="detail-card">
+                          <td colSpan={4} className="px-0 py-0">
+                            <div className="border-t border-l-4 border-l-violet-300 border-t-slate-100 bg-slate-50/50 px-4 py-3">
+                              <p className="text-xs font-bold text-slate-600 mb-2">Completed Sets</p>
+                              {detailLoading ? (
+                                <p className="text-slate-500 text-sm">Loading...</p>
+                              ) : detail.length === 0 ? (
+                                <p className="text-slate-500 text-sm">No sets completed.</p>
+                              ) : (
+                                <table className="w-full text-sm">
+                                  <thead>
+                                    <tr>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">#</th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">Exercise</th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">Reps</th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">Load</th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">Time</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {detail.map((d, i) => (
+                                      <tr
+                                        key={i}
+                                        data-testid={`detail-row-${i + 1}`}
+                                        className="border-t border-slate-100"
+                                      >
+                                        <td className="px-2 py-1 align-middle text-slate-500">{i + 1}</td>
+                                        <td className="px-2 py-1 align-middle font-medium">{d.exercise_name}</td>
+                                        <td className="px-2 py-1 align-middle font-medium">{d.actual_reps}</td>
+                                        <td className="px-2 py-1 align-middle font-medium">
+                                          {d.actual_load} {WEIGHT_UNIT}
+                                        </td>
+                                        <td className="px-2 py-1 align-middle">
+                                          <span className="text-slate-500 text-xs">
+                                            {timeFormatter.format(new Date(d.completed_at))}
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      )}
+                    </>
                   ))}
                 </tbody>
               </table>
             </div>
           </Card>
-
-          {expandedPlan && (
-            <Card className="mb-5" data-testid="detail-card">
-              <CardHeader>
-                <CardTitle>Completed Sets</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {detailLoading ? (
-                  <p className="text-slate-500 text-sm">Loading...</p>
-                ) : detail.length === 0 ? (
-                  <p className="text-slate-500 text-sm">No sets completed.</p>
-                ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full text-sm">
-                      <thead>
-                        <tr>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                            #
-                          </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                            Exercise
-                          </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                            Reps
-                          </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                            Load
-                          </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                            Time
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {detail.map((d, i) => (
-                          <tr
-                            key={i}
-                            data-testid={`detail-row-${i + 1}`}
-                            className="border-b border-slate-100 last:border-b-0"
-                          >
-                            <td className="px-3 py-2 align-middle">{i + 1}</td>
-                            <td className="px-3 py-2 align-middle">
-                              <strong>{d.exercise_name}</strong>
-                            </td>
-                            <td className="px-3 py-2 align-middle">
-                              <strong>{d.actual_reps}</strong>
-                            </td>
-                            <td className="px-3 py-2 align-middle">
-                              <strong>
-                                {d.actual_load} {WEIGHT_UNIT}
-                              </strong>
-                            </td>
-                            <td className="px-3 py-2 align-middle">
-                              <span className="text-slate-500 text-xs">
-                                {timeFormatter.format(new Date(d.completed_at))}
-                              </span>
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
 
           {hasMore && (
             <Button
