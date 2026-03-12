@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -172,6 +172,10 @@ export function RecipesPage() {
   const [editingThreshold, setEditingThreshold] = useState<'protein' | 'carbs' | null>(null);
   const [thresholdInput, setThresholdInput] = useState('');
 
+  /* ---- Filter popover ---- */
+  const [showFilters, setShowFilters] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
   /* ---------------------------------------------------------------- */
@@ -270,6 +274,23 @@ export function RecipesPage() {
     carbsThreshold,
   ]);
 
+  /* ---- Active filter count ---- */
+  const activeFilterCount = [canBeMadeOnly, maxActiveTime === 30, highProteinOnly, highCarbsOnly].filter(
+    Boolean,
+  ).length;
+
+  /* ---- Close filter popover on outside click ---- */
+  useEffect(() => {
+    if (!showFilters) return;
+    const handler = (e: MouseEvent) => {
+      if (filterRef.current && !filterRef.current.contains(e.target as Node)) {
+        setShowFilters(false);
+      }
+    };
+    document.addEventListener('mousedown', handler);
+    return () => document.removeEventListener('mousedown', handler);
+  }, [showFilters]);
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -312,194 +333,197 @@ export function RecipesPage() {
       {/*  FILTERS                                                      */}
       {/* ============================================================ */}
       <div data-testid="recipes-filters" className="mb-4">
-        <input
-          type="text"
-          placeholder="Search recipes..."
-          aria-label="Search recipes"
-          value={searchText}
-          onChange={(e) => setSearchText(e.target.value)}
-          data-testid="recipe-search"
-          className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm mb-2 focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
-        />
-        <div className="flex gap-2 flex-wrap items-center">
-          <button
-            onClick={() => setCanBeMadeOnly(!canBeMadeOnly)}
-            data-testid="can-be-made-filter"
-            className={[
-              'px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors',
-              canBeMadeOnly
-                ? 'border border-green-600 bg-green-50 text-green-600'
-                : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
-            ].join(' ')}
-          >
-            Can Be Made
-          </button>
-          <button
-            onClick={() => setMaxActiveTime(maxActiveTime === 30 ? null : 30)}
-            data-testid="active-time-filter"
-            className={[
-              'px-3.5 py-1.5 rounded-full text-xs font-medium transition-colors',
-              maxActiveTime === 30
-                ? 'border border-emerald-600 bg-emerald-50 text-emerald-600'
-                : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
-            ].join(' ')}
-          >
-            &lt; 30 min
-          </button>
-
-          {/* High Protein filter + edit threshold */}
-          <div className="inline-flex items-center gap-0.5">
+        <div className="flex gap-2 items-center mb-2">
+          <input
+            type="text"
+            placeholder="Search recipes..."
+            aria-label="Search recipes"
+            value={searchText}
+            onChange={(e) => setSearchText(e.target.value)}
+            data-testid="recipe-search"
+            className="flex-1 px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+          />
+          <div className="relative" ref={filterRef}>
             <button
-              onClick={() => setHighProteinOnly(!highProteinOnly)}
-              data-testid="high-protein-filter"
+              onClick={() => setShowFilters(!showFilters)}
+              data-testid="filters-btn"
               className={[
-                'px-3.5 py-1.5 text-xs font-medium transition-colors',
-                editingThreshold === 'protein' ? 'rounded-l-full' : 'rounded-full',
-                highProteinOnly
-                  ? 'border border-violet-600 bg-violet-50 text-violet-600'
-                  : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
-                editingThreshold === 'protein' ? 'border-r-0' : '',
+                'px-4 py-2.5 rounded-md text-sm font-semibold transition-colors whitespace-nowrap',
+                activeFilterCount > 0
+                  ? 'bg-emerald-600 text-white hover:bg-emerald-700'
+                  : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50',
               ].join(' ')}
             >
-              High Protein ({proteinThreshold}g/100cal)
+              Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
             </button>
-            {editingThreshold !== 'protein' ? (
-              <button
-                onClick={() => {
-                  setEditingThreshold('protein');
-                  setThresholdInput(String(proteinThreshold));
-                }}
-                data-testid="edit-protein-threshold"
-                title="Edit threshold"
-                className="px-1.5 py-1 border border-slate-300 rounded bg-slate-50 text-[11px] text-slate-500 hover:bg-slate-100 transition-colors"
-              >
-                &#x270E;
-              </button>
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const val = parseFloat(thresholdInput);
-                  if (!isNaN(val) && val > 0) {
-                    setProteinThreshold(val);
-                    try {
-                      localStorage.setItem('chefbyte_protein_threshold', String(val));
-                    } catch {
-                      /* Safari private */
-                    }
-                  }
-                  setEditingThreshold(null);
-                }}
-                className="inline-flex items-center"
-              >
-                <input
-                  type="number"
-                  value={thresholdInput}
-                  onChange={(e) => setThresholdInput(e.target.value)}
-                  autoFocus
-                  step="0.5"
-                  min="0"
-                  data-testid="protein-threshold-input"
-                  className="w-14 px-1 py-1 border border-violet-600 rounded-none text-xs text-center focus:outline-none"
-                  onBlur={() => {
-                    const val = parseFloat(thresholdInput);
-                    if (!isNaN(val) && val > 0) {
-                      setProteinThreshold(val);
-                      try {
-                        localStorage.setItem('chefbyte_protein_threshold', String(val));
-                      } catch {
-                        /* Safari private */
-                      }
-                    }
-                    setEditingThreshold(null);
-                  }}
-                />
-                <button
-                  type="submit"
-                  data-testid="save-protein-threshold"
-                  className="px-2 py-1 border border-violet-600 border-l-0 rounded-r-full bg-violet-600 text-white text-xs hover:bg-violet-700 transition-colors"
-                >
-                  OK
-                </button>
-              </form>
-            )}
-          </div>
 
-          {/* High Carbs filter + edit threshold */}
-          <div className="inline-flex items-center gap-0.5">
-            <button
-              onClick={() => setHighCarbsOnly(!highCarbsOnly)}
-              data-testid="high-carbs-filter"
-              className={[
-                'px-3.5 py-1.5 text-xs font-medium transition-colors',
-                editingThreshold === 'carbs' ? 'rounded-l-full' : 'rounded-full',
-                highCarbsOnly
-                  ? 'border border-amber-600 bg-amber-50 text-amber-600'
-                  : 'border border-slate-300 bg-white text-slate-600 hover:bg-slate-50',
-                editingThreshold === 'carbs' ? 'border-r-0' : '',
-              ].join(' ')}
-            >
-              High Carbs ({carbsThreshold}g/100cal)
-            </button>
-            {editingThreshold !== 'carbs' ? (
-              <button
-                onClick={() => {
-                  setEditingThreshold('carbs');
-                  setThresholdInput(String(carbsThreshold));
-                }}
-                data-testid="edit-carbs-threshold"
-                title="Edit threshold"
-                className="px-1.5 py-1 border border-slate-300 rounded bg-slate-50 text-[11px] text-slate-500 hover:bg-slate-100 transition-colors"
+            {showFilters && (
+              <div
+                data-testid="filters-popover"
+                className="absolute right-0 top-full mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-4"
               >
-                &#x270E;
-              </button>
-            ) : (
-              <form
-                onSubmit={(e) => {
-                  e.preventDefault();
-                  const val = parseFloat(thresholdInput);
-                  if (!isNaN(val) && val > 0) {
-                    setCarbsThreshold(val);
-                    try {
-                      localStorage.setItem('chefbyte_carbs_threshold', String(val));
-                    } catch {
-                      /* Safari private */
-                    }
-                  }
-                  setEditingThreshold(null);
-                }}
-                className="inline-flex items-center"
-              >
-                <input
-                  type="number"
-                  value={thresholdInput}
-                  onChange={(e) => setThresholdInput(e.target.value)}
-                  autoFocus
-                  step="0.5"
-                  min="0"
-                  data-testid="carbs-threshold-input"
-                  className="w-14 px-1 py-1 border border-amber-600 rounded-none text-xs text-center focus:outline-none"
-                  onBlur={() => {
-                    const val = parseFloat(thresholdInput);
-                    if (!isNaN(val) && val > 0) {
-                      setCarbsThreshold(val);
-                      try {
-                        localStorage.setItem('chefbyte_carbs_threshold', String(val));
-                      } catch {
-                        /* Safari private */
-                      }
-                    }
-                    setEditingThreshold(null);
-                  }}
-                />
-                <button
-                  type="submit"
-                  data-testid="save-carbs-threshold"
-                  className="px-2 py-1 border border-amber-600 border-l-0 rounded-r-full bg-amber-600 text-white text-xs hover:bg-amber-700 transition-colors"
-                >
-                  OK
-                </button>
-              </form>
+                <h4 className="m-0 mb-3 text-sm font-bold text-slate-900">Filter Recipes</h4>
+                <div className="space-y-3">
+                  {/* Can Be Made toggle */}
+                  <label className="flex items-center justify-between cursor-pointer" data-testid="can-be-made-filter">
+                    <span className="text-sm text-slate-700">Can Be Made</span>
+                    <div
+                      role="switch"
+                      aria-checked={canBeMadeOnly}
+                      onClick={() => setCanBeMadeOnly(!canBeMadeOnly)}
+                      className={[
+                        'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
+                        canBeMadeOnly ? 'bg-green-600' : 'bg-slate-300',
+                      ].join(' ')}
+                    >
+                      <div
+                        className={[
+                          'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
+                          canBeMadeOnly ? 'translate-x-5' : 'translate-x-0.5',
+                        ].join(' ')}
+                      />
+                    </div>
+                  </label>
+
+                  {/* Quick (< 30 min) toggle */}
+                  <label className="flex items-center justify-between cursor-pointer" data-testid="active-time-filter">
+                    <span className="text-sm text-slate-700">Quick (&lt; 30 min)</span>
+                    <div
+                      role="switch"
+                      aria-checked={maxActiveTime === 30}
+                      onClick={() => setMaxActiveTime(maxActiveTime === 30 ? null : 30)}
+                      className={[
+                        'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
+                        maxActiveTime === 30 ? 'bg-emerald-600' : 'bg-slate-300',
+                      ].join(' ')}
+                    >
+                      <div
+                        className={[
+                          'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
+                          maxActiveTime === 30 ? 'translate-x-5' : 'translate-x-0.5',
+                        ].join(' ')}
+                      />
+                    </div>
+                  </label>
+
+                  {/* High Protein toggle + threshold */}
+                  <div className="border-t border-slate-100 pt-3">
+                    <label
+                      className="flex items-center justify-between cursor-pointer"
+                      data-testid="high-protein-filter"
+                    >
+                      <span className="text-sm text-slate-700">High Protein</span>
+                      <div
+                        role="switch"
+                        aria-checked={highProteinOnly}
+                        onClick={() => setHighProteinOnly(!highProteinOnly)}
+                        className={[
+                          'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
+                          highProteinOnly ? 'bg-violet-600' : 'bg-slate-300',
+                        ].join(' ')}
+                      >
+                        <div
+                          className={[
+                            'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
+                            highProteinOnly ? 'translate-x-5' : 'translate-x-0.5',
+                          ].join(' ')}
+                        />
+                      </div>
+                    </label>
+                    <div className="flex items-center gap-2 mt-1.5 ml-1">
+                      <span className="text-xs text-slate-500">Threshold:</span>
+                      <input
+                        type="number"
+                        value={editingThreshold === 'protein' ? thresholdInput : proteinThreshold}
+                        onChange={(e) => {
+                          setEditingThreshold('protein');
+                          setThresholdInput(e.target.value);
+                        }}
+                        onBlur={() => {
+                          if (editingThreshold === 'protein') {
+                            const val = parseFloat(thresholdInput);
+                            if (!isNaN(val) && val > 0) {
+                              setProteinThreshold(val);
+                              try {
+                                localStorage.setItem('chefbyte_protein_threshold', String(val));
+                              } catch {
+                                /* Safari private */
+                              }
+                            }
+                            setEditingThreshold(null);
+                          }
+                        }}
+                        onFocus={() => {
+                          setEditingThreshold('protein');
+                          setThresholdInput(String(proteinThreshold));
+                        }}
+                        step="0.5"
+                        min="0"
+                        data-testid="protein-threshold-input"
+                        className="w-16 px-2 py-1 border border-slate-300 rounded text-xs text-center focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                      />
+                      <span className="text-xs text-slate-500">g/100cal</span>
+                    </div>
+                  </div>
+
+                  {/* High Carbs toggle + threshold */}
+                  <div className="border-t border-slate-100 pt-3">
+                    <label className="flex items-center justify-between cursor-pointer" data-testid="high-carbs-filter">
+                      <span className="text-sm text-slate-700">High Carbs</span>
+                      <div
+                        role="switch"
+                        aria-checked={highCarbsOnly}
+                        onClick={() => setHighCarbsOnly(!highCarbsOnly)}
+                        className={[
+                          'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
+                          highCarbsOnly ? 'bg-amber-600' : 'bg-slate-300',
+                        ].join(' ')}
+                      >
+                        <div
+                          className={[
+                            'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
+                            highCarbsOnly ? 'translate-x-5' : 'translate-x-0.5',
+                          ].join(' ')}
+                        />
+                      </div>
+                    </label>
+                    <div className="flex items-center gap-2 mt-1.5 ml-1">
+                      <span className="text-xs text-slate-500">Threshold:</span>
+                      <input
+                        type="number"
+                        value={editingThreshold === 'carbs' ? thresholdInput : carbsThreshold}
+                        onChange={(e) => {
+                          setEditingThreshold('carbs');
+                          setThresholdInput(e.target.value);
+                        }}
+                        onBlur={() => {
+                          if (editingThreshold === 'carbs') {
+                            const val = parseFloat(thresholdInput);
+                            if (!isNaN(val) && val > 0) {
+                              setCarbsThreshold(val);
+                              try {
+                                localStorage.setItem('chefbyte_carbs_threshold', String(val));
+                              } catch {
+                                /* Safari private */
+                              }
+                            }
+                            setEditingThreshold(null);
+                          }
+                        }}
+                        onFocus={() => {
+                          setEditingThreshold('carbs');
+                          setThresholdInput(String(carbsThreshold));
+                        }}
+                        step="0.5"
+                        min="0"
+                        data-testid="carbs-threshold-input"
+                        className="w-16 px-2 py-1 border border-slate-300 rounded text-xs text-center focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500"
+                      />
+                      <span className="text-xs text-slate-500">g/100cal</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
         </div>
@@ -542,8 +566,11 @@ export function RecipesPage() {
                 {recipe.name}
               </h3>
               {recipe.description && (
-                <p className="text-sm text-slate-500 mt-1 mb-0" data-testid={`recipe-desc-${recipe.recipe_id}`}>
-                  {recipe.description.length > 60 ? recipe.description.slice(0, 60) + '...' : recipe.description}
+                <p
+                  className="text-sm text-slate-500 mt-1 mb-0 line-clamp-2"
+                  data-testid={`recipe-desc-${recipe.recipe_id}`}
+                >
+                  {recipe.description}
                 </p>
               )}
               <div className="flex gap-3 text-xs text-slate-400 my-1.5">
