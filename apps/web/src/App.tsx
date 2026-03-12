@@ -1,5 +1,6 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AppShell } from '@luna-hub/ui-kit';
+import { Analytics } from '@vercel/analytics/react';
 import { AuthProvider } from './shared/auth/AuthProvider';
 import { AppLayout } from './shared/layout/AppLayout';
 import { AppProvider } from './shared/AppProvider';
@@ -83,6 +84,7 @@ export default function App() {
             />
           </Routes>
         </AuthProvider>
+        <Analytics />
       </AppShell>
     </BrowserRouter>
   );
