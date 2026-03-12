@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { ChevronDown, ChevronUp, Timer, Play, Pause, RotateCcw } from 'lucide-react';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
@@ -26,6 +27,11 @@ interface SetQueueProps {
   timerState?: 'running' | 'paused' | 'expired' | 'idle';
   timerDisplay?: string;
   disabled?: boolean;
+  // Timer control callbacks (inline controls)
+  onTimerStart?: (seconds: number) => void;
+  onTimerPause?: () => void;
+  onTimerResume?: () => void;
+  onTimerReset?: () => void;
 }
 
 export function SetQueue({
@@ -38,11 +44,17 @@ export function SetQueue({
   timerState,
   timerDisplay,
   disabled,
+  onTimerStart,
+  onTimerPause,
+  onTimerResume,
+  onTimerReset,
 }: SetQueueProps) {
   const nextSet = sets.find((s) => !s.completed);
   const [reps, setReps] = useState<string>(nextSet?.target_reps?.toString() ?? '');
   const [load, setLoad] = useState<string>(nextSet?.target_load?.toString() ?? '');
   const [validationError, setValidationError] = useState<string | null>(null);
+  const [queueExpanded, setQueueExpanded] = useState(false);
+  const [customDuration, setCustomDuration] = useState('');
   const errorTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => {
@@ -61,6 +73,8 @@ export function SetQueue({
   }, []);
 
   const pendingSets = sets.filter((s) => !s.completed && s !== nextSet);
+  const previewSets = pendingSets.slice(0, 3);
+  const hasMoreSets = pendingSets.length > 3;
 
   const formatLoadDisplay = (set: PlannedSet) => {
     if (set.target_load_percentage && set.target_load) {
@@ -86,6 +100,14 @@ export function SetQueue({
     }
     setValidationError(null);
     onComplete(r, l);
+  };
+
+  const handleCustomTimerStart = () => {
+    const secs = parseInt(customDuration, 10);
+    if (!isNaN(secs) && secs > 0) {
+      onTimerStart?.(secs);
+      setCustomDuration('');
+    }
   };
 
   if (sets.length === 0) {
@@ -134,8 +156,46 @@ export function SetQueue({
               </div>
             </div>
 
+            {/* Inline Timer Controls */}
+            <div className="flex gap-2 items-center flex-wrap mb-4" data-testid="timer-controls">
+              {timerState === 'running' && onTimerPause && (
+                <Button variant="secondary" size="sm" onClick={onTimerPause} data-testid="pause-btn">
+                  <Pause className="w-3.5 h-3.5 mr-1 inline" />
+                  Pause
+                </Button>
+              )}
+              {timerState === 'paused' && onTimerResume && (
+                <Button variant="secondary" size="sm" onClick={onTimerResume} data-testid="resume-btn">
+                  <Play className="w-3.5 h-3.5 mr-1 inline" />
+                  Resume
+                </Button>
+              )}
+              {(timerState === 'running' || timerState === 'paused' || timerState === 'expired') && onTimerReset && (
+                <Button variant="secondary" size="sm" onClick={onTimerReset} data-testid="reset-btn">
+                  <RotateCcw className="w-3.5 h-3.5 mr-1 inline" />
+                  Reset
+                </Button>
+              )}
+              {(timerState === 'idle' || timerState === 'expired') && onTimerStart && (
+                <div className="flex gap-1.5 items-center ml-auto">
+                  <Timer className="w-4 h-4 text-slate-400" />
+                  <input
+                    type="number"
+                    value={customDuration}
+                    onChange={(e) => setCustomDuration(e.target.value)}
+                    placeholder="sec"
+                    className="w-16 px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                    data-testid="custom-duration-input"
+                  />
+                  <Button variant="secondary" size="sm" onClick={handleCustomTimerStart} data-testid="custom-start-btn">
+                    Start Timer
+                  </Button>
+                </div>
+              )}
+            </div>
+
             <form
-              className="flex gap-3 items-end flex-wrap mt-4"
+              className="flex gap-3 items-end flex-wrap"
               onSubmit={(e) => {
                 e.preventDefault();
                 handleComplete();
@@ -193,105 +253,165 @@ export function SetQueue({
         )}
       </div>
 
-      {/* Pending Queue Table */}
-      <Card className="mb-5">
-        <CardHeader>
-          <CardTitle>Set Queue ({pendingSets.length} remaining)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {pendingSets.length === 0 && !nextSet ? (
-            <p className="text-slate-500 italic text-center text-sm">No sets remaining</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Exercise
-                    </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Reps
-                    </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Load
-                    </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Rest
-                    </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {pendingSets.map((set) => (
-                    <tr
-                      key={set.planned_set_id}
-                      data-testid={`queue-row-${set.order}`}
-                      className="border-b border-slate-100 last:border-b-0"
-                    >
-                      <td className="px-3 py-2 align-middle">{set.exercise_name}</td>
-                      <td className="px-3 py-2 align-middle">
-                        <input
-                          type="number"
-                          className="w-15 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
-                          defaultValue={set.target_reps ?? ''}
-                          onBlur={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null;
-                            if (val !== set.target_reps) onUpdateSet?.(set.planned_set_id, 'target_reps', val);
-                          }}
-                          data-testid={`edit-reps-${set.order}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <input
-                          type="number"
-                          className="w-20 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
-                          defaultValue={set.target_load_percentage ?? set.target_load ?? ''}
-                          onBlur={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null;
-                            const field = set.target_load_percentage ? 'target_load_percentage' : 'target_load';
-                            if (val !== (set.target_load_percentage ?? set.target_load))
-                              onUpdateSet?.(set.planned_set_id, field, val);
-                          }}
-                          data-testid={`edit-load-${set.order}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <input
-                          type="number"
-                          className="w-[70px] text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
-                          defaultValue={set.rest_seconds ?? 60}
-                          onBlur={(e) => {
-                            const val = e.target.value ? Number(e.target.value) : null;
-                            if (val !== set.rest_seconds) onUpdateSet?.(set.planned_set_id, 'rest_seconds', val);
-                          }}
-                          data-testid={`edit-rest-${set.order}`}
-                        />
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <Button
-                          variant="danger"
-                          size="sm"
-                          onClick={() => onDeleteSet?.(set.planned_set_id)}
-                          data-testid={`delete-set-${set.order}`}
-                        >
-                          Remove
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+      {/* Coming Up Preview + Expandable Full Queue */}
+      {pendingSets.length > 0 && (
+        <div className="mb-5">
+          {/* Coming Up Preview — compact cards for next 2-3 sets */}
+          {!queueExpanded && (
+            <div data-testid="coming-up-preview">
+              <h4 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">Coming Up</h4>
+              <div className="space-y-1.5">
+                {previewSets.map((set) => (
+                  <div
+                    key={set.planned_set_id}
+                    className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2"
+                    data-testid={`preview-set-${set.order}`}
+                  >
+                    <span className="font-medium text-slate-800 text-sm">{set.exercise_name}</span>
+                    <span className="text-sm text-slate-500">
+                      {set.target_reps ?? '—'} reps @ {formatLoadDisplay(set)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <button
+                type="button"
+                onClick={() => setQueueExpanded(true)}
+                className="mt-2 text-sm text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                data-testid="expand-queue-btn"
+              >
+                <ChevronDown className="w-4 h-4" />
+                {hasMoreSets
+                  ? `Show all (${pendingSets.length} remaining)`
+                  : `Edit queue (${pendingSets.length} remaining)`}
+              </button>
             </div>
           )}
-          {onAddSet && (
-            <Button variant="success" size="sm" onClick={onAddSet} className="mt-2">
-              + Add Set
-            </Button>
+
+          {/* Expanded Full Queue Table */}
+          {queueExpanded && (
+            <Card data-testid="full-queue-table">
+              <CardHeader>
+                <div className="flex items-center justify-between w-full">
+                  <CardTitle>Set Queue ({pendingSets.length} remaining)</CardTitle>
+                  <button
+                    type="button"
+                    onClick={() => setQueueExpanded(false)}
+                    className="text-sm text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                    data-testid="collapse-queue-btn"
+                  >
+                    <ChevronUp className="w-4 h-4" />
+                    Collapse
+                  </button>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <div className="overflow-x-auto">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr>
+                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          Exercise
+                        </th>
+                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          Reps
+                        </th>
+                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          Load
+                        </th>
+                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          Rest
+                        </th>
+                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          Action
+                        </th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingSets.map((set) => (
+                        <tr
+                          key={set.planned_set_id}
+                          data-testid={`queue-row-${set.order}`}
+                          className="border-b border-slate-100 last:border-b-0"
+                        >
+                          <td className="px-3 py-2 align-middle">{set.exercise_name}</td>
+                          <td className="px-3 py-2 align-middle">
+                            <input
+                              type="number"
+                              className="w-15 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                              defaultValue={set.target_reps ?? ''}
+                              onBlur={(e) => {
+                                const val = e.target.value ? Number(e.target.value) : null;
+                                if (val !== set.target_reps) onUpdateSet?.(set.planned_set_id, 'target_reps', val);
+                              }}
+                              data-testid={`edit-reps-${set.order}`}
+                            />
+                          </td>
+                          <td className="px-3 py-2 align-middle">
+                            <input
+                              type="number"
+                              className="w-20 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                              defaultValue={set.target_load_percentage ?? set.target_load ?? ''}
+                              onBlur={(e) => {
+                                const val = e.target.value ? Number(e.target.value) : null;
+                                const field = set.target_load_percentage ? 'target_load_percentage' : 'target_load';
+                                if (val !== (set.target_load_percentage ?? set.target_load))
+                                  onUpdateSet?.(set.planned_set_id, field, val);
+                              }}
+                              data-testid={`edit-load-${set.order}`}
+                            />
+                          </td>
+                          <td className="px-3 py-2 align-middle">
+                            <input
+                              type="number"
+                              className="w-[70px] text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                              defaultValue={set.rest_seconds ?? 60}
+                              onBlur={(e) => {
+                                const val = e.target.value ? Number(e.target.value) : null;
+                                if (val !== set.rest_seconds) onUpdateSet?.(set.planned_set_id, 'rest_seconds', val);
+                              }}
+                              data-testid={`edit-rest-${set.order}`}
+                            />
+                          </td>
+                          <td className="px-3 py-2 align-middle">
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => onDeleteSet?.(set.planned_set_id)}
+                              data-testid={`delete-set-${set.order}`}
+                            >
+                              Remove
+                            </Button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                {onAddSet && (
+                  <Button variant="success" size="sm" onClick={onAddSet} className="mt-2">
+                    + Add Set
+                  </Button>
+                )}
+              </CardContent>
+            </Card>
           )}
-        </CardContent>
-      </Card>
+        </div>
+      )}
+
+      {/* Add Set button when queue is collapsed or empty */}
+      {pendingSets.length === 0 && !nextSet && (
+        <Card className="mb-5">
+          <CardContent>
+            <p className="text-slate-500 italic text-center text-sm">No sets remaining</p>
+            {onAddSet && (
+              <Button variant="success" size="sm" onClick={onAddSet} className="mt-2">
+                + Add Set
+              </Button>
+            )}
+          </CardContent>
+        </Card>
+      )}
     </>
   );
 }

@@ -1,7 +1,8 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { ChevronDown, ChevronUp } from 'lucide-react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
-import { RestTimer, formatTime } from '@/components/coachbyte/RestTimer';
+import { formatTime } from '@/components/coachbyte/RestTimer';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
@@ -10,7 +11,7 @@ import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { epley1RM } from '@/pages/coachbyte/PrsPage';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
-import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
+import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 
@@ -54,6 +55,9 @@ export function TodayPage() {
   const [confirmReset, setConfirmReset] = useState(false);
   const [notes, setNotes] = useState('');
   const [prToast, setPrToast] = useState<string | null>(null);
+  const [completedExpanded, setCompletedExpanded] = useState(false);
+  const [notesExpanded, setNotesExpanded] = useState(false);
+  const [summaryExpanded, setSummaryExpanded] = useState(false);
   const summaryRef = useRef('');
   const notesRef = useRef('');
   const summaryDebounceRef = useRef<ReturnType<typeof setTimeout>>();
@@ -365,11 +369,28 @@ export function TodayPage() {
     else setTimer(DEFAULT_TIMER);
   };
 
-  const handleTimerExpired = async () => {
+  const handleTimerExpired = useCallback(async () => {
     if (!user) return;
     const { error: err } = await coachbyte().from('timers').update({ state: 'expired' }).eq('user_id', user.id);
-    if (err) setError(err.message);
-  };
+    if (err) console.error('Failed to mark timer expired:', err.message);
+  }, [user]);
+
+  // Timer expired detection — runs when timer is running and hits 0
+  useEffect(() => {
+    if (timer.state !== 'running' || !timer.end_time) return;
+
+    const remaining = Math.max(0, Math.ceil((new Date(timer.end_time).getTime() - Date.now()) / 1000));
+    if (remaining <= 0) {
+      handleTimerExpired();
+      return;
+    }
+
+    const id = setTimeout(() => {
+      handleTimerExpired();
+    }, remaining * 1000);
+
+    return () => clearTimeout(id);
+  }, [timer.state, timer.end_time, handleTimerExpired]);
 
   const handleAdHocSubmit = async (exerciseId: string, reps: number, load: number) => {
     if (!user || !planId) return;
@@ -557,19 +578,10 @@ export function TodayPage() {
               : undefined
         }
         disabled={false}
-      />
-
-      {/* Timer — right after the queue */}
-      <RestTimer
-        endTime={timer.end_time}
-        state={timer.state}
-        durationSeconds={timer.duration_seconds}
-        elapsedBeforePause={timer.elapsed_before_pause}
-        onStart={(secs) => startTimer(secs)}
-        onPause={pauseTimer}
-        onResume={resumeTimer}
-        onReset={resetTimer}
-        onExpired={handleTimerExpired}
+        onTimerStart={(secs) => startTimer(secs)}
+        onTimerPause={pauseTimer}
+        onTimerResume={resumeTimer}
+        onTimerReset={resetTimer}
       />
 
       {showAdHoc && (
@@ -580,100 +592,147 @@ export function TodayPage() {
         <AdHocSetForm exercises={exercises} onSubmit={addPlannedSet} onCancel={() => setAddingPlanned(false)} />
       )}
 
-      {/* Completed Sets */}
-      <Card className="mb-5">
-        <CardHeader>
-          <CardTitle>Completed Sets ({completedSets.length} done)</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {completedSets.length === 0 ? (
-            <p className="text-slate-500 italic text-center text-sm">No sets completed yet</p>
+      {/* Completed Sets — collapsible */}
+      <div className="border border-slate-200 rounded-xl bg-white mb-5" data-testid="completed-section">
+        <button
+          type="button"
+          onClick={() => setCompletedExpanded(!completedExpanded)}
+          className="w-full flex items-center justify-between px-4 py-3 cursor-pointer bg-transparent border-none text-left"
+          data-testid="toggle-completed"
+        >
+          <h3 className="text-lg font-semibold text-slate-900 m-0">Completed ({completedSets.length})</h3>
+          {completedExpanded ? (
+            <ChevronUp className="w-5 h-5 text-slate-400" />
           ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      #
-                    </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Exercise
-                    </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Reps
-                    </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Load
-                    </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
-                      Action
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {completedSets.map((cs, i) => (
-                    <tr
-                      key={cs.completed_set_id}
-                      data-testid={`completed-row-${i + 1}`}
-                      className="border-b border-slate-100 last:border-b-0"
-                    >
-                      <td className="px-3 py-2 align-middle">{i + 1}</td>
-                      <td className="px-3 py-2 align-middle">
-                        <strong>{cs.exercise_name}</strong>
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <strong>{cs.actual_reps}</strong>
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <strong>
-                          {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
-                        </strong>
-                      </td>
-                      <td className="px-3 py-2 align-middle">
-                        <Button
-                          variant={confirmDeleteId === cs.completed_set_id ? 'danger' : 'secondary'}
-                          size="sm"
-                          onClick={() => deleteCompletedSet(cs.completed_set_id)}
-                          data-testid={`delete-completed-${i + 1}`}
-                        >
-                          {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
-                        </Button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <ChevronDown className="w-5 h-5 text-slate-400" />
           )}
-        </CardContent>
-      </Card>
+        </button>
 
-      {/* Notes */}
-      <div className="border border-slate-200 rounded-xl p-4 mb-5 bg-white">
-        <h3 className="text-lg font-semibold text-slate-900 mt-0 mb-2.5">Workout Notes</h3>
-        <textarea
-          rows={4}
-          value={notes}
-          onChange={(e) => handleNotesChange(e.target.value)}
-          onBlur={handleNotesBlur}
-          placeholder="How did the workout feel? Any observations..."
-          className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
-          data-testid="notes-textarea"
-        />
+        {completedExpanded && (
+          <div className="px-4 pb-4">
+            {completedSets.length === 0 ? (
+              <p className="text-slate-500 italic text-center text-sm">No sets completed yet</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr>
+                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        #
+                      </th>
+                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        Exercise
+                      </th>
+                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        Reps
+                      </th>
+                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        Load
+                      </th>
+                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        Action
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {completedSets.map((cs, i) => (
+                      <tr
+                        key={cs.completed_set_id}
+                        data-testid={`completed-row-${i + 1}`}
+                        className="border-b border-slate-100 last:border-b-0"
+                      >
+                        <td className="px-3 py-2 align-middle">{i + 1}</td>
+                        <td className="px-3 py-2 align-middle">
+                          <strong>{cs.exercise_name}</strong>
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          <strong>{cs.actual_reps}</strong>
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          <strong>
+                            {formatWeightWithPlates(cs.actual_load)} {WEIGHT_UNIT}
+                          </strong>
+                        </td>
+                        <td className="px-3 py-2 align-middle">
+                          <Button
+                            variant={confirmDeleteId === cs.completed_set_id ? 'danger' : 'secondary'}
+                            size="sm"
+                            onClick={() => deleteCompletedSet(cs.completed_set_id)}
+                            data-testid={`delete-completed-${i + 1}`}
+                          >
+                            {confirmDeleteId === cs.completed_set_id ? 'Confirm?' : 'Remove'}
+                          </Button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
-      {/* Summary */}
-      <div className="border border-slate-200 rounded-xl p-4 bg-white">
-        <h3 className="text-lg font-semibold text-slate-900 mt-0 mb-2.5">Summary</h3>
-        <textarea
-          rows={3}
-          value={summary}
-          onChange={(e) => handleSummaryChange(e.target.value)}
-          onBlur={handleSummaryBlur}
-          placeholder="Add your workout summary here..."
-          className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
-          data-testid="summary-textarea"
-        />
+      {/* Notes — collapsible */}
+      <div className="border border-slate-200 rounded-xl bg-white mb-5" data-testid="notes-section">
+        <button
+          type="button"
+          onClick={() => setNotesExpanded(!notesExpanded)}
+          className="w-full flex items-center justify-between px-4 py-3 cursor-pointer bg-transparent border-none text-left"
+          data-testid="toggle-notes"
+        >
+          <h3 className="text-lg font-semibold text-slate-900 m-0">Notes</h3>
+          {notesExpanded ? (
+            <ChevronUp className="w-5 h-5 text-slate-400" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-slate-400" />
+          )}
+        </button>
+
+        {notesExpanded && (
+          <div className="px-4 pb-4">
+            <textarea
+              rows={4}
+              value={notes}
+              onChange={(e) => handleNotesChange(e.target.value)}
+              onBlur={handleNotesBlur}
+              placeholder="How did the workout feel? Any observations..."
+              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              data-testid="notes-textarea"
+            />
+          </div>
+        )}
+      </div>
+
+      {/* Summary — collapsible */}
+      <div className="border border-slate-200 rounded-xl bg-white" data-testid="summary-section">
+        <button
+          type="button"
+          onClick={() => setSummaryExpanded(!summaryExpanded)}
+          className="w-full flex items-center justify-between px-4 py-3 cursor-pointer bg-transparent border-none text-left"
+          data-testid="toggle-summary"
+        >
+          <h3 className="text-lg font-semibold text-slate-900 m-0">Summary</h3>
+          {summaryExpanded ? (
+            <ChevronUp className="w-5 h-5 text-slate-400" />
+          ) : (
+            <ChevronDown className="w-5 h-5 text-slate-400" />
+          )}
+        </button>
+
+        {summaryExpanded && (
+          <div className="px-4 pb-4">
+            <textarea
+              rows={3}
+              value={summary}
+              onChange={(e) => handleSummaryChange(e.target.value)}
+              onBlur={handleSummaryBlur}
+              placeholder="Add your workout summary here..."
+              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              data-testid="summary-textarea"
+            />
+          </div>
+        )}
       </div>
     </CoachLayout>
   );

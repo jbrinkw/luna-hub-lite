@@ -96,25 +96,44 @@ describe('SetQueue', () => {
     expect(onComplete).toHaveBeenCalledWith(6, 230);
   });
 
-  it('shows pending sets in the SET QUEUE table (excluding next and completed)', () => {
+  it('shows pending sets as compact preview cards (Coming Up section)', () => {
     render(<SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
-    // Set 1 is "next", sets 2 and 3 should be in queue
+    // Set 1 is "next", sets 2 and 3 should be in "Coming Up" preview
+    expect(screen.getByTestId('coming-up-preview')).toBeInTheDocument();
+    expect(screen.getByTestId('preview-set-2')).toHaveTextContent('Bench Press');
+    expect(screen.getByTestId('preview-set-3')).toHaveTextContent('Squat');
+  });
+
+  it('shows expand button to reveal full editable queue table', async () => {
+    render(<SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
+    const expandBtn = screen.getByTestId('expand-queue-btn');
+    expect(expandBtn).toBeInTheDocument();
+
+    // Full queue table is NOT visible before expanding
+    expect(screen.queryByTestId('full-queue-table')).not.toBeInTheDocument();
+
+    // Expand
+    await userEvent.click(expandBtn);
+    expect(screen.getByTestId('full-queue-table')).toBeInTheDocument();
     expect(screen.getByTestId('queue-row-2')).toHaveTextContent('Bench Press');
     expect(screen.getByTestId('queue-row-3')).toHaveTextContent('Squat');
   });
 
-  it('displays load percentage in editable input when target_load_percentage is set', () => {
+  it('displays load percentage in editable input when queue is expanded', async () => {
     render(<SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
+    // Expand the queue
+    await userEvent.click(screen.getByTestId('expand-queue-btn'));
     // Set 3 has percentage 80% — the load input shows the percentage value
     const loadInput = screen.getByTestId('edit-load-3');
     expect(loadInput).toHaveValue(80);
   });
 
-  it('displays null load when target_load_percentage set but target_load is null', () => {
+  it('displays null load when target_load_percentage set but target_load is null (expanded)', async () => {
     const sets = makeSets();
     sets[2].target_load = null;
     sets[2].target_load_percentage = 75;
     render(<SetQueue sets={sets} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
+    await userEvent.click(screen.getByTestId('expand-queue-btn'));
     const loadInput = screen.getByTestId('edit-load-3');
     expect(loadInput).toHaveValue(75);
   });
@@ -165,5 +184,163 @@ describe('SetQueue', () => {
     expect(screen.getByText('All sets completed!')).toBeInTheDocument();
     // The next-exercise box should not appear
     expect(screen.queryByTestId('next-exercise')).not.toBeInTheDocument();
+  });
+
+  it('can collapse the expanded queue table', async () => {
+    render(<SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} />);
+    // Expand
+    await userEvent.click(screen.getByTestId('expand-queue-btn'));
+    expect(screen.getByTestId('full-queue-table')).toBeInTheDocument();
+
+    // Collapse
+    await userEvent.click(screen.getByTestId('collapse-queue-btn'));
+    expect(screen.queryByTestId('full-queue-table')).not.toBeInTheDocument();
+    // Preview should be back
+    expect(screen.getByTestId('coming-up-preview')).toBeInTheDocument();
+  });
+
+  describe('inline timer controls', () => {
+    it('shows Pause button when timer is running', () => {
+      render(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="running"
+          timerDisplay="1:30"
+          onTimerPause={vi.fn()}
+          onTimerReset={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('pause-btn')).toBeInTheDocument();
+    });
+
+    it('calls onTimerPause when Pause is clicked', async () => {
+      const onPause = vi.fn();
+      render(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="running"
+          timerDisplay="1:30"
+          onTimerPause={onPause}
+          onTimerReset={vi.fn()}
+        />,
+      );
+      await userEvent.click(screen.getByTestId('pause-btn'));
+      expect(onPause).toHaveBeenCalled();
+    });
+
+    it('shows Resume button when timer is paused', () => {
+      render(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="paused"
+          timerDisplay="0:45"
+          onTimerResume={vi.fn()}
+          onTimerReset={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('resume-btn')).toBeInTheDocument();
+    });
+
+    it('calls onTimerResume when Resume is clicked', async () => {
+      const onResume = vi.fn();
+      render(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="paused"
+          timerDisplay="0:45"
+          onTimerResume={onResume}
+          onTimerReset={vi.fn()}
+        />,
+      );
+      await userEvent.click(screen.getByTestId('resume-btn'));
+      expect(onResume).toHaveBeenCalled();
+    });
+
+    it('shows Reset button in running, paused, and expired states', () => {
+      const { rerender } = render(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="running"
+          timerDisplay="1:30"
+          onTimerPause={vi.fn()}
+          onTimerReset={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('reset-btn')).toBeInTheDocument();
+
+      rerender(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="paused"
+          timerDisplay="0:45"
+          onTimerResume={vi.fn()}
+          onTimerReset={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('reset-btn')).toBeInTheDocument();
+
+      rerender(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="expired"
+          timerDisplay="expired!"
+          onTimerReset={vi.fn()}
+        />,
+      );
+      expect(screen.getByTestId('reset-btn')).toBeInTheDocument();
+    });
+
+    it('shows custom timer start input when idle', () => {
+      render(
+        <SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} timerState="idle" onTimerStart={vi.fn()} />,
+      );
+      expect(screen.getByTestId('custom-duration-input')).toBeInTheDocument();
+      expect(screen.getByTestId('custom-start-btn')).toBeInTheDocument();
+    });
+
+    it('calls onTimerStart with custom duration', async () => {
+      const onStart = vi.fn();
+      render(
+        <SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} timerState="idle" onTimerStart={onStart} />,
+      );
+      const input = screen.getByTestId('custom-duration-input');
+      await userEvent.type(input, '120');
+      await userEvent.click(screen.getByTestId('custom-start-btn'));
+      expect(onStart).toHaveBeenCalledWith(120);
+    });
+
+    it('does not call onTimerStart with invalid duration', async () => {
+      const onStart = vi.fn();
+      render(
+        <SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} timerState="idle" onTimerStart={onStart} />,
+      );
+      // Click start without entering a value
+      await userEvent.click(screen.getByTestId('custom-start-btn'));
+      expect(onStart).not.toHaveBeenCalled();
+    });
+
+    it('does not show timer controls when no timer callbacks provided', () => {
+      render(
+        <SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={vi.fn()} timerState="running" timerDisplay="1:30" />,
+      );
+      // No pause/resume/reset without callbacks
+      expect(screen.queryByTestId('pause-btn')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('resume-btn')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('reset-btn')).not.toBeInTheDocument();
+    });
   });
 });
