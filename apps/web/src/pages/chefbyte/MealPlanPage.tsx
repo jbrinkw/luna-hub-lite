@@ -758,19 +758,25 @@ export function MealPlanPage() {
                           data-testid={`detail-row-${meal.meal_id}`}
                           className="bg-white border border-slate-200 rounded-lg p-3.5"
                         >
-                          <div data-testid={`grid-meal-${meal.meal_id}`} className="flex justify-between items-start">
+                          <div
+                            data-testid={`grid-meal-${meal.meal_id}`}
+                            className="flex flex-col sm:flex-row sm:justify-between sm:items-start"
+                          >
                             <div className="flex-1 min-w-0">
-                              <div className="font-semibold text-[15px] text-slate-900">{entryName(meal)}</div>
+                              {/* Row 1: Meal name + type badge */}
+                              <div className="flex items-center gap-2 flex-wrap">
+                                <div className="font-semibold text-[15px] text-slate-900">{entryName(meal)}</div>
+                                {meal.meal_type && (
+                                  <span
+                                    data-testid={`meal-type-label-${meal.meal_id}`}
+                                    className="inline-block text-[11px] bg-slate-200 px-2 py-0.5 rounded text-slate-600 capitalize"
+                                  >
+                                    {meal.meal_type}
+                                  </span>
+                                )}
+                              </div>
 
-                              {meal.meal_type && (
-                                <span
-                                  data-testid={`meal-type-label-${meal.meal_id}`}
-                                  className="inline-block mt-1 text-[11px] bg-slate-200 px-2 py-0.5 rounded text-slate-600 capitalize"
-                                >
-                                  {meal.meal_type}
-                                </span>
-                              )}
-
+                              {/* Row 2: Macros */}
                               {macros && (macros.calories > 0 || macros.protein > 0) && (
                                 <div
                                   data-testid={`grid-macros-${meal.meal_id}`}
@@ -780,6 +786,7 @@ export function MealPlanPage() {
                                 </div>
                               )}
 
+                              {/* Row 3: Status badges + prep checkbox */}
                               <div className="flex items-center gap-1.5 mt-2 flex-wrap">
                                 {meal.completed_at && (
                                   <span
@@ -820,8 +827,8 @@ export function MealPlanPage() {
                               </div>
                             </div>
 
-                            {/* Action buttons */}
-                            <div className="flex flex-col gap-1 ml-3 shrink-0">
+                            {/* Row 4 (mobile) / Side column (sm+): Action buttons */}
+                            <div className="flex flex-row gap-2 mt-2.5 sm:flex-col sm:gap-1 sm:ml-3 sm:mt-0 shrink-0">
                               {!meal.completed_at ? (
                                 <>
                                   <button
@@ -864,7 +871,7 @@ export function MealPlanPage() {
                     {/* TOTAL macros row */}
                     <div
                       data-testid="day-detail-total-row"
-                      className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex justify-between items-center"
+                      className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1"
                     >
                       <span className="font-bold text-sm text-slate-800">TOTAL</span>
                       <span className="text-sm text-slate-600 font-semibold">
@@ -892,25 +899,25 @@ export function MealPlanPage() {
                         <div
                           key={log.log_id}
                           data-testid={`consumed-log-${log.log_id}`}
-                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-white flex justify-between items-center"
+                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-white"
                         >
-                          <span className="font-semibold text-sm">
-                            {log.products?.name ?? 'Unknown'}
-                            <span className="font-normal text-slate-500 text-xs ml-2">
-                              {Number(log.qty_consumed)} {log.unit}
-                              {Number(log.qty_consumed) !== 1 ? 's' : ''}
-                            </span>
-                          </span>
-                          <div className="flex gap-2 items-center">
-                            <span className="text-xs text-slate-500">
-                              {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
-                              {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
+                          <div className="flex justify-between items-start gap-2">
+                            <span className="font-semibold text-sm min-w-0">
+                              {log.products?.name ?? 'Unknown'}
+                              <span className="font-normal text-slate-500 text-xs ml-2">
+                                {Number(log.qty_consumed)} {log.unit}
+                                {Number(log.qty_consumed) !== 1 ? 's' : ''}
+                              </span>
                             </span>
                             <DeleteBtn
                               id={delId}
                               onConfirm={() => deleteFoodLog(log.log_id)}
                               testId={`delete-log-${log.log_id}`}
                             />
+                          </div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
+                            {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
                           </div>
                         </div>
                       );
@@ -921,22 +928,22 @@ export function MealPlanPage() {
                         <div
                           key={item.temp_id}
                           data-testid={`consumed-temp-${item.temp_id}`}
-                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-white flex justify-between items-center"
+                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-white"
                         >
-                          <span className="font-semibold text-sm">
-                            {item.name}
-                            <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
-                          </span>
-                          <div className="flex gap-2 items-center">
-                            <span className="text-xs text-slate-500">
-                              {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
-                              {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
+                          <div className="flex justify-between items-start gap-2">
+                            <span className="font-semibold text-sm min-w-0">
+                              {item.name}
+                              <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
                             </span>
                             <DeleteBtn
                               id={delId}
                               onConfirm={() => deleteTempItem(item.temp_id)}
                               testId={`delete-temp-${item.temp_id}`}
                             />
+                          </div>
+                          <div className="text-xs text-slate-500 mt-1">
+                            {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
+                            {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
                           </div>
                         </div>
                       );
