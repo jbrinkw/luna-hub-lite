@@ -416,7 +416,11 @@ export function InventoryPage() {
       {/* ========================================================== */}
       {viewMode === 'grouped' && (
         <div data-testid="grouped-view">
-          {filteredGrouped.length === 0 && <p data-testid="no-products">No products in inventory.</p>}
+          {filteredGrouped.length === 0 && (
+            <p data-testid="no-products" className="text-slate-500">
+              No products in inventory. Scan a barcode or add products in Settings to get started.
+            </p>
+          )}
 
           {filteredGrouped.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">

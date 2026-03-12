@@ -1,4 +1,5 @@
 import { useEffect, useState, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { ChevronDown, ChevronUp, Timer, Play, Pause, RotateCcw } from 'lucide-react';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
@@ -115,6 +116,12 @@ export function SetQueue({
       <div className="text-center py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500">
         <h3 className="text-lg font-semibold mb-1">No workout planned for today.</h3>
         <p className="text-sm">Add sets manually or configure your weekly split.</p>
+        <Link
+          to="/coach/split"
+          className="inline-block mt-3 text-sm font-medium text-violet-600 hover:text-violet-800 no-underline hover:underline"
+        >
+          Set up your weekly split &rarr;
+        </Link>
       </div>
     );
   }

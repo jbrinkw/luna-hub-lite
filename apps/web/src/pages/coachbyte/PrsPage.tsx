@@ -208,7 +208,7 @@ export function PrsPage() {
           data-testid="no-prs"
         >
           <h3 className="text-lg font-semibold mb-1">No PRs recorded yet</h3>
-          <p className="text-sm">Complete some sets to see your records.</p>
+          <p className="text-sm">Complete sets to start tracking PRs.</p>
         </div>
       ) : (
         filteredPRs.map((pr) => (

@@ -231,7 +231,7 @@ export function HistoryPage() {
           data-testid="no-history"
         >
           <h3 className="text-lg font-semibold mb-1">No workout history yet</h3>
-          <p className="text-sm">Complete some workouts to see your history here.</p>
+          <p className="text-sm">Complete your first workout to see it here.</p>
         </div>
       ) : (
         <>

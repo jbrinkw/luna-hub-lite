@@ -537,7 +537,7 @@ export function ShoppingPage() {
           <h3 className="m-0 mb-3 text-base font-semibold">To Buy ({toBuy.length})</h3>
           {toBuy.length === 0 ? (
             <div data-testid="no-to-buy" className="text-center text-slate-400 py-5">
-              No items to buy.
+              Your shopping list is empty. Scan items or auto-add low-stock products.
             </div>
           ) : (
             <div data-testid="to-buy-list" className="flex flex-col gap-2">

@@ -510,9 +510,18 @@ export function RecipesPage() {
       {/* ============================================================ */}
       <div data-testid="recipe-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredRecipes.length === 0 && (
-          <p data-testid="no-recipes" className="text-slate-500">
-            No recipes found.
-          </p>
+          <div data-testid="no-recipes" className="text-slate-500">
+            {searchText || maxActiveTime !== null || canBeMadeOnly || highProteinOnly || highCarbsOnly ? (
+              <p>No recipes match the current filters.</p>
+            ) : (
+              <p>
+                No recipes yet.{' '}
+                <Link to="/chef/recipes/new" className="text-emerald-600 font-medium hover:underline">
+                  Create your first recipe &rarr;
+                </Link>
+              </p>
+            )}
+          </div>
         )}
 
         {filteredRecipes.map((recipe) => {

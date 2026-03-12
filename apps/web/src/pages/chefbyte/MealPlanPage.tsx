@@ -697,7 +697,15 @@ export function MealPlanPage() {
 
               {selectedDayMeals.length === 0 ? (
                 <p data-testid="no-meals" className="text-slate-400 text-sm">
-                  No meals planned. Click + Add Meal to get started.
+                  No meals planned for this day. Use the{' '}
+                  <button
+                    type="button"
+                    onClick={openAddModal}
+                    className="text-emerald-600 font-medium hover:underline bg-transparent border-none cursor-pointer p-0 text-sm"
+                  >
+                    + Add Meal
+                  </button>{' '}
+                  button to plan your meals.
                 </p>
               ) : (
                 <div data-testid="day-detail-table" className="flex flex-col gap-2.5">
