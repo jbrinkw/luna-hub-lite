@@ -160,10 +160,8 @@ test.describe('Auth flow', () => {
     await page.goto('/login');
     await page.getByRole('button', { name: /try demo account/i }).click();
     await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
-    // Verify the hub page rendered with demo user
-    await expect(page.getByRole('button', { name: /logout/i })).toBeVisible({ timeout: 30000 });
-    // Verify demo user's display name is loaded in the profile input
-    await expect(page.getByLabel('Display Name')).toHaveValue('Demo User', { timeout: 30000 });
+    // Verify the launcher rendered (settings link is in the launcher header)
+    await expect(page.getByTestId('hub-settings-link')).toBeVisible({ timeout: 30000 });
   });
 
   test('demo login button shows loading state', async ({ page }) => {
@@ -172,8 +170,8 @@ test.describe('Auth flow', () => {
     await expect(demoBtn).toBeVisible({ timeout: 30000 });
     await expect(demoBtn).toBeEnabled();
     await demoBtn.click();
-    // Button should show loading text while processing
-    await expect(page.getByRole('button', { name: /loading demo/i })).toBeVisible({ timeout: 30000 });
+    // Button keeps its text but becomes disabled while loading (spinner prepended)
+    await expect(demoBtn).toBeDisabled({ timeout: 30000 });
     // Eventually redirects
     await expect(page).toHaveURL(/\/hub/, { timeout: 30000 });
   });
@@ -259,8 +257,8 @@ test.describe('Auth flow', () => {
     // Should still be on /login (inline form, not a navigation)
     await expect(page).toHaveURL(/\/login/);
 
-    // Click again to hide the form
-    await forgotBtn.click();
+    // Click back-to-login to return to login view
+    await page.getByTestId('back-to-login-link').click();
     await expect(page.getByTestId('forgot-password-form')).not.toBeVisible();
   });
 
