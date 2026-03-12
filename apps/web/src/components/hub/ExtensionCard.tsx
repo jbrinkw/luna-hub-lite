@@ -6,6 +6,9 @@ import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { Badge } from '@/components/ui/Badge';
 
+/** Credential field keys that represent URLs (not secrets) */
+const URL_FIELD_KEYS = new Set(['obsidian_url', 'ha_url']);
+
 interface ExtensionCardProps {
   extensionName: string;
   displayName: string;
@@ -56,7 +59,7 @@ export function ExtensionCard({
   };
 
   return (
-    <Card>
+    <Card className={['transition-all', enabled ? 'border-l-4 border-l-emerald-500' : 'opacity-60'].join(' ')}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>{displayName}</CardTitle>
@@ -66,7 +69,11 @@ export function ExtensionCard({
       <CardContent className="space-y-4">
         <p className="text-sm text-slate-600">{description}</p>
 
-        {hasCredentials && <Badge variant="success">Credentials configured</Badge>}
+        {hasCredentials ? (
+          <Badge variant="success">Credentials configured</Badge>
+        ) : (
+          <Badge variant="warning">Not configured</Badge>
+        )}
 
         {enabled && (
           <div className="space-y-3 pt-2 border-t border-slate-100">
@@ -74,7 +81,7 @@ export function ExtensionCard({
               <Input
                 key={field.key}
                 label={field.label}
-                type="password"
+                type={URL_FIELD_KEYS.has(field.key) ? 'text' : 'password'}
                 value={credentials[field.key] ?? ''}
                 onChange={(e) => setCredentials((prev) => ({ ...prev, [field.key]: e.target.value }))}
               />

@@ -63,9 +63,14 @@ describe('ExtensionCard', () => {
     expect(screen.queryByText('Save Credentials')).not.toBeInTheDocument();
   });
 
-  it('hasCredentials shows configured text', () => {
+  it('hasCredentials shows configured badge', () => {
     render(<ExtensionCard {...defaultProps} enabled hasCredentials />);
     expect(screen.getByText('Credentials configured')).toBeInTheDocument();
+  });
+
+  it('no credentials shows not configured badge', () => {
+    render(<ExtensionCard {...defaultProps} enabled hasCredentials={false} />);
+    expect(screen.getByText('Not configured')).toBeInTheDocument();
   });
 
   it('server error from onSaveCredentials', async () => {
@@ -106,5 +111,30 @@ describe('ExtensionCard', () => {
       const saveButton = screen.getByRole('button', { name: /save credentials/i });
       expect(saveButton).toBeDisabled();
     });
+  });
+
+  it('URL fields use text type, API key fields use password type', () => {
+    const fields = [
+      { key: 'obsidian_url', label: 'Obsidian URL' },
+      { key: 'obsidian_api_key', label: 'API Key' },
+    ];
+    render(<ExtensionCard {...defaultProps} enabled credentialFields={fields} />);
+
+    const urlInput = screen.getByLabelText('Obsidian URL');
+    const apiKeyInput = screen.getByLabelText('API Key');
+    expect(urlInput).toHaveAttribute('type', 'text');
+    expect(apiKeyInput).toHaveAttribute('type', 'password');
+  });
+
+  it('enabled card has green left border', () => {
+    const { container } = render(<ExtensionCard {...defaultProps} enabled />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain('border-l-emerald-500');
+  });
+
+  it('disabled card has reduced opacity', () => {
+    const { container } = render(<ExtensionCard {...defaultProps} enabled={false} />);
+    const card = container.firstChild as HTMLElement;
+    expect(card.className).toContain('opacity-60');
   });
 });
