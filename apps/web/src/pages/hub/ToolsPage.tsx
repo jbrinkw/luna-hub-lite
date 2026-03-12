@@ -158,7 +158,8 @@ export function ToolsPage() {
   const searchLower = search.toLowerCase().trim();
 
   /** Filter groups by search, computing matching tools per group */
-  const filteredGroups = useMemo(() => {
+  type FilteredGroup = ToolGroup & { matchingTools: ToolDef[] };
+  const filteredGroups: FilteredGroup[] = useMemo(() => {
     if (!searchLower) return TOOL_GROUPS.map((g) => ({ ...g, matchingTools: g.tools }));
     return TOOL_GROUPS.map((g) => ({
       ...g,
