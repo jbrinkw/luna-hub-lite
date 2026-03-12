@@ -772,18 +772,18 @@ export function ScannerPage() {
           <div data-testid="mode-selector" className="grid grid-cols-2 gap-2">
             {(
               [
-                { key: 'purchase', label: 'Purchase' },
-                { key: 'consume_macros', label: 'Consume+Macros' },
-                { key: 'consume_no_macros', label: 'Consume-NoMacros' },
-                { key: 'shopping', label: 'Add to Shopping' },
+                { key: 'purchase', label: 'Buy' },
+                { key: 'consume_macros', label: 'Eat (Track)' },
+                { key: 'consume_no_macros', label: 'Eat (Skip)' },
+                { key: 'shopping', label: 'Add to List' },
               ] as const
             ).map((m) => (
               <button
                 key={m.key}
-                className={`p-2.5 border rounded-lg cursor-pointer font-bold w-full text-[15px] flex items-center justify-center text-center leading-tight ${
+                className={`p-2.5 border-2 rounded-lg cursor-pointer w-full flex items-center justify-center text-center leading-tight transition-all ${
                   mode === m.key
-                    ? 'bg-slate-800 text-white border-slate-800'
-                    : 'bg-white text-slate-900 border-slate-300'
+                    ? 'bg-slate-800 text-white border-slate-800 font-extrabold text-base ring-2 ring-slate-800/30 ring-offset-1'
+                    : 'bg-white text-slate-900 border-slate-300 font-semibold text-[15px]'
                 }`}
                 onClick={() => setMode(m.key)}
                 data-testid={`mode-${m.key}`}
