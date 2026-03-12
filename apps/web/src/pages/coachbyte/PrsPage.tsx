@@ -6,6 +6,7 @@ import { WEIGHT_UNIT } from '@/shared/constants';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { Settings, ChevronDown, ChevronRight } from 'lucide-react';
 
 interface ExercisePR {
   exercise_id: string;
@@ -30,6 +31,7 @@ export function PrsPage() {
   const [allExercises, setAllExercises] = useState<{ exercise_id: string; name: string }[]>([]);
   const [searchText, setSearchText] = useState('');
   const [dateRange, setDateRange] = useState<number>(90);
+  const [trackedPanelOpen, setTrackedPanelOpen] = useState(false);
 
   const computePRs = useCallback(async () => {
     if (!user) return;
@@ -217,7 +219,11 @@ export function PrsPage() {
               <span className="text-xl font-bold text-slate-900 capitalize" data-testid={`pr-name-${pr.exercise_id}`}>
                 {pr.exercise_name}
               </span>
-              <span className="text-base font-bold text-violet-600" data-testid={`pr-e1rm-${pr.exercise_id}`}>
+              <span
+                className="text-base font-bold text-violet-600 cursor-help"
+                data-testid={`pr-e1rm-${pr.exercise_id}`}
+                title="Estimated 1-rep max using Epley formula"
+              >
                 e1RM: {pr.e1rm} {WEIGHT_UNIT}
               </span>
             </div>
@@ -256,63 +262,84 @@ export function PrsPage() {
         )}
       </div>
 
-      <div className="bg-slate-50 p-5 rounded-xl border border-slate-200 mt-5" data-testid="tracked-exercises-card">
-        <h3 className="text-lg font-semibold text-slate-900 mb-2 mt-0">Tracked Exercises</h3>
-        <p className="text-slate-500 text-xs mb-4">
-          Add exercises to track all rep ranges for those exercises automatically.
-        </p>
+      {/* Collapsible tracked exercises panel */}
+      <div className="bg-slate-50 rounded-xl border border-slate-200 mt-5" data-testid="tracked-exercises-card">
+        <button
+          type="button"
+          onClick={() => setTrackedPanelOpen((prev) => !prev)}
+          className="flex items-center gap-2 w-full text-left px-5 py-3 group"
+          data-testid="tracked-exercises-toggle"
+        >
+          <Settings className="w-4 h-4 text-slate-500" />
+          <h3 className="text-base font-semibold text-slate-900 m-0 flex-1">
+            Tracked Exercises ({trackedExercises.length})
+          </h3>
+          {trackedPanelOpen ? (
+            <ChevronDown className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+          ) : (
+            <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+          )}
+        </button>
 
-        <div className="flex gap-2 mb-4 items-center">
-          <input
-            type="text"
-            value={searchText}
-            onChange={(e) => setSearchText(e.target.value)}
-            placeholder="Enter exercise name..."
-            aria-label="Search exercises to track"
-            data-testid="pr-search-input"
-            className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
-          />
-        </div>
+        {trackedPanelOpen && (
+          <div className="px-5 pb-5 border-t border-slate-200 pt-3">
+            <p className="text-slate-500 text-xs mb-4">
+              Add exercises to track all rep ranges for those exercises automatically.
+            </p>
 
-        {searchResults.length > 0 && (
-          <div data-testid="pr-search-results" className="flex flex-wrap gap-2 mb-4">
-            {searchResults.slice(0, 5).map((ex) => (
-              <Button
-                key={ex.exercise_id}
-                variant="secondary"
-                size="sm"
-                onClick={() => addTrackedExercise(ex.exercise_id)}
-                data-testid={`add-exercise-${ex.exercise_id}`}
-              >
-                {ex.name}
-              </Button>
-            ))}
-          </div>
-        )}
-
-        {trackedExercises.length === 0 ? (
-          <p className="text-slate-500 italic text-sm">No exercises being tracked</p>
-        ) : (
-          <>
-            <div className="text-sm font-bold text-slate-700 mb-2.5">
-              Currently Tracking ({trackedExercises.length} exercises)
+            <div className="flex gap-2 mb-4 items-center">
+              <input
+                type="text"
+                value={searchText}
+                onChange={(e) => setSearchText(e.target.value)}
+                placeholder="Enter exercise name..."
+                aria-label="Search exercises to track"
+                data-testid="pr-search-input"
+                className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              />
             </div>
-            <div className="flex flex-wrap gap-2" data-testid="tracked-chips">
-              {trackedExercises.map((ex) => (
-                <div
-                  className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm cursor-pointer hover:border-slate-300 transition-colors"
-                  key={ex.exercise_id}
-                  data-testid={`tracked-${ex.exercise_id}`}
-                  onClick={() => removeTrackedExercise(ex.exercise_id)}
-                >
-                  <span>{ex.name}</span>
-                  <Button variant="danger" size="sm" className="!px-1.5 !py-0.5 !text-[11px]">
-                    Remove
+
+            {searchResults.length > 0 && (
+              <div data-testid="pr-search-results" className="flex flex-wrap gap-2 mb-4">
+                {searchResults.slice(0, 5).map((ex) => (
+                  <Button
+                    key={ex.exercise_id}
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => addTrackedExercise(ex.exercise_id)}
+                    data-testid={`add-exercise-${ex.exercise_id}`}
+                  >
+                    {ex.name}
                   </Button>
+                ))}
+              </div>
+            )}
+
+            {trackedExercises.length === 0 ? (
+              <p className="text-slate-500 italic text-sm">No exercises being tracked</p>
+            ) : (
+              <>
+                <div className="text-sm font-bold text-slate-700 mb-2.5">
+                  Currently Tracking ({trackedExercises.length} exercises)
                 </div>
-              ))}
-            </div>
-          </>
+                <div className="flex flex-wrap gap-2" data-testid="tracked-chips">
+                  {trackedExercises.map((ex) => (
+                    <div
+                      className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm cursor-pointer hover:border-slate-300 transition-colors"
+                      key={ex.exercise_id}
+                      data-testid={`tracked-${ex.exercise_id}`}
+                      onClick={() => removeTrackedExercise(ex.exercise_id)}
+                    >
+                      <span>{ex.name}</span>
+                      <Button variant="danger" size="sm" className="!px-1.5 !py-0.5 !text-[11px]">
+                        Remove
+                      </Button>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )}
+          </div>
         )}
       </div>
     </CoachLayout>
