@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -52,6 +53,8 @@ export function InventoryPage() {
   const [locationId, setLocationId] = useState<string | null>(null);
   /* ---- Search filter state ---- */
   const [searchText, setSearchText] = useState('');
+  /* ---- Expand/collapse state (grouped view) ---- */
+  const [expandedProductId, setExpandedProductId] = useState<string | null>(null);
 
   /* ---- Add-stock modal state ---- */
   const [addingStockFor, setAddingStockFor] = useState<string | null>(null);
@@ -397,18 +400,18 @@ export function InventoryPage() {
           {filteredGrouped.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               {/* Table header */}
-              <div className="grid grid-cols-[1fr_140px_90px_60px_210px] gap-0 px-3 py-2 bg-slate-50 border-b-2 border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              <div className="grid grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2 bg-slate-50 border-b-2 border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+                <span />
                 <span>Product</span>
                 <span>Stock</span>
                 <span>Expiry</span>
-                <span>Min</span>
-                <span className="text-right">Actions</span>
               </div>
 
               {/* Product rows */}
               {filteredGrouped.map(({ product, totalStock, nearestExpiry }, idx) => {
                 const isZeroStock = totalStock <= 0;
                 const servingsTotal = totalStock * Number(product.servings_per_container);
+                const isExpanded = expandedProductId === product.product_id;
                 const expiryLabel = nearestExpiry
                   ? new Date(nearestExpiry + 'T00:00:00').toLocaleDateString('en-US', {
                       month: 'short',
@@ -420,100 +423,120 @@ export function InventoryPage() {
                   <div
                     key={product.product_id}
                     data-testid={`inv-product-${product.product_id}`}
-                    className={`grid grid-cols-[1fr_140px_90px_60px_210px] gap-0 px-3 py-1.5 items-center text-sm ${
-                      idx < filteredGrouped.length - 1 ? 'border-b border-slate-100' : ''
-                    } ${isZeroStock ? 'opacity-50' : ''}`}
+                    className={`${idx < filteredGrouped.length - 1 ? 'border-b border-slate-100' : ''} ${isZeroStock ? 'opacity-50' : ''}`}
                   >
-                    {/* Product name + stock dot */}
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className={`w-2.5 h-2.5 rounded-full shrink-0 ${stockDotColor(totalStock, Number(product.min_stock_amount))}`}
-                      />
-                      <span
-                        className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis"
-                        title={`${product.name}${product.barcode ? ` | Barcode: ${product.barcode}` : ''} | ${Number(product.servings_per_container)} srv/ctn`}
-                      >
-                        {product.name}
-                      </span>
-                      {product.barcode && (
-                        <span className="hidden" data-testid={`barcode-${product.product_id}`}>
-                          {product.barcode}
-                        </span>
+                    {/* Collapsed row — always visible, clickable to toggle */}
+                    <button
+                      type="button"
+                      className={`grid grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
+                      onClick={() => setExpandedProductId(isExpanded ? null : product.product_id)}
+                      aria-expanded={isExpanded}
+                      data-testid={`inv-row-toggle-${product.product_id}`}
+                    >
+                      {/* Chevron indicator */}
+                      {isExpanded ? (
+                        <ChevronDown className="w-4 h-4 text-slate-400" />
+                      ) : (
+                        <ChevronRight className="w-4 h-4 text-slate-400" />
                       )}
-                    </div>
 
-                    {/* Stock */}
-                    <div>
-                      <span data-testid={`stock-badge-${product.product_id}`} className="font-semibold">
+                      {/* Product name + stock dot */}
+                      <div className="flex items-center gap-2 min-w-0">
+                        <span
+                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${stockDotColor(totalStock, Number(product.min_stock_amount))}`}
+                        />
+                        <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
+                          {product.name}
+                        </span>
+                      </div>
+
+                      {/* Stock */}
+                      <span data-testid={`stock-badge-${product.product_id}`} className="font-semibold text-sm">
                         {totalStock.toFixed(1)} ctn
                       </span>
-                      <span
-                        className="text-xs text-slate-400 ml-1"
-                        data-testid={`stock-servings-${product.product_id}`}
-                      >
-                        ({servingsTotal.toFixed(1)} svgs)
+
+                      {/* Expiry */}
+                      <span data-testid={`expiry-${product.product_id}`} className="text-[13px] text-slate-600">
+                        {expiryLabel}
                       </span>
-                    </div>
+                    </button>
 
-                    {/* Expiry */}
-                    <span data-testid={`expiry-${product.product_id}`} className="text-[13px] text-slate-600">
-                      {expiryLabel}
-                    </span>
-
-                    {/* Min stock */}
-                    <span data-testid={`min-stock-${product.product_id}`} className="text-[13px] text-slate-600">
-                      {Number(product.min_stock_amount).toFixed(1)}
-                    </span>
-
-                    {/* Actions */}
-                    <div className="flex gap-1 justify-end items-center">
-                      {/* +/- Container pair */}
-                      <div className="inline-flex">
-                        <button
-                          className="bg-green-600 text-white border-none px-2 py-0.5 rounded-l cursor-pointer text-xs font-semibold leading-snug hover:bg-green-700"
-                          onClick={() => openAddStockModal(product.product_id, 1)}
-                          data-testid={`add-ctn-${product.product_id}`}
-                        >
-                          +1
-                        </button>
-                        <button
-                          className="bg-red-600 text-white border-none px-2 py-0.5 rounded-r cursor-pointer text-xs font-semibold leading-snug hover:bg-red-700"
-                          onClick={() => consumeStock(product.product_id, 1, 'container')}
-                          data-testid={`sub-ctn-${product.product_id}`}
-                        >
-                          -1
-                        </button>
-                      </div>
-
-                      {/* +/- Serving pair */}
-                      <div className="inline-flex">
-                        <button
-                          className="bg-white text-green-600 border border-green-600 border-r-0 px-1.5 py-0.5 rounded-l cursor-pointer text-xs font-semibold leading-snug hover:bg-green-50"
-                          onClick={() =>
-                            openAddStockModal(product.product_id, 1 / Number(product.servings_per_container))
-                          }
-                          data-testid={`add-srv-${product.product_id}`}
-                        >
-                          +S
-                        </button>
-                        <button
-                          className="bg-white text-red-600 border border-red-600 px-1.5 py-0.5 rounded-r cursor-pointer text-xs font-semibold leading-snug hover:bg-red-50"
-                          onClick={() => consumeStock(product.product_id, 1, 'serving')}
-                          data-testid={`sub-srv-${product.product_id}`}
-                        >
-                          -S
-                        </button>
-                      </div>
-
-                      {/* Consume All */}
-                      <button
-                        className="bg-transparent text-slate-500 border-none px-1.5 py-0.5 cursor-pointer text-[11px] underline leading-snug hover:text-slate-700"
-                        onClick={() => handleConsumeAll(product.product_id)}
-                        data-testid={`consume-all-${product.product_id}`}
+                    {/* Expanded detail panel */}
+                    {isExpanded && (
+                      <div
+                        className="px-4 pb-4 pt-1 bg-slate-50/50 border-t border-slate-100"
+                        data-testid={`inv-detail-${product.product_id}`}
                       >
-                        Consume All
-                      </button>
-                    </div>
+                        {/* Detail info */}
+                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-600 mb-3">
+                          <span data-testid={`stock-servings-${product.product_id}`}>
+                            {totalStock.toFixed(1)} containers ({servingsTotal.toFixed(1)} servings)
+                          </span>
+                          <span data-testid={`min-stock-${product.product_id}`}>
+                            Min stock: {Number(product.min_stock_amount).toFixed(1)}
+                          </span>
+                          {product.barcode && (
+                            <span data-testid={`barcode-${product.product_id}`}>Barcode: {product.barcode}</span>
+                          )}
+                        </div>
+
+                        {/* Action buttons — clean grid layout */}
+                        <div className="grid grid-cols-2 gap-2 max-w-sm">
+                          <button
+                            className="flex items-center justify-center gap-1.5 bg-green-600 text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-green-700 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAddStockModal(product.product_id, 1);
+                            }}
+                            data-testid={`add-ctn-${product.product_id}`}
+                          >
+                            Add Container
+                          </button>
+                          <button
+                            className="flex items-center justify-center gap-1.5 bg-red-600 text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-red-700 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              consumeStock(product.product_id, 1, 'container');
+                            }}
+                            data-testid={`sub-ctn-${product.product_id}`}
+                          >
+                            Remove Container
+                          </button>
+                          <button
+                            className="flex items-center justify-center gap-1.5 bg-white text-green-600 border-2 border-green-600 px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-green-50 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openAddStockModal(product.product_id, 1 / Number(product.servings_per_container));
+                            }}
+                            data-testid={`add-srv-${product.product_id}`}
+                          >
+                            Add Serving
+                          </button>
+                          <button
+                            className="flex items-center justify-center gap-1.5 bg-white text-red-600 border-2 border-red-600 px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-red-50 transition-colors"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              consumeStock(product.product_id, 1, 'serving');
+                            }}
+                            data-testid={`sub-srv-${product.product_id}`}
+                          >
+                            Remove Serving
+                          </button>
+                        </div>
+
+                        {/* Consume All — separate, text-style */}
+                        <button
+                          className="mt-2 bg-transparent text-slate-500 border-none px-0 py-1 cursor-pointer text-sm underline hover:text-slate-700 transition-colors"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleConsumeAll(product.product_id);
+                          }}
+                          data-testid={`consume-all-${product.product_id}`}
+                        >
+                          Consume All
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}
