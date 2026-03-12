@@ -136,6 +136,9 @@ test.describe('ChefByte Inventory', () => {
         await dialog.dismiss(); // Cancel so stock is not consumed
       });
 
+      // Expand the row first to reveal action buttons
+      await page.getByTestId(`inv-row-toggle-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
+
       // Click consume all for Chicken Breast (has stock = 3 ctn)
       await page.getByTestId(`consume-all-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
@@ -203,7 +206,10 @@ test.describe('ChefByte Inventory', () => {
       );
       await expect(chickenBadge).toContainText('3.0', { timeout: 30000 });
 
-      // Click the "+1 Ctn" button to open the add stock modal
+      // Expand the row first to reveal action buttons
+      await page.getByTestId(`inv-row-toggle-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
+
+      // Click the "Add Container" button to open the add stock modal
       await page.getByTestId(`add-ctn-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
       // Modal should open
@@ -244,7 +250,10 @@ test.describe('ChefByte Inventory', () => {
       );
       await expect(chickenBadge).toContainText('3.0', { timeout: 30000 });
 
-      // Click "-1 Ctn" to consume 1 container
+      // Expand the row first to reveal action buttons
+      await page.getByTestId(`inv-row-toggle-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
+
+      // Click "Remove Container" to consume 1 container
       await page.getByTestId(`sub-ctn-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
       // Badge should update to 2.0 ctn
@@ -358,21 +367,18 @@ test.describe('ChefByte Inventory', () => {
       );
 
       // Verify the color dot indicator inside each product row
-      // The dot is the first span child inside the product row's first div
+      // The dot uses Tailwind classes: bg-green-600, bg-amber-500, bg-red-600
       const chickenRow = page.getByTestId(`inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`);
-      const chickenDot = chickenRow.locator('span').first();
-      const chickenDotStyle = await chickenDot.getAttribute('style');
-      expect(chickenDotStyle).toMatch(/(?:#2f9e44|rgb\(47,\s*158,\s*68\))/); // green (above min)
+      const chickenDot = chickenRow.locator('span.rounded-full').first();
+      await expect(chickenDot).toHaveClass(/bg-green-600/); // green (above min)
 
       const eggsRow = page.getByTestId(`inv-product-${productMap['Great Value Large White Eggs']}`);
-      const eggsDot = eggsRow.locator('span').first();
-      const eggsDotStyle = await eggsDot.getAttribute('style');
-      expect(eggsDotStyle).toMatch(/(?:#ff9800|rgb\(255,\s*152,\s*0\))/); // orange (below min)
+      const eggsDot = eggsRow.locator('span.rounded-full').first();
+      await expect(eggsDot).toHaveClass(/bg-amber-500/); // orange (below min)
 
       const bananasRow = page.getByTestId(`inv-product-${productMap['Banquet Chicken Breast Patties']}`);
-      const bananasDot = bananasRow.locator('span').first();
-      const bananasDotStyle = await bananasDot.getAttribute('style');
-      expect(bananasDotStyle).toMatch(/(?:#d33|rgb\(221,\s*51,\s*51\))/); // red (zero stock)
+      const bananasDot = bananasRow.locator('span.rounded-full').first();
+      await expect(bananasDot).toHaveClass(/bg-red-600/); // red (zero stock)
     } finally {
       await cleanup();
     }
@@ -396,6 +402,9 @@ test.describe('ChefByte Inventory', () => {
           { qty_containers: 3 },
         );
       }).toPass({ timeout: 30000 });
+
+      // Expand the row first to reveal action buttons
+      await page.getByTestId(`inv-row-toggle-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
       // Consume 1 container of Chicken Breast via the UI
       await page.getByTestId(`sub-ctn-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
