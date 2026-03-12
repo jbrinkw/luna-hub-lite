@@ -256,8 +256,9 @@ export function SplitPage() {
                     No exercises scheduled
                   </p>
                 ) : (
-                  <div className="overflow-x-auto ml-7">
-                    <table className="w-full text-sm" data-testid={`day-${day.weekday}-table`}>
+                  <div className="overflow-x-auto sm:ml-7">
+                    {/* Desktop table */}
+                    <table className="hidden sm:table w-full text-sm" data-testid={`day-${day.weekday}-table`}>
                       <thead>
                         <tr>
                           <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
@@ -385,7 +386,7 @@ export function SplitPage() {
                                     updateSet(day.weekday, i, 'target_load_percentage', null);
                                   }
                                 }}
-                                className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40"
+                                className="h-5 w-5 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40"
                                 data-testid={`day-${day.weekday}-set-${i}-rel`}
                               />
                             </td>
@@ -413,7 +414,7 @@ export function SplitPage() {
                                       key={preset}
                                       type="button"
                                       onClick={() => updateSet(day.weekday, i, 'rest_seconds', preset)}
-                                      className={`px-1.5 py-0.5 text-[11px] rounded border transition-colors ${
+                                      className={`px-2 py-1.5 text-xs rounded border transition-colors min-w-[36px] ${
                                         set.rest_seconds === preset
                                           ? 'bg-violet-100 border-violet-300 text-violet-700 font-semibold'
                                           : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300'
@@ -441,10 +442,187 @@ export function SplitPage() {
                         ))}
                       </tbody>
                     </table>
+
+                    {/* Mobile card layout */}
+                    <div className="sm:hidden flex flex-col gap-3">
+                      {day.template_sets.map((set, i) => (
+                        <div
+                          key={i}
+                          data-testid={`day-${day.weekday}-set-${i}`}
+                          className="border border-slate-200 rounded-lg p-3 bg-white"
+                        >
+                          {/* Top row: order badge + exercise select */}
+                          <div className="flex items-center gap-2 mb-2">
+                            <span
+                              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-100 text-violet-700 text-xs font-bold shrink-0"
+                              data-testid={`day-${day.weekday}-set-${i}-order`}
+                            >
+                              {set.order}
+                            </span>
+                            <select
+                              value={set.exercise_id}
+                              aria-label="Exercise"
+                              onChange={(e) => {
+                                const ex = exercises.find((ex) => ex.exercise_id === e.target.value);
+                                updateSet(day.weekday, i, 'exercise_id', e.target.value);
+                                if (ex) updateSet(day.weekday, i, 'exercise_name', ex.name);
+                              }}
+                              className="flex-1 min-w-0 appearance-none rounded-md border border-slate-300 px-2 py-1.5 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                              data-testid={`day-${day.weekday}-set-${i}-exercise`}
+                            >
+                              {exercises.map((ex) => (
+                                <option key={ex.exercise_id} value={ex.exercise_id}>
+                                  {ex.name}
+                                </option>
+                              ))}
+                            </select>
+                          </div>
+
+                          {/* Middle row: Reps, Load, Rest inputs */}
+                          <div className="grid grid-cols-3 gap-2 mb-2">
+                            <div>
+                              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-0.5">
+                                Reps
+                              </label>
+                              <input
+                                type="number"
+                                className="w-full text-center px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                min="0"
+                                aria-label="Target reps"
+                                value={set.target_reps ?? ''}
+                                onChange={(e) =>
+                                  updateSet(
+                                    day.weekday,
+                                    i,
+                                    'target_reps',
+                                    e.target.value ? Number(e.target.value) : null,
+                                  )
+                                }
+                                data-testid={`day-${day.weekday}-set-${i}-reps`}
+                              />
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-0.5">
+                                {set.target_load_percentage ? 'Load %' : 'Load'}
+                              </label>
+                              {set.target_load_percentage ? (
+                                <input
+                                  type="number"
+                                  className="w-full text-center px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                  min="0"
+                                  aria-label="Load percentage"
+                                  value={set.target_load_percentage}
+                                  onChange={(e) =>
+                                    updateSet(
+                                      day.weekday,
+                                      i,
+                                      'target_load_percentage',
+                                      e.target.value ? Number(e.target.value) : null,
+                                    )
+                                  }
+                                  data-testid={`day-${day.weekday}-set-${i}-load-pct`}
+                                />
+                              ) : (
+                                <input
+                                  type="number"
+                                  className="w-full text-center px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                  min="0"
+                                  aria-label="Target load"
+                                  value={set.target_load ?? ''}
+                                  onChange={(e) =>
+                                    updateSet(
+                                      day.weekday,
+                                      i,
+                                      'target_load',
+                                      e.target.value ? Number(e.target.value) : null,
+                                    )
+                                  }
+                                  data-testid={`day-${day.weekday}-set-${i}-load`}
+                                />
+                              )}
+                            </div>
+                            <div>
+                              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-0.5">
+                                Rest (s)
+                              </label>
+                              <input
+                                type="number"
+                                className="w-full text-center px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                min="0"
+                                aria-label="Rest seconds"
+                                value={set.rest_seconds}
+                                onChange={(e) =>
+                                  updateSet(
+                                    day.weekday,
+                                    i,
+                                    'rest_seconds',
+                                    e.target.value ? Number(e.target.value) : 90,
+                                  )
+                                }
+                                data-testid={`day-${day.weekday}-set-${i}-rest`}
+                              />
+                            </div>
+                          </div>
+
+                          {/* Bottom row: %1RM toggle, rest presets, remove */}
+                          <div className="flex items-center justify-between gap-2">
+                            <label className="flex items-center gap-1.5 shrink-0">
+                              <input
+                                type="checkbox"
+                                checked={set.target_load_percentage !== null}
+                                aria-label="Use % of 1RM"
+                                onChange={(e) => {
+                                  if (e.target.checked) {
+                                    updateSet(
+                                      day.weekday,
+                                      i,
+                                      'target_load_percentage',
+                                      set.target_load_percentage ?? 80,
+                                    );
+                                    updateSet(day.weekday, i, 'target_load', null);
+                                  } else {
+                                    updateSet(day.weekday, i, 'target_load_percentage', null);
+                                  }
+                                }}
+                                className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40"
+                                data-testid={`day-${day.weekday}-set-${i}-rel`}
+                              />
+                              <span className="text-xs text-slate-600">%1RM</span>
+                            </label>
+                            <div className="flex gap-1">
+                              {REST_PRESETS.map((preset) => (
+                                <button
+                                  key={preset}
+                                  type="button"
+                                  onClick={() => updateSet(day.weekday, i, 'rest_seconds', preset)}
+                                  className={`px-1.5 py-1 text-[11px] rounded border transition-colors ${
+                                    set.rest_seconds === preset
+                                      ? 'bg-violet-100 border-violet-300 text-violet-700 font-semibold'
+                                      : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300'
+                                  }`}
+                                  data-testid={`day-${day.weekday}-set-${i}-rest-preset-${preset}`}
+                                >
+                                  {preset}
+                                </button>
+                              ))}
+                            </div>
+                            <Button
+                              variant="danger"
+                              size="sm"
+                              onClick={() => removeSet(day.weekday, i)}
+                              data-testid={`day-${day.weekday}-set-${i}-delete`}
+                              aria-label={`Remove set ${i + 1} from ${WEEKDAYS[day.weekday]}`}
+                            >
+                              Remove
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 )}
 
-                <div className="mt-2 flex gap-2 ml-7">
+                <div className="mt-2 flex gap-2 sm:ml-7">
                   <Button
                     variant="success"
                     size="sm"
@@ -465,7 +643,7 @@ export function SplitPage() {
                   </Button>
                 </div>
 
-                <div className="mt-2 ml-7">
+                <div className="mt-2 sm:ml-7">
                   <label className="text-sm font-semibold text-slate-700 block mb-1">Notes</label>
                   <textarea
                     value={day.split_notes}
