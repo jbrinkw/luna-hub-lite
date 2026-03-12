@@ -17,7 +17,7 @@ Serverless refactor of the original self-hosted Luna Hub ecosystem. Replaces hea
 
 ## Tech Stack
 
-- **Frontend:** React 18 + TypeScript + Vite, Tailwind CSS v4 (UI), Lucide React (icons), React Router (path-based: `/hub/*`, `/coach/*`, `/chef/*`)
+- **Frontend:** React 18 + TypeScript + Vite, TanStack Query v5 (data fetching/caching), Tailwind CSS v4 (UI), Lucide React (icons), React Router (path-based: `/hub/*`, `/coach/*`, `/chef/*`)
 - **Backend:** Supabase (Postgres, Auth, Edge Functions, Realtime, Storage), schema-per-module (`hub`, `coachbyte`, `chefbyte`, `private`)
 - **MCP Server:** Cloudflare Workers + Durable Objects at `mcp.lunahub.dev`
 - **Monorepo:** pnpm workspaces + Turborepo
@@ -51,7 +51,9 @@ legacy/                # Old repos for reference (see below)
 - **Day boundary:** `private.get_logical_date()` computes logical_date from configurable `day_start_hour`. Stored on every date-sensitive row at insert time.
 - **Quantities:** NUMERIC(10,3) in Postgres. Stock is canonical in containers and tracked at lot level (`product_id + location_id + expires_on`). UI displays containers by default; writes can be in containers or servings with server-side conversion via `servings_per_container`. Stock floors at 0. Macros always logged for full consumed amount regardless of stock.
 - **RLS everywhere:** `(select auth.uid()) = user_id TO authenticated` on all tables. Client-side queries duplicate the filter.
-- **Realtime over polling:** Supabase Realtime for timer updates, plan changes, macro totals, profile changes.
+- **Realtime over polling:** Supabase Realtime for timer updates, plan changes, macro totals, profile changes. Realtime events invalidate TanStack Query keys via `useRealtimeInvalidation` hook instead of refetching all data.
+- **Data fetching:** TanStack Query (`useQuery`/`useMutation`) for all server state. Query keys defined in `src/shared/queryKeys.ts`. Mutations use optimistic updates where appropriate. Stale time: 2 min default, 5-10 min for rarely-changing data.
+- **Code splitting:** Route modules lazy-loaded via `React.lazy()`. Pages within modules also lazy-loaded (except landing pages). Vendor + Supabase extracted into separate cached chunks.
 - **Desktop-first:** Ionic grid + CSS media queries. Mobile-optimized layouts deferred to post-MVP.
 
 ## Legacy Reference

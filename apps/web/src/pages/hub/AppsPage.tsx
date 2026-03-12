@@ -1,8 +1,11 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { AppActivationCard } from '@/components/hub/AppActivationCard';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { supabase } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
 import { Alert } from '@/components/ui/Alert';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 
@@ -13,54 +16,43 @@ const APPS = [
 
 export function AppsPage() {
   const { user } = useAuth();
-  const [activations, setActivations] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
-  const [mutating, setMutating] = useState<string | null>(null);
+  const { activations, activationsLoading, refreshActivations } = useAppContext();
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
 
-  const loadActivations = useCallback(async () => {
-    if (!user) return;
-    const { data } = await supabase.schema('hub').from('app_activations').select('app_name').eq('user_id', user.id);
+  const activateMutation = useMutation({
+    mutationFn: async (appName: string) => {
+      const { error: rpcError } = await supabase.schema('hub').rpc('activate_app', { p_app_name: appName });
+      if (rpcError) throw rpcError;
+    },
+    onSettled: () => {
+      refreshActivations();
+      queryClient.invalidateQueries({ queryKey: queryKeys.activations(user!.id) });
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    },
+  });
 
-    const map: Record<string, boolean> = {};
-    data?.forEach((row) => {
-      map[row.app_name] = true;
-    });
-    setActivations(map);
-    setLoading(false);
-  }, [user]);
+  const deactivateMutation = useMutation({
+    mutationFn: async (appName: string) => {
+      const { error: rpcError } = await supabase.schema('hub').rpc('deactivate_app', { p_app_name: appName });
+      if (rpcError) throw rpcError;
+    },
+    onSettled: () => {
+      refreshActivations();
+      queryClient.invalidateQueries({ queryKey: queryKeys.activations(user!.id) });
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    },
+  });
 
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadActivations();
-  }, [loadActivations]);
-
-  const handleActivate = async (appName: string) => {
-    setError(null);
-    setMutating(appName);
-    const { error: rpcError } = await supabase.schema('hub').rpc('activate_app', { p_app_name: appName });
-    if (rpcError) {
-      setError(rpcError.message);
-      setMutating(null);
-      return;
-    }
-    await loadActivations();
-    setMutating(null);
-  };
-
-  const handleDeactivate = async (appName: string) => {
-    setError(null);
-    setMutating(appName);
-    const { error: rpcError } = await supabase.schema('hub').rpc('deactivate_app', { p_app_name: appName });
-    if (rpcError) {
-      setError(rpcError.message);
-      setMutating(null);
-      return;
-    }
-    await loadActivations();
-    setMutating(null);
-  };
+  const mutatingApp = activateMutation.isPending
+    ? (activateMutation.variables as string)
+    : deactivateMutation.isPending
+      ? (deactivateMutation.variables as string)
+      : null;
 
   return (
     <HubLayout title="Apps">
@@ -69,7 +61,7 @@ export function AppsPage() {
           {error}
         </Alert>
       )}
-      {loading ? (
+      {activationsLoading ? (
         <div className="space-y-4">
           <CardSkeleton />
           <CardSkeleton />
@@ -82,9 +74,15 @@ export function AppsPage() {
               appName={app.name}
               displayName={app.displayName}
               active={!!activations[app.name]}
-              loading={mutating === app.name}
-              onActivate={() => handleActivate(app.name)}
-              onDeactivate={() => handleDeactivate(app.name)}
+              loading={mutatingApp === app.name}
+              onActivate={() => {
+                setError(null);
+                activateMutation.mutate(app.name);
+              }}
+              onDeactivate={() => {
+                setError(null);
+                deactivateMutation.mutate(app.name);
+              }}
             />
           ))}
         </div>

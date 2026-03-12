@@ -1,13 +1,17 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
+import { MacroBarSkeleton, ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte, supabase } from '@/shared/supabase';
+import { chefbyte } from '@/shared/supabase';
 import { toDateStr, formatDateDisplay } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { computeRecipeMacros } from './RecipesPage';
+import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -37,6 +41,12 @@ interface PlannedItem {
   fat: number;
 }
 
+interface MacroPageData {
+  macros: MacroTotals | null;
+  consumed: ConsumedItem[];
+  planned: PlannedItem[];
+}
+
 /* ------------------------------------------------------------------ */
 /*  Pure helpers (exported for testing)                                 */
 /* ------------------------------------------------------------------ */
@@ -51,12 +61,8 @@ export function calcCaloriesFromMacros(protein: number, carbs: number, fat: numb
 
 export function MacroPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const queryClient = useQueryClient();
   const [currentDate, setCurrentDate] = useState(() => toDateStr(new Date()));
-  const [macros, setMacros] = useState<MacroTotals | null>(null);
-  const [consumed, setConsumed] = useState<ConsumedItem[]>([]);
-  const [planned, setPlanned] = useState<PlannedItem[]>([]);
 
   /* ---- Temp Item modal ---- */
   const [showTempModal, setShowTempModal] = useState(false);
@@ -76,203 +82,164 @@ export function MacroPage() {
   const [showTasteModal, setShowTasteModal] = useState(false);
   const [tasteProfile, setTasteProfile] = useState('');
 
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
   /* ---------------------------------------------------------------- */
-  /*  Data loading                                                     */
+  /*  Data loading via useQuery                                        */
   /* ---------------------------------------------------------------- */
 
   const userId = user?.id;
 
-  const loadData = useCallback(async () => {
-    if (!userId) return;
-    setLoadError(null);
+  const {
+    data,
+    isLoading,
+    error: loadError,
+  } = useQuery({
+    queryKey: [...queryKeys.dailyMacros(userId!, currentDate), 'full'],
+    queryFn: async (): Promise<MacroPageData> => {
+      // Fire all independent queries in parallel
+      const [macroRes, foodLogsRes, tempItemsRes, ltEventsRes, plannedRes] = await Promise.all([
+        (chefbyte() as any).rpc('get_daily_macros', { p_logical_date: currentDate }),
+        chefbyte()
+          .from('food_logs')
+          .select('log_id, product_id, calories, protein, carbs, fat, products:product_id(name)')
+          .eq('user_id', userId!)
+          .eq('logical_date', currentDate)
+          .order('created_at'),
+        chefbyte()
+          .from('temp_items')
+          .select('temp_id, name, calories, protein, carbs, fat')
+          .eq('user_id', userId!)
+          .eq('logical_date', currentDate)
+          .order('created_at'),
+        chefbyte()
+          .from('liquidtrack_events')
+          .select('event_id, calories, protein, carbs, fat')
+          .eq('user_id', userId!)
+          .eq('logical_date', currentDate)
+          .order('created_at'),
+        chefbyte()
+          .from('meal_plan_entries')
+          .select(
+            'meal_id, servings, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving)',
+          )
+          .eq('user_id', userId!)
+          .eq('logical_date', currentDate)
+          .eq('meal_prep', false)
+          .is('completed_at', null),
+      ]);
 
-    // 1. Fetch daily macro summary via RPC
-    // RPC returns: { calories: { consumed, goal, remaining }, protein: {...}, carbs: {...}, fat: {...} }
-    const { data: macroData, error: macroErr } = await (chefbyte() as any).rpc('get_daily_macros', {
-      p_logical_date: currentDate,
-    });
+      if (macroRes.error) throw new Error(macroRes.error.message);
 
-    if (macroErr) {
-      setLoadError(macroErr.message);
-      setLoading(false);
-      return;
-    }
+      // Process macros
+      let macros: MacroTotals | null = null;
+      if (macroRes.data) {
+        const rpc = macroRes.data as Record<string, { consumed: number; goal: number; remaining: number }>;
+        macros = {
+          consumed: {
+            calories: Number(rpc.calories?.consumed) || 0,
+            protein: Number(rpc.protein?.consumed) || 0,
+            carbs: Number(rpc.carbs?.consumed) || 0,
+            fat: Number(rpc.fat?.consumed) || 0,
+          },
+          goals: {
+            calories: Number(rpc.calories?.goal) || 0,
+            protein: Number(rpc.protein?.goal) || 0,
+            carbs: Number(rpc.carbs?.goal) || 0,
+            fat: Number(rpc.fat?.goal) || 0,
+          },
+        };
+      }
 
-    if (macroData) {
-      const rpc = macroData as Record<string, { consumed: number; goal: number; remaining: number }>;
-      setMacros({
-        consumed: {
-          calories: Number(rpc.calories?.consumed) || 0,
-          protein: Number(rpc.protein?.consumed) || 0,
-          carbs: Number(rpc.carbs?.consumed) || 0,
-          fat: Number(rpc.fat?.consumed) || 0,
-        },
-        goals: {
-          calories: Number(rpc.calories?.goal) || 0,
-          protein: Number(rpc.protein?.goal) || 0,
-          carbs: Number(rpc.carbs?.goal) || 0,
-          fat: Number(rpc.fat?.goal) || 0,
-        },
-      });
-    } else {
-      setMacros(null);
-    }
+      // Process consumed items from 3 sources
+      const items: ConsumedItem[] = [];
 
-    // 2. Fetch consumed items from 3 sources
-    const items: ConsumedItem[] = [];
-
-    // food_logs (from meal plan completions and scanner)
-    const { data: foodLogs } = await chefbyte()
-      .from('food_logs')
-      .select('log_id, product_id, calories, protein, carbs, fat, products:product_id(name)')
-      .eq('user_id', userId)
-      .eq('logical_date', currentDate)
-      .order('created_at');
-
-    for (const log of (foodLogs ?? []) as any[]) {
-      items.push({
-        id: log.log_id,
-        source: 'Meal Plan',
-        name: log.products?.name ?? 'Unknown',
-        calories: Number(log.calories) || 0,
-        protein: Number(log.protein) || 0,
-        carbs: Number(log.carbs) || 0,
-        fat: Number(log.fat) || 0,
-      });
-    }
-
-    // temp_items
-    const { data: tempItems } = await chefbyte()
-      .from('temp_items')
-      .select('temp_id, name, calories, protein, carbs, fat')
-      .eq('user_id', userId)
-      .eq('logical_date', currentDate)
-      .order('created_at');
-
-    for (const ti of (tempItems ?? []) as any[]) {
-      items.push({
-        id: ti.temp_id,
-        source: 'Temp Item',
-        name: ti.name,
-        calories: Number(ti.calories) || 0,
-        protein: Number(ti.protein) || 0,
-        carbs: Number(ti.carbs) || 0,
-        fat: Number(ti.fat) || 0,
-      });
-    }
-
-    // liquidtrack_events
-    const { data: ltEvents } = await chefbyte()
-      .from('liquidtrack_events')
-      .select('event_id, calories, protein, carbs, fat')
-      .eq('user_id', userId)
-      .eq('logical_date', currentDate)
-      .order('created_at');
-
-    for (const ev of (ltEvents ?? []) as any[]) {
-      items.push({
-        id: ev.event_id,
-        source: 'LiquidTrack',
-        name: 'Liquid intake',
-        calories: Number(ev.calories) || 0,
-        protein: Number(ev.protein) || 0,
-        carbs: Number(ev.carbs) || 0,
-        fat: Number(ev.fat) || 0,
-      });
-    }
-
-    setConsumed(items);
-
-    // 3. Planned items: meal_plan_entries for date where completed_at IS NULL and meal_prep=false
-    const { data: plannedData } = await chefbyte()
-      .from('meal_plan_entries')
-      .select(
-        'meal_id, servings, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving)',
-      )
-      .eq('user_id', userId)
-      .eq('logical_date', currentDate)
-      .eq('meal_prep', false)
-      .is('completed_at', null);
-
-    const plannedItems: PlannedItem[] = [];
-    for (const entry of (plannedData ?? []) as any[]) {
-      const servings = Number(entry.servings) || 1;
-      if (entry.recipes) {
-        // Recipe-based entry: compute macros from ingredients
-        const recipeMacros = computeRecipeMacros(
-          entry.recipes.recipe_ingredients ?? [],
-          Number(entry.recipes.base_servings) || 1,
-        );
-        plannedItems.push({
-          meal_id: entry.meal_id,
-          name: entry.recipes.name ?? 'Unknown',
-          calories: Math.round(recipeMacros.calories * servings),
-          protein: Math.round(recipeMacros.protein * servings),
-          carbs: Math.round(recipeMacros.carbs * servings),
-          fat: Math.round(recipeMacros.fat * servings),
-        });
-      } else if (entry.products) {
-        // Product-based entry: use per-serving macros directly
-        plannedItems.push({
-          meal_id: entry.meal_id,
-          name: entry.products.name ?? 'Unknown',
-          calories: Math.round((Number(entry.products.calories_per_serving) || 0) * servings),
-          protein: Math.round((Number(entry.products.protein_per_serving) || 0) * servings),
-          carbs: Math.round((Number(entry.products.carbs_per_serving) || 0) * servings),
-          fat: Math.round((Number(entry.products.fat_per_serving) || 0) * servings),
+      for (const log of (foodLogsRes.data ?? []) as any[]) {
+        items.push({
+          id: log.log_id,
+          source: 'Meal Plan',
+          name: log.products?.name ?? 'Unknown',
+          calories: Number(log.calories) || 0,
+          protein: Number(log.protein) || 0,
+          carbs: Number(log.carbs) || 0,
+          fat: Number(log.fat) || 0,
         });
       }
-    }
-    setPlanned(plannedItems);
 
-    setLoading(false);
-  }, [userId, currentDate]);
+      for (const ti of (tempItemsRes.data ?? []) as any[]) {
+        items.push({
+          id: ti.temp_id,
+          source: 'Temp Item',
+          name: ti.name,
+          calories: Number(ti.calories) || 0,
+          protein: Number(ti.protein) || 0,
+          carbs: Number(ti.carbs) || 0,
+          fat: Number(ti.fat) || 0,
+        });
+      }
 
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadData();
-  }, [loadData]);
+      for (const ev of (ltEventsRes.data ?? []) as any[]) {
+        items.push({
+          id: ev.event_id,
+          source: 'LiquidTrack',
+          name: 'Liquid intake',
+          calories: Number(ev.calories) || 0,
+          protein: Number(ev.protein) || 0,
+          carbs: Number(ev.carbs) || 0,
+          fat: Number(ev.fat) || 0,
+        });
+      }
+
+      // Process planned items
+      const plannedItems: PlannedItem[] = [];
+      for (const entry of (plannedRes.data ?? []) as any[]) {
+        const servings = Number(entry.servings) || 1;
+        if (entry.recipes) {
+          const recipeMacros = computeRecipeMacros(
+            entry.recipes.recipe_ingredients ?? [],
+            Number(entry.recipes.base_servings) || 1,
+          );
+          plannedItems.push({
+            meal_id: entry.meal_id,
+            name: entry.recipes.name ?? 'Unknown',
+            calories: Math.round(recipeMacros.calories * servings),
+            protein: Math.round(recipeMacros.protein * servings),
+            carbs: Math.round(recipeMacros.carbs * servings),
+            fat: Math.round(recipeMacros.fat * servings),
+          });
+        } else if (entry.products) {
+          plannedItems.push({
+            meal_id: entry.meal_id,
+            name: entry.products.name ?? 'Unknown',
+            calories: Math.round((Number(entry.products.calories_per_serving) || 0) * servings),
+            protein: Math.round((Number(entry.products.protein_per_serving) || 0) * servings),
+            carbs: Math.round((Number(entry.products.carbs_per_serving) || 0) * servings),
+            fat: Math.round((Number(entry.products.fat_per_serving) || 0) * servings),
+          });
+        }
+      }
+
+      return { macros, consumed: items, planned: plannedItems };
+    },
+    enabled: !!userId,
+  });
 
   /* ---------------------------------------------------------------- */
-  /*  Realtime subscriptions                                           */
+  /*  Realtime invalidation                                            */
   /* ---------------------------------------------------------------- */
 
-  useEffect(() => {
-    if (!userId) return;
-
-    const channel = supabase
-      .channel('macro-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'chefbyte',
-          table: 'food_logs',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
-          loadData();
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'chefbyte',
-          table: 'temp_items',
-          filter: `user_id=eq.${userId}`,
-        },
-        () => {
-          loadData();
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [userId, loadData]);
+  useRealtimeInvalidation('chef-macros', [
+    {
+      schema: 'chefbyte',
+      table: 'food_logs',
+      queryKeys: [queryKeys.dailyMacros(userId!, currentDate)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'temp_items',
+      queryKeys: [queryKeys.dailyMacros(userId!, currentDate)],
+    },
+  ]);
 
   /* ---------------------------------------------------------------- */
   /*  Date navigation                                                  */
@@ -299,7 +266,112 @@ export function MacroPage() {
   };
 
   /* ---------------------------------------------------------------- */
-  /*  Temp Item modal actions                                          */
+  /*  Mutations                                                        */
+  /* ---------------------------------------------------------------- */
+
+  const invalidateMacros = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.dailyMacros(userId!, currentDate) });
+  };
+
+  const deleteMutation = useMutation({
+    mutationFn: async (item: ConsumedItem) => {
+      if (item.source === 'LiquidTrack') return;
+
+      let error;
+      if (item.source === 'Meal Plan') {
+        ({ error } = await chefbyte().from('food_logs').delete().eq('log_id', item.id));
+      } else if (item.source === 'Temp Item') {
+        ({ error } = await chefbyte().from('temp_items').delete().eq('temp_id', item.id));
+      }
+
+      if (error) throw new Error(error.message);
+    },
+    onMutate: async (item) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.dailyMacros(userId!, currentDate) });
+      const previous = queryClient.getQueryData<MacroPageData>([
+        ...queryKeys.dailyMacros(userId!, currentDate),
+        'full',
+      ]);
+      if (previous) {
+        queryClient.setQueryData<MacroPageData>([...queryKeys.dailyMacros(userId!, currentDate), 'full'], {
+          ...previous,
+          consumed: previous.consumed.filter((c) => c.id !== item.id),
+        });
+      }
+      return { previous };
+    },
+    onError: (err: Error, _item, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData([...queryKeys.dailyMacros(userId!, currentDate), 'full'], context.previous);
+      }
+      setMutationError(err.message);
+    },
+    onSettled: () => invalidateMacros(),
+  });
+
+  const addTempMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !tempName.trim()) return;
+      const { error: err } = await chefbyte().from('temp_items').insert({
+        user_id: user.id,
+        name: tempName.trim(),
+        calories: tempCalories,
+        protein: tempProtein,
+        carbs: tempCarbs,
+        fat: tempFat,
+        logical_date: currentDate,
+      });
+      if (err) throw new Error(err.message);
+    },
+    onSuccess: () => {
+      setShowTempModal(false);
+      invalidateMacros();
+    },
+    onError: (err: Error) => setMutationError(err.message),
+  });
+
+  const saveTargetsMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) return;
+      const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat);
+      const keys = [
+        { key: 'goal_calories', value: String(calories) },
+        { key: 'goal_protein', value: String(targetProtein) },
+        { key: 'goal_carbs', value: String(targetCarbs) },
+        { key: 'goal_fat', value: String(targetFat) },
+      ];
+
+      // Parallelize all 4 upserts
+      const results = await Promise.all(
+        keys.map(({ key, value }) =>
+          chefbyte().from('user_config').upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' }),
+        ),
+      );
+
+      const firstError = results.find((r) => r.error);
+      if (firstError?.error) throw new Error(firstError.error.message);
+    },
+    onSuccess: () => {
+      setShowTargetModal(false);
+      invalidateMacros();
+    },
+    onError: (err: Error) => setMutationError(err.message),
+  });
+
+  const saveTasteMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) return;
+      const { error: err } = await chefbyte()
+        .from('user_config')
+        .upsert({ user_id: user.id, key: 'taste_profile', value: tasteProfile }, { onConflict: 'user_id,key' });
+      if (err) throw new Error(err.message);
+    },
+    onSuccess: () => setShowTasteModal(false),
+    onError: (err: Error) => setMutationError(err.message),
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  Modal open helpers                                               */
   /* ---------------------------------------------------------------- */
 
   const openTempModal = () => {
@@ -311,136 +383,45 @@ export function MacroPage() {
     setShowTempModal(true);
   };
 
-  const [mutationError, setMutationError] = useState<string | null>(null);
-
-  const saveTempItem = async () => {
-    if (!user || !tempName.trim()) return;
-    setMutationError(null);
-    const { error: err } = await chefbyte().from('temp_items').insert({
-      user_id: user.id,
-      name: tempName.trim(),
-      calories: tempCalories,
-      protein: tempProtein,
-      carbs: tempCarbs,
-      fat: tempFat,
-      logical_date: currentDate,
-    });
-    if (err) {
-      setMutationError(err.message);
-      return;
-    }
-    setShowTempModal(false);
-    await loadData();
-  };
-
-  /* ---------------------------------------------------------------- */
-  /*  Delete consumed item                                             */
-  /* ---------------------------------------------------------------- */
-
-  const deleteConsumedItem = async (item: ConsumedItem) => {
-    if (item.source === 'LiquidTrack') return; // IoT data, not user-deletable
-    setMutationError(null);
-
-    let error;
-    if (item.source === 'Meal Plan') {
-      ({ error } = await chefbyte().from('food_logs').delete().eq('log_id', item.id));
-    } else if (item.source === 'Temp Item') {
-      ({ error } = await chefbyte().from('temp_items').delete().eq('temp_id', item.id));
-    }
-
-    if (error) {
-      setMutationError(error.message);
-      return;
-    }
-
-    await loadData();
-  };
-
-  /* ---------------------------------------------------------------- */
-  /*  Target Macros modal actions                                      */
-  /* ---------------------------------------------------------------- */
-
   const openTargetModal = () => {
-    // Pre-fill from current goals if available
-    if (macros?.goals) {
-      setTargetProtein(macros.goals.protein || 0);
-      setTargetCarbs(macros.goals.carbs || 0);
-      setTargetFat(macros.goals.fat || 0);
+    if (data?.macros?.goals) {
+      setTargetProtein(data.macros.goals.protein || 0);
+      setTargetCarbs(data.macros.goals.carbs || 0);
+      setTargetFat(data.macros.goals.fat || 0);
     }
     setShowTargetModal(true);
   };
 
-  const saveTargets = async () => {
-    if (!user) return;
-    setMutationError(null);
-    const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat);
-
-    // Upsert each config key
-    const keys = [
-      { key: 'goal_calories', value: String(calories) },
-      { key: 'goal_protein', value: String(targetProtein) },
-      { key: 'goal_carbs', value: String(targetCarbs) },
-      { key: 'goal_fat', value: String(targetFat) },
-    ];
-
-    for (const { key, value } of keys) {
-      const { error: err } = await chefbyte()
-        .from('user_config')
-        .upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
-      if (err) {
-        setMutationError(err.message);
-        return;
-      }
-    }
-
-    setShowTargetModal(false);
-    await loadData();
-  };
-
-  /* ---------------------------------------------------------------- */
-  /*  Taste Profile modal actions                                      */
-  /* ---------------------------------------------------------------- */
-
   const openTasteModal = async () => {
     if (!user) return;
-    // Load current taste profile
-    const { data } = await chefbyte()
+    const { data: configData } = await chefbyte()
       .from('user_config')
       .select('value')
       .eq('user_id', user.id)
       .eq('key', 'taste_profile')
       .single();
-    setTasteProfile((data as any)?.value ?? '');
+    setTasteProfile((configData as any)?.value ?? '');
     setShowTasteModal(true);
-  };
-
-  const saveTasteProfile = async () => {
-    if (!user) return;
-    setMutationError(null);
-    const { error: err } = await chefbyte()
-      .from('user_config')
-      .upsert({ user_id: user.id, key: 'taste_profile', value: tasteProfile }, { onConflict: 'user_id,key' });
-    if (err) {
-      setMutationError(err.message);
-      return;
-    }
-    setShowTasteModal(false);
   };
 
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
 
-  if (loading) {
+  if (isLoading) {
     return (
       <ChefLayout title="Macros">
         <div className="p-5" data-testid="macro-loading">
-          Loading macros...
+          <MacroBarSkeleton />
+          <ListSkeleton count={4} />
         </div>
       </ChefLayout>
     );
   }
 
+  const macros = data?.macros ?? null;
+  const consumed = data?.consumed ?? [];
+  const planned = data?.planned ?? [];
   const consumedTotals = macros?.consumed ?? { calories: 0, protein: 0, carbs: 0, fat: 0 };
   const goals = macros?.goals ?? { ...DEFAULT_MACRO_GOALS };
 
@@ -452,10 +433,10 @@ export function MacroPage() {
       <h1 className="mt-2 mb-0 text-2xl font-bold text-slate-900">Macros</h1>
       {loadError && (
         <div className="border border-red-500 bg-red-50 rounded-lg p-4 mb-4" data-testid="load-error">
-          <p className="text-red-600 m-0 mb-2">Failed to load data: {loadError}</p>
+          <p className="text-red-600 m-0 mb-2">Failed to load data: {loadError.message}</p>
           <button
             className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
-            onClick={loadData}
+            onClick={() => invalidateMacros()}
           >
             Retry
           </button>
@@ -593,7 +574,7 @@ export function MacroPage() {
                       <button
                         className="text-red-500 hover:text-red-700 font-bold text-base bg-transparent border-none cursor-pointer shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center"
                         data-testid={`delete-consumed-${item.id}`}
-                        onClick={() => deleteConsumedItem(item)}
+                        onClick={() => deleteMutation.mutate(item)}
                         aria-label={`Remove ${item.name}`}
                       >
                         x
@@ -788,7 +769,7 @@ export function MacroPage() {
           </button>
           <button
             className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"
-            onClick={saveTempItem}
+            onClick={() => addTempMutation.mutate()}
             disabled={!tempName.trim()}
             data-testid="temp-save-btn"
           >
@@ -856,7 +837,7 @@ export function MacroPage() {
           </button>
           <button
             className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
-            onClick={saveTargets}
+            onClick={() => saveTargetsMutation.mutate()}
             data-testid="target-save-btn"
           >
             Save
@@ -894,7 +875,7 @@ export function MacroPage() {
           </button>
           <button
             className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
-            onClick={saveTasteProfile}
+            onClick={() => saveTasteMutation.mutate()}
             data-testid="taste-save-btn"
           >
             Save

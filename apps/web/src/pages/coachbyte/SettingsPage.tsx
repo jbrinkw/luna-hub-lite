@@ -1,11 +1,14 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { ListSkeleton } from '@/components/ui/Skeleton';
 import { SaveIndicator } from '@/components/ui/SaveIndicator';
 import { useSaveIndicator } from '@/hooks/useSaveIndicator';
+import { queryKeys } from '@/shared/queryKeys';
 
 interface UserSettings {
   default_rest_seconds: number;
@@ -23,57 +26,58 @@ const DEFAULT_PLATES = [45, 35, 25, 10, 5, 2.5];
 
 export function SettingsPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [settings, setSettings] = useState<UserSettings>({
     default_rest_seconds: 90,
     bar_weight_lbs: 45,
     available_plates: DEFAULT_PLATES,
   });
-  const [exercises, setExercises] = useState<Exercise[]>([]);
   const [searchText, setSearchText] = useState('');
   const [newExerciseName, setNewExerciseName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const { showSaved: settingsSaved, flash: flashSettings } = useSaveIndicator();
 
-  const loadSettings = useCallback(async () => {
-    if (!user) return;
+  // ── Settings query ──
+  const { isLoading: settingsLoading } = useQuery({
+    queryKey: queryKeys.coachSettings(user!.id),
+    queryFn: async () => {
+      const { data } = await supabase
+        .schema('coachbyte')
+        .from('user_settings')
+        .select('default_rest_seconds, bar_weight_lbs, available_plates')
+        .eq('user_id', user!.id)
+        .single();
 
-    const { data } = await supabase
-      .schema('coachbyte')
-      .from('user_settings')
-      .select('default_rest_seconds, bar_weight_lbs, available_plates')
-      .eq('user_id', user.id)
-      .single();
+      if (data) {
+        const s = {
+          default_rest_seconds: data.default_rest_seconds,
+          bar_weight_lbs: Number(data.bar_weight_lbs),
+          available_plates: (data.available_plates as number[]) ?? DEFAULT_PLATES,
+        };
+        setSettings(s);
+        return s;
+      }
+      return null;
+    },
+    enabled: !!user,
+  });
 
-    if (data) {
-      setSettings({
-        default_rest_seconds: data.default_rest_seconds,
-        bar_weight_lbs: Number(data.bar_weight_lbs),
-        available_plates: (data.available_plates as number[]) ?? DEFAULT_PLATES,
-      });
-    }
-    setLoading(false);
-  }, [user]);
+  // ── Exercises query ──
+  const { data: exercises = [], isLoading: exercisesLoading } = useQuery({
+    queryKey: queryKeys.exercises(user!.id),
+    queryFn: async (): Promise<Exercise[]> => {
+      const { data } = await supabase
+        .schema('coachbyte')
+        .from('exercises')
+        .select('exercise_id, name, user_id')
+        .or(`user_id.is.null,user_id.eq.${user!.id}`)
+        .order('name');
+      return (data ?? []) as Exercise[];
+    },
+    enabled: !!user,
+  });
 
-  const loadExercises = useCallback(async () => {
-    if (!user) return;
-
-    const { data } = await supabase
-      .schema('coachbyte')
-      .from('exercises')
-      .select('exercise_id, name, user_id')
-      .or(`user_id.is.null,user_id.eq.${user.id}`)
-      .order('name');
-
-    setExercises((data ?? []) as Exercise[]);
-  }, [user]);
-
-  useEffect(() => {
-    /* eslint-disable react-hooks/set-state-in-effect */
-    loadSettings();
-    loadExercises();
-    /* eslint-enable react-hooks/set-state-in-effect */
-  }, [loadSettings, loadExercises]);
+  const loading = settingsLoading || exercisesLoading;
 
   const saveSettings = async () => {
     if (!user) return;
@@ -94,36 +98,51 @@ export function SettingsPage() {
     }
   };
 
-  const addCustomExercise = async () => {
+  // ── Add exercise mutation ──
+  const addExerciseMutation = useMutation({
+    mutationFn: async (name: string) => {
+      const { error: insertErr } = await supabase
+        .schema('coachbyte')
+        .from('exercises')
+        .insert({ user_id: user!.id, name: name.trim() });
+      if (insertErr) throw insertErr;
+    },
+    onSuccess: () => {
+      setNewExerciseName('');
+      queryClient.invalidateQueries({ queryKey: queryKeys.exercises(user!.id) });
+    },
+    onError: (err: any) => {
+      setError(err.message);
+    },
+  });
+
+  const addCustomExercise = () => {
     if (!user || !newExerciseName.trim()) return;
     setError(null);
-
-    const { error: insertErr } = await supabase
-      .schema('coachbyte')
-      .from('exercises')
-      .insert({ user_id: user.id, name: newExerciseName.trim() });
-    if (insertErr) {
-      setError(insertErr.message);
-      return;
-    }
-
-    setNewExerciseName('');
-    await loadExercises();
+    addExerciseMutation.mutate(newExerciseName);
   };
 
-  const deleteExercise = async (exerciseId: string) => {
-    setError(null);
-    const { error: deleteErr } = await supabase
-      .schema('coachbyte')
-      .from('exercises')
-      .delete()
-      .eq('exercise_id', exerciseId);
-    if (deleteErr) {
-      setError(deleteErr.message);
-      return;
-    }
+  // ── Delete exercise mutation ──
+  const deleteExerciseMutation = useMutation({
+    mutationFn: async (exerciseId: string) => {
+      const { error: deleteErr } = await supabase
+        .schema('coachbyte')
+        .from('exercises')
+        .delete()
+        .eq('exercise_id', exerciseId);
+      if (deleteErr) throw deleteErr;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.exercises(user!.id) });
+    },
+    onError: (err: any) => {
+      setError(err.message);
+    },
+  });
 
-    await loadExercises();
+  const deleteExercise = (exerciseId: string) => {
+    setError(null);
+    deleteExerciseMutation.mutate(exerciseId);
   };
 
   const filteredExercises = searchText
@@ -133,9 +152,7 @@ export function SettingsPage() {
   if (loading) {
     return (
       <CoachLayout title="Settings">
-        <p className="text-slate-500 text-sm" data-testid="settings-loading">
-          Loading settings...
-        </p>
+        <ListSkeleton count={5} data-testid="settings-loading" />
       </CoachLayout>
     );
   }

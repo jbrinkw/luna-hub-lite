@@ -1,10 +1,14 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
+import { CardSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte, supabase, escapeIlike } from '@/shared/supabase';
+import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { toDateStr } from '@/shared/dates';
 import { computeRecipeMacros } from './RecipesPage';
+import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -72,6 +76,12 @@ interface SearchResult {
   type: 'recipe' | 'product';
 }
 
+interface MealPlanData {
+  meals: MealEntry[];
+  foodLogs: FoodLogEntry[];
+  tempItems: TempItemEntry[];
+}
+
 /* ------------------------------------------------------------------ */
 /*  Pure helpers (exported for testing)                                 */
 /* ------------------------------------------------------------------ */
@@ -114,9 +124,8 @@ function formatDateLong(dateStr: string, dayIndex: number): string {
 
 export function MealPlanPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
-  const [meals, setMeals] = useState<MealEntry[]>([]);
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   /* ---- Add meal modal state ---- */
@@ -130,99 +139,88 @@ export function MealPlanPage() {
   const [addMealType, setAddMealType] = useState<string | null>(null);
   const [addDate, setAddDate] = useState<string>('');
 
-  /* ---- Consumed items (food_logs + temp_items) ---- */
-  const [foodLogs, setFoodLogs] = useState<FoodLogEntry[]>([]);
-  const [tempItems, setTempItems] = useState<TempItemEntry[]>([]);
-
   /* ---- Two-click delete confirmation ---- */
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   const [error, setError] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------- */
-  /*  Data loading                                                     */
+  /*  Derived date range                                               */
   /* ---------------------------------------------------------------- */
 
   const userId = user?.id;
-
-  const loadMeals = useCallback(async () => {
-    if (!userId) return;
-
-    const startDate = toDateStr(weekStart);
-    const endDate = toDateStr(new Date(weekStart.getTime() + 6 * 86400000));
-
-    const [mealsRes, logRes, tempRes] = await Promise.all([
-      chefbyte()
-        .from('meal_plan_entries')
-        .select(
-          '*, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving)',
-        )
-        .eq('user_id', userId)
-        .gte('logical_date', startDate)
-        .lte('logical_date', endDate)
-        .order('created_at'),
-      chefbyte()
-        .from('food_logs')
-        .select('log_id, logical_date, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
-        .eq('user_id', userId)
-        .gte('logical_date', startDate)
-        .lte('logical_date', endDate)
-        .order('created_at'),
-      chefbyte()
-        .from('temp_items')
-        .select('temp_id, logical_date, name, calories, protein, carbs, fat')
-        .eq('user_id', userId)
-        .gte('logical_date', startDate)
-        .lte('logical_date', endDate)
-        .order('created_at'),
-    ]);
-
-    if (mealsRes.error) {
-      setError(mealsRes.error.message);
-      setLoading(false);
-      return;
-    }
-
-    setMeals((mealsRes.data ?? []) as MealEntry[]);
-    setFoodLogs((logRes.data ?? []) as FoodLogEntry[]);
-    setTempItems((tempRes.data ?? []) as TempItemEntry[]);
-    setLoading(false);
-  }, [userId, weekStart]);
-
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-
-    loadMeals();
-  }, [loadMeals]);
+  const startDate = toDateStr(weekStart);
+  const endDate = toDateStr(new Date(weekStart.getTime() + 6 * 86400000));
 
   /* ---------------------------------------------------------------- */
-  /*  Realtime subscriptions                                           */
+  /*  Data loading via useQuery                                        */
   /* ---------------------------------------------------------------- */
 
-  useEffect(() => {
-    if (!user) return;
-    const channel = supabase
-      .channel('mealplan-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'chefbyte', table: 'meal_plan_entries', filter: `user_id=eq.${user.id}` },
-        () => loadMeals(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'chefbyte', table: 'food_logs', filter: `user_id=eq.${user.id}` },
-        () => loadMeals(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'chefbyte', table: 'temp_items', filter: `user_id=eq.${user.id}` },
-        () => loadMeals(),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, loadMeals]);
+  const { data, isLoading } = useQuery({
+    queryKey: queryKeys.mealPlan(userId!, startDate),
+    queryFn: async (): Promise<MealPlanData> => {
+      const [mealsRes, logRes, tempRes] = await Promise.all([
+        chefbyte()
+          .from('meal_plan_entries')
+          .select(
+            '*, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving)',
+          )
+          .eq('user_id', userId!)
+          .gte('logical_date', startDate)
+          .lte('logical_date', endDate)
+          .order('created_at'),
+        chefbyte()
+          .from('food_logs')
+          .select('log_id, logical_date, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+          .eq('user_id', userId!)
+          .gte('logical_date', startDate)
+          .lte('logical_date', endDate)
+          .order('created_at'),
+        chefbyte()
+          .from('temp_items')
+          .select('temp_id, logical_date, name, calories, protein, carbs, fat')
+          .eq('user_id', userId!)
+          .gte('logical_date', startDate)
+          .lte('logical_date', endDate)
+          .order('created_at'),
+      ]);
+
+      if (mealsRes.error) throw new Error(mealsRes.error.message);
+
+      return {
+        meals: (mealsRes.data ?? []) as MealEntry[],
+        foodLogs: (logRes.data ?? []) as FoodLogEntry[],
+        tempItems: (tempRes.data ?? []) as TempItemEntry[],
+      };
+    },
+    enabled: !!userId,
+  });
+
+  const meals = data?.meals;
+  const foodLogs = data?.foodLogs;
+  const tempItems = data?.tempItems;
+
+  /* ---------------------------------------------------------------- */
+  /*  Realtime invalidation                                            */
+  /* ---------------------------------------------------------------- */
+
+  useRealtimeInvalidation('mealplan-changes', [
+    {
+      schema: 'chefbyte',
+      table: 'meal_plan_entries',
+      queryKeys: [queryKeys.mealPlan(userId!, startDate)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'food_logs',
+      queryKeys: [queryKeys.mealPlan(userId!, startDate)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'temp_items',
+      queryKeys: [queryKeys.mealPlan(userId!, startDate)],
+    },
+  ]);
 
   /* ---------------------------------------------------------------- */
   /*  Auto-select today on initial load                                */
@@ -231,17 +229,14 @@ export function MealPlanPage() {
   const todayStr = toDateStr(new Date());
 
   useEffect(() => {
-    if (!loading && selectedDay === null) {
-      // Auto-select today if it's in the current week
-      const startDate = toDateStr(weekStart);
-      const endDate = toDateStr(new Date(weekStart.getTime() + 6 * 86400000));
+    if (!isLoading && selectedDay === null) {
       if (todayStr >= startDate && todayStr <= endDate) {
         setSelectedDay(todayStr);
       }
     }
     // Only run when loading finishes, not on every todayStr change
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loading]);
+  }, [isLoading]);
 
   /* ---------------------------------------------------------------- */
   /*  Week navigation                                                  */
@@ -275,7 +270,7 @@ export function MealPlanPage() {
     for (const date of dayDates) {
       map.set(date, []);
     }
-    for (const meal of meals) {
+    for (const meal of meals ?? []) {
       const list = map.get(meal.logical_date);
       if (list) list.push(meal);
     }
@@ -298,12 +293,12 @@ export function MealPlanPage() {
 
   const selectedDayLogs = useMemo(() => {
     if (!selectedDay) return [];
-    return foodLogs.filter((l) => l.logical_date === selectedDay);
+    return (foodLogs ?? []).filter((l) => l.logical_date === selectedDay);
   }, [selectedDay, foodLogs]);
 
   const selectedDayTemps = useMemo(() => {
     if (!selectedDay) return [];
-    return tempItems.filter((t) => t.logical_date === selectedDay);
+    return (tempItems ?? []).filter((t) => t.logical_date === selectedDay);
   }, [selectedDay, tempItems]);
 
   /* ---------------------------------------------------------------- */
@@ -351,51 +346,97 @@ export function MealPlanPage() {
   };
 
   /* ---------------------------------------------------------------- */
-  /*  Actions                                                          */
+  /*  Invalidation helper                                              */
   /* ---------------------------------------------------------------- */
 
-  const markDone = async (mealId: string) => {
-    setError(null);
-    const { error: rpcErr } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
-    if (rpcErr) {
-      setError(rpcErr.message);
-      return;
-    }
-    await loadMeals();
+  const invalidateMealPlan = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.mealPlan(userId!, startDate) });
   };
 
-  const unmarkDone = async (mealId: string) => {
-    setError(null);
-    const { error: rpcErr } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
-    if (rpcErr) {
-      setError(rpcErr.message);
-      return;
-    }
-    await loadMeals();
-  };
+  /* ---------------------------------------------------------------- */
+  /*  Mutations                                                        */
+  /* ---------------------------------------------------------------- */
 
-  const deleteMeal = async (mealId: string) => {
-    setError(null);
-    const { error: deleteErr } = await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
-    if (deleteErr) {
-      setError(deleteErr.message);
-      return;
-    }
-    await loadMeals();
-  };
+  const markDoneMutation = useMutation({
+    mutationFn: async (mealId: string) => {
+      const { error: rpcErr } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
+      if (rpcErr) throw new Error(rpcErr.message);
+    },
+    onError: (err: Error) => setError(err.message),
+    onSettled: () => invalidateMealPlan(),
+  });
 
-  const toggleMealPrep = async (meal: MealEntry) => {
-    setError(null);
-    const { error: updateErr } = await chefbyte()
-      .from('meal_plan_entries')
-      .update({ meal_prep: !meal.meal_prep })
-      .eq('meal_id', meal.meal_id);
-    if (updateErr) {
-      setError(updateErr.message);
-      return;
-    }
-    await loadMeals();
-  };
+  const unmarkDoneMutation = useMutation({
+    mutationFn: async (mealId: string) => {
+      const { error: rpcErr } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
+      if (rpcErr) throw new Error(rpcErr.message);
+    },
+    onError: (err: Error) => setError(err.message),
+    onSettled: () => invalidateMealPlan(),
+  });
+
+  const deleteMealMutation = useMutation({
+    mutationFn: async (mealId: string) => {
+      const { error: deleteErr } = await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
+      if (deleteErr) throw new Error(deleteErr.message);
+    },
+    onMutate: async (mealId) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.mealPlan(userId!, startDate) });
+      const previous = queryClient.getQueryData<MealPlanData>(queryKeys.mealPlan(userId!, startDate));
+      if (previous) {
+        queryClient.setQueryData<MealPlanData>(queryKeys.mealPlan(userId!, startDate), {
+          ...previous,
+          meals: previous.meals.filter((m) => m.meal_id !== mealId),
+        });
+      }
+      return { previous };
+    },
+    onError: (err: Error, _mealId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.mealPlan(userId!, startDate), context.previous);
+      }
+      setError(err.message);
+    },
+    onSettled: () => invalidateMealPlan(),
+  });
+
+  const toggleMealPrepMutation = useMutation({
+    mutationFn: async (meal: MealEntry) => {
+      const { error: updateErr } = await chefbyte()
+        .from('meal_plan_entries')
+        .update({ meal_prep: !meal.meal_prep })
+        .eq('meal_id', meal.meal_id);
+      if (updateErr) throw new Error(updateErr.message);
+    },
+    onError: (err: Error) => setError(err.message),
+    onSettled: () => invalidateMealPlan(),
+  });
+
+  const addMealMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !addSelected || !addDate) return;
+      const { error: insertErr } = await chefbyte()
+        .from('meal_plan_entries')
+        .insert({
+          user_id: user.id,
+          recipe_id: addSelected.type === 'recipe' ? addSelected.id : null,
+          product_id: addSelected.type === 'product' ? addSelected.id : null,
+          logical_date: addDate,
+          servings: addServings,
+          meal_prep: addMealPrep,
+          meal_type: addMealType,
+        });
+      if (insertErr) throw new Error(insertErr.message);
+    },
+    onSuccess: () => {
+      if (!selectedDay) {
+        setSelectedDay(addDate);
+      }
+      setShowAddModal(false);
+    },
+    onError: (err: Error) => setError(err.message),
+    onSettled: () => invalidateMealPlan(),
+  });
 
   /* ---------------------------------------------------------------- */
   /*  Delete consumed items (two-click confirm)                        */
@@ -410,15 +451,21 @@ export function MealPlanPage() {
     }
   };
 
-  const deleteFoodLog = async (logId: string) => {
-    await chefbyte().from('food_logs').delete().eq('log_id', logId);
-    await loadMeals();
-  };
+  const deleteFoodLogMutation = useMutation({
+    mutationFn: async (logId: string) => {
+      const { error: err } = await chefbyte().from('food_logs').delete().eq('log_id', logId);
+      if (err) throw new Error(err.message);
+    },
+    onSettled: () => invalidateMealPlan(),
+  });
 
-  const deleteTempItem = async (tempId: string) => {
-    await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
-    await loadMeals();
-  };
+  const deleteTempItemMutation = useMutation({
+    mutationFn: async (tempId: string) => {
+      const { error: err } = await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
+      if (err) throw new Error(err.message);
+    },
+    onSettled: () => invalidateMealPlan(),
+  });
 
   /* ---------------------------------------------------------------- */
   /*  Add meal: search recipes + products                              */
@@ -498,35 +545,6 @@ export function MealPlanPage() {
     setShowAddModal(true);
   };
 
-  const addMeal = async () => {
-    if (!user || !addSelected || !addDate) return;
-
-    setError(null);
-    const { error: insertErr } = await chefbyte()
-      .from('meal_plan_entries')
-      .insert({
-        user_id: user.id,
-        recipe_id: addSelected.type === 'recipe' ? addSelected.id : null,
-        product_id: addSelected.type === 'product' ? addSelected.id : null,
-        logical_date: addDate,
-        servings: addServings,
-        meal_prep: addMealPrep,
-        meal_type: addMealType,
-      });
-    if (insertErr) {
-      setError(insertErr.message);
-      return;
-    }
-
-    // If the added date is in the current week and we don't have a day selected, select it
-    if (!selectedDay) {
-      setSelectedDay(addDate);
-    }
-
-    setShowAddModal(false);
-    await loadMeals();
-  };
-
   /* Helper: two-click delete button */
   const DeleteBtn = ({ id, onConfirm, testId }: { id: string; onConfirm: () => Promise<void>; testId: string }) => (
     <button
@@ -550,11 +568,13 @@ export function MealPlanPage() {
   /*  RENDER                                                           */
   /* ================================================================ */
 
-  if (loading) {
+  if (isLoading) {
     return (
       <ChefLayout title="Meal Plan">
-        <div className="p-5" data-testid="mealplan-loading">
-          Loading meal plan...
+        <div className="space-y-4 p-4" data-testid="mealplan-loading">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
         </div>
       </ChefLayout>
     );
@@ -814,7 +834,7 @@ export function MealPlanPage() {
                                     <input
                                       type="checkbox"
                                       checked={meal.meal_prep}
-                                      onChange={() => toggleMealPrep(meal)}
+                                      onChange={() => toggleMealPrepMutation.mutate(meal)}
                                       disabled={!!meal.completed_at}
                                       aria-label={`Toggle meal prep for ${entryName(meal)}`}
                                       data-testid={`toggle-prep-${meal.meal_id}`}
@@ -831,7 +851,7 @@ export function MealPlanPage() {
                               {!meal.completed_at ? (
                                 <>
                                   <button
-                                    onClick={() => markDone(meal.meal_id)}
+                                    onClick={() => markDoneMutation.mutate(meal.meal_id)}
                                     data-testid={`mark-done-${meal.meal_id}`}
                                     className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-green-700 transition-colors"
                                   >
@@ -839,7 +859,7 @@ export function MealPlanPage() {
                                   </button>
                                   {meal.meal_prep && (
                                     <button
-                                      onClick={() => markDone(meal.meal_id)}
+                                      onClick={() => markDoneMutation.mutate(meal.meal_id)}
                                       data-testid={`exec-prep-${meal.meal_id}`}
                                       className="px-3 py-1 bg-violet-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-violet-700 transition-colors"
                                     >
@@ -849,7 +869,7 @@ export function MealPlanPage() {
                                 </>
                               ) : (
                                 <button
-                                  onClick={() => unmarkDone(meal.meal_id)}
+                                  onClick={() => unmarkDoneMutation.mutate(meal.meal_id)}
                                   data-testid={`undo-done-${meal.meal_id}`}
                                   className="px-3 py-1 bg-white text-amber-500 border border-amber-500 rounded text-xs font-semibold whitespace-nowrap hover:bg-amber-50 transition-colors"
                                 >
@@ -858,7 +878,9 @@ export function MealPlanPage() {
                               )}
                               <DeleteBtn
                                 id={`meal-${meal.meal_id}`}
-                                onConfirm={() => deleteMeal(meal.meal_id)}
+                                onConfirm={async () => {
+                                  deleteMealMutation.mutate(meal.meal_id);
+                                }}
                                 testId={`delete-meal-${meal.meal_id}`}
                               />
                             </div>
@@ -910,7 +932,9 @@ export function MealPlanPage() {
                             </span>
                             <DeleteBtn
                               id={delId}
-                              onConfirm={() => deleteFoodLog(log.log_id)}
+                              onConfirm={async () => {
+                                deleteFoodLogMutation.mutate(log.log_id);
+                              }}
                               testId={`delete-log-${log.log_id}`}
                             />
                           </div>
@@ -936,7 +960,9 @@ export function MealPlanPage() {
                             </span>
                             <DeleteBtn
                               id={delId}
-                              onConfirm={() => deleteTempItem(item.temp_id)}
+                              onConfirm={async () => {
+                                deleteTempItemMutation.mutate(item.temp_id);
+                              }}
                               testId={`delete-temp-${item.temp_id}`}
                             />
                           </div>
@@ -1046,7 +1072,7 @@ export function MealPlanPage() {
             Cancel
           </button>
           <button
-            onClick={addMeal}
+            onClick={() => addMealMutation.mutate()}
             disabled={!addSelected}
             data-testid="add-meal-confirm"
             className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"

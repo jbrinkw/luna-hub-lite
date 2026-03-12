@@ -1,6 +1,9 @@
-import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useMemo, type ReactNode } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from './auth/AuthProvider';
 import { supabase } from './supabase';
+import { queryKeys } from './queryKeys';
+import { useRealtimeInvalidation } from './useRealtimeInvalidation';
 
 interface AppContextType {
   activations: Record<string, boolean>;
@@ -26,77 +29,59 @@ export function useAppContext() {
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const { user } = useAuth();
-  const [activations, setActivations] = useState<Record<string, boolean>>({});
-  const [activationsLoading, setActivationsLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [online, setOnline] = useState(navigator.onLine);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
-  const [dayStartHour, setDayStartHour] = useState(0);
-  const loadingRef = useRef(false);
 
-  const loadActivations = useCallback(async () => {
-    if (!user) {
-      setActivations({});
-      setActivationsLoading(false);
-      return;
-    }
-
-    // Deduplicate concurrent calls
-    if (loadingRef.current) return;
-    loadingRef.current = true;
-
-    try {
-      // Parallel fetch: activations + profile
-      const [activationsRes, profileRes] = await Promise.all([
-        supabase.schema('hub').from('app_activations').select('app_name').eq('user_id', user.id),
-        supabase.schema('hub').from('profiles').select('day_start_hour').eq('user_id', user.id).single(),
-      ]);
-
-      if (activationsRes.error) {
-        console.error('Failed to load activations:', activationsRes.error.message);
-      }
+  const { data: activations = {}, isLoading: activationsLoading } = useQuery({
+    queryKey: queryKeys.activations(user?.id ?? ''),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .schema('hub')
+        .from('app_activations')
+        .select('app_name')
+        .eq('user_id', user!.id);
+      if (error) throw error;
       const map: Record<string, boolean> = {};
-      (activationsRes.data || []).forEach((row: any) => {
+      (data || []).forEach((row: any) => {
         map[row.app_name] = true;
       });
-      setActivations(map);
-      setActivationsLoading(false);
       setLastSynced(new Date());
+      return map;
+    },
+    enabled: !!user,
+  });
 
-      if (profileRes.data?.day_start_hour != null) {
-        setDayStartHour(profileRes.data.day_start_hour);
-      }
-    } finally {
-      loadingRef.current = false;
-    }
-  }, [user]);
+  const { data: dayStartHour = 0 } = useQuery({
+    queryKey: queryKeys.profile(user?.id ?? ''),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .schema('hub')
+        .from('profiles')
+        .select('day_start_hour')
+        .eq('user_id', user!.id)
+        .single();
+      if (error) throw error;
+      return data?.day_start_hour ?? 0;
+    },
+    enabled: !!user,
+    staleTime: 10 * 60 * 1000,
+  });
 
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-
-    loadActivations();
-  }, [loadActivations]);
-
-  // Realtime subscription for activation changes
-  useEffect(() => {
-    if (!user) return;
-    const channel = supabase
-      .channel('app-activations')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'hub', table: 'app_activations', filter: `user_id=eq.${user.id}` },
-        () => loadActivations(),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, loadActivations]);
+  // Realtime invalidation for activation changes
+  useRealtimeInvalidation('app-activations', [
+    {
+      schema: 'hub',
+      table: 'app_activations',
+      queryKeys: [queryKeys.activations(user?.id ?? '')],
+    },
+  ]);
 
   // Online/offline detection
   useEffect(() => {
     const goOnline = () => {
       setOnline(true);
-      loadActivations();
+      queryClient.invalidateQueries({ queryKey: queryKeys.activations(user?.id ?? '') });
     };
     const goOffline = () => setOnline(false);
     window.addEventListener('online', goOnline);
@@ -105,13 +90,19 @@ export function AppProvider({ children }: { children: ReactNode }) {
       window.removeEventListener('online', goOnline);
       window.removeEventListener('offline', goOffline);
     };
-  }, [loadActivations]);
+  }, [user, queryClient]);
 
-  return (
-    <AppContext.Provider
-      value={{ activations, activationsLoading, online, lastSynced, dayStartHour, refreshActivations: loadActivations }}
-    >
-      {children}
-    </AppContext.Provider>
+  const refreshActivations = useMemo(
+    () => async () => {
+      await queryClient.invalidateQueries({ queryKey: queryKeys.activations(user?.id ?? '') });
+    },
+    [user, queryClient],
   );
+
+  const value = useMemo(
+    () => ({ activations, activationsLoading, online, lastSynced, dayStartHour, refreshActivations }),
+    [activations, activationsLoading, online, lastSynced, dayStartHour, refreshActivations],
+  );
+
+  return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

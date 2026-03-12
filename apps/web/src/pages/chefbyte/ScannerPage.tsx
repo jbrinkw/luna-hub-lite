@@ -1,9 +1,11 @@
 import { useState, useRef, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
+import { queryKeys } from '@/shared/queryKeys';
 import { useScannerDetection } from '@/hooks/useScannerDetection';
 
 /* ------------------------------------------------------------------ */
@@ -91,7 +93,24 @@ export function autoScaleNutrition(
 export function ScannerPage() {
   const { user } = useAuth();
   const { dayStartHour } = useAppContext();
+  const queryClient = useQueryClient();
   const barcodeRef = useRef<HTMLInputElement>(null);
+
+  // Cache default location to avoid re-fetching on every scan
+  const { data: defaultLocationId } = useQuery({
+    queryKey: queryKeys.locations(user?.id ?? ''),
+    queryFn: async () => {
+      const { data } = await chefbyte()
+        .from('locations')
+        .select('location_id')
+        .eq('user_id', user!.id)
+        .order('created_at')
+        .limit(1);
+      return (data?.[0] as any)?.location_id ?? null;
+    },
+    enabled: !!user,
+    staleTime: 5 * 60 * 1000,
+  });
 
   /* ---- Mode & queue ---- */
   const [mode, setMode] = useState<ScanMode>('purchase');
@@ -353,6 +372,7 @@ export function ScannerPage() {
         );
       }
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- executeAction is stable (only uses user + defaultLocationId, both in outer scope)
     [user, mode, screenValue, unit, nutrition],
   );
 
@@ -374,14 +394,7 @@ export function ScannerPage() {
 
     switch (actionMode) {
       case 'purchase': {
-        // Get default location for stock lot
-        const { data: locs } = await chefbyte()
-          .from('locations')
-          .select('location_id')
-          .eq('user_id', user.id)
-          .order('created_at')
-          .limit(1);
-        const locId = (locs?.[0] as any)?.location_id;
+        const locId = defaultLocationId;
         if (!locId) break; // No locations — can't add stock
 
         // Check for existing lot with same merge key (product + location + no expiry)
@@ -444,14 +457,7 @@ export function ScannerPage() {
           p_logical_date: logicalDate,
         });
 
-        // Get the default location so undo can re-add stock
-        const { data: purchLocs } = await chefbyte()
-          .from('locations')
-          .select('location_id')
-          .eq('user_id', user.id)
-          .order('created_at')
-          .limit(1);
-        const defaultLocId = (purchLocs?.[0] as any)?.location_id;
+        const defaultLocId = defaultLocationId;
 
         // Compute qty_containers for undo re-add
         const spc = product.servings_per_container ?? 1;
@@ -486,14 +492,7 @@ export function ScannerPage() {
           p_logical_date: todayStr(dayStartHour),
         });
 
-        // Get the default location so undo can re-add stock
-        const { data: cLocs } = await chefbyte()
-          .from('locations')
-          .select('location_id')
-          .eq('user_id', user.id)
-          .order('created_at')
-          .limit(1);
-        const cLocId = (cLocs?.[0] as any)?.location_id;
+        const cLocId = defaultLocationId;
 
         const cSpc = product.servings_per_container ?? 1;
         const cQtyContainers = unitType === 'serving' ? qty / Math.max(cSpc, 0.001) : qty;
@@ -516,9 +515,14 @@ export function ScannerPage() {
           })
           .select('cart_item_id')
           .single();
+        // Invalidate shopping list cache
+        queryClient.invalidateQueries({ queryKey: queryKeys.shoppingList(user.id) });
         return newCartItem ? { type: 'shopping', recordId: (newCartItem as any).cart_item_id } : undefined;
       }
     }
+    // Invalidate stock + product caches after purchase/consume actions
+    queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user.id) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.products(user.id) });
     return undefined;
   };
 

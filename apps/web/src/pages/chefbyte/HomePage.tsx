@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import {
   ChefHat,
@@ -15,12 +16,13 @@ import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
-import { chefbyte, supabase } from '@/shared/supabase';
+import { chefbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { calcCaloriesFromMacros } from '@/pages/chefbyte/MacroPage';
 import { computeRecipeMacros, computeStockStatus, type StockStatus } from '@/pages/chefbyte/RecipesPage';
 import { CardSkeleton, MacroBarSkeleton, ListSkeleton } from '@/components/SkeletonScreen';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -105,6 +107,19 @@ interface MealEntry {
   } | null;
 }
 
+interface HomePageData {
+  missingPrices: number;
+  placeholders: number;
+  belowMinStock: number;
+  cartValue: number;
+  macros: MacroTotals | null;
+  mealPrep: MealPrepEntry[];
+  todaysMeals: MealEntry[];
+  foodLogs: FoodLogEntry[];
+  tempItems: TempItemEntry[];
+  stockByProduct: Map<string, number>;
+}
+
 /* ------------------------------------------------------------------ */
 /*  Pure helpers (exported for testing)                                 */
 /* ------------------------------------------------------------------ */
@@ -145,30 +160,8 @@ export function computeMealEntryMacros(
 export function HomePage() {
   const { user } = useAuth();
   const { dayStartHour } = useAppContext();
+  const queryClient = useQueryClient();
   const userId = user?.id;
-
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  /* ---- Status cards ---- */
-  const [missingPrices, setMissingPrices] = useState(0);
-  const [placeholders, setPlaceholders] = useState(0);
-  const [belowMinStock, setBelowMinStock] = useState(0);
-  const [cartValue, setCartValue] = useState(0);
-
-  /* ---- Macro summary ---- */
-  const [macros, setMacros] = useState<MacroTotals | null>(null);
-
-  /* ---- Today's meal prep ---- */
-  const [mealPrep, setMealPrep] = useState<MealPrepEntry[]>([]);
-
-  /* ---- Today's meals (non-prep) ---- */
-  const [todaysMeals, setTodaysMeals] = useState<MealEntry[]>([]);
-  const [stockByProduct, setStockByProduct] = useState<Map<string, number>>(new Map());
-
-  /* ---- Consumed items (food_logs + temp_items) ---- */
-  const [foodLogs, setFoodLogs] = useState<FoodLogEntry[]>([]);
-  const [tempItems, setTempItems] = useState<TempItemEntry[]>([]);
 
   /* ---- Consumed meal expand/collapse ---- */
   const [expandedMeals, setExpandedMeals] = useState<Set<string>>(new Set());
@@ -186,198 +179,194 @@ export function HomePage() {
   const [showTasteModal, setShowTasteModal] = useState(false);
   const [tasteProfile, setTasteProfile] = useState('');
 
+  const [mutationError, setMutationError] = useState<string | null>(null);
+
+  /* ---- Meal Plan -> Cart ---- */
+  const [syncing, setSyncing] = useState(false);
+
+  /* ---- Prep confirm ---- */
+  const [confirmPrepId, setConfirmPrepId] = useState<string | null>(null);
+
   /* ---------------------------------------------------------------- */
-  /*  Data loading                                                     */
+  /*  Data loading via useQuery                                        */
   /* ---------------------------------------------------------------- */
 
   const today = todayStr(dayStartHour);
 
-  const loadData = useCallback(async () => {
-    if (!userId) return;
-    setLoadError(null);
+  // Use a stable composite key for all homepage data
+  const homeQueryKey = ['chef-home', userId, today] as const;
 
-    // Fire all independent queries in parallel
-    const [mpRes, phRes, spRes, cartRes, macroRes, prepRes, mealsRes, logRes, tempRes, stockRes] = await Promise.all([
+  const {
+    data,
+    isLoading,
+    error: loadError,
+  } = useQuery({
+    queryKey: [...homeQueryKey],
+    queryFn: async (): Promise<HomePageData> => {
+      // Fire all independent queries in parallel
+      const [mpRes, phRes, spRes, cartRes, macroRes, prepRes, mealsRes, logRes, tempRes, stockRes] = await Promise.all([
+        // 1. Missing prices
+        chefbyte()
+          .from('products')
+          .select('product_id')
+          .eq('user_id', userId!)
+          .is('price', null)
+          .not('name', 'ilike', '[MEAL]%'),
+        // 2. Placeholders
+        chefbyte().from('products').select('product_id').eq('user_id', userId!).eq('is_placeholder', true),
+        // 3. Products with min_stock
+        chefbyte()
+          .from('products')
+          .select('product_id, min_stock_amount')
+          .eq('user_id', userId!)
+          .gt('min_stock_amount', 0),
+        // 4. Cart value
+        chefbyte().from('shopping_list').select('qty_containers, products:product_id(price)').eq('user_id', userId!),
+        // 5. Macro summary
+        (chefbyte() as any).rpc('get_daily_macros', { p_logical_date: today }),
+        // 6. Meal prep
+        chefbyte()
+          .from('meal_plan_entries')
+          .select('meal_id, servings, recipes:recipe_id(name), products:product_id(name)')
+          .eq('user_id', userId!)
+          .eq('logical_date', today)
+          .eq('meal_prep', true)
+          .is('completed_at', null),
+        // 7. Today's meals
+        chefbyte()
+          .from('meal_plan_entries')
+          .select(
+            'meal_id, servings, meal_type, completed_at, product_id, recipes:recipe_id(name, base_servings, recipe_ingredients(product_id, quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container)',
+          )
+          .eq('user_id', userId!)
+          .eq('logical_date', today)
+          .eq('meal_prep', false),
+        // 8. Food logs
+        chefbyte()
+          .from('food_logs')
+          .select(
+            'log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
+          )
+          .eq('user_id', userId!)
+          .eq('logical_date', today),
+        // 9. Temp items
+        chefbyte()
+          .from('temp_items')
+          .select('temp_id, name, calories, protein, carbs, fat')
+          .eq('user_id', userId!)
+          .eq('logical_date', today),
+        // 10. All stock lots
+        chefbyte().from('stock_lots').select('product_id, qty_containers').eq('user_id', userId!),
+      ]);
+
+      // Check for errors
+      const firstError = [mpRes, phRes, spRes, cartRes, macroRes, prepRes, mealsRes, logRes, tempRes, stockRes].find(
+        (r) => r.error,
+      );
+      if (firstError?.error) throw new Error(firstError.error.message);
+
       // 1. Missing prices
-      chefbyte()
-        .from('products')
-        .select('product_id')
-        .eq('user_id', userId)
-        .is('price', null)
-        .not('name', 'ilike', '[MEAL]%'),
+      const missingPrices = (mpRes.data ?? []).length;
+
       // 2. Placeholders
-      chefbyte().from('products').select('product_id').eq('user_id', userId).eq('is_placeholder', true),
-      // 3. Products with min_stock
-      chefbyte()
-        .from('products')
-        .select('product_id, min_stock_amount')
-        .eq('user_id', userId)
-        .gt('min_stock_amount', 0),
-      // 4. Cart value
-      chefbyte().from('shopping_list').select('qty_containers, products:product_id(price)').eq('user_id', userId),
-      // 5. Macro summary
-      (chefbyte() as any).rpc('get_daily_macros', { p_logical_date: today }),
-      // 6. Meal prep
-      chefbyte()
-        .from('meal_plan_entries')
-        .select('meal_id, servings, recipes:recipe_id(name), products:product_id(name)')
-        .eq('user_id', userId)
-        .eq('logical_date', today)
-        .eq('meal_prep', true)
-        .is('completed_at', null),
-      // 7. Today's meals
-      chefbyte()
-        .from('meal_plan_entries')
-        .select(
-          'meal_id, servings, meal_type, completed_at, product_id, recipes:recipe_id(name, base_servings, recipe_ingredients(product_id, quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container)',
-        )
-        .eq('user_id', userId)
-        .eq('logical_date', today)
-        .eq('meal_prep', false),
-      // 8. Food logs
-      chefbyte()
-        .from('food_logs')
-        .select(
-          'log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
-        )
-        .eq('user_id', userId)
-        .eq('logical_date', today),
-      // 9. Temp items
-      chefbyte()
-        .from('temp_items')
-        .select('temp_id, name, calories, protein, carbs, fat')
-        .eq('user_id', userId)
-        .eq('logical_date', today),
-      // 10. All stock lots
-      chefbyte().from('stock_lots').select('product_id, qty_containers').eq('user_id', userId),
-    ]);
+      const placeholders = (phRes.data ?? []).length;
 
-    // Check for errors
-    const firstError = [mpRes, phRes, spRes, cartRes, macroRes, prepRes, mealsRes, logRes, tempRes, stockRes].find(
-      (r) => r.error,
-    );
-    if (firstError?.error) {
-      setLoadError(firstError.error.message);
-      return;
-    }
+      // 3. Below min stock
+      const spArr = (spRes.data ?? []) as any[];
+      let belowCount = 0;
+      const stockMap = new Map<string, number>();
 
-    // 1. Missing prices
-    setMissingPrices((mpRes.data ?? []).length);
-
-    // 2. Placeholders
-    setPlaceholders((phRes.data ?? []).length);
-
-    // 3. Below min stock — compare products with min_stock against stock lots
-    const spArr = (spRes.data ?? []) as any[];
-    let belowCount = 0;
-    if (spArr.length > 0) {
-      const minStockIds = new Set(spArr.map((p: any) => p.product_id));
-      const stockByProduct = new Map<string, number>();
+      // Build stock map first (needed for both below-min-stock and meal stock status)
       for (const lot of (stockRes.data ?? []) as any[]) {
-        if (!minStockIds.has(lot.product_id)) continue;
-        const current = stockByProduct.get(lot.product_id) ?? 0;
-        stockByProduct.set(lot.product_id, current + Number(lot.qty_containers));
+        const cur = stockMap.get(lot.product_id) ?? 0;
+        stockMap.set(lot.product_id, cur + Number(lot.qty_containers));
       }
-      for (const p of spArr) {
-        const totalStock = stockByProduct.get(p.product_id) ?? 0;
-        if (totalStock < Number(p.min_stock_amount)) belowCount++;
+
+      if (spArr.length > 0) {
+        const minStockIds = new Set(spArr.map((p: any) => p.product_id));
+        const stockByMinProduct = new Map<string, number>();
+        for (const lot of (stockRes.data ?? []) as any[]) {
+          if (!minStockIds.has(lot.product_id)) continue;
+          const current = stockByMinProduct.get(lot.product_id) ?? 0;
+          stockByMinProduct.set(lot.product_id, current + Number(lot.qty_containers));
+        }
+        for (const p of spArr) {
+          const totalStock = stockByMinProduct.get(p.product_id) ?? 0;
+          if (totalStock < Number(p.min_stock_amount)) belowCount++;
+        }
       }
-    }
-    setBelowMinStock(belowCount);
 
-    // 4. Cart value
-    const total = (cartRes.data ?? []).reduce((sum: number, item: any) => {
-      const price = Number(item.products?.price ?? 0);
-      const qty = Number(item.qty_containers ?? 0);
-      return sum + price * qty;
-    }, 0);
-    setCartValue(total);
+      // 4. Cart value
+      const cartValue = (cartRes.data ?? []).reduce((sum: number, item: any) => {
+        const price = Number(item.products?.price ?? 0);
+        const qty = Number(item.qty_containers ?? 0);
+        return sum + price * qty;
+      }, 0);
 
-    // 5. Macros
-    if (macroRes.data) {
-      const rpc = macroRes.data as Record<string, { consumed: number; goal: number; remaining: number }>;
-      setMacros({
-        consumed: {
-          calories: Number(rpc.calories?.consumed) || 0,
-          protein: Number(rpc.protein?.consumed) || 0,
-          carbs: Number(rpc.carbs?.consumed) || 0,
-          fat: Number(rpc.fat?.consumed) || 0,
-        },
-        goals: {
-          calories: Number(rpc.calories?.goal) || 0,
-          protein: Number(rpc.protein?.goal) || 0,
-          carbs: Number(rpc.carbs?.goal) || 0,
-          fat: Number(rpc.fat?.goal) || 0,
-        },
-      });
-    } else {
-      setMacros(null);
-    }
+      // 5. Macros
+      let macros: MacroTotals | null = null;
+      if (macroRes.data) {
+        const rpc = macroRes.data as Record<string, { consumed: number; goal: number; remaining: number }>;
+        macros = {
+          consumed: {
+            calories: Number(rpc.calories?.consumed) || 0,
+            protein: Number(rpc.protein?.consumed) || 0,
+            carbs: Number(rpc.carbs?.consumed) || 0,
+            fat: Number(rpc.fat?.consumed) || 0,
+          },
+          goals: {
+            calories: Number(rpc.calories?.goal) || 0,
+            protein: Number(rpc.protein?.goal) || 0,
+            carbs: Number(rpc.carbs?.goal) || 0,
+            fat: Number(rpc.fat?.goal) || 0,
+          },
+        };
+      }
 
-    // 6-10. Set remaining state
-    setMealPrep((prepRes.data ?? []) as MealPrepEntry[]);
-    setTodaysMeals((mealsRes.data ?? []) as MealEntry[]);
-    setFoodLogs((logRes.data ?? []) as FoodLogEntry[]);
-    setTempItems((tempRes.data ?? []) as TempItemEntry[]);
-
-    const stockMap = new Map<string, number>();
-    for (const lot of (stockRes.data ?? []) as any[]) {
-      const cur = stockMap.get(lot.product_id) ?? 0;
-      stockMap.set(lot.product_id, cur + Number(lot.qty_containers));
-    }
-    setStockByProduct(stockMap);
-
-    setLoading(false);
-  }, [userId, today]);
-
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-
-    loadData();
-  }, [loadData]);
+      return {
+        missingPrices,
+        placeholders,
+        belowMinStock: belowCount,
+        cartValue,
+        macros,
+        mealPrep: (prepRes.data ?? []) as MealPrepEntry[],
+        todaysMeals: (mealsRes.data ?? []) as MealEntry[],
+        foodLogs: (logRes.data ?? []) as FoodLogEntry[],
+        tempItems: (tempRes.data ?? []) as TempItemEntry[],
+        stockByProduct: stockMap,
+      };
+    },
+    enabled: !!userId,
+  });
 
   /* ---------------------------------------------------------------- */
-  /*  Realtime subscriptions                                           */
+  /*  Realtime invalidation                                            */
   /* ---------------------------------------------------------------- */
 
-  useEffect(() => {
-    if (!user) return;
-    const channel = supabase
-      .channel('home-changes')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'chefbyte', table: 'meal_plan_entries', filter: `user_id=eq.${user.id}` },
-        () => loadData(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'chefbyte', table: 'food_logs', filter: `user_id=eq.${user.id}` },
-        () => loadData(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'chefbyte', table: 'temp_items', filter: `user_id=eq.${user.id}` },
-        () => loadData(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'chefbyte', table: 'stock_lots', filter: `user_id=eq.${user.id}` },
-        () => loadData(),
-      )
-      .subscribe();
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, loadData]);
+  useRealtimeInvalidation('chef-home', [
+    { schema: 'chefbyte', table: 'food_logs', queryKeys: [homeQueryKey] },
+    { schema: 'chefbyte', table: 'temp_items', queryKeys: [homeQueryKey] },
+    { schema: 'chefbyte', table: 'stock_lots', queryKeys: [homeQueryKey] },
+    { schema: 'chefbyte', table: 'meal_plan_entries', queryKeys: [homeQueryKey] },
+    { schema: 'chefbyte', table: 'shopping_list', queryKeys: [homeQueryKey] },
+  ]);
 
-  // Re-load on tab focus to catch midnight date changes
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadData();
-    };
-    document.addEventListener('visibilitychange', onVisibility);
-    return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [loadData]);
+  const invalidateHome = () => queryClient.invalidateQueries({ queryKey: homeQueryKey });
+
+  /* ---------------------------------------------------------------- */
+  /*  Extract data from query result                                   */
+  /* ---------------------------------------------------------------- */
+
+  const missingPrices = data?.missingPrices ?? 0;
+  const placeholders = data?.placeholders ?? 0;
+  const belowMinStock = data?.belowMinStock ?? 0;
+  const cartValue = data?.cartValue ?? 0;
+  const macros = data?.macros ?? null;
+  const mealPrep = data?.mealPrep ?? [];
+  const todaysMeals = data?.todaysMeals ?? [];
+  const foodLogs = data?.foodLogs ?? [];
+  const tempItems = data?.tempItems ?? [];
+  const stockByProduct = data?.stockByProduct ?? new Map<string, number>();
 
   /* ---------------------------------------------------------------- */
   /*  Target Macros modal actions                                      */
@@ -392,27 +381,30 @@ export function HomePage() {
     setShowTargetModal(true);
   };
 
-  const saveTargets = async () => {
-    if (!user) return;
-    const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat);
-    const keys = [
-      { key: 'goal_calories', value: String(calories) },
-      { key: 'goal_protein', value: String(targetProtein) },
-      { key: 'goal_carbs', value: String(targetCarbs) },
-      { key: 'goal_fat', value: String(targetFat) },
-    ];
-    for (const { key, value } of keys) {
-      const { error } = await chefbyte()
-        .from('user_config')
-        .upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' });
-      if (error) {
-        setLoadError(error.message);
-        return;
-      }
-    }
-    setShowTargetModal(false);
-    await loadData();
-  };
+  const saveTargetsMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) return;
+      const calories = calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat);
+      const keys = [
+        { key: 'goal_calories', value: String(calories) },
+        { key: 'goal_protein', value: String(targetProtein) },
+        { key: 'goal_carbs', value: String(targetCarbs) },
+        { key: 'goal_fat', value: String(targetFat) },
+      ];
+      const results = await Promise.all(
+        keys.map(({ key, value }) =>
+          chefbyte().from('user_config').upsert({ user_id: user.id, key, value }, { onConflict: 'user_id,key' }),
+        ),
+      );
+      const firstError = results.find((r) => r.error);
+      if (firstError?.error) throw new Error(firstError.error.message);
+    },
+    onSuccess: () => {
+      setShowTargetModal(false);
+      invalidateHome();
+    },
+    onError: (err: Error) => setMutationError(err.message),
+  });
 
   /* ---------------------------------------------------------------- */
   /*  Taste Profile modal actions                                      */
@@ -420,110 +412,110 @@ export function HomePage() {
 
   const openTasteModal = async () => {
     if (!user) return;
-    const { data } = await chefbyte()
+    const { data: configData } = await chefbyte()
       .from('user_config')
       .select('value')
       .eq('user_id', user.id)
       .eq('key', 'taste_profile')
       .single();
-    setTasteProfile((data as any)?.value ?? '');
+    setTasteProfile((configData as any)?.value ?? '');
     setShowTasteModal(true);
   };
 
-  const saveTasteProfile = async () => {
-    if (!user) return;
-    const { error } = await chefbyte()
-      .from('user_config')
-      .upsert({ user_id: user.id, key: 'taste_profile', value: tasteProfile }, { onConflict: 'user_id,key' });
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    setShowTasteModal(false);
-  };
+  const saveTasteMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) return;
+      const { error } = await chefbyte()
+        .from('user_config')
+        .upsert({ user_id: user.id, key: 'taste_profile', value: tasteProfile }, { onConflict: 'user_id,key' });
+      if (error) throw new Error(error.message);
+    },
+    onSuccess: () => setShowTasteModal(false),
+    onError: (err: Error) => setMutationError(err.message),
+  });
 
   /* ---------------------------------------------------------------- */
   /*  Quick actions                                                    */
   /* ---------------------------------------------------------------- */
 
-  const importShopping = async () => {
-    if (!user) return;
+  const importShoppingMutation = useMutation({
+    mutationFn: async () => {
+      if (!user) return;
 
-    // Get user's default location (first by created_at)
-    const { data: locations } = await chefbyte()
-      .from('locations')
-      .select('location_id')
-      .eq('user_id', user.id)
-      .order('created_at')
-      .limit(1);
-    const defaultLocationId = (locations?.[0] as any)?.location_id;
-    if (!defaultLocationId) return; // No locations -- can't import
+      // Get user's default location (first by created_at)
+      const { data: locations } = await chefbyte()
+        .from('locations')
+        .select('location_id')
+        .eq('user_id', user.id)
+        .order('created_at')
+        .limit(1);
+      const defaultLocationId = (locations?.[0] as any)?.location_id;
+      if (!defaultLocationId) return; // No locations -- can't import
 
-    // Get non-placeholder items from shopping list
-    const { data: items } = await chefbyte()
-      .from('shopping_list')
-      .select('*, products:product_id(is_placeholder)')
-      .eq('user_id', user.id)
-      .eq('purchased', true);
+      // Get non-placeholder items from shopping list
+      const { data: items } = await chefbyte()
+        .from('shopping_list')
+        .select('*, products:product_id(is_placeholder)')
+        .eq('user_id', user.id)
+        .eq('purchased', true);
 
-    const validItems = ((items ?? []) as any[]).filter((item) => !item.products?.is_placeholder);
-    if (validItems.length > 0) {
-      // Merge stock lots: check for existing lot per item, increment qty or insert new
-      let stockError = false;
-      for (const item of validItems) {
-        const { data: existingLot } = await chefbyte()
-          .from('stock_lots')
-          .select('lot_id, qty_containers')
-          .eq('user_id', user.id)
-          .eq('product_id', item.product_id)
-          .eq('location_id', defaultLocationId)
-          .is('expires_on', null)
-          .single();
-
-        if (existingLot) {
-          const { error: updateErr } = await chefbyte()
+      const validItems = ((items ?? []) as any[]).filter((item) => !item.products?.is_placeholder);
+      if (validItems.length > 0) {
+        // Merge stock lots: check for existing lot per item, increment qty or insert new
+        let stockError = false;
+        for (const item of validItems) {
+          const { data: existingLot } = await chefbyte()
             .from('stock_lots')
-            .update({ qty_containers: Number((existingLot as any).qty_containers) + Number(item.qty_containers) })
-            .eq('lot_id', (existingLot as any).lot_id);
-          if (updateErr) {
-            stockError = true;
-            break;
-          }
-        } else {
-          const { error: insertErr } = await chefbyte()
-            .from('stock_lots')
-            .insert({
-              user_id: user.id,
-              product_id: item.product_id,
-              qty_containers: Number(item.qty_containers),
-              location_id: defaultLocationId,
-            });
-          if (insertErr) {
-            stockError = true;
-            break;
+            .select('lot_id, qty_containers')
+            .eq('user_id', user.id)
+            .eq('product_id', item.product_id)
+            .eq('location_id', defaultLocationId)
+            .is('expires_on', null)
+            .single();
+
+          if (existingLot) {
+            const { error: updateErr } = await chefbyte()
+              .from('stock_lots')
+              .update({ qty_containers: Number((existingLot as any).qty_containers) + Number(item.qty_containers) })
+              .eq('lot_id', (existingLot as any).lot_id);
+            if (updateErr) {
+              stockError = true;
+              break;
+            }
+          } else {
+            const { error: insertErr } = await chefbyte()
+              .from('stock_lots')
+              .insert({
+                user_id: user.id,
+                product_id: item.product_id,
+                qty_containers: Number(item.qty_containers),
+                location_id: defaultLocationId,
+              });
+            if (insertErr) {
+              stockError = true;
+              break;
+            }
           }
         }
-      }
 
-      // Only delete shopping items if all stock operations succeeded
-      if (!stockError) {
-        const cartIds = validItems.map((item: any) => item.cart_item_id);
-        await chefbyte().from('shopping_list').delete().in('cart_item_id', cartIds);
+        // Only delete shopping items if all stock operations succeeded
+        if (!stockError) {
+          const cartIds = validItems.map((item: any) => item.cart_item_id);
+          await chefbyte().from('shopping_list').delete().in('cart_item_id', cartIds);
+        }
       }
-    }
-    await loadData();
-  };
+    },
+    onSettled: () => invalidateHome(),
+  });
 
   /* ---------------------------------------------------------------- */
   /*  Meal Plan -> Cart                                                */
   /* ---------------------------------------------------------------- */
 
-  const [syncing, setSyncing] = useState(false);
-
   const syncMealPlanToCart = async () => {
     if (!user) return;
     setSyncing(true);
-    setLoadError(null);
+    setMutationError(null);
 
     try {
       // Get today's incomplete meal plan entries that have recipes
@@ -573,7 +565,6 @@ export function HomePage() {
       // Also handle product-based entries (no recipe, just a product)
       for (const entry of entries as any[]) {
         if (entry.recipe_id) continue;
-        // Re-fetch if product_id present but no recipe
         // The query above doesn't fetch product_id directly, so fetch separately
       }
 
@@ -612,9 +603,9 @@ export function HomePage() {
         );
       }
 
-      await loadData();
+      invalidateHome();
     } catch {
-      setLoadError('Failed to sync meal plan to cart');
+      setMutationError('Failed to sync meal plan to cart');
     } finally {
       setSyncing(false);
     }
@@ -624,34 +615,27 @@ export function HomePage() {
   /*  Mark meal done / execute prep                                    */
   /* ---------------------------------------------------------------- */
 
-  const [confirmPrepId, setConfirmPrepId] = useState<string | null>(null);
+  const markMealDoneMutation = useMutation({
+    mutationFn: async (mealId: string) => {
+      const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
+      if (error) throw new Error(error.message);
+    },
+    onError: (err: Error) => setMutationError(err.message),
+    onSettled: () => invalidateHome(),
+  });
 
-  const markMealDone = async (mealId: string) => {
-    const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    await loadData();
-  };
-
-  const unmarkMealDone = async (mealId: string) => {
-    const { error } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    await loadData();
-  };
+  const unmarkMealDoneMutation = useMutation({
+    mutationFn: async (mealId: string) => {
+      const { error } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
+      if (error) throw new Error(error.message);
+    },
+    onError: (err: Error) => setMutationError(err.message),
+    onSettled: () => invalidateHome(),
+  });
 
   const executePrepMeal = async (mealId: string) => {
     setConfirmPrepId(null);
-    const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    await loadData();
+    markMealDoneMutation.mutate(mealId);
   };
 
   /* ---------------------------------------------------------------- */
@@ -667,28 +651,33 @@ export function HomePage() {
     }
   };
 
-  const deleteFoodLog = async (logId: string) => {
-    const { error } = await chefbyte().from('food_logs').delete().eq('log_id', logId);
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    await loadData();
-  };
+  const deleteFoodLogMutation = useMutation({
+    mutationFn: async (logId: string) => {
+      const { error } = await chefbyte().from('food_logs').delete().eq('log_id', logId);
+      if (error) throw new Error(error.message);
+    },
+    onError: (err: Error) => setMutationError(err.message),
+    onSettled: () => invalidateHome(),
+  });
 
-  const deleteMealLogs = async (mealId: string) => {
-    const { error } = await chefbyte().from('food_logs').delete().eq('meal_id', mealId);
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    setExpandedMeals((prev) => {
-      const next = new Set(prev);
-      next.delete(mealId);
-      return next;
-    });
-    await loadData();
-  };
+  const deleteMealLogsMutation = useMutation({
+    mutationFn: async (mealId: string) => {
+      const { error } = await chefbyte().from('food_logs').delete().eq('meal_id', mealId);
+      if (error) throw new Error(error.message);
+      return mealId;
+    },
+    onSuccess: (mealId: string | undefined) => {
+      if (mealId) {
+        setExpandedMeals((prev) => {
+          const next = new Set(prev);
+          next.delete(mealId);
+          return next;
+        });
+      }
+    },
+    onError: (err: Error) => setMutationError(err.message),
+    onSettled: () => invalidateHome(),
+  });
 
   const toggleMealExpand = (mealId: string) => {
     setExpandedMeals((prev) => {
@@ -732,29 +721,29 @@ export function HomePage() {
     return { mealGroups: Array.from(groups.values()), standaloneLogs: standalone };
   })();
 
-  const deleteTempItem = async (tempId: string) => {
-    const { error } = await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    await loadData();
-  };
+  const deleteTempItemMutation = useMutation({
+    mutationFn: async (tempId: string) => {
+      const { error } = await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
+      if (error) throw new Error(error.message);
+    },
+    onError: (err: Error) => setMutationError(err.message),
+    onSettled: () => invalidateHome(),
+  });
 
-  const deleteMealEntry = async (mealId: string) => {
-    const { error } = await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
-    if (error) {
-      setLoadError(error.message);
-      return;
-    }
-    await loadData();
-  };
+  const deleteMealEntryMutation = useMutation({
+    mutationFn: async (mealId: string) => {
+      const { error } = await chefbyte().from('meal_plan_entries').delete().eq('meal_id', mealId);
+      if (error) throw new Error(error.message);
+    },
+    onError: (err: Error) => setMutationError(err.message),
+    onSettled: () => invalidateHome(),
+  });
 
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
 
-  if (loading) {
+  if (isLoading) {
     return (
       <ChefLayout title="Home">
         <div data-testid="home-loading">
@@ -885,11 +874,11 @@ export function HomePage() {
 
   return (
     <ChefLayout title="Home">
-      {loadError && (
+      {(loadError || mutationError) && (
         <div data-testid="load-error" className="border border-red-400 bg-red-50 rounded-lg p-4 mb-4">
-          <p className="m-0 mb-2 text-red-600">Failed to load data: {loadError}</p>
+          <p className="m-0 mb-2 text-red-600">Failed to load data: {loadError?.message ?? mutationError}</p>
           <button
-            onClick={loadData}
+            onClick={invalidateHome}
             className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
           >
             Retry
@@ -1002,7 +991,7 @@ export function HomePage() {
       <div data-testid="quick-actions" className="mb-5 space-y-2">
         <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2">
           <button
-            onClick={importShopping}
+            onClick={() => importShoppingMutation.mutate()}
             data-testid="import-shopping-btn"
             className="px-3 py-2 sm:py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
           >
@@ -1095,7 +1084,7 @@ export function HomePage() {
                             data-testid={`meal-stock-${entry.meal_id}`}
                             className={stockBadgeClass(mealStockStatus)}
                           >
-                            {mealStockStatus === 'CAN MAKE' ? '✓ IN STOCK' : mealStockStatus}
+                            {mealStockStatus === 'CAN MAKE' ? '\u2713 IN STOCK' : mealStockStatus}
                           </span>
                         )}
                       </div>
@@ -1115,7 +1104,7 @@ export function HomePage() {
                     <div className="flex gap-1.5 items-center sm:shrink-0 sm:ml-1">
                       {isDone ? (
                         <button
-                          onClick={() => unmarkMealDone(entry.meal_id)}
+                          onClick={() => unmarkMealDoneMutation.mutate(entry.meal_id)}
                           data-testid={`meal-undo-${entry.meal_id}`}
                           className="px-2.5 py-1 bg-white text-amber-500 border border-amber-500 rounded text-xs font-semibold hover:bg-amber-50 transition-colors"
                         >
@@ -1123,7 +1112,7 @@ export function HomePage() {
                         </button>
                       ) : (
                         <button
-                          onClick={() => markMealDone(entry.meal_id)}
+                          onClick={() => markMealDoneMutation.mutate(entry.meal_id)}
                           data-testid={`meal-done-${entry.meal_id}`}
                           className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
                         >
@@ -1132,7 +1121,9 @@ export function HomePage() {
                       )}
                       <DeleteBtn
                         id={`meal-${entry.meal_id}`}
-                        onConfirm={() => deleteMealEntry(entry.meal_id)}
+                        onConfirm={async () => {
+                          deleteMealEntryMutation.mutate(entry.meal_id);
+                        }}
                         testId={`delete-meal-${entry.meal_id}`}
                       />
                     </div>
@@ -1203,7 +1194,9 @@ export function HomePage() {
                     )}
                     <DeleteBtn
                       id={`prep-${entry.meal_id}`}
-                      onConfirm={() => deleteMealEntry(entry.meal_id)}
+                      onConfirm={async () => {
+                        deleteMealEntryMutation.mutate(entry.meal_id);
+                      }}
                       testId={`delete-prep-${entry.meal_id}`}
                     />
                   </div>
@@ -1252,7 +1245,9 @@ export function HomePage() {
                       <span onClick={(e) => e.stopPropagation()} role="presentation">
                         <DeleteBtn
                           id={`meal-group-${group.meal_id}`}
-                          onConfirm={() => deleteMealLogs(group.meal_id)}
+                          onConfirm={async () => {
+                            deleteMealLogsMutation.mutate(group.meal_id);
+                          }}
                           testId={`delete-meal-${group.meal_id}`}
                         />
                       </span>
@@ -1308,7 +1303,9 @@ export function HomePage() {
                   </span>
                   <DeleteBtn
                     id={`log-${log.log_id}`}
-                    onConfirm={() => deleteFoodLog(log.log_id)}
+                    onConfirm={async () => {
+                      deleteFoodLogMutation.mutate(log.log_id);
+                    }}
                     testId={`delete-log-${log.log_id}`}
                   />
                 </div>
@@ -1332,7 +1329,9 @@ export function HomePage() {
                   </span>
                   <DeleteBtn
                     id={`temp-${item.temp_id}`}
-                    onConfirm={() => deleteTempItem(item.temp_id)}
+                    onConfirm={async () => {
+                      deleteTempItemMutation.mutate(item.temp_id);
+                    }}
                     testId={`delete-temp-${item.temp_id}`}
                   />
                 </div>
@@ -1403,7 +1402,7 @@ export function HomePage() {
             Cancel
           </button>
           <button
-            onClick={saveTargets}
+            onClick={() => saveTargetsMutation.mutate()}
             className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
             data-testid="target-save-btn"
           >
@@ -1437,7 +1436,7 @@ export function HomePage() {
             Cancel
           </button>
           <button
-            onClick={saveTasteProfile}
+            onClick={() => saveTasteMutation.mutate()}
             className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
             data-testid="taste-save-btn"
           >

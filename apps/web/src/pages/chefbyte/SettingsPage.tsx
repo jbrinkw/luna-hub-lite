@@ -1,9 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { WalmartTab } from '@/components/chefbyte/WalmartTab';
+import { ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
 import { Copy, Check } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -95,13 +98,12 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
 
 export function SettingsPage() {
   const { user } = useAuth();
+  const queryClient = useQueryClient();
   const [searchParams] = useSearchParams();
   const initialTab = (searchParams.get('tab') as Tab) || 'products';
   const [activeTab, setActiveTab] = useState<Tab>(tabs.some((t) => t.id === initialTab) ? initialTab : 'products');
-  const [loading, setLoading] = useState(true);
 
   /* ---- Products state ---- */
-  const [products, setProducts] = useState<Product[]>([]);
   const [searchText, setSearchText] = useState('');
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<Partial<Product>>({});
@@ -110,7 +112,6 @@ export function SettingsPage() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
   /* ---- LiquidTrack state ---- */
-  const [devices, setDevices] = useState<LiquidTrackDevice[]>([]);
   const [showAddDevice, setShowAddDevice] = useState(false);
   const [newDeviceName, setNewDeviceName] = useState('');
   const [newDeviceProductId, setNewDeviceProductId] = useState('');
@@ -134,210 +135,246 @@ export function SettingsPage() {
   };
 
   /* ---- Locations state ---- */
-  const [locations, setLocations] = useState<
-    { location_id: string; user_id: string; name: string; created_at: string }[]
-  >([]);
   const [newLocationName, setNewLocationName] = useState('');
   const [deleteLocationTarget, setDeleteLocationTarget] = useState<string | null>(null);
 
   /* ---------------------------------------------------------------- */
-  /*  Data loading                                                     */
+  /*  Data loading via TanStack Query                                  */
   /* ---------------------------------------------------------------- */
 
-  const loadProducts = useCallback(async () => {
-    if (!user) return;
-    const { data, error: loadErr } = await chefbyte()
-      .from('products')
-      .select('*')
-      .eq('user_id', user.id)
-      .not('name', 'ilike', '[MEAL]%')
-      .order('name');
-    if (loadErr) {
-      setError(loadErr.message);
-      setLoading(false);
-      return;
-    }
-    setProducts((data ?? []) as Product[]);
-    setLoading(false);
-  }, [user]);
+  const { data: products = [], isLoading: productsLoading } = useQuery({
+    queryKey: queryKeys.chefSettings(user!.id),
+    queryFn: async () => {
+      const { data, error: loadErr } = await chefbyte()
+        .from('products')
+        .select('*')
+        .eq('user_id', user!.id)
+        .not('name', 'ilike', '[MEAL]%')
+        .order('name');
+      if (loadErr) throw loadErr;
+      return (data ?? []) as Product[];
+    },
+    enabled: !!user,
+  });
 
-  const loadDevices = useCallback(async () => {
-    if (!user) return;
-    const { data } = await chefbyte()
-      .from('liquidtrack_devices')
-      .select('*, products:product_id(name)')
-      .eq('user_id', user.id);
-    setDevices((data ?? []) as LiquidTrackDevice[]);
-  }, [user]);
+  const { data: devices = [], isLoading: devicesLoading } = useQuery({
+    queryKey: queryKeys.devices(user!.id),
+    queryFn: async () => {
+      const { data, error: loadErr } = await chefbyte()
+        .from('liquidtrack_devices')
+        .select('*, products:product_id(name)')
+        .eq('user_id', user!.id);
+      if (loadErr) throw loadErr;
+      return (data ?? []) as LiquidTrackDevice[];
+    },
+    enabled: !!user,
+  });
 
-  const loadLocations = useCallback(async () => {
-    if (!user) return;
-    const { data } = await chefbyte().from('locations').select('*').eq('user_id', user.id).order('name');
-    setLocations((data ?? []) as { location_id: string; user_id: string; name: string; created_at: string }[]);
-  }, [user]);
+  const { data: locations = [], isLoading: locationsLoading } = useQuery({
+    queryKey: queryKeys.locations(user!.id),
+    queryFn: async () => {
+      const { data, error: loadErr } = await chefbyte()
+        .from('locations')
+        .select('*')
+        .eq('user_id', user!.id)
+        .order('name');
+      if (loadErr) throw loadErr;
+      return (data ?? []) as { location_id: string; user_id: string; name: string; created_at: string }[];
+    },
+    enabled: !!user,
+  });
 
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-    /* eslint-disable react-hooks/set-state-in-effect */
-    loadProducts();
-    loadDevices();
-    loadLocations();
-  }, [loadProducts, loadDevices, loadLocations]);
-
-  /* ---------------------------------------------------------------- */
-  /*  Product CRUD                                                     */
-  /* eslint-enable react-hooks/set-state-in-effect */
-  /* ---------------------------------------------------------------- */
-
-  const saveProduct = async () => {
-    if (!user || !editingId) return;
-    setError(null);
-    // eslint-disable-next-line @typescript-eslint/no-unused-vars
-    const { product_id: _pid, user_id: _uid, ...updates } = editForm as Product;
-    const { error: updateErr } = await chefbyte().from('products').update(updates).eq('product_id', editingId);
-    if (updateErr) {
-      setError(updateErr.message);
-      return;
-    }
-    setEditingId(null);
-    setEditForm({});
-    await loadProducts();
-  };
-
-  const addProduct = async () => {
-    if (!user || !addForm.name.trim()) return;
-    setError(null);
-    const { error: insertErr } = await chefbyte()
-      .from('products')
-      .insert({ ...addForm, user_id: user.id });
-    if (insertErr) {
-      setError(insertErr.message);
-      return;
-    }
-    setAddForm(blankProduct());
-    setShowAddProduct(false);
-    await loadProducts();
-  };
-
-  const deleteProduct = async (productId: string) => {
-    setError(null);
-    const { error: deleteErr } = await chefbyte().from('products').delete().eq('product_id', productId);
-    if (deleteErr) {
-      setError(deleteErr.message);
-      return;
-    }
-    setDeleteTarget(null);
-    await loadProducts();
-  };
+  const loading = productsLoading || devicesLoading || locationsLoading;
 
   /* ---------------------------------------------------------------- */
-  /*  LiquidTrack actions                                              */
+  /*  Product CRUD mutations                                           */
   /* ---------------------------------------------------------------- */
 
-  const generateDevice = async () => {
-    if (!user || !newDeviceName.trim()) return;
+  const saveProductMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !editingId) throw new Error('Missing user or editing target');
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { product_id: _pid, user_id: _uid, ...updates } = editForm as Product;
+      const { error: updateErr } = await chefbyte().from('products').update(updates).eq('product_id', editingId);
+      if (updateErr) throw updateErr;
+    },
+    onError: (err: any) => {
+      setError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      setEditingId(null);
+      setEditForm({});
+      queryClient.invalidateQueries({ queryKey: queryKeys.chefSettings(user!.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
+    },
+  });
 
-    const deviceId = crypto.randomUUID();
-    const rawKey = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+  const addProductMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !addForm.name.trim()) throw new Error('Missing name');
+      const { error: insertErr } = await chefbyte()
+        .from('products')
+        .insert({ ...addForm, user_id: user.id });
+      if (insertErr) throw insertErr;
+    },
+    onError: (err: any) => {
+      setError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      setAddForm(blankProduct());
+      setShowAddProduct(false);
+      queryClient.invalidateQueries({ queryKey: queryKeys.chefSettings(user!.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
+    },
+  });
 
-    // Hash the key with SHA-256
-    const encoder = new TextEncoder();
-    const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawKey));
-    const hashArray = Array.from(new Uint8Array(hashBuffer));
-    const keyHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-
-    setError(null);
-    const { error: insertErr } = await chefbyte()
-      .from('liquidtrack_devices')
-      .insert({
-        device_id: deviceId,
-        user_id: user.id,
-        device_name: newDeviceName.trim(),
-        product_id: newDeviceProductId || null,
-        import_key_hash: keyHash,
-      });
-    if (insertErr) {
-      setError(insertErr.message);
-      return;
-    }
-
-    setGeneratedDevice({ device_id: deviceId, raw_key: rawKey });
-    setNewDeviceName('');
-    setNewDeviceProductId('');
-    setShowAddDevice(false);
-    await loadDevices();
-  };
-
-  const revokeDevice = async (deviceId: string) => {
-    setError(null);
-    const { error: revokeErr } = await chefbyte()
-      .from('liquidtrack_devices')
-      .update({ is_active: false })
-      .eq('device_id', deviceId);
-    if (revokeErr) {
-      setError(revokeErr.message);
-      return;
-    }
-    setRevokeTarget(null);
-    await loadDevices();
-  };
-
-  const loadDeviceEvents = async (deviceId: string) => {
-    if (!user) return;
-    if (expandedDeviceId === deviceId) {
-      setExpandedDeviceId(null);
-      setDeviceEvents([]);
-      return;
-    }
-    const { data } = await chefbyte()
-      .from('liquidtrack_events')
-      .select('*')
-      .eq('device_id', deviceId)
-      .eq('user_id', user.id)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    setDeviceEvents((data ?? []) as LiquidTrackEvent[]);
-    setExpandedDeviceId(deviceId);
-  };
+  const deleteProductMutation = useMutation({
+    mutationFn: async (productId: string) => {
+      const { error: deleteErr } = await chefbyte().from('products').delete().eq('product_id', productId);
+      if (deleteErr) throw deleteErr;
+    },
+    onMutate: async (productId) => {
+      const key = queryKeys.chefSettings(user!.id);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData(key);
+      queryClient.setQueryData(key, (old: Product[] | undefined) => old?.filter((p) => p.product_id !== productId));
+      return { previous };
+    },
+    onError: (err: any, _id, context) => {
+      queryClient.setQueryData(queryKeys.chefSettings(user!.id), context?.previous);
+      setError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      setDeleteTarget(null);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.chefSettings(user!.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
+    },
+  });
 
   /* ---------------------------------------------------------------- */
-  /*  Location actions                                                 */
+  /*  LiquidTrack mutations                                            */
   /* ---------------------------------------------------------------- */
 
-  const addLocation = async () => {
-    if (!user || !newLocationName.trim()) return;
-    setError(null);
-    const { error: insertErr } = await chefbyte()
-      .from('locations')
-      .insert({ user_id: user.id, name: newLocationName.trim() });
-    if (insertErr) {
-      setError(insertErr.message);
-      return;
-    }
-    setNewLocationName('');
-    await loadLocations();
-  };
+  const generateDeviceMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !newDeviceName.trim()) throw new Error('Missing device name');
 
-  const deleteLocation = async (locationId: string) => {
-    setError(null);
-    const { count } = await chefbyte()
-      .from('stock_lots')
-      .select('*', { count: 'exact', head: true })
-      .eq('location_id', locationId);
-    if (count && count > 0) {
-      setError('Cannot delete location with existing stock. Move stock first.');
+      const deviceId = crypto.randomUUID();
+      const rawKey = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
+
+      // Hash the key with SHA-256
+      const encoder = new TextEncoder();
+      const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawKey));
+      const hashArray = Array.from(new Uint8Array(hashBuffer));
+      const keyHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+
+      const { error: insertErr } = await chefbyte()
+        .from('liquidtrack_devices')
+        .insert({
+          device_id: deviceId,
+          user_id: user.id,
+          device_name: newDeviceName.trim(),
+          product_id: newDeviceProductId || null,
+          import_key_hash: keyHash,
+        });
+      if (insertErr) throw insertErr;
+
+      return { device_id: deviceId, raw_key: rawKey };
+    },
+    onError: (err: any) => {
+      setError(err.message ?? String(err));
+    },
+    onSuccess: (result) => {
+      setGeneratedDevice(result);
+      setNewDeviceName('');
+      setNewDeviceProductId('');
+      setShowAddDevice(false);
+      queryClient.invalidateQueries({ queryKey: queryKeys.devices(user!.id) });
+    },
+  });
+
+  const revokeDeviceMutation = useMutation({
+    mutationFn: async (deviceId: string) => {
+      const { error: revokeErr } = await chefbyte()
+        .from('liquidtrack_devices')
+        .update({ is_active: false })
+        .eq('device_id', deviceId);
+      if (revokeErr) throw revokeErr;
+    },
+    onError: (err: any) => {
+      setError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      setRevokeTarget(null);
+      queryClient.invalidateQueries({ queryKey: queryKeys.devices(user!.id) });
+    },
+  });
+
+  const loadDeviceEvents = useCallback(
+    async (deviceId: string) => {
+      if (!user) return;
+      if (expandedDeviceId === deviceId) {
+        setExpandedDeviceId(null);
+        setDeviceEvents([]);
+        return;
+      }
+      const { data } = await chefbyte()
+        .from('liquidtrack_events')
+        .select('*')
+        .eq('device_id', deviceId)
+        .eq('user_id', user.id)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      setDeviceEvents((data ?? []) as LiquidTrackEvent[]);
+      setExpandedDeviceId(deviceId);
+    },
+    [user, expandedDeviceId],
+  );
+
+  /* ---------------------------------------------------------------- */
+  /*  Location mutations                                               */
+  /* ---------------------------------------------------------------- */
+
+  const addLocationMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !newLocationName.trim()) throw new Error('Missing location name');
+      const { error: insertErr } = await chefbyte()
+        .from('locations')
+        .insert({ user_id: user.id, name: newLocationName.trim() });
+      if (insertErr) throw insertErr;
+    },
+    onError: (err: any) => {
+      setError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      setNewLocationName('');
+      queryClient.invalidateQueries({ queryKey: queryKeys.locations(user!.id) });
+    },
+  });
+
+  const deleteLocationMutation = useMutation({
+    mutationFn: async (locationId: string) => {
+      const { count } = await chefbyte()
+        .from('stock_lots')
+        .select('*', { count: 'exact', head: true })
+        .eq('location_id', locationId);
+      if (count && count > 0) {
+        throw new Error('Cannot delete location with existing stock. Move stock first.');
+      }
+      const { error: deleteErr } = await chefbyte().from('locations').delete().eq('location_id', locationId);
+      if (deleteErr) throw deleteErr;
+    },
+    onError: (err: any) => {
+      setError(err.message ?? String(err));
       setDeleteLocationTarget(null);
-      return;
-    }
-    const { error: deleteErr } = await chefbyte().from('locations').delete().eq('location_id', locationId);
-    if (deleteErr) {
-      setError(deleteErr.message);
+    },
+    onSuccess: () => {
       setDeleteLocationTarget(null);
-      return;
-    }
-    setDeleteLocationTarget(null);
-    await loadLocations();
-  };
+      queryClient.invalidateQueries({ queryKey: queryKeys.locations(user!.id) });
+    },
+  });
 
   /* ---------------------------------------------------------------- */
   /*  Helpers                                                          */
@@ -488,8 +525,8 @@ export function SettingsPage() {
   if (loading) {
     return (
       <ChefLayout title="Settings">
-        <div data-testid="settings-loading" className="p-5 text-slate-500">
-          Loading...
+        <div data-testid="settings-loading" className="p-5">
+          <ListSkeleton count={5} />
         </div>
       </ChefLayout>
     );
@@ -581,7 +618,7 @@ export function SettingsPage() {
                   )}
                   <button
                     className="mt-3 bg-emerald-600 text-white border-none w-full py-3 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                    onClick={addProduct}
+                    onClick={() => addProductMutation.mutate()}
                     disabled={!addForm.name.trim()}
                     data-testid="save-new-product"
                   >
@@ -614,7 +651,7 @@ export function SettingsPage() {
                       <div className="flex gap-2 mt-3">
                         <button
                           className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700"
-                          onClick={saveProduct}
+                          onClick={() => saveProductMutation.mutate()}
                           data-testid="save-edit-product"
                         >
                           Save
@@ -690,7 +727,7 @@ export function SettingsPage() {
                     <button
                       className="bg-red-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-red-700"
                       onClick={() => {
-                        if (deleteTarget) deleteProduct(deleteTarget);
+                        if (deleteTarget) deleteProductMutation.mutate(deleteTarget);
                       }}
                     >
                       Delete
@@ -770,7 +807,7 @@ export function SettingsPage() {
                   </div>
                   <button
                     className="bg-emerald-600 text-white border-none w-full py-3 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                    onClick={generateDevice}
+                    onClick={() => generateDeviceMutation.mutate()}
                     disabled={!newDeviceName.trim()}
                     data-testid="generate-device-btn"
                   >
@@ -945,7 +982,7 @@ export function SettingsPage() {
                     <button
                       className="bg-red-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-red-700"
                       onClick={() => {
-                        if (revokeTarget) revokeDevice(revokeTarget);
+                        if (revokeTarget) revokeDeviceMutation.mutate(revokeTarget);
                       }}
                     >
                       Revoke
@@ -1006,7 +1043,7 @@ export function SettingsPage() {
                 />
                 <button
                   className="bg-emerald-600 text-white border-none px-4 py-2.5 rounded-md cursor-pointer font-semibold text-sm whitespace-nowrap hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                  onClick={addLocation}
+                  onClick={() => addLocationMutation.mutate()}
                   disabled={!newLocationName.trim()}
                   data-testid="add-location-btn"
                 >
@@ -1039,7 +1076,7 @@ export function SettingsPage() {
                     <button
                       className="bg-red-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-red-700"
                       onClick={() => {
-                        if (deleteLocationTarget) deleteLocation(deleteLocationTarget);
+                        if (deleteLocationTarget) deleteLocationMutation.mutate(deleteLocationTarget);
                       }}
                     >
                       Delete

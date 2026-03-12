@@ -1,8 +1,12 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte, supabase, escapeIlike } from '@/shared/supabase';
+import { chefbyte, escapeIlike } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { generateWalmartCartLink } from '@/lib/walmart';
 import { PackageSearch } from 'lucide-react';
 
@@ -37,8 +41,7 @@ interface ProductSearchResult {
 
 export function ShoppingPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [items, setItems] = useState<ShoppingItem[]>([]);
+  const queryClient = useQueryClient();
 
   const [error, setError] = useState<string | null>(null);
 
@@ -64,58 +67,30 @@ export function ShoppingPage() {
   const closeConfirm = () => setConfirmState((prev) => ({ ...prev, open: false }));
 
   /* ---------------------------------------------------------------- */
-  /*  Data loading                                                     */
+  /*  Data loading via TanStack Query                                  */
   /* ---------------------------------------------------------------- */
 
-  const loadItems = useCallback(async () => {
-    if (!user) return;
-    const { data, error: loadErr } = await chefbyte()
-      .from('shopping_list')
-      .select('*, products:product_id(name, barcode, price, walmart_link, is_placeholder)')
-      .eq('user_id', user.id)
-      .order('created_at');
-    if (loadErr) {
-      setError(loadErr.message);
-      setLoading(false);
-      return;
-    }
-    setItems((data ?? []) as ShoppingItem[]);
-    setLoading(false);
-  }, [user]);
-
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadItems();
-  }, [loadItems]);
+  const { data: items = [], isLoading } = useQuery({
+    queryKey: queryKeys.shoppingList(user!.id),
+    queryFn: async () => {
+      const { data, error: loadErr } = await chefbyte()
+        .from('shopping_list')
+        .select('*, products:product_id(name, barcode, price, walmart_link, is_placeholder)')
+        .eq('user_id', user!.id)
+        .order('created_at');
+      if (loadErr) throw loadErr;
+      return (data ?? []) as ShoppingItem[];
+    },
+    enabled: !!user,
+  });
 
   /* ---------------------------------------------------------------- */
   /*  Realtime subscriptions                                           */
   /* ---------------------------------------------------------------- */
 
-  useEffect(() => {
-    if (!user) return;
-
-    const channel = supabase
-      .channel('shopping-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'chefbyte',
-          table: 'shopping_list',
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => {
-          loadItems();
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, loadItems]);
+  useRealtimeInvalidation('shopping-changes', [
+    { schema: 'chefbyte', table: 'shopping_list', queryKeys: [queryKeys.shoppingList(user!.id)] },
+  ]);
 
   /* ---------------------------------------------------------------- */
   /*  Derived state                                                    */
@@ -174,8 +149,79 @@ export function ShoppingPage() {
   };
 
   /* ---------------------------------------------------------------- */
-  /*  Actions                                                          */
+  /*  Mutations                                                        */
   /* ---------------------------------------------------------------- */
+
+  const invalidateShoppingList = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.shoppingList(user!.id) });
+  };
+
+  const toggleMutation = useMutation({
+    mutationFn: async (item: ShoppingItem) => {
+      const { error: updateErr } = await chefbyte()
+        .from('shopping_list')
+        .update({ purchased: !item.purchased })
+        .eq('cart_item_id', item.cart_item_id);
+      if (updateErr) throw updateErr;
+    },
+    onMutate: async (item) => {
+      const key = queryKeys.shoppingList(user!.id);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData(key);
+      queryClient.setQueryData(key, (old: ShoppingItem[] | undefined) =>
+        old?.map((i) => (i.cart_item_id === item.cart_item_id ? { ...i, purchased: !i.purchased } : i)),
+      );
+      return { previous };
+    },
+    onError: (err: any, _item, context) => {
+      queryClient.setQueryData(queryKeys.shoppingList(user!.id), context?.previous);
+      setError(err.message ?? String(err));
+    },
+    onSettled: () => {
+      invalidateShoppingList();
+    },
+  });
+
+  const togglePurchased = (item: ShoppingItem) => {
+    setError(null);
+
+    // Trigger green flash animation when marking as purchased
+    if (!item.purchased) {
+      setJustPurchasedIds((prev) => new Set(prev).add(item.cart_item_id));
+      setTimeout(() => {
+        setJustPurchasedIds((prev) => {
+          const next = new Set(prev);
+          next.delete(item.cart_item_id);
+          return next;
+        });
+      }, 600);
+    }
+
+    toggleMutation.mutate(item);
+  };
+
+  const removeMutation = useMutation({
+    mutationFn: async (cartItemId: string) => {
+      const { error: deleteErr } = await chefbyte().from('shopping_list').delete().eq('cart_item_id', cartItemId);
+      if (deleteErr) throw deleteErr;
+    },
+    onMutate: async (cartItemId) => {
+      const key = queryKeys.shoppingList(user!.id);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData(key);
+      queryClient.setQueryData(key, (old: ShoppingItem[] | undefined) =>
+        old?.filter((i) => i.cart_item_id !== cartItemId),
+      );
+      return { previous };
+    },
+    onError: (err: any, _id, context) => {
+      queryClient.setQueryData(queryKeys.shoppingList(user!.id), context?.previous);
+      setError(err.message ?? String(err));
+    },
+    onSettled: () => {
+      invalidateShoppingList();
+    },
+  });
 
   const addItem = async () => {
     if (!user || !searchText.trim()) return;
@@ -229,43 +275,7 @@ export function ShoppingPage() {
     setSearchText('');
     setSelectedProductId(null);
     setAddQty(1);
-    await loadItems();
-  };
-
-  const togglePurchased = async (item: ShoppingItem) => {
-    setError(null);
-
-    // Trigger green flash animation when marking as purchased
-    if (!item.purchased) {
-      setJustPurchasedIds((prev) => new Set(prev).add(item.cart_item_id));
-      setTimeout(() => {
-        setJustPurchasedIds((prev) => {
-          const next = new Set(prev);
-          next.delete(item.cart_item_id);
-          return next;
-        });
-      }, 600);
-    }
-
-    const { error: updateErr } = await chefbyte()
-      .from('shopping_list')
-      .update({ purchased: !item.purchased })
-      .eq('cart_item_id', item.cart_item_id);
-    if (updateErr) {
-      setError(updateErr.message);
-      return;
-    }
-    await loadItems();
-  };
-
-  const removeItem = async (cartItemId: string) => {
-    setError(null);
-    const { error: deleteErr } = await chefbyte().from('shopping_list').delete().eq('cart_item_id', cartItemId);
-    if (deleteErr) {
-      setError(deleteErr.message);
-      return;
-    }
-    await loadItems();
+    invalidateShoppingList();
   };
 
   const importToInventory = async () => {
@@ -278,8 +288,8 @@ export function ShoppingPage() {
       .eq('user_id', user.id)
       .order('created_at')
       .limit(1);
-    const locationId = locs?.[0]?.location_id;
-    if (!locationId) return;
+    const locId = locs?.[0]?.location_id;
+    if (!locId) return;
 
     // Merge stock lots: check for existing lot per item, increment qty or insert new
     for (const item of purchased) {
@@ -288,7 +298,7 @@ export function ShoppingPage() {
         .select('lot_id, qty_containers')
         .eq('user_id', user.id)
         .eq('product_id', item.product_id)
-        .eq('location_id', locationId)
+        .eq('location_id', locId)
         .is('expires_on', null)
         .single();
 
@@ -305,7 +315,7 @@ export function ShoppingPage() {
         const { error: insertErr } = await chefbyte().from('stock_lots').insert({
           user_id: user.id,
           product_id: item.product_id,
-          location_id: locationId,
+          location_id: locId,
           qty_containers: item.qty_containers,
         });
         if (insertErr) {
@@ -323,7 +333,7 @@ export function ShoppingPage() {
       return;
     }
 
-    await loadItems();
+    invalidateShoppingList();
   };
 
   const autoAddBelowMinStock = async () => {
@@ -331,14 +341,14 @@ export function ShoppingPage() {
     setError(null);
 
     // Get all products with min_stock_amount
-    const { data: products } = await chefbyte()
+    const { data: prods } = await chefbyte()
       .from('products')
       .select('product_id, name, min_stock_amount')
       .eq('user_id', user.id)
       .not('name', 'ilike', '[MEAL]%')
       .gt('min_stock_amount', 0);
 
-    if (!products || products.length === 0) return;
+    if (!prods || prods.length === 0) return;
 
     // Get all stock lots to calculate current stock
     const { data: stockLots } = await chefbyte()
@@ -355,7 +365,7 @@ export function ShoppingPage() {
 
     // Collect deficient products — upsert sets qty to full deficit
     const rowsToUpsert: Array<{ user_id: string; product_id: string; qty_containers: number }> = [];
-    for (const product of products) {
+    for (const product of prods) {
       const currentStock = stockByProduct.get(product.product_id) ?? 0;
       const minStock = Number(product.min_stock_amount);
       if (currentStock < minStock) {
@@ -379,7 +389,7 @@ export function ShoppingPage() {
       }
     }
 
-    await loadItems();
+    invalidateShoppingList();
   };
 
   const clearAll = async () => {
@@ -390,7 +400,7 @@ export function ShoppingPage() {
       setError(delErr.message);
       return;
     }
-    await loadItems();
+    invalidateShoppingList();
   };
 
   const handleClearAll = () => {
@@ -419,11 +429,11 @@ export function ShoppingPage() {
   /*  RENDER                                                           */
   /* ================================================================ */
 
-  if (loading) {
+  if (isLoading) {
     return (
       <ChefLayout title="Shopping">
         <div className="p-5" data-testid="shopping-loading">
-          Loading shopping list...
+          <ListSkeleton count={5} />
         </div>
       </ChefLayout>
     );
@@ -582,7 +592,7 @@ export function ShoppingPage() {
                       <span className="ml-3 text-slate-500">{formatQty(item.qty_containers)}</span>
                     </div>
                     <button
-                      onClick={() => removeItem(item.cart_item_id)}
+                      onClick={() => removeMutation.mutate(item.cart_item_id)}
                       data-testid={`remove-${item.cart_item_id}`}
                       className="px-3 py-1 bg-transparent text-slate-500 border border-slate-200 rounded cursor-pointer text-xs hover:bg-slate-100"
                     >
@@ -636,7 +646,7 @@ export function ShoppingPage() {
                     <span className="ml-3">{formatQty(item.qty_containers)}</span>
                   </div>
                   <button
-                    onClick={() => removeItem(item.cart_item_id)}
+                    onClick={() => removeMutation.mutate(item.cart_item_id)}
                     data-testid={`remove-${item.cart_item_id}`}
                     className="px-3 py-1 bg-transparent text-slate-500 border border-slate-200 rounded cursor-pointer text-xs hover:bg-slate-100"
                   >

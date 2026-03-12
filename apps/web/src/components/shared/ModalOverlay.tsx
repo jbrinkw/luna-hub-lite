@@ -40,13 +40,16 @@ export function ModalOverlay({ isOpen, onClose, title, children, maxWidth = '500
   return (
     <div
       data-testid={testId}
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm animate-modal-backdrop"
       onClick={(e) => {
         // Close on backdrop click (not card click)
         if (e.target === e.currentTarget) onClose();
       }}
     >
-      <div className="bg-white p-5 rounded-xl w-[92vw] max-h-[90vh] overflow-y-auto shadow-xl m-4" style={{ maxWidth }}>
+      <div
+        className="bg-white p-5 rounded-xl w-[92vw] max-h-[90vh] overflow-y-auto shadow-xl m-4 animate-modal-card"
+        style={{ maxWidth }}
+      >
         <h3 className="m-0 mb-4 text-lg font-bold">{title}</h3>
         {children}
       </div>

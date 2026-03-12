@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { ExtensionCard } from '@/components/hub/ExtensionCard';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 
 const EXTENSIONS = [
@@ -39,18 +40,18 @@ interface ExtensionState {
 
 export function ExtensionsPage() {
   const { user } = useAuth();
-  const [states, setStates] = useState<Record<string, ExtensionState>>({});
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
 
-  useEffect(() => {
-    if (!user) return;
-
-    const loadSettings = async () => {
-      const { data } = await supabase
+  // Load extension settings via useQuery
+  const { data: states = {} as Record<string, ExtensionState>, isLoading } = useQuery({
+    queryKey: queryKeys.extensions(user!.id),
+    queryFn: async () => {
+      const { data, error } = await supabase
         .schema('hub')
         .from('extension_settings')
         .select('extension_name, enabled, credentials_encrypted')
-        .eq('user_id', user.id);
+        .eq('user_id', user!.id);
+      if (error) throw error;
 
       const map: Record<string, ExtensionState> = {};
       data?.forEach((row) => {
@@ -59,56 +60,75 @@ export function ExtensionsPage() {
           hasCredentials: !!row.credentials_encrypted,
         };
       });
-      setStates(map);
-      setLoading(false);
-    };
+      return map;
+    },
+    enabled: !!user,
+  });
 
-    loadSettings();
-  }, [user]);
-
-  const handleToggle = async (extName: string, enabled: boolean) => {
-    if (!user) return;
-    const prev = states[extName];
-    setStates((s) => ({
-      ...s,
-      [extName]: { ...s[extName], enabled },
-    }));
-
-    const { error } = await supabase
-      .schema('hub')
-      .from('extension_settings')
-      .upsert({ user_id: user.id, extension_name: extName, enabled }, { onConflict: 'user_id,extension_name' });
-
-    if (error) {
-      // Rollback optimistic update
-      setStates((s) => ({
-        ...s,
-        [extName]: prev ?? { enabled: !enabled, hasCredentials: false },
+  // Toggle extension mutation with optimistic update
+  const toggleMutation = useMutation({
+    mutationFn: async ({ extName, enabled }: { extName: string; enabled: boolean }) => {
+      const { error } = await supabase
+        .schema('hub')
+        .from('extension_settings')
+        .upsert({ user_id: user!.id, extension_name: extName, enabled }, { onConflict: 'user_id,extension_name' });
+      if (error) throw error;
+    },
+    onMutate: async ({ extName, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.extensions(user!.id) });
+      const previous = queryClient.getQueryData<Record<string, ExtensionState>>(queryKeys.extensions(user!.id));
+      queryClient.setQueryData(queryKeys.extensions(user!.id), (old: Record<string, ExtensionState> | undefined) => ({
+        ...old,
+        [extName]: { ...old?.[extName], enabled, hasCredentials: old?.[extName]?.hasCredentials ?? false },
       }));
-    }
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.extensions(user!.id), context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.extensions(user!.id) });
+    },
+  });
+
+  // Save credentials mutation
+  const saveCredentialsMutation = useMutation({
+    mutationFn: async ({ extName, credentials }: { extName: string; credentials: Record<string, string> }) => {
+      const { error } = await supabase.schema('hub').rpc('save_extension_credentials', {
+        p_extension_name: extName,
+        p_credentials_json: JSON.stringify(credentials),
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_data, { extName }) => {
+      queryClient.setQueryData(queryKeys.extensions(user!.id), (old: Record<string, ExtensionState> | undefined) => ({
+        ...old,
+        [extName]: { ...old?.[extName], enabled: old?.[extName]?.enabled ?? false, hasCredentials: true },
+      }));
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.extensions(user!.id) });
+    },
+  });
+
+  const handleToggle = (extName: string, enabled: boolean) => {
+    toggleMutation.mutate({ extName, enabled });
   };
 
   const handleSaveCredentials = async (extName: string, credentials: Record<string, string>) => {
-    if (!user) return { error: 'Not authenticated' };
-
-    // Save credentials via server-side encrypted RPC (pgp_sym_encrypt)
-    const { error } = await supabase.schema('hub').rpc('save_extension_credentials', {
-      p_extension_name: extName,
-      p_credentials_json: JSON.stringify(credentials),
-    });
-
-    if (error) return { error: error.message };
-
-    setStates((prev) => ({
-      ...prev,
-      [extName]: { ...prev[extName], hasCredentials: true },
-    }));
-    return {};
+    try {
+      await saveCredentialsMutation.mutateAsync({ extName, credentials });
+      return {};
+    } catch (err: any) {
+      return { error: err.message };
+    }
   };
 
   return (
     <HubLayout title="Extensions">
-      {loading ? (
+      {isLoading ? (
         <div className="space-y-4">
           <CardSkeleton />
           <CardSkeleton />

@@ -1,4 +1,5 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
@@ -6,7 +7,7 @@ import { formatTime } from '@/shared/formatTime';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
-import { supabase, coachbyte } from '@/shared/supabase';
+import { coachbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { epley1RM } from '@/pages/coachbyte/PrsPage';
@@ -16,6 +17,9 @@ import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { SaveIndicator } from '@/components/ui/SaveIndicator';
 import { useSaveIndicator } from '@/hooks/useSaveIndicator';
+import { CardSkeleton } from '@/components/ui/Skeleton';
+import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
 interface CompletedSet {
   completed_set_id: string;
@@ -39,23 +43,23 @@ const DEFAULT_TIMER: TimerState = {
   elapsed_before_pause: 0,
 };
 
+interface DailyPlanData {
+  planId: string;
+  sets: PlannedSet[];
+  completedSets: CompletedSet[];
+  summary: string;
+  notes: string;
+}
+
 export function TodayPage() {
   const { user } = useAuth();
   const { dayStartHour } = useAppContext();
-  const [loading, setLoading] = useState(true);
-  const [planId, setPlanId] = useState<string | null>(null);
-  const [sets, setSets] = useState<PlannedSet[]>([]);
-  const [completedSets, setCompletedSets] = useState<CompletedSet[]>([]);
-  const [timer, setTimer] = useState<TimerState>(DEFAULT_TIMER);
-  const [summary, setSummary] = useState('');
+  const queryClient = useQueryClient();
   const [showAdHoc, setShowAdHoc] = useState(false);
   const [addingPlanned, setAddingPlanned] = useState(false);
-  const [exercises, setExercises] = useState<Exercise[]>([]);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [confirmReset, setConfirmReset] = useState(false);
-  const [notes, setNotes] = useState('');
   const [prToast, setPrToast] = useState<string | null>(null);
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [notesExpanded, setNotesExpanded] = useState(false);
@@ -70,6 +74,10 @@ export function TodayPage() {
   const resetTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
   const isEditingRef = useRef(false);
 
+  // Local state for summary/notes (controlled by debounced save)
+  const [summary, setSummary] = useState('');
+  const [notes, setNotes] = useState('');
+
   useEffect(() => {
     return () => {
       if (summaryDebounceRef.current) clearTimeout(summaryDebounceRef.current);
@@ -81,199 +89,198 @@ export function TodayPage() {
 
   const today = todayStr(dayStartHour);
 
-  const loadPlan = useCallback(async () => {
-    if (!user) return;
-    setLoadError(null);
+  // ── Daily Plan query ──
+  const {
+    data: planData,
+    isLoading: planLoading,
+    error: planError,
+  } = useQuery({
+    queryKey: queryKeys.dailyPlan(user!.id, today),
+    queryFn: async (): Promise<DailyPlanData> => {
+      const { data: planResult, error: planErr } = await coachbyte().rpc('ensure_daily_plan', { p_day: today });
+      if (planErr) throw planErr;
 
-    const { data: planResult, error: planErr } = await coachbyte().rpc('ensure_daily_plan', { p_day: today });
+      const result = planResult as { plan_id: string; status: string };
 
-    if (planErr) {
-      setLoadError(planErr.message);
-      setLoading(false);
-      return;
-    }
+      const [{ data: plannedData }, { data: completedData }, { data: planInfo }] = await Promise.all([
+        coachbyte()
+          .from('planned_sets')
+          .select(
+            'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)',
+          )
+          .eq('plan_id', result.plan_id)
+          .order('"order"'),
+        coachbyte()
+          .from('completed_sets')
+          .select('completed_set_id, planned_set_id, actual_reps, actual_load, completed_at, exercises(name)')
+          .eq('plan_id', result.plan_id)
+          .order('completed_at'),
+        coachbyte().from('daily_plans').select('summary, notes').eq('plan_id', result.plan_id).single(),
+      ]);
 
-    const result = planResult as { plan_id: string; status: string };
-    setPlanId(result.plan_id);
+      const completedPlanIds = new Set(completedData?.map((cs: any) => cs.planned_set_id).filter(Boolean) ?? []);
 
-    const [{ data: plannedData }, { data: completedData }, { data: planData }] = await Promise.all([
-      coachbyte()
-        .from('planned_sets')
-        .select(
-          'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)',
-        )
-        .eq('plan_id', result.plan_id)
-        .order('"order"'),
-      coachbyte()
-        .from('completed_sets')
-        .select('completed_set_id, planned_set_id, actual_reps, actual_load, completed_at, exercises(name)')
-        .eq('plan_id', result.plan_id)
-        .order('completed_at'),
-      coachbyte().from('daily_plans').select('summary, notes').eq('plan_id', result.plan_id).single(),
-    ]);
+      const mapped: PlannedSet[] = (plannedData ?? []).map((ps: any) => ({
+        planned_set_id: ps.planned_set_id,
+        exercise_id: ps.exercise_id,
+        exercise_name: ps.exercises?.name ?? 'Unknown',
+        target_reps: ps.target_reps,
+        target_load: ps.target_load ? Number(ps.target_load) : null,
+        target_load_percentage: ps.target_load_percentage ? Number(ps.target_load_percentage) : null,
+        rest_seconds: ps.rest_seconds,
+        order: ps.order,
+        completed: completedPlanIds.has(ps.planned_set_id),
+      }));
 
-    const completedPlanIds = new Set(completedData?.map((cs: any) => cs.planned_set_id).filter(Boolean) ?? []);
+      const completedMapped: CompletedSet[] = (completedData ?? []).map((cs: any) => ({
+        completed_set_id: cs.completed_set_id,
+        exercise_name: cs.exercises?.name ?? 'Unknown',
+        actual_reps: cs.actual_reps,
+        actual_load: Number(cs.actual_load),
+        completed_at: cs.completed_at,
+      }));
 
-    const mapped: PlannedSet[] = (plannedData ?? []).map((ps: any) => ({
-      planned_set_id: ps.planned_set_id,
-      exercise_id: ps.exercise_id,
-      exercise_name: ps.exercises?.name ?? 'Unknown',
-      target_reps: ps.target_reps,
-      target_load: ps.target_load ? Number(ps.target_load) : null,
-      target_load_percentage: ps.target_load_percentage ? Number(ps.target_load_percentage) : null,
-      rest_seconds: ps.rest_seconds,
-      order: ps.order,
-      completed: completedPlanIds.has(ps.planned_set_id),
-    }));
+      return {
+        planId: result.plan_id,
+        sets: mapped,
+        completedSets: completedMapped,
+        summary: planInfo?.summary ?? '',
+        notes: (planInfo as any)?.notes ?? '',
+      };
+    },
+    enabled: !!user,
+  });
 
-    setSets(mapped);
-
-    const completedMapped: CompletedSet[] = (completedData ?? []).map((cs: any) => ({
-      completed_set_id: cs.completed_set_id,
-      exercise_name: cs.exercises?.name ?? 'Unknown',
-      actual_reps: cs.actual_reps,
-      actual_load: Number(cs.actual_load),
-      completed_at: cs.completed_at,
-    }));
-
-    setCompletedSets(completedMapped);
-
-    const loadedSummary = planData?.summary ?? '';
-    const loadedNotes = (planData as any)?.notes ?? '';
-    setSummary(loadedSummary);
-    summaryRef.current = loadedSummary;
-    setNotes(loadedNotes);
-    notesRef.current = loadedNotes;
-    setLoading(false);
-  }, [user, today]);
-
+  // Sync local summary/notes from query data
+  /* eslint-disable react-hooks/set-state-in-effect -- legitimate: sync server state → local form fields */
   useEffect(() => {
-    if (!user) return;
-    coachbyte()
-      .from('exercises')
-      .select('exercise_id, name')
-      .or(`user_id.is.null,user_id.eq.${user.id}`)
-      .order('name')
-      .then(({ data, error: err }: { data: any; error: any }) => {
-        if (err) console.error('Failed to load exercises:', err.message);
-        setExercises((data ?? []) as Exercise[]);
-      });
-  }, [user]);
-
-  const loadTimer = useCallback(async () => {
-    if (!user) return;
-    const { data } = await coachbyte()
-      .from('timers')
-      .select('state, end_time, duration_seconds, elapsed_before_pause')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (data) {
-      setTimer({
-        state: data.state as TimerState['state'],
-        end_time: data.end_time,
-        duration_seconds: data.duration_seconds,
-        elapsed_before_pause: data.elapsed_before_pause,
-      });
-    } else {
-      setTimer(DEFAULT_TIMER);
+    if (planData) {
+      setSummary(planData.summary);
+      summaryRef.current = planData.summary;
+      setNotes(planData.notes);
+      notesRef.current = planData.notes;
     }
-  }, [user]);
+  }, [planData]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadPlan();
-    loadTimer();
-  }, [loadPlan, loadTimer]);
+  const planId = planData?.planId ?? null;
+  const sets = planData?.sets ?? [];
+  const completedSets = planData?.completedSets ?? [];
+
+  // ── Timer query ──
+  const { data: timer = DEFAULT_TIMER } = useQuery({
+    queryKey: queryKeys.timer(user!.id),
+    queryFn: async (): Promise<TimerState> => {
+      const { data } = await coachbyte()
+        .from('timers')
+        .select('state, end_time, duration_seconds, elapsed_before_pause')
+        .eq('user_id', user!.id)
+        .maybeSingle();
+
+      if (data) {
+        return {
+          state: data.state as TimerState['state'],
+          end_time: data.end_time,
+          duration_seconds: data.duration_seconds,
+          elapsed_before_pause: data.elapsed_before_pause,
+        };
+      }
+      return DEFAULT_TIMER;
+    },
+    enabled: !!user,
+  });
+
+  // ── Exercises query ──
+  const { data: exercises = [] } = useQuery({
+    queryKey: queryKeys.exercises(user!.id),
+    queryFn: async (): Promise<Exercise[]> => {
+      const { data, error: err } = await coachbyte()
+        .from('exercises')
+        .select('exercise_id, name')
+        .or(`user_id.is.null,user_id.eq.${user!.id}`)
+        .order('name');
+      if (err) throw err;
+      return (data ?? []) as Exercise[];
+    },
+    enabled: !!user,
+  });
+
+  // ── Realtime invalidation ──
+  useRealtimeInvalidation('coach-today', [
+    { schema: 'coachbyte', table: 'planned_sets', queryKeys: [queryKeys.dailyPlan(user!.id, today)] },
+    { schema: 'coachbyte', table: 'completed_sets', queryKeys: [queryKeys.dailyPlan(user!.id, today)] },
+    { schema: 'coachbyte', table: 'timers', queryKeys: [queryKeys.timer(user!.id)] },
+  ]);
 
   // Re-load on tab focus to catch midnight date changes
   useEffect(() => {
     const onVisibility = () => {
-      if (document.visibilityState === 'visible') loadPlan();
+      if (document.visibilityState === 'visible') {
+        queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
+      }
     };
     document.addEventListener('visibilitychange', onVisibility);
     return () => document.removeEventListener('visibilitychange', onVisibility);
-  }, [loadPlan]);
+  }, [user, today, queryClient]);
 
-  useEffect(() => {
-    if (!user) return;
+  // ── Complete set mutation ──
+  const completeSetMutation = useMutation({
+    mutationFn: async ({ reps, load }: { reps: number; load: number }) => {
+      const { data, error: err } = await coachbyte().rpc('complete_next_set', {
+        p_plan_id: planId,
+        p_reps: reps,
+        p_load: load,
+      });
+      if (err) throw err;
+      return data as { rest_seconds: number | null }[] | null;
+    },
+    onSuccess: async (data, { reps, load }) => {
+      const result = data;
+      const restSeconds = result?.[0]?.rest_seconds;
+      if (restSeconds && restSeconds > 0) {
+        await startTimer(restSeconds);
+      }
 
-    const channel = supabase
-      .channel('coach-today')
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'coachbyte', table: 'planned_sets', filter: `user_id=eq.${user.id}` },
-        () => {
-          if (!isEditingRef.current) loadPlan();
-        },
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'coachbyte', table: 'completed_sets', filter: `user_id=eq.${user.id}` },
-        () => loadPlan(),
-      )
-      .on(
-        'postgres_changes',
-        { event: '*', schema: 'coachbyte', table: 'timers', filter: `user_id=eq.${user.id}` },
-        () => loadTimer(),
-      )
-      .subscribe();
+      // PR check
+      const nextSet = sets.find((s) => !s.completed);
+      const completedExerciseId = nextSet?.exercise_id;
+      const completedExerciseName = nextSet?.exercise_name;
 
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, loadPlan, loadTimer]);
+      if (completedExerciseId && reps > 0 && load > 0) {
+        const newE1RM = epley1RM(load, reps);
+
+        const { data: prevSets } = await coachbyte()
+          .from('completed_sets')
+          .select('actual_reps, actual_load')
+          .eq('exercise_id', completedExerciseId)
+          .eq('user_id', user!.id);
+
+        let prevBestWithout = 0;
+        for (const ps of (prevSets ?? []) as { actual_reps: number; actual_load: string | number }[]) {
+          const r = ps.actual_reps;
+          const l = Number(ps.actual_load);
+          if (r === reps && l === load) continue;
+          const e = epley1RM(l, r);
+          if (e > prevBestWithout) prevBestWithout = e;
+        }
+
+        if (newE1RM > prevBestWithout && prevBestWithout > 0) {
+          setPrToast(`NEW PR! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT} (was ${prevBestWithout})`);
+        } else if (newE1RM > 0 && prevBestWithout === 0) {
+          setPrToast(`First record! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT}`);
+        }
+      }
+
+      queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
+    },
+    onError: (err: any) => {
+      setError(err.message);
+    },
+  });
 
   const handleCompleteSet = async (reps: number, load: number) => {
     if (!planId || !user) return;
-
-    const nextSet = sets.find((s) => !s.completed);
-    const completedExerciseId = nextSet?.exercise_id;
-    const completedExerciseName = nextSet?.exercise_name;
-
-    const { data, error: err } = await coachbyte().rpc('complete_next_set', {
-      p_plan_id: planId,
-      p_reps: reps,
-      p_load: load,
-    });
-
-    if (err) {
-      setError(err.message);
-      return;
-    }
-
-    const result = data as { rest_seconds: number | null }[] | null;
-    const restSeconds = result?.[0]?.rest_seconds;
-    if (restSeconds && restSeconds > 0) {
-      await startTimer(restSeconds);
-    }
-
-    if (completedExerciseId && reps > 0 && load > 0) {
-      const newE1RM = epley1RM(load, reps);
-
-      const { data: prevSets } = await coachbyte()
-        .from('completed_sets')
-        .select('actual_reps, actual_load')
-        .eq('exercise_id', completedExerciseId)
-        .eq('user_id', user.id);
-
-      let prevBestWithout = 0;
-      for (const ps of (prevSets ?? []) as { actual_reps: number; actual_load: string | number }[]) {
-        const r = ps.actual_reps;
-        const l = Number(ps.actual_load);
-        if (r === reps && l === load) continue;
-        const e = epley1RM(l, r);
-        if (e > prevBestWithout) prevBestWithout = e;
-      }
-
-      if (newE1RM > prevBestWithout && prevBestWithout > 0) {
-        setPrToast(`NEW PR! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT} (was ${prevBestWithout})`);
-      } else if (newE1RM > 0 && prevBestWithout === 0) {
-        setPrToast(`First record! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT}`);
-      }
-    }
-
-    await loadPlan();
+    completeSetMutation.mutate({ reps, load });
   };
 
   const updatePlannedSet = async (plannedSetId: string, field: string, value: number | null) => {
@@ -292,7 +299,7 @@ export function TodayPage() {
       setError(err.message);
       return;
     }
-    await loadPlan();
+    queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
   };
 
   const addPlannedSet = async (exerciseId: string, reps: number, load: number) => {
@@ -314,7 +321,7 @@ export function TodayPage() {
       return;
     }
     setAddingPlanned(false);
-    await loadPlan();
+    queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
   };
 
   const startTimer = async (seconds: number) => {
@@ -334,7 +341,7 @@ export function TodayPage() {
       setError(err.message);
       return;
     }
-    await loadTimer();
+    queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
   };
 
   const pauseTimer = async () => {
@@ -347,7 +354,7 @@ export function TodayPage() {
       .update({ state: 'paused', paused_at: new Date().toISOString(), elapsed_before_pause: Math.max(0, elapsed) })
       .eq('user_id', user.id);
     if (err) setError(err.message);
-    else await loadTimer();
+    else queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
   };
 
   const resumeTimer = async () => {
@@ -359,14 +366,14 @@ export function TodayPage() {
       .update({ state: 'running', end_time: endTime, paused_at: null })
       .eq('user_id', user.id);
     if (err) setError(err.message);
-    else await loadTimer();
+    else queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
   };
 
   const resetTimer = async () => {
     if (!user) return;
     const { error: err } = await coachbyte().from('timers').delete().eq('user_id', user.id);
     if (err) setError(err.message);
-    else setTimer(DEFAULT_TIMER);
+    else queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
   };
 
   const handleTimerExpired = useCallback(async () => {
@@ -376,12 +383,12 @@ export function TodayPage() {
   }, [user]);
 
   // Timer expired detection — runs when timer is running and hits 0
+  /* eslint-disable react-hooks/set-state-in-effect -- timer expiry triggers server-side mutation + state update */
   useEffect(() => {
     if (timer.state !== 'running' || !timer.end_time) return;
 
     const remaining = Math.max(0, Math.ceil((new Date(timer.end_time).getTime() - Date.now()) / 1000));
     if (remaining <= 0) {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       handleTimerExpired();
       return;
     }
@@ -392,12 +399,13 @@ export function TodayPage() {
 
     return () => clearTimeout(id);
   }, [timer.state, timer.end_time, handleTimerExpired]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   const handleAdHocSubmit = async (exerciseId: string, reps: number, load: number) => {
     if (!user || !planId) return;
     setError(null);
 
-    const { data: planData, error: fetchErr } = await coachbyte()
+    const { data: planInfo, error: fetchErr } = await coachbyte()
       .from('daily_plans')
       .select('logical_date')
       .eq('plan_id', planId)
@@ -413,7 +421,7 @@ export function TodayPage() {
       exercise_id: exerciseId,
       actual_reps: reps,
       actual_load: load,
-      logical_date: planData?.logical_date,
+      logical_date: planInfo?.logical_date,
     });
     if (insertErr) {
       setError(insertErr.message);
@@ -421,7 +429,7 @@ export function TodayPage() {
     }
 
     setShowAdHoc(false);
-    await loadPlan();
+    queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
   };
 
   const saveSummary = useCallback(
@@ -484,7 +492,7 @@ export function TodayPage() {
       setError(err.message);
       return;
     }
-    await loadPlan();
+    queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
   };
 
   const resetPlan = async () => {
@@ -502,15 +510,15 @@ export function TodayPage() {
       setError(err.message);
       return;
     }
-    await loadPlan();
+    queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
   };
 
   const [timerRemaining, setTimerRemaining] = useState(0);
 
+  /* eslint-disable react-hooks/set-state-in-effect -- timer countdown driven by external clock */
   useEffect(() => {
     if (timer.state === 'running' && timer.end_time) {
       const calc = () => Math.max(0, Math.ceil((new Date(timer.end_time!).getTime() - Date.now()) / 1000));
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setTimerRemaining(calc());
       const id = setInterval(() => setTimerRemaining(calc()), 1000);
       return () => clearInterval(id);
@@ -520,11 +528,12 @@ export function TodayPage() {
       setTimerRemaining(0);
     }
   }, [timer.state, timer.end_time, timer.duration_seconds, timer.elapsed_before_pause]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  if (loading) {
+  if (planLoading) {
     return (
       <CoachLayout title="Today">
-        <p className="text-slate-500 text-sm">Loading workout...</p>
+        <CardSkeleton />
       </CoachLayout>
     );
   }
@@ -546,11 +555,15 @@ export function TodayPage() {
         </div>
       </div>
 
-      {loadError && (
+      {planError && (
         <Card className="border-red-300 mb-5" data-testid="load-error">
           <CardContent>
-            <p className="text-red-600 text-sm mb-2">Failed to load data: {loadError}</p>
-            <Button variant="primary" size="sm" onClick={loadPlan}>
+            <p className="text-red-600 text-sm mb-2">Failed to load data: {(planError as any).message}</p>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) })}
+            >
               Retry
             </Button>
           </CardContent>

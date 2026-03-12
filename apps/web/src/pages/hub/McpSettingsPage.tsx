@@ -1,8 +1,10 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { ApiKeyGenerator } from '@/components/hub/ApiKeyGenerator';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
@@ -24,38 +26,98 @@ async function sha256(text: string): Promise<string> {
     .join('');
 }
 
-async function fetchActiveKeys(userId: string) {
-  return supabase
-    .schema('hub')
-    .from('api_keys')
-    .select('id, label, created_at')
-    .eq('user_id', userId)
-    .is('revoked_at', null)
-    .order('created_at', { ascending: false });
-}
-
 export function McpSettingsPage() {
   const { user } = useAuth();
-  const [activeKeys, setActiveKeys] = useState<ActiveKey[]>([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
-  const [refreshCounter, setRefreshCounter] = useState(0);
   const [endpointCopied, setEndpointCopied] = useState(false);
 
   const endpointUrl = `${import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/sse`;
 
-  useEffect(() => {
-    if (!user) return;
+  // Load active API keys via useQuery
+  const { data: activeKeys = [], isLoading } = useQuery({
+    queryKey: queryKeys.apiKeys(user!.id),
+    queryFn: async () => {
+      const { data, error: err } = await supabase
+        .schema('hub')
+        .from('api_keys')
+        .select('id, label, created_at')
+        .eq('user_id', user!.id)
+        .is('revoked_at', null)
+        .order('created_at', { ascending: false });
+      if (err) throw err;
+      return (data ?? []) as ActiveKey[];
+    },
+    enabled: !!user,
+  });
 
-    const load = async () => {
-      const { data, error: err } = await fetchActiveKeys(user.id);
-      if (err) setError(err.message);
-      else setActiveKeys(data ?? []);
-      setLoading(false);
-    };
+  // Generate key mutation
+  const generateMutation = useMutation({
+    mutationFn: async (label: string): Promise<string> => {
+      // Enforce maximum of 10 active (non-revoked) API keys per user
+      const { count, error: countErr } = await supabase
+        .schema('hub')
+        .from('api_keys')
+        .select('id', { count: 'exact', head: true })
+        .eq('user_id', user!.id)
+        .is('revoked_at', null);
 
-    load();
-  }, [user, refreshCounter]);
+      if (countErr) throw countErr;
+
+      if ((count ?? 0) >= MAX_ACTIVE_KEYS) {
+        throw new Error(
+          `Maximum of ${MAX_ACTIVE_KEYS} active API keys reached. Revoke an existing key before creating a new one.`,
+        );
+      }
+
+      const plaintext = `lh_${crypto.randomUUID().replace(/-/g, '')}`;
+      const hash = await sha256(plaintext);
+
+      const { error: err } = await supabase
+        .schema('hub')
+        .from('api_keys')
+        .insert({ user_id: user!.id, api_key_hash: hash, label });
+
+      if (err) throw err;
+      return plaintext;
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys(user!.id) });
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    },
+  });
+
+  // Revoke key mutation
+  const revokeMutation = useMutation({
+    mutationFn: async (keyId: string) => {
+      const { error: err } = await supabase
+        .schema('hub')
+        .from('api_keys')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('id', keyId)
+        .eq('user_id', user!.id);
+      if (err) throw err;
+    },
+    onMutate: async (keyId) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.apiKeys(user!.id) });
+      const previous = queryClient.getQueryData<ActiveKey[]>(queryKeys.apiKeys(user!.id));
+      queryClient.setQueryData(queryKeys.apiKeys(user!.id), (old: ActiveKey[] | undefined) =>
+        old?.filter((key) => key.id !== keyId),
+      );
+      return { previous };
+    },
+    onError: (_err, _keyId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.apiKeys(user!.id), context.previous);
+      }
+      setError(_err.message);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys(user!.id) });
+    },
+  });
 
   const handleCopyEndpoint = async () => {
     try {
@@ -68,56 +130,17 @@ export function McpSettingsPage() {
   };
 
   const handleGenerate = async (label: string): Promise<string | null> => {
-    if (!user) return null;
     setError(null);
-
-    // Enforce maximum of 10 active (non-revoked) API keys per user
-    const { count, error: countErr } = await supabase
-      .schema('hub')
-      .from('api_keys')
-      .select('id', { count: 'exact', head: true })
-      .eq('user_id', user.id)
-      .is('revoked_at', null);
-
-    if (countErr) {
-      setError(countErr.message);
+    try {
+      return await generateMutation.mutateAsync(label || 'Untitled');
+    } catch {
       return null;
     }
-
-    if ((count ?? 0) >= MAX_ACTIVE_KEYS) {
-      setError(
-        `Maximum of ${MAX_ACTIVE_KEYS} active API keys reached. Revoke an existing key before creating a new one.`,
-      );
-      return null;
-    }
-
-    const plaintext = `lh_${crypto.randomUUID().replace(/-/g, '')}`;
-    const hash = await sha256(plaintext);
-
-    const { error: err } = await supabase
-      .schema('hub')
-      .from('api_keys')
-      .insert({ user_id: user.id, api_key_hash: hash, label });
-
-    if (err) {
-      setError(err.message);
-      return null;
-    }
-    setRefreshCounter((c) => c + 1);
-    return plaintext;
   };
 
-  const handleRevoke = async (keyId: string) => {
+  const handleRevoke = (keyId: string) => {
     setError(null);
-    const { error: err } = await supabase
-      .schema('hub')
-      .from('api_keys')
-      .update({ revoked_at: new Date().toISOString() })
-      .eq('id', keyId)
-      .eq('user_id', user!.id);
-
-    if (err) setError(err.message);
-    setRefreshCounter((c) => c + 1);
+    revokeMutation.mutate(keyId);
   };
 
   return (
@@ -140,12 +163,12 @@ export function McpSettingsPage() {
           </CardContent>
         </Card>
 
-        {loading ? (
+        {isLoading ? (
           <CardSkeleton />
         ) : (
           <ApiKeyGenerator
             activeKeys={activeKeys}
-            loading={loading}
+            loading={generateMutation.isPending || revokeMutation.isPending}
             error={error}
             onGenerate={handleGenerate}
             onRevoke={handleRevoke}

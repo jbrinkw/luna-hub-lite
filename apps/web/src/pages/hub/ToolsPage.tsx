@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useState, useMemo } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight, Search, X } from 'lucide-react';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
 import { Toggle } from '@/components/ui/Toggle';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 
@@ -106,20 +108,20 @@ const ALL_TOOLS = TOOL_GROUPS.flatMap((g) => g.tools);
 
 export function ToolsPage() {
   const { user } = useAuth();
-  const [toggles, setToggles] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [search, setSearch] = useState('');
 
-  useEffect(() => {
-    if (!user) return;
-
-    const loadTools = async () => {
-      const { data: configs } = await supabase
+  // Load tool toggles via useQuery
+  const { data: toggles = {} as Record<string, boolean>, isLoading } = useQuery({
+    queryKey: queryKeys.tools(user!.id),
+    queryFn: async () => {
+      const { data: configs, error } = await supabase
         .schema('hub')
         .from('user_tool_config')
         .select('tool_name, enabled')
-        .eq('user_id', user.id);
+        .eq('user_id', user!.id);
+      if (error) throw error;
 
       const configMap = new Map(configs?.map((c) => [c.tool_name, c.enabled]) ?? []);
 
@@ -127,28 +129,41 @@ export function ToolsPage() {
       for (const tool of ALL_TOOLS) {
         initial[tool.name] = configMap.get(tool.name) ?? true;
       }
+      return initial;
+    },
+    enabled: !!user,
+  });
 
-      setToggles(initial);
-      setLoading(false);
-    };
+  // Toggle tool mutation with optimistic update
+  const toggleMutation = useMutation({
+    mutationFn: async ({ toolName, enabled }: { toolName: string; enabled: boolean }) => {
+      const { error } = await supabase
+        .schema('hub')
+        .from('user_tool_config')
+        .upsert({ user_id: user!.id, tool_name: toolName, enabled }, { onConflict: 'user_id,tool_name' });
+      if (error) throw error;
+    },
+    onMutate: async ({ toolName, enabled }) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.tools(user!.id) });
+      const previous = queryClient.getQueryData<Record<string, boolean>>(queryKeys.tools(user!.id));
+      queryClient.setQueryData(queryKeys.tools(user!.id), (old: Record<string, boolean> | undefined) => ({
+        ...old,
+        [toolName]: enabled,
+      }));
+      return { previous };
+    },
+    onError: (_err, _vars, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.tools(user!.id), context.previous);
+      }
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.tools(user!.id) });
+    },
+  });
 
-    loadTools();
-  }, [user]);
-
-  const handleToggle = async (toolName: string, enabled: boolean) => {
-    if (!user) return;
-    const prev = toggles[toolName];
-    setToggles((s) => ({ ...s, [toolName]: enabled }));
-
-    const { error } = await supabase
-      .schema('hub')
-      .from('user_tool_config')
-      .upsert({ user_id: user.id, tool_name: toolName, enabled }, { onConflict: 'user_id,tool_name' });
-
-    if (error) {
-      // Rollback optimistic update
-      setToggles((s) => ({ ...s, [toolName]: prev }));
-    }
+  const handleToggle = (toolName: string, enabled: boolean) => {
+    toggleMutation.mutate({ toolName, enabled });
   };
 
   const toggleGroup = (label: string) => {
@@ -180,7 +195,7 @@ export function ToolsPage() {
 
   return (
     <HubLayout title="Tools">
-      {loading ? (
+      {isLoading ? (
         <ListSkeleton count={8} />
       ) : (
         <div className="space-y-3">

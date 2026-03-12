@@ -32,6 +32,7 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
   useEffect(() => {
     if (!open) return;
     document.addEventListener('keydown', handleEscape);
+    const prevOverflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden';
 
     // Move focus into the dialog
@@ -41,7 +42,7 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
 
     return () => {
       document.removeEventListener('keydown', handleEscape);
-      document.body.style.overflow = '';
+      document.body.style.overflow = prevOverflow;
       cancelAnimationFrame(timer);
     };
   }, [open, handleEscape]);
@@ -51,7 +52,11 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
   return createPortal(
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} aria-hidden="true" />
+      <div
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-modal-backdrop"
+        onClick={onClose}
+        aria-hidden="true"
+      />
 
       {/* Dialog */}
       <div
@@ -60,7 +65,11 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
-        className={['relative w-full bg-white rounded-xl shadow-xl', maxWidthClasses[maxWidth], className]
+        className={[
+          'relative w-full bg-white rounded-xl shadow-xl animate-modal-card',
+          maxWidthClasses[maxWidth],
+          className,
+        ]
           .filter(Boolean)
           .join(' ')}
       >

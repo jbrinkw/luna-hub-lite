@@ -1,4 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState, useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase, coachbyte } from '@/shared/supabase';
@@ -6,7 +7,9 @@ import { WEIGHT_UNIT } from '@/shared/constants';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
+import { CardSkeleton } from '@/components/ui/Skeleton';
 import { Settings, ChevronDown, ChevronRight } from 'lucide-react';
+import { queryKeys } from '@/shared/queryKeys';
 
 interface ExercisePR {
   exercise_id: string;
@@ -24,124 +27,135 @@ export function epley1RM(load: number, reps: number): number {
 
 export function PrsPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [prs, setPrs] = useState<ExercisePR[]>([]);
+  const queryClient = useQueryClient();
   const [trackedExercises, setTrackedExercises] = useState<{ exercise_id: string; name: string }[]>([]);
-  const [allExercises, setAllExercises] = useState<{ exercise_id: string; name: string }[]>([]);
   const [searchText, setSearchText] = useState('');
   const [dateRange, setDateRange] = useState<number>(90);
   const [trackedPanelOpen, setTrackedPanelOpen] = useState(false);
 
-  const computePRs = useCallback(async () => {
-    if (!user) return;
-    setLoadError(null);
+  // ── PRs query ──
+  const {
+    data: prs = [],
+    isLoading: loading,
+    error: loadError,
+  } = useQuery({
+    queryKey: queryKeys.prs(user!.id, String(dateRange)),
+    queryFn: async (): Promise<ExercisePR[]> => {
+      let query = supabase
+        .schema('coachbyte')
+        .from('completed_sets')
+        .select('exercise_id, actual_reps, actual_load, exercises(name)')
+        .eq('user_id', user!.id)
+        .order('completed_at', { ascending: false });
 
-    let query = supabase
-      .schema('coachbyte')
-      .from('completed_sets')
-      .select('exercise_id, actual_reps, actual_load, exercises(name)')
-      .eq('user_id', user.id)
-      .order('completed_at', { ascending: false });
-
-    if (dateRange < 9999) {
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - dateRange);
-      query = query.gte('completed_at', cutoffDate.toISOString());
-    }
-
-    const { data: completedSets, error: setsErr } = await query;
-
-    if (setsErr) {
-      setLoadError(setsErr.message);
-      setLoading(false);
-      return;
-    }
-
-    if (!completedSets || completedSets.length === 0) {
-      setPrs([]);
-      setLoading(false);
-      return;
-    }
-
-    // Group by exercise, find best load at each rep count
-    const exerciseMap = new Map<string, { name: string; repBests: Map<number, number> }>();
-
-    for (const cs of completedSets as any[]) {
-      const id = cs.exercise_id;
-      const name = cs.exercises?.name ?? 'Unknown';
-      const reps = cs.actual_reps;
-      const load = Number(cs.actual_load);
-
-      if (!exerciseMap.has(id)) {
-        exerciseMap.set(id, { name, repBests: new Map() });
-      }
-      const entry = exerciseMap.get(id)!;
-      const current = entry.repBests.get(reps) ?? 0;
-      if (load > current) {
-        entry.repBests.set(reps, load);
-      }
-    }
-
-    const result: ExercisePR[] = [];
-    for (const [exerciseId, data] of exerciseMap) {
-      const repRecords = Array.from(data.repBests.entries())
-        .map(([reps, load]) => ({ reps, load }))
-        .sort((a, b) => a.reps - b.reps);
-
-      // e1RM = max Epley across all rep records
-      let maxE1RM = 0;
-      for (const r of repRecords) {
-        const e = epley1RM(r.load, r.reps);
-        if (e > maxE1RM) maxE1RM = e;
+      if (dateRange < 9999) {
+        const cutoffDate = new Date();
+        cutoffDate.setDate(cutoffDate.getDate() - dateRange);
+        query = query.gte('completed_at', cutoffDate.toISOString());
       }
 
-      result.push({
-        exercise_id: exerciseId,
-        exercise_name: data.name,
-        e1rm: maxE1RM,
-        rep_records: repRecords,
-      });
-    }
+      const { data: completedSets, error: setsErr } = await query;
+      if (setsErr) throw setsErr;
 
-    result.sort((a, b) => a.exercise_name.localeCompare(b.exercise_name));
-    setPrs(result);
-    setLoading(false);
-  }, [user, dateRange]);
+      if (!completedSets || completedSets.length === 0) {
+        return [];
+      }
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    computePRs();
-  }, [computePRs]);
+      // Group by exercise, find best load at each rep count
+      const exerciseMap = new Map<string, { name: string; repBests: Map<number, number> }>();
 
-  useEffect(() => {
-    if (!user) return;
+      for (const cs of completedSets as any[]) {
+        const id = cs.exercise_id;
+        const name = cs.exercises?.name ?? 'Unknown';
+        const reps = cs.actual_reps;
+        const load = Number(cs.actual_load);
 
-    const loadExercisesAndSettings = async () => {
-      const [exercisesRes, settingsRes] = await Promise.all([
-        supabase
-          .schema('coachbyte')
-          .from('exercises')
-          .select('exercise_id, name')
-          .or(`user_id.is.null,user_id.eq.${user.id}`)
-          .order('name'),
-        coachbyte().from('user_settings').select('pr_tracked_exercise_ids').eq('user_id', user.id).maybeSingle(),
-      ]);
+        if (!exerciseMap.has(id)) {
+          exerciseMap.set(id, { name, repBests: new Map() });
+        }
+        const entry = exerciseMap.get(id)!;
+        const current = entry.repBests.get(reps) ?? 0;
+        if (load > current) {
+          entry.repBests.set(reps, load);
+        }
+      }
 
-      const exercises = (exercisesRes.data ?? []) as { exercise_id: string; name: string }[];
-      setAllExercises(exercises);
+      const result: ExercisePR[] = [];
+      for (const [exerciseId, data] of exerciseMap) {
+        const repRecords = Array.from(data.repBests.entries())
+          .map(([reps, load]) => ({ reps, load }))
+          .sort((a, b) => a.reps - b.reps);
 
-      const savedIds: string[] | null = settingsRes.data?.pr_tracked_exercise_ids ?? null;
+        // e1RM = max Epley across all rep records
+        let maxE1RM = 0;
+        for (const r of repRecords) {
+          const e = epley1RM(r.load, r.reps);
+          if (e > maxE1RM) maxE1RM = e;
+        }
+
+        result.push({
+          exercise_id: exerciseId,
+          exercise_name: data.name,
+          e1rm: maxE1RM,
+          rep_records: repRecords,
+        });
+      }
+
+      result.sort((a, b) => a.exercise_name.localeCompare(b.exercise_name));
+      return result;
+    },
+    enabled: !!user,
+  });
+
+  // ── Exercises + tracked settings query ──
+  const { data: allExercises = [] } = useQuery({
+    queryKey: queryKeys.exercises(user!.id),
+    queryFn: async () => {
+      const { data, error: err } = await supabase
+        .schema('coachbyte')
+        .from('exercises')
+        .select('exercise_id, name')
+        .or(`user_id.is.null,user_id.eq.${user!.id}`)
+        .order('name');
+      if (err) throw err;
+      return (data ?? []) as { exercise_id: string; name: string }[];
+    },
+    enabled: !!user,
+  });
+
+  // Load tracked exercise settings
+  useQuery({
+    queryKey: queryKeys.coachSettings(user!.id),
+    queryFn: async () => {
+      const { data } = await coachbyte()
+        .from('user_settings')
+        .select('pr_tracked_exercise_ids')
+        .eq('user_id', user!.id)
+        .maybeSingle();
+
+      const savedIds: string[] | null = data?.pr_tracked_exercise_ids ?? null;
+      return savedIds;
+    },
+    enabled: !!user && allExercises.length > 0,
+    // When data arrives, sync tracked exercises state
+    select: (savedIds: string[] | null) => {
+      // Side-effect: update tracked exercises based on loaded settings
       if (savedIds && Array.isArray(savedIds)) {
         const savedSet = new Set(savedIds);
-        setTrackedExercises(exercises.filter((e) => savedSet.has(e.exercise_id)));
-      } else {
-        setTrackedExercises(exercises);
+        const filtered = allExercises.filter((e) => savedSet.has(e.exercise_id));
+        // Only update if different to avoid infinite loops
+        if (
+          filtered.length !== trackedExercises.length ||
+          filtered.some((f, i) => f.exercise_id !== trackedExercises[i]?.exercise_id)
+        ) {
+          setTrackedExercises(filtered);
+        }
+      } else if (trackedExercises.length === 0 && allExercises.length > 0) {
+        setTrackedExercises(allExercises);
       }
-    };
-
-    loadExercisesAndSettings();
-  }, [user]);
+      return savedIds;
+    },
+  });
 
   const saveTrackedExercises = useCallback(
     async (ids: string[]) => {
@@ -180,9 +194,7 @@ export function PrsPage() {
   if (loading) {
     return (
       <CoachLayout title="PRs">
-        <p className="text-slate-500 text-sm" data-testid="prs-loading">
-          Loading your PRs...
-        </p>
+        <CardSkeleton data-testid="prs-loading" />
       </CoachLayout>
     );
   }
@@ -196,8 +208,12 @@ export function PrsPage() {
       {loadError && (
         <Card className="border-red-300 mb-5" data-testid="load-error">
           <CardContent>
-            <p className="text-red-600 text-sm mb-2">Failed to load data: {loadError}</p>
-            <Button variant="primary" size="sm" onClick={computePRs}>
+            <p className="text-red-600 text-sm mb-2">Failed to load data: {(loadError as any).message}</p>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.prs(user!.id, String(dateRange)) })}
+            >
               Retry
             </Button>
           </CardContent>
@@ -253,7 +269,6 @@ export function PrsPage() {
             size="sm"
             data-testid="load-all-history-btn"
             onClick={() => {
-              setLoading(true);
               setDateRange(9999);
             }}
           >

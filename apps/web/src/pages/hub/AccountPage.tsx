@@ -1,14 +1,16 @@
-import { useEffect, useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { HubLayout } from '@/components/hub/HubLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
 import { MIN_PASSWORD_LENGTH } from '@/shared/constants';
 import { Button } from '@/components/ui/Button';
 import { Input } from '@/components/ui/Input';
 import { Select } from '@/components/ui/Select';
 import { Alert } from '@/components/ui/Alert';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
-import { Skeleton } from '@/components/ui/Skeleton';
+import { CardSkeleton } from '@/components/ui/Skeleton';
 import { SaveIndicator } from '@/components/ui/SaveIndicator';
 import { useSaveIndicator } from '@/hooks/useSaveIndicator';
 import { ChevronDown } from 'lucide-react';
@@ -42,8 +44,6 @@ export function AccountPage() {
   const [displayName, setDisplayName] = useState('');
   const [timezone, setTimezone] = useState('America/New_York');
   const [dayStartHour, setDayStartHour] = useState(6);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const { showSaved, flash } = useSaveIndicator();
 
@@ -85,50 +85,76 @@ export function AccountPage() {
   // Password change
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [pwSaving, setPwSaving] = useState(false);
   const [pwMessage, setPwMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
+  // Load profile via useQuery
+  const { data: profile, isLoading } = useQuery({
+    queryKey: queryKeys.profile(user!.id),
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .schema('hub')
+        .from('profiles')
+        .select('display_name, timezone, day_start_hour')
+        .eq('user_id', user!.id)
+        .single();
+      if (error) throw error;
+      return data;
+    },
+    enabled: !!user,
+  });
+
+  // Sync local form state when profile data loads
+  /* eslint-disable react-hooks/set-state-in-effect -- legitimate: sync server state → local form fields */
   useEffect(() => {
-    if (!user) return;
-    supabase
-      .schema('hub')
-      .from('profiles')
-      .select('display_name, timezone, day_start_hour')
-      .eq('user_id', user.id)
-      .single()
-      .then(({ data, error: err }) => {
-        if (err) {
-          console.error('Failed to load profile:', err.message);
-        } else if (data) {
-          setDisplayName(data.display_name ?? '');
-          setTimezone(data.timezone);
-          setDayStartHour(data.day_start_hour);
-        }
-        setLoading(false);
-      });
-  }, [user]);
+    if (profile) {
+      setDisplayName(profile.display_name ?? '');
+      setTimezone(profile.timezone);
+      setDayStartHour(profile.day_start_hour);
+    }
+  }, [profile]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  const handleSaveProfile = async () => {
-    if (!user) return;
-    setSaving(true);
-    setMessage(null);
-
-    const { error } = await supabase
-      .schema('hub')
-      .from('profiles')
-      .update({ display_name: displayName, timezone, day_start_hour: dayStartHour })
-      .eq('user_id', user.id);
-
-    setSaving(false);
-    if (error) {
-      setMessage({ type: 'error', text: error.message });
-    } else {
+  // Save profile mutation
+  const saveProfileMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase
+        .schema('hub')
+        .from('profiles')
+        .update({ display_name: displayName, timezone, day_start_hour: dayStartHour })
+        .eq('user_id', user!.id);
+      if (error) throw error;
+    },
+    onSuccess: () => {
       setMessage({ type: 'success', text: 'Profile updated' });
       flash();
-    }
+    },
+    onError: (error: Error) => {
+      setMessage({ type: 'error', text: error.message });
+    },
+  });
+
+  // Change password mutation
+  const changePasswordMutation = useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.auth.updateUser({ password: newPassword });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setPwMessage({ type: 'success', text: 'Password updated' });
+      setNewPassword('');
+      setConfirmPassword('');
+    },
+    onError: (error: Error) => {
+      setPwMessage({ type: 'error', text: error.message });
+    },
+  });
+
+  const handleSaveProfile = () => {
+    setMessage(null);
+    saveProfileMutation.mutate();
   };
 
-  const handleChangePassword = async () => {
+  const handleChangePassword = () => {
     setPwMessage(null);
     if (newPassword.length < MIN_PASSWORD_LENGTH) {
       setPwMessage({ type: 'error', text: `Password must be at least ${MIN_PASSWORD_LENGTH} characters` });
@@ -138,16 +164,7 @@ export function AccountPage() {
       setPwMessage({ type: 'error', text: 'Passwords do not match' });
       return;
     }
-    setPwSaving(true);
-    const { error } = await supabase.auth.updateUser({ password: newPassword });
-    setPwSaving(false);
-    if (error) {
-      setPwMessage({ type: 'error', text: error.message });
-    } else {
-      setPwMessage({ type: 'success', text: 'Password updated' });
-      setNewPassword('');
-      setConfirmPassword('');
-    }
+    changePasswordMutation.mutate();
   };
 
   const handleTzSelect = (tz: string) => {
@@ -193,12 +210,10 @@ export function AccountPage() {
 
   return (
     <HubLayout title="Account">
-      {loading ? (
+      {isLoading ? (
         <div className="space-y-4">
-          <Skeleton className="h-5 w-1/4" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
-          <Skeleton className="h-10 w-full" />
+          <CardSkeleton />
+          <CardSkeleton />
         </div>
       ) : (
         <div className="space-y-6">
@@ -295,7 +310,7 @@ export function AccountPage() {
                 ))}
               </Select>
 
-              <Button onClick={handleSaveProfile} loading={saving}>
+              <Button onClick={handleSaveProfile} loading={saveProfileMutation.isPending}>
                 Save Profile
               </Button>
 
@@ -320,7 +335,7 @@ export function AccountPage() {
                 value={confirmPassword}
                 onChange={(e) => setConfirmPassword(e.target.value)}
               />
-              <Button onClick={handleChangePassword} loading={pwSaving}>
+              <Button onClick={handleChangePassword} loading={changePasswordMutation.isPending}>
                 Change Password
               </Button>
 

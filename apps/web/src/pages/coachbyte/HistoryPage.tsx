@@ -1,11 +1,14 @@
-import { Fragment, useEffect, useState, useCallback } from 'react';
+import { Fragment, useState, useEffect } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { ListSkeleton } from '@/components/ui/Skeleton';
 import { formatDateDisplay } from '@/shared/dates';
+import { queryKeys } from '@/shared/queryKeys';
 
 interface HistoryDay {
   plan_id: string;
@@ -31,69 +34,55 @@ const timeFormatter = new Intl.DateTimeFormat('en-US', {
 
 export function HistoryPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [days, setDays] = useState<HistoryDay[]>([]);
-  const [totalCount, setTotalCount] = useState<number | null>(null);
+  const queryClient = useQueryClient();
   const [cursor, setCursor] = useState<string | null>(null);
+  const [allDays, setAllDays] = useState<HistoryDay[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [expandedPlan, setExpandedPlan] = useState<string | null>(null);
-  const [detail, setDetail] = useState<HistoryDetail[]>([]);
-  const [detailLoading, setDetailLoading] = useState(false);
   const [exerciseFilter, setExerciseFilter] = useState<string>('all');
   const [exercisePlanIds, setExercisePlanIds] = useState<Set<string> | null>(null);
-  const [exercises, setExercises] = useState<{ exercise_id: string; name: string }[]>([]);
 
-  const loadHistory = useCallback(
-    async (cursorDate?: string) => {
-      if (!user) return;
-      setLoadError(null);
-      setLoading(true);
-
-      let query = supabase
+  // ── Main history query (first page) ──
+  const {
+    data: firstPageData,
+    isLoading: historyLoading,
+    error: loadError,
+  } = useQuery({
+    queryKey: queryKeys.history(user!.id),
+    queryFn: async () => {
+      const query = supabase
         .schema('coachbyte')
         .from('daily_plans')
         .select('plan_id, plan_date, summary')
-        .eq('user_id', user.id)
+        .eq('user_id', user!.id)
         .order('plan_date', { ascending: false })
         .limit(PAGE_SIZE + 1);
 
-      if (cursorDate) {
-        query = query.lt('plan_date', cursorDate);
-      }
-
       const { data: plans, error: plansErr } = await query;
-
-      if (plansErr) {
-        setLoadError(plansErr.message);
-        setLoading(false);
-        return;
-      }
+      if (plansErr) throw plansErr;
 
       if (!plans || plans.length === 0) {
-        if (!cursorDate) setDays([]);
-        setHasMore(false);
-        setLoading(false);
-        return;
+        return { days: [] as HistoryDay[], hasMore: false, cursor: null as string | null };
       }
 
       const hasNextPage = plans.length > PAGE_SIZE;
       const page = hasNextPage ? plans.slice(0, PAGE_SIZE) : plans;
       const planIds = page.map((p: any) => p.plan_id);
 
-      const { data: plannedCounts } = await supabase
-        .schema('coachbyte')
-        .from('planned_sets')
-        .select('plan_id')
-        .eq('user_id', user.id)
-        .in('plan_id', planIds);
-
-      const { data: completedCounts } = await supabase
-        .schema('coachbyte')
-        .from('completed_sets')
-        .select('plan_id')
-        .eq('user_id', user.id)
-        .in('plan_id', planIds);
+      const [{ data: plannedCounts }, { data: completedCounts }] = await Promise.all([
+        supabase
+          .schema('coachbyte')
+          .from('planned_sets')
+          .select('plan_id')
+          .eq('user_id', user!.id)
+          .in('plan_id', planIds),
+        supabase
+          .schema('coachbyte')
+          .from('completed_sets')
+          .select('plan_id')
+          .eq('user_id', user!.id)
+          .in('plan_id', planIds),
+      ]);
 
       const planned = new Map<string, number>();
       const completed = new Map<string, number>();
@@ -108,81 +97,142 @@ export function HistoryPage() {
         completed_count: completed.get(p.plan_id) ?? 0,
       }));
 
-      if (cursorDate) {
-        setDays((prev) => [...prev, ...mapped]);
-      } else {
-        setDays(mapped);
-      }
-
-      setCursor(page[page.length - 1].plan_date);
-      setHasMore(hasNextPage);
-      setLoading(false);
+      return {
+        days: mapped,
+        hasMore: hasNextPage,
+        cursor: page[page.length - 1].plan_date as string,
+      };
     },
-    [user],
-  );
+    enabled: !!user,
+  });
 
-  // Load total count for "Showing X-Y of Z" display
+  // Sync first page data to allDays
+  /* eslint-disable react-hooks/set-state-in-effect -- sync paginated server data → local accumulator */
   useEffect(() => {
-    if (!user) return;
-    supabase
+    if (firstPageData) {
+      setAllDays(firstPageData.days);
+      setHasMore(firstPageData.hasMore);
+      setCursor(firstPageData.cursor);
+    }
+  }, [firstPageData]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  // ── Total count query ──
+  const { data: totalCount = null } = useQuery({
+    queryKey: queryKeys.historyCount(user!.id),
+    queryFn: async () => {
+      const { count } = await supabase
+        .schema('coachbyte')
+        .from('daily_plans')
+        .select('plan_id', { count: 'exact', head: true })
+        .eq('user_id', user!.id);
+      return count ?? null;
+    },
+    enabled: !!user,
+  });
+
+  // ── Exercises query ──
+  const { data: exercises = [] } = useQuery({
+    queryKey: queryKeys.exercises(user!.id),
+    queryFn: async () => {
+      const { data, error: err } = await supabase
+        .schema('coachbyte')
+        .from('exercises')
+        .select('exercise_id, name')
+        .or(`user_id.is.null,user_id.eq.${user!.id}`)
+        .order('name');
+      if (err) throw err;
+      return (data ?? []) as { exercise_id: string; name: string }[];
+    },
+    enabled: !!user,
+  });
+
+  // ── Detail query (for expanded plan) ──
+  const { data: detail = [], isLoading: detailLoading } = useQuery({
+    queryKey: queryKeys.historyDetail(user!.id, expandedPlan ?? ''),
+    queryFn: async (): Promise<HistoryDetail[]> => {
+      const { data } = await supabase
+        .schema('coachbyte')
+        .from('completed_sets')
+        .select('actual_reps, actual_load, completed_at, exercises(name)')
+        .eq('plan_id', expandedPlan!)
+        .eq('user_id', user!.id)
+        .order('completed_at');
+
+      return (data ?? []).map((cs: any) => ({
+        exercise_name: cs.exercises?.name ?? 'Unknown',
+        actual_reps: cs.actual_reps,
+        actual_load: Number(cs.actual_load),
+        completed_at: cs.completed_at,
+      }));
+    },
+    enabled: !!user && !!expandedPlan,
+  });
+
+  const loadMore = async () => {
+    if (!user || !cursor) return;
+
+    const query = supabase
       .schema('coachbyte')
       .from('daily_plans')
-      .select('plan_id', { count: 'exact', head: true })
+      .select('plan_id, plan_date, summary')
       .eq('user_id', user.id)
-      .then(({ count }) => {
-        setTotalCount(count ?? null);
-      });
-  }, [user]);
+      .order('plan_date', { ascending: false })
+      .lt('plan_date', cursor)
+      .limit(PAGE_SIZE + 1);
 
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadHistory();
-  }, [loadHistory]);
+    const { data: plans, error: plansErr } = await query;
+    if (plansErr) return;
 
-  useEffect(() => {
-    if (!user) return;
-    supabase
-      .schema('coachbyte')
-      .from('exercises')
-      .select('exercise_id, name')
-      .or(`user_id.is.null,user_id.eq.${user.id}`)
-      .order('name')
-      .then(({ data, error: err }) => {
-        if (err) console.error('Failed to load exercises:', err.message);
-        setExercises((data ?? []) as any);
-      });
-  }, [user]);
+    if (!plans || plans.length === 0) {
+      setHasMore(false);
+      return;
+    }
 
-  const loadDetail = async (planId: string) => {
+    const hasNextPage = plans.length > PAGE_SIZE;
+    const page = hasNextPage ? plans.slice(0, PAGE_SIZE) : plans;
+    const planIds = page.map((p: any) => p.plan_id);
+
+    const [{ data: plannedCounts }, { data: completedCounts }] = await Promise.all([
+      supabase.schema('coachbyte').from('planned_sets').select('plan_id').eq('user_id', user.id).in('plan_id', planIds),
+      supabase
+        .schema('coachbyte')
+        .from('completed_sets')
+        .select('plan_id')
+        .eq('user_id', user.id)
+        .in('plan_id', planIds),
+    ]);
+
+    const planned = new Map<string, number>();
+    const completed = new Map<string, number>();
+    (plannedCounts ?? []).forEach((r: any) => planned.set(r.plan_id, (planned.get(r.plan_id) ?? 0) + 1));
+    (completedCounts ?? []).forEach((r: any) => completed.set(r.plan_id, (completed.get(r.plan_id) ?? 0) + 1));
+
+    const mapped: HistoryDay[] = page.map((p: any) => ({
+      plan_id: p.plan_id,
+      plan_date: p.plan_date,
+      summary: p.summary,
+      planned_count: planned.get(p.plan_id) ?? 0,
+      completed_count: completed.get(p.plan_id) ?? 0,
+    }));
+
+    setAllDays((prev) => [...prev, ...mapped]);
+    setCursor(page[page.length - 1].plan_date);
+    setHasMore(hasNextPage);
+  };
+
+  const loadDetail = (planId: string) => {
     if (expandedPlan === planId) {
       setExpandedPlan(null);
       return;
     }
     setExpandedPlan(planId);
-    setDetailLoading(true);
-
-    const { data } = await supabase
-      .schema('coachbyte')
-      .from('completed_sets')
-      .select('actual_reps, actual_load, completed_at, exercises(name)')
-      .eq('plan_id', planId)
-      .eq('user_id', user!.id)
-      .order('completed_at');
-
-    setDetail(
-      (data ?? []).map((cs: any) => ({
-        exercise_name: cs.exercises?.name ?? 'Unknown',
-        actual_reps: cs.actual_reps,
-        actual_load: Number(cs.actual_load),
-        completed_at: cs.completed_at,
-      })),
-    );
-    setDetailLoading(false);
   };
 
+  // Exercise filter effect
+  /* eslint-disable react-hooks/set-state-in-effect -- async filter query → local state */
   useEffect(() => {
     if (!user || exerciseFilter === 'all') {
-      // eslint-disable-next-line react-hooks/set-state-in-effect
       setExercisePlanIds(null);
       return;
     }
@@ -198,8 +248,9 @@ export function HistoryPage() {
         setExercisePlanIds(ids);
       });
   }, [user, exerciseFilter]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
-  const filteredDays = days.filter((d) => {
+  const filteredDays = allDays.filter((d) => {
     if (d.completed_count <= 0) return false;
     if (exercisePlanIds !== null) return exercisePlanIds.has(d.plan_id);
     return true;
@@ -227,18 +278,20 @@ export function HistoryPage() {
       {loadError && (
         <Card className="border-red-300 mb-5" data-testid="load-error">
           <div className="p-4">
-            <p className="text-red-600 text-sm mb-2">Failed to load data: {loadError}</p>
-            <Button variant="primary" size="sm" onClick={() => loadHistory()}>
+            <p className="text-red-600 text-sm mb-2">Failed to load data: {(loadError as any).message}</p>
+            <Button
+              variant="primary"
+              size="sm"
+              onClick={() => queryClient.invalidateQueries({ queryKey: queryKeys.history(user!.id) })}
+            >
               Retry
             </Button>
           </div>
         </Card>
       )}
 
-      {loading && days.length === 0 ? (
-        <p className="text-slate-500 text-sm" data-testid="history-loading">
-          Loading workout history...
-        </p>
+      {historyLoading && allDays.length === 0 ? (
+        <ListSkeleton count={5} data-testid="history-loading" />
       ) : filteredDays.length === 0 ? (
         <div
           className="text-center py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500"
@@ -445,12 +498,7 @@ export function HistoryPage() {
           </Card>
 
           {hasMore && (
-            <Button
-              variant="secondary"
-              onClick={() => cursor && loadHistory(cursor)}
-              data-testid="load-more-btn"
-              className="w-full mt-4"
-            >
+            <Button variant="secondary" onClick={loadMore} data-testid="load-more-btn" className="w-full mt-4">
               Load More
             </Button>
           )}

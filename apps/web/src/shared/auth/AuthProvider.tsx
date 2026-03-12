@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import type { User, Session } from '@supabase/supabase-js';
 import { supabase } from '../supabase';
@@ -81,16 +81,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  const signIn = async (email: string, password: string) => {
+  const signIn = useCallback(async (email: string, password: string) => {
     const { data, error } = await supabase.auth.signInWithPassword({ email, password });
     if (!error && data.session) {
       setSession(data.session);
       setUser(data.session.user);
     }
     return { error: error as Error | null };
-  };
+  }, []);
 
-  const signUp = async (email: string, password: string, displayName?: string) => {
+  const signUp = useCallback(async (email: string, password: string, displayName?: string) => {
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
@@ -101,14 +101,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setUser(data.session.user);
     }
     return { error: error as Error | null };
-  };
+  }, []);
 
-  const signOut = async () => {
+  const signOut = useCallback(async () => {
     await supabase.auth.signOut();
-  };
+  }, []);
+
+  const value = useMemo(
+    () => ({ user, session, loading, sessionError, clearSessionError, signIn, signUp, signOut }),
+    [user, session, loading, sessionError, clearSessionError, signIn, signUp, signOut],
+  );
 
   return (
-    <AuthContext.Provider value={{ user, session, loading, sessionError, clearSessionError, signIn, signUp, signOut }}>
+    <AuthContext.Provider value={value}>
       {children}
       {sessionError && <SessionToast message={sessionError} onDismiss={clearSessionError} />}
     </AuthContext.Provider>

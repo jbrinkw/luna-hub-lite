@@ -1,8 +1,11 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect, useCallback } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { CardSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, escapeIlike } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
 import { computeRecipeMacros } from './RecipesPage';
 
 /* ------------------------------------------------------------------ */
@@ -41,10 +44,9 @@ export function RecipeFormPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const queryClient = useQueryClient();
 
   const isEdit = !!id;
-
-  const [loading, setLoading] = useState(isEdit);
 
   /* ---- Form fields ---- */
   const [name, setName] = useState('');
@@ -70,58 +72,66 @@ export function RecipeFormPage() {
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
 
+  /* ---- Form populated flag (prevent re-populating on refetch) ---- */
+  const [formPopulated, setFormPopulated] = useState(false);
+
   /* ---------------------------------------------------------------- */
-  /*  Load existing recipe (edit mode)                                 */
+  /*  Load existing recipe (edit mode) via TanStack Query              */
   /* ---------------------------------------------------------------- */
 
-  const userId = user?.id;
+  const { isLoading } = useQuery({
+    queryKey: queryKeys.recipe(id!),
+    queryFn: async () => {
+      const { data: recipe, error } = await chefbyte()
+        .from('recipes')
+        .select(
+          '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
+        )
+        .eq('recipe_id', id!)
+        .eq('user_id', user!.id)
+        .single();
 
-  const loadRecipe = useCallback(async () => {
-    if (!userId || !id) return;
+      if (error) throw error;
+      return recipe;
+    },
+    enabled: isEdit && !!user,
+    // Populate form state from fetched data
+    // Use a ref-like pattern: only populate once
+  });
 
-    const { data: recipe } = await chefbyte()
-      .from('recipes')
-      .select(
-        '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
-      )
-      .eq('recipe_id', id)
-      .eq('user_id', userId)
-      .single();
+  // Populate form fields from fetched recipe data (once)
+  const cachedRecipe = isEdit ? queryClient.getQueryData(queryKeys.recipe(id!)) : null;
 
-    if (recipe) {
-      setName(recipe.name ?? '');
-      setDescription(recipe.description ?? '');
-      setBaseServings(Number(recipe.base_servings) || 1);
-      setActiveTime(recipe.active_time != null ? Number(recipe.active_time) : null);
-      setTotalTime(recipe.total_time != null ? Number(recipe.total_time) : null);
-      setInstructions(recipe.instructions ?? '');
-
-      // Map ingredients
-      const ings: LocalIngredient[] = (recipe.recipe_ingredients ?? []).map((ri: any) => ({
-        product_id: ri.product_id,
-        product_name: ri.products?.name ?? 'Unknown',
-        quantity: Number(ri.quantity),
-        unit: ri.unit,
-        note: ri.note ?? '',
-        calories_per_serving: Number(ri.products?.calories_per_serving ?? 0),
-        carbs_per_serving: Number(ri.products?.carbs_per_serving ?? 0),
-        protein_per_serving: Number(ri.products?.protein_per_serving ?? 0),
-        fat_per_serving: Number(ri.products?.fat_per_serving ?? 0),
-        servings_per_container: Number(ri.products?.servings_per_container ?? 1),
-      }));
-      setIngredients(ings);
-    }
-
-    setLoading(false);
-  }, [userId, id]);
-
+  /* eslint-disable react-hooks/set-state-in-effect -- syncing server data to form fields */
   useEffect(() => {
-    if (isEdit) {
-      // Async data fetching with setState is the standard pattern for this use case
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      loadRecipe();
-    }
-  }, [isEdit, loadRecipe]);
+    if (!isEdit || formPopulated || !cachedRecipe) return;
+    const recipe = cachedRecipe as any;
+
+    setName(recipe.name ?? '');
+    setDescription(recipe.description ?? '');
+    setBaseServings(Number(recipe.base_servings) || 1);
+    setActiveTime(recipe.active_time != null ? Number(recipe.active_time) : null);
+    setTotalTime(recipe.total_time != null ? Number(recipe.total_time) : null);
+    setInstructions(recipe.instructions ?? '');
+
+    const ings: LocalIngredient[] = (recipe.recipe_ingredients ?? []).map((ri: any) => ({
+      product_id: ri.product_id,
+      product_name: ri.products?.name ?? 'Unknown',
+      quantity: Number(ri.quantity),
+      unit: ri.unit,
+      note: ri.note ?? '',
+      calories_per_serving: Number(ri.products?.calories_per_serving ?? 0),
+      carbs_per_serving: Number(ri.products?.carbs_per_serving ?? 0),
+      protein_per_serving: Number(ri.products?.protein_per_serving ?? 0),
+      fat_per_serving: Number(ri.products?.fat_per_serving ?? 0),
+      servings_per_container: Number(ri.products?.servings_per_container ?? 1),
+    }));
+    setIngredients(ings);
+    setFormPopulated(true);
+  }, [isEdit, cachedRecipe, formPopulated]);
+  /* eslint-enable react-hooks/set-state-in-effect */
+
+  const loading = isEdit && isLoading;
 
   /* ---------------------------------------------------------------- */
   /*  Product search (server-side ilike + 300ms debounce)              */
@@ -244,128 +254,129 @@ export function RecipeFormPage() {
   }, [ingredients]);
 
   /* ---------------------------------------------------------------- */
-  /*  Save                                                             */
+  /*  Save mutation                                                    */
   /* ---------------------------------------------------------------- */
 
-  const handleSave = async () => {
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      if (!user || !name.trim()) throw new Error('Name is required');
+      if (ingredients.length === 0) throw new Error('At least one ingredient is required.');
+
+      if (isEdit && id) {
+        // Update recipe
+        const { error: updateErr } = await chefbyte()
+          .from('recipes')
+          .update({
+            name: name.trim(),
+            description: description || null,
+            base_servings: baseServings,
+            active_time: activeTime,
+            total_time: totalTime,
+            instructions: instructions || null,
+          })
+          .eq('recipe_id', id)
+          .eq('user_id', user.id);
+
+        if (updateErr) throw updateErr;
+
+        // Atomic ingredient save via RPC (delete old + insert new in one transaction)
+        if (ingredients.length === 0) {
+          // Zero ingredients: just delete existing
+          const { error: delErr } = await chefbyte()
+            .from('recipe_ingredients')
+            .delete()
+            .eq('recipe_id', id)
+            .eq('user_id', user.id);
+          if (delErr) throw delErr;
+        } else {
+          const { error: ingErr } = await chefbyte().rpc('save_recipe_ingredients', {
+            p_recipe_id: id,
+            p_ingredients: ingredients.map((ing) => ({
+              product_id: ing.product_id,
+              quantity: ing.quantity,
+              unit: ing.unit,
+              note: ing.note || null,
+            })),
+          });
+          if (ingErr) throw ingErr;
+        }
+      } else {
+        // Create recipe
+        const { data: newRecipe, error: createErr } = await chefbyte()
+          .from('recipes')
+          .insert({
+            user_id: user.id,
+            name: name.trim(),
+            description: description || null,
+            base_servings: baseServings,
+            active_time: activeTime,
+            total_time: totalTime,
+            instructions: instructions || null,
+          })
+          .select('recipe_id')
+          .single();
+
+        if (createErr || !newRecipe) throw createErr ?? new Error('Failed to create recipe');
+
+        if (ingredients.length > 0) {
+          const { error: ingErr } = await chefbyte().rpc('save_recipe_ingredients', {
+            p_recipe_id: newRecipe.recipe_id,
+            p_ingredients: ingredients.map((ing) => ({
+              product_id: ing.product_id,
+              quantity: ing.quantity,
+              unit: ing.unit,
+              note: ing.note || null,
+            })),
+          });
+          if (ingErr) throw ingErr;
+        }
+      }
+    },
+    onError: (err: any) => {
+      setSaveError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      // Invalidate recipe-related queries
+      queryClient.invalidateQueries({ queryKey: queryKeys.recipes(user!.id) });
+      if (id) queryClient.invalidateQueries({ queryKey: queryKeys.recipe(id) });
+      navigate('/chef/recipes');
+    },
+  });
+
+  const handleSave = () => {
     if (!user || !name.trim()) return;
     if (ingredients.length === 0) {
       setSaveError('At least one ingredient is required.');
       return;
     }
     setSaveError(null);
+    saveMutation.mutate();
+  };
 
-    if (isEdit && id) {
-      // Update recipe
-      const { error: updateErr } = await chefbyte()
-        .from('recipes')
-        .update({
-          name: name.trim(),
-          description: description || null,
-          base_servings: baseServings,
-          active_time: activeTime,
-          total_time: totalTime,
-          instructions: instructions || null,
-        })
+  /* ---------------------------------------------------------------- */
+  /*  Delete mutation (edit mode only)                                 */
+  /* ---------------------------------------------------------------- */
+
+  const deleteMutation = useMutation({
+    mutationFn: async () => {
+      if (!id || !user) throw new Error('Missing recipe or user');
+      const { error: ingErr } = await chefbyte()
+        .from('recipe_ingredients')
+        .delete()
         .eq('recipe_id', id)
         .eq('user_id', user.id);
-
-      if (updateErr) {
-        setSaveError(updateErr.message);
-        return;
-      }
-
-      // Atomic ingredient save via RPC (delete old + insert new in one transaction)
-      if (ingredients.length === 0) {
-        // Zero ingredients: just delete existing
-        const { error: delErr } = await chefbyte()
-          .from('recipe_ingredients')
-          .delete()
-          .eq('recipe_id', id)
-          .eq('user_id', user.id);
-        if (delErr) {
-          setSaveError(delErr.message);
-          return;
-        }
-      } else {
-        const { error: ingErr } = await chefbyte().rpc('save_recipe_ingredients', {
-          p_recipe_id: id,
-          p_ingredients: ingredients.map((ing) => ({
-            product_id: ing.product_id,
-            quantity: ing.quantity,
-            unit: ing.unit,
-            note: ing.note || null,
-          })),
-        });
-        if (ingErr) {
-          setSaveError(ingErr.message);
-          return;
-        }
-      }
-    } else {
-      // Create recipe
-      const { data: newRecipe, error: createErr } = await chefbyte()
-        .from('recipes')
-        .insert({
-          user_id: user.id,
-          name: name.trim(),
-          description: description || null,
-          base_servings: baseServings,
-          active_time: activeTime,
-          total_time: totalTime,
-          instructions: instructions || null,
-        })
-        .select('recipe_id')
-        .single();
-
-      if (createErr || !newRecipe) {
-        setSaveError(createErr?.message ?? 'Failed to create recipe');
-        return;
-      }
-
-      if (ingredients.length > 0) {
-        const { error: ingErr } = await chefbyte().rpc('save_recipe_ingredients', {
-          p_recipe_id: newRecipe.recipe_id,
-          p_ingredients: ingredients.map((ing) => ({
-            product_id: ing.product_id,
-            quantity: ing.quantity,
-            unit: ing.unit,
-            note: ing.note || null,
-          })),
-        });
-        if (ingErr) {
-          setSaveError(ingErr.message);
-          return;
-        }
-      }
-    }
-
-    navigate('/chef/recipes');
-  };
-
-  /* ---------------------------------------------------------------- */
-  /*  Delete (edit mode only)                                          */
-  /* ---------------------------------------------------------------- */
-
-  const handleDelete = async () => {
-    if (!id || !user) return;
-    setSaveError(null);
-    const { error: ingErr } = await chefbyte()
-      .from('recipe_ingredients')
-      .delete()
-      .eq('recipe_id', id)
-      .eq('user_id', user.id);
-    if (ingErr) {
-      setSaveError(ingErr.message);
-      return;
-    }
-    const { error: recErr } = await chefbyte().from('recipes').delete().eq('recipe_id', id).eq('user_id', user.id);
-    if (recErr) {
-      setSaveError(recErr.message);
-      return;
-    }
-    navigate('/chef/recipes');
-  };
+      if (ingErr) throw ingErr;
+      const { error: recErr } = await chefbyte().from('recipes').delete().eq('recipe_id', id).eq('user_id', user.id);
+      if (recErr) throw recErr;
+    },
+    onError: (err: any) => {
+      setSaveError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.recipes(user!.id) });
+      navigate('/chef/recipes');
+    },
+  });
 
   /* ================================================================ */
   /*  RENDER                                                           */
@@ -378,8 +389,8 @@ export function RecipeFormPage() {
   if (loading) {
     return (
       <ChefLayout title={isEdit ? 'Edit Recipe' : 'New Recipe'}>
-        <div data-testid="recipe-form-loading" className="p-5 text-slate-500">
-          Loading...
+        <div data-testid="recipe-form-loading" className="p-5">
+          <CardSkeleton />
         </div>
       </ChefLayout>
     );
@@ -716,7 +727,7 @@ export function RecipeFormPage() {
                 Cancel
               </button>
               <button
-                onClick={handleDelete}
+                onClick={() => deleteMutation.mutate()}
                 className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
               >
                 Delete

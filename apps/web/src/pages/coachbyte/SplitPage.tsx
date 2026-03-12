@@ -1,9 +1,12 @@
-import { useEffect, useState, useCallback } from 'react';
+import { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { Button } from '@/components/ui/Button';
+import { TableSkeleton } from '@/components/ui/Skeleton';
 import { ChevronDown, ChevronRight } from 'lucide-react';
+import { queryKeys } from '@/shared/queryKeys';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
@@ -33,9 +36,7 @@ interface Exercise {
 
 export function SplitPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
   const [splits, setSplits] = useState<DaySplit[]>([]);
-  const [exercises, setExercises] = useState<Exercise[]>([]);
   const [savingDay, setSavingDay] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [collapsedDays, setCollapsedDays] = useState<Set<number>>(new Set());
@@ -52,108 +53,111 @@ export function SplitPage() {
     });
   };
 
-  const loadSplits = useCallback(async () => {
-    if (!user) return;
-
-    const { data, error: loadErr } = await supabase
-      .schema('coachbyte')
-      .from('splits')
-      .select('split_id, weekday, template_sets, split_notes')
-      .eq('user_id', user.id)
-      .order('weekday');
-
-    if (loadErr) {
-      setSaveError(loadErr.message);
-      setLoading(false);
-      return;
-    }
-
-    const splitMap = new Map<number, any>();
-    (data ?? []).forEach((s: any) => splitMap.set(s.weekday, s));
-
-    const all: DaySplit[] = Array.from({ length: 7 }, (_, i) => {
-      const s = splitMap.get(i);
-      return {
-        split_id: s?.split_id ?? null,
-        weekday: i,
-        template_sets: (s?.template_sets ?? []) as TemplateSet[],
-        split_notes: s?.split_notes ?? '',
-      };
-    });
-
-    // Default collapse rest days (days with no exercises)
-    const restDays = new Set<number>();
-    for (const day of all) {
-      if (day.template_sets.length === 0) {
-        restDays.add(day.weekday);
-      }
-    }
-    setCollapsedDays(restDays);
-
-    setSplits(all);
-    setLoading(false);
-  }, [user]);
-
-  useEffect(() => {
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadSplits();
-  }, [loadSplits]);
-
-  useEffect(() => {
-    if (!user) return;
-    supabase
-      .schema('coachbyte')
-      .from('exercises')
-      .select('exercise_id, name')
-      .or(`user_id.is.null,user_id.eq.${user.id}`)
-      .order('name')
-      .then(({ data, error: err }) => {
-        if (err) console.error('Failed to load exercises:', err.message);
-        setExercises((data ?? []) as Exercise[]);
-      });
-  }, [user]);
-
-  const saveSplit = async (day: DaySplit) => {
-    if (!user) return;
-    setSavingDay(day.weekday);
-    setSaveError(null);
-
-    if (day.split_id) {
-      const { error: err } = await supabase
+  // ── Splits query ──
+  const { isLoading: loading } = useQuery({
+    queryKey: queryKeys.splits(user!.id),
+    queryFn: async () => {
+      const { data, error: loadErr } = await supabase
         .schema('coachbyte')
         .from('splits')
-        .update({ template_sets: day.template_sets as any, split_notes: day.split_notes })
-        .eq('split_id', day.split_id)
-        .eq('user_id', user.id);
-      if (err) {
-        setSaveError(err.message);
-        setSavingDay(null);
-        return;
+        .select('split_id, weekday, template_sets, split_notes')
+        .eq('user_id', user!.id)
+        .order('weekday');
+
+      if (loadErr) throw loadErr;
+
+      const splitMap = new Map<number, any>();
+      (data ?? []).forEach((s: any) => splitMap.set(s.weekday, s));
+
+      const all: DaySplit[] = Array.from({ length: 7 }, (_, i) => {
+        const s = splitMap.get(i);
+        return {
+          split_id: s?.split_id ?? null,
+          weekday: i,
+          template_sets: (s?.template_sets ?? []) as TemplateSet[],
+          split_notes: s?.split_notes ?? '',
+        };
+      });
+
+      // Default collapse rest days (days with no exercises)
+      const restDays = new Set<number>();
+      for (const day of all) {
+        if (day.template_sets.length === 0) {
+          restDays.add(day.weekday);
+        }
       }
-    } else if (day.template_sets.length > 0 || day.split_notes) {
+      setCollapsedDays(restDays);
+      setSplits(all);
+
+      return all;
+    },
+    enabled: !!user,
+  });
+
+  // ── Exercises query ──
+  const { data: exercises = [] } = useQuery({
+    queryKey: queryKeys.exercises(user!.id),
+    queryFn: async (): Promise<Exercise[]> => {
       const { data, error: err } = await supabase
         .schema('coachbyte')
-        .from('splits')
-        .insert({
-          user_id: user.id,
-          weekday: day.weekday,
-          template_sets: day.template_sets as any,
-          split_notes: day.split_notes,
-        })
-        .select('split_id')
-        .single();
+        .from('exercises')
+        .select('exercise_id, name')
+        .or(`user_id.is.null,user_id.eq.${user!.id}`)
+        .order('name');
+      if (err) throw err;
+      return (data ?? []) as Exercise[];
+    },
+    enabled: !!user,
+  });
 
-      if (err) {
-        setSaveError(err.message);
-        setSavingDay(null);
-        return;
-      }
-      if (data) {
-        setSplits((prev) => prev.map((s) => (s.weekday === day.weekday ? { ...s, split_id: data.split_id } : s)));
-      }
-    }
+  // ── Save split mutation ──
+  const saveSplitMutation = useMutation({
+    mutationFn: async (day: DaySplit) => {
+      if (day.split_id) {
+        const { error: err } = await supabase
+          .schema('coachbyte')
+          .from('splits')
+          .update({ template_sets: day.template_sets as any, split_notes: day.split_notes })
+          .eq('split_id', day.split_id)
+          .eq('user_id', user!.id);
+        if (err) throw err;
+        return null;
+      } else if (day.template_sets.length > 0 || day.split_notes) {
+        const { data, error: err } = await supabase
+          .schema('coachbyte')
+          .from('splits')
+          .insert({
+            user_id: user!.id,
+            weekday: day.weekday,
+            template_sets: day.template_sets as any,
+            split_notes: day.split_notes,
+          })
+          .select('split_id')
+          .single();
 
-    setSavingDay(null);
+        if (err) throw err;
+        return { weekday: day.weekday, split_id: data?.split_id ?? null };
+      }
+      return null;
+    },
+    onMutate: (day) => {
+      setSavingDay(day.weekday);
+      setSaveError(null);
+    },
+    onSuccess: (result) => {
+      if (result) {
+        setSplits((prev) => prev.map((s) => (s.weekday === result.weekday ? { ...s, split_id: result.split_id } : s)));
+      }
+      setSavingDay(null);
+    },
+    onError: (err: any) => {
+      setSaveError(err.message);
+      setSavingDay(null);
+    },
+  });
+
+  const saveSplit = (day: DaySplit) => {
+    saveSplitMutation.mutate(day);
   };
 
   const updateSet = (weekday: number, setIndex: number, field: string, value: any) => {
@@ -208,9 +212,7 @@ export function SplitPage() {
   if (loading) {
     return (
       <CoachLayout title="Split">
-        <p className="text-slate-500 text-sm" data-testid="split-loading">
-          Loading split...
-        </p>
+        <TableSkeleton rows={7} cols={6} data-testid="split-loading" />
       </CoachLayout>
     );
   }

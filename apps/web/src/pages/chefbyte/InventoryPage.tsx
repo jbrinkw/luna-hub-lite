@@ -1,11 +1,15 @@
-import { useEffect, useState, useCallback, useMemo } from 'react';
+import { useState, useMemo } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
+import { ListSkeleton } from '@/components/ui/Skeleton';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
-import { chefbyte, supabase } from '@/shared/supabase';
+import { chefbyte } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { todayStr } from '@/shared/dates';
 
 /* ------------------------------------------------------------------ */
@@ -45,13 +49,9 @@ type ViewMode = 'grouped' | 'lots';
 export function InventoryPage() {
   const { user } = useAuth();
   const { dayStartHour } = useAppContext();
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
 
-  const [loadError, setLoadError] = useState<string | null>(null);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [lots, setLots] = useState<StockLot[]>([]);
-  const [locationId, setLocationId] = useState<string | null>(null);
   /* ---- Search filter state ---- */
   const [searchText, setSearchText] = useState('');
   /* ---- Expand/collapse state (grouped view) ---- */
@@ -69,84 +69,70 @@ export function InventoryPage() {
   }>({ open: false, action: () => {} });
   const closeConfirm = () => setConfirmState((prev) => ({ ...prev, open: false }));
 
+  /* ---- Mutation error state ---- */
+  const [error, setError] = useState<string | null>(null);
+
   /* ---------------------------------------------------------------- */
-  /*  Data loading                                                     */
+  /*  Data loading via TanStack Query                                  */
   /* ---------------------------------------------------------------- */
 
-  const loadData = useCallback(async () => {
-    if (!user) return;
-    setLoadError(null);
-
-    const [prodsRes, stockRes, locsRes] = await Promise.all([
-      chefbyte()
+  const {
+    data: products = [],
+    isLoading: productsLoading,
+    error: productsError,
+  } = useQuery({
+    queryKey: queryKeys.products(user!.id),
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
         .from('products')
         .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount')
-        .eq('user_id', user.id)
-        .order('name'),
-      chefbyte()
+        .eq('user_id', user!.id)
+        .order('name');
+      if (error) throw error;
+      return (data ?? []) as Product[];
+    },
+    enabled: !!user,
+  });
+
+  const { data: lots = [], isLoading: lotsLoading } = useQuery({
+    queryKey: queryKeys.stockLots(user!.id),
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
         .from('stock_lots')
         .select('lot_id,product_id,qty_containers,expires_on,locations:location_id(name)')
-        .eq('user_id', user.id),
-      chefbyte().from('locations').select('location_id').eq('user_id', user.id).order('created_at').limit(1),
-    ]);
+        .eq('user_id', user!.id);
+      if (error) throw error;
+      return (data ?? []) as StockLot[];
+    },
+    enabled: !!user,
+  });
 
-    if (prodsRes.error) {
-      setLoadError(prodsRes.error.message);
-      setLoading(false);
-      return;
-    }
+  const { data: locationId = null } = useQuery({
+    queryKey: queryKeys.defaultLocationId(user!.id),
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
+        .from('locations')
+        .select('location_id')
+        .eq('user_id', user!.id)
+        .order('created_at')
+        .limit(1);
+      if (error) throw error;
+      return data?.[0]?.location_id ?? null;
+    },
+    enabled: !!user,
+  });
 
-    setProducts((prodsRes.data ?? []) as Product[]);
-    setLots((stockRes.data ?? []) as StockLot[]);
-    setLocationId(locsRes.data?.[0]?.location_id ?? null);
-    setLoading(false);
-  }, [user]);
-
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadData();
-  }, [loadData]);
+  const loading = productsLoading || lotsLoading;
+  const loadError = productsError ? (productsError as Error).message : null;
 
   /* ---------------------------------------------------------------- */
   /*  Realtime subscriptions                                           */
   /* ---------------------------------------------------------------- */
 
-  useEffect(() => {
-    if (!user) return;
-
-    const channel = supabase
-      .channel('inventory-changes')
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'chefbyte',
-          table: 'stock_lots',
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => {
-          loadData();
-        },
-      )
-      .on(
-        'postgres_changes',
-        {
-          event: '*',
-          schema: 'chefbyte',
-          table: 'products',
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => {
-          loadData();
-        },
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(channel);
-    };
-  }, [user, loadData]);
+  useRealtimeInvalidation('inventory-changes', [
+    { schema: 'chefbyte', table: 'stock_lots', queryKeys: [queryKeys.stockLots(user!.id)] },
+    { schema: 'chefbyte', table: 'products', queryKeys: [queryKeys.products(user!.id)] },
+  ]);
 
   /* ---------------------------------------------------------------- */
   /*  Aggregation                                                      */
@@ -225,7 +211,10 @@ export function InventoryPage() {
 
   const getLogicalDate = () => todayStr(dayStartHour);
 
-  const [error, setError] = useState<string | null>(null);
+  const invalidateInventory = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user!.id) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
+  };
 
   const openAddStockModal = (productId: string, defaultQty: number = 1) => {
     setAddingStockFor(productId);
@@ -239,77 +228,97 @@ export function InventoryPage() {
     setAddStockExpiry('');
   };
 
-  const addStock = async (productId: string, qtyContainers: number, expiresOn?: string | null) => {
-    if (!user || !locationId) return;
+  const addStockMutation = useMutation({
+    mutationFn: async ({
+      productId,
+      qtyContainers,
+      expiresOn,
+    }: {
+      productId: string;
+      qtyContainers: number;
+      expiresOn: string | null;
+    }) => {
+      if (!user || !locationId) throw new Error('Missing user or location');
 
-    const resolvedExpiry = expiresOn || null;
+      const resolvedExpiry = expiresOn || null;
 
-    // Build query to find existing lot with same product/location/expiry
-    let query = chefbyte()
-      .from('stock_lots')
-      .select('lot_id, qty_containers')
-      .eq('user_id', user.id)
-      .eq('product_id', productId)
-      .eq('location_id', locationId);
-
-    if (resolvedExpiry) {
-      query = query.eq('expires_on', resolvedExpiry);
-    } else {
-      query = query.is('expires_on', null);
-    }
-
-    const { data: existing } = await query.limit(1).maybeSingle();
-
-    if (existing) {
-      // Merge into existing lot
-      const { error: err } = await chefbyte()
+      // Build query to find existing lot with same product/location/expiry
+      let query = chefbyte()
         .from('stock_lots')
-        .update({ qty_containers: Number(existing.qty_containers) + qtyContainers })
-        .eq('lot_id', existing.lot_id);
-      if (err) {
-        setError(err.message);
-        return;
-      }
-    } else {
-      // Create new lot
-      const { error: err } = await chefbyte().from('stock_lots').insert({
-        user_id: user.id,
-        product_id: productId,
-        location_id: locationId,
-        qty_containers: qtyContainers,
-        expires_on: resolvedExpiry,
-      });
-      if (err) {
-        setError(err.message);
-        return;
-      }
-    }
+        .select('lot_id, qty_containers')
+        .eq('user_id', user.id)
+        .eq('product_id', productId)
+        .eq('location_id', locationId);
 
-    setError(null);
-    await loadData();
-  };
+      if (resolvedExpiry) {
+        query = query.eq('expires_on', resolvedExpiry);
+      } else {
+        query = query.is('expires_on', null);
+      }
+
+      const { data: existing } = await query.limit(1).maybeSingle();
+
+      if (existing) {
+        // Merge into existing lot
+        const { error: err } = await chefbyte()
+          .from('stock_lots')
+          .update({ qty_containers: Number(existing.qty_containers) + qtyContainers })
+          .eq('lot_id', existing.lot_id);
+        if (err) throw err;
+      } else {
+        // Create new lot
+        const { error: err } = await chefbyte().from('stock_lots').insert({
+          user_id: user.id,
+          product_id: productId,
+          location_id: locationId,
+          qty_containers: qtyContainers,
+          expires_on: resolvedExpiry,
+        });
+        if (err) throw err;
+      }
+    },
+    onError: (err: any) => {
+      setError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      setError(null);
+    },
+    onSettled: () => {
+      invalidateInventory();
+    },
+  });
 
   const confirmAddStock = async () => {
     if (!addingStockFor || addStockQty <= 0) return;
-    await addStock(addingStockFor, addStockQty, addStockExpiry || null);
+    addStockMutation.mutate({
+      productId: addingStockFor,
+      qtyContainers: addStockQty,
+      expiresOn: addStockExpiry || null,
+    });
     closeAddStockModal();
   };
 
-  const consumeStock = async (productId: string, qty: number, unit: 'container' | 'serving') => {
-    const { error: err } = await (chefbyte() as any).rpc('consume_product', {
-      p_product_id: productId,
-      p_qty: qty,
-      p_unit: unit,
-      p_log_macros: true,
-      p_logical_date: getLogicalDate(),
-    });
-    if (err) {
-      setError(err.message);
-      return;
-    }
-    setError(null);
-    await loadData();
-  };
+  const consumeStockMutation = useMutation({
+    mutationFn: async ({ productId, qty, unit }: { productId: string; qty: number; unit: 'container' | 'serving' }) => {
+      const { error: err } = await (chefbyte() as any).rpc('consume_product', {
+        p_product_id: productId,
+        p_qty: qty,
+        p_unit: unit,
+        p_log_macros: true,
+        p_logical_date: getLogicalDate(),
+      });
+      if (err) throw err;
+    },
+    onError: (err: any) => {
+      setError(err.message ?? String(err));
+    },
+    onSuccess: () => {
+      setError(null);
+    },
+    onSettled: () => {
+      invalidateInventory();
+    },
+  });
 
   const handleConsumeAll = (productId: string) => {
     const item = grouped.find((g) => g.product.product_id === productId);
@@ -318,7 +327,7 @@ export function InventoryPage() {
       open: true,
       action: () => {
         closeConfirm();
-        consumeStock(productId, item.totalStock, 'container');
+        consumeStockMutation.mutate({ productId, qty: item.totalStock, unit: 'container' });
       },
     });
   };
@@ -344,7 +353,7 @@ export function InventoryPage() {
     return (
       <ChefLayout title="Inventory">
         <div className="p-5" data-testid="inventory-loading">
-          Loading inventory...
+          <ListSkeleton count={6} />
         </div>
       </ChefLayout>
     );
@@ -358,7 +367,7 @@ export function InventoryPage() {
           <p className="text-red-600 m-0 mb-2">Failed to load data: {loadError}</p>
           <button
             className="bg-emerald-600 text-white border-none px-4 py-1.5 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700"
-            onClick={loadData}
+            onClick={() => invalidateInventory()}
           >
             Retry
           </button>
@@ -527,7 +536,7 @@ export function InventoryPage() {
                             className="flex items-center justify-center gap-1.5 bg-red-600 text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-red-700 transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              consumeStock(product.product_id, 1, 'container');
+                              consumeStockMutation.mutate({ productId: product.product_id, qty: 1, unit: 'container' });
                             }}
                             data-testid={`sub-ctn-${product.product_id}`}
                           >
@@ -547,7 +556,7 @@ export function InventoryPage() {
                             className="flex items-center justify-center gap-1.5 bg-white text-red-600 border-2 border-red-600 px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-red-50 transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              consumeStock(product.product_id, 1, 'serving');
+                              consumeStockMutation.mutate({ productId: product.product_id, qty: 1, unit: 'serving' });
                             }}
                             data-testid={`sub-srv-${product.product_id}`}
                           >

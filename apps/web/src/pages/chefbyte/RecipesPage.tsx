@@ -1,8 +1,11 @@
-import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { CardSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
+import { queryKeys } from '@/shared/queryKeys';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -139,11 +142,6 @@ function stockBadgeClass(status: StockStatus): string {
 
 export function RecipesPage() {
   const { user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
-
-  const [recipes, setRecipes] = useState<Recipe[]>([]);
-  const [stockByProduct, setStockByProduct] = useState<Map<string, number>>(new Map());
 
   /* ---- Filter state ---- */
   const [searchText, setSearchText] = useState('');
@@ -177,55 +175,54 @@ export function RecipesPage() {
   const filterRef = useRef<HTMLDivElement>(null);
 
   /* ---------------------------------------------------------------- */
-  /*  Data loading                                                     */
+  /*  Data loading via TanStack Query                                  */
   /* ---------------------------------------------------------------- */
 
-  const loadData = useCallback(async () => {
-    if (!user) return;
+  const {
+    data: queryData,
+    isLoading,
+    error: loadErrorObj,
+  } = useQuery({
+    queryKey: queryKeys.recipes(user!.id),
+    queryFn: async () => {
+      const [recipeRes, stockRes] = await Promise.all([
+        chefbyte()
+          .from('recipes')
+          .select(
+            '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
+          )
+          .eq('user_id', user!.id)
+          .order('name'),
+        chefbyte().from('stock_lots').select('product_id, qty_containers').eq('user_id', user!.id),
+      ]);
 
-    setLoadError(null);
-    const { data: recipeData, error: recipeErr } = await chefbyte()
-      .from('recipes')
-      .select(
-        '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
-      )
-      .eq('user_id', user.id)
-      .order('name');
-    if (recipeErr) {
-      setLoadError(recipeErr.message);
-      setLoading(false);
-      return;
-    }
+      if (recipeRes.error) throw recipeRes.error;
 
-    // Load all stock lots to compute stock-per-product
-    const { data: stockLots } = await chefbyte()
-      .from('stock_lots')
-      .select('product_id, qty_containers')
-      .eq('user_id', user.id);
+      const stockMap = new Map<string, number>();
+      for (const lot of (stockRes.data ?? []) as Array<{ product_id: string; qty_containers: number }>) {
+        const current = stockMap.get(lot.product_id) ?? 0;
+        stockMap.set(lot.product_id, current + Number(lot.qty_containers));
+      }
 
-    const stockMap = new Map<string, number>();
-    for (const lot of (stockLots ?? []) as Array<{ product_id: string; qty_containers: number }>) {
-      const current = stockMap.get(lot.product_id) ?? 0;
-      stockMap.set(lot.product_id, current + Number(lot.qty_containers));
-    }
-    setStockByProduct(stockMap);
+      return {
+        recipes: (recipeRes.data ?? []) as Recipe[],
+        stockByProduct: stockMap,
+      };
+    },
+    enabled: !!user,
+  });
 
-    setRecipes((recipeData ?? []) as Recipe[]);
-    setLoading(false);
-  }, [user]);
-
-  useEffect(() => {
-    // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadData();
-  }, [loadData]);
+  const recipes = queryData?.recipes;
+  const stockByProduct = queryData?.stockByProduct;
+  const loadError = loadErrorObj ? (loadErrorObj as Error).message : null;
 
   /* ---------------------------------------------------------------- */
   /*  Filtering                                                        */
   /* ---------------------------------------------------------------- */
 
   const filteredRecipes = useMemo(() => {
-    let result = recipes;
+    let result = recipes ?? [];
+    const stock = stockByProduct ?? new Map<string, number>();
 
     // Search filter
     if (searchText.trim()) {
@@ -240,7 +237,7 @@ export function RecipesPage() {
 
     // Can be made filter
     if (canBeMadeOnly) {
-      result = result.filter((r) => computeStockStatus(r.recipe_ingredients, stockByProduct) === 'CAN MAKE');
+      result = result.filter((r) => computeStockStatus(r.recipe_ingredients, stock) === 'CAN MAKE');
     }
 
     // High protein filter (g protein per 100 cal >= threshold)
@@ -295,11 +292,14 @@ export function RecipesPage() {
   /*  RENDER                                                           */
   /* ================================================================ */
 
-  if (loading) {
+  if (isLoading) {
     return (
       <ChefLayout title="Recipes">
-        <div className="p-5" data-testid="recipes-loading">
-          Loading recipes...
+        <div className="p-5 grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4" data-testid="recipes-loading">
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
+          <CardSkeleton />
         </div>
       </ChefLayout>
     );
@@ -550,7 +550,7 @@ export function RecipesPage() {
 
         {filteredRecipes.map((recipe) => {
           const macros = computeRecipeMacros(recipe.recipe_ingredients, Number(recipe.base_servings));
-          const status = computeStockStatus(recipe.recipe_ingredients, stockByProduct);
+          const status = computeStockStatus(recipe.recipe_ingredients, stockByProduct ?? new Map());
 
           return (
             <Link
