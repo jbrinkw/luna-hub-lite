@@ -32,6 +32,8 @@ The Supabase JS client calls wrappers: `supabase.schema('coachbyte').rpc('ensure
 | `coachbyte`    | `complete_next_set(p_plan_id, p_reps, p_load)`               | `private.complete_next_set(uid, ...)`             |
 | `chefbyte`     | `get_daily_macros(p_logical_date)`                           | `private.get_daily_macros(uid, p_date)`           |
 | `chefbyte`     | `mark_meal_done(p_meal_id)`                                  | `private.mark_meal_done(uid, p_meal_id)`          |
+| `chefbyte`     | `unmark_meal_done(p_meal_id)`                                | `private.unmark_meal_done(uid, p_meal_id)`        |
+| `chefbyte`     | `save_recipe_ingredients(p_recipe_id, p_ingredients)`        | `private.save_recipe_ingredients(uid, ...)`       |
 | `chefbyte`     | `consume_product(p_product_id, p_qty, p_unit, p_log_macros)` | `private.consume_product(uid, ...)`               |
 | `chefbyte`     | `sync_meal_plan_to_shopping(p_days)`                         | `private.sync_meal_plan_to_shopping(uid, p_days)` |
 | `chefbyte`     | `import_shopping_to_inventory()`                             | `private.import_shopping_to_inventory(uid)`       |
@@ -83,6 +85,14 @@ Default locations (Fridge, Pantry, Freezer) are seeded per user on ChefByte acti
 
 - `meal_type` TEXT CHECK (meal_type IN ('breakfast', 'lunch', 'dinner', 'snack')) — categorizes meal plan entries by meal type (migration 20260304050000)
 
+### `chefbyte.food_logs` — notable column
+
+- `meal_id` UUID (FK → chefbyte.meal_plan_entries, nullable) — traceability link set when `mark_meal_done` creates food logs from a meal plan entry
+
+### `chefbyte.recipes` — notable column
+
+- `instructions` TEXT — free-text recipe instructions/preparation steps
+
 ### Non-negative CHECK constraints (migration 20260304040004)
 
 - `chefbyte.products`: `calories_per_serving >= 0`, `protein_per_serving >= 0`, `carbs_per_serving >= 0`, `fat_per_serving >= 0`
@@ -98,14 +108,10 @@ CREATE FUNCTION private.get_logical_date(
   tz TEXT,
   day_start_hour INTEGER
 ) RETURNS DATE
-LANGUAGE plpgsql
+LANGUAGE sql
 IMMUTABLE
-SECURITY DEFINER
-SET search_path = ''
 AS $$
-BEGIN
-  RETURN (ts AT TIME ZONE tz - (day_start_hour || ' hours')::INTERVAL)::DATE;
-END;
+  SELECT ((ts AT TIME ZONE tz) - (day_start_hour || ' hours')::INTERVAL)::DATE;
 $$;
 ```
 
@@ -134,12 +140,12 @@ All quantity columns (stock, servings, recipe amounts, shopping quantities) use 
 
 ## Business Logic Placement
 
-| Logic Type              | Runs In                                                                                                         | Examples                                                                                                                                                                                                                                                                                                              |
-| ----------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Simple CRUD             | Supabase client SDK (direct from frontend)                                                                      | Add a planned set, update a product name, toggle a tool                                                                                                                                                                                                                                                               |
-| Multi-step transactions | Database functions (plpgsql, SECURITY DEFINER in `private` schema, exposed via thin wrappers in module schemas) | Ensure today's plan + clone from split, complete a set + return rest_seconds, mark meal done (consume ingredients + log macros or create [MEAL] lot), consume product (nearest-expiry lot depletion + optional macro log), import shopping to inventory (bulk lot creation + clear items), sync meal plan to shopping |
-| External API calls      | Supabase Edge Functions                                                                                         | Walmart scraping (via third-party scraper API, already implemented), OpenFoodFacts + Claude Haiku 4.5 product analysis, LiquidTrack ingestion                                                                                                                                                                         |
-| MCP tool execution      | Cloudflare Worker → Supabase RPC via Supavisor (for app tools) or direct API call (for extension tools)         | All tool calls from external AI clients                                                                                                                                                                                                                                                                               |
+| Logic Type              | Runs In                                                                                                         | Examples                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| ----------------------- | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Simple CRUD             | Supabase client SDK (direct from frontend)                                                                      | Add a planned set, update a product name, toggle a tool                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| Multi-step transactions | Database functions (plpgsql, SECURITY DEFINER in `private` schema, exposed via thin wrappers in module schemas) | Ensure today's plan + clone from split, complete a set + return rest_seconds, mark meal done (consume ingredients + log macros or create [MEAL] lot), unmark meal done (reverse completion: delete food_logs, restore stock, delete [MEAL] product for prep entries), save recipe ingredients (atomic delete + insert), consume product (nearest-expiry lot depletion + optional macro log), import shopping to inventory (bulk lot creation + clear items), sync meal plan to shopping |
+| External API calls      | Supabase Edge Functions                                                                                         | Walmart scraping (via third-party scraper API, already implemented), OpenFoodFacts + Claude Haiku 4.5 product analysis, LiquidTrack ingestion                                                                                                                                                                                                                                                                                                                                           |
+| MCP tool execution      | Cloudflare Worker → Supabase RPC via Supavisor (for app tools) or direct API call (for extension tools)         | All tool calls from external AI clients                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 ## Key Indexes
 
@@ -158,15 +164,15 @@ All quantity columns (stock, servings, recipe amounts, shopping quantities) use 
 
 The frontend uses the `useRealtimeInvalidation` hook to subscribe to Supabase Realtime `postgres_changes` and invalidate specific TanStack Query keys when rows change. This replaces full-page refetches with targeted cache invalidation. Active subscriptions by page:
 
-| Page / Provider            | Tables Subscribed                                                                                   | Query Keys Invalidated  | Purpose                                                          |
-| -------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------- |
-| `AppProvider`              | `hub.app_activations`                                                                               | `activations`           | Live activation changes propagate to all modules                 |
-| `TodayPage` (CoachByte)    | `coachbyte.daily_plans`, `coachbyte.planned_sets`, `coachbyte.completed_sets`                       | `dailyPlan`, `timer`    | Live workout state — set completion, plan changes, timer updates |
-| `InventoryPage` (ChefByte) | `chefbyte.stock_lots`, `chefbyte.products`                                                          | `stockLots`, `products` | Live inventory updates when lots are consumed or added           |
-| `MacroPage` (ChefByte)     | `chefbyte.food_logs`, `chefbyte.temp_items`                                                         | `dailyMacros`           | Live macro totals as food is logged                              |
-| `ShoppingPage` (ChefByte)  | `chefbyte.shopping_list`                                                                            | `shoppingList`          | Live shopping list updates (sync, import, manual edits)          |
-| `MealPlanPage` (ChefByte)  | `chefbyte.meal_plan_entries`, `chefbyte.food_logs`, `chefbyte.temp_items`                           | `mealPlan`              | Live meal plan changes and completion updates                    |
-| `HomePage` (ChefByte)      | `chefbyte.meal_plan_entries`, `chefbyte.food_logs`, `chefbyte.temp_items`, `chefbyte.shopping_list` | `chef-home`             | Live dashboard updates                                           |
+| Page / Provider            | Tables Subscribed                                                                                                          | Query Keys Invalidated  | Purpose                                                          |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------- |
+| `AppProvider`              | `hub.app_activations`                                                                                                      | `activations`           | Live activation changes propagate to all modules                 |
+| `TodayPage` (CoachByte)    | `coachbyte.planned_sets`, `coachbyte.completed_sets`, `coachbyte.timers`                                                   | `dailyPlan`, `timer`    | Live workout state — set completion, plan changes, timer updates |
+| `InventoryPage` (ChefByte) | `chefbyte.stock_lots`, `chefbyte.products`                                                                                 | `stockLots`, `products` | Live inventory updates when lots are consumed or added           |
+| `MacroPage` (ChefByte)     | `chefbyte.food_logs`, `chefbyte.temp_items`                                                                                | `dailyMacros`           | Live macro totals as food is logged                              |
+| `ShoppingPage` (ChefByte)  | `chefbyte.shopping_list`                                                                                                   | `shoppingList`          | Live shopping list updates (sync, import, manual edits)          |
+| `MealPlanPage` (ChefByte)  | `chefbyte.meal_plan_entries`, `chefbyte.food_logs`, `chefbyte.temp_items`                                                  | `mealPlan`              | Live meal plan changes and completion updates                    |
+| `HomePage` (ChefByte)      | `chefbyte.meal_plan_entries`, `chefbyte.food_logs`, `chefbyte.temp_items`, `chefbyte.stock_lots`, `chefbyte.shopping_list` | `chef-home`             | Live dashboard updates                                           |
 
 All subscriptions filter on `user_id = auth.uid()` via RLS. Channels are cleaned up on page unmount. Query keys are defined in `src/shared/queryKeys.ts`.
 

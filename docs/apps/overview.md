@@ -27,7 +27,7 @@ CoachByte's UI may optionally display today's macros from ChefByte. ChefByte may
 
 ### MVP: Desktop-First Web App
 
-The MVP targets desktop browsers. All UI layouts are designed desktop-first with responsive stacking for narrower viewports. Ionic React is used for its component library and Capacitor compatibility, not because the MVP is mobile-first.
+The MVP targets desktop browsers. All UI layouts are designed desktop-first with responsive stacking for narrower viewports. Tailwind CSS is used for styling with Capacitor compatibility preserved for future native builds.
 
 ### Post-MVP: Mobile & Native
 
@@ -38,7 +38,7 @@ The following are deferred to post-MVP and designed to be easy to add without re
 | Layout             | Desktop-first responsive, multi-column       | Mobile-optimized single-column layouts, bottom tab navigation, swipe gestures |
 | Notifications      | Not available                                | `@capacitor/local-notifications` — schedule OS-level timer alerts             |
 | Barcode Scanner    | Physical Bluetooth/USB barcode scanner input | `@capacitor/barcode-scanner` for camera scanning                              |
-| Haptics            | Ionic built-in haptics                       | `@capacitor/haptics`                                                          |
+| Haptics            | Not available                                | `@capacitor/haptics`                                                          |
 | Storage            | Browser localStorage/IndexedDB               | `@capacitor/preferences`                                                      |
 | Background Timer   | Timer recovers on tab/window focus           | True background countdown with native notification on expiry                  |
 | Platform Detection | `Capacitor.isNativePlatform()` returns false | Returns true, enables native code paths                                       |
@@ -50,4 +50,4 @@ Background rest timer notifications (CoachByte's biggest web limitation), reliab
 
 ### What Doesn't Change
 
-All React components, routing, state management, Supabase queries, Realtime subscriptions, Ionic UI components, edge functions, and database functions remain identical. Mobile layouts are additive — new responsive breakpoints and mobile-specific navigation, not rewrites.
+All React components, routing, state management, Supabase queries, Realtime subscriptions, edge functions, and database functions remain identical. Mobile layouts are additive — new responsive breakpoints and mobile-specific navigation, not rewrites.

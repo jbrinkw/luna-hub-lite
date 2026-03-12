@@ -6,7 +6,7 @@
 2. **Single identity.** One Luna Hub account works across all app modules. Email/password authentication via Supabase Auth.
 3. **Per-user isolation.** Every table has `user_id`. Row Level Security enforces access at the database level.
 4. **Connectivity required.** All writes go to the server. No offline queue or conflict resolution. The UI communicates connectivity state clearly — offline indicators, disabled write buttons, "last synced" timestamps. Service workers cache app shell assets only for fast loads.
-5. **Desktop-first, mobile-ready.** Built as a responsive web app with Ionic React. MVP targets desktop browsers. The architecture and component choices (Ionic + Capacitor abstraction points) ensure mobile and native app support can be added later without rewriting app code, but mobile-optimized layouts and native features (background notifications, camera scanning, etc.) are deferred to a post-MVP phase.
+5. **Desktop-first, mobile-ready.** Built as a responsive web app with React + Tailwind CSS. MVP targets desktop browsers. The architecture ensures mobile and native app support can be added later via Capacitor without rewriting app code, but mobile-optimized layouts and native features (background notifications, camera scanning, etc.) are deferred to a post-MVP phase.
 6. **Modular by convention.** App modules and extensions follow a consistent folder structure. Full app modules live in `apps/`, lightweight tool integrations live in `extensions/`. All tools aggregate into a single MCP server.
 7. **AI client as integration layer.** Cross-app data access is available through MCP tools. An AI agent connected via MCP can query both CoachByte and ChefByte tools in the same conversation. No cross-app schema or UI integration exists at launch.
 8. **One MCP endpoint for everything.** The Hub MCP server is a single gateway — it exposes CoachByte tools, ChefByte tools, and extension tools. External clients connect once and get access to everything the user has enabled.
@@ -15,17 +15,17 @@
 
 ## Frontend (Single App Shell)
 
-| Concern       | Choice                                                                                                                                                                                       |
-| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Framework     | React + TypeScript + Vite                                                                                                                                                                    |
-| UI Library    | Ionic React (platform-adaptive components, Capacitor-ready for future native)                                                                                                                |
-| Styling       | Ionic theming + CSS variables for per-module branding                                                                                                                                        |
-| Routing       | React Router with path-based module routing (`/hub/*`, `/coach/*`, `/chef/*`)                                                                                                                |
-| State         | React hooks + Supabase client SDK subscriptions                                                                                                                                              |
-| Real-Time     | Supabase Realtime (Postgres change subscriptions filtered by `user_id`, additional filtering client-side)                                                                                    |
-| PWA           | Single service worker (app shell caching only — no data caching or offline data access) + single web manifest                                                                                |
-| Layout        | Desktop-first responsive design using Ionic grid + CSS media queries. Multi-column layouts on wide screens, single-column stacking on narrow. Mobile-optimized layouts deferred to post-MVP. |
-| Future Native | Capacitor wrapping deferred to post-MVP (adds native plugins, no app code changes)                                                                                                           |
+| Concern       | Choice                                                                                                                                                                                        |
+| ------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework     | React + TypeScript + Vite                                                                                                                                                                     |
+| UI Library    | Tailwind CSS v4 + custom React components                                                                                                                                                     |
+| Styling       | Tailwind CSS utility classes                                                                                                                                                                  |
+| Routing       | React Router with path-based module routing (`/hub/*`, `/coach/*`, `/chef/*`)                                                                                                                 |
+| State         | TanStack Query v5 (server state) + React hooks (local state) + Supabase client SDK                                                                                                            |
+| Real-Time     | Supabase Realtime (Postgres change subscriptions filtered by `user_id`, additional filtering client-side)                                                                                     |
+| PWA           | Single service worker (app shell caching only — no data caching or offline data access) + single web manifest                                                                                 |
+| Layout        | Desktop-first responsive design using Tailwind CSS responsive classes. Multi-column layouts on wide screens, single-column stacking on narrow. Mobile-optimized layouts deferred to post-MVP. |
+| Future Native | Capacitor wrapping deferred to post-MVP (adds native plugins, no app code changes)                                                                                                            |
 
 ## Backend (Shared)
 
@@ -57,10 +57,10 @@
 
 ## Monorepo
 
-| Concern           | Choice                                                                                                              |
-| ----------------- | ------------------------------------------------------------------------------------------------------------------- |
-| Workspace Manager | pnpm workspaces + Turborepo                                                                                         |
-| Shared Packages   | Supabase client config, TypeScript types (auto-generated from DB schema), shared Ionic theme/layout/auth components |
+| Concern           | Choice                                                                                                        |
+| ----------------- | ------------------------------------------------------------------------------------------------------------- |
+| Workspace Manager | pnpm workspaces + Turborepo                                                                                   |
+| Shared Packages   | Supabase client config, TypeScript types (auto-generated from DB schema), shared layout components (AppShell) |
 
 ### Convention: App Modules vs Extensions
 

@@ -16,7 +16,7 @@ Strength training copilot: workout programming, set tracking, PR monitoring, res
 - Override reps/load on completion
 - Validation error display: if reps or load inputs are not valid numbers, an inline error message ("Please enter valid numbers for reps and load.") is shown below the complete button for 4 seconds
 - Automatic rest timer starts after each completion, seeded from the next set's rest duration
-- PR toast notifications: after completing a set, the system computes the Epley 1RM for the just-completed set and compares it against all previous completed sets for that exercise. If the new e1RM exceeds the previous best, a success-colored IonToast appears at the top of the page showing "NEW PR! {exercise} e1RM: {value} lb (was {previous})". First-ever sets for an exercise also trigger a "First record!" toast.
+- PR toast notifications: after completing a set, the system computes the Epley 1RM for the just-completed set and compares it against all previous completed sets for that exercise. If the new e1RM exceeds the previous best, a success-colored toast alert appears at the top of the page showing "NEW PR! {exercise} e1RM: {value} lb (was {previous})". First-ever sets for an exercise also trigger a "First record!" toast.
 - Inline editing of planned sets: reps, load, and rest seconds for queued (pending) sets are editable directly in the queue table via IonInput fields that save on blur. Realtime refresh is suppressed while editing to prevent input clobbering.
 - Add/delete planned sets: a "+ Add Set" button below the queue table opens an exercise/reps/load form to insert a new planned set at the end of the queue. Each queued set has a delete button (X icon) to remove it.
 - Delete completed sets with two-click confirmation: each completed set row has a "Remove" button that changes to "Confirm?" on first click (with a 3-second auto-reset timeout), then deletes on second click.
@@ -74,7 +74,7 @@ Strength training copilot: workout programming, set tracking, PR monitoring, res
 - Each day expandable to show completed sets with exercise name, reps, load, and completion timestamp
 - Human-friendly date formatting: dates displayed as "Mon, Mar 3" style via `Intl.DateTimeFormat`. Completion timestamps in the detail view display the time (e.g. "2:30 PM") using `Intl.DateTimeFormat` with hour/minute.
 - Day summaries visible in list view
-- Exercise filter: an IonSelect dropdown at the top allows filtering the history to only show days that have completed sets for the selected exercise. Filtering queries `completed_sets` by `exercise_id` to determine which plan IDs to display.
+- Exercise filter: a dropdown at the top allows filtering the history to only show days that have completed sets for the selected exercise. Filtering queries `completed_sets` by `exercise_id` to determine which plan IDs to display.
 
 ### Exercise Library
 
@@ -86,8 +86,10 @@ Strength training copilot: workout programming, set tracking, PR monitoring, res
 ### Settings
 
 - Default rest duration
+- Plate calculator (bar weight, available plate sizes)
+- Exercise library with search (global and custom exercises, delete for custom)
 
-## CoachByte UX (Ionic)
+## CoachByte UX
 
 Desktop-first with responsive design.
 
@@ -95,16 +97,16 @@ Desktop-first with responsive design.
 
 **Pages:**
 
-- **Today's Workout** (default landing page): Reset Plan button (two-click confirm) at top right. Next-in-queue completion section showing current exercise, target reps/load with plate breakdown (e.g. "185 (45,25) lb"), override inputs, complete button, ad-hoc set button, and validation error display. Below: two-column layout — set queue on left (remaining planned sets with inline-editable reps, load, and rest fields; delete button per set; "+ Add Set" button), completed sets on right (log of finished sets with plate breakdown, two-click remove per set). Workout notes textarea below completed sets for freeform observations. Countdown timer panel (pause/resume/reset/start custom) alongside workout view. Summary textarea at bottom for session notes. PR toast notifications on new personal records. Relative loads show both percentage and calculated weight (e.g., "85% of 371").
-- **History**: Day list table with Date (human-friendly, e.g. "Mon, Mar 3"), Summary, Sets (completed/total) columns. Empty days (zero completed sets) are filtered out. Exercise filter dropdown (IonSelect) to show only days containing the selected exercise. Click a day to expand its detail card showing completed sets with exercise, reps, load, and completion time. Keyset pagination with Load More.
-- **Split Planner**: Vertical day-by-day layout (Sunday through Saturday). Each day has a label and editable table: Order number (#), Exercise, Reps, Load, Relative (% checkbox), Rest, and delete button. Add Exercise button and Save button per day. Split notes textarea per day.
-- **PR Tracker**: Exercise cards for tracked exercises — each card shows exercise name, estimated 1RM, and rep-range chips (e.g. "5 rep: 225 lb"). 90-day default date filter with "Showing PRs from last 90 days" info text and "Load All History" button. Tracked exercises management card: search input to find and add exercises, IonChip list of tracked exercises with click-to-remove. Tracked exercise selections persisted to DB (`pr_tracked_exercise_ids`). PR alerts as toast notifications (on TodayPage).
+- **Today's Workout** (default landing page): Reset Plan button (two-click confirm) at top right. Next-in-queue completion section showing current exercise, target reps/load with plate breakdown (e.g. "185 (45,25) lb"), override inputs, complete button, ad-hoc set button, and validation error display. Inline timer display with pause/resume/reset/start custom controls. Below: collapsible "Coming Up" section (preview of next 3 sets, expandable to full queue with inline-editable reps, load, and rest fields; delete button per set; "+ Add Set" button). Collapsible "Completed" section (log of finished sets with plate breakdown, two-click remove per set). Collapsible "Notes" textarea for freeform observations. Collapsible "Summary" textarea for session notes. PR toast notifications on new personal records. Relative loads show both percentage and calculated weight (e.g., "85% of 371").
+- **History**: Responsive layout — desktop shows a day list table (Date, Summary, Sets columns); mobile shows card list. Empty days (zero completed sets) filtered out client-side. Exercise filter dropdown to show only days containing the selected exercise. Click a day to expand its detail card showing completed sets with exercise, reps, load, and completion time. Keyset pagination with Load More. Total workout count displayed.
+- **Split Planner**: Collapsible day-by-day layout (Sunday through Saturday; rest days collapsed by default). Each day has a label and editable table: Order number (#), Exercise, Reps, Load, % of 1RM (checkbox), Rest (with 30/60/90/120s preset buttons), and delete button. Add Exercise button and Save button per day. Split notes textarea per day.
+- **PR Tracker**: Exercise cards for tracked exercises — each card shows exercise name, estimated 1RM, and rep-range chips (e.g. "5 rep: 225 lb"). 90-day default date filter with "Showing PRs from last 90 days" info text and "Load All History" button. Collapsible tracked exercises management panel: search input to find and add exercises, chip list of tracked exercises with click-to-remove. Tracked exercise selections persisted to DB (`pr_tracked_exercise_ids`). PR alerts as toast notifications (on TodayPage).
 - **Settings**: Default rest duration input. Plate calculator settings (bar weight, available plate sizes). Exercise library with search, showing global and custom exercises with delete for custom.
 
 **Shared across layouts:**
 
 - Toast notifications for set completed, PR alerts
-- Offline indicator (disabled buttons + "no connection" banner)
+- Offline indicator (entire content area disabled + "no connection" banner)
 
 ## CoachByte MCP Tools
 

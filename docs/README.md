@@ -34,7 +34,7 @@ The MCP server remains on a subdomain because it runs on Cloudflare Workers, sep
 ```
 luna-hub-lite/
 ├── apps/
-│   ├── web/                          # Ionic React app (all modules)
+│   ├── web/                          # React SPA (all modules)
 │   │   └── src/
 │   │       ├── modules/
 │   │       │   ├── hub/
@@ -49,7 +49,7 @@ luna-hub-lite/
 │   │       ├── chefbyte/
 │   │       └── shared/
 │   ├── db-types/                     # Generated Supabase TypeScript types
-│   ├── ui-kit/                       # Shared Ionic components
+│   ├── ui-kit/                       # Shared layout components
 │   └── config/                       # Shared config (Supabase URLs, etc.)
 ├── supabase/
 │   ├── migrations/                   # All schema migrations
