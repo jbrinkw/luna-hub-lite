@@ -196,62 +196,88 @@ export function HomePage() {
     if (!userId) return;
     setLoadError(null);
 
-    // 1. Status cards — missing prices (exclude [MEAL] lots)
-    const { data: mp, error: mpErr } = await chefbyte()
-      .from('products')
-      .select('product_id')
-      .eq('user_id', userId)
-      .is('price', null)
-      .not('name', 'ilike', '[MEAL]%');
-    if (mpErr) {
-      setLoadError(mpErr.message);
+    // Fire all independent queries in parallel
+    const [mpRes, phRes, spRes, cartRes, macroRes, prepRes, mealsRes, logRes, tempRes, stockRes] = await Promise.all([
+      // 1. Missing prices
+      chefbyte()
+        .from('products')
+        .select('product_id')
+        .eq('user_id', userId)
+        .is('price', null)
+        .not('name', 'ilike', '[MEAL]%'),
+      // 2. Placeholders
+      chefbyte().from('products').select('product_id').eq('user_id', userId).eq('is_placeholder', true),
+      // 3. Products with min_stock
+      chefbyte()
+        .from('products')
+        .select('product_id, min_stock_amount')
+        .eq('user_id', userId)
+        .gt('min_stock_amount', 0),
+      // 4. Cart value
+      chefbyte().from('shopping_list').select('qty_containers, products:product_id(price)').eq('user_id', userId),
+      // 5. Macro summary
+      (chefbyte() as any).rpc('get_daily_macros', { p_logical_date: today }),
+      // 6. Meal prep
+      chefbyte()
+        .from('meal_plan_entries')
+        .select('meal_id, servings, recipes:recipe_id(name), products:product_id(name)')
+        .eq('user_id', userId)
+        .eq('logical_date', today)
+        .eq('meal_prep', true)
+        .is('completed_at', null),
+      // 7. Today's meals
+      chefbyte()
+        .from('meal_plan_entries')
+        .select(
+          'meal_id, servings, meal_type, completed_at, product_id, recipes:recipe_id(name, base_servings, recipe_ingredients(product_id, quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container)',
+        )
+        .eq('user_id', userId)
+        .eq('logical_date', today)
+        .eq('meal_prep', false),
+      // 8. Food logs
+      chefbyte()
+        .from('food_logs')
+        .select(
+          'log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
+        )
+        .eq('user_id', userId)
+        .eq('logical_date', today),
+      // 9. Temp items
+      chefbyte()
+        .from('temp_items')
+        .select('temp_id, name, calories, protein, carbs, fat')
+        .eq('user_id', userId)
+        .eq('logical_date', today),
+      // 10. All stock lots
+      chefbyte().from('stock_lots').select('product_id, qty_containers').eq('user_id', userId),
+    ]);
+
+    // Check for errors
+    const firstError = [mpRes, phRes, spRes, cartRes, macroRes, prepRes, mealsRes, logRes, tempRes, stockRes].find(
+      (r) => r.error,
+    );
+    if (firstError?.error) {
+      setLoadError(firstError.error.message);
       return;
     }
-    setMissingPrices((mp ?? []).length);
+
+    // 1. Missing prices
+    setMissingPrices((mpRes.data ?? []).length);
 
     // 2. Placeholders
-    const { data: ph, error: phErr } = await chefbyte()
-      .from('products')
-      .select('product_id')
-      .eq('user_id', userId)
-      .eq('is_placeholder', true);
-    if (phErr) {
-      setLoadError(phErr.message);
-      return;
-    }
-    setPlaceholders((ph ?? []).length);
+    setPlaceholders((phRes.data ?? []).length);
 
-    // 3. Below min stock — fetch products with min_stock_amount > 0, then batch-fetch stock_lots
-    const { data: stockProducts, error: spErr } = await chefbyte()
-      .from('products')
-      .select('product_id, min_stock_amount')
-      .eq('user_id', userId)
-      .gt('min_stock_amount', 0);
-    if (spErr) {
-      setLoadError(spErr.message);
-      return;
-    }
-
+    // 3. Below min stock — compare products with min_stock against stock lots
+    const spArr = (spRes.data ?? []) as any[];
     let belowCount = 0;
-    const spArr = (stockProducts ?? []) as any[];
     if (spArr.length > 0) {
-      const productIds = spArr.map((p: any) => p.product_id);
-      const { data: allLots, error: lotsErr } = await chefbyte()
-        .from('stock_lots')
-        .select('product_id, qty_containers')
-        .in('product_id', productIds);
-      if (lotsErr) {
-        setLoadError(lotsErr.message);
-        return;
-      }
-
-      // Group stock by product_id
+      const minStockIds = new Set(spArr.map((p: any) => p.product_id));
       const stockByProduct = new Map<string, number>();
-      for (const lot of (allLots ?? []) as any[]) {
+      for (const lot of (stockRes.data ?? []) as any[]) {
+        if (!minStockIds.has(lot.product_id)) continue;
         const current = stockByProduct.get(lot.product_id) ?? 0;
         stockByProduct.set(lot.product_id, current + Number(lot.qty_containers));
       }
-
       for (const p of spArr) {
         const totalStock = stockByProduct.get(p.product_id) ?? 0;
         if (totalStock < Number(p.min_stock_amount)) belowCount++;
@@ -259,33 +285,17 @@ export function HomePage() {
     }
     setBelowMinStock(belowCount);
 
-    // 4. Cart value — shopping_list joined with products
-    const { data: cartItems, error: cartErr } = await chefbyte()
-      .from('shopping_list')
-      .select('qty_containers, products:product_id(price)')
-      .eq('user_id', userId);
-    if (cartErr) {
-      setLoadError(cartErr.message);
-      return;
-    }
-
-    const total = (cartItems ?? []).reduce((sum: number, item: any) => {
+    // 4. Cart value
+    const total = (cartRes.data ?? []).reduce((sum: number, item: any) => {
       const price = Number(item.products?.price ?? 0);
       const qty = Number(item.qty_containers ?? 0);
       return sum + price * qty;
     }, 0);
     setCartValue(total);
 
-    // 5. Macro day summary
-    const { data: macroData, error: macroErr } = await (chefbyte() as any).rpc('get_daily_macros', {
-      p_logical_date: today,
-    });
-    if (macroErr) {
-      setLoadError(macroErr.message);
-      return;
-    }
-    if (macroData) {
-      const rpc = macroData as Record<string, { consumed: number; goal: number; remaining: number }>;
+    // 5. Macros
+    if (macroRes.data) {
+      const rpc = macroRes.data as Record<string, { consumed: number; goal: number; remaining: number }>;
       setMacros({
         consumed: {
           calories: Number(rpc.calories?.consumed) || 0,
@@ -304,71 +314,14 @@ export function HomePage() {
       setMacros(null);
     }
 
-    // 6. Today's meal prep
-    const { data: prepData, error: prepErr } = await chefbyte()
-      .from('meal_plan_entries')
-      .select('meal_id, servings, recipes:recipe_id(name), products:product_id(name)')
-      .eq('user_id', userId)
-      .eq('logical_date', today)
-      .eq('meal_prep', true)
-      .is('completed_at', null);
-    if (prepErr) {
-      setLoadError(prepErr.message);
-      return;
-    }
-    setMealPrep((prepData ?? []) as MealPrepEntry[]);
+    // 6-10. Set remaining state
+    setMealPrep((prepRes.data ?? []) as MealPrepEntry[]);
+    setTodaysMeals((mealsRes.data ?? []) as MealEntry[]);
+    setFoodLogs((logRes.data ?? []) as FoodLogEntry[]);
+    setTempItems((tempRes.data ?? []) as TempItemEntry[]);
 
-    // 7. Today's meals (non-prep)
-    const { data: mealsData, error: mealsErr } = await chefbyte()
-      .from('meal_plan_entries')
-      .select(
-        'meal_id, servings, meal_type, completed_at, product_id, recipes:recipe_id(name, base_servings, recipe_ingredients(product_id, quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container)',
-      )
-      .eq('user_id', userId)
-      .eq('logical_date', today)
-      .eq('meal_prep', false);
-    if (mealsErr) {
-      setLoadError(mealsErr.message);
-      return;
-    }
-    setTodaysMeals((mealsData ?? []) as MealEntry[]);
-
-    // 8. Consumed items — food_logs + temp_items
-    const { data: logData, error: logErr } = await chefbyte()
-      .from('food_logs')
-      .select(
-        'log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
-      )
-      .eq('user_id', userId)
-      .eq('logical_date', today);
-    if (logErr) {
-      setLoadError(logErr.message);
-      return;
-    }
-    setFoodLogs((logData ?? []) as FoodLogEntry[]);
-
-    const { data: tempData, error: tempErr } = await chefbyte()
-      .from('temp_items')
-      .select('temp_id, name, calories, protein, carbs, fat')
-      .eq('user_id', userId)
-      .eq('logical_date', today);
-    if (tempErr) {
-      setLoadError(tempErr.message);
-      return;
-    }
-    setTempItems((tempData ?? []) as TempItemEntry[]);
-
-    // 9. Stock by product — for stock availability badges on meals
-    const { data: allStockLots, error: stockErr } = await chefbyte()
-      .from('stock_lots')
-      .select('product_id, qty_containers')
-      .eq('user_id', userId);
-    if (stockErr) {
-      setLoadError(stockErr.message);
-      return;
-    }
     const stockMap = new Map<string, number>();
-    for (const lot of (allStockLots ?? []) as any[]) {
+    for (const lot of (stockRes.data ?? []) as any[]) {
       const cur = stockMap.get(lot.product_id) ?? 0;
       stockMap.set(lot.product_id, cur + Number(lot.qty_containers));
     }

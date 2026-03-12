@@ -151,42 +151,41 @@ export function MealPlanPage() {
     const startDate = toDateStr(weekStart);
     const endDate = toDateStr(new Date(weekStart.getTime() + 6 * 86400000));
 
-    const { data, error: loadErr } = await chefbyte()
-      .from('meal_plan_entries')
-      .select(
-        '*, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving)',
-      )
-      .eq('user_id', userId)
-      .gte('logical_date', startDate)
-      .lte('logical_date', endDate)
-      .order('created_at');
+    const [mealsRes, logRes, tempRes] = await Promise.all([
+      chefbyte()
+        .from('meal_plan_entries')
+        .select(
+          '*, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving)',
+        )
+        .eq('user_id', userId)
+        .gte('logical_date', startDate)
+        .lte('logical_date', endDate)
+        .order('created_at'),
+      chefbyte()
+        .from('food_logs')
+        .select('log_id, logical_date, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+        .eq('user_id', userId)
+        .gte('logical_date', startDate)
+        .lte('logical_date', endDate)
+        .order('created_at'),
+      chefbyte()
+        .from('temp_items')
+        .select('temp_id, logical_date, name, calories, protein, carbs, fat')
+        .eq('user_id', userId)
+        .gte('logical_date', startDate)
+        .lte('logical_date', endDate)
+        .order('created_at'),
+    ]);
 
-    if (loadErr) {
-      setError(loadErr.message);
+    if (mealsRes.error) {
+      setError(mealsRes.error.message);
       setLoading(false);
       return;
     }
-    setMeals((data ?? []) as MealEntry[]);
 
-    // Also fetch consumed items for the week
-    const { data: logData } = await chefbyte()
-      .from('food_logs')
-      .select('log_id, logical_date, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
-      .eq('user_id', userId)
-      .gte('logical_date', startDate)
-      .lte('logical_date', endDate)
-      .order('created_at');
-    setFoodLogs((logData ?? []) as FoodLogEntry[]);
-
-    const { data: tempData } = await chefbyte()
-      .from('temp_items')
-      .select('temp_id, logical_date, name, calories, protein, carbs, fat')
-      .eq('user_id', userId)
-      .gte('logical_date', startDate)
-      .lte('logical_date', endDate)
-      .order('created_at');
-    setTempItems((tempData ?? []) as TempItemEntry[]);
-
+    setMeals((mealsRes.data ?? []) as MealEntry[]);
+    setFoodLogs((logRes.data ?? []) as FoodLogEntry[]);
+    setTempItems((tempRes.data ?? []) as TempItemEntry[]);
     setLoading(false);
   }, [userId, weekStart]);
 

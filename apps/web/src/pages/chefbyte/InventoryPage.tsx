@@ -77,33 +77,28 @@ export function InventoryPage() {
     if (!user) return;
     setLoadError(null);
 
-    const { data: prods, error: prodsErr } = await chefbyte()
-      .from('products')
-      .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount')
-      .eq('user_id', user.id)
-      .order('name');
+    const [prodsRes, stockRes, locsRes] = await Promise.all([
+      chefbyte()
+        .from('products')
+        .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount')
+        .eq('user_id', user.id)
+        .order('name'),
+      chefbyte()
+        .from('stock_lots')
+        .select('lot_id,product_id,qty_containers,expires_on,locations:location_id(name)')
+        .eq('user_id', user.id),
+      chefbyte().from('locations').select('location_id').eq('user_id', user.id).order('created_at').limit(1),
+    ]);
 
-    if (prodsErr) {
-      setLoadError(prodsErr.message);
+    if (prodsRes.error) {
+      setLoadError(prodsRes.error.message);
       setLoading(false);
       return;
     }
 
-    const { data: stockLots } = await chefbyte()
-      .from('stock_lots')
-      .select('lot_id,product_id,qty_containers,expires_on,locations:location_id(name)')
-      .eq('user_id', user.id);
-
-    const { data: locs } = await chefbyte()
-      .from('locations')
-      .select('location_id')
-      .eq('user_id', user.id)
-      .order('created_at')
-      .limit(1);
-
-    setProducts((prods ?? []) as Product[]);
-    setLots((stockLots ?? []) as StockLot[]);
-    setLocationId(locs?.[0]?.location_id ?? null);
+    setProducts((prodsRes.data ?? []) as Product[]);
+    setLots((stockRes.data ?? []) as StockLot[]);
+    setLocationId(locsRes.data?.[0]?.location_id ?? null);
     setLoading(false);
   }, [user]);
 

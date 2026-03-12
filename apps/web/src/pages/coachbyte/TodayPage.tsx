@@ -96,19 +96,20 @@ export function TodayPage() {
     const result = planResult as { plan_id: string; status: string };
     setPlanId(result.plan_id);
 
-    const { data: plannedData } = await coachbyte()
-      .from('planned_sets')
-      .select(
-        'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)',
-      )
-      .eq('plan_id', result.plan_id)
-      .order('"order"');
-
-    const { data: completedData } = await coachbyte()
-      .from('completed_sets')
-      .select('completed_set_id, planned_set_id, actual_reps, actual_load, completed_at, exercises(name)')
-      .eq('plan_id', result.plan_id)
-      .order('completed_at');
+    const [{ data: plannedData }, { data: completedData }] = await Promise.all([
+      coachbyte()
+        .from('planned_sets')
+        .select(
+          'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)',
+        )
+        .eq('plan_id', result.plan_id)
+        .order('"order"'),
+      coachbyte()
+        .from('completed_sets')
+        .select('completed_set_id, planned_set_id, actual_reps, actual_load, completed_at, exercises(name)')
+        .eq('plan_id', result.plan_id)
+        .order('completed_at'),
+    ]);
 
     const completedPlanIds = new Set(completedData?.map((cs: any) => cs.planned_set_id).filter(Boolean) ?? []);
 
