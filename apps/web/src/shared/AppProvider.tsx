@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
+import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from 'react';
 import { useAuth } from './auth/AuthProvider';
 import { supabase } from './supabase';
 
@@ -31,6 +31,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [online, setOnline] = useState(navigator.onLine);
   const [lastSynced, setLastSynced] = useState<Date | null>(null);
   const [dayStartHour, setDayStartHour] = useState(0);
+  const loadingRef = useRef(false);
 
   const loadActivations = useCallback(async () => {
     if (!user) {
@@ -38,38 +39,40 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setActivationsLoading(false);
       return;
     }
-    const { data, error } = await supabase
-      .schema('hub')
-      .from('app_activations')
-      .select('app_name')
-      .eq('user_id', user.id);
 
-    if (error) {
-      console.error('Failed to load activations:', error.message);
-    }
-    const map: Record<string, boolean> = {};
-    (data || []).forEach((row: any) => {
-      map[row.app_name] = true;
-    });
-    setActivations(map);
-    setActivationsLoading(false);
-    setLastSynced(new Date());
+    // Deduplicate concurrent calls
+    if (loadingRef.current) return;
+    loadingRef.current = true;
 
-    // Load day_start_hour from profile
-    const { data: profile } = await supabase
-      .schema('hub')
-      .from('profiles')
-      .select('day_start_hour')
-      .eq('user_id', user.id)
-      .single();
-    if (profile?.day_start_hour != null) {
-      setDayStartHour(profile.day_start_hour);
+    try {
+      // Parallel fetch: activations + profile
+      const [activationsRes, profileRes] = await Promise.all([
+        supabase.schema('hub').from('app_activations').select('app_name').eq('user_id', user.id),
+        supabase.schema('hub').from('profiles').select('day_start_hour').eq('user_id', user.id).single(),
+      ]);
+
+      if (activationsRes.error) {
+        console.error('Failed to load activations:', activationsRes.error.message);
+      }
+      const map: Record<string, boolean> = {};
+      (activationsRes.data || []).forEach((row: any) => {
+        map[row.app_name] = true;
+      });
+      setActivations(map);
+      setActivationsLoading(false);
+      setLastSynced(new Date());
+
+      if (profileRes.data?.day_start_hour != null) {
+        setDayStartHour(profileRes.data.day_start_hour);
+      }
+    } finally {
+      loadingRef.current = false;
     }
   }, [user]);
 
   useEffect(() => {
     // Async data fetching with setState is the standard pattern for this use case
-    // eslint-disable-next-line react-hooks/set-state-in-effect
+
     loadActivations();
   }, [loadActivations]);
 
