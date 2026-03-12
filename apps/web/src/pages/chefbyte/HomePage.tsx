@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
+import { ChefHat, UtensilsCrossed, AlertTriangle, DollarSign, PackageSearch, ShoppingCart } from 'lucide-react';
 
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
@@ -781,16 +782,16 @@ export function HomePage() {
     const pct = pctOf(value, goal);
     const plannedPct = plannedValue ? Math.min(pctOf(value + plannedValue, goal), 100) : 0;
     return (
-      <div data-testid={testId} className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+      <div data-testid={testId} className="bg-white/70 border border-slate-200/60 rounded-lg p-3.5">
         <div className="flex justify-between items-center mb-1.5">
           <label className="font-semibold text-sm text-slate-700">{label}</label>
-          <span className="text-xs font-semibold tabular-nums" style={{ color }}>
+          <span className="text-xs font-bold tabular-nums" style={{ color }}>
             {pct}%
           </span>
         </div>
         <div
           data-testid={`${testId}-bar`}
-          className="w-full h-2 bg-slate-200 rounded-full overflow-hidden relative mb-1"
+          className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden relative mb-1"
         >
           {plannedPct > pct && (
             <div
@@ -859,130 +860,138 @@ export function HomePage() {
       )}
 
       {/* ============================================================ */}
-      {/*  MACRO SUMMARY -- progress bars, clickable to /chef/macros    */}
+      {/*  MACRO SUMMARY — hero card, clickable to /chef/macros         */}
       {/* ============================================================ */}
-      <div data-testid="macro-summary" className="mb-4">
-        <div className="mb-2">
-          <span className="font-semibold text-slate-900">Today</span>{' '}
-          <span className="text-sm text-slate-500">(6:00 AM - 5:59 AM)</span>
-        </div>
+      <div data-testid="macro-summary" className="mb-5">
         <Link to="/chef/macros" className="no-underline text-inherit block">
-          <div data-testid="status-cards" className="grid grid-cols-4 gap-3 mb-3 cursor-pointer">
-            <ProgressBar
-              testId="compact-calories"
-              label="Calories"
-              value={consumed.calories}
-              plannedValue={planned.calories}
-              goal={goals.calories}
-              color={macroColorValues.calories}
-              colorClass={macroColors.calories}
-              unit=""
-            />
-            <ProgressBar
-              testId="compact-protein"
-              label="Protein"
-              value={consumed.protein}
-              plannedValue={planned.protein}
-              goal={goals.protein}
-              color={macroColorValues.protein}
-              colorClass={macroColors.protein}
-              unit="g"
-            />
-            <ProgressBar
-              testId="compact-carbs"
-              label="Carbs"
-              value={consumed.carbs}
-              plannedValue={planned.carbs}
-              goal={goals.carbs}
-              color={macroColorValues.carbs}
-              colorClass={macroColors.carbs}
-              unit="g"
-            />
-            <ProgressBar
-              testId="compact-fats"
-              label="Fats"
-              value={consumed.fat}
-              plannedValue={planned.fat}
-              goal={goals.fat}
-              color={macroColorValues.fat}
-              colorClass={macroColors.fat}
-              unit="g"
-            />
+          <div className="bg-gradient-to-br from-slate-50 to-emerald-50 border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow transition-shadow">
+            <div className="mb-3">
+              <span className="font-bold text-base text-slate-900">Today</span>{' '}
+              <span className="text-sm text-slate-500">(6:00 AM - 5:59 AM)</span>
+            </div>
+            <div data-testid="status-cards" className="grid grid-cols-4 gap-3 cursor-pointer">
+              <ProgressBar
+                testId="compact-calories"
+                label="Calories"
+                value={consumed.calories}
+                plannedValue={planned.calories}
+                goal={goals.calories}
+                color={macroColorValues.calories}
+                colorClass={macroColors.calories}
+                unit=""
+              />
+              <ProgressBar
+                testId="compact-protein"
+                label="Protein"
+                value={consumed.protein}
+                plannedValue={planned.protein}
+                goal={goals.protein}
+                color={macroColorValues.protein}
+                colorClass={macroColors.protein}
+                unit="g"
+              />
+              <ProgressBar
+                testId="compact-carbs"
+                label="Carbs"
+                value={consumed.carbs}
+                plannedValue={planned.carbs}
+                goal={goals.carbs}
+                color={macroColorValues.carbs}
+                colorClass={macroColors.carbs}
+                unit="g"
+              />
+              <ProgressBar
+                testId="compact-fats"
+                label="Fats"
+                value={consumed.fat}
+                plannedValue={planned.fat}
+                goal={goals.fat}
+                color={macroColorValues.fat}
+                colorClass={macroColors.fat}
+                unit="g"
+              />
+            </div>
           </div>
         </Link>
+      </div>
 
-        {/* Alert Badge Cards */}
-        <div data-testid="card-missing-prices" className="flex flex-wrap gap-2 mb-3">
-          <Link
-            to="/chef/inventory"
-            data-testid="card-below-min"
-            className={[
-              'no-underline px-3.5 py-2 rounded-md text-xs font-semibold inline-block',
-              belowMinStock > 0 ? 'bg-amber-500 text-white' : 'bg-slate-100 text-slate-500',
-            ].join(' ')}
-          >
-            Below Min Stock: {belowMinStock}
-          </Link>
-          <Link
-            to="/chef/settings?tab=walmart"
-            className={[
-              'no-underline px-3.5 py-2 rounded-md text-xs font-semibold inline-block',
-              missingPrices > 0 ? 'bg-red-500 text-white' : 'bg-slate-100 text-slate-500',
-            ].join(' ')}
-          >
-            Missing Prices: {missingPrices}
-          </Link>
-          <Link
-            to="/chef/settings?tab=products"
-            data-testid="card-placeholders"
-            className={[
-              'no-underline px-3.5 py-2 rounded-md text-xs font-semibold inline-block',
-              placeholders > 0 ? 'bg-yellow-300 text-slate-800' : 'bg-slate-100 text-slate-500',
-            ].join(' ')}
-          >
-            Placeholders: {placeholders}
-          </Link>
-          <Link
-            to="/chef/shopping"
-            data-testid="card-cart-value"
-            className="no-underline bg-slate-100 text-slate-500 px-3.5 py-2 rounded-md text-xs font-semibold inline-block"
-          >
-            Cart: ${cartValue.toFixed(2)}
-          </Link>
-        </div>
+      {/* ============================================================ */}
+      {/*  NOTIFICATION STRIP — compact alert badges                    */}
+      {/* ============================================================ */}
+      <div data-testid="card-missing-prices" className="flex items-center gap-2 flex-wrap mb-3">
+        <Link
+          to="/chef/inventory"
+          data-testid="card-below-min"
+          className={[
+            'no-underline inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors',
+            belowMinStock > 0 ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-slate-100 text-slate-400',
+          ].join(' ')}
+        >
+          <AlertTriangle className="w-3 h-3" />
+          Stock: {belowMinStock}
+        </Link>
+        <Link
+          to="/chef/settings?tab=walmart"
+          className={[
+            'no-underline inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium transition-colors',
+            missingPrices > 0 ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-slate-100 text-slate-400',
+          ].join(' ')}
+        >
+          <DollarSign className="w-3 h-3" />
+          Prices: {missingPrices}
+        </Link>
+        <Link
+          to="/chef/settings?tab=products"
+          data-testid="card-placeholders"
+          className="no-underline inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-slate-100 text-slate-400 hover:bg-slate-200 transition-colors"
+        >
+          <PackageSearch className="w-3 h-3" />
+          Placeholders: {placeholders}
+        </Link>
+        <Link
+          to="/chef/shopping"
+          data-testid="card-cart-value"
+          className="no-underline inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] font-medium bg-slate-100 text-slate-400 hover:bg-slate-200 transition-colors"
+        >
+          <ShoppingCart className="w-3 h-3" />
+          Cart: ${cartValue.toFixed(2)}
+        </Link>
+      </div>
 
-        {/* Action Buttons */}
-        <div data-testid="quick-actions" className="flex gap-3 flex-wrap">
-          <button
-            onClick={importShopping}
-            data-testid="import-shopping-btn"
-            className="px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
-          >
-            Import Shopping List
-          </button>
-          <button
-            onClick={syncMealPlanToCart}
-            disabled={syncing}
-            data-testid="meal-plan-cart-btn"
-            className="px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
-          </button>
-          <button
-            onClick={openTasteModal}
-            data-testid="taste-profile-btn"
-            className="px-4 py-2.5 bg-white text-emerald-600 border-2 border-emerald-600 rounded-md font-semibold text-sm hover:bg-emerald-50 transition-colors"
-          >
-            Taste Profile
-          </button>
-          <button
-            onClick={openTargetModal}
-            data-testid="target-macros-btn"
-            className="px-4 py-2.5 bg-white text-emerald-600 border-2 border-emerald-600 rounded-md font-semibold text-sm hover:bg-emerald-50 transition-colors"
-          >
-            Target Macros
-          </button>
-        </div>
+      {/* ============================================================ */}
+      {/*  ACTION BUTTONS — primary workflow + secondary settings        */}
+      {/* ============================================================ */}
+      <div data-testid="quick-actions" className="flex items-center gap-2 flex-wrap mb-5">
+        <button
+          onClick={importShopping}
+          data-testid="import-shopping-btn"
+          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+        >
+          Import Shopping List
+        </button>
+        <button
+          onClick={syncMealPlanToCart}
+          disabled={syncing}
+          data-testid="meal-plan-cart-btn"
+          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
+        </button>
+        <span className="text-slate-300 select-none">|</span>
+        <button
+          onClick={openTasteModal}
+          data-testid="taste-profile-btn"
+          className="px-2 py-1 text-slate-500 text-xs hover:text-emerald-600 hover:underline transition-colors bg-transparent border-none cursor-pointer"
+        >
+          Taste Profile
+        </button>
+        <button
+          onClick={openTargetModal}
+          data-testid="target-macros-btn"
+          className="px-2 py-1 text-slate-500 text-xs hover:text-emerald-600 hover:underline transition-colors bg-transparent border-none cursor-pointer"
+        >
+          Target Macros
+        </button>
       </div>
 
       {/* ============================================================ */}
@@ -1046,10 +1055,13 @@ export function HomePage() {
       )}
 
       {/* ============================================================ */}
-      {/*  TODAY'S MEAL PREP                                            */}
+      {/*  TODAY'S MEAL PREP — amber accent                             */}
       {/* ============================================================ */}
-      <div data-testid="meal-prep-section" className="mb-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-3">Today&apos;s Meal Prep</h3>
+      <div data-testid="meal-prep-section" className="mb-6 border-l-4 border-l-amber-400 pl-3">
+        <h3 className="text-lg font-semibold text-slate-900 mb-3 flex items-center gap-2">
+          <ChefHat className="w-5 h-5 text-amber-500" />
+          Today&apos;s Meal Prep
+        </h3>
         {mealPrep.length === 0 ? (
           <p data-testid="no-meal-prep" className="text-slate-500 italic">
             No meal prep scheduled for today
@@ -1111,10 +1123,13 @@ export function HomePage() {
       </div>
 
       {/* ============================================================ */}
-      {/*  TODAY'S MEALS                                                */}
+      {/*  TODAY'S MEALS — green accent                                 */}
       {/* ============================================================ */}
-      <div data-testid="todays-meals-section" className="mb-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-3">Today&apos;s Meals</h3>
+      <div data-testid="todays-meals-section" className="mb-6 border-l-4 border-l-green-500 pl-3">
+        <h3 className="text-lg font-semibold text-slate-900 mb-3 flex items-center gap-2">
+          <UtensilsCrossed className="w-5 h-5 text-green-600" />
+          Today&apos;s Meals
+        </h3>
         {todaysMeals.length === 0 ? (
           <p data-testid="no-todays-meals" className="text-slate-500 italic">
             No meals planned for today
