@@ -4,6 +4,7 @@ import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { WalmartTab } from '@/components/chefbyte/WalmartTab';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
+import { Copy, Check } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -67,6 +68,7 @@ const inputCls =
   'w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
 const labelCls = 'block mb-1 font-semibold text-[13px] text-slate-700';
 const cardCls = 'border border-slate-200 rounded-lg p-3 mb-2 bg-white';
+const productCardCls = 'border border-slate-200 rounded-lg p-4 bg-white min-h-[180px] flex flex-col';
 
 /* ------------------------------------------------------------------ */
 /*  Blank-product template for Add Product form                       */
@@ -117,6 +119,19 @@ export function SettingsPage() {
   const [deviceEvents, setDeviceEvents] = useState<LiquidTrackEvent[]>([]);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+
+  /* ---- Clipboard copy feedback ---- */
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+  const copyToClipboard = async (text: string, key: string) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey(null), 2000);
+    } catch {
+      // Fallback: no-op
+    }
+  };
 
   /* ---- Locations state ---- */
   const [locations, setLocations] = useState<
@@ -528,6 +543,12 @@ export function SettingsPage() {
         {/* ========================================================== */}
         {activeTab === 'products' && (
           <div data-testid="products-tab" className="p-5">
+            {/* Section Header */}
+            <div className="mb-4 pb-3 border-b border-slate-200">
+              <h2 className="m-0 text-lg font-bold text-slate-800">Product Library</h2>
+              <p className="m-0 mt-1 text-sm text-slate-500">Manage your product catalog and nutritional info</p>
+            </div>
+
             {/* Search bar */}
             <input
               placeholder="Search products..."
@@ -571,9 +592,14 @@ export function SettingsPage() {
             </div>
 
             {/* Product list */}
-            <div data-testid="product-list" className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-2">
+            <div className="mb-3 pb-2 border-b border-slate-100">
+              <span className="text-sm font-semibold text-slate-500">
+                {filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}
+              </span>
+            </div>
+            <div data-testid="product-list" className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3">
               {filteredProducts.map((p) => (
-                <div key={p.product_id} data-testid={`product-${p.product_id}`} className={cardCls}>
+                <div key={p.product_id} data-testid={`product-${p.product_id}`} className={productCardCls}>
                   {editingId === p.product_id ? (
                     /* Editing mode */
                     <div>
@@ -601,9 +627,9 @@ export function SettingsPage() {
                     </div>
                   ) : (
                     /* Display mode */
-                    <div>
+                    <div className="flex flex-col flex-1">
                       <h4 className="m-0 mb-2 text-base font-semibold">{p.name}</h4>
-                      <div className="grid grid-cols-3 gap-1 text-[0.9em] text-slate-600">
+                      <div className="grid grid-cols-3 gap-1 text-[0.9em] text-slate-600 flex-1">
                         {p.barcode && <span>Barcode: {p.barcode}</span>}
                         <span>Servings/Container: {Number(p.servings_per_container)}</span>
                         <span>Cal: {Number(p.calories_per_serving)}</span>
@@ -613,7 +639,7 @@ export function SettingsPage() {
                         <span>Min Stock: {Number(p.min_stock_amount)}</span>
                         {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
                       </div>
-                      <div className="flex gap-2 mt-3">
+                      <div className="flex gap-2 mt-3 pt-2 border-t border-slate-100">
                         <button
                           className="bg-emerald-600 text-white border-none px-3.5 py-1.5 rounded-md cursor-pointer font-semibold text-[13px] hover:bg-emerald-700"
                           onClick={() => startEdit(p)}
@@ -676,6 +702,10 @@ export function SettingsPage() {
         {/* ========================================================== */}
         {activeTab === 'walmart' && (
           <div data-testid="walmart-tab" className="p-5">
+            <div className="mb-4 pb-3 border-b border-slate-200">
+              <h2 className="m-0 text-lg font-bold text-slate-800">Walmart Price Manager</h2>
+              <p className="m-0 mt-1 text-sm text-slate-500">Track and update Walmart prices for your products</p>
+            </div>
             <WalmartTab />
           </div>
         )}
@@ -685,6 +715,12 @@ export function SettingsPage() {
         {/* ========================================================== */}
         {activeTab === 'liquidtrack' && (
           <div data-testid="liquidtrack-tab" className="p-5">
+            {/* Section Header */}
+            <div className="mb-4 pb-3 border-b border-slate-200">
+              <h2 className="m-0 text-lg font-bold text-slate-800">LiquidTrack Devices</h2>
+              <p className="m-0 mt-1 text-sm text-slate-500">Manage IoT scale devices and view event history</p>
+            </div>
+
             {/* Add Device */}
             <div data-testid="add-device-section" className={cardCls}>
               <div className={`flex justify-between items-center ${showAddDevice ? 'mb-4' : ''}`}>
@@ -746,13 +782,46 @@ export function SettingsPage() {
                 className="border-2 border-green-600 rounded-lg p-3 mb-2 bg-green-50"
               >
                 <h3 className="m-0 mb-3 text-base font-bold text-green-600">Device Created!</h3>
-                <p className="m-0 mb-2">
-                  <strong>Device ID:</strong> {generatedDevice.device_id}
-                </p>
-                <p className="m-0 mb-2">
-                  <strong>Import Key:</strong>{' '}
-                  <code className="bg-slate-200 px-1.5 py-0.5 rounded text-[13px]">{generatedDevice.raw_key}</code>
-                </p>
+                <div className="flex items-center gap-2 mb-2">
+                  <strong>Device ID:</strong>
+                  <code className="bg-slate-200 px-1.5 py-0.5 rounded text-[13px]">{generatedDevice.device_id}</code>
+                  <button
+                    onClick={() => copyToClipboard(generatedDevice.device_id, 'device-id')}
+                    data-testid="copy-device-id-btn"
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-xs cursor-pointer hover:bg-slate-50 transition-colors"
+                  >
+                    {copiedKey === 'device-id' ? (
+                      <>
+                        <Check className="w-3 h-3 text-green-600" /> <span className="text-green-600">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" /> Copy
+                      </>
+                    )}
+                  </button>
+                </div>
+                <div className="flex items-center gap-2 mb-2">
+                  <strong>Import Key:</strong>
+                  <code className="bg-slate-200 px-1.5 py-0.5 rounded text-[13px] break-all">
+                    {generatedDevice.raw_key}
+                  </code>
+                  <button
+                    onClick={() => copyToClipboard(generatedDevice.raw_key, 'import-key')}
+                    data-testid="copy-import-key-btn"
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-xs cursor-pointer hover:bg-slate-50 transition-colors shrink-0"
+                  >
+                    {copiedKey === 'import-key' ? (
+                      <>
+                        <Check className="w-3 h-3 text-green-600" /> <span className="text-green-600">Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="w-3 h-3" /> Copy
+                      </>
+                    )}
+                  </button>
+                </div>
                 <p className="text-red-600 m-0 mb-3 text-sm font-semibold">
                   Save this key now -- you will not be able to see it again!
                 </p>
@@ -766,6 +835,13 @@ export function SettingsPage() {
             )}
 
             {/* Device list */}
+            {devices.length > 0 && (
+              <div className="mb-3 mt-4 pb-2 border-b border-slate-100">
+                <span className="text-sm font-semibold text-slate-500">
+                  {devices.length} device{devices.length !== 1 ? 's' : ''}
+                </span>
+              </div>
+            )}
             <div data-testid="device-list">
               {devices.map((d) => (
                 <div key={d.device_id} data-testid={`device-${d.device_id}`} className={cardCls}>
@@ -881,8 +957,12 @@ export function SettingsPage() {
         {/* ========================================================== */}
         {activeTab === 'locations' && (
           <div data-testid="locations-tab" className="p-5">
+            <div className="mb-4 pb-3 border-b border-slate-200">
+              <h2 className="m-0 text-lg font-bold text-slate-800">Storage Locations</h2>
+              <p className="m-0 mt-1 text-sm text-slate-500">Define where you store your inventory items</p>
+            </div>
             <div data-testid="locations-section" className={cardCls}>
-              <h3 className="m-0 mb-4 text-base font-bold text-slate-900">Storage Locations</h3>
+              <h3 className="m-0 mb-4 text-base font-bold text-slate-900">Manage Locations</h3>
 
               {/* Existing locations list */}
               {locations.length === 0 ? (
