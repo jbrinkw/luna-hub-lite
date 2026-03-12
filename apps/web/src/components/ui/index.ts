@@ -32,3 +32,4 @@ export {
 export { ProgressBar, type ProgressBarProps } from './ProgressBar';
 export { Alert, type AlertProps } from './Alert';
 export { SaveIndicator } from './SaveIndicator';
+export { ConfirmModal } from './ConfirmModal';

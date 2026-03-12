@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useMemo, useRef } from 'react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, supabase, escapeIlike } from '@/shared/supabase';
 import { generateWalmartCartLink } from '@/lib/walmart';
@@ -46,6 +47,17 @@ export function ShoppingPage() {
   const [selectedProductId, setSelectedProductId] = useState<string | null>(null);
   const [addQty, setAddQty] = useState(1);
   const [showDropdown, setShowDropdown] = useState(false);
+
+  /* ---- Confirm modal state ---- */
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    title: string;
+    message: string;
+    confirmLabel: string;
+    action: () => void;
+  }>({ open: false, title: '', message: '', confirmLabel: 'Confirm', action: () => {} });
+
+  const closeConfirm = () => setConfirmState((prev) => ({ ...prev, open: false }));
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -378,9 +390,16 @@ export function ShoppingPage() {
   };
 
   const handleClearAll = () => {
-    if (window.confirm('Are you sure you want to remove all items from the shopping list?')) {
-      clearAll();
-    }
+    setConfirmState({
+      open: true,
+      title: 'Clear Shopping List',
+      message: 'Are you sure you want to remove all items from the shopping list?',
+      confirmLabel: 'Clear All',
+      action: () => {
+        closeConfirm();
+        clearAll();
+      },
+    });
   };
 
   /* ---------------------------------------------------------------- */
@@ -427,12 +446,17 @@ export function ShoppingPage() {
                 }
                 if (missingLink.length > 0) {
                   const names = missingLink.map((i) => i.products?.name ?? 'Unknown').join(', ');
-                  if (
-                    !window.confirm(
-                      `${missingLink.length} item${missingLink.length > 1 ? 's' : ''} missing Walmart links and won't be in the cart:\n\n${names}\n\nContinue?`,
-                    )
-                  )
-                    return;
+                  setConfirmState({
+                    open: true,
+                    title: 'Missing Walmart Links',
+                    message: `${missingLink.length} item${missingLink.length > 1 ? 's' : ''} missing Walmart links and won't be in the cart: ${names}. Continue?`,
+                    confirmLabel: 'Continue',
+                    action: () => {
+                      closeConfirm();
+                      window.open(link, '_blank');
+                    },
+                  });
+                  return;
                 }
                 window.open(link, '_blank');
               }}
@@ -614,6 +638,14 @@ export function ShoppingPage() {
             Clear All
           </button>
         </div>
+        <ConfirmModal
+          open={confirmState.open}
+          onConfirm={confirmState.action}
+          onCancel={closeConfirm}
+          title={confirmState.title}
+          message={confirmState.message}
+          confirmLabel={confirmState.confirmLabel}
+        />
       </div>
     </ChefLayout>
   );

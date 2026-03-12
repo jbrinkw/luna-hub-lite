@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback, useMemo } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
@@ -60,6 +61,13 @@ export function InventoryPage() {
   const [addingStockFor, setAddingStockFor] = useState<string | null>(null);
   const [addStockQty, setAddStockQty] = useState<number>(1);
   const [addStockExpiry, setAddStockExpiry] = useState<string>('');
+
+  /* ---- Confirm modal state ---- */
+  const [confirmState, setConfirmState] = useState<{
+    open: boolean;
+    action: () => void;
+  }>({ open: false, action: () => {} });
+  const closeConfirm = () => setConfirmState((prev) => ({ ...prev, open: false }));
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -301,12 +309,16 @@ export function InventoryPage() {
     await loadData();
   };
 
-  const handleConsumeAll = async (productId: string) => {
-    const confirmed = window.confirm('Are you sure you want to consume all remaining stock for this product?');
-    if (!confirmed) return;
+  const handleConsumeAll = (productId: string) => {
     const item = grouped.find((g) => g.product.product_id === productId);
     if (!item || item.totalStock <= 0) return;
-    await consumeStock(productId, item.totalStock, 'container');
+    setConfirmState({
+      open: true,
+      action: () => {
+        closeConfirm();
+        consumeStock(productId, item.totalStock, 'container');
+      },
+    });
   };
 
   /* ---------------------------------------------------------------- */
@@ -646,6 +658,15 @@ export function InventoryPage() {
           </div>
         </div>
       </ModalOverlay>
+
+      <ConfirmModal
+        open={confirmState.open}
+        onConfirm={confirmState.action}
+        onCancel={closeConfirm}
+        title="Consume All Stock"
+        message="Are you sure you want to consume all remaining stock for this product?"
+        confirmLabel="Consume All"
+      />
     </ChefLayout>
   );
 }
