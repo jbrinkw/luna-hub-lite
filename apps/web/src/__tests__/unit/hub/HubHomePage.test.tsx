@@ -91,13 +91,18 @@ describe('HubHomePage', () => {
     renderPage();
     expect(screen.getByTestId('no-active-apps')).toBeInTheDocument();
     expect(screen.getByText('No apps activated yet.')).toBeInTheDocument();
-    expect(screen.getByText('Activate Apps')).toHaveAttribute('href', '/hub/apps');
+    expect(screen.getByText('Activate an app to get started')).toHaveAttribute('href', '/hub/apps');
   });
 
-  it('shows settings link pointing to /hub/account', () => {
+  it('shows settings navigation with links to settings pages', () => {
     renderPage();
-    const settingsLink = screen.getByTestId('hub-settings-link');
-    expect(settingsLink).toHaveAttribute('href', '/hub/account');
+    const settingsNav = screen.getByTestId('hub-settings-link');
+    expect(settingsNav).toBeInTheDocument();
+    expect(screen.getByText('Account')).toBeInTheDocument();
+    expect(screen.getByText('Apps')).toBeInTheDocument();
+    expect(screen.getByText('Tools')).toBeInTheDocument();
+    expect(screen.getByText('Extensions')).toBeInTheDocument();
+    expect(screen.getByText('MCP Settings')).toBeInTheDocument();
   });
 
   it('shows skeleton when activations loading', () => {
