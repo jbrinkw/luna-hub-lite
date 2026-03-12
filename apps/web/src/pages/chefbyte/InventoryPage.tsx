@@ -195,6 +195,13 @@ export function InventoryPage() {
       const lower = searchText.toLowerCase();
       result = result.filter((g) => g.product.name.toLowerCase().includes(lower));
     }
+    // Sort: in-stock items first (alphabetically), then 0-qty items at end (alphabetically)
+    result.sort((a, b) => {
+      const aZero = a.totalStock <= 0 ? 1 : 0;
+      const bZero = b.totalStock <= 0 ? 1 : 0;
+      if (aZero !== bZero) return aZero - bZero;
+      return a.product.name.localeCompare(b.product.name);
+    });
     return result;
   }, [grouped, searchText]);
 
