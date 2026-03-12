@@ -476,8 +476,11 @@ export function RecipeFormPage() {
       <div data-testid="ingredients-section" className="bg-white border border-slate-200 rounded-lg p-5 mb-4">
         <h3 className="m-0 mb-4 text-lg font-bold text-slate-900">Ingredients</h3>
 
-        {/* Add ingredient form */}
-        <div data-testid="add-ingredient-form" className="flex gap-2 flex-wrap items-end mb-4">
+        {/* Add ingredient form — stacks vertically on mobile */}
+        <div
+          data-testid="add-ingredient-form"
+          className="flex flex-col md:flex-row gap-2 md:flex-wrap md:items-end mb-4"
+        >
           <div className="flex-1 min-w-[150px] relative">
             <label className={labelCls}>Product</label>
             <input
@@ -505,30 +508,32 @@ export function RecipeFormPage() {
               </div>
             )}
           </div>
-          <div className="w-20">
-            <label className={labelCls}>Qty</label>
-            <input
-              type="number"
-              min="0"
-              value={ingQuantity}
-              onChange={(e) => setIngQuantity(Number(e.target.value) || 1)}
-              data-testid="ingredient-qty"
-              className={inputCls}
-            />
+          <div className="flex gap-2">
+            <div className="flex-1 md:w-20 md:flex-none">
+              <label className={labelCls}>Qty</label>
+              <input
+                type="number"
+                min="0"
+                value={ingQuantity}
+                onChange={(e) => setIngQuantity(Number(e.target.value) || 1)}
+                data-testid="ingredient-qty"
+                className={inputCls}
+              />
+            </div>
+            <div className="flex-1 md:w-[120px] md:flex-none">
+              <label className={labelCls}>Unit</label>
+              <select
+                value={ingUnit}
+                onChange={(e) => setIngUnit(e.target.value)}
+                data-testid="ingredient-unit"
+                className={inputCls}
+              >
+                <option value="serving">Serving</option>
+                <option value="container">Container</option>
+              </select>
+            </div>
           </div>
-          <div className="w-[120px]">
-            <label className={labelCls}>Unit</label>
-            <select
-              value={ingUnit}
-              onChange={(e) => setIngUnit(e.target.value)}
-              data-testid="ingredient-unit"
-              className={inputCls}
-            >
-              <option value="serving">Serving</option>
-              <option value="container">Container</option>
-            </select>
-          </div>
-          <div className="w-[120px]">
+          <div className="md:w-[120px]">
             <label className={labelCls}>Note</label>
             <input
               value={ingNote}
@@ -542,76 +547,68 @@ export function RecipeFormPage() {
             onClick={addIngredient}
             disabled={!selectedProduct}
             data-testid="add-ingredient-btn"
-            className="px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50 self-end"
+            className="px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50 md:self-end"
           >
             Add
           </button>
         </div>
 
-        {/* Ingredients table */}
+        {/* Ingredient cards */}
         {ingredients.length > 0 && (
-          <div className="overflow-x-auto rounded-lg border border-slate-200 mb-3">
-            <table className="w-full border-collapse text-sm" data-testid="ingredients-table">
-              <thead>
-                <tr className="bg-slate-50 border-b-2 border-slate-200">
-                  <th className="text-left p-2.5 text-xs font-semibold text-slate-600">Product</th>
-                  <th className="text-right p-2.5 text-xs font-semibold text-slate-600">Qty</th>
-                  <th className="text-left p-2.5 text-xs font-semibold text-slate-600">Unit</th>
-                  <th className="text-left p-2.5 text-xs font-semibold text-slate-600">Note</th>
-                  <th className="p-2.5 w-20"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {ingredients.map((ing, idx) => (
-                  <tr
-                    key={`${ing.product_id}-${idx}`}
-                    data-testid={`ingredient-row-${idx}`}
-                    className="border-b border-slate-100"
+          <div className="space-y-2 mb-3" data-testid="ingredients-table">
+            {ingredients.map((ing, idx) => (
+              <div
+                key={`${ing.product_id}-${idx}`}
+                data-testid={`ingredient-row-${idx}`}
+                className="bg-white border border-slate-200 rounded-lg p-3"
+              >
+                <div className="flex items-center justify-between mb-2">
+                  <span className="font-medium text-sm text-slate-900">{ing.product_name}</span>
+                  <button
+                    onClick={() => removeIngredient(idx)}
+                    data-testid={`remove-ingredient-${idx}`}
+                    className="bg-transparent border-none text-red-600 cursor-pointer font-semibold text-xs px-2 py-1 hover:text-red-700"
                   >
-                    <td className="p-2 font-medium text-slate-900">{ing.product_name}</td>
-                    <td className="text-right p-1">
-                      <input
-                        type="number"
-                        min="0"
-                        value={ing.quantity}
-                        onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
-                        className="w-[70px] px-2 py-1.5 border border-slate-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                        data-testid={`edit-qty-${idx}`}
-                      />
-                    </td>
-                    <td className="p-1">
-                      <select
-                        value={ing.unit}
-                        onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
-                        data-testid={`edit-unit-${idx}`}
-                        className="w-[110px] px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                      >
-                        <option value="serving">Serving</option>
-                        <option value="container">Container</option>
-                      </select>
-                    </td>
-                    <td className="p-1">
-                      <input
-                        value={ing.note}
-                        placeholder={'\u2014'}
-                        onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
-                        className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
-                        data-testid={`edit-note-${idx}`}
-                      />
-                    </td>
-                    <td className="p-2">
-                      <button
-                        onClick={() => removeIngredient(idx)}
-                        data-testid={`remove-ingredient-${idx}`}
-                        className="bg-transparent border-none text-red-600 cursor-pointer font-semibold text-xs px-2 py-1 hover:text-red-700"
-                      >
-                        Remove
-                      </button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                    Remove
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-2 items-end">
+                  <div className="w-20">
+                    <label className="block text-[11px] text-slate-500 mb-0.5">Qty</label>
+                    <input
+                      type="number"
+                      min="0"
+                      value={ing.quantity}
+                      onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                      data-testid={`edit-qty-${idx}`}
+                    />
+                  </div>
+                  <div className="w-[110px]">
+                    <label className="block text-[11px] text-slate-500 mb-0.5">Unit</label>
+                    <select
+                      value={ing.unit}
+                      onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
+                      data-testid={`edit-unit-${idx}`}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                    >
+                      <option value="serving">Serving</option>
+                      <option value="container">Container</option>
+                    </select>
+                  </div>
+                  <div className="flex-1 min-w-[100px]">
+                    <label className="block text-[11px] text-slate-500 mb-0.5">Note</label>
+                    <input
+                      value={ing.note}
+                      placeholder={'\u2014'}
+                      onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
+                      className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                      data-testid={`edit-note-${idx}`}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         )}
 
@@ -621,16 +618,49 @@ export function RecipeFormPage() {
           </p>
         )}
 
-        {/* Dynamic macro display */}
-        <div data-testid="macro-display" className="mt-4 p-3 bg-slate-50 rounded-lg">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-            <div data-testid="total-macros">
-              <strong>Total:</strong> {totalMacros.calories} cal | {totalMacros.protein}g P | {totalMacros.carbs}g C |{' '}
-              {totalMacros.fat}g F
+        {/* Dynamic macro display — visual badges */}
+        <div data-testid="macro-display" className="mt-4 p-4 bg-slate-50 rounded-lg">
+          {/* Per Serving (prominent) */}
+          <div data-testid="per-serving-macros" className="mb-3">
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              Per Serving ({baseServings})
             </div>
-            <div data-testid="per-serving-macros">
-              <strong>Per Serving ({baseServings}):</strong> {macros.calories} cal | {macros.protein}g P |{' '}
-              {macros.carbs}g C | {macros.fat}g F
+            <div className="flex gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-semibold bg-emerald-100 text-emerald-800">
+                <span className="w-2 h-2 rounded-full bg-emerald-600" />
+                {macros.calories} Cal
+              </span>
+              <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-semibold bg-green-100 text-green-800">
+                <span className="w-2 h-2 rounded-full bg-green-600" />
+                {macros.protein}g P
+              </span>
+              <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-semibold bg-amber-100 text-amber-800">
+                <span className="w-2 h-2 rounded-full bg-amber-500" />
+                {macros.carbs}g C
+              </span>
+              <span className="inline-flex items-center gap-1 px-3 py-1.5 rounded-full text-sm font-semibold bg-red-100 text-red-800">
+                <span className="w-2 h-2 rounded-full bg-red-500" />
+                {macros.fat}g F
+              </span>
+            </div>
+          </div>
+
+          {/* Total (smaller) */}
+          <div data-testid="total-macros">
+            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Total Recipe</div>
+            <div className="flex gap-2 flex-wrap">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+                {totalMacros.calories} Cal
+              </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+                {totalMacros.protein}g P
+              </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+                {totalMacros.carbs}g C
+              </span>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+                {totalMacros.fat}g F
+              </span>
             </div>
           </div>
         </div>
