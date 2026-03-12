@@ -1,6 +1,15 @@
 import { useEffect, useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
-import { ChefHat, UtensilsCrossed, AlertTriangle, DollarSign, PackageSearch, ShoppingCart } from 'lucide-react';
+import {
+  ChefHat,
+  UtensilsCrossed,
+  AlertTriangle,
+  DollarSign,
+  PackageSearch,
+  ShoppingCart,
+  ChevronDown,
+  ChevronUp,
+} from 'lucide-react';
 
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
@@ -30,7 +39,22 @@ interface FoodLogEntry {
   protein: number;
   carbs: number;
   fat: number;
+  meal_id: string | null;
   products: { name: string } | null;
+  meal_plan_entries: {
+    recipes: { name: string } | null;
+    products: { name: string } | null;
+  } | null;
+}
+
+interface MealGroup {
+  meal_id: string;
+  mealName: string;
+  logs: FoodLogEntry[];
+  totalCalories: number;
+  totalProtein: number;
+  totalCarbs: number;
+  totalFat: number;
 }
 
 interface TempItemEntry {
@@ -145,6 +169,9 @@ export function HomePage() {
   /* ---- Consumed items (food_logs + temp_items) ---- */
   const [foodLogs, setFoodLogs] = useState<FoodLogEntry[]>([]);
   const [tempItems, setTempItems] = useState<TempItemEntry[]>([]);
+
+  /* ---- Consumed meal expand/collapse ---- */
+  const [expandedMeals, setExpandedMeals] = useState<Set<string>>(new Set());
 
   /* ---- Two-click delete confirmation ---- */
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
@@ -309,7 +336,9 @@ export function HomePage() {
     // 8. Consumed items — food_logs + temp_items
     const { data: logData, error: logErr } = await chefbyte()
       .from('food_logs')
-      .select('log_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+      .select(
+        'log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
+      )
       .eq('user_id', userId)
       .eq('logical_date', today);
     if (logErr) {
@@ -694,6 +723,62 @@ export function HomePage() {
     await loadData();
   };
 
+  const deleteMealLogs = async (mealId: string) => {
+    const { error } = await chefbyte().from('food_logs').delete().eq('meal_id', mealId);
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
+    setExpandedMeals((prev) => {
+      const next = new Set(prev);
+      next.delete(mealId);
+      return next;
+    });
+    await loadData();
+  };
+
+  const toggleMealExpand = (mealId: string) => {
+    setExpandedMeals((prev) => {
+      const next = new Set(prev);
+      if (next.has(mealId)) next.delete(mealId);
+      else next.add(mealId);
+      return next;
+    });
+  };
+
+  /* Group food_logs by meal_id */
+  const { mealGroups, standaloneLogs } = (() => {
+    const groups = new Map<string, MealGroup>();
+    const standalone: FoodLogEntry[] = [];
+    for (const log of foodLogs) {
+      if (!log.meal_id) {
+        standalone.push(log);
+        continue;
+      }
+      let group = groups.get(log.meal_id);
+      if (!group) {
+        const mpe = log.meal_plan_entries;
+        const mealName = mpe?.recipes?.name ?? mpe?.products?.name ?? 'Meal';
+        group = {
+          meal_id: log.meal_id,
+          mealName,
+          logs: [],
+          totalCalories: 0,
+          totalProtein: 0,
+          totalCarbs: 0,
+          totalFat: 0,
+        };
+        groups.set(log.meal_id, group);
+      }
+      group.logs.push(log);
+      group.totalCalories += Number(log.calories);
+      group.totalProtein += Number(log.protein);
+      group.totalCarbs += Number(log.carbs);
+      group.totalFat += Number(log.fat);
+    }
+    return { mealGroups: Array.from(groups.values()), standaloneLogs: standalone };
+  })();
+
   const deleteTempItem = async (tempId: string) => {
     const { error } = await chefbyte().from('temp_items').delete().eq('temp_id', tempId);
     if (error) {
@@ -998,136 +1083,6 @@ export function HomePage() {
       </div>
 
       {/* ============================================================ */}
-      {/*  CONSUMED TODAY                                               */}
-      {/* ============================================================ */}
-      {(foodLogs.length > 0 || tempItems.length > 0) && (
-        <div data-testid="consumed-section" className="mb-6">
-          <h3 className="text-lg font-semibold text-slate-900 mb-3">Consumed Today</h3>
-          <div className="flex flex-col gap-1.5">
-            {foodLogs.map((log) => (
-              <div
-                key={log.log_id}
-                data-testid={`consumed-log-${log.log_id}`}
-                className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-green-50"
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <span className="font-semibold text-sm text-slate-900 min-w-0">
-                    {log.products?.name ?? 'Unknown'}
-                    <span className="font-normal text-slate-500 text-xs ml-2">
-                      {Number(log.qty_consumed)} {log.unit}
-                      {Number(log.qty_consumed) !== 1 ? 's' : ''}
-                    </span>
-                  </span>
-                  <DeleteBtn
-                    id={`log-${log.log_id}`}
-                    onConfirm={() => deleteFoodLog(log.log_id)}
-                    testId={`delete-log-${log.log_id}`}
-                  />
-                </div>
-                <div className="text-xs text-slate-500 mt-1">
-                  {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
-                  {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
-                </div>
-              </div>
-            ))}
-            {tempItems.map((item) => (
-              <div
-                key={item.temp_id}
-                data-testid={`consumed-temp-${item.temp_id}`}
-                className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-amber-50"
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <span className="font-semibold text-sm text-slate-900 min-w-0">
-                    {item.name}
-                    <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
-                  </span>
-                  <DeleteBtn
-                    id={`temp-${item.temp_id}`}
-                    onConfirm={() => deleteTempItem(item.temp_id)}
-                    testId={`delete-temp-${item.temp_id}`}
-                  />
-                </div>
-                <div className="text-xs text-slate-500 mt-1">
-                  {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
-                  {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* ============================================================ */}
-      {/*  TODAY'S MEAL PREP — amber accent                             */}
-      {/* ============================================================ */}
-      <div data-testid="meal-prep-section" className="mb-6 border-l-4 border-l-amber-400 pl-3">
-        <h3 className="text-lg font-semibold text-slate-900 mb-3 flex items-center gap-2">
-          <ChefHat className="w-5 h-5 text-amber-500" />
-          Today&apos;s Meal Prep
-        </h3>
-        {mealPrep.length === 0 ? (
-          <p data-testid="no-meal-prep" className="text-slate-500 italic">
-            No meal prep scheduled for today
-          </p>
-        ) : (
-          <div className="flex flex-col gap-2">
-            {mealPrep.map((entry) => (
-              <div
-                key={entry.meal_id}
-                data-testid={`prep-entry-${entry.meal_id}`}
-                className="py-2.5 px-3 border border-slate-200 border-l-4 border-l-emerald-600 rounded-md bg-slate-50"
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <div className="min-w-0">
-                    <span className="font-semibold text-slate-900">
-                      {entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}
-                    </span>
-                    <span className="text-slate-500 text-sm ml-2">
-                      {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
-                    </span>
-                  </div>
-                  <div className="flex gap-1.5 items-center shrink-0">
-                    {confirmPrepId === entry.meal_id ? (
-                      <>
-                        <span className="text-xs text-slate-500">Execute?</span>
-                        <button
-                          onClick={() => executePrepMeal(entry.meal_id)}
-                          data-testid={`prep-confirm-${entry.meal_id}`}
-                          className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
-                        >
-                          Yes
-                        </button>
-                        <button
-                          onClick={() => setConfirmPrepId(null)}
-                          data-testid={`prep-cancel-${entry.meal_id}`}
-                          className="px-2.5 py-1 bg-slate-200 text-slate-700 rounded text-xs font-semibold hover:bg-slate-300 transition-colors"
-                        >
-                          No
-                        </button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={() => setConfirmPrepId(entry.meal_id)}
-                        data-testid={`prep-execute-${entry.meal_id}`}
-                        className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700 transition-colors"
-                      >
-                        Execute
-                      </button>
-                    )}
-                    <DeleteBtn
-                      id={`prep-${entry.meal_id}`}
-                      onConfirm={() => deleteMealEntry(entry.meal_id)}
-                      testId={`delete-prep-${entry.meal_id}`}
-                    />
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* ============================================================ */}
       {/*  TODAY'S MEALS — green accent                                 */}
       {/* ============================================================ */}
       <div data-testid="todays-meals-section" className="mb-6 border-l-4 border-l-green-500 pl-3">
@@ -1235,6 +1190,208 @@ export function HomePage() {
           </div>
         )}
       </div>
+
+      {/* ============================================================ */}
+      {/*  TODAY'S MEAL PREP — amber accent                             */}
+      {/* ============================================================ */}
+      <div data-testid="meal-prep-section" className="mb-6 border-l-4 border-l-amber-400 pl-3">
+        <h3 className="text-lg font-semibold text-slate-900 mb-3 flex items-center gap-2">
+          <ChefHat className="w-5 h-5 text-amber-500" />
+          Today&apos;s Meal Prep
+        </h3>
+        {mealPrep.length === 0 ? (
+          <p data-testid="no-meal-prep" className="text-slate-500 italic">
+            No meal prep scheduled for today
+          </p>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {mealPrep.map((entry) => (
+              <div
+                key={entry.meal_id}
+                data-testid={`prep-entry-${entry.meal_id}`}
+                className="py-2.5 px-3 border border-slate-200 border-l-4 border-l-emerald-600 rounded-md bg-slate-50"
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <div className="min-w-0">
+                    <span className="font-semibold text-slate-900">
+                      {entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}
+                    </span>
+                    <span className="text-slate-500 text-sm ml-2">
+                      {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
+                    </span>
+                  </div>
+                  <div className="flex gap-1.5 items-center shrink-0">
+                    {confirmPrepId === entry.meal_id ? (
+                      <>
+                        <span className="text-xs text-slate-500">Execute?</span>
+                        <button
+                          onClick={() => executePrepMeal(entry.meal_id)}
+                          data-testid={`prep-confirm-${entry.meal_id}`}
+                          className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
+                        >
+                          Yes
+                        </button>
+                        <button
+                          onClick={() => setConfirmPrepId(null)}
+                          data-testid={`prep-cancel-${entry.meal_id}`}
+                          className="px-2.5 py-1 bg-slate-200 text-slate-700 rounded text-xs font-semibold hover:bg-slate-300 transition-colors"
+                        >
+                          No
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        onClick={() => setConfirmPrepId(entry.meal_id)}
+                        data-testid={`prep-execute-${entry.meal_id}`}
+                        className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700 transition-colors"
+                      >
+                        Execute
+                      </button>
+                    )}
+                    <DeleteBtn
+                      id={`prep-${entry.meal_id}`}
+                      onConfirm={() => deleteMealEntry(entry.meal_id)}
+                      testId={`delete-prep-${entry.meal_id}`}
+                    />
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      {/* ============================================================ */}
+      {/*  CONSUMED TODAY                                               */}
+      {/* ============================================================ */}
+      {(foodLogs.length > 0 || tempItems.length > 0) && (
+        <div data-testid="consumed-section" className="mb-6">
+          <h3 className="text-lg font-semibold text-slate-900 mb-3">Consumed Today</h3>
+          <div className="flex flex-col gap-1.5">
+            {/* Grouped meal entries */}
+            {mealGroups.map((group) => {
+              const isExpanded = expandedMeals.has(group.meal_id);
+              return (
+                <div
+                  key={`meal-${group.meal_id}`}
+                  data-testid={`consumed-meal-${group.meal_id}`}
+                  className="border border-slate-200 border-l-4 border-l-emerald-500 rounded-md bg-emerald-50 overflow-hidden"
+                >
+                  {/* Meal header — clickable to expand */}
+                  <button
+                    type="button"
+                    onClick={() => toggleMealExpand(group.meal_id)}
+                    className="w-full py-2 px-3 text-left hover:bg-emerald-100/50 transition-colors"
+                    data-testid={`meal-toggle-${group.meal_id}`}
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="font-semibold text-sm text-slate-900 min-w-0 flex items-center gap-1.5">
+                        {group.mealName}
+                        <span className="font-normal text-slate-500 text-xs">
+                          ({group.logs.length} item{group.logs.length !== 1 ? 's' : ''})
+                        </span>
+                        {isExpanded ? (
+                          <ChevronUp className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        ) : (
+                          <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                        )}
+                      </span>
+                      <span onClick={(e) => e.stopPropagation()} role="presentation">
+                        <DeleteBtn
+                          id={`meal-group-${group.meal_id}`}
+                          onConfirm={() => deleteMealLogs(group.meal_id)}
+                          testId={`delete-meal-${group.meal_id}`}
+                        />
+                      </span>
+                    </div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {Math.round(group.totalCalories)} cal | {Math.round(group.totalProtein)}g P |{' '}
+                      {Math.round(group.totalCarbs)}g C | {Math.round(group.totalFat)}g F
+                    </div>
+                  </button>
+                  {/* Expanded ingredient list */}
+                  {isExpanded && (
+                    <div
+                      className="border-t border-slate-200 bg-white/60 px-3 py-1.5 flex flex-col gap-1"
+                      data-testid={`meal-ingredients-${group.meal_id}`}
+                    >
+                      {group.logs.map((log) => (
+                        <div
+                          key={log.log_id}
+                          className="flex justify-between items-center py-1 text-xs"
+                          data-testid={`consumed-log-${log.log_id}`}
+                        >
+                          <span className="text-slate-700">
+                            {log.products?.name ?? 'Unknown'}
+                            <span className="text-slate-400 ml-1.5">
+                              {Number(log.qty_consumed)} {log.unit}
+                              {Number(log.qty_consumed) !== 1 ? 's' : ''}
+                            </span>
+                          </span>
+                          <span className="text-slate-500 whitespace-nowrap ml-2">
+                            {Math.round(Number(log.calories))} cal
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {/* Standalone food logs (not part of a meal) */}
+            {standaloneLogs.map((log) => (
+              <div
+                key={log.log_id}
+                data-testid={`consumed-log-${log.log_id}`}
+                className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-green-50"
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <span className="font-semibold text-sm text-slate-900 min-w-0">
+                    {log.products?.name ?? 'Unknown'}
+                    <span className="font-normal text-slate-500 text-xs ml-2">
+                      {Number(log.qty_consumed)} {log.unit}
+                      {Number(log.qty_consumed) !== 1 ? 's' : ''}
+                    </span>
+                  </span>
+                  <DeleteBtn
+                    id={`log-${log.log_id}`}
+                    onConfirm={() => deleteFoodLog(log.log_id)}
+                    testId={`delete-log-${log.log_id}`}
+                  />
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
+                  {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
+                </div>
+              </div>
+            ))}
+            {/* Quick-add temp items */}
+            {tempItems.map((item) => (
+              <div
+                key={item.temp_id}
+                data-testid={`consumed-temp-${item.temp_id}`}
+                className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-amber-50"
+              >
+                <div className="flex justify-between items-start gap-2">
+                  <span className="font-semibold text-sm text-slate-900 min-w-0">
+                    {item.name}
+                    <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
+                  </span>
+                  <DeleteBtn
+                    id={`temp-${item.temp_id}`}
+                    onConfirm={() => deleteTempItem(item.temp_id)}
+                    testId={`delete-temp-${item.temp_id}`}
+                  />
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
+                  {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* ============================================================ */}
       {/*  TARGET MACROS MODAL                                          */}

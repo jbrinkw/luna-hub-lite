@@ -432,11 +432,11 @@ export function InventoryPage() {
           {filteredGrouped.length > 0 && (
             <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
               {/* Table header */}
-              <div className="grid grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2 bg-slate-50 border-b-2 border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              <div className="grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2 bg-slate-50 border-b-2 border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
                 <span />
                 <span>Product</span>
                 <span>Stock</span>
-                <span>Expiry</span>
+                <span className="hidden sm:block">Expiry</span>
               </div>
 
               {/* Product rows */}
@@ -460,7 +460,7 @@ export function InventoryPage() {
                     {/* Collapsed row — always visible, clickable to toggle */}
                     <button
                       type="button"
-                      className={`grid grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
+                      className={`grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
                       onClick={() => setExpandedProductId(isExpanded ? null : product.product_id)}
                       aria-expanded={isExpanded}
                       data-testid={`inv-row-toggle-${product.product_id}`}
@@ -477,7 +477,7 @@ export function InventoryPage() {
                         <span
                           className={`w-2.5 h-2.5 rounded-full shrink-0 ${stockDotColor(totalStock, Number(product.min_stock_amount))}`}
                         />
-                        <span className="font-semibold whitespace-nowrap overflow-hidden text-ellipsis">
+                        <span className="font-semibold sm:whitespace-nowrap sm:overflow-hidden sm:text-ellipsis">
                           {product.name}
                         </span>
                       </div>
@@ -487,8 +487,11 @@ export function InventoryPage() {
                         {totalStock.toFixed(1)} ctn
                       </span>
 
-                      {/* Expiry */}
-                      <span data-testid={`expiry-${product.product_id}`} className="text-[13px] text-slate-600">
+                      {/* Expiry (hidden on small screens) */}
+                      <span
+                        data-testid={`expiry-${product.product_id}`}
+                        className="text-[13px] text-slate-600 hidden sm:block"
+                      >
                         {expiryLabel}
                       </span>
                     </button>
@@ -507,6 +510,7 @@ export function InventoryPage() {
                           <span data-testid={`min-stock-${product.product_id}`}>
                             Min stock: {Number(product.min_stock_amount).toFixed(1)}
                           </span>
+                          <span data-testid={`detail-expiry-${product.product_id}`}>Expires: {expiryLabel}</span>
                           {product.barcode && (
                             <span data-testid={`barcode-${product.product_id}`}>Barcode: {product.barcode}</span>
                           )}
@@ -585,28 +589,49 @@ export function InventoryPage() {
           {sortedLots.length === 0 && <p data-testid="no-lots">No stock lots.</p>}
 
           {sortedLots.length > 0 && (
-            <div className="overflow-x-auto rounded-lg border border-slate-200 mt-3">
-              <table className="w-full border-collapse" data-testid="lots-table">
-                <thead>
-                  <tr className="bg-slate-50 border-b-2 border-slate-200">
-                    <th className="p-3 text-left font-semibold">Product</th>
-                    <th className="p-3 text-left font-semibold">Location</th>
-                    <th className="p-3 text-right font-semibold">Qty (ctn)</th>
-                    <th className="p-3 text-left font-semibold">Expires</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedLots.map((lot) => (
-                    <tr key={lot.lot_id} data-testid={`lot-row-${lot.lot_id}`} className="border-b border-slate-100">
-                      <td className="p-3">{lot.productName}</td>
-                      <td className="p-3">{lot.locations?.name ?? '\u2014'}</td>
-                      <td className="text-right p-3">{Number(lot.qty_containers).toFixed(1)}</td>
-                      <td className="p-3">{lot.expires_on ?? '\u2014'}</td>
+            <>
+              {/* Mobile card list */}
+              <div className="sm:hidden flex flex-col gap-2 mt-3" data-testid="lots-table">
+                {sortedLots.map((lot) => (
+                  <div
+                    key={lot.lot_id}
+                    data-testid={`lot-row-${lot.lot_id}`}
+                    className="bg-white border border-slate-200 rounded-lg p-3"
+                  >
+                    <div className="font-semibold text-sm text-slate-900 mb-1">{lot.productName}</div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-600">
+                      <span>{Number(lot.qty_containers).toFixed(1)} ctn</span>
+                      <span>{lot.locations?.name ?? '\u2014'}</span>
+                      <span>Expires: {lot.expires_on ?? '\u2014'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Desktop table */}
+              <div className="hidden sm:block overflow-x-auto rounded-lg border border-slate-200 mt-3">
+                <table className="w-full border-collapse" data-testid="lots-table-desktop">
+                  <thead>
+                    <tr className="bg-slate-50 border-b-2 border-slate-200">
+                      <th className="p-3 text-left font-semibold">Product</th>
+                      <th className="p-3 text-left font-semibold">Location</th>
+                      <th className="p-3 text-right font-semibold">Qty (ctn)</th>
+                      <th className="p-3 text-left font-semibold">Expires</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+                  </thead>
+                  <tbody>
+                    {sortedLots.map((lot) => (
+                      <tr key={lot.lot_id} data-testid={`lot-row-${lot.lot_id}`} className="border-b border-slate-100">
+                        <td className="p-3">{lot.productName}</td>
+                        <td className="p-3">{lot.locations?.name ?? '\u2014'}</td>
+                        <td className="text-right p-3">{Number(lot.qty_containers).toFixed(1)}</td>
+                        <td className="p-3">{lot.expires_on ?? '\u2014'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
         </div>
       )}

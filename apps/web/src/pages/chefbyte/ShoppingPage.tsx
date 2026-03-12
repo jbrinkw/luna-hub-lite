@@ -444,8 +444,8 @@ export function ShoppingPage() {
 
   return (
     <ChefLayout title="Shopping">
-      <div className="p-5">
-        <div className="flex justify-between items-center mb-5">
+      <div>
+        <div className="flex justify-between items-center flex-wrap gap-2 mb-5">
           <h1 className="m-0 text-2xl font-bold text-slate-900">Shopping List</h1>
           <button
             onClick={() => {
@@ -504,7 +504,7 @@ export function ShoppingPage() {
         {/* ============================================================ */}
         {/*  ADD ITEM FORM                                                */}
         {/* ============================================================ */}
-        <div data-testid="add-item-form" className="bg-slate-50 p-4 rounded-lg mb-5 flex gap-3">
+        <div data-testid="add-item-form" className="bg-slate-50 p-4 rounded-lg mb-5 flex gap-3 flex-wrap">
           <div className="flex-1 relative">
             <input
               type="text"
@@ -575,14 +575,14 @@ export function ShoppingPage() {
                       justPurchased ? 'bg-green-100' : 'bg-slate-50',
                     ].join(' ')}
                   >
-                    <div className="relative flex items-center justify-center w-[22px] h-[22px]">
+                    <div className="relative flex items-center justify-center w-[28px] h-[28px]">
                       <input
                         type="checkbox"
                         checked={item.purchased}
                         onChange={() => togglePurchased(item)}
                         aria-label={`Mark ${item.products?.name ?? 'Unknown Product'} as purchased`}
                         data-testid={`check-${item.cart_item_id}`}
-                        className="cursor-pointer w-[18px] h-[18px] accent-green-600"
+                        className="cursor-pointer w-5 h-5 accent-green-600"
                       />
                       {justPurchased && (
                         <span className="absolute inset-0 flex items-center justify-center pointer-events-none animate-ping text-green-600 text-sm">

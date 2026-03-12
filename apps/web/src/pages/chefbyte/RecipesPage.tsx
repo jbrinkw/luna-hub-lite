@@ -360,7 +360,7 @@ export function RecipesPage() {
             {showFilters && (
               <div
                 data-testid="filters-popover"
-                className="absolute right-0 top-full mt-1 w-72 bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-4"
+                className="absolute right-0 top-full mt-1 w-72 max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-4"
               >
                 <h4 className="m-0 mb-3 text-sm font-bold text-slate-900">Filter Recipes</h4>
                 <div className="space-y-3">

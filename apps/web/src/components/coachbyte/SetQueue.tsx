@@ -135,19 +135,21 @@ export function SetQueue({
         {nextSet ? (
           <>
             <div
-              className="bg-emerald-100 p-4 rounded-lg mb-4 border-2 border-emerald-400 flex justify-between items-start"
+              className="bg-emerald-100 p-4 rounded-lg mb-4 border-2 border-emerald-400 flex flex-col sm:flex-row justify-between items-start gap-3"
               data-testid="next-exercise"
             >
-              <div className="flex-1">
-                <div className="text-2xl font-bold text-emerald-800 mb-1.5">{nextSet.exercise_name}</div>
-                <div className="text-lg font-bold text-slate-900">
+              <div className="flex-1 min-w-0">
+                <div className="text-xl sm:text-2xl font-bold text-emerald-800 mb-1.5 break-words">
+                  {nextSet.exercise_name}
+                </div>
+                <div className="text-base sm:text-lg font-bold text-slate-900">
                   {nextSet.target_reps} reps @ {formatLoadDisplay(nextSet)}
                 </div>
                 <div className="text-sm text-slate-500 mt-1">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
               </div>
               <div
                 className={[
-                  'font-bold text-right ml-5 min-w-[100px]',
+                  'font-bold sm:text-right sm:ml-5 shrink-0',
                   timerState === 'running'
                     ? 'text-violet-600'
                     : timerState === 'expired'
@@ -157,7 +159,7 @@ export function SetQueue({
                 data-testid="inline-timer"
               >
                 <div className="text-xs mb-0.5">{timerState === 'expired' ? 'Timer' : 'Rest Timer'}</div>
-                <div className="text-5xl font-mono leading-none">
+                <div className="text-3xl sm:text-5xl font-mono leading-none">
                   {timerState === 'expired' ? 'expired!' : timerDisplay || '0:00'}
                 </div>
               </div>
@@ -202,20 +204,20 @@ export function SetQueue({
             </div>
 
             <form
-              className="flex gap-3 items-end flex-wrap"
+              className="grid grid-cols-2 sm:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-end"
               onSubmit={(e) => {
                 e.preventDefault();
                 handleComplete();
               }}
               data-testid="completion-form"
             >
-              <div className="flex flex-col gap-1">
+              <div className="flex flex-col gap-1 col-span-2 sm:col-span-1">
                 <label className="text-sm font-semibold text-slate-700">Exercise</label>
                 <input
                   type="text"
                   value={nextSet.exercise_name}
                   readOnly
-                  className="w-44 px-3 py-2 text-base border border-slate-300 rounded-lg bg-slate-50 text-slate-900"
+                  className="w-full px-3 py-2 text-base border border-slate-300 rounded-lg bg-slate-50 text-slate-900"
                   data-testid="override-exercise"
                 />
               </div>
@@ -225,7 +227,7 @@ export function SetQueue({
                   type="number"
                   value={reps}
                   onChange={(e) => setReps(e.target.value)}
-                  className="w-20 px-3 py-2 text-base text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                  className="w-full px-3 py-2 text-base text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
                   data-testid="override-reps"
                 />
               </div>
@@ -235,7 +237,7 @@ export function SetQueue({
                   type="number"
                   value={load}
                   onChange={(e) => setLoad(e.target.value)}
-                  className="w-20 px-3 py-2 text-base text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                  className="w-full px-3 py-2 text-base text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
                   data-testid="override-load"
                 />
               </div>
@@ -271,11 +273,11 @@ export function SetQueue({
                 {previewSets.map((set) => (
                   <div
                     key={set.planned_set_id}
-                    className="flex items-center justify-between bg-white border border-slate-200 rounded-lg px-3 py-2"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 bg-white border border-slate-200 rounded-lg px-3 py-2"
                     data-testid={`preview-set-${set.order}`}
                   >
-                    <span className="font-medium text-slate-800 text-sm">{set.exercise_name}</span>
-                    <span className="text-sm text-slate-500">
+                    <span className="font-medium text-slate-800 text-sm truncate">{set.exercise_name}</span>
+                    <span className="text-sm text-slate-500 sm:text-right shrink-0">
                       {set.target_reps ?? '—'} reps @ {formatLoadDisplay(set)}
                     </span>
                   </div>

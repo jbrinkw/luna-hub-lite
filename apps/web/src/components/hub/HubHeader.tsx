@@ -13,7 +13,7 @@ export function HubHeader({ title, children }: HubHeaderProps) {
   const { signOut } = useAuth();
 
   return (
-    <header className="flex justify-between items-center h-14 px-6 border-b border-slate-200 bg-white">
+    <header className="flex justify-between items-center h-14 px-4 sm:px-6 border-b border-slate-200 bg-white">
       <div className="flex items-center gap-2">
         <Link to="/hub" className="text-slate-400 hover:text-slate-600 transition-colors" aria-label="Back to Hub">
           <ArrowLeft className="h-5 w-5" />

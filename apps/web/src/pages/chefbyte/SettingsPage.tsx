@@ -597,7 +597,10 @@ export function SettingsPage() {
                 {filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}
               </span>
             </div>
-            <div data-testid="product-list" className="grid grid-cols-[repeat(auto-fill,minmax(340px,1fr))] gap-3">
+            <div
+              data-testid="product-list"
+              className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-3"
+            >
               {filteredProducts.map((p) => (
                 <div key={p.product_id} data-testid={`product-${p.product_id}`} className={productCardCls}>
                   {editingId === p.product_id ? (
@@ -629,9 +632,11 @@ export function SettingsPage() {
                     /* Display mode */
                     <div className="flex flex-col flex-1">
                       <h4 className="m-0 mb-2 text-base font-semibold">{p.name}</h4>
-                      <div className="grid grid-cols-3 gap-1 text-[0.9em] text-slate-600 flex-1">
-                        {p.barcode && <span>Barcode: {p.barcode}</span>}
-                        <span>Servings/Container: {Number(p.servings_per_container)}</span>
+                      {p.barcode && (
+                        <span className="text-xs text-slate-500 mb-1.5 break-all">Barcode: {p.barcode}</span>
+                      )}
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-slate-600 flex-1">
+                        <span>Srv/Ctn: {Number(p.servings_per_container)}</span>
                         <span>Cal: {Number(p.calories_per_serving)}</span>
                         <span>C: {Number(p.carbs_per_serving)}g</span>
                         <span>P: {Number(p.protein_per_serving)}g</span>

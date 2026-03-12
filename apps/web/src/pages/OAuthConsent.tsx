@@ -134,7 +134,7 @@ export function OAuthConsent() {
                 <span className="font-semibold">{details.client.name}</span> wants to access your Luna Hub account.
               </p>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1">
+              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1 break-all">
                 <p className="text-xs text-slate-500">
                   <span className="font-medium">Redirect URI:</span> {details.redirect_uri}
                 </p>

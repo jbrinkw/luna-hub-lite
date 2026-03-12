@@ -207,7 +207,7 @@ export function HistoryPage() {
 
   return (
     <CoachLayout title="History">
-      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
+      <div className="flex justify-between items-center flex-wrap gap-2 border-b-2 border-slate-200 pb-2.5 mb-5">
         <h2 className="text-2xl font-bold text-slate-900 m-0">Workout History</h2>
         <select
           value={exerciseFilter}
@@ -255,9 +255,82 @@ export function HistoryPage() {
             {totalCount !== null ? ` of ${totalCount} workouts` : ' workouts'}
           </p>
 
-          <Card className="mb-5 overflow-hidden">
+          {/* Mobile card list */}
+          <div className="sm:hidden flex flex-col gap-3 mb-5" data-testid="history-table">
+            {filteredDays.map((day) => (
+              <Fragment key={day.plan_id}>
+                <Card data-testid={`history-row-${day.plan_date}`} className="overflow-hidden">
+                  <div className="p-3.5">
+                    <div className="flex justify-between items-start gap-2 mb-1.5">
+                      <strong className="text-sm text-slate-900">{formatDateDisplay(day.plan_date)}</strong>
+                      <span className="text-xs text-slate-500 tabular-nums shrink-0">
+                        {day.completed_count}/{day.planned_count} sets
+                      </span>
+                    </div>
+                    {day.summary ? (
+                      <p className="text-xs text-slate-600 mb-2.5 m-0 line-clamp-2">{day.summary}</p>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic mb-2.5 m-0">No summary</p>
+                    )}
+                    <Button
+                      variant="primary"
+                      size="sm"
+                      onClick={() => loadDetail(day.plan_id)}
+                      data-testid={`expand-${day.plan_date}`}
+                      className="w-full"
+                      aria-label={
+                        expandedPlan === day.plan_id
+                          ? `Collapse ${day.plan_date} details`
+                          : `Expand ${day.plan_date} details`
+                      }
+                    >
+                      {expandedPlan === day.plan_id ? 'Hide Details' : 'View Details'}
+                    </Button>
+                  </div>
+
+                  {expandedPlan === day.plan_id && (
+                    <div
+                      data-testid="detail-card"
+                      className="border-t border-l-4 border-l-violet-300 border-t-slate-100 bg-slate-50/50 px-3.5 py-3"
+                    >
+                      <p className="text-xs font-bold text-slate-600 mb-2">Completed Sets</p>
+                      {detailLoading ? (
+                        <p className="text-slate-500 text-sm">Loading...</p>
+                      ) : detail.length === 0 ? (
+                        <p className="text-slate-500 text-sm">No sets completed.</p>
+                      ) : (
+                        <div className="space-y-1.5">
+                          {detail.map((d, i) => (
+                            <div
+                              key={i}
+                              data-testid={`detail-row-${i + 1}`}
+                              className="flex items-baseline justify-between gap-2 text-sm border-b border-slate-100 pb-1.5 last:border-0"
+                            >
+                              <div className="min-w-0">
+                                <span className="text-slate-400 text-xs mr-1.5">{i + 1}.</span>
+                                <span className="font-medium">{d.exercise_name}</span>
+                              </div>
+                              <div className="text-xs text-slate-600 shrink-0 tabular-nums">
+                                {d.actual_reps}r @ {d.actual_load} {WEIGHT_UNIT}
+                                <span className="text-slate-400 ml-1.5">
+                                  {timeFormatter.format(new Date(d.completed_at))}
+                                </span>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </Card>
+              </Fragment>
+            ))}
+          </div>
+
+          {/* Desktop table */}
+          <Card className="mb-5 overflow-hidden hidden sm:block">
             <div className="overflow-x-auto">
-              <table className="w-full text-sm" data-testid="history-table">
+              <table className="w-full text-sm" data-testid="history-table-desktop">
                 <thead>
                   <tr>
                     <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">

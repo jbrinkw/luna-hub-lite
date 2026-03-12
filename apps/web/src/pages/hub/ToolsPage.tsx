@@ -242,7 +242,7 @@ export function ToolsPage() {
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium text-slate-900">{tool.displayName}</p>
                           <p className="text-sm text-slate-500">{tool.description}</p>
-                          <p className="text-xs text-slate-400 font-mono mt-0.5">{tool.name}</p>
+                          <p className="text-xs text-slate-400 font-mono mt-0.5 break-all">{tool.name}</p>
                         </div>
                         <div className="ml-4 shrink-0">
                           <Toggle

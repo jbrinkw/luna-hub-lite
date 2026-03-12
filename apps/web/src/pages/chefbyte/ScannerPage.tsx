@@ -832,7 +832,7 @@ export function ScannerPage() {
 
           {/* Nutrition editor (purchase mode only) */}
           {mode === 'purchase' && (
-            <div data-testid="nutrition-editor" className="grid grid-cols-5 gap-1.5">
+            <div data-testid="nutrition-editor" className="grid grid-cols-3 sm:grid-cols-5 gap-1.5">
               {[
                 { key: 'servingsPerContainer' as const, label: 'Srv/Ctn' },
                 { key: 'calories' as const, label: 'Cal' },
@@ -849,7 +849,7 @@ export function ScannerPage() {
                     aria-label={f.label}
                     value={nutrition[f.key]}
                     onChange={(e) => handleNutritionChange(f.key, e.target.value)}
-                    className="w-full px-1.5 py-1.5 text-center border border-slate-200 rounded text-[0.9em]"
+                    className="w-full px-1.5 py-2 text-center border border-slate-200 rounded text-sm min-h-[36px]"
                   />
                 </div>
               ))}

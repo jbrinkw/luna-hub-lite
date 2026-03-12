@@ -418,16 +418,17 @@ describe('ChefByte HomePage queries', () => {
   });
 
   // -------------------------------------------------------------------
-  // HomePage: food_logs query for consumed items display
-  // Source: HomePage.tsx line 255-259
-  //   .from('food_logs').select('log_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+  // HomePage: food_logs query for consumed items display (with meal grouping)
+  // Source: HomePage.tsx loadData()
+  //   .from('food_logs').select('log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id,
+  //     products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))')
   //     .eq('user_id', userId).eq('logical_date', today)
   // -------------------------------------------------------------------
-  it('food_logs query returns consumed items for logical_date', async () => {
+  it('food_logs query returns consumed items with meal_id and meal info joins', async () => {
     const today = todayDate();
     const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
 
-    // Consume a product to generate a food_log entry
+    // Consume a product directly (standalone — no meal_id)
     await (chefbyte(ctx.client) as any).rpc('consume_product', {
       p_product_id: chickenId,
       p_qty: 1,
@@ -439,7 +440,9 @@ describe('ChefByte HomePage queries', () => {
     // Exact query from HomePage.tsx loadData() — consumed items section
     const result = await chefbyte(ctx.client)
       .from('food_logs')
-      .select('log_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+      .select(
+        'log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
+      )
       .eq('user_id', ctx.userId)
       .eq('logical_date', today);
 
@@ -457,6 +460,9 @@ describe('ChefByte HomePage queries', () => {
     expect(Number(entry.fat)).toBeGreaterThanOrEqual(0);
     expect(entry.products).not.toBeNull();
     expect(entry.products.name).toBe('Great Value Boneless Skinless Chicken Breasts');
+    // Standalone consume — no meal_id
+    expect(entry.meal_id).toBeNull();
+    expect(entry.meal_plan_entries).toBeNull();
 
     // Cleanup: delete food_logs and restore consumed stock
     await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
@@ -472,6 +478,137 @@ describe('ChefByte HomePage queries', () => {
         .update({ qty_containers: Number((chickenLots[0] as any).qty_containers) + 1 })
         .eq('lot_id', (chickenLots[0] as any).lot_id);
     }
+  });
+
+  // -------------------------------------------------------------------
+  // HomePage: food_logs query returns meal_id + meal name after mark_meal_done
+  // Source: HomePage.tsx — meal grouping in consumed section
+  // -------------------------------------------------------------------
+  it('food_logs from mark_meal_done have meal_id and meal_plan_entries join data', async () => {
+    const today = todayDate();
+
+    // Create a regular meal entry for today
+    const { data: meal, error: mealErr } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: seeds.recipeId,
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(mealErr).toBeNull();
+    expect(meal).not.toBeNull();
+
+    // Mark meal done — creates food_logs tagged with meal_id
+    const { data: markResult } = await (chefbyte(ctx.client) as any).rpc('mark_meal_done', {
+      p_meal_id: meal!.meal_id,
+    });
+    expect(markResult.success).toBe(true);
+
+    // Query with the exact select from HomePage.tsx
+    const result = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select(
+        'log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
+      )
+      .eq('user_id', ctx.userId)
+      .eq('logical_date', today)
+      .eq('meal_id', meal!.meal_id);
+
+    const data = assertQuerySucceeds(result, 'food_logs with meal grouping');
+    expect(data.length).toBeGreaterThanOrEqual(1);
+
+    // All entries should have the meal_id set
+    for (const entry of data as any[]) {
+      expect(entry.meal_id).toBe(meal!.meal_id);
+      expect(entry.meal_plan_entries).not.toBeNull();
+      // Recipe-based meal — should have recipe name
+      expect(entry.meal_plan_entries.recipes).not.toBeNull();
+      expect(entry.meal_plan_entries.recipes.name).toBe('Chicken & Rice');
+      // Not product-based, so products on meal_plan_entries should be null
+      expect(entry.meal_plan_entries.products).toBeNull();
+    }
+
+    // Cleanup: unmark restores stock + deletes food_logs, then remove meal entry
+    await (chefbyte(ctx.client) as any).rpc('unmark_meal_done', { p_meal_id: meal!.meal_id });
+    await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
+  });
+
+  // -------------------------------------------------------------------
+  // HomePage: delete all food_logs for a meal (deleteMealLogs)
+  // Source: HomePage.tsx deleteMealLogs()
+  //   .from('food_logs').delete().eq('meal_id', mealId)
+  // -------------------------------------------------------------------
+  it('delete food_logs by meal_id removes all logs for that meal', async () => {
+    const today = todayDate();
+
+    // Create and complete a meal to generate food_logs with meal_id
+    const { data: meal } = await chefbyte(ctx.client)
+      .from('meal_plan_entries')
+      .insert({
+        user_id: ctx.userId,
+        recipe_id: seeds.recipeId,
+        logical_date: today,
+        servings: 1,
+        meal_prep: false,
+      })
+      .select('meal_id')
+      .single();
+    expect(meal).not.toBeNull();
+
+    await (chefbyte(ctx.client) as any).rpc('mark_meal_done', {
+      p_meal_id: meal!.meal_id,
+    });
+
+    // Verify food_logs exist for this meal
+    const { data: logsBefore } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('meal_id', meal!.meal_id);
+    expect(logsBefore!.length).toBeGreaterThanOrEqual(1);
+
+    // Exact delete from HomePage.tsx deleteMealLogs()
+    const delResult = await chefbyte(ctx.client).from('food_logs').delete().eq('meal_id', meal!.meal_id);
+    expect(delResult.error).toBeNull();
+
+    // Verify all food_logs for this meal are deleted
+    const { data: logsAfter } = await chefbyte(ctx.client)
+      .from('food_logs')
+      .select('log_id')
+      .eq('meal_id', meal!.meal_id);
+    expect(logsAfter).toHaveLength(0);
+
+    // Cleanup: restore stock consumed by mark_meal_done
+    // Recipe "Chicken & Rice" base_servings=2, meal servings=1, scale_factor=0.5
+    // Chicken: 1 * 0.5 = 0.5 containers consumed, Rice: 0.5 * 0.5 = 0.25 containers consumed
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
+    const riceId = seeds.productMap['Great Value Long Grain Brown Rice'];
+    const { data: chickenLots } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id, qty_containers')
+      .eq('product_id', chickenId)
+      .eq('user_id', ctx.userId);
+    if (chickenLots?.length) {
+      await chefbyte(ctx.client)
+        .from('stock_lots')
+        .update({ qty_containers: Number((chickenLots[0] as any).qty_containers) + 0.5 })
+        .eq('lot_id', (chickenLots[0] as any).lot_id);
+    }
+    const { data: riceLots } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id, qty_containers')
+      .eq('product_id', riceId)
+      .eq('user_id', ctx.userId);
+    if (riceLots?.length) {
+      await chefbyte(ctx.client)
+        .from('stock_lots')
+        .update({ qty_containers: Number((riceLots[0] as any).qty_containers) + 0.25 })
+        .eq('lot_id', (riceLots[0] as any).lot_id);
+    }
+    await chefbyte(ctx.client).from('meal_plan_entries').delete().eq('meal_id', meal!.meal_id);
   });
 
   // -------------------------------------------------------------------

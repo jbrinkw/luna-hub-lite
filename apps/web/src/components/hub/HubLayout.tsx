@@ -3,7 +3,6 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { HubHeader } from './HubHeader';
 import { SideNav } from './SideNav';
-import { ModuleSwitcher } from '../ModuleSwitcher';
 import { Menu, X, User, LayoutGrid, Wrench, Puzzle, KeyRound } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
@@ -87,15 +86,11 @@ export function HubLayout({ title, children }: HubLayoutProps) {
         )}
       </div>
 
-      <div className="px-6 py-2 border-b border-slate-200 bg-white">
-        <ModuleSwitcher />
-      </div>
-      {/* min-h subtracts header (3.5rem) + module switcher row (~2.75rem) */}
-      <div className="flex min-h-[calc(100vh-6.25rem)]">
+      <div className="flex min-h-[calc(100vh-3.5rem)]">
         <aside className="hidden md:block w-60 border-r border-slate-200 bg-white">
           <SideNav />
         </aside>
-        <main className="flex-1 p-6 max-w-4xl">{children}</main>
+        <main className="flex-1 p-4 sm:p-6 max-w-4xl">{children}</main>
       </div>
     </div>
   );

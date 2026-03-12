@@ -535,7 +535,7 @@ export function TodayPage() {
 
   return (
     <CoachLayout title="Today">
-      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
+      <div className="flex justify-between items-center flex-wrap gap-2 border-b-2 border-slate-200 pb-2.5 mb-5">
         <h2 className="text-2xl font-bold text-slate-900 m-0">Today's Workout</h2>
         <div className="flex gap-2.5 items-center">
           <span className="text-slate-500 text-sm">{today}</span>

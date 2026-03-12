@@ -16,6 +16,11 @@ import {
   UtensilsCrossed,
   ShoppingCart,
   Scale,
+  Cpu,
+  Puzzle,
+  Zap,
+  Package,
+  ClipboardList,
 } from 'lucide-react';
 
 // Intentional demo account credentials — allows one-click demo login.
@@ -109,86 +114,139 @@ export function Login() {
 
   return (
     <div className="min-h-screen flex flex-col md:flex-row">
-      {/* Hero panel */}
-      <div className="md:w-[55%] bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white flex flex-col justify-center px-8 py-10 md:px-14 md:py-0 md:overflow-y-auto md:max-h-screen">
+      {/* Hero panel (after form on mobile so users see login first) */}
+      <div className="order-2 md:order-1 md:w-[55%] bg-gradient-to-br from-slate-900 via-slate-800 to-blue-900 text-white flex flex-col justify-center px-6 py-8 md:px-14 md:py-0 md:overflow-y-auto md:max-h-screen">
         <div className="max-w-lg mx-auto md:mx-0 md:py-12">
-          <h1 className="text-4xl md:text-5xl font-extrabold mb-2 tracking-tight">Luna Hub</h1>
-          <p className="text-lg text-slate-300 mb-8">Your personal fitness &amp; nutrition command center.</p>
+          <h1 className="text-3xl md:text-5xl font-extrabold mb-1 md:mb-2 tracking-tight">Luna Hub</h1>
+          <p className="text-sm md:text-lg text-slate-300 mb-5 md:mb-8">
+            Your personal fitness &amp; nutrition command center.
+          </p>
 
           {/* CoachByte section */}
-          <div className="mb-6">
+          <div className="mb-4 md:mb-6">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-blue-500/20 flex items-center justify-center shrink-0">
                 <Dumbbell className="h-5 w-5 text-blue-300" />
               </div>
-              <h2 className="text-lg font-bold">CoachByte</h2>
+              <div>
+                <h2 className="text-lg font-bold leading-tight">CoachByte</h2>
+                <p className="text-xs text-slate-400">Strength training copilot</p>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 pl-[52px]">
-              <div className="flex items-center gap-2">
-                <CalendarDays className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                <span className="text-xs text-slate-300">Weekly split planner</span>
+            <div className="hidden md:block space-y-2 pl-[52px]">
+              <div className="flex items-start gap-2.5">
+                <CalendarDays className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Weekly split planner with percentage-of-1RM relative loads
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <BarChart3 className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                <span className="text-xs text-slate-300">Sequential set tracking</span>
+              <div className="flex items-start gap-2.5">
+                <BarChart3 className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Sequential set tracking with auto plate-per-side breakdown
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <Timer className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                <span className="text-xs text-slate-300">Built-in rest timer</span>
+              <div className="flex items-start gap-2.5">
+                <Trophy className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Epley e1RM PR detection &mdash; automatic alerts on new records
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <Trophy className="h-3.5 w-3.5 text-blue-400 shrink-0" />
-                <span className="text-xs text-slate-300">PR tracking &amp; e1RM</span>
+              <div className="flex items-start gap-2.5">
+                <Timer className="h-3.5 w-3.5 text-blue-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Cloud-synced rest timer &mdash; pause &amp; resume across devices
+                </span>
               </div>
             </div>
           </div>
 
           {/* ChefByte section */}
-          <div className="mb-8">
+          <div className="mb-4 md:mb-6">
             <div className="flex items-center gap-3 mb-3">
               <div className="w-10 h-10 rounded-lg bg-emerald-500/20 flex items-center justify-center shrink-0">
                 <ChefHat className="h-5 w-5 text-emerald-300" />
               </div>
-              <h2 className="text-lg font-bold">ChefByte</h2>
+              <div>
+                <h2 className="text-lg font-bold leading-tight">ChefByte</h2>
+                <p className="text-xs text-slate-400">AI-powered nutrition system</p>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-x-4 gap-y-2 pl-[52px]">
-              <div className="flex items-center gap-2">
-                <ScanBarcode className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                <span className="text-xs text-slate-300">Barcode scanner</span>
+            <div className="hidden md:block space-y-2 pl-[52px]">
+              <div className="flex items-start gap-2.5">
+                <ScanBarcode className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  AI barcode scanner &mdash; auto-lookup via OpenFoodFacts &amp; Claude Haiku
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <ShoppingCart className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                <span className="text-xs text-slate-300">Smart shopping lists</span>
+              <div className="flex items-start gap-2.5">
+                <Package className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Lot-based inventory with expiry tracking &amp; stock color coding
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <UtensilsCrossed className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                <span className="text-xs text-slate-300">Recipes &amp; meal plans</span>
+              <div className="flex items-start gap-2.5">
+                <UtensilsCrossed className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Dynamic recipe macros with real-time stock availability badges
+                </span>
               </div>
-              <div className="flex items-center gap-2">
-                <Scale className="h-3.5 w-3.5 text-emerald-400 shrink-0" />
-                <span className="text-xs text-slate-300">Macro &amp; calorie tracking</span>
+              <div className="flex items-start gap-2.5">
+                <ClipboardList className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Meal planning &mdash; regular mode &amp; batch meal prep with auto lot creation
+                </span>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <ShoppingCart className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Shopping list auto-synced from 7-day meal plan &amp; Walmart deep links
+                </span>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <Scale className="h-3.5 w-3.5 text-emerald-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Macro tracking with configurable day boundaries &amp; IoT scale support
+                </span>
               </div>
             </div>
           </div>
 
-          {/* Demo CTA — large and prominent */}
-          <div className="bg-white/[0.07] rounded-xl p-5 border border-white/10">
-            <p className="text-sm text-slate-300 mb-3">See it in action with sample data — no signup needed</p>
-            <Button
-              variant="secondary"
-              className="w-full !bg-white !border-white !text-slate-900 hover:!bg-slate-100 font-bold text-base py-3"
-              onClick={handleDemo}
-              disabled={loading || demoLoading}
-              loading={demoLoading}
-            >
-              Try Demo Account
-            </Button>
+          {/* Platform section */}
+          <div>
+            <div className="flex items-center gap-3 mb-3">
+              <div className="w-10 h-10 rounded-lg bg-violet-500/20 flex items-center justify-center shrink-0">
+                <Cpu className="h-5 w-5 text-violet-300" />
+              </div>
+              <div>
+                <h2 className="text-lg font-bold leading-tight">AI-Native Platform</h2>
+                <p className="text-xs text-slate-400">Built for agents &amp; automation</p>
+              </div>
+            </div>
+            <div className="hidden md:block space-y-2 pl-[52px]">
+              <div className="flex items-start gap-2.5">
+                <Cpu className="h-3.5 w-3.5 text-violet-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  38+ MCP tools &mdash; AI agents manage workouts &amp; nutrition for you
+                </span>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <Puzzle className="h-3.5 w-3.5 text-violet-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">
+                  Extensions: Obsidian, Todoist &amp; Home Assistant integrations
+                </span>
+              </div>
+              <div className="flex items-start gap-2.5">
+                <Zap className="h-3.5 w-3.5 text-violet-400 shrink-0 mt-0.5" />
+                <span className="text-xs text-slate-300">Realtime sync across all your devices via Supabase</span>
+              </div>
+            </div>
           </div>
         </div>
       </div>
 
-      {/* Form panel */}
-      <div className="md:w-[45%] flex items-center justify-center px-6 py-12 md:py-0 bg-white">
+      {/* Form panel (first on mobile) */}
+      <div className="order-1 md:order-2 md:w-[45%] flex items-center justify-center px-6 py-12 md:py-0 bg-white">
         <div className="w-full max-w-sm">
           {view === 'login' ? (
             <>
@@ -238,6 +296,19 @@ export function Login() {
                 <span className="text-sm text-slate-500">or</span>
                 <hr className="flex-1 border-slate-200" />
               </div>
+
+              <Button
+                variant="secondary"
+                className="w-full font-semibold"
+                onClick={handleDemo}
+                disabled={loading || demoLoading}
+                loading={demoLoading}
+              >
+                Try Demo Account
+              </Button>
+              <p className="text-center text-xs text-slate-400 mt-2">
+                Pre-loaded with sample data &mdash; no signup needed
+              </p>
 
               <p className="text-center text-sm text-slate-600 mt-4">
                 Don&apos;t have an account?{' '}

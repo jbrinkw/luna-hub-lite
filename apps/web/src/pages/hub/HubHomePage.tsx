@@ -58,10 +58,10 @@ export function HubHomePage() {
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-6 h-14">
+        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 sm:px-6 h-14">
           <h1 className="text-lg font-bold text-slate-900">Luna Hub</h1>
           <div className="flex items-center gap-3">
-            <span className="text-sm text-slate-500 hidden sm:inline">{user?.email}</span>
+            <span className="text-sm text-slate-500 truncate max-w-[160px] sm:max-w-none">{user?.email}</span>
             <button
               onClick={signOut}
               data-testid="hub-logout-btn"
@@ -75,10 +75,10 @@ export function HubHomePage() {
       </header>
 
       {/* Two-column layout */}
-      <div className="mx-auto max-w-6xl px-6 py-8">
+      <div className="mx-auto max-w-6xl px-4 sm:px-6 py-8">
         <div className="flex flex-col md:flex-row gap-8">
-          {/* Left column — Settings */}
-          <div className="md:w-[340px] shrink-0">
+          {/* Left column — Settings (after apps on mobile) */}
+          <div className="md:w-[340px] shrink-0 order-2 md:order-1">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Settings</h2>
             <nav
               className="bg-white rounded-xl border border-slate-200 overflow-hidden"
@@ -107,8 +107,8 @@ export function HubHomePage() {
             </nav>
           </div>
 
-          {/* Right column — App Launcher */}
-          <div className="flex-1">
+          {/* Right column — App Launcher (first on mobile) */}
+          <div className="flex-1 order-1 md:order-2">
             <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-3">Your Apps</h2>
 
             {activationsLoading ? (

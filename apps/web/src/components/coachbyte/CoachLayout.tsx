@@ -38,18 +38,18 @@ export function CoachLayout({ children }: CoachLayoutProps) {
     <div className="flex flex-col h-full overflow-y-hidden bg-slate-50 text-slate-900">
       {/* Header */}
       <header
-        className="flex items-center justify-between h-14 px-6 bg-white border-b border-slate-200 shrink-0"
+        className="flex items-center justify-between h-14 px-4 sm:px-6 bg-white border-b border-slate-200 shrink-0"
         data-testid="coach-header"
       >
-        <div className="flex items-center gap-2 font-bold text-xl text-slate-900">
+        <div className="flex items-center font-bold text-lg sm:text-xl text-slate-900">
           <Link
-            to="/hub/account"
+            to="/hub"
             className="text-inherit no-underline hover:text-violet-600 transition-colors"
             onClick={() => setDrawerOpen(false)}
           >
             Luna Hub
           </Link>
-          <span className="text-slate-400 mx-1.5">/</span>
+          <span className="text-slate-400 mx-1 sm:mx-1.5">/</span>
           <Link
             to="/coach"
             className="text-inherit no-underline hover:text-violet-600 transition-colors"
@@ -102,7 +102,7 @@ export function CoachLayout({ children }: CoachLayoutProps) {
             <button
               onClick={() => {
                 setDrawerOpen(false);
-                navigate('/hub/account');
+                navigate('/hub');
               }}
               className="block px-3 py-2.5 text-sm font-medium rounded-lg text-slate-700 hover:bg-slate-100 text-left transition-colors"
             >
@@ -130,7 +130,7 @@ export function CoachLayout({ children }: CoachLayoutProps) {
 
       {/* Content */}
       <div
-        className="flex-1 overflow-y-auto p-5 max-w-[1200px] w-full mx-auto"
+        className="flex-1 overflow-y-auto p-4 sm:p-5 max-w-[1200px] w-full mx-auto"
         style={online ? undefined : { pointerEvents: 'none', opacity: 0.6 }}
       >
         {children}
