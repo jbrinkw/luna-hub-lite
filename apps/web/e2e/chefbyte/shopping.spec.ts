@@ -151,11 +151,11 @@ test.describe('ChefByte Shopping', () => {
         timeout: 30000,
       });
 
-      // Click clear all button (triggers window.confirm dialog)
-      page.on('dialog', async (dialog) => {
-        await dialog.accept();
-      });
+      // Click clear all button (triggers ConfirmModal)
       await page.getByTestId('clear-all-btn').click();
+      const modal = page.getByRole('dialog');
+      await expect(modal).toBeVisible({ timeout: 5000 });
+      await modal.getByRole('button', { name: 'Clear All' }).click();
 
       // Both sections should now show empty states
       await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 30000 });

@@ -503,7 +503,7 @@ describe('ChefByte InventoryPage queries', () => {
   });
 
   // -----------------------------------------------------------------------
-  // #8: Consume all stock — window.confirm flow
+  // #8: Consume all stock — depletes to zero
   // The UI calls consume_product with the full total stock qty.
   // This test verifies the RPC works when consuming the entire stock.
   // -----------------------------------------------------------------------

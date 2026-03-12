@@ -127,27 +127,20 @@ test.describe('ChefByte Inventory', () => {
       await page.goto('/chef/inventory');
       await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
-      // Register dialog handler BEFORE the click triggers window.confirm
-      let dialogMessage = '';
-      let dialogType = '';
-      page.on('dialog', async (dialog) => {
-        dialogType = dialog.type();
-        dialogMessage = dialog.message();
-        await dialog.dismiss(); // Cancel so stock is not consumed
-      });
-
       // Expand the row first to reveal action buttons
       await page.getByTestId(`inv-row-toggle-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
       // Click consume all for Chicken Breast (has stock = 3 ctn)
       await page.getByTestId(`consume-all-${productMap['Great Value Boneless Skinless Chicken Breasts']}`).click();
 
-      // Give dialog handler a moment to fire
-      await page.waitForTimeout(2000);
+      // Verify the ConfirmModal is shown with expected text
+      const modal = page.getByRole('dialog');
+      await expect(modal).toBeVisible({ timeout: 5000 });
+      await expect(modal).toContainText('Are you sure you want to consume all remaining stock');
 
-      // Verify the native confirm dialog was shown
-      expect(dialogType).toBe('confirm');
-      expect(dialogMessage).toContain('Are you sure you want to consume all remaining stock');
+      // Cancel so stock is not consumed
+      await modal.getByRole('button', { name: 'Cancel' }).click();
+      await expect(modal).not.toBeVisible();
     } finally {
       await cleanup();
     }

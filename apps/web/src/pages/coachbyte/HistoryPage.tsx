@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from 'react';
+import { Fragment, useEffect, useState, useCallback } from 'react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
@@ -276,9 +276,8 @@ export function HistoryPage() {
                 </thead>
                 <tbody>
                   {filteredDays.map((day) => (
-                    <>
+                    <Fragment key={day.plan_id}>
                       <tr
-                        key={day.plan_id}
                         data-testid={`history-row-${day.plan_date}`}
                         className="border-b border-slate-100 last:border-b-0"
                       >
@@ -365,7 +364,7 @@ export function HistoryPage() {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   ))}
                 </tbody>
               </table>
