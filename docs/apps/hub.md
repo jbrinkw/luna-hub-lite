@@ -36,17 +36,18 @@ Account management, MCP server configuration, and extension management. Minimal 
 
 ### AuthGuard
 
-Wraps all protected routes. While the auth session is loading, displays a centered `IonSpinner` (full viewport height). Once loaded, redirects unauthenticated users to `/login`. Authenticated users see the child content.
+Wraps all protected routes. While the auth session is loading, displays a branded loading screen with "Luna Hub" heading and a centered spinner (full viewport height). Once loaded, redirects unauthenticated users to `/login`. Authenticated users see the child content.
 
 ### AppProvider
 
-Wraps all authenticated routes. Provides `useAppContext()` with:
+Wraps all authenticated routes. Uses TanStack Query internally (`useQuery` for activations and profile data, `useRealtimeInvalidation` for live updates). Provides `useAppContext()` with:
 
-- `activations: Record<string, boolean>` — loaded from `hub.app_activations` on mount, updated via Realtime. When the user has no session (e.g. after sign-out), activations are cleared to an empty object `{}`.
-- `activationsLoading: boolean` — true until the first activations load completes
+- `activations: Record<string, boolean>` — fetched via `useQuery` from `hub.app_activations`, invalidated via `useRealtimeInvalidation` on changes. When the user has no session (e.g. after sign-out), activations are cleared to an empty object `{}`.
+- `activationsLoading: boolean` — true until the first activations query completes
 - `online: boolean` — tracks `navigator.onLine` + window events
 - `lastSynced: Date | null` — updated on successful data loads and reconnection
-- `refreshActivations()` — manual refresh
+- `dayStartHour: number` — from profile query
+- `refreshActivations()` — invalidates the activations query cache
 
 ### ModuleSwitcher
 

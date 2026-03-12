@@ -156,17 +156,19 @@ All quantity columns (stock, servings, recipe amounts, shopping quantities) use 
 
 ## Supabase Realtime Subscriptions
 
-The frontend subscribes to Supabase Realtime channels for live data updates. Active subscriptions by page:
+The frontend uses the `useRealtimeInvalidation` hook to subscribe to Supabase Realtime `postgres_changes` and invalidate specific TanStack Query keys when rows change. This replaces full-page refetches with targeted cache invalidation. Active subscriptions by page:
 
-| Page / Provider            | Tables Subscribed                                                             | Purpose                                                                  |
-| -------------------------- | ----------------------------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `AppProvider`              | `hub.profiles`                                                                | Live profile changes (timezone, day_start_hour) propagate to all modules |
-| `TodayPage` (CoachByte)    | `coachbyte.daily_plans`, `coachbyte.planned_sets`, `coachbyte.completed_sets` | Live workout state — set completion, plan changes, timer updates         |
-| `InventoryPage` (ChefByte) | `chefbyte.stock_lots`, `chefbyte.products`                                    | Live inventory updates when lots are consumed or added                   |
-| `MacroPage` (ChefByte)     | `chefbyte.food_logs`, `chefbyte.temp_items`                                   | Live macro totals as food is logged                                      |
-| `ShoppingPage` (ChefByte)  | `chefbyte.shopping_list`                                                      | Live shopping list updates (sync, import, manual edits)                  |
+| Page / Provider            | Tables Subscribed                                                                                   | Query Keys Invalidated  | Purpose                                                          |
+| -------------------------- | --------------------------------------------------------------------------------------------------- | ----------------------- | ---------------------------------------------------------------- |
+| `AppProvider`              | `hub.app_activations`                                                                               | `activations`           | Live activation changes propagate to all modules                 |
+| `TodayPage` (CoachByte)    | `coachbyte.daily_plans`, `coachbyte.planned_sets`, `coachbyte.completed_sets`                       | `dailyPlan`, `timer`    | Live workout state — set completion, plan changes, timer updates |
+| `InventoryPage` (ChefByte) | `chefbyte.stock_lots`, `chefbyte.products`                                                          | `stockLots`, `products` | Live inventory updates when lots are consumed or added           |
+| `MacroPage` (ChefByte)     | `chefbyte.food_logs`, `chefbyte.temp_items`                                                         | `dailyMacros`           | Live macro totals as food is logged                              |
+| `ShoppingPage` (ChefByte)  | `chefbyte.shopping_list`                                                                            | `shoppingList`          | Live shopping list updates (sync, import, manual edits)          |
+| `MealPlanPage` (ChefByte)  | `chefbyte.meal_plan_entries`, `chefbyte.food_logs`, `chefbyte.temp_items`                           | `mealPlan`              | Live meal plan changes and completion updates                    |
+| `HomePage` (ChefByte)      | `chefbyte.meal_plan_entries`, `chefbyte.food_logs`, `chefbyte.temp_items`, `chefbyte.shopping_list` | `chef-home`             | Live dashboard updates                                           |
 
-All subscriptions filter on `user_id = auth.uid()` via RLS. Channels are cleaned up on page unmount.
+All subscriptions filter on `user_id = auth.uid()` via RLS. Channels are cleaned up on page unmount. Query keys are defined in `src/shared/queryKeys.ts`.
 
 ## Environment Validation
 

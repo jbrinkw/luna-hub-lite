@@ -151,6 +151,12 @@ Desktop-first with responsive design. Matching the legacy ChefByte layout.
 - Offline indicator (disabled buttons + "no connection" banner)
 - **ilike search pattern escaping:** All search inputs across ChefByte pages escape special characters (`%`, `_`, `\`) before passing to `ilike` queries to prevent unintended pattern matching
 
+## ChefByte Technical Notes
+
+- **Data fetching:** All pages use TanStack Query (`useQuery`/`useMutation`) for server state. Complex pages (HomePage, MacroPage, MealPlanPage) use `Promise.all` in a single `useQuery` for parallel data loading. Query keys defined in `src/shared/queryKeys.ts`.
+- **Realtime invalidation:** `useRealtimeInvalidation` hook subscribes to Supabase Realtime `postgres_changes` and invalidates specific TanStack Query keys when rows change. Replaces the old pattern of full-page refetch on any Realtime event.
+- **Optimistic updates:** Shopping list toggles, inventory changes, meal plan deletions, and product deletions use `useMutation` with `onMutate` optimistic cache updates and `onError` rollback.
+
 ## ChefByte MCP Tools
 
 | Tool                                    | Purpose                                                                                                                         |

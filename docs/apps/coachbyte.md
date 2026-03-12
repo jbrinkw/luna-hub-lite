@@ -129,7 +129,8 @@ Desktop-first with responsive design.
 ## CoachByte Technical Notes
 
 - **No edge functions required.** All operations are Supabase client SDK calls or database function RPCs via Supavisor.
-- **Realtime subscriptions** on `planned_sets`, `completed_sets`, and `timers` tables filtered by `user_id`. Additional filtering (today's log) applied client-side.
+- **Data fetching:** All pages use TanStack Query (`useQuery`/`useMutation`) for server state management. Query keys defined in `src/shared/queryKeys.ts`. Exercises use a shared query key (`queryKeys.exercises`) for cross-page cache deduplication.
+- **Realtime invalidation:** `useRealtimeInvalidation` hook subscribes to Supabase Realtime `postgres_changes` and invalidates specific TanStack Query keys when rows change. Used on `planned_sets`, `completed_sets`, and `timers` tables (TodayPage), filtered by `user_id`.
 - **Bootstrap function** is idempotent and safe for concurrent calls (UNIQUE constraint + ON CONFLICT).
 - **Day boundary** computed via `private.get_logical_date()`, stored as `logical_date` on daily plans and completed sets.
 - **Global exercise seed** runs as part of CoachByte activation.
