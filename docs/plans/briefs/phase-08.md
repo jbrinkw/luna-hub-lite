@@ -1,10 +1,13 @@
 # Phase 08: Remaining Edge Functions — walmart-scrape + liquidtrack
+
 > Previous: phase-07c.md | Next: phase-09a.md
 
 ## Skills
+
 test-driven-development, test-quality-review, context7 (Supabase Edge Functions, Deno)
 
 ## Build
+
 - `supabase/functions/walmart-scrape/index.ts`:
   - POST handler: accepts Supabase JWT + product URL
   - Calls third-party scraper API with the URL
@@ -25,6 +28,7 @@ test-driven-development, test-quality-review, context7 (Supabase Edge Functions,
 ## Test (TDD)
 
 ### Integration: `apps/web/src/__tests__/integration/edge-functions/walmart-scrape.test.ts`
+
 - POST with valid URL -> mock scraper returns data -> response contains product name + price
 - POST with invalid/malformed URL -> error response with descriptive message
 - Rate limiting: send rapid requests from same user -> later calls return 429 with throttle message
@@ -32,6 +36,7 @@ test-driven-development, test-quality-review, context7 (Supabase Edge Functions,
 - Expired JWT -> 401 Unauthorized
 
 ### Integration: `apps/web/src/__tests__/integration/edge-functions/liquidtrack.test.ts`
+
 - POST with valid device_id + weight data (no JWT) -> event created in liquidtrack_events table
 - Verify event row contains: device_id, weight_before, weight_after, calculated macros, logical_date
 - Verify NO food_log row created (macros aggregated via get_daily_macros from liquidtrack_events)
@@ -39,21 +44,25 @@ test-driven-development, test-quality-review, context7 (Supabase Edge Functions,
 - Import key: first POST with import_key -> device activated (provisioned=true)
 - Import key: second POST with same import_key -> rejected (one-time use)
 - Weight delta = 0 (weight_before == weight_after) -> no event logged, success response with zero delta note
-- Device with linked product -> macros calculated correctly from weight delta * product nutrition per gram
+- Device with linked product -> macros calculated correctly from weight delta \* product nutrition per gram
 - POST without device_id -> 400 Bad Request
 
 ### Quality gate
+
 After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
+
 - `legacy/luna-ext-chefbyte/lib/integrations/walmart.py` — Walmart scraping logic, URL parsing, response normalization
 - `legacy/luna-ext-chefbyte/services/liquidtrack/server.py` — IoT ingestion endpoint, device ID auth, weight delta calculation
 - `legacy/luna-ext-chefbyte/services/liquidtrack/init_schema.sql` — liquidtrack_events table schema reference
 
 ## Commit
+
 `feat: walmart-scrape + liquidtrack edge functions`
 
 ## Acceptance
+
 - [ ] walmart-scrape: POST with URL returns product name + price from mock scraper
 - [ ] walmart-scrape: per-user rate limiting enforced
 - [ ] liquidtrack: POST with device_id + weight creates liquidtrack_event (NOT food_log)

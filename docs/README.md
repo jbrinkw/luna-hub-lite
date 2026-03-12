@@ -20,12 +20,12 @@ Luna Hub Lite does not contain a built-in AI agent. It exposes an **MCP server**
 
 All app modules are served from a single origin (`lunahub.dev`) with path-based routing. This eliminates cross-subdomain cookie issues, PWA navigation problems, refresh token race conditions, and service worker scope conflicts.
 
-| Path | Module | Purpose |
-|------|--------|---------|
-| `lunahub.dev/hub` | Luna Hub | Account, MCP config, extensions |
-| `lunahub.dev/coach` | CoachByte | Strength training |
-| `lunahub.dev/chef` | ChefByte | Nutrition lab |
-| `mcp.lunahub.dev` | MCP Server | Cloudflare Worker (separate origin by necessity) |
+| Path                | Module     | Purpose                                          |
+| ------------------- | ---------- | ------------------------------------------------ |
+| `lunahub.dev/hub`   | Luna Hub   | Account, MCP config, extensions                  |
+| `lunahub.dev/coach` | CoachByte  | Strength training                                |
+| `lunahub.dev/chef`  | ChefByte   | Nutrition lab                                    |
+| `mcp.lunahub.dev`   | MCP Server | Cloudflare Worker (separate origin by necessity) |
 
 The MCP server remains on a subdomain because it runs on Cloudflare Workers, separate from the Vercel deployment. All web app modules share a single Vercel project, single service worker, single PWA manifest, and single auth session.
 
@@ -65,13 +65,13 @@ luna-hub-lite/
 
 ## Documentation Map
 
-| Document | Contents |
-|----------|----------|
-| [Architecture Overview](architecture/overview.md) | Design principles, tech stack, monorepo conventions |
-| [Database Design](architecture/database.md) | Schema layout, RLS, day boundary, units, indexes |
-| [Infrastructure](architecture/infrastructure.md) | Authentication, security model, realtime |
-| [Apps Overview](apps/overview.md) | App modules vs extensions, cross-app integration, mobile readiness |
-| [Luna Hub](apps/hub.md) | Account management, MCP config, extension management |
-| [CoachByte](apps/coachbyte.md) | Strength training: features, UX, MCP tools, technical notes |
-| [ChefByte](apps/chefbyte.md) | Nutrition lab: features, UX, MCP tools, edge functions |
-| [MCP Server & Extensions](mcp/guide.md) | MCP server architecture, extension system, tool catalog |
+| Document                                          | Contents                                                           |
+| ------------------------------------------------- | ------------------------------------------------------------------ |
+| [Architecture Overview](architecture/overview.md) | Design principles, tech stack, monorepo conventions                |
+| [Database Design](architecture/database.md)       | Schema layout, RLS, day boundary, units, indexes                   |
+| [Infrastructure](architecture/infrastructure.md)  | Authentication, security model, realtime                           |
+| [Apps Overview](apps/overview.md)                 | App modules vs extensions, cross-app integration, mobile readiness |
+| [Luna Hub](apps/hub.md)                           | Account management, MCP config, extension management               |
+| [CoachByte](apps/coachbyte.md)                    | Strength training: features, UX, MCP tools, technical notes        |
+| [ChefByte](apps/chefbyte.md)                      | Nutrition lab: features, UX, MCP tools, edge functions             |
+| [MCP Server & Extensions](mcp/guide.md)           | MCP server architecture, extension system, tool catalog            |

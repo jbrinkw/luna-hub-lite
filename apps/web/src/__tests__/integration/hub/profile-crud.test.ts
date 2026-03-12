@@ -41,12 +41,7 @@ describe('Profile CRUD', () => {
 
     expect(updateError).toBeNull();
 
-    const { data } = await client
-      .schema('hub')
-      .from('profiles')
-      .select('display_name')
-      .eq('user_id', userId)
-      .single();
+    const { data } = await client.schema('hub').from('profiles').select('display_name').eq('user_id', userId).single();
 
     expect(data?.display_name).toBe('Updated Name');
   });
@@ -63,12 +58,7 @@ describe('Profile CRUD', () => {
 
     expect(updateError).toBeNull();
 
-    const { data } = await client
-      .schema('hub')
-      .from('profiles')
-      .select('timezone')
-      .eq('user_id', userId)
-      .single();
+    const { data } = await client.schema('hub').from('profiles').select('timezone').eq('user_id', userId).single();
 
     expect(data?.timezone).toBe('Europe/London');
   });
@@ -151,11 +141,7 @@ describe('Profile CRUD', () => {
     const { userId, client } = await createTestUser('prof-dsh-high');
     userIds.push(userId);
 
-    const { error } = await client
-      .schema('hub')
-      .from('profiles')
-      .update({ day_start_hour: 25 })
-      .eq('user_id', userId);
+    const { error } = await client.schema('hub').from('profiles').update({ day_start_hour: 25 }).eq('user_id', userId);
 
     // Postgres CHECK constraint violation
     expect(error).not.toBeNull();
@@ -166,11 +152,7 @@ describe('Profile CRUD', () => {
     const { userId, client } = await createTestUser('prof-dsh-neg');
     userIds.push(userId);
 
-    const { error } = await client
-      .schema('hub')
-      .from('profiles')
-      .update({ day_start_hour: -1 })
-      .eq('user_id', userId);
+    const { error } = await client.schema('hub').from('profiles').update({ day_start_hour: -1 }).eq('user_id', userId);
 
     // Postgres CHECK constraint violation
     expect(error).not.toBeNull();
@@ -191,12 +173,7 @@ describe('Profile CRUD', () => {
 
     expect(updateError).toBeNull();
 
-    const { data } = await client
-      .schema('hub')
-      .from('profiles')
-      .select('timezone')
-      .eq('user_id', userId)
-      .single();
+    const { data } = await client.schema('hub').from('profiles').select('timezone').eq('user_id', userId).single();
 
     expect(data?.timezone).toBe('Not/A/Timezone');
   });
@@ -218,11 +195,7 @@ describe('Profile CRUD', () => {
     expect(ownProfile).not.toBeNull();
 
     // User B cannot see User A's profile
-    const { data, error } = await clientB
-      .schema('hub')
-      .from('profiles')
-      .select('user_id')
-      .eq('user_id', userAId);
+    const { data, error } = await clientB.schema('hub').from('profiles').select('user_id').eq('user_id', userAId);
     expect(error).toBeNull();
     expect(data).toHaveLength(0);
   });
@@ -234,11 +207,7 @@ describe('Profile CRUD', () => {
     userIds.push(userBId);
 
     // User B tries to update User A's profile
-    await clientB
-      .schema('hub')
-      .from('profiles')
-      .update({ display_name: 'HACKED' })
-      .eq('user_id', userAId);
+    await clientB.schema('hub').from('profiles').update({ display_name: 'HACKED' }).eq('user_id', userAId);
 
     // Verify User A's profile is unchanged
     const { data, error } = await clientA

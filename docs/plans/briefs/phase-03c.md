@@ -1,10 +1,13 @@
 # Phase 03c: Hub Layout Shell
+
 > Previous: phase-03b.md | Next: phase-03d.md
 
 ## Skills
+
 frontend-design, context7 (Ionic React, React Router 6)
 
 ## Build
+
 - `apps/web/src/components/hub/HubLayout.tsx` — side nav + content area wrapper
 - `apps/web/src/components/hub/SideNav.tsx` — navigation links: Account, Apps, Tools, Extensions, MCP Settings
 - `apps/web/src/components/hub/HubHeader.tsx` — header bar with page title + offline indicator placeholder + logout button
@@ -20,6 +23,7 @@ frontend-design, context7 (Ionic React, React Router 6)
 ## Test (TDD)
 
 ### Browser: `apps/web/e2e/hub/navigation.spec.ts`
+
 - Log in -> land on /hub
 - Click "Account" in side nav -> /hub/account page renders with profile form (placeholder OK)
 - Click "Apps" -> /hub/apps renders with activation cards (placeholder OK)
@@ -31,14 +35,17 @@ frontend-design, context7 (Ionic React, React Router 6)
 - Module switcher: click ChefByte -> navigates to /chef
 
 ## Legacy Reference
+
 - `legacy/luna-hub/hub_ui/src/pages/ExtensionManager.jsx` — nav pattern, side menu structure
 - `legacy/luna-hub/hub_ui/src/pages/MCPToolManager.jsx` — tool manager page layout pattern
 - `legacy/chefbyte-vercel/apps/web/src/components/ProtectedRoute.tsx` — route guard integration
 
 ## Commit
+
 `feat: hub layout shell with side navigation`
 
 ## Acceptance
+
 - [ ] Side nav renders with 5 links (Account, Apps, Tools, Extensions, MCP Settings)
 - [ ] Clicking each nav link navigates to correct route
 - [ ] Active page highlighted in nav

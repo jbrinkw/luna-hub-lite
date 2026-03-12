@@ -1,10 +1,13 @@
 # Phase 09a: MCP Worker — Core + Auth
+
 > Previous: phase-08.md | Next: phase-09b.md
 
 ## Skills
+
 test-driven-development, test-quality-review, context7 (Cloudflare Workers, MCP SDK, Supabase, Durable Objects)
 
 ## Build
+
 - `apps/mcp-worker/src/index.ts` — Worker entry point, SSE transport at `/sse` endpoint
 - `apps/mcp-worker/src/auth/api-key.ts` — API key authentication middleware:
   - Accept key via Authorization header (Bearer scheme)
@@ -40,6 +43,7 @@ test-driven-development, test-quality-review, context7 (Cloudflare Workers, MCP 
 ## Test (TDD)
 
 ### Unit: `apps/mcp-worker/src/__tests__/auth.test.ts`
+
 - Valid API key -> accepted, returns resolved user_id
 - Invalid API key (no matching hash) -> rejected with 401
 - Revoked API key (revoked_at IS NOT NULL) -> rejected with 401
@@ -48,6 +52,7 @@ test-driven-development, test-quality-review, context7 (Cloudflare Workers, MCP 
 - Malformed Bearer token -> rejected with 401
 
 ### Unit: `apps/mcp-worker/src/__tests__/tool-dispatch.test.ts`
+
 - Known tool name -> correct handler function invoked with arguments
 - Handler returns structured result -> result passed through to caller
 - Unknown tool name -> returns `{isError: true, content: "Unknown tool: foo"}`
@@ -56,13 +61,15 @@ test-driven-development, test-quality-review, context7 (Cloudflare Workers, MCP 
 - Handler returns isError:true -> passed through unchanged
 
 ### Unit: `apps/mcp-worker/src/__tests__/tool-registry.test.ts`
+
 - Loads user config from mock Supabase -> returns enabled tools only
 - Disabled tool excluded from tool list
-- Deactivated app (e.g., CoachByte) removes all COACHBYTE_* tools from list
+- Deactivated app (e.g., CoachByte) removes all COACHBYTE\_\* tools from list
 - Both apps active -> all app tools present
 - No user config -> returns default tool set (all enabled)
 
 ### Unit: `apps/mcp-worker/src/__tests__/oauth.test.ts`
+
 - Authorization request with code_challenge -> returns auth code
 - Code exchange with valid code_verifier (SHA256 matches challenge) -> returns access token with 24h expiry
 - Code exchange with wrong code_verifier -> rejected with error
@@ -72,23 +79,28 @@ test-driven-development, test-quality-review, context7 (Cloudflare Workers, MCP 
 - PKCE method must be S256 (plain rejected)
 
 ### Integration: `apps/mcp-worker/src/__tests__/sse-connection.test.ts`
+
 - SSE connection with valid API key -> receives tool list in initial message
 - SSE connection with invalid API key -> 401 response (no SSE stream)
 - SSE connection with revoked API key -> 401 response
 - Tool list matches user's enabled tools from config
 
 ### Quality gate
+
 After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
+
 - `legacy/luna-hub/core/utils/mcp_server.py` — FastMCP server pattern, tool registration
 - `legacy/luna-hub/core/utils/auth_service.py` — OAuth flow reference (different impl, concepts apply)
 - `legacy/luna-hub/core/utils/agent_api.py` — API key generation and validation patterns
 
 ## Commit
+
 `feat: MCP worker core + auth`
 
 ## Acceptance
+
 - [ ] SSE transport at /sse endpoint accepts connections and streams tool list
 - [ ] API key auth: SHA-256 hash lookup + timingSafeEqual + revocation check
 - [ ] OAuth 2.1 PKCE: auth code -> token exchange with S256 verifier, 24h expiry

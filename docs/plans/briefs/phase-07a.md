@@ -1,10 +1,13 @@
 # Phase 07a: ChefByte UI — Scanner + Dashboard
+
 > Previous: phase-06e.md | Next: phase-07b.md
 
 ## Skills
+
 test-driven-development, test-quality-review, frontend-design, context7 (Ionic React, Supabase)
 
 ## Build
+
 - ChefByte layout shell with top nav: Scanner (default) / Home / Inventory / Shopping / Meal Plan / Recipes / Walmart / Settings
 - ChefByte routes in `apps/web/src/App.tsx`: `/chef/*` paths
 - `apps/web/src/pages/chefbyte/Scanner.tsx` — two-column layout:
@@ -26,6 +29,7 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 ## Test (TDD)
 
 ### Unit: `apps/web/src/__tests__/unit/chefbyte/ScannerModeSelector.test.tsx`
+
 - Mode selection updates parent state via callback
 - Purchase mode selected -> shows nutrition editor (renders editor slot)
 - Consume+Macros mode -> hides nutrition editor
@@ -34,6 +38,7 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 - Active mode button visually distinguished (aria-pressed)
 
 ### Unit: `apps/web/src/__tests__/unit/chefbyte/TransactionQueue.test.tsx`
+
 - Red border on items with `status='new'`
 - Green border on items with `status='success'`
 - Orange border on items with `status='pending'`
@@ -43,8 +48,9 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 - Filter "All" shows all items; filter "New" shows only red items
 
 ### Unit: `apps/web/src/__tests__/unit/chefbyte/NutritionEditor.test.tsx`
+
 - Edit calories -> macros scale proportionally (maintaining ratios)
-- Edit protein -> calories recalculate via 4-4-9 (protein*4 + carbs*4 + fats*9)
+- Edit protein -> calories recalculate via 4-4-9 (protein*4 + carbs*4 + fats\*9)
 - Edit carbs -> calories recalculate via 4-4-9
 - Edit fats -> calories recalculate via 4-4-9
 - servings_per_container adjustment updates display
@@ -52,12 +58,14 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 - Negative values rejected
 
 ### Unit: `apps/web/src/__tests__/unit/chefbyte/MacroCard.test.tsx`
-- Progress bar width = (consumed / goal) * 100 percent
+
+- Progress bar width = (consumed / goal) \* 100 percent
 - Consumed and goal labels rendered correctly
 - Bar color changes when consumed > goal (over-target state)
 - Zero goal renders 0% width (no division by zero)
 
 ### Unit: `apps/web/src/__tests__/unit/chefbyte/TempItemForm.test.tsx`
+
 - Name field required: submit with empty name -> validation error
 - Macro inputs reject non-numeric values
 - Calories auto-calculate via 4-4-9 when macros entered
@@ -66,18 +74,22 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 - Protein/carbs/fats default to 0
 
 ### Quality gate
+
 After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
+
 - `legacy/chefbyte-vercel/apps/web/src/pages/Scanner.tsx` — 4-mode scanner layout, queue rendering
 - `legacy/chefbyte-vercel/apps/web/src/pages/Home.tsx` — dashboard macro cards, status badges, modals
 - `legacy/chefbyte-vercel/apps/web/src/hooks/useScannerDetection.ts` — barcode input detection
 - `legacy/chefbyte-vercel/apps/web/src/lib/api-supabase.ts` — Supabase query patterns
 
 ## Commit
+
 `feat: chefbyte UI — scanner + dashboard`
 
 ## Acceptance
+
 - [ ] ChefByte layout shell with working top nav renders all routes
 - [ ] Scanner page renders two-column layout with mode selector, keypad, queue
 - [ ] Purchase mode shows nutrition editor; other modes hide it

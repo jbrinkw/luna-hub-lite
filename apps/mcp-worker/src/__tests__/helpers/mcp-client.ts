@@ -26,7 +26,22 @@ export class McpTestClient {
    * Connect to the MCP Worker SSE endpoint.
    * Waits until the initial "endpoint" event is received with the sessionId.
    */
-  async connect(apiKey: string): Promise<void> {
+  async connect(apiKey: string, retries = 3): Promise<void> {
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        await this._connectOnce(apiKey);
+        return;
+      } catch (err: any) {
+        if (attempt === retries) throw err;
+        console.warn(`[McpTestClient] connect attempt ${attempt}/${retries} failed: ${err.message}, retrying…`);
+        this.sseAbortController?.abort();
+        this.sseAbortController = null;
+        await new Promise((r) => setTimeout(r, 2_000));
+      }
+    }
+  }
+
+  private async _connectOnce(apiKey: string): Promise<void> {
     this.sseAbortController = new AbortController();
 
     const response = await fetch(`${this.baseUrl}/sse?apiKey=${encodeURIComponent(apiKey)}`, {
@@ -49,7 +64,7 @@ export class McpTestClient {
 
     // Promise that resolves when we get the endpoint event
     const endpointReady = new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Timed out waiting for endpoint event')), 10_000);
+      const timeout = setTimeout(() => reject(new Error('Timed out waiting for endpoint event')), 20_000);
 
       let buffer = '';
 

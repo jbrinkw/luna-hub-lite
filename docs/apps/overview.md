@@ -2,14 +2,14 @@
 
 ## App Modules vs Extensions
 
-| Aspect | App Modules | Extensions |
-|--------|------------|------------|
-| Has UI pages | Yes (within single app shell) | No |
-| Has database schema | Yes (own Supabase schema) | No |
-| Has edge functions | Optional | No |
-| Has MCP tools | Yes | Yes |
-| User-facing credentials | N/A (uses hub auth) | Per-user in Supabase Vault |
-| Deployment | Part of web app (Vercel) | Bundled into MCP server Worker |
+| Aspect                  | App Modules                   | Extensions                     |
+| ----------------------- | ----------------------------- | ------------------------------ |
+| Has UI pages            | Yes (within single app shell) | No                             |
+| Has database schema     | Yes (own Supabase schema)     | No                             |
+| Has edge functions      | Optional                      | No                             |
+| Has MCP tools           | Yes                           | Yes                            |
+| User-facing credentials | N/A (uses hub auth)           | Per-user in Supabase Vault     |
+| Deployment              | Part of web app (Vercel)      | Bundled into MCP server Worker |
 
 ## Cross-App Integration
 
@@ -33,16 +33,16 @@ The MVP targets desktop browsers. All UI layouts are designed desktop-first with
 
 The following are deferred to post-MVP and designed to be easy to add without rewriting app code:
 
-| Capability | MVP (Desktop Web) | Post-MVP (Mobile / Capacitor) |
-|------------|-------------------|-------------------------------|
-| Layout | Desktop-first responsive, multi-column | Mobile-optimized single-column layouts, bottom tab navigation, swipe gestures |
-| Notifications | Not available | `@capacitor/local-notifications` — schedule OS-level timer alerts |
-| Barcode Scanner | Physical Bluetooth/USB barcode scanner input | `@capacitor/barcode-scanner` for camera scanning |
-| Haptics | Ionic built-in haptics | `@capacitor/haptics` |
-| Storage | Browser localStorage/IndexedDB | `@capacitor/preferences` |
-| Background Timer | Timer recovers on tab/window focus | True background countdown with native notification on expiry |
-| Platform Detection | `Capacitor.isNativePlatform()` returns false | Returns true, enables native code paths |
-| Distribution | Web only (lunahub.dev) | App Store / Play Store via Capacitor |
+| Capability         | MVP (Desktop Web)                            | Post-MVP (Mobile / Capacitor)                                                 |
+| ------------------ | -------------------------------------------- | ----------------------------------------------------------------------------- |
+| Layout             | Desktop-first responsive, multi-column       | Mobile-optimized single-column layouts, bottom tab navigation, swipe gestures |
+| Notifications      | Not available                                | `@capacitor/local-notifications` — schedule OS-level timer alerts             |
+| Barcode Scanner    | Physical Bluetooth/USB barcode scanner input | `@capacitor/barcode-scanner` for camera scanning                              |
+| Haptics            | Ionic built-in haptics                       | `@capacitor/haptics`                                                          |
+| Storage            | Browser localStorage/IndexedDB               | `@capacitor/preferences`                                                      |
+| Background Timer   | Timer recovers on tab/window focus           | True background countdown with native notification on expiry                  |
+| Platform Detection | `Capacitor.isNativePlatform()` returns false | Returns true, enables native code paths                                       |
+| Distribution       | Web only (lunahub.dev)                       | App Store / Play Store via Capacitor                                          |
 
 ### What Post-MVP Unlocks
 

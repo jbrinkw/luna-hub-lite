@@ -1,10 +1,13 @@
 # Phase 07b: ChefByte UI — Inventory + Shopping + Meal Plan
+
 > Previous: phase-07a.md | Next: phase-07c.md
 
 ## Skills
+
 test-driven-development, test-quality-review, frontend-design, context7 (Ionic React, Supabase Realtime)
 
 ## Build
+
 - `apps/web/src/pages/chefbyte/Inventory.tsx`:
   - Grouped-by-product table: Product (name + barcode + servings/container), Stock Total, Nearest Expiry, Lots count, Min, Actions
   - Actions: +1/-1 container, +S/-S serving, Consume All (with confirmation) — all stock-only, never log macros
@@ -28,6 +31,7 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 ## Test (TDD)
 
 ### Unit: `apps/web/src/__tests__/unit/chefbyte/InventoryGroup.test.tsx`
+
 - Grouped-by-product rendering shows product name + total stock + nearest expiry + lot count
 - Expand button reveals individual lot rows with qty, location, expiration
 - +1 container button calls onAdjust with (product_id, +1, 'containers')
@@ -38,6 +42,7 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 - Stock displayed to 1 decimal place
 
 ### Unit: `apps/web/src/__tests__/unit/chefbyte/ShoppingListItem.test.tsx`
+
 - Displays product name and quantity
 - Checkbox toggles purchased state via callback
 - Remove button calls onRemove with item ID
@@ -46,6 +51,7 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 - Unpurchased items show no strikethrough
 
 ### Unit: `apps/web/src/__tests__/unit/chefbyte/MealPlanDayCard.test.tsx`
+
 - Renders meal entries with recipe/product name + servings count
 - Shows macro summary (calories, protein, carbs, fats) for the day
 - Mark Done button calls onMarkDone with meal_id for regular entries
@@ -54,24 +60,29 @@ test-driven-development, test-quality-review, frontend-design, context7 (Ionic R
 - Status badge: planned/done/prepped
 
 ### Integration: `apps/web/src/__tests__/integration/chefbyte/realtime-subscriptions.test.ts`
+
 - Subscribe to food_log channel -> insert food_log row -> callback fires with new row
 - Subscribe to temp_items channel -> insert temp_item -> callback fires
 - Subscribe to meal_plan channel -> update status to 'done' -> callback fires with updated row
 - Unsubscribe -> insert row -> callback does NOT fire
 
 ### Quality gate
+
 After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
+
 - `legacy/chefbyte-vercel/apps/web/src/pages/Inventory.tsx` — grouped-by-product table, lot toggle, stock adjustments
 - `legacy/chefbyte-vercel/apps/web/src/pages/ShoppingList.tsx` — add/check/import flow, below-min-stock button
 - `legacy/chefbyte-vercel/apps/web/src/pages/MealPlan.tsx` — day grid, execute meals, prep confirmation
 - `legacy/chefbyte-vercel/apps/web/src/lib/api-supabase.ts` — Supabase Realtime subscription patterns
 
 ## Commit
+
 `feat: chefbyte UI — inventory + shopping + meal plan`
 
 ## Acceptance
+
 - [ ] Inventory page renders grouped-by-product with lot toggle, stock adjustments are stock-only
 - [ ] Shopping list page has To Buy / Purchased sections, bulk import, below-min-stock button
 - [ ] Meal plan page renders 7-day grid with week navigation, Add Meal modal, Mark Done + [PREP] actions

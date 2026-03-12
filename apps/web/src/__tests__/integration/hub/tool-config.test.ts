@@ -18,10 +18,7 @@ describe('Tool config', () => {
     const { error: upsertError } = await client
       .schema('hub')
       .from('user_tool_config')
-      .upsert(
-        { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true },
-        { onConflict: 'user_id,tool_name' },
-      );
+      .upsert({ user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true }, { onConflict: 'user_id,tool_name' });
     expect(upsertError).toBeNull();
 
     const { data } = await client
@@ -42,19 +39,13 @@ describe('Tool config', () => {
     const { error: enableError } = await client
       .schema('hub')
       .from('user_tool_config')
-      .upsert(
-        { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true },
-        { onConflict: 'user_id,tool_name' },
-      );
+      .upsert({ user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true }, { onConflict: 'user_id,tool_name' });
     expect(enableError).toBeNull();
 
     const { error: disableError } = await client
       .schema('hub')
       .from('user_tool_config')
-      .upsert(
-        { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: false },
-        { onConflict: 'user_id,tool_name' },
-      );
+      .upsert({ user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: false }, { onConflict: 'user_id,tool_name' });
     expect(disableError).toBeNull();
 
     const { data } = await client
@@ -75,10 +66,13 @@ describe('Tool config', () => {
     const { error: upsertError } = await client
       .schema('hub')
       .from('user_tool_config')
-      .upsert([
-        { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true },
-        { user_id: userId, tool_name: 'CHEFBYTE_SCAN_BARCODE', enabled: false },
-      ], { onConflict: 'user_id,tool_name' });
+      .upsert(
+        [
+          { user_id: userId, tool_name: 'COACHBYTE_LOG_SET', enabled: true },
+          { user_id: userId, tool_name: 'CHEFBYTE_SCAN_BARCODE', enabled: false },
+        ],
+        { onConflict: 'user_id,tool_name' },
+      );
     expect(upsertError).toBeNull();
 
     const { data } = await client
@@ -118,17 +112,10 @@ describe('Tool config', () => {
     const { error: upsertError } = await clientA
       .schema('hub')
       .from('user_tool_config')
-      .upsert(
-        { user_id: userA, tool_name: 'SECRET_TOOL', enabled: true },
-        { onConflict: 'user_id,tool_name' },
-      );
+      .upsert({ user_id: userA, tool_name: 'SECRET_TOOL', enabled: true }, { onConflict: 'user_id,tool_name' });
     expect(upsertError).toBeNull();
 
-    const { data } = await clientB
-      .schema('hub')
-      .from('user_tool_config')
-      .select('*')
-      .eq('tool_name', 'SECRET_TOOL');
+    const { data } = await clientB.schema('hub').from('user_tool_config').select('*').eq('tool_name', 'SECRET_TOOL');
 
     expect(data).toHaveLength(0);
   });

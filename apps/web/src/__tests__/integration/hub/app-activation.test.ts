@@ -138,15 +138,10 @@ describe('App activation lifecycle', () => {
     const { userId: userBId, client: clientB } = await createTestUser('act-rls-b');
     userIds.push(userBId);
 
-    const { error: activateError } = await clientA
-      .schema('hub')
-      .rpc('activate_app', { p_app_name: 'coachbyte' });
+    const { error: activateError } = await clientA.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
     expect(activateError).toBeNull();
 
-    const { data, error } = await clientB
-      .schema('hub')
-      .from('app_activations')
-      .select('*');
+    const { data, error } = await clientB.schema('hub').from('app_activations').select('*');
     expect(error).toBeNull();
     expect(data).toHaveLength(0);
   });

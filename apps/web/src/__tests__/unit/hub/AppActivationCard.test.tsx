@@ -12,7 +12,9 @@ describe('AppActivationCard', () => {
     onDeactivate: vi.fn(),
   };
 
-  afterEach(() => { vi.clearAllMocks(); });
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
 
   it('shows app name and inactive status', () => {
     render(<AppActivationCard {...defaultProps} />);

@@ -1,7 +1,9 @@
 # Phase 04a: CoachByte DB — Tables + RLS
+
 > Previous: phase-03e.md | Next: phase-04b.md
 
 ## Skills
+
 test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 
 ## Build
@@ -9,6 +11,7 @@ test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 Single migration file — order: tables, indexes, RLS, seeds.
 
 **Tables:**
+
 - `coachbyte.exercises` (exercise_id UUID PK DEFAULT gen_random_uuid(), user_id UUID REFERENCES auth.users ON DELETE CASCADE — nullable for globals, name TEXT, UNIQUE(user_id, LOWER(name)), created_at TIMESTAMPTZ DEFAULT now())
 - `coachbyte.user_settings` (user_id UUID PK REFERENCES auth.users ON DELETE CASCADE, default_rest_seconds INTEGER DEFAULT 90, bar_weight_lbs NUMERIC(10,3) DEFAULT 45, available_plates JSONB DEFAULT '[45,35,25,10,5,2.5]')
 - `coachbyte.daily_plans` (plan_id UUID PK DEFAULT gen_random_uuid(), user_id UUID REFERENCES auth.users ON DELETE CASCADE, plan_date DATE, logical_date DATE, summary TEXT, created_at TIMESTAMPTZ DEFAULT now(), UNIQUE(user_id, plan_date))
@@ -19,21 +22,25 @@ Single migration file — order: tables, indexes, RLS, seeds.
 - **No exercise_prs table** — PRs derived from completed_sets via Epley formula (decision #6)
 
 **Indexes:**
+
 - `(user_id, logical_date)` on completed_sets
 - `(exercise_id)` on completed_sets (for PR derivation queries)
 - Partial index on exercises: `WHERE user_id IS NULL` (global exercises)
 - UNIQUE `(user_id, weekday)` on splits
 
 **RLS policies (all tables):**
+
 - Standard: `(select auth.uid()) = user_id TO authenticated` for SELECT, INSERT, UPDATE, DELETE
 - exercises exception: SELECT also allows `user_id IS NULL` (global). INSERT/UPDATE/DELETE restricted to `(select auth.uid()) = user_id` only (no writes to globals).
 
 **Seeds:**
+
 - Global exercise library (user_id = NULL): Squat, Bench Press, Deadlift, Overhead Press, Barbell Row, Pull-Up, Dip, Lat Pulldown, Cable Row, Leg Press, Romanian Deadlift, Front Squat, Incline Bench Press, Barbell Curl, Tricep Extension, Lateral Raise, Face Pull, Leg Curl, Leg Extension, Calf Raise
 
 ## Test (TDD)
 
 ### pgTAP: `supabase/tests/coachbyte/exercise_rls.test.sql`
+
 - User A can SELECT global exercises (user_id IS NULL)
 - User A can SELECT their own custom exercises
 - User A cannot SELECT User B's custom exercises
@@ -46,22 +53,27 @@ Single migration file — order: tables, indexes, RLS, seeds.
 - Uniqueness: User A inserting duplicate name (case-insensitive) rejected
 
 ### pgTAP: `supabase/tests/hub/activation_coachbyte.test.sql`
+
 - Activate CoachByte → global exercises accessible, user_settings row created with defaults (rest=90, bar=45, plates=[45,35,25,10,5,2.5])
 - Deactivate CoachByte → all user's CoachByte data deleted (plans, sets, splits, timer, user_settings)
 - Reactivate → clean slate, fresh seeds, no leftover data
 
 ### Quality gate
+
 After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
+
 - `legacy/luna_ext_coachbyte/services/api/server.py` — DB schema definitions (embedded SQL)
 - `legacy/luna_ext_coachbyte/tools/populate_coachbyte_demo.py` — exercise seed data reference
 - `legacy/luna_ext_coachbyte/tools/coachbyte_tools.py` — tool definitions showing table structure
 
 ## Commit
+
 `feat: coachbyte DB tables + RLS + exercise seeds`
 
 ## Acceptance
+
 - [ ] All CoachByte tables created in coachbyte schema with correct columns and constraints
 - [ ] Global exercises seeded (20 common exercises with user_id = NULL)
 - [ ] RLS enforced: user isolation + global exercise read access

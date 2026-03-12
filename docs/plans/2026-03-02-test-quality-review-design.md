@@ -9,11 +9,13 @@
 ## Workflow Integration
 
 Current subagent-driven-development flow:
+
 ```
 Implement → Spec Review → Code Quality Review → Done
 ```
 
 New flow:
+
 ```
 Implement → Spec Review → Code Quality Review → [batch completes] → Test Quality Review → Done
 ```
@@ -31,22 +33,26 @@ The test quality review subagent runs once per layer batch (e.g., after all pgTA
 ## Layer-Specific Checks
 
 ### pgTAP
+
 6. Every `lives_ok` followed by a data assertion
 7. Cross-user isolation (user B can't see/modify user A)
 8. Anon denial test exists for every table
 9. All tables in the schema have RLS tests
 
 ### Unit (Vitest + RTL)
+
 10. Callback props verified with correct arguments, not just "was called"
 11. Loading/disabled/error states covered
 12. Mocks are minimal — only external dependencies
 
 ### Integration (Vitest + Supabase SDK)
+
 13. All readbacks use user's client, NOT `adminClient`
 14. Cross-user RLS isolation for every table touched
 15. Each test creates its own user (no shared state)
 
 ### E2E (Playwright)
+
 16. No URL-only assertions — every navigation has a content check
 17. Selectors are page-specific (scoped locators, not `getByText` matching globally)
 18. Persistence tests (state survives reload) for stateful features
@@ -58,17 +64,21 @@ The test quality review subagent runs once per layer batch (e.g., after all pgTA
 ## Test Quality Review: [layer]
 
 ### Files reviewed
+
 - path/to/test1.ts (N tests)
 
 ### PASS (N tests)
+
 [Tests that passed all checks]
 
 ### FAIL (N issues)
+
 1. [file:line] Test "name" — FALSE POSITIVE: [reason]
 2. [file:line] Test "name" — WEAK: [reason]
 3. [file:line] MISSING: [what's missing]
 
 ### Coverage gaps
+
 - Table X has 0 tests
 - Component Y missing error state test
 ```

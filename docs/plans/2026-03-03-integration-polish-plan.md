@@ -13,6 +13,7 @@
 ### Task 1: AppProvider — shared activation + online context
 
 **Files:**
+
 - Create: `apps/web/src/shared/AppProvider.tsx`
 - Modify: `apps/web/src/App.tsx`
 - Test: `apps/web/src/__tests__/unit/hub/AppProvider.test.tsx`
@@ -182,6 +183,7 @@ git commit -m "feat(hub): AppProvider — shared activation + online context"
 ### Task 2: Update ModuleSwitcher to filter by activations
 
 **Files:**
+
 - Modify: `apps/web/src/components/ModuleSwitcher.tsx`
 - Test: `apps/web/src/__tests__/unit/hub/ModuleSwitcher.test.tsx`
 
@@ -295,6 +297,7 @@ git commit -m "feat(hub): ModuleSwitcher filters by active modules"
 ### Task 3: OfflineIndicator component
 
 **Files:**
+
 - Create: `apps/web/src/components/OfflineIndicator.tsx`
 - Modify: `apps/web/src/shared/layout/AppLayout.tsx`
 - Test: `apps/web/src/__tests__/unit/hub/OfflineIndicator.test.tsx`
@@ -406,6 +409,7 @@ git commit -m "feat(hub): OfflineIndicator with last synced timestamp"
 ### Task 4: ErrorBoundary component
 
 **Files:**
+
 - Create: `apps/web/src/components/ErrorBoundary.tsx`
 - Modify: `apps/web/src/App.tsx`
 - Test: `apps/web/src/__tests__/unit/hub/ErrorBoundary.test.tsx`
@@ -551,6 +555,7 @@ git commit -m "feat(hub): per-module ErrorBoundary with retry"
 ### Task 5: SkeletonScreen components
 
 **Files:**
+
 - Create: `apps/web/src/components/SkeletonScreen.tsx`
 - Test: `apps/web/src/__tests__/unit/hub/SkeletonScreen.test.tsx`
 
@@ -650,6 +655,7 @@ git commit -m "feat(hub): skeleton screen components for loading states"
 ### Task 6: Regenerate DB types + fix existing test breakage
 
 **Files:**
+
 - Modify: `packages/db-types/` (regenerated)
 - Potentially modify: test files if AppProvider import breaks existing mocks
 
@@ -679,6 +685,7 @@ git commit -m "chore: regenerate DB types, fix test imports for AppProvider"
 ### Task 7: Update docs to reflect final state
 
 **Files:**
+
 - Modify: `docs/apps/hub.md` — document ModuleSwitcher, OfflineIndicator, ErrorBoundary, SkeletonScreen
 - Modify: `docs/apps/coachbyte.md` — if any changes needed
 - Modify: `docs/apps/chefbyte.md` — if any changes needed
@@ -686,6 +693,7 @@ git commit -m "chore: regenerate DB types, fix test imports for AppProvider"
 **Step 1: Update hub.md**
 
 Add to the Hub spec:
+
 - ModuleSwitcher now filters by `app_activations` — only activated modules shown
 - OfflineIndicator shows "No connection" banner with last synced time
 - ErrorBoundary wraps each module independently — one module crash doesn't affect others
@@ -714,6 +722,7 @@ cd /home/jeremy/luna-hub-lite && pnpm typecheck
 **Step 2: Verify all pass**
 
 Expected:
+
 - 207 pgTAP tests pass
 - 268+ web tests pass (new tests from Tasks 1-5)
 - 85 app-tools tests pass
@@ -727,15 +736,15 @@ Update `MEMORY.md` and `current-task.md` to reflect Phase 10 complete.
 
 ## Summary
 
-| Task | What | Files |
-|------|------|-------|
-| 1 | AppProvider (activation + online context) | 3 files |
-| 2 | ModuleSwitcher activation filtering | 2 files |
-| 3 | OfflineIndicator | 3 files |
-| 4 | ErrorBoundary per module | 3 files |
-| 5 | SkeletonScreen components | 2 files |
-| 6 | DB types regen + test fixes | varies |
-| 7 | Doc updates | 1-3 docs |
-| 8 | Full verification | memory files |
+| Task | What                                      | Files        |
+| ---- | ----------------------------------------- | ------------ |
+| 1    | AppProvider (activation + online context) | 3 files      |
+| 2    | ModuleSwitcher activation filtering       | 2 files      |
+| 3    | OfflineIndicator                          | 3 files      |
+| 4    | ErrorBoundary per module                  | 3 files      |
+| 5    | SkeletonScreen components                 | 2 files      |
+| 6    | DB types regen + test fixes               | varies       |
+| 7    | Doc updates                               | 1-3 docs     |
+| 8    | Full verification                         | memory files |
 
 **Note:** The Phase 10 brief also specifies E2E browser tests (full-journey, offline-indicator, responsive-layout, error-boundaries). These are deferred as they require a running Supabase instance + dev server and are better tested manually or in a CI pipeline. The unit tests in Tasks 1-5 cover the component logic.

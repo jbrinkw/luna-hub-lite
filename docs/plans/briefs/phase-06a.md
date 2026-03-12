@@ -1,10 +1,13 @@
 # Phase 06a: ChefByte DB — Products + Stock + consume_product
+
 > Previous: phase-05b.md | Next: phase-06b.md
 
 ## Skills
+
 test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 
 ## Build
+
 - Migration: `supabase/migrations/YYYYMMDD_chefbyte_products_stock.sql`
 - `chefbyte.products` — product_id UUID PK, user_id FK auth.users CASCADE, name TEXT NOT NULL, barcode TEXT nullable, servings_per_container NUMERIC(10,3) NOT NULL DEFAULT 1, calories NUMERIC(10,3), protein_g NUMERIC(10,3), carbs_g NUMERIC(10,3), fats_g NUMERIC(10,3), is_placeholder BOOLEAN DEFAULT false, min_stock_containers NUMERIC(10,3) DEFAULT 0, walmart_url TEXT, price NUMERIC(10,2), created_at TIMESTAMPTZ
 - `chefbyte.stock_lots` — lot_id UUID PK, product_id FK CASCADE, user_id FK auth.users CASCADE, location_id TEXT NOT NULL, qty_containers NUMERIC(10,3) NOT NULL DEFAULT 0, expires_on DATE nullable, created_at TIMESTAMPTZ
@@ -19,6 +22,7 @@ test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 ## Test (TDD)
 
 ### pgTAP: `supabase/tests/chefbyte/consume_product.test.sql`
+
 - Single lot consumed correctly (qty reduced)
 - Multi-lot depletion in nearest-expiry order
 - NULL expires_on consumed last
@@ -28,6 +32,7 @@ test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 - Macros logged for full requested amount regardless of stock shortage
 
 ### Integration: `apps/web/src/__tests__/integration/chefbyte/product-crud.test.ts`
+
 - Create product with macros -> all fields stored correctly (NUMERIC(10,3) precision)
 - Update macros -> reflected on reload
 - Barcode unique per user: two products with same barcode -> second rejected
@@ -38,6 +43,7 @@ test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 - Product with min_stock_containers -> stored correctly
 
 ### Integration: `apps/web/src/__tests__/integration/chefbyte/stock-lot-operations.test.ts`
+
 - Add stock -> lot created with correct qty_containers and location_id
 - Add same product+location+expiry -> qty merged (UPSERT)
 - Add same product+different location -> separate lot created
@@ -54,18 +60,22 @@ test-driven-development, test-quality-review, context7 (Supabase, pgTAP)
 - Consume with p_log_macros=true -> food_log row created with correct macros
 
 ### Quality gate
+
 After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
+
 - `legacy/chefbyte-vercel/apps/web/src/lib/api-supabase.ts` — product/stock Supabase queries, lot merge patterns
 - `legacy/luna-ext-chefbyte/lib/services/inventory.py` — consume logic, nearest-expiry depletion
 - `legacy/luna-ext-chefbyte/lib/core/qu_resolver.py` — servings-to-containers conversion
 - `legacy/chefbyte-vercel/supabase/migrations/*.sql` — table schemas, indexes, RLS policies
 
 ## Commit
+
 `feat: chefbyte products + stock lots + consume_product`
 
 ## Acceptance
+
 - [ ] Products table with all columns, indexes, and RLS policies
 - [ ] Stock lots table with merge key UNIQUE constraint and RLS policies
 - [ ] consume_product depletes nearest-expiry-first, floors at 0, optionally logs macros

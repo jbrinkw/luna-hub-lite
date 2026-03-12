@@ -1,14 +1,17 @@
 # Phase 10: Integration + Polish
+
 > Previous: phase-09b.md | Next: (done)
 
 ## Skills
+
 test-driven-development, test-quality-review, frontend-design, requesting-code-review (final phase)
 
 ## Build
+
 - `apps/web/src/components/ModuleSwitcher.tsx` — cross-module navigation:
   - Hub / CoachByte / ChefByte switcher in main nav/menu
   - Only shows activated modules (reads hub.app_activations)
-  - Navigates between /hub/*, /coach/*, /chef/* route groups
+  - Navigates between /hub/_, /coach/_, /chef/\* route groups
 - `apps/web/src/components/OfflineIndicator.tsx`:
   - Connection status detection (navigator.onLine + Supabase Realtime heartbeat)
   - "No connection" banner when offline
@@ -28,6 +31,7 @@ test-driven-development, test-quality-review, frontend-design, requesting-code-r
 ## Test (TDD)
 
 ### Browser: `apps/web/e2e/cross-module/full-journey.spec.ts`
+
 - Sign up with email/password -> redirected to Hub
 - Set display name + timezone + day_start_hour in profile
 - Activate CoachByte -> CoachByte appears in module switcher
@@ -41,6 +45,7 @@ test-driven-development, test-quality-review, frontend-design, requesting-code-r
 - ChefByte still accessible and data intact
 
 ### Browser: `apps/web/e2e/cross-module/offline-indicator.spec.ts`
+
 - Simulate network disconnect (via Playwright context.setOffline)
 - "No connection" banner appears
 - Write buttons (save, submit, complete) are disabled
@@ -49,12 +54,14 @@ test-driven-development, test-quality-review, frontend-design, requesting-code-r
 - "Last synced" timestamp updates on reconnect
 
 ### Browser: `apps/web/e2e/cross-module/responsive-layout.spec.ts`
+
 - Desktop viewport (1280x800): side navigation visible, full table layouts
 - Tablet viewport (768x1024): navigation adapts, tables remain usable
 - Mobile viewport (375x667): hamburger menu, card layouts replace tables
 - Module switcher accessible at all viewport sizes
 
 ### Browser: `apps/web/e2e/cross-module/error-boundaries.spec.ts`
+
 - Inject error in CoachByte module -> fallback UI shown with retry button
 - Hub module still functional (navigable, profile editable)
 - ChefByte module still functional (scanner loads)
@@ -62,15 +69,19 @@ test-driven-development, test-quality-review, frontend-design, requesting-code-r
 - Error in one module's component does not crash sibling modules
 
 ### Quality gate
+
 After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
+
 N/A — cross-cutting concerns with no direct legacy equivalent.
 
 ## Commit
+
 `feat: integration + polish`
 
 ## Acceptance
+
 - [ ] Module switcher shows only activated modules, navigates between Hub / Coach / Chef
 - [ ] Offline indicator: banner on disconnect, buttons disabled, "last synced" timestamp
 - [ ] Error boundaries: per-module isolation, fallback UI, retry button, sibling modules unaffected

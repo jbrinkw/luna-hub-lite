@@ -11,6 +11,7 @@
 **Worktree:** `.worktrees/test-hardening-final` on branch `fix/test-hardening-final`
 
 **Test commands:**
+
 - pgTAP: `cd /home/jeremy/luna-hub-lite && supabase test db`
 - Unit: `cd /home/jeremy/luna-hub-lite/apps/web && pnpm exec vitest run`
 - Integration: `cd /home/jeremy/luna-hub-lite/apps/web && pnpm exec vitest run --config vitest.integration.config.ts`
@@ -23,6 +24,7 @@
 ## Task 1: pgTAP — user_tool_config RLS (NEW FILE)
 
 **Files:**
+
 - Create: `supabase/tests/hub/tool_config.test.sql`
 
 **What to test:** The `hub.user_tool_config` table has SELECT/INSERT/UPDATE/DELETE RLS policies for own rows. Zero pgTAP coverage exists.
@@ -130,6 +132,7 @@ ROLLBACK;
 ## Task 2: pgTAP — extension_settings RLS (NEW FILE)
 
 **Files:**
+
 - Create: `supabase/tests/hub/extension_settings.test.sql`
 
 **What to test:** The `hub.extension_settings` table has SELECT/INSERT/UPDATE/DELETE RLS policies. Zero pgTAP coverage exists.
@@ -237,6 +240,7 @@ ROLLBACK;
 ## Task 3: pgTAP — get_logical_date + fix existing weak tests
 
 **Files:**
+
 - Create: `supabase/tests/hub/logical_date.test.sql`
 - Modify: `supabase/tests/hub/api_keys.test.sql` (test 11: change `> 0` to exact count)
 - Modify: `supabase/tests/hub/activation.test.sql` (test 3: add data assertion after lives_ok)
@@ -313,11 +317,14 @@ ROLLBACK;
 In `supabase/tests/hub/api_keys.test.sql`, find the test that uses `ok(count(*)::integer > 0, ...)` and change it to use the exact expected count. After test 10 deletes `hash_jkl012`, User A should have 3 keys total: `hash_abc123` (revoked), `hash_def456` (revoked), `hash_ghi789` (active). So the cross-user DELETE check should verify count = 3:
 
 Change:
+
 ```sql
 SELECT ok(
   (SELECT count(*)::integer FROM hub.api_keys WHERE user_id = tests.get_supabase_uid('key_owner')) > 0,
 ```
+
 To:
+
 ```sql
 SELECT is(
   (SELECT count(*)::integer FROM hub.api_keys WHERE user_id = tests.get_supabase_uid('key_owner')),
@@ -331,6 +338,7 @@ Also update the test description to match.
 In `supabase/tests/hub/activation.test.sql`, after the `lives_ok` for deactivating an unactivated app, add a data assertion:
 
 After the `lives_ok(...)` line, add:
+
 ```sql
 -- Verify table is still empty for this user (no side effects)
 SELECT is(
@@ -352,6 +360,7 @@ Update the `SELECT plan(7)` to `SELECT plan(8)` to account for the new assertion
 ## Task 4: Integration — RLS isolation + fix readbacks + fix weak tests
 
 **Files:**
+
 - Modify: `apps/web/src/__tests__/integration/hub/profile-crud.test.ts`
 - Modify: `apps/web/src/__tests__/integration/hub/api-key-lifecycle.test.ts`
 - Modify: `apps/web/src/__tests__/integration/hub/app-activation.test.ts`
@@ -379,11 +388,7 @@ it('RLS: user B cannot read user A profile', async () => {
   expect(ownProfile).not.toBeNull();
 
   // User B cannot see User A's profile
-  const { data, error } = await clientB
-    .schema('hub')
-    .from('profiles')
-    .select('user_id')
-    .eq('user_id', userAId);
+  const { data, error } = await clientB.schema('hub').from('profiles').select('user_id').eq('user_id', userAId);
   expect(error).toBeNull();
   expect(data).toHaveLength(0);
 });
@@ -395,11 +400,7 @@ it('RLS: user B cannot update user A profile', async () => {
   userIds.push(userBId);
 
   // User B tries to update User A's profile
-  await clientB
-    .schema('hub')
-    .from('profiles')
-    .update({ display_name: 'HACKED' })
-    .eq('user_id', userAId);
+  await clientB.schema('hub').from('profiles').update({ display_name: 'HACKED' }).eq('user_id', userAId);
 
   // Verify User A's profile is unchanged
   const { data, error } = await clientA
@@ -430,11 +431,7 @@ it('RLS: user B cannot read user A api keys', async () => {
   expect(insertError).toBeNull();
 
   // User B queries — should see nothing
-  const { data, error } = await clientB
-    .schema('hub')
-    .from('api_keys')
-    .select('*')
-    .eq('user_id', userAId);
+  const { data, error } = await clientB.schema('hub').from('api_keys').select('*').eq('user_id', userAId);
   expect(error).toBeNull();
   expect(data).toHaveLength(0);
 });
@@ -453,11 +450,7 @@ it('RLS: user B cannot revoke user A api keys', async () => {
   expect(insertError).toBeNull();
 
   // User B tries to revoke it
-  await clientB
-    .schema('hub')
-    .from('api_keys')
-    .update({ revoked_at: new Date().toISOString() })
-    .eq('user_id', userAId);
+  await clientB.schema('hub').from('api_keys').update({ revoked_at: new Date().toISOString() }).eq('user_id', userAId);
 
   // Verify key is still active
   const { data, error } = await clientA
@@ -476,17 +469,17 @@ it('RLS: user B cannot revoke user A api keys', async () => {
 In `app-activation.test.ts`, change all readback queries from `adminClient` to the user's own `client`. This tests that the SELECT RLS policy works.
 
 Find all instances of:
+
 ```typescript
-const { data } = await adminClient
-  .schema('hub')
-  .from('app_activations')
+const { data } = await adminClient.schema('hub').from('app_activations');
 ```
+
 Replace with:
+
 ```typescript
-const { data, error: readError } = await client
-  .schema('hub')
-  .from('app_activations')
+const { data, error: readError } = await client.schema('hub').from('app_activations');
 ```
+
 And add `expect(readError).toBeNull();` after each.
 
 Also add a cross-user test:
@@ -499,16 +492,11 @@ it('RLS: user B cannot see user A activations', async () => {
   userIds.push(userBId);
 
   // User A activates coachbyte
-  const { error: activateError } = await clientA
-    .schema('hub')
-    .rpc('activate_app', { p_app_name: 'coachbyte' });
+  const { error: activateError } = await clientA.schema('hub').rpc('activate_app', { p_app_name: 'coachbyte' });
   expect(activateError).toBeNull();
 
   // User B queries — should see nothing
-  const { data, error } = await clientB
-    .schema('hub')
-    .from('app_activations')
-    .select('*');
+  const { data, error } = await clientB.schema('hub').from('app_activations').select('*');
   expect(error).toBeNull();
   expect(data).toHaveLength(0);
 });
@@ -519,12 +507,14 @@ it('RLS: user B cannot see user A activations', async () => {
 In `auth-lifecycle.test.ts`:
 
 1. In the logout test, add error check on the signIn call:
+
 ```typescript
 const { error: signInError } = await client.auth.signInWithPassword({ email, password });
 expect(signInError).toBeNull();
 ```
 
 2. In the duplicate signup test, capture the second signUp return value:
+
 ```typescript
 const { error: dupError } = await client2.auth.signUp({ ... });
 // Supabase may return success (anti-enumeration) or error — either is acceptable
@@ -540,6 +530,7 @@ const { error: dupError } = await client2.auth.signUp({ ... });
 ## Task 5: Unit — Fix weak tests + add missing coverage
 
 **Files:**
+
 - Modify: `apps/web/src/__tests__/unit/hub/ApiKeyGenerator.test.tsx`
 - Modify: `apps/web/src/__tests__/unit/hub/ExtensionCard.test.tsx`
 - Modify: `apps/web/src/__tests__/unit/hub/SignupForm.test.tsx`
@@ -578,9 +569,7 @@ it('renders active keys list with labels and revoke buttons', () => {
 
 it('onRevoke called with correct key id', async () => {
   const onRevoke = vi.fn();
-  const activeKeys = [
-    { id: 'key-abc', label: 'Test Key', created_at: '2026-01-15T00:00:00Z' },
-  ];
+  const activeKeys = [{ id: 'key-abc', label: 'Test Key', created_at: '2026-01-15T00:00:00Z' }];
   render(<ApiKeyGenerator {...defaultProps} activeKeys={activeKeys} onRevoke={onRevoke} />);
 
   await userEvent.click(screen.getByRole('button', { name: /revoke/i }));
@@ -612,6 +601,7 @@ it('handles onGenerate returning null', async () => {
 ```
 
 Also fix the clipboard test (test 3) — use vi.spyOn pattern instead of Object.assign:
+
 ```tsx
 // Before the test:
 const writeText = vi.fn().mockResolvedValue(undefined);
@@ -682,9 +672,7 @@ Also delete the redundant test 5 (`passes display_name as user metadata`) since 
 
 ```tsx
 it('buttons are disabled when loading', () => {
-  const { rerender } = render(
-    <AppActivationCard {...defaultProps} loading />
-  );
+  const { rerender } = render(<AppActivationCard {...defaultProps} loading />);
   expect(screen.getByRole('button', { name: /activate/i })).toBeDisabled();
 
   rerender(<AppActivationCard {...defaultProps} active loading />);
@@ -713,17 +701,20 @@ it('toggling enabled tool off calls onToggle with false', async () => {
 ## Task 6: E2E — Fix all URL-only assertions in auth.spec.ts
 
 **Files:**
+
 - Modify: `apps/web/e2e/hub/auth.spec.ts`
 
 Read the file first. Then make these changes:
 
 **Test 1** (`visit / redirects to /login`) — Add content check:
+
 ```typescript
 await expect(page).toHaveURL(/\/login/);
 await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
 ```
 
 **Test 3** (`login with invalid password`) — Already has content assertion (`/invalid.*credentials/i`). Add session verification:
+
 ```typescript
 await expect(page.getByText(/invalid.*credentials/i)).toBeVisible();
 await expect(page).toHaveURL(/\/login/);
@@ -733,12 +724,14 @@ await expect(page).toHaveURL(/\/login/);
 ```
 
 **Test 4** (`signup with valid inputs`) — Add hub content check:
+
 ```typescript
 await expect(page).toHaveURL(/\/hub/, { timeout: 5000 });
 await expect(page.getByRole('button', { name: /logout/i })).toBeVisible();
 ```
 
 **Test 5** (`signup with duplicate email`) — Fix false-positive risk. Replace the `waitForURL` + `listUsers` pattern with a proper assertion. Since Supabase local dev silently succeeds (redirects to /hub), we can only check the user count:
+
 ```typescript
 await page.getByRole('button', { name: /sign up/i }).click();
 // Supabase local dev may redirect to /hub (anti-enumeration) or stay on /signup
@@ -749,21 +742,25 @@ const { data } = await admin.auth.admin.listUsers();
 const matches = data.users.filter((u) => u.email === email);
 expect(matches.length).toBe(1);
 ```
+
 (Keep as-is — the current implementation is the best we can do given Supabase's anti-enumeration behavior. Add a comment explaining why.)
 
 **Test 6** (`logout redirects to /login`) — Add content check:
+
 ```typescript
 await expect(page).toHaveURL(/\/login/, { timeout: 5000 });
 await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
 ```
 
 **Test 8** (`visit /coach without login`) — Add content check:
+
 ```typescript
 await expect(page).toHaveURL(/\/login/);
 await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
 ```
 
 **Test 9** (`visit /chef without login`) — Add content check:
+
 ```typescript
 await expect(page).toHaveURL(/\/login/);
 await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
@@ -778,18 +775,22 @@ await expect(page.getByRole('button', { name: /sign in/i })).toBeVisible();
 ## Task 7: E2E — Fix navigation weak tests
 
 **Files:**
+
 - Modify: `apps/web/e2e/hub/navigation.spec.ts`
 
 Read the file first. Then make these changes:
 
 **Test 4** (`click Tools in side nav`) — Replace `ion-toggle` with page-specific selector:
+
 ```typescript
 await expect(page).toHaveURL(/\/hub\/tools/);
 await expect(page.getByText('COACHBYTE_LOG_SET')).toBeVisible();
 ```
+
 (Tool names only appear on the Tools page, not Extensions.)
 
 **Test 7** (`active page highlighted`) — Add count assertion:
+
 ```typescript
 const nav = page.getByLabel('Hub navigation');
 // Verify exactly one item is highlighted
@@ -806,12 +807,14 @@ await expect(appsItem).toContainText('Apps');
 ```
 
 **Test 8** (`module switcher: CoachByte`) — CoachByte and ChefByte pages don't exist yet (Phase 5+), so we can't add content assertions. Add a comment documenting this:
+
 ```typescript
 // Note: CoachByte page not yet built (Phase 5). URL assertion is sufficient until then.
 await expect(page).toHaveURL(/\/coach/, { timeout: 5000 });
 ```
 
 **Test 9** (`module switcher: ChefByte`) — Same treatment:
+
 ```typescript
 // Note: ChefByte page not yet built (Phase 7). URL assertion is sufficient until then.
 await expect(page).toHaveURL(/\/chef/, { timeout: 5000 });
@@ -826,6 +829,7 @@ await expect(page).toHaveURL(/\/chef/, { timeout: 5000 });
 ## Task 8: E2E — New tools.spec.ts
 
 **Files:**
+
 - Create: `apps/web/e2e/hub/tools.spec.ts`
 
 **Implementation:**
@@ -921,6 +925,7 @@ test.describe('Tools page', () => {
 ## Task 9: E2E — New extensions.spec.ts
 
 **Files:**
+
 - Create: `apps/web/e2e/hub/extensions.spec.ts`
 
 **Implementation:**
@@ -1024,7 +1029,9 @@ test.describe('Extensions page', () => {
       // Reload and verify
       await page.reload();
       await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 15000 });
-      await expect(page.locator('ion-card', { hasText: 'Obsidian' }).getByText(/credentials configured/i)).toBeVisible();
+      await expect(
+        page.locator('ion-card', { hasText: 'Obsidian' }).getByText(/credentials configured/i),
+      ).toBeVisible();
     } finally {
       await cleanup();
     }
@@ -1041,6 +1048,7 @@ test.describe('Extensions page', () => {
 ## Task 10: E2E — App activation confirm/cancel + persistence
 
 **Files:**
+
 - Modify: `apps/web/e2e/hub/app-activation.spec.ts`
 
 Read the file first. Add these tests to the existing describe block:
@@ -1102,10 +1110,14 @@ test('activation persists after page reload', async ({ page }) => {
 
     // Reload
     await page.reload();
-    await expect(page.locator('ion-card', { hasText: 'CoachByte' }).getByText('Active', { exact: true })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('ion-card', { hasText: 'CoachByte' }).getByText('Active', { exact: true })).toBeVisible({
+      timeout: 15000,
+    });
 
     // ChefByte should still be Inactive
-    await expect(page.locator('ion-card', { hasText: 'ChefByte' }).getByText('Inactive', { exact: true })).toBeVisible();
+    await expect(
+      page.locator('ion-card', { hasText: 'ChefByte' }).getByText('Inactive', { exact: true }),
+    ).toBeVisible();
   } finally {
     await cleanup();
   }

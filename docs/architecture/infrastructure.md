@@ -26,21 +26,21 @@ The frontend app uses the Supabase client SDK with standard RLS. The service rol
 
 ## Security Model
 
-| Layer | Mechanism |
-|-------|-----------|
-| Transport | HTTPS everywhere (Vercel, Supabase, Cloudflare all enforce) |
-| Frontend Auth | Supabase Auth with PKCE flow, single origin (no cross-subdomain issues) |
-| Frontend Data Access | RLS on every table, `(select auth.uid()) = user_id TO authenticated` |
-| MCP Auth | API key (SHA-256, primary) or OAuth 2.1 with PKCE (24h expiry, secondary) — verified before any tool execution |
-| MCP Data Access | Service role key via Supavisor + SECURITY DEFINER functions in `private` schema with `SET search_path = ''` and explicit `user_id` parameter assertion |
-| MCP Tool Scoping | Tools only call validated RPC functions, never raw SQL — mitigates prompt injection data exfiltration |
-| Device Auth | LiquidTrack provisioning validates a one-time device key (stored hashed). Runtime events are accepted by device ID lookup (MVP simplification), with JWT verification disabled on IoT endpoint |
-| Extension Credentials | Supabase Vault (pgsodium) per user, accessed via `private` schema RPC |
-| Secrets | Vercel env vars + Supabase dashboard + Cloudflare Worker secrets (never in client code) |
-| XSS Prevention | Strict Content Security Policy headers (`script-src 'self'` minimum) on all pages |
-| CSRF | SameSite=Lax cookies + CSRF tokens |
-| Walmart Rate Limiting | Per-user request quota with queuing in edge function |
-| LLM Rate Limiting | Per-user daily quota (100 scans/day) on analyze-product |
+| Layer                 | Mechanism                                                                                                                                                                                      |
+| --------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Transport             | HTTPS everywhere (Vercel, Supabase, Cloudflare all enforce)                                                                                                                                    |
+| Frontend Auth         | Supabase Auth with PKCE flow, single origin (no cross-subdomain issues)                                                                                                                        |
+| Frontend Data Access  | RLS on every table, `(select auth.uid()) = user_id TO authenticated`                                                                                                                           |
+| MCP Auth              | API key (SHA-256, primary) or OAuth 2.1 with PKCE (24h expiry, secondary) — verified before any tool execution                                                                                 |
+| MCP Data Access       | Service role key via Supavisor + SECURITY DEFINER functions in `private` schema with `SET search_path = ''` and explicit `user_id` parameter assertion                                         |
+| MCP Tool Scoping      | Tools only call validated RPC functions, never raw SQL — mitigates prompt injection data exfiltration                                                                                          |
+| Device Auth           | LiquidTrack provisioning validates a one-time device key (stored hashed). Runtime events are accepted by device ID lookup (MVP simplification), with JWT verification disabled on IoT endpoint |
+| Extension Credentials | Supabase Vault (pgsodium) per user, accessed via `private` schema RPC                                                                                                                          |
+| Secrets               | Vercel env vars + Supabase dashboard + Cloudflare Worker secrets (never in client code)                                                                                                        |
+| XSS Prevention        | Strict Content Security Policy headers (`script-src 'self'` minimum) on all pages                                                                                                              |
+| CSRF                  | SameSite=Lax cookies + CSRF tokens                                                                                                                                                             |
+| Walmart Rate Limiting | Per-user request quota with queuing in edge function                                                                                                                                           |
+| LLM Rate Limiting     | Per-user daily quota (100 scans/day) on analyze-product                                                                                                                                        |
 
 ## Realtime Infrastructure
 
@@ -48,12 +48,12 @@ Supabase Realtime replaces all polling. Clients subscribe to Postgres changes fi
 
 **Future optimization:** For high-frequency events (timer updates), switch to Broadcast channels to avoid per-subscriber RLS evaluation. For scoped subscriptions, subscribe to specific row IDs instead of broad table-level changes.
 
-| Channel | Module | What Triggers | Purpose |
-|---------|--------|--------------|---------|
-| Timer updates | CoachByte | CoachByte `timer` row INSERT/UPDATE | Client receives new `end_time`, starts local countdown |
-| Plan updates | CoachByte | CoachByte `planned_sets` or `completed_sets` changes | UI reflects sets completed by MCP agent or another device |
-| Macro totals | ChefByte | ChefByte `meal_plan` done status changes, `temp_items` inserts | Dashboard updates when meals are logged |
-| Profile changes | Hub | Hub `profiles` UPDATE | `day_start_hour` or timezone changes propagate to all modules without page refresh |
+| Channel         | Module    | What Triggers                                                  | Purpose                                                                            |
+| --------------- | --------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Timer updates   | CoachByte | CoachByte `timer` row INSERT/UPDATE                            | Client receives new `end_time`, starts local countdown                             |
+| Plan updates    | CoachByte | CoachByte `planned_sets` or `completed_sets` changes           | UI reflects sets completed by MCP agent or another device                          |
+| Macro totals    | ChefByte  | ChefByte `meal_plan` done status changes, `temp_items` inserts | Dashboard updates when meals are logged                                            |
+| Profile changes | Hub       | Hub `profiles` UPDATE                                          | `day_start_hour` or timezone changes propagate to all modules without page refresh |
 
 ### Timer Precision Model
 

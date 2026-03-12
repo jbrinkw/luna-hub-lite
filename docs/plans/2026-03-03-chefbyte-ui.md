@@ -13,9 +13,11 @@
 ## Context
 
 ### Navigation
+
 Top nav tabs: Scanner | Home | Inventory | Shopping | Meal Plan | Recipes | Macros | Walmart | Settings
 
 Routes under `/chef/*`:
+
 - `/chef` → ScannerPage (index)
 - `/chef/home` → HomePage
 - `/chef/inventory` → InventoryPage
@@ -29,14 +31,17 @@ Routes under `/chef/*`:
 - `/chef/settings` → SettingsPage
 
 ### DB Tables (chefbyte schema)
+
 locations, products, stock_lots, recipes, recipe_ingredients, meal_plan_entries, food_logs, temp_items, shopping_list, liquidtrack_devices, liquidtrack_events, user_config
 
 ### RPC Functions
+
 - `chefbyte.consume_product(p_product_id, p_qty, p_unit, p_log_macros, p_logical_date)` → JSONB
 - `chefbyte.mark_meal_done(p_meal_id)` → JSONB
 - `chefbyte.get_daily_macros(p_logical_date)` → JSONB
 
 ### Patterns (from CoachByte)
+
 - Layout: `ChefLayout` wraps page in IonPage + IonHeader + IonContent + ModuleSwitcher
 - Nav: `ChefNav` uses IonSegment with tab buttons, useLocation for active detection
 - Data: `supabase.schema('chefbyte').from('table').select('...').eq('user_id', user.id)`
@@ -45,6 +50,7 @@ locations, products, stock_lots, recipes, recipe_ingredients, meal_plan_entries,
 - Errors: Show IonText with error message
 
 ### Legacy Reference
+
 Match UI patterns from `legacy/chefbyte-vercel/apps/web/src/pages/` — same React+Supabase stack. Key files: Home.tsx, Scanner.tsx, Inventory.tsx, MealPlan.tsx, Recipes.tsx, RecipeCreate.tsx, ShoppingList.tsx, Walmart.tsx, Settings.tsx.
 
 ---
@@ -52,12 +58,14 @@ Match UI patterns from `legacy/chefbyte-vercel/apps/web/src/pages/` — same Rea
 ## Task 1: ChefLayout + ChefNav + Routes
 
 **Files:**
+
 - Create: `apps/web/src/components/chefbyte/ChefLayout.tsx`
 - Create: `apps/web/src/components/chefbyte/ChefNav.tsx`
 - Modify: `apps/web/src/modules/chefbyte/routes.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/ChefNav.test.tsx`
 
 **What to build:**
+
 - `ChefNav`: IonSegment with tabs matching nav structure above. Follow CoachNav pattern exactly (useLocation, useNavigate, IonSegmentButton).
 - `ChefLayout`: IonPage + IonHeader (title "CHEFBYTE" + logout button) + second IonToolbar with ChefNav + IonContent with ModuleSwitcher + children. Follow CoachLayout pattern.
 - Update `routes.tsx`: Import all page components (use placeholder components for now — just the page name in an IonText), wire up all routes with React Router.
@@ -70,6 +78,7 @@ Match UI patterns from `legacy/chefbyte-vercel/apps/web/src/pages/` — same Rea
 ## Task 2: SettingsPage (Products + LiquidTrack tabs)
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/SettingsPage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/SettingsPage.test.tsx`
 
@@ -77,6 +86,7 @@ Match UI patterns from `legacy/chefbyte-vercel/apps/web/src/pages/` — same Rea
 Settings page with two IonSegment tabs: Products and LiquidTrack.
 
 **Products tab:**
+
 - Searchable product list from `chefbyte.products`
 - Each product shows: name, barcode, servings_per_container, macros per serving, min_stock, price
 - Edit inline or in expandable card
@@ -84,6 +94,7 @@ Settings page with two IonSegment tabs: Products and LiquidTrack.
 - Add Product form: name, barcode, servings_per_container, calories/carbs/protein/fat_per_serving, min_stock_amount, price
 
 **LiquidTrack tab:**
+
 - Device table from `chefbyte.liquidtrack_devices`: device_name, product name (joined), is_active status
 - Add Device form: device_name, product_id (select), generates UUID device_id + random import_key. Insert device with hashed key.
 - Per-device event log from `chefbyte.liquidtrack_events`: created_at, weight_before, weight_after, consumption, macros
@@ -98,6 +109,7 @@ Settings page with two IonSegment tabs: Products and LiquidTrack.
 ## Task 3: InventoryPage
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/InventoryPage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/InventoryPage.test.tsx`
 
@@ -105,16 +117,19 @@ Settings page with two IonSegment tabs: Products and LiquidTrack.
 Inventory page with grouped-by-product default view and raw lots toggle.
 
 **Grouped view (default):**
+
 - Query products + aggregate stock_lots per product (total qty_containers, nearest expires_on, lot count)
 - Table columns: Product name (+ barcode, srvg/ctn below), Total Stock, Nearest Expiry, Lots count, Min Stock, Actions
 - StockBadge color: red if stock=0, orange if below min_stock_amount, green otherwise
 - Actions: +1 ctn, -1 ctn, +1 srv, -1 srv (via consume_product RPC with appropriate unit/qty), Consume All
 
 **Lots view:**
+
 - Toggle to show raw stock_lots with: lot_id, product name, location name, qty_containers, expires_on
 - Sorted by expires_on ASC NULLS LAST
 
 **Stock adjustments:**
+
 - +ctn/-ctn: Call consume_product with negative/positive qty? No — for adding stock, insert/update lot directly. For consuming, use consume_product RPC.
 - +ctn: Insert new lot (location = first location, no expiry) or update existing
 - -ctn: consume_product(product_id, 1, 'container', false, logical_date)
@@ -130,6 +145,7 @@ Inventory page with grouped-by-product default view and raw lots toggle.
 ## Task 4: ShoppingPage
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/ShoppingPage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/ShoppingPage.test.tsx`
 
@@ -152,6 +168,7 @@ Shopping list with To Buy / Purchased sections.
 ## Task 5: RecipesPage + RecipeFormPage
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/RecipesPage.tsx`
 - Create: `apps/web/src/pages/chefbyte/RecipeFormPage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/RecipesPage.test.tsx`
@@ -160,6 +177,7 @@ Shopping list with To Buy / Purchased sections.
 **What to build:**
 
 **RecipesPage:**
+
 - Card grid from `chefbyte.recipes` joined with recipe_ingredients → products for macro calculation
 - Each card: name, active_time, total_time, per-serving macros (computed from ingredients), [+ Meal Plan] button
 - Filters: search bar, Can Be Made (sufficient stock for all ingredients), active time filter
@@ -167,11 +185,12 @@ Shopping list with To Buy / Purchased sections.
 - [+ New Recipe] button → navigate to `/chef/recipes/new`
 
 **RecipeFormPage:**
+
 - Single page for create (no :id param) and edit (with :id param)
 - Form fields: name, description, base_servings, active_time, total_time, instructions (textarea)
 - Ingredient section: ProductSearch autocomplete + quantity + unit (container/serving) + note + Add button
 - Ingredients table showing added ingredients with Remove button
-- Dynamic macro calculation: sum each ingredient's macros (quantity * per-serving or per-container macros) / base_servings for per-serving display
+- Dynamic macro calculation: sum each ingredient's macros (quantity \* per-serving or per-container macros) / base_servings for per-serving display
 - Save: upsert recipe + delete old ingredients + insert new ingredients
 - Delete button (edit mode only)
 
@@ -184,6 +203,7 @@ Shopping list with To Buy / Purchased sections.
 ## Task 6: MealPlanPage
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/MealPlanPage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/MealPlanPage.test.tsx`
 
@@ -208,6 +228,7 @@ Shopping list with To Buy / Purchased sections.
 ## Task 7: MacroPage
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/MacroPage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/MacroPage.test.tsx`
 
@@ -220,7 +241,7 @@ Daily macro tracking with consumed/planned items and modals.
 - Planned Items: query meal_plan_entries for date where completed_at IS NULL and meal_prep=false. Show recipe/product name + estimated macros
 - Modals:
   - Log Temp Item: name, calories, protein, carbs, fat inputs → insert into temp_items
-  - Target Macros editor: protein, carbs, fats inputs → auto-calc calories (P*4 + C*4 + F*9) → save to user_config keys: goal_calories, goal_protein, goal_carbs, goal_fats
+  - Target Macros editor: protein, carbs, fats inputs → auto-calc calories (P*4 + C*4 + F\*9) → save to user_config keys: goal_calories, goal_protein, goal_carbs, goal_fats
   - Taste Profile: textarea → save to user_config key: taste_profile
 
 **Reference:** `legacy/chefbyte-vercel/apps/web/src/pages/Home.tsx` (macro section), ASCII layout line 641
@@ -232,6 +253,7 @@ Daily macro tracking with consumed/planned items and modals.
 ## Task 8: HomePage (Dashboard)
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/HomePage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/HomePage.test.tsx`
 
@@ -242,7 +264,7 @@ Dashboard with status cards, macro summary, and quick actions.
   - Missing Prices: products where price IS NULL
   - Placeholders: products where is_placeholder = true
   - Below Min Stock: products where total stock < min_stock_amount
-  - Cart Value: SUM(price * qty_containers) from shopping_list joined with products
+  - Cart Value: SUM(price \* qty_containers) from shopping_list joined with products
 - Macro Day Summary: reuse same get_daily_macros RPC + progress bars as MacroPage (but compact)
 - Quick Actions row: buttons for Import Shopping, Target Macros modal, Taste Profile modal, Meal Plan → Cart
 - Today's Meal Prep: query meal_plan_entries for today where meal_prep=true and completed_at IS NULL
@@ -256,6 +278,7 @@ Dashboard with status cards, macro summary, and quick actions.
 ## Task 9: ScannerPage
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/ScannerPage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/ScannerPage.test.tsx`
 
@@ -263,12 +286,14 @@ Dashboard with status cards, macro summary, and quick actions.
 Two-column barcode scanner with queue and keypad.
 
 **Left column — Queue:**
+
 - Barcode input field (text, auto-focus, captures HID scanner input)
 - Filter buttons: All / New
 - Transaction queue (local state array of queue items)
 - Each queue item: product name, transaction details (purchased/consumed X units), stock level, status indicator (border color), undo/delete buttons
 
 **Right column — Keypad:**
+
 - Mode selector: 4 buttons (Purchase, Consume+Macros, Consume-NoMacros, Add to Shopping)
 - Active item display (currently selected queue item name)
 - Screen value display (numeric input)
@@ -277,6 +302,7 @@ Two-column barcode scanner with queue and keypad.
 - Unit toggle: Servings / Containers (consume modes only)
 
 **Barcode flow:**
+
 1. Scan barcode → look up in products table by barcode
 2. If found → add to queue with product info
 3. If not found → call analyze-product Edge Function (STUBBED: just create placeholder product with barcode, mark as is_placeholder=true, add [!NEW] badge to queue item)
@@ -298,6 +324,7 @@ Two-column barcode scanner with queue and keypad.
 ## Task 10: WalmartPage
 
 **Files:**
+
 - Create: `apps/web/src/pages/chefbyte/WalmartPage.tsx`
 - Test: `apps/web/src/__tests__/unit/chefbyte/WalmartPage.test.tsx`
 
@@ -305,11 +332,13 @@ Two-column barcode scanner with queue and keypad.
 Price manager with two sections.
 
 **Missing Walmart Links:**
+
 - Query products where walmart_link IS NULL and is_placeholder=false
 - For each product: show name, radio group with search results (STUBBED — walmart-scrape Edge Function not yet available, show "Search results will appear when Walmart integration is enabled" placeholder) + "Not on Walmart" option
 - [Link Selected] button: updates product's walmart_link field
 
 **Missing Prices:**
+
 - Query products where walmart_link IS NOT NULL and price IS NULL, OR products marked "Not on Walmart" with no price
 - Manual price input per product + [Save Price] button
 
@@ -324,10 +353,12 @@ Price manager with two sections.
 ## Task 11: Wire up routes + integration verification
 
 **Files:**
+
 - Modify: `apps/web/src/modules/chefbyte/routes.tsx` (replace placeholders with real page imports)
 - Run: `pnpm typecheck`, `pnpm test`, `supabase test db`
 
 **What to do:**
+
 - Replace all placeholder page components in routes.tsx with real imports
 - Verify typecheck passes
 - Verify all tests pass (existing + new ChefByte tests)

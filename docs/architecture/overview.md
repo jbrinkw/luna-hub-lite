@@ -15,52 +15,52 @@
 
 ## Frontend (Single App Shell)
 
-| Concern | Choice |
-|---------|--------|
-| Framework | React + TypeScript + Vite |
-| UI Library | Ionic React (platform-adaptive components, Capacitor-ready for future native) |
-| Styling | Ionic theming + CSS variables for per-module branding |
-| Routing | React Router with path-based module routing (`/hub/*`, `/coach/*`, `/chef/*`) |
-| State | React hooks + Supabase client SDK subscriptions |
-| Real-Time | Supabase Realtime (Postgres change subscriptions filtered by `user_id`, additional filtering client-side) |
-| PWA | Single service worker (app shell caching only — no data caching or offline data access) + single web manifest |
-| Layout | Desktop-first responsive design using Ionic grid + CSS media queries. Multi-column layouts on wide screens, single-column stacking on narrow. Mobile-optimized layouts deferred to post-MVP. |
-| Future Native | Capacitor wrapping deferred to post-MVP (adds native plugins, no app code changes) |
+| Concern       | Choice                                                                                                                                                                                       |
+| ------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Framework     | React + TypeScript + Vite                                                                                                                                                                    |
+| UI Library    | Ionic React (platform-adaptive components, Capacitor-ready for future native)                                                                                                                |
+| Styling       | Ionic theming + CSS variables for per-module branding                                                                                                                                        |
+| Routing       | React Router with path-based module routing (`/hub/*`, `/coach/*`, `/chef/*`)                                                                                                                |
+| State         | React hooks + Supabase client SDK subscriptions                                                                                                                                              |
+| Real-Time     | Supabase Realtime (Postgres change subscriptions filtered by `user_id`, additional filtering client-side)                                                                                    |
+| PWA           | Single service worker (app shell caching only — no data caching or offline data access) + single web manifest                                                                                |
+| Layout        | Desktop-first responsive design using Ionic grid + CSS media queries. Multi-column layouts on wide screens, single-column stacking on narrow. Mobile-optimized layouts deferred to post-MVP. |
+| Future Native | Capacitor wrapping deferred to post-MVP (adds native plugins, no app code changes)                                                                                                           |
 
 ## Backend (Shared)
 
-| Concern | Choice |
-|---------|--------|
-| Database | Supabase PostgreSQL (single project, schema-per-module: `hub`, `coachbyte`, `chefbyte`, `private`) |
-| Auth | Supabase Auth (email/password, single origin — no cross-subdomain cookie issues) |
-| Serverless Functions | Supabase Edge Functions (Deno/TypeScript) for anything needing secrets or external APIs |
-| Database Functions | plpgsql for multi-step business logic that is purely data operations. All SECURITY DEFINER functions in a `private` schema with `SET search_path = ''`. |
-| File Storage | Supabase Storage (recipe photos, profile images — future) |
-| Real-Time Engine | Supabase Realtime (Postgres changes broadcast to subscribed clients) |
-| Secrets Management | Supabase Vault (pgsodium) for extension credentials |
-| Observability | Platform-native dashboards (Cloudflare Workers analytics, Supabase logs, Vercel logs) |
-| Connection Management | All serverless connections route through Supavisor (port 6543, transaction mode) |
+| Concern               | Choice                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Database              | Supabase PostgreSQL (single project, schema-per-module: `hub`, `coachbyte`, `chefbyte`, `private`)                                                      |
+| Auth                  | Supabase Auth (email/password, single origin — no cross-subdomain cookie issues)                                                                        |
+| Serverless Functions  | Supabase Edge Functions (Deno/TypeScript) for anything needing secrets or external APIs                                                                 |
+| Database Functions    | plpgsql for multi-step business logic that is purely data operations. All SECURITY DEFINER functions in a `private` schema with `SET search_path = ''`. |
+| File Storage          | Supabase Storage (recipe photos, profile images — future)                                                                                               |
+| Real-Time Engine      | Supabase Realtime (Postgres changes broadcast to subscribed clients)                                                                                    |
+| Secrets Management    | Supabase Vault (pgsodium) for extension credentials                                                                                                     |
+| Observability         | Platform-native dashboards (Cloudflare Workers analytics, Supabase logs, Vercel logs)                                                                   |
+| Connection Management | All serverless connections route through Supavisor (port 6543, transaction mode)                                                                        |
 
 ## MCP Server
 
-| Concern | Choice |
-|---------|--------|
-| Hosting | Cloudflare Workers with Durable Objects (serverless) |
-| Transport | Server-Sent Events (SSE) |
-| Auth (primary) | API key per user — stored as SHA-256 hash, validated with constant-time comparison |
-| Auth (secondary) | OAuth 2.1 flow with PKCE required for all clients, 24-hour token expiry, no server-side refresh — for MCP clients that require OAuth |
-| Auth (to database) | Service role key via Supavisor — MCP auth verifies user identity first, then tool calls execute via SECURITY DEFINER functions with explicit user_id parameter. Each function asserts the passed user_id matches the authenticated identity. |
-| Tool sources | App tools (CoachByte, ChefByte) and extension tools |
-| Tool scope | Per-user — each user enables/disables tools in their Hub settings |
-| Durable Objects purpose | Maintaining OAuth session context per connected MCP client. Tool calls are stateless request-response. |
-| Remote MCP proxying | **Deferred.** Not included at launch. Future feature. |
+| Concern                 | Choice                                                                                                                                                                                                                                       |
+| ----------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Hosting                 | Cloudflare Workers with Durable Objects (serverless)                                                                                                                                                                                         |
+| Transport               | Server-Sent Events (SSE)                                                                                                                                                                                                                     |
+| Auth (primary)          | API key per user — stored as SHA-256 hash, validated with constant-time comparison                                                                                                                                                           |
+| Auth (secondary)        | OAuth 2.1 flow with PKCE required for all clients, 24-hour token expiry, no server-side refresh — for MCP clients that require OAuth                                                                                                         |
+| Auth (to database)      | Service role key via Supavisor — MCP auth verifies user identity first, then tool calls execute via SECURITY DEFINER functions with explicit user_id parameter. Each function asserts the passed user_id matches the authenticated identity. |
+| Tool sources            | App tools (CoachByte, ChefByte) and extension tools                                                                                                                                                                                          |
+| Tool scope              | Per-user — each user enables/disables tools in their Hub settings                                                                                                                                                                            |
+| Durable Objects purpose | Maintaining OAuth session context per connected MCP client. Tool calls are stateless request-response.                                                                                                                                       |
+| Remote MCP proxying     | **Deferred.** Not included at launch. Future feature.                                                                                                                                                                                        |
 
 ## Monorepo
 
-| Concern | Choice |
-|---------|--------|
-| Workspace Manager | pnpm workspaces + Turborepo |
-| Shared Packages | Supabase client config, TypeScript types (auto-generated from DB schema), shared Ionic theme/layout/auth components |
+| Concern           | Choice                                                                                                              |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------- |
+| Workspace Manager | pnpm workspaces + Turborepo                                                                                         |
+| Shared Packages   | Supabase client config, TypeScript types (auto-generated from DB schema), shared Ionic theme/layout/auth components |
 
 ### Convention: App Modules vs Extensions
 

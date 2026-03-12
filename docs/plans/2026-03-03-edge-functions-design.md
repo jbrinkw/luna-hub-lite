@@ -25,6 +25,7 @@ Three Supabase Edge Functions (Deno/TypeScript) ported from legacy Vercel server
 ### Claude Haiku 4.5 Prompt
 
 System: normalize OFF data into our product schema fields. Return strict JSON:
+
 ```json
 {
   "name": "Brand Product Name",
@@ -38,6 +39,7 @@ System: normalize OFF data into our product schema fields. Return strict JSON:
 ```
 
 Rules:
+
 - Name: `brand + product_name`, fix formatting only
 - Nutrition: per-serving. If OFF only has per-100g, calculate using serving_size
 - Apply 4-4-9 validation: `carbs×4 + protein×4 + fat×9` should approximate calories. Adjust calories if >10% off
@@ -110,10 +112,10 @@ Minimal changes from legacy — direct port to Deno.serve pattern.
 ```typescript
 {
   events: Array<{
-    weight_before: number,  // grams
-    weight_after: number,   // grams
-    is_refill: boolean
-  }>
+    weight_before: number; // grams
+    weight_after: number; // grams
+    is_refill: boolean;
+  }>;
 }
 ```
 
@@ -133,6 +135,7 @@ For liquids, serving_weight_grams ≈ serving_size in mL (density ≈ 1).
 ## Shared Patterns
 
 ### CORS Headers (all functions)
+
 ```typescript
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -142,25 +145,25 @@ const corsHeaders = {
 ```
 
 ### Deno.serve Pattern
+
 ```typescript
-import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { createClient } from 'jsr:@supabase/supabase-js@2';
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
-    return new Response('ok', { headers: corsHeaders })
+    return new Response('ok', { headers: corsHeaders });
   }
   // ...
-})
+});
 ```
 
 ### JWT Auth Helper (analyze-product, walmart-scrape)
+
 ```typescript
 function getSupabaseClient(authHeader: string) {
-  return createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } }
-  )
+  return createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    global: { headers: { Authorization: authHeader } },
+  });
 }
 ```
 
@@ -181,11 +184,13 @@ Each function needs a Deno import map. Supabase Edge Functions use `jsr:` import
 ### liquidtrack config
 
 `supabase/functions/liquidtrack/.env` (local dev only, not committed):
+
 ```
 # No special env — uses SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY from supabase start
 ```
 
 Need to add `verify_jwt = false` to `supabase/config.toml`:
+
 ```toml
 [functions.liquidtrack]
 verify_jwt = false

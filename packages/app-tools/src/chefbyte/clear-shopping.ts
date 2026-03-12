@@ -9,11 +9,7 @@ export const clearShopping: ToolDefinition = {
     properties: {},
   },
   handler: async (_args, ctx) => {
-    const { error } = await ctx.supabase
-      .schema('chefbyte')
-      .from('shopping_list')
-      .delete()
-      .eq('user_id', ctx.userId);
+    const { error } = await ctx.supabase.schema('chefbyte').from('shopping_list').delete().eq('user_id', ctx.userId);
 
     if (error) return toolError(`Failed to clear shopping list: ${error.message}`);
 

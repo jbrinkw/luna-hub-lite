@@ -23,6 +23,7 @@ For simple CRUD: use service-role client with direct table queries + `.eq('user_
 ### Task 1: DB Migration — Service-role RPC wrappers
 
 **Files:**
+
 - Create: `supabase/migrations/20260303050000_service_role_wrappers.sql`
 
 **The migration:**
@@ -115,6 +116,7 @@ GRANT EXECUTE ON FUNCTION chefbyte.get_daily_macros_admin(UUID, DATE) TO service
 ### Task 2: Tool types and shared utilities
 
 **Files:**
+
 - Create: `packages/app-tools/src/types.ts`
 - Create: `packages/app-tools/src/shared/index.ts`
 - Modify: `packages/app-tools/src/index.ts`
@@ -198,6 +200,7 @@ export { chefbyteTools } from './chefbyte';
 ### Task 3: CoachByte tool handlers (11 tools)
 
 **Files:**
+
 - Create: `packages/app-tools/src/coachbyte/get-today-plan.ts` (and 10 more)
 - Modify: `packages/app-tools/src/coachbyte/index.ts`
 
@@ -212,7 +215,9 @@ export const COACHBYTE_tool_name: ToolDefinition = {
   description: 'What it does',
   inputSchema: {
     type: 'object',
-    properties: { /* JSON Schema */ },
+    properties: {
+      /* JSON Schema */
+    },
     required: ['...'],
   },
   handler: async (args, ctx) => {
@@ -226,13 +231,15 @@ export const COACHBYTE_tool_name: ToolDefinition = {
 **Full handler implementations for all 11 CoachByte tools:**
 
 #### get-today-plan.ts
+
 ```typescript
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError, getLogicalDate } from '../shared';
 
 export const COACHBYTE_get_today_plan: ToolDefinition = {
   name: 'COACHBYTE_get_today_plan',
-  description: 'Get today\'s workout plan with all planned and completed sets. Creates plan from weekly split if none exists.',
+  description:
+    "Get today's workout plan with all planned and completed sets. Creates plan from weekly split if none exists.",
   inputSchema: { type: 'object', properties: {} },
   handler: async (_args, ctx) => {
     const today = await getLogicalDate(ctx.supabase, ctx.userId);
@@ -296,13 +303,14 @@ export const COACHBYTE_get_today_plan: ToolDefinition = {
 ```
 
 #### complete-next-set.ts
+
 ```typescript
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError } from '../shared';
 
 export const COACHBYTE_complete_next_set: ToolDefinition = {
   name: 'COACHBYTE_complete_next_set',
-  description: 'Complete the next incomplete set in today\'s plan. Returns rest time for next set.',
+  description: "Complete the next incomplete set in today's plan. Returns rest time for next set.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -313,38 +321,38 @@ export const COACHBYTE_complete_next_set: ToolDefinition = {
     required: ['plan_id', 'reps', 'load'],
   },
   handler: async (args, ctx) => {
-    const { data, error } = await ctx.supabase
-      .schema('coachbyte')
-      .rpc('complete_next_set_admin', {
-        p_user_id: ctx.userId,
-        p_plan_id: args.plan_id,
-        p_reps: args.reps,
-        p_load: args.load,
-      });
+    const { data, error } = await ctx.supabase.schema('coachbyte').rpc('complete_next_set_admin', {
+      p_user_id: ctx.userId,
+      p_plan_id: args.plan_id,
+      p_reps: args.reps,
+      p_load: args.load,
+    });
 
     if (error) return toolError(`Failed to complete set: ${error.message}`);
-    if (!data || data.length === 0) return toolError('No remaining sets in today\'s plan');
+    if (!data || data.length === 0) return toolError("No remaining sets in today's plan");
 
     const restSeconds = data[0]?.rest_seconds;
     return toolSuccess({
       completed: true,
       rest_seconds: restSeconds,
-      message: restSeconds != null
-        ? `Set completed. Rest ${restSeconds}s before next set.`
-        : 'Set completed. No more sets in plan.',
+      message:
+        restSeconds != null
+          ? `Set completed. Rest ${restSeconds}s before next set.`
+          : 'Set completed. No more sets in plan.',
     });
   },
 };
 ```
 
 #### log-set.ts
+
 ```typescript
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError, getLogicalDate } from '../shared';
 
 export const COACHBYTE_log_set: ToolDefinition = {
   name: 'COACHBYTE_log_set',
-  description: 'Log an ad-hoc completed set (not part of today\'s plan).',
+  description: "Log an ad-hoc completed set (not part of today's plan).",
   inputSchema: {
     type: 'object',
     properties: {
@@ -365,17 +373,14 @@ export const COACHBYTE_log_set: ToolDefinition = {
     const planId = planResult?.plan_id;
     if (!planId) return toolError('Could not create plan for today');
 
-    const { error } = await ctx.supabase
-      .schema('coachbyte')
-      .from('completed_sets')
-      .insert({
-        plan_id: planId,
-        user_id: ctx.userId,
-        exercise_id: args.exercise_id,
-        actual_reps: args.reps,
-        actual_load: args.load,
-        logical_date: today,
-      });
+    const { error } = await ctx.supabase.schema('coachbyte').from('completed_sets').insert({
+      plan_id: planId,
+      user_id: ctx.userId,
+      exercise_id: args.exercise_id,
+      actual_reps: args.reps,
+      actual_load: args.load,
+      logical_date: today,
+    });
 
     if (error) return toolError(`Failed to log set: ${error.message}`);
     return toolSuccess({ logged: true, exercise_id: args.exercise_id, reps: args.reps, load: args.load });
@@ -437,19 +442,38 @@ export const coachbyteTools: Record<string, ToolDefinition> = {
 ### Task 4: CoachByte tool tests
 
 **Files:**
+
 - Create: `packages/app-tools/src/__tests__/coachbyte.test.ts`
 
 Test each handler with a mocked Supabase client. Verify correct schema/table/RPC calls, correct args passed, correct response format (toolSuccess/toolError). ~2-3 tests per tool.
 
 **Test pattern:**
+
 ```typescript
 import { describe, it, expect, vi } from 'vitest';
 import { COACHBYTE_get_today_plan } from '../coachbyte/get-today-plan';
 
 // Mock supabase chain (same pattern as web app tests)
 const mockChain: any = {};
-const chainMethods = ['select','eq','neq','order','single','insert','update','delete','upsert','in','is','limit','gte','lte'];
-chainMethods.forEach(m => { mockChain[m] = vi.fn(() => mockChain); });
+const chainMethods = [
+  'select',
+  'eq',
+  'neq',
+  'order',
+  'single',
+  'insert',
+  'update',
+  'delete',
+  'upsert',
+  'in',
+  'is',
+  'limit',
+  'gte',
+  'lte',
+];
+chainMethods.forEach((m) => {
+  mockChain[m] = vi.fn(() => mockChain);
+});
 
 const mockRpc = vi.fn();
 const mockFrom = vi.fn(() => mockChain);
@@ -464,12 +488,14 @@ const ctx = { userId: 'user-1', supabase: mockSupabase };
 ### Task 5: ChefByte tool handlers (19 tools)
 
 **Files:**
+
 - Create: `packages/app-tools/src/chefbyte/*.ts` (19 files)
 - Modify: `packages/app-tools/src/chefbyte/index.ts`
 
 Same pattern as CoachByte. Key handlers:
 
 #### get-inventory.ts (representative)
+
 ```typescript
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError } from '../shared';
@@ -487,7 +513,9 @@ export const CHEFBYTE_get_inventory: ToolDefinition = {
     const { data: lots, error } = await ctx.supabase
       .schema('chefbyte')
       .from('stock_lots')
-      .select('lot_id, product_id, location_id, qty_containers, expires_on, products(name, servings_per_container), locations(name)')
+      .select(
+        'lot_id, product_id, location_id, qty_containers, expires_on, products(name, servings_per_container), locations(name)',
+      )
       .eq('user_id', ctx.userId)
       .order('expires_on', { ascending: true, nullsFirst: false });
 
@@ -495,7 +523,7 @@ export const CHEFBYTE_get_inventory: ToolDefinition = {
 
     // Group by product
     const grouped: Record<string, any> = {};
-    for (const lot of (lots || [])) {
+    for (const lot of lots || []) {
       const pid = lot.product_id;
       if (!grouped[pid]) {
         grouped[pid] = {
@@ -531,6 +559,7 @@ export const CHEFBYTE_get_inventory: ToolDefinition = {
 ```
 
 #### consume.ts (uses admin RPC)
+
 ```typescript
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError, getLogicalDate } from '../shared';
@@ -550,16 +579,14 @@ export const CHEFBYTE_consume: ToolDefinition = {
   },
   handler: async (args, ctx) => {
     const logicalDate = await getLogicalDate(ctx.supabase, ctx.userId);
-    const { data, error } = await ctx.supabase
-      .schema('chefbyte')
-      .rpc('consume_product_admin', {
-        p_user_id: ctx.userId,
-        p_product_id: args.product_id,
-        p_qty: args.qty,
-        p_unit: args.unit,
-        p_log_macros: args.log_macros ?? true,
-        p_logical_date: logicalDate,
-      });
+    const { data, error } = await ctx.supabase.schema('chefbyte').rpc('consume_product_admin', {
+      p_user_id: ctx.userId,
+      p_product_id: args.product_id,
+      p_qty: args.qty,
+      p_unit: args.unit,
+      p_log_macros: args.log_macros ?? true,
+      p_logical_date: logicalDate,
+    });
 
     if (error) return toolError(`Consume failed: ${error.message}`);
     return toolSuccess(data);
@@ -569,31 +596,32 @@ export const CHEFBYTE_consume: ToolDefinition = {
 
 #### Remaining ChefByte tools (brief — each is a simple query or RPC call)
 
-| Tool | Logic |
-|------|-------|
-| `get_product_lots` | `stock_lots.select(...).eq('product_id', args.product_id).eq('user_id', userId)` |
-| `add_stock` | Upsert `stock_lots` on merge key (user+product+location+expiry) |
-| `get_products` | `products.select(*).eq('user_id', userId)` with optional `.ilike('name', search)` |
-| `create_product` | Insert into `products` with all fields from args |
-| `get_shopping_list` | `shopping_list.select(*, products(name, price))` |
-| `add_to_shopping` | Upsert `shopping_list` on (user_id, product_id) |
-| `clear_shopping` | `shopping_list.delete().eq('user_id', userId)` |
-| `below_min_stock` | Query products + stock sums, compare, auto-add deficit |
-| `get_meal_plan` | `meal_plan_entries.select(*, recipes(name), products(name))` for date range |
-| `add_meal` | Insert `meal_plan_entries` |
-| `mark_done` | `rpc('mark_meal_done_admin', {p_user_id, p_meal_id})` |
-| `get_recipes` | `recipes.select(*, recipe_ingredients(*, products(name)))` |
-| `get_cookable` | Compare recipe ingredients vs stock sums |
-| `create_recipe` | Insert `recipes` + `recipe_ingredients` in sequence |
-| `get_macros` | `rpc('get_daily_macros_admin', {p_user_id, p_logical_date})` |
-| `log_temp_item` | Insert into `temp_items` |
-| `set_price` | `products.update({price}).eq('product_id', productId)` |
+| Tool                | Logic                                                                             |
+| ------------------- | --------------------------------------------------------------------------------- |
+| `get_product_lots`  | `stock_lots.select(...).eq('product_id', args.product_id).eq('user_id', userId)`  |
+| `add_stock`         | Upsert `stock_lots` on merge key (user+product+location+expiry)                   |
+| `get_products`      | `products.select(*).eq('user_id', userId)` with optional `.ilike('name', search)` |
+| `create_product`    | Insert into `products` with all fields from args                                  |
+| `get_shopping_list` | `shopping_list.select(*, products(name, price))`                                  |
+| `add_to_shopping`   | Upsert `shopping_list` on (user_id, product_id)                                   |
+| `clear_shopping`    | `shopping_list.delete().eq('user_id', userId)`                                    |
+| `below_min_stock`   | Query products + stock sums, compare, auto-add deficit                            |
+| `get_meal_plan`     | `meal_plan_entries.select(*, recipes(name), products(name))` for date range       |
+| `add_meal`          | Insert `meal_plan_entries`                                                        |
+| `mark_done`         | `rpc('mark_meal_done_admin', {p_user_id, p_meal_id})`                             |
+| `get_recipes`       | `recipes.select(*, recipe_ingredients(*, products(name)))`                        |
+| `get_cookable`      | Compare recipe ingredients vs stock sums                                          |
+| `create_recipe`     | Insert `recipes` + `recipe_ingredients` in sequence                               |
+| `get_macros`        | `rpc('get_daily_macros_admin', {p_user_id, p_logical_date})`                      |
+| `log_temp_item`     | Insert into `temp_items`                                                          |
+| `set_price`         | `products.update({price}).eq('product_id', productId)`                            |
 
 ---
 
 ### Task 6: ChefByte tool tests
 
 **Files:**
+
 - Create: `packages/app-tools/src/__tests__/chefbyte.test.ts`
 
 Same mock pattern as CoachByte tests. Test representative tools: get_inventory, consume, get_macros, create_product, add_stock.
@@ -603,6 +631,7 @@ Same mock pattern as CoachByte tests. Test representative tools: get_inventory, 
 ### Task 7: MCP Worker — Protocol, Auth, SSE
 
 **Files:**
+
 - Modify: `apps/mcp-worker/src/index.ts`
 - Create: `apps/mcp-worker/src/protocol.ts`
 - Create: `apps/mcp-worker/src/auth.ts`
@@ -611,6 +640,7 @@ Same mock pattern as CoachByte tests. Test representative tools: get_inventory, 
 - Create: `apps/mcp-worker/src/supabase.ts`
 
 #### protocol.ts
+
 ```typescript
 // JSON-RPC 2.0 types for MCP protocol
 export interface JsonRpcRequest {
@@ -647,16 +677,14 @@ export function sseEvent(event: string, data: unknown): string {
 ```
 
 #### auth.ts
+
 ```typescript
-export async function authenticateApiKey(
-  supabase: any,
-  apiKey: string,
-): Promise<string | null> {
+export async function authenticateApiKey(supabase: any, apiKey: string): Promise<string | null> {
   // SHA-256 hash the key
   const data = new TextEncoder().encode(apiKey);
   const hashBuffer = await crypto.subtle.digest('SHA-256', data);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
-  const keyHash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+  const keyHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 
   // Look up in hub.api_keys
   const { data: keyRow, error } = await supabase
@@ -673,6 +701,7 @@ export async function authenticateApiKey(
 ```
 
 #### supabase.ts
+
 ```typescript
 import { createClient } from '@supabase/supabase-js';
 
@@ -682,6 +711,7 @@ export function createServiceClient(env: { SUPABASE_URL: string; SUPABASE_SERVIC
 ```
 
 #### registry.ts
+
 ```typescript
 import type { ToolDefinition } from '@luna-hub/app-tools';
 import { coachbyteTools, chefbyteTools } from '@luna-hub/app-tools';
@@ -692,10 +722,7 @@ const allTools: Record<string, ToolDefinition> = {
 };
 
 /** Build per-user tool set based on active modules and tool config */
-export async function buildUserTools(
-  supabase: any,
-  userId: string,
-): Promise<Record<string, ToolDefinition>> {
+export async function buildUserTools(supabase: any, userId: string): Promise<Record<string, ToolDefinition>> {
   // 1. Get active app modules
   const { data: activations } = await supabase
     .schema('hub')
@@ -733,6 +760,7 @@ export async function buildUserTools(
 ```
 
 #### session.ts (Durable Object)
+
 ```typescript
 import type { ToolDefinition, ToolContext } from '@luna-hub/app-tools';
 import { JsonRpcRequest, jsonRpcSuccess, jsonRpcError, sseEvent, McpToolSchema } from './protocol';
@@ -780,9 +808,7 @@ export class McpSession implements DurableObject {
       start: (controller) => {
         this.sseController = controller;
         // Send endpoint message
-        controller.enqueue(
-          new TextEncoder().encode(sseEvent('endpoint', `/message?sessionId=${sessionId}`)),
-        );
+        controller.enqueue(new TextEncoder().encode(sseEvent('endpoint', `/message?sessionId=${sessionId}`)));
       },
       cancel: () => {
         this.sseController = null;
@@ -817,11 +843,13 @@ export class McpSession implements DurableObject {
 
       case 'tools/list':
         response = jsonRpcSuccess(rpc.id, {
-          tools: Object.values(this.tools).map((t): McpToolSchema => ({
-            name: t.name,
-            description: t.description,
-            inputSchema: t.inputSchema,
-          })),
+          tools: Object.values(this.tools).map(
+            (t): McpToolSchema => ({
+              name: t.name,
+              description: t.description,
+              inputSchema: t.inputSchema,
+            }),
+          ),
         });
         break;
 
@@ -856,9 +884,7 @@ export class McpSession implements DurableObject {
 
     // Send response via SSE stream
     if (this.sseController && response) {
-      this.sseController.enqueue(
-        new TextEncoder().encode(sseEvent('message', response)),
-      );
+      this.sseController.enqueue(new TextEncoder().encode(sseEvent('message', response)));
     }
 
     return new Response('', { status: 202 });
@@ -867,6 +893,7 @@ export class McpSession implements DurableObject {
 ```
 
 #### index.ts (Worker entrypoint)
+
 ```typescript
 import { authenticateApiKey } from './auth';
 import { createServiceClient } from './supabase';
@@ -956,6 +983,7 @@ export default {
 ### Task 8: Extension tools (11 tools across 3 extensions)
 
 **Files:**
+
 - Create: `extensions/obsidian/config.json` + `extensions/obsidian/tools/*.ts`
 - Create: `extensions/todoist/config.json` + `extensions/todoist/tools/*.ts`
 - Create: `extensions/homeassistant/config.json` + `extensions/homeassistant/tools/*.ts`
@@ -963,6 +991,7 @@ export default {
 Extension handlers follow the `ExtensionToolDefinition` pattern. Each gets credentials from Vault via the worker before handler is called.
 
 **Credential retrieval pattern (in worker session.ts, add to tools/call):**
+
 ```typescript
 // For extension tools: fetch credentials first
 if ('extensionName' in tool) {
@@ -986,6 +1015,7 @@ if ('extensionName' in tool) {
 ```
 
 **Representative extension tool (Obsidian search):**
+
 ```typescript
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
@@ -1023,6 +1053,7 @@ export const OBSIDIAN_search_notes: ExtensionToolDefinition = {
 ### Task 9: Extension tool tests
 
 **Files:**
+
 - Create: `packages/app-tools/src/__tests__/extensions.test.ts`
 
 Mock fetch() globally, test credential injection and API call construction.
@@ -1032,12 +1063,14 @@ Mock fetch() globally, test credential injection and API call construction.
 ### Task 10: Wire extensions into registry, add vitest config for app-tools
 
 **Files:**
+
 - Modify: `apps/mcp-worker/src/registry.ts` — import extension tools
 - Modify: `apps/mcp-worker/src/session.ts` — extension credential flow
 - Create: `packages/app-tools/vitest.config.ts`
 - Modify: `packages/app-tools/package.json` — add test script
 
 **vitest.config.ts for app-tools:**
+
 ```typescript
 import { defineConfig } from 'vitest/config';
 import path from 'path';
@@ -1067,16 +1100,16 @@ export default defineConfig({
 
 ## Summary
 
-| Task | What | Files |
-|------|------|-------|
-| 1 | DB migration: service-role wrappers | 1 SQL migration |
-| 2 | Tool types + shared utilities | 3 TS files |
-| 3 | CoachByte handlers (11) | 12 TS files |
-| 4 | CoachByte tests | 1 test file |
-| 5 | ChefByte handlers (19) | 20 TS files |
-| 6 | ChefByte tests | 1 test file |
-| 7 | MCP Worker infrastructure | 6 TS files |
-| 8 | Extension tools (11) | ~15 TS files + 3 config.json |
-| 9 | Extension tests | 1 test file |
-| 10 | Wire extensions + vitest config | 3-4 files |
-| 11 | Verify + commit | docs + memory |
+| Task | What                                | Files                        |
+| ---- | ----------------------------------- | ---------------------------- |
+| 1    | DB migration: service-role wrappers | 1 SQL migration              |
+| 2    | Tool types + shared utilities       | 3 TS files                   |
+| 3    | CoachByte handlers (11)             | 12 TS files                  |
+| 4    | CoachByte tests                     | 1 test file                  |
+| 5    | ChefByte handlers (19)              | 20 TS files                  |
+| 6    | ChefByte tests                      | 1 test file                  |
+| 7    | MCP Worker infrastructure           | 6 TS files                   |
+| 8    | Extension tools (11)                | ~15 TS files + 3 config.json |
+| 9    | Extension tests                     | 1 test file                  |
+| 10   | Wire extensions + vitest config     | 3-4 files                    |
+| 11   | Verify + commit                     | docs + memory                |

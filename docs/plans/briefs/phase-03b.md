@@ -1,10 +1,13 @@
 # Phase 03b: Hub DB
+
 > Previous: phase-03a.md | Next: phase-03c.md
 
 ## Skills
+
 test-driven-development, context7 (Supabase, pgTAP)
 
 ## Build
+
 - `supabase/migrations/<timestamp>_hub_tables.sql`:
   - `hub.app_activations` — user_id UUID REFERENCES auth.users ON DELETE CASCADE, app_name TEXT, activated_at TIMESTAMPTZ DEFAULT NOW(), UNIQUE(user_id, app_name)
   - `hub.api_keys` — id UUID PK, user_id UUID REFERENCES auth.users ON DELETE CASCADE, api_key_hash TEXT NOT NULL, label TEXT, created_at TIMESTAMPTZ DEFAULT NOW(), revoked_at TIMESTAMPTZ
@@ -20,6 +23,7 @@ test-driven-development, context7 (Supabase, pgTAP)
 ## Test (TDD)
 
 ### pgTAP: `supabase/tests/hub/api_keys.test.sql`
+
 - Insert API key hash for user -> row created with correct fields
 - Query active keys (WHERE revoked_at IS NULL) -> returns the key
 - Revoke key (SET revoked_at = NOW()) -> key excluded from active query
@@ -32,18 +36,21 @@ test-driven-development, context7 (Supabase, pgTAP)
 - RLS: User B cannot DELETE User A's api_key
 
 ### pgTAP: `supabase/tests/hub/activation.test.sql`
+
 - Call hub.activate_app('coachbyte') -> verify hub.app_activations row created
 - Call hub.deactivate_app('coachbyte') -> verify hub.app_activations row deleted
 - Deactivate app that's not activated -> no-op, no error
 - Activate + deactivate + reactivate -> clean cycle, no errors
 
 ### Integration: `apps/web/src/__tests__/integration/hub/app-activation.test.ts`
+
 - Activate CoachByte -> verify hub.app_activations row exists
 - Deactivate CoachByte -> verify hub.app_activations row deleted
 - Verify Hub profile still intact after deactivation
 - Activate + deactivate + reactivate -> clean cycle
 
 ### Integration: `apps/web/src/__tests__/integration/hub/api-key-lifecycle.test.ts`
+
 - Generate API key -> plaintext returned to caller
 - Verify DB stores SHA-256 hash (not plaintext)
 - Query active keys -> newly generated key included
@@ -53,14 +60,17 @@ test-driven-development, context7 (Supabase, pgTAP)
 - Revoke one of multiple -> only that one excluded
 
 ## Legacy Reference
+
 - `legacy/luna-hub/core/utils/agent_api.py` — API key generation pattern (SHA-256 hashing)
 - `legacy/luna-hub/hub_ui/src/context/AuthContext.jsx` — session validation
 - `legacy/luna_ext_coachbyte/services/api/server.py` — embedded schema definitions (architecture reference)
 
 ## Commit
+
 `feat: hub DB tables + activation stubs + RLS`
 
 ## Acceptance
+
 - [ ] Migration applies cleanly via `supabase db push`
 - [ ] DB types regenerated successfully
 - [ ] RLS blocks cross-user access on all 4 new tables

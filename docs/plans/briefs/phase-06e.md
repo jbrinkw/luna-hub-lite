@@ -1,16 +1,19 @@
 # Phase 06e: analyze-product Edge Function
+
 > Previous: phase-06d.md | Next: phase-07a.md
 
 ## Skills
+
 test-driven-development, test-quality-review, claude-developer-platform (Claude Haiku 4.5 call), context7 (Supabase Edge Functions)
 
 ## Build
+
 - `supabase/functions/analyze-product/index.ts` — Deno Edge Function
 - Pipeline stages:
   1. **Auth:** Validate Supabase JWT, extract user_id
   2. **Quota check:** Query daily usage count for user, reject if >= 100
   3. **OpenFoodFacts lookup:** GET `https://world.openfoodfacts.org/api/v2/product/{barcode}` -> extract product_name, nutrition_data_per (serving vs 100g), nutriments (energy-kcal, proteins, carbohydrates, fat)
-  4. **Claude Haiku 4.5 normalization:** Send OFF data to Claude for name cleanup, nutrition extraction/normalization to per-container values, 4-4-9 calorie validation ((protein*4)+(carbs*4)+(fats*9) vs reported calories)
+  4. **Claude Haiku 4.5 normalization:** Send OFF data to Claude for name cleanup, nutrition extraction/normalization to per-container values, 4-4-9 calorie validation ((protein*4)+(carbs*4)+(fats\*9) vs reported calories)
   5. **Response:** Return normalized name, calories, protein_g, carbs_g, fats_g, servings_per_container, 4-4-9 validation result
 - Error handling: OFF miss -> error response (no fallback to Claude without OFF data). Claude failure -> error response. No auto-creation of product on any failure.
 - Quota tracking: `chefbyte.analyze_quota` table (user_id, logical_date, count) or increment pattern
@@ -37,21 +40,25 @@ Tests run against locally-served Edge Function (`http://localhost:54321/function
 - Quota resets on new logical_date (next day call succeeds)
 - Missing/invalid JWT -> 401 Unauthorized
 - Missing barcode in request body -> 400 Bad Request
-- 4-4-9 validation: response includes whether reported calories match computed (protein*4 + carbs*4 + fats*9) within tolerance
+- 4-4-9 validation: response includes whether reported calories match computed (protein*4 + carbs*4 + fats\*9) within tolerance
 - Response does NOT auto-create a product row (caller decides whether to create)
 
 ### Quality gate
+
 After all tests in each layer pass, dispatch `test-quality-review` per-batch before marking done.
 
 ## Legacy Reference
+
 - `legacy/luna-ext-chefbyte/lib/api.py` — full pipeline: OFF lookup -> GPT-4 normalize -> 4-4-9 validate (rewrite GPT-4 to Claude Haiku 4.5)
 - `legacy/luna-ext-chefbyte/lib/services/products.py` — product creation validation, nutrition normalization
 - `legacy/luna-ext-chefbyte/lib/core/qu_resolver.py` — servings_per_container extraction from OFF data
 
 ## Commit
+
 `feat: analyze-product edge function`
 
 ## Acceptance
+
 - [ ] Edge Function deployed locally via `supabase start`
 - [ ] Pipeline: barcode -> OFF lookup -> Claude Haiku 4.5 normalization -> structured response
 - [ ] OFF miss returns error, not partial data
@@ -66,6 +73,7 @@ After all tests in each layer pass, dispatch `test-quality-review` per-batch bef
 ## Phase 6 Overall Acceptance
 
 All ChefByte DB + Edge Function work complete:
+
 - [ ] All ChefByte tables created with correct columns, indexes, RLS
 - [ ] All private functions working: consume_product, mark_meal_done, get_daily_macros, sync_meal_plan_to_shopping, import_shopping_to_inventory
 - [ ] Liquid Log writes to liquidtrack_events with device_id='manual' (decision #22)
