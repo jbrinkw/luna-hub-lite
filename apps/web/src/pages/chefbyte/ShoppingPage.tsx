@@ -353,39 +353,26 @@ export function ShoppingPage() {
       stockByProduct.set(lot.product_id, current + Number(lot.qty_containers));
     }
 
-    // Fetch fresh shopping list to avoid stale-state duplicates
-    const { data: freshShoppingItems } = await chefbyte()
-      .from('shopping_list')
-      .select('product_id, qty_containers')
-      .eq('user_id', user.id);
-
-    // Sum already-listed quantities per product
-    const listedByProduct = new Map<string, number>();
-    for (const si of freshShoppingItems ?? []) {
-      const current = listedByProduct.get(si.product_id) ?? 0;
-      listedByProduct.set(si.product_id, current + Number(si.qty_containers));
-    }
-
-    // Collect deficient products, subtracting already-listed qty
-    const rowsToInsert: Array<{ user_id: string; product_id: string; qty_containers: number }> = [];
+    // Collect deficient products — upsert sets qty to full deficit
+    const rowsToUpsert: Array<{ user_id: string; product_id: string; qty_containers: number }> = [];
     for (const product of products) {
       const currentStock = stockByProduct.get(product.product_id) ?? 0;
       const minStock = Number(product.min_stock_amount);
       if (currentStock < minStock) {
-        const deficit = minStock - currentStock;
-        const alreadyListed = listedByProduct.get(product.product_id) ?? 0;
-        const qtyNeeded = Math.ceil(deficit - alreadyListed);
-        if (qtyNeeded > 0) {
-          rowsToInsert.push({
+        const deficit = Math.ceil(minStock - currentStock);
+        if (deficit > 0) {
+          rowsToUpsert.push({
             user_id: user.id,
             product_id: product.product_id,
-            qty_containers: qtyNeeded,
+            qty_containers: deficit,
           });
         }
       }
     }
-    if (rowsToInsert.length > 0) {
-      const { error: batchErr } = await chefbyte().from('shopping_list').insert(rowsToInsert);
+    if (rowsToUpsert.length > 0) {
+      const { error: batchErr } = await chefbyte()
+        .from('shopping_list')
+        .upsert(rowsToUpsert, { onConflict: 'user_id,product_id' });
       if (batchErr) {
         setError(batchErr.message);
         return;
