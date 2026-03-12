@@ -5,6 +5,8 @@ interface MacroProgressBarProps {
   color: string;
   unit?: string;
   testId?: string;
+  /** CSS height class for the bar track, e.g. 'h-5'. Defaults to 'h-4'. */
+  barHeight?: string;
 }
 
 function pct(val: number, goal: number): number {
@@ -16,7 +18,15 @@ function pct(val: number, goal: number): number {
  * Shared macro progress bar — label, current/goal text, and colored fill bar.
  * Replaces the identical pattern duplicated in MacroPage and HomePage.
  */
-export function MacroProgressBar({ label, current, goal, color, unit, testId }: MacroProgressBarProps) {
+export function MacroProgressBar({
+  label,
+  current,
+  goal,
+  color,
+  unit,
+  testId,
+  barHeight = 'h-4',
+}: MacroProgressBarProps) {
   const percentage = pct(current, goal);
   const suffix = unit ? unit : '';
 
@@ -30,7 +40,7 @@ export function MacroProgressBar({ label, current, goal, color, unit, testId }: 
           {suffix} ({percentage}%)
         </span>
       </div>
-      <div className="bg-slate-200 rounded h-4 overflow-hidden">
+      <div className={`bg-slate-200 rounded ${barHeight} overflow-hidden`}>
         <div
           className="h-full rounded"
           style={{

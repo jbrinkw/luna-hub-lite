@@ -470,7 +470,7 @@ export function MacroPage() {
       {/* ============================================================ */}
       {/*  DATE NAVIGATION                                              */}
       {/* ============================================================ */}
-      <div data-testid="date-nav" className="flex items-center gap-2 mb-4">
+      <div data-testid="date-nav" className="flex items-center gap-2 mb-4 flex-wrap">
         <button
           className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm hover:bg-slate-50 transition-colors"
           onClick={prevDate}
@@ -492,6 +492,15 @@ export function MacroPage() {
         >
           Next
         </button>
+        <input
+          type="date"
+          value={currentDate}
+          onChange={(e) => {
+            if (e.target.value) setCurrentDate(e.target.value);
+          }}
+          data-testid="date-picker"
+          className="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+        />
         <span data-testid="current-date" className="ml-2 font-bold text-slate-900">
           {formatDateDisplay(currentDate)}
         </span>
@@ -508,6 +517,7 @@ export function MacroPage() {
           goal={goals.calories}
           color="#059669"
           testId="progress-calories"
+          barHeight="h-5"
         />
         <MacroProgressBar
           label="Protein"
@@ -516,6 +526,7 @@ export function MacroPage() {
           color="#22c55e"
           unit="g"
           testId="progress-protein"
+          barHeight="h-5"
         />
         <MacroProgressBar
           label="Carbs"
@@ -524,6 +535,7 @@ export function MacroPage() {
           color="#f59e0b"
           unit="g"
           testId="progress-carbs"
+          barHeight="h-5"
         />
         <MacroProgressBar
           label="Fats"
@@ -532,11 +544,12 @@ export function MacroPage() {
           color="#ef4444"
           unit="g"
           testId="progress-fats"
+          barHeight="h-5"
         />
       </div>
 
       {/* ============================================================ */}
-      {/*  CONSUMED ITEMS TABLE                                         */}
+      {/*  CONSUMED ITEMS — CARD LIST                                   */}
       {/* ============================================================ */}
       <div data-testid="consumed-section" className="mb-6">
         <h3 className="text-lg font-semibold text-slate-900 mb-3">Consumed Items</h3>
@@ -545,55 +558,62 @@ export function MacroPage() {
             No consumed items for this day.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-200">
-            <table data-testid="consumed-table" className="w-full border-collapse text-sm">
-              <thead>
-                <tr className="bg-slate-50 border-b-2 border-slate-200">
-                  <th className="p-2.5 text-left font-semibold text-slate-700 text-xs">Source</th>
-                  <th className="p-2.5 text-left font-semibold text-slate-700 text-xs">Item</th>
-                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">Cal</th>
-                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">P</th>
-                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">C</th>
-                  <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">F</th>
-                  <th className="p-2.5 w-10"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {consumed.map((item) => (
-                  <tr key={item.id} data-testid={`consumed-row-${item.id}`} className="border-b border-slate-100">
-                    <td className="p-2 text-slate-600">{item.source}</td>
-                    <td className="p-2 text-slate-900 font-medium">{item.name}</td>
-                    <td className="p-2 text-right tabular-nums">{item.calories}</td>
-                    <td className="p-2 text-right tabular-nums">{item.protein}g</td>
-                    <td className="p-2 text-right tabular-nums">{item.carbs}g</td>
-                    <td className="p-2 text-right tabular-nums">{item.fat}g</td>
-                    <td className="p-1 text-center">
-                      {item.source !== 'LiquidTrack' && (
-                        <button
-                          className="text-red-500 hover:text-red-700 font-bold text-base bg-transparent border-none cursor-pointer"
-                          data-testid={`delete-consumed-${item.id}`}
-                          onClick={() => deleteConsumedItem(item)}
-                          aria-label={`Remove ${item.name}`}
-                        >
-                          x
-                        </button>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-              <tfoot>
-                <tr data-testid="consumed-total-row" className="font-bold border-t-2 border-slate-400">
-                  <td className="p-2"></td>
-                  <td className="p-2 text-slate-900">TOTAL</td>
-                  <td className="p-2 text-right tabular-nums">{consumed.reduce((sum, i) => sum + i.calories, 0)}</td>
-                  <td className="p-2 text-right tabular-nums">{consumed.reduce((sum, i) => sum + i.protein, 0)}g</td>
-                  <td className="p-2 text-right tabular-nums">{consumed.reduce((sum, i) => sum + i.carbs, 0)}g</td>
-                  <td className="p-2 text-right tabular-nums">{consumed.reduce((sum, i) => sum + i.fat, 0)}g</td>
-                  <td></td>
-                </tr>
-              </tfoot>
-            </table>
+          <div data-testid="consumed-table" className="space-y-2">
+            {consumed.map((item) => {
+              const badgeColor =
+                item.source === 'Meal Plan'
+                  ? 'bg-emerald-100 text-emerald-700'
+                  : item.source === 'Temp Item'
+                    ? 'bg-violet-100 text-violet-700'
+                    : 'bg-sky-100 text-sky-700';
+              return (
+                <div
+                  key={item.id}
+                  data-testid={`consumed-row-${item.id}`}
+                  className="bg-white border border-slate-200 rounded-lg px-3 py-2.5 flex items-center gap-3"
+                >
+                  <span
+                    className={`text-[11px] font-semibold px-2 py-0.5 rounded-full whitespace-nowrap ${badgeColor}`}
+                  >
+                    {item.source}
+                  </span>
+                  <span className="flex-1 text-sm font-medium text-slate-900 min-w-0 truncate">{item.name}</span>
+                  <div className="flex gap-3 text-xs tabular-nums text-slate-600 whitespace-nowrap">
+                    <span>{item.calories} cal</span>
+                    <span>{item.protein}g P</span>
+                    <span>{item.carbs}g C</span>
+                    <span>{item.fat}g F</span>
+                  </div>
+                  {item.source !== 'LiquidTrack' && (
+                    <button
+                      className="text-red-500 hover:text-red-700 font-bold text-base bg-transparent border-none cursor-pointer ml-1 shrink-0"
+                      data-testid={`delete-consumed-${item.id}`}
+                      onClick={() => deleteConsumedItem(item)}
+                      aria-label={`Remove ${item.name}`}
+                    >
+                      x
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+
+            {/* Totals row */}
+            <div
+              data-testid="consumed-total-row"
+              className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 flex items-center gap-3 font-bold"
+            >
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 whitespace-nowrap">
+                Total
+              </span>
+              <span className="flex-1 text-sm text-slate-900">TOTAL</span>
+              <div className="flex gap-3 text-xs tabular-nums text-slate-900 whitespace-nowrap">
+                <span>{consumed.reduce((sum, i) => sum + i.calories, 0)} cal</span>
+                <span>{consumed.reduce((sum, i) => sum + i.protein, 0)}g P</span>
+                <span>{consumed.reduce((sum, i) => sum + i.carbs, 0)}g C</span>
+                <span>{consumed.reduce((sum, i) => sum + i.fat, 0)}g F</span>
+              </div>
+            </div>
           </div>
         )}
       </div>
