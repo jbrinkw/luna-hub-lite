@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
+import { formatTime } from '@/shared/formatTime';
 
 interface RestTimerProps {
   endTime?: string | null;
@@ -12,12 +13,6 @@ interface RestTimerProps {
   onResume: () => void;
   onReset: () => void;
   onExpired?: () => void;
-}
-
-function formatTime(totalSeconds: number): string {
-  const mins = Math.floor(Math.max(0, totalSeconds) / 60);
-  const secs = Math.max(0, totalSeconds) % 60;
-  return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
 export function RestTimer({
@@ -153,4 +148,5 @@ export function RestTimer({
   );
 }
 
-export { formatTime };
+// eslint-disable-next-line react-refresh/only-export-components
+export { formatTime } from '@/shared/formatTime';

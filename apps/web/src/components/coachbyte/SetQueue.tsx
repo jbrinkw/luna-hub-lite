@@ -279,6 +279,7 @@ export function SetQueue({
                 onClick={() => setQueueExpanded(true)}
                 className="mt-2 text-sm text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
                 data-testid="expand-queue-btn"
+                aria-expanded={queueExpanded}
               >
                 <ChevronDown className="w-4 h-4" />
                 {hasMoreSets
@@ -299,6 +300,7 @@ export function SetQueue({
                     onClick={() => setQueueExpanded(false)}
                     className="text-sm text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
                     data-testid="collapse-queue-btn"
+                    aria-expanded={queueExpanded}
                   >
                     <ChevronUp className="w-4 h-4" />
                     Collapse

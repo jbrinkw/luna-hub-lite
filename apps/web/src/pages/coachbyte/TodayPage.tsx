@@ -2,7 +2,7 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
-import { formatTime } from '@/components/coachbyte/RestTimer';
+import { formatTime } from '@/shared/formatTime';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
@@ -372,7 +372,7 @@ export function TodayPage() {
   const handleTimerExpired = useCallback(async () => {
     if (!user) return;
     const { error: err } = await coachbyte().from('timers').update({ state: 'expired' }).eq('user_id', user.id);
-    if (err) console.error('Failed to mark timer expired:', err.message);
+    if (err) setError(err instanceof Error ? err.message : 'Failed to mark timer expired');
   }, [user]);
 
   // Timer expired detection — runs when timer is running and hits 0
@@ -381,6 +381,7 @@ export function TodayPage() {
 
     const remaining = Math.max(0, Math.ceil((new Date(timer.end_time).getTime() - Date.now()) / 1000));
     if (remaining <= 0) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
       handleTimerExpired();
       return;
     }
@@ -599,6 +600,7 @@ export function TodayPage() {
           onClick={() => setCompletedExpanded(!completedExpanded)}
           className="w-full flex items-center justify-between px-4 py-3 cursor-pointer bg-transparent border-none text-left"
           data-testid="toggle-completed"
+          aria-expanded={completedExpanded}
         >
           <h3 className="text-lg font-semibold text-slate-900 m-0">Completed ({completedSets.length})</h3>
           {completedExpanded ? (
@@ -680,6 +682,7 @@ export function TodayPage() {
           onClick={() => setNotesExpanded(!notesExpanded)}
           className="w-full flex items-center justify-between px-4 py-3 cursor-pointer bg-transparent border-none text-left"
           data-testid="toggle-notes"
+          aria-expanded={notesExpanded}
         >
           <h3 className="text-lg font-semibold text-slate-900 m-0">Notes</h3>
           {notesExpanded ? (
@@ -711,6 +714,7 @@ export function TodayPage() {
           onClick={() => setSummaryExpanded(!summaryExpanded)}
           className="w-full flex items-center justify-between px-4 py-3 cursor-pointer bg-transparent border-none text-left"
           data-testid="toggle-summary"
+          aria-expanded={summaryExpanded}
         >
           <h3 className="text-lg font-semibold text-slate-900 m-0">Summary</h3>
           {summaryExpanded ? (
