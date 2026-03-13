@@ -943,9 +943,9 @@ export function HomePage() {
       </div>
 
       {/* ============================================================ */}
-      {/*  NOTIFICATION STRIP — compact alert badges                    */}
+      {/*  ACTION BAR — badges + action buttons in one row              */}
       {/* ============================================================ */}
-      <div data-testid="card-missing-prices" className="grid grid-cols-2 sm:flex sm:items-center gap-1.5 sm:gap-2 mb-3">
+      <div data-testid="quick-actions" className="mb-5 flex flex-wrap items-center gap-2">
         <Link
           to="/chef/inventory"
           data-testid="card-below-min"
@@ -959,13 +959,14 @@ export function HomePage() {
         </Link>
         <Link
           to="/chef/settings?tab=walmart"
+          data-testid="card-missing-prices"
           className={[
             'no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium transition-colors',
             missingPrices > 0 ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-slate-100 text-slate-400',
           ].join(' ')}
         >
           <DollarSign className="w-3 h-3" />
-          Prices: {missingPrices}
+          Missing Prices: {missingPrices}
         </Link>
         <Link
           to="/chef/settings?tab=products"
@@ -983,45 +984,35 @@ export function HomePage() {
           <ShoppingCart className="w-3 h-3" />
           Cart: ${cartValue.toFixed(2)}
         </Link>
-      </div>
-
-      {/* ============================================================ */}
-      {/*  ACTION BUTTONS — primary workflow + secondary settings        */}
-      {/* ============================================================ */}
-      <div data-testid="quick-actions" className="mb-5 space-y-2">
-        <div className="grid grid-cols-2 gap-2 sm:flex sm:items-center sm:gap-2">
-          <button
-            onClick={() => importShoppingMutation.mutate()}
-            data-testid="import-shopping-btn"
-            className="px-3 py-2 sm:py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
-          >
-            Import Shopping List
-          </button>
-          <button
-            onClick={syncMealPlanToCart}
-            disabled={syncing}
-            data-testid="meal-plan-cart-btn"
-            className="px-3 py-2 sm:py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
-          >
-            {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
-          </button>
-        </div>
-        <div className="flex items-center gap-3">
-          <button
-            onClick={openTasteModal}
-            data-testid="taste-profile-btn"
-            className="px-2 py-1 text-slate-500 text-xs hover:text-emerald-600 hover:underline transition-colors bg-transparent border-none cursor-pointer"
-          >
-            Taste Profile
-          </button>
-          <button
-            onClick={openTargetModal}
-            data-testid="target-macros-btn"
-            className="px-2 py-1 text-slate-500 text-xs hover:text-emerald-600 hover:underline transition-colors bg-transparent border-none cursor-pointer"
-          >
-            Target Macros
-          </button>
-        </div>
+        <button
+          onClick={() => importShoppingMutation.mutate()}
+          data-testid="import-shopping-btn"
+          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+        >
+          Import Shopping List
+        </button>
+        <button
+          onClick={syncMealPlanToCart}
+          disabled={syncing}
+          data-testid="meal-plan-cart-btn"
+          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+        >
+          {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
+        </button>
+        <button
+          onClick={openTasteModal}
+          data-testid="taste-profile-btn"
+          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+        >
+          Taste Profile
+        </button>
+        <button
+          onClick={openTargetModal}
+          data-testid="target-macros-btn"
+          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+        >
+          Target Macros
+        </button>
       </div>
 
       {/* ============================================================ */}

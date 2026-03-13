@@ -25,10 +25,10 @@ Serverless refactor of the original self-hosted Luna Hub ecosystem. Replaces hea
 ## Repo Structure
 
 ```
-apps/web/              # Single Ionic React app (all modules), deployed to Vercel
+apps/web/              # Single React SPA (all modules), deployed to Vercel
 packages/app-tools/    # MCP tool definitions + handlers (CoachByte + ChefByte)
 packages/db-types/     # Generated Supabase TypeScript types
-packages/ui-kit/       # Shared Ionic components (auth, layout, theme)
+packages/ui-kit/       # Shared layout components (AppShell wrapper)
 packages/config/       # Shared config (Supabase URLs)
 supabase/              # Migrations, edge functions, seeds
 extensions/            # Obsidian, Todoist, Home Assistant
@@ -39,7 +39,7 @@ legacy/                # Old repos for reference (see below)
 
 ## What We're Building
 
-**Phase 1 (now):** Hub app + ChefByte app + CoachByte app as a single Ionic React SPA, plus the MCP Worker with bundled extension tool integrations.
+**Phase 1 (now):** Hub app + ChefByte app + CoachByte app as a single React SPA, plus the MCP Worker with bundled extension tool integrations.
 
 - **Hub** (`/hub`): Auth (email/password via Supabase), profile (timezone, day_start_hour), app activation/deactivation, MCP key management, tool toggles, extension settings UI
 - **CoachByte** (`/coach`): Workout plans, sequential set completion, rest timer (DB state machine), weekly split planner, PR tracker (Epley 1RM), history with keyset pagination, exercise library
@@ -54,7 +54,7 @@ legacy/                # Old repos for reference (see below)
 - **Realtime over polling:** Supabase Realtime for timer updates, plan changes, macro totals, profile changes. Realtime events invalidate TanStack Query keys via `useRealtimeInvalidation` hook instead of refetching all data.
 - **Data fetching:** TanStack Query (`useQuery`/`useMutation`) for all server state. Query keys defined in `src/shared/queryKeys.ts`. Mutations use optimistic updates where appropriate. Stale time: 2 min default, 5-10 min for rarely-changing data.
 - **Code splitting:** Route modules lazy-loaded via `React.lazy()`. Pages within modules also lazy-loaded (except landing pages). Vendor + Supabase extracted into separate cached chunks.
-- **Desktop-first:** Ionic grid + CSS media queries. Mobile-optimized layouts deferred to post-MVP.
+- **Desktop-first:** Tailwind CSS responsive classes. Mobile-optimized layouts deferred to post-MVP.
 
 ## Legacy Reference
 
@@ -102,7 +102,7 @@ After all implementation tasks in a test layer batch (pgTAP, unit, integration, 
 
 ## When Copying from Legacy
 
-1. **ChefByte UI** — The `legacy/chefbyte-vercel/apps/web/` React components can be closely matched. Same React + Supabase stack. Check component patterns, hooks, and Supabase queries. Adapt to Ionic React components where appropriate.
+1. **ChefByte UI** — The `legacy/chefbyte-vercel/apps/web/` React components can be closely matched. Same React + Supabase stack. Check component patterns, hooks, and Supabase queries. Adapt to Tailwind CSS components where appropriate.
 2. **ChefByte AI pipeline** — `legacy/luna-ext-chefbyte/` has the barcode → OpenFoodFacts → LLM pipeline in Python. Rewrite to TypeScript for Supabase Edge Functions. Switch from GPT-4/OpenAI to Claude Haiku 4.5/Anthropic SDK.
 3. **CoachByte DB logic** — `legacy/luna_ext_coachbyte/` has Postgres schemas and Python service logic. Port DB functions to plpgsql, build UI fresh from `docs/ascii-layouts.md`.
 4. **Always verify** — Legacy code may have patterns that conflict with the current spec (different unit systems, different auth, different state management). The docs are the source of truth.
