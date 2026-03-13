@@ -9,7 +9,7 @@ export interface CardProps extends HTMLAttributes<HTMLDivElement> {
 export function Card({ children, className, ...rest }: CardProps) {
   return (
     <div
-      className={['bg-white border border-slate-200 rounded-xl overflow-hidden', className].filter(Boolean).join(' ')}
+      className={['bg-surface border border-border rounded-xl overflow-hidden', className].filter(Boolean).join(' ')}
       {...rest}
     >
       {children}
@@ -25,7 +25,7 @@ export interface CardHeaderProps extends HTMLAttributes<HTMLDivElement> {
 
 export function CardHeader({ children, className, ...rest }: CardHeaderProps) {
   return (
-    <div className={['px-5 py-4 border-b border-slate-200', className].filter(Boolean).join(' ')} {...rest}>
+    <div className={['px-5 py-4 border-b border-border', className].filter(Boolean).join(' ')} {...rest}>
       {children}
     </div>
   );
@@ -39,7 +39,7 @@ export interface CardTitleProps extends HTMLAttributes<HTMLHeadingElement> {
 
 export function CardTitle({ children, className, ...rest }: CardTitleProps) {
   return (
-    <h3 className={['text-lg font-semibold text-slate-900', className].filter(Boolean).join(' ')} {...rest}>
+    <h3 className={['text-lg font-semibold text-text', className].filter(Boolean).join(' ')} {...rest}>
       {children}
     </h3>
   );
@@ -67,7 +67,10 @@ export interface CardFooterProps extends HTMLAttributes<HTMLDivElement> {
 
 export function CardFooter({ children, className, ...rest }: CardFooterProps) {
   return (
-    <div className={['px-5 py-4 border-t border-slate-200 bg-slate-50', className].filter(Boolean).join(' ')} {...rest}>
+    <div
+      className={['px-5 py-4 border-t border-border bg-surface-sunken', className].filter(Boolean).join(' ')}
+      {...rest}
+    >
       {children}
     </div>
   );

@@ -1,11 +1,11 @@
 import { forwardRef, type ButtonHTMLAttributes, type ReactNode } from 'react';
 
 const variantClasses = {
-  primary: 'bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-500/40',
-  secondary: 'bg-white text-slate-700 border border-slate-300 hover:bg-slate-50 focus-visible:ring-slate-400/40',
-  ghost: 'bg-transparent text-slate-600 hover:bg-slate-100 hover:text-slate-900 focus-visible:ring-slate-400/40',
-  danger: 'bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-500/40',
-  success: 'bg-emerald-600 text-white hover:bg-emerald-700 focus-visible:ring-emerald-500/40',
+  primary: 'bg-primary text-primary-text hover:bg-primary-hover focus-visible:ring-focus-ring',
+  secondary: 'bg-surface text-text border border-border-strong hover:bg-surface-hover focus-visible:ring-focus-ring',
+  ghost: 'bg-transparent text-text-secondary hover:bg-surface-hover hover:text-text focus-visible:ring-focus-ring',
+  danger: 'bg-danger text-white hover:bg-danger-hover focus-visible:ring-focus-ring',
+  success: 'bg-success text-white hover:bg-success-hover focus-visible:ring-focus-ring',
 } as const;
 
 const sizeClasses = {
@@ -35,7 +35,7 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(
         disabled={isDisabled}
         className={[
           'inline-flex items-center justify-center gap-2 rounded-lg font-medium transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-offset-surface',
           variantClasses[variant],
           sizeClasses[size],
           isDisabled ? 'opacity-50 cursor-not-allowed pointer-events-none' : '',

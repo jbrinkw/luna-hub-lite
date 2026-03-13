@@ -14,7 +14,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
     return (
       <div className="w-full">
         {label && (
-          <label htmlFor={selectId} className="block text-sm font-medium text-slate-700 mb-1">
+          <label htmlFor={selectId} className="block text-sm font-medium text-text-secondary mb-1">
             {label}
           </label>
         )}
@@ -23,12 +23,12 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
             ref={ref}
             id={selectId}
             className={[
-              'block w-full appearance-none rounded-lg border px-3 py-2 pr-10 text-sm text-slate-900',
-              'bg-white transition-colors',
-              'focus:outline-none focus:ring-2 focus:border-blue-500',
+              'block w-full appearance-none rounded-lg border px-3 py-2 pr-10 text-sm text-text',
+              'bg-surface transition-colors',
+              'focus:outline-none focus:ring-2 focus:border-primary',
               error
-                ? 'border-red-300 focus:ring-red-500/40 focus:border-red-500'
-                : 'border-slate-300 focus:ring-blue-500/40 focus:border-blue-500',
+                ? 'border-danger focus:ring-focus-ring focus:border-danger'
+                : 'border-border-strong focus:ring-focus-ring focus:border-primary',
               className,
             ]
               .filter(Boolean)
@@ -41,7 +41,7 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           </select>
           {/* Chevron icon */}
           <svg
-            className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+            className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary"
             viewBox="0 0 20 20"
             fill="currentColor"
             aria-hidden="true"
@@ -54,12 +54,12 @@ export const Select = forwardRef<HTMLSelectElement, SelectProps>(
           </svg>
         </div>
         {error && (
-          <p id={`${selectId}-error`} className="mt-1 text-sm text-red-600">
+          <p id={`${selectId}-error`} className="mt-1 text-sm text-danger-text">
             {error}
           </p>
         )}
         {!error && hint && (
-          <p id={`${selectId}-hint`} className="mt-1 text-sm text-slate-500">
+          <p id={`${selectId}-hint`} className="mt-1 text-sm text-text-secondary">
             {hint}
           </p>
         )}

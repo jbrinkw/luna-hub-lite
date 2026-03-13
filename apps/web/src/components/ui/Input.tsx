@@ -12,7 +12,7 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(({ label, error, h
   return (
     <div className="w-full">
       {label && (
-        <label htmlFor={inputId} className="block text-sm font-medium text-slate-700 mb-1">
+        <label htmlFor={inputId} className="block text-sm font-medium text-text-secondary mb-1">
           {label}
         </label>
       )}
@@ -20,12 +20,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(({ label, error, h
         ref={ref}
         id={inputId}
         className={[
-          'block w-full rounded-lg border px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400',
+          'block w-full rounded-lg border px-3 py-2 text-sm bg-surface text-text placeholder:text-text-tertiary',
           'transition-colors',
-          'focus:outline-none focus:ring-2 focus:border-blue-500',
+          'focus:outline-none focus:ring-2 focus:border-primary',
           error
-            ? 'border-red-300 focus:ring-red-500/40 focus:border-red-500'
-            : 'border-slate-300 focus:ring-blue-500/40 focus:border-blue-500',
+            ? 'border-danger focus:ring-focus-ring focus:border-danger'
+            : 'border-border-strong focus:ring-focus-ring focus:border-primary',
           className,
         ]
           .filter(Boolean)
@@ -35,12 +35,12 @@ export const Input = forwardRef<HTMLInputElement, InputProps>(({ label, error, h
         {...rest}
       />
       {error && (
-        <p id={`${inputId}-error`} className="mt-1 text-sm text-red-600">
+        <p id={`${inputId}-error`} className="mt-1 text-sm text-danger-text">
           {error}
         </p>
       )}
       {!error && hint && (
-        <p id={`${inputId}-hint`} className="mt-1 text-sm text-slate-500">
+        <p id={`${inputId}-hint`} className="mt-1 text-sm text-text-secondary">
           {hint}
         </p>
       )}

@@ -53,7 +53,7 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       {/* Backdrop */}
       <div
-        className="absolute inset-0 bg-black/50 backdrop-blur-sm animate-modal-backdrop"
+        className="absolute inset-0 bg-backdrop backdrop-blur-sm animate-modal-backdrop"
         onClick={onClose}
         aria-hidden="true"
       />
@@ -66,7 +66,7 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
         aria-label={title}
         tabIndex={-1}
         className={[
-          'relative w-full bg-white rounded-xl shadow-xl animate-modal-card',
+          'relative w-full bg-surface-raised rounded-xl shadow-xl animate-modal-card',
           maxWidthClasses[maxWidth],
           className,
         ]
@@ -74,12 +74,12 @@ export function Modal({ open, onClose, title, children, maxWidth = 'md', classNa
           .join(' ')}
       >
         {title && (
-          <div className="flex items-center justify-between px-5 py-4 border-b border-slate-200">
-            <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+          <div className="flex items-center justify-between px-5 py-4 border-b border-border">
+            <h2 className="text-lg font-semibold text-text">{title}</h2>
             <button
               type="button"
               onClick={onClose}
-              className="rounded-md p-1.5 text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40"
+              className="rounded-md p-1.5 text-text-tertiary hover:text-text-secondary hover:bg-surface-hover transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring"
               aria-label="Close"
             >
               <svg className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">

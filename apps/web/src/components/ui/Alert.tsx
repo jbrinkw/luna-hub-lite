@@ -1,10 +1,10 @@
 import type { HTMLAttributes, ReactNode } from 'react';
 
 const variantClasses = {
-  info: 'bg-blue-50 border-blue-500 text-blue-800',
-  warning: 'bg-amber-50 border-amber-500 text-amber-800',
-  error: 'bg-red-50 border-red-500 text-red-800',
-  success: 'bg-emerald-50 border-emerald-500 text-emerald-800',
+  info: 'bg-info-subtle border-primary text-info-text',
+  warning: 'bg-warning-subtle border-warning text-warning-text',
+  error: 'bg-danger-subtle border-danger text-danger-text',
+  success: 'bg-success-subtle border-success text-success-text',
 } as const;
 
 const iconPaths: Record<keyof typeof variantClasses, string> = {
