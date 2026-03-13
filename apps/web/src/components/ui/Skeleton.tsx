@@ -5,7 +5,7 @@ import type { HTMLAttributes } from 'react';
 export type SkeletonProps = HTMLAttributes<HTMLDivElement>;
 
 export function Skeleton({ className, ...rest }: SkeletonProps) {
-  return <div className={['animate-pulse bg-slate-200 rounded', className].filter(Boolean).join(' ')} {...rest} />;
+  return <div className={['animate-pulse bg-skeleton rounded', className].filter(Boolean).join(' ')} {...rest} />;
 }
 
 /* ─── ListSkeleton ─── */
@@ -37,7 +37,7 @@ export type CardSkeletonProps = HTMLAttributes<HTMLDivElement>;
 export function CardSkeleton({ className, ...rest }: CardSkeletonProps) {
   return (
     <div
-      className={['bg-white border border-slate-200 rounded-xl overflow-hidden p-5 space-y-4', className]
+      className={['bg-surface border border-border rounded-xl overflow-hidden p-5 space-y-4', className]
         .filter(Boolean)
         .join(' ')}
       {...rest}
@@ -83,7 +83,7 @@ export function TableSkeleton({ rows = 5, cols = 4, className, ...rest }: TableS
   return (
     <div className={['space-y-2', className].filter(Boolean).join(' ')} {...rest}>
       {/* Header row */}
-      <div className="flex gap-4 pb-2 border-b border-slate-200">
+      <div className="flex gap-4 pb-2 border-b border-border">
         {Array.from({ length: cols }, (_, i) => (
           <Skeleton key={i} className="h-4 flex-1" />
         ))}

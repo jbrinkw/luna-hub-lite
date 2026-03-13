@@ -27,8 +27,8 @@ export function Toggle({ checked, onChange, label, disabled = false, className, 
         className={[
           'relative inline-flex h-6 w-11 shrink-0 rounded-full border-2 border-transparent',
           'transition-colors duration-200 ease-in-out',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40 focus-visible:ring-offset-2',
-          checked ? 'bg-blue-600' : 'bg-slate-200',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring',
+          checked ? 'bg-primary' : 'bg-border-strong',
         ].join(' ')}
         {...rest}
       >
@@ -41,7 +41,7 @@ export function Toggle({ checked, onChange, label, disabled = false, className, 
           ].join(' ')}
         />
       </button>
-      {label && <span className="text-sm font-medium text-slate-700 select-none">{label}</span>}
+      {label && <span className="text-sm font-medium text-text select-none">{label}</span>}
     </label>
   );
 }

@@ -22,12 +22,12 @@ export function Tabs({ items, activeValue, onChange, accentColor: _, className, 
         const isActive = item.value === activeValue;
         const sharedClasses = [
           'inline-flex items-center gap-1.5 px-3 py-2 text-sm font-medium rounded-md transition-colors',
-          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500/40',
-          isActive ? 'bg-slate-100 text-slate-900' : 'text-slate-500 hover:text-slate-700 hover:bg-slate-50',
+          'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring',
+          isActive ? 'bg-surface-hover text-text' : 'text-text-secondary hover:text-text hover:bg-surface-hover',
         ].join(' ');
 
         const badgeEl = item.badge ? (
-          <span className="ml-1 inline-flex items-center rounded-full bg-slate-200 px-1.5 py-0.5 text-[10px] font-semibold text-slate-600">
+          <span className="ml-1 inline-flex items-center rounded-full bg-surface-hover px-1.5 py-0.5 text-[10px] font-semibold text-text-secondary">
             {item.badge}
           </span>
         ) : null;

@@ -22,7 +22,7 @@ export function ConfirmModal({
 }: ConfirmModalProps) {
   return (
     <Modal open={open} onClose={onCancel} title={title} maxWidth="sm">
-      <p className="text-sm text-slate-600 mb-4">{message}</p>
+      <p className="text-sm text-text-secondary mb-4">{message}</p>
       <div className="flex justify-end gap-2">
         <Button variant="secondary" size="sm" onClick={onCancel}>
           Cancel

@@ -32,18 +32,18 @@ export function ProgressBar({
       {(label || showPercentage) && (
         <div className="flex items-baseline justify-between mb-1.5">
           <div className="flex items-baseline gap-2">
-            {label && <span className="text-sm font-medium text-slate-700">{label}</span>}
-            {sublabel && <span className="text-xs text-slate-500">{sublabel}</span>}
+            {label && <span className="text-sm font-medium text-text">{label}</span>}
+            {sublabel && <span className="text-xs text-text-secondary">{sublabel}</span>}
           </div>
           {showPercentage && (
-            <span className="text-xs font-medium text-slate-500 tabular-nums">{Math.round(pct)}%</span>
+            <span className="text-xs font-medium text-text-secondary tabular-nums">{Math.round(pct)}%</span>
           )}
         </div>
       )}
 
       {/* Bar */}
       <div
-        className="relative h-2 w-full rounded-full bg-slate-100 overflow-hidden"
+        className="relative h-2 w-full rounded-full bg-surface-hover overflow-hidden"
         role="progressbar"
         aria-valuenow={value}
         aria-valuemin={0}

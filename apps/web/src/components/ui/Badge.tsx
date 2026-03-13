@@ -1,11 +1,11 @@
 import type { HTMLAttributes, ReactNode } from 'react';
 
 const variantClasses = {
-  default: 'bg-slate-100 text-slate-700',
-  success: 'bg-emerald-50 text-emerald-700',
-  warning: 'bg-amber-50 text-amber-700',
-  danger: 'bg-red-50 text-red-700',
-  info: 'bg-blue-50 text-blue-700',
+  default: 'bg-surface-hover text-text-secondary',
+  success: 'bg-success-subtle text-success-text',
+  warning: 'bg-warning-subtle text-warning-text',
+  danger: 'bg-danger-subtle text-danger-text',
+  info: 'bg-info-subtle text-info-text',
 } as const;
 
 export interface BadgeProps extends HTMLAttributes<HTMLSpanElement> {
