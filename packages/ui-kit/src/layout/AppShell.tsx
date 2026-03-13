@@ -5,5 +5,5 @@ interface AppShellProps {
 }
 
 export function AppShell({ children }: AppShellProps) {
-  return <div className="min-h-screen bg-slate-50">{children}</div>;
+  return <div className="min-h-screen bg-surface-sunken">{children}</div>;
 }

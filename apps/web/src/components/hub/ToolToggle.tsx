@@ -24,12 +24,12 @@ export function ToolToggle({ tools, loading, onToggle }: ToolToggleProps) {
         </div>
       )}
       {!loading && (
-        <div className="bg-white border border-slate-200 rounded-xl divide-y divide-slate-100">
+        <div className="bg-surface border border-border rounded-xl divide-y divide-border-light">
           {tools.map((tool) => (
             <div key={tool.tool_name} className="flex items-center justify-between px-4 py-3">
               <div className="min-w-0 flex-1">
-                <p className="text-sm font-medium text-slate-900 truncate">{tool.tool_name}</p>
-                <p className="text-sm text-slate-500">{tool.description}</p>
+                <p className="text-sm font-medium text-text truncate">{tool.tool_name}</p>
+                <p className="text-sm text-text-secondary">{tool.description}</p>
               </div>
               <div className="ml-4 shrink-0">
                 <Toggle
@@ -42,7 +42,7 @@ export function ToolToggle({ tools, loading, onToggle }: ToolToggleProps) {
           ))}
           {tools.length === 0 && (
             <div className="px-4 py-8 text-center">
-              <p className="text-sm text-slate-500">No tools configured. Activate an app first.</p>
+              <p className="text-sm text-text-secondary">No tools configured. Activate an app first.</p>
             </div>
           )}
         </div>

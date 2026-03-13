@@ -28,11 +28,11 @@ export class ErrorBoundary extends Component<Props, State> {
     if (this.state.hasError) {
       return (
         <div className="p-8 text-center">
-          <h2 className="text-red-600 text-lg font-semibold mb-2">Something went wrong in {this.props.module}</h2>
-          <p className="text-red-600 mb-4">{this.state.error?.message}</p>
+          <h2 className="text-danger-text text-lg font-semibold mb-2">Something went wrong in {this.props.module}</h2>
+          <p className="text-danger-text mb-4">{this.state.error?.message}</p>
           <button
             onClick={this.handleRetry}
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition-colors"
+            className="px-4 py-2 bg-primary text-primary-text rounded-lg font-medium hover:bg-primary-hover transition-colors"
           >
             Retry
           </button>

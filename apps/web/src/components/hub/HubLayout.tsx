@@ -32,10 +32,10 @@ export function HubLayout({ title, children }: HubLayoutProps) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-surface-sunken">
       <HubHeader title={title}>
         <button
-          className="md:hidden inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors"
+          className="md:hidden inline-flex items-center justify-center p-1.5 rounded-lg border border-border-strong text-text hover:bg-surface-hover transition-colors"
           aria-label="Toggle navigation"
           onClick={() => setDrawerOpen(!drawerOpen)}
         >
@@ -46,7 +46,7 @@ export function HubLayout({ title, children }: HubLayoutProps) {
       {/* Mobile drawer */}
       <div
         className={[
-          'md:hidden flex-col bg-white border-b border-slate-200 overflow-hidden transition-all duration-200',
+          'md:hidden flex-col bg-surface border-b border-border overflow-hidden transition-all duration-200',
           drawerOpen ? 'flex' : 'hidden',
         ].join(' ')}
         data-testid="hub-mobile-drawer"
@@ -65,7 +65,7 @@ export function HubLayout({ title, children }: HubLayoutProps) {
                   }}
                   className={[
                     'flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg transition-colors text-left',
-                    active ? 'text-blue-700 bg-blue-50' : 'text-slate-700 hover:bg-slate-100',
+                    active ? 'text-primary bg-primary-subtle' : 'text-text hover:bg-surface-hover',
                   ].join(' ')}
                 >
                   <Icon className="h-[18px] w-[18px] shrink-0" />
@@ -78,7 +78,7 @@ export function HubLayout({ title, children }: HubLayoutProps) {
                 setDrawerOpen(false);
                 signOut();
               }}
-              className="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg text-red-600 hover:bg-red-50 text-left transition-colors"
+              className="flex items-center gap-3 px-3 py-2.5 text-sm font-medium rounded-lg text-danger hover:bg-danger-subtle text-left transition-colors"
             >
               Logout
             </button>
@@ -87,7 +87,7 @@ export function HubLayout({ title, children }: HubLayoutProps) {
       </div>
 
       <div className="flex min-h-[calc(100vh-3.5rem)]">
-        <aside className="hidden md:block w-60 border-r border-slate-200 bg-white">
+        <aside className="hidden md:block w-60 border-r border-border bg-surface">
           <SideNav />
         </aside>
         <main className="flex-1 p-4 sm:p-6 max-w-4xl">{children}</main>

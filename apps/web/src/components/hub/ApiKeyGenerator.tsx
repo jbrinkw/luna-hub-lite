@@ -86,11 +86,11 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
         {error && <Alert variant="error">{error}</Alert>}
 
         {generatedKey && (
-          <div data-testid="key-display" className="bg-slate-50 border border-slate-200 rounded-lg p-4 space-y-3">
-            <p className="text-sm font-medium text-slate-700">Your API key (shown once):</p>
+          <div data-testid="key-display" className="bg-surface-sunken border border-border rounded-lg p-4 space-y-3">
+            <p className="text-sm font-medium text-text">Your API key (shown once):</p>
             <code
               data-testid="key-plaintext"
-              className="block text-sm bg-white border border-slate-200 rounded px-3 py-2 break-all"
+              className="block text-sm bg-surface border border-border rounded px-3 py-2 break-all"
             >
               {generatedKey}
             </code>
@@ -106,21 +106,21 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
           </div>
         )}
 
-        <div className="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
+        <div className="divide-y divide-border-light border border-border rounded-lg overflow-hidden">
           {activeKeys.map((key) => (
-            <div key={key.id} className="flex items-center justify-between px-4 py-3 bg-white">
+            <div key={key.id} className="flex items-center justify-between px-4 py-3 bg-surface">
               <div className="flex items-center gap-3 min-w-0">
-                <Key className="h-4 w-4 text-slate-400 shrink-0" />
+                <Key className="h-4 w-4 text-text-tertiary shrink-0" />
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-900 truncate">{key.label || 'Untitled'}</p>
-                  <p className="text-xs text-slate-500">Created {new Date(key.created_at).toLocaleDateString()}</p>
+                  <p className="text-sm font-medium text-text truncate">{key.label || 'Untitled'}</p>
+                  <p className="text-xs text-text-secondary">Created {new Date(key.created_at).toLocaleDateString()}</p>
                 </div>
               </div>
               <Button
                 variant="ghost"
                 size="sm"
                 onClick={() => handleRevokeClick(key.id)}
-                className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                className="text-danger hover:text-danger-hover hover:bg-danger-subtle"
               >
                 <Trash2 className="h-4 w-4" />
                 Revoke
@@ -129,8 +129,8 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
           ))}
           {activeKeys.length === 0 && (
             <div className="px-4 py-8 text-center">
-              <Key className="h-8 w-8 text-slate-300 mx-auto mb-2" />
-              <p className="text-sm text-slate-500">No API keys yet. Generate one to connect MCP clients.</p>
+              <Key className="h-8 w-8 text-text-disabled mx-auto mb-2" />
+              <p className="text-sm text-text-secondary">No API keys yet. Generate one to connect MCP clients.</p>
             </div>
           )}
         </div>

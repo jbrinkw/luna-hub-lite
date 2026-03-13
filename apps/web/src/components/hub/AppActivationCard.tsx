@@ -41,7 +41,7 @@ export function AppActivationCard({ displayName, active, loading, onActivate, on
           title={`Deactivate ${displayName}?`}
           maxWidth="sm"
         >
-          <p className="text-sm text-slate-600 mb-4">Are you sure you want to deactivate {displayName}?</p>
+          <p className="text-sm text-text-secondary mb-4">Are you sure you want to deactivate {displayName}?</p>
           <div className="flex gap-3 justify-end">
             <Button variant="secondary" onClick={() => setShowConfirm(false)}>
               Cancel

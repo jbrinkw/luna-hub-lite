@@ -59,7 +59,7 @@ export function ExtensionCard({
   };
 
   return (
-    <Card className={['transition-all', enabled ? 'border-l-4 border-l-emerald-500' : 'opacity-60'].join(' ')}>
+    <Card className={['transition-all', enabled ? 'border-l-4 border-l-success' : 'opacity-60'].join(' ')}>
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle>{displayName}</CardTitle>
@@ -67,7 +67,7 @@ export function ExtensionCard({
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
-        <p className="text-sm text-slate-600">{description}</p>
+        <p className="text-sm text-text-secondary">{description}</p>
 
         {hasCredentials ? (
           <Badge variant="success">Credentials configured</Badge>
@@ -76,7 +76,7 @@ export function ExtensionCard({
         )}
 
         {enabled && (
-          <div className="space-y-3 pt-2 border-t border-slate-100">
+          <div className="space-y-3 pt-2 border-t border-border-light">
             {credentialFields.map((field) => (
               <Input
                 key={field.key}
