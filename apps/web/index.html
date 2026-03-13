@@ -12,6 +12,14 @@
         src: url('/fonts/inter-variable.woff2') format('woff2');
       }
     </style>
+    <script>
+      (function () {
+        var t = localStorage.getItem('luna-theme');
+        if (t === 'dark' || (t !== 'light' && window.matchMedia('(prefers-color-scheme: dark)').matches)) {
+          document.documentElement.classList.add('dark');
+        }
+      })();
+    </script>
     <title>Luna Hub</title>
   </head>
   <body>
