@@ -152,7 +152,7 @@ export function McpSettingsPage() {
           </CardHeader>
           <CardContent>
             <div className="flex items-center gap-2">
-              <code className="text-sm bg-slate-100 px-3 py-1.5 rounded-md text-slate-800 flex-1 break-all">
+              <code className="text-sm bg-code-bg px-3 py-1.5 rounded-md text-code-text flex-1 break-all">
                 {endpointUrl}
               </code>
               <Button variant="secondary" size="sm" onClick={handleCopyEndpoint} data-testid="copy-endpoint">

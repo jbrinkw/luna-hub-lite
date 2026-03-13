@@ -229,7 +229,7 @@ export function AccountPage() {
 
               {/* Timezone searchable combobox */}
               <div className="relative w-full" ref={tzRef}>
-                <label htmlFor="timezone-search" className="block text-sm font-medium text-slate-700 mb-1">
+                <label htmlFor="timezone-search" className="block text-sm font-medium text-text-secondary mb-1">
                   Timezone
                 </label>
                 <div className="relative">
@@ -242,7 +242,7 @@ export function AccountPage() {
                     aria-controls="timezone-listbox"
                     aria-autocomplete="list"
                     aria-activedescendant={tzHighlight >= 0 ? `tz-option-${tzHighlight}` : undefined}
-                    className="block w-full rounded-lg border border-slate-300 px-3 py-2 pr-10 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-500"
+                    className="block w-full rounded-lg border border-border-strong bg-surface px-3 py-2 pr-10 text-sm text-text placeholder:text-text-tertiary transition-colors focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                     value={tzOpen ? tzSearch : timezone}
                     placeholder="Search timezones..."
                     onChange={(e) => {
@@ -258,7 +258,7 @@ export function AccountPage() {
                     data-testid="timezone-combobox"
                   />
                   <ChevronDown
-                    className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400"
+                    className="pointer-events-none absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 text-text-tertiary"
                     aria-hidden="true"
                   />
                 </div>
@@ -267,10 +267,10 @@ export function AccountPage() {
                     ref={listRef}
                     id="timezone-listbox"
                     role="listbox"
-                    className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-slate-200 bg-white shadow-lg"
+                    className="absolute z-20 mt-1 max-h-60 w-full overflow-auto rounded-lg border border-border bg-surface-raised shadow-lg"
                   >
                     {filteredTimezones.length === 0 ? (
-                      <li className="px-3 py-2 text-sm text-slate-500">No matching timezones</li>
+                      <li className="px-3 py-2 text-sm text-text-secondary">No matching timezones</li>
                     ) : (
                       filteredTimezones.map((tz, i) => (
                         <li
@@ -280,7 +280,7 @@ export function AccountPage() {
                           aria-selected={tz === timezone}
                           className={[
                             'cursor-pointer px-3 py-2 text-sm',
-                            i === tzHighlight ? 'bg-blue-50 text-blue-900' : 'text-slate-900',
+                            i === tzHighlight ? 'bg-primary-subtle text-primary' : 'text-text',
                             tz === timezone ? 'font-medium' : '',
                           ].join(' ')}
                           onMouseDown={(e) => {

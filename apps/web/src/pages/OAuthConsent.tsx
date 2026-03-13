@@ -101,7 +101,7 @@ export function OAuthConsent() {
 
   if (!authorizationId) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
+      <div className="min-h-screen flex items-center justify-center bg-surface-sunken">
         <Card className="w-full max-w-md">
           <CardContent>
             <Alert variant="error">Missing authorization_id parameter.</Alert>
@@ -113,14 +113,14 @@ export function OAuthConsent() {
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-50">
-        <p className="text-sm text-slate-500">Loading authorization details...</p>
+      <div className="min-h-screen flex items-center justify-center bg-surface-sunken">
+        <p className="text-sm text-text-secondary">Loading authorization details...</p>
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className="min-h-screen flex items-center justify-center bg-surface-sunken">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Authorize Application</CardTitle>
@@ -130,22 +130,22 @@ export function OAuthConsent() {
 
           {details && (
             <>
-              <p className="text-base text-slate-700">
+              <p className="text-base text-text">
                 <span className="font-semibold">{details.client.name}</span> wants to access your Luna Hub account.
               </p>
 
-              <div className="bg-slate-50 border border-slate-200 rounded-lg p-3 space-y-1 break-all">
-                <p className="text-xs text-slate-500">
+              <div className="bg-surface-sunken border border-border rounded-lg p-3 space-y-1 break-all">
+                <p className="text-xs text-text-secondary">
                   <span className="font-medium">Redirect URI:</span> {details.redirect_uri}
                 </p>
                 {details.scope && details.scope.trim() && (
-                  <p className="text-xs text-slate-500">
+                  <p className="text-xs text-text-secondary">
                     <span className="font-medium">Scopes:</span> {details.scope}
                   </p>
                 )}
               </div>
 
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-text-secondary">
                 This will allow the application to use your MCP tools (CoachByte, ChefByte, extensions) on your behalf.
               </p>
 

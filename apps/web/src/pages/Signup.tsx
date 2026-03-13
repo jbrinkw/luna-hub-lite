@@ -51,7 +51,7 @@ export function Signup() {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-slate-50">
+    <div className="min-h-screen flex items-center justify-center bg-surface-sunken">
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Create Account</CardTitle>
@@ -84,9 +84,9 @@ export function Signup() {
               Sign Up
             </Button>
           </form>
-          <p className="text-center text-sm text-slate-600 mt-4">
+          <p className="text-center text-sm text-text-secondary mt-4">
             Already have an account?{' '}
-            <Link to="/login" className="text-blue-600 hover:text-blue-700 hover:underline font-medium">
+            <Link to="/login" className="text-primary hover:text-primary-hover hover:underline font-medium">
               Sign in
             </Link>
           </p>

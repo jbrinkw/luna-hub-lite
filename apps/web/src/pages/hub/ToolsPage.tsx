@@ -201,21 +201,21 @@ export function ToolsPage() {
         <div className="space-y-3">
           {/* Search input */}
           <div className="relative">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-text-tertiary" />
             <input
               type="text"
               placeholder="Search tools..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-9 py-2 text-sm border border-slate-200 rounded-lg bg-white
-                focus:outline-none focus:ring-2 focus:ring-blue-500/40 focus:border-blue-400
-                placeholder:text-slate-400"
+              className="w-full pl-9 pr-9 py-2 text-sm border border-border rounded-lg bg-surface
+                focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary
+                placeholder:text-text-tertiary"
               aria-label="Search tools"
             />
             {search && (
               <button
                 onClick={() => setSearch('')}
-                className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600"
+                className="absolute right-3 top-1/2 -translate-y-1/2 text-text-tertiary hover:text-text-secondary"
                 aria-label="Clear search"
               >
                 <X className="h-4 w-4" />
@@ -228,22 +228,22 @@ export function ToolsPage() {
             const expanded = isGroupExpanded(group.label);
             const tools = group.matchingTools;
             return (
-              <div key={group.label} className="bg-white border border-slate-200 rounded-xl overflow-hidden">
+              <div key={group.label} className="bg-surface border border-border rounded-xl overflow-hidden">
                 {/* Group header */}
                 <button
                   onClick={() => toggleGroup(group.label)}
-                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-slate-50 transition-colors"
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-surface-hover transition-colors"
                   aria-expanded={expanded}
                   aria-label={`${group.label} tools group`}
                 >
                   <div className="flex items-center gap-2">
                     {expanded ? (
-                      <ChevronDown className="h-4 w-4 text-slate-400" />
+                      <ChevronDown className="h-4 w-4 text-text-tertiary" />
                     ) : (
-                      <ChevronRight className="h-4 w-4 text-slate-400" />
+                      <ChevronRight className="h-4 w-4 text-text-tertiary" />
                     )}
-                    <span className="text-sm font-semibold text-slate-700">{group.label}</span>
-                    <span className="inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium text-slate-500 bg-slate-100 rounded-full">
+                    <span className="text-sm font-semibold text-text">{group.label}</span>
+                    <span className="inline-flex items-center justify-center px-2 py-0.5 text-xs font-medium text-text-secondary bg-surface-hover rounded-full">
                       {tools.length}
                     </span>
                   </div>
@@ -251,13 +251,13 @@ export function ToolsPage() {
 
                 {/* Expanded tool list */}
                 {expanded && (
-                  <div className="divide-y divide-slate-100 border-t border-slate-100">
+                  <div className="divide-y divide-border-light border-t border-border-light">
                     {tools.map((tool) => (
                       <div key={tool.name} className="flex items-center justify-between px-4 py-3">
                         <div className="min-w-0 flex-1">
-                          <p className="text-sm font-medium text-slate-900">{tool.displayName}</p>
-                          <p className="text-sm text-slate-500">{tool.description}</p>
-                          <p className="text-xs text-slate-400 font-mono mt-0.5 break-all">{tool.name}</p>
+                          <p className="text-sm font-medium text-text">{tool.displayName}</p>
+                          <p className="text-sm text-text-secondary">{tool.description}</p>
+                          <p className="text-xs text-text-tertiary font-mono mt-0.5 break-all">{tool.name}</p>
                         </div>
                         <div className="ml-4 shrink-0">
                           <Toggle
@@ -276,7 +276,7 @@ export function ToolsPage() {
 
           {/* No results */}
           {filteredGroups.length === 0 && search && (
-            <p className="text-center text-sm text-slate-500 py-8">No tools match "{search}"</p>
+            <p className="text-center text-sm text-text-secondary py-8">No tools match "{search}"</p>
           )}
         </div>
       )}

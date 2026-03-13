@@ -246,12 +246,12 @@ export function Login() {
       </div>
 
       {/* Form panel */}
-      <div className="md:order-2 md:w-[45%] flex items-center justify-center px-6 py-12 md:py-0 bg-white">
+      <div className="md:order-2 md:w-[45%] flex items-center justify-center px-6 py-12 md:py-0 bg-surface">
         <div className="w-full max-w-sm">
           {view === 'login' ? (
             <>
-              <h2 className="text-2xl font-bold text-slate-900 mb-1">Welcome back</h2>
-              <p className="text-sm text-slate-500 mb-6">Sign in to your account</p>
+              <h2 className="text-2xl font-bold text-text mb-1">Welcome back</h2>
+              <p className="text-sm text-text-secondary mb-6">Sign in to your account</p>
 
               <form onSubmit={handleSubmit} className="space-y-4">
                 {error && <Alert variant="error">{error}</Alert>}
@@ -279,7 +279,7 @@ export function Login() {
               <div className="text-right mt-2">
                 <button
                   type="button"
-                  className="text-sm text-blue-600 hover:text-blue-700 hover:underline bg-transparent border-none cursor-pointer p-0"
+                  className="text-sm text-primary hover:text-primary-hover hover:underline bg-transparent border-none cursor-pointer p-0"
                   onClick={() => {
                     setView('reset');
                     setError(null);
@@ -292,9 +292,9 @@ export function Login() {
               </div>
 
               <div className="flex items-center gap-3 my-4">
-                <hr className="flex-1 border-slate-200" />
-                <span className="text-sm text-slate-500">or</span>
-                <hr className="flex-1 border-slate-200" />
+                <hr className="flex-1 border-border" />
+                <span className="text-sm text-text-secondary">or</span>
+                <hr className="flex-1 border-border" />
               </div>
 
               <Button
@@ -306,20 +306,20 @@ export function Login() {
               >
                 Try Demo Account
               </Button>
-              <p className="text-center text-xs text-slate-400 mt-2">
+              <p className="text-center text-xs text-text-tertiary mt-2">
                 Pre-loaded with sample data &mdash; no signup needed
               </p>
 
-              <p className="text-center text-sm text-slate-600 mt-4">
+              <p className="text-center text-sm text-text-secondary mt-4">
                 Don&apos;t have an account?{' '}
-                <Link to="/signup" className="text-blue-600 hover:text-blue-700 hover:underline font-medium">
+                <Link to="/signup" className="text-primary hover:text-primary-hover hover:underline font-medium">
                   Sign up
                 </Link>
               </p>
             </>
           ) : (
             <>
-              <h2 className="text-2xl font-bold text-slate-900 mb-4">Reset Password</h2>
+              <h2 className="text-2xl font-bold text-text mb-4">Reset Password</h2>
               <form onSubmit={handleForgotPassword} data-testid="forgot-password-form" className="space-y-3">
                 {error && <Alert variant="error">{error}</Alert>}
                 {forgotMessage && (
@@ -343,7 +343,7 @@ export function Login() {
               <div className="text-center mt-4">
                 <button
                   type="button"
-                  className="text-sm text-blue-600 hover:text-blue-700 hover:underline bg-transparent border-none cursor-pointer p-0"
+                  className="text-sm text-primary hover:text-primary-hover hover:underline bg-transparent border-none cursor-pointer p-0"
                   onClick={() => {
                     setView('login');
                     setError(null);
