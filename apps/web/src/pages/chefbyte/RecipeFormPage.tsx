@@ -383,8 +383,8 @@ export function RecipeFormPage() {
   /* ================================================================ */
 
   const inputCls =
-    'w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
-  const labelCls = 'block mb-1 font-semibold text-sm text-slate-700';
+    'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
+  const labelCls = 'block mb-1 font-semibold text-sm text-text-secondary';
 
   if (loading) {
     return (
@@ -402,17 +402,17 @@ export function RecipeFormPage() {
         <Link to="/chef/recipes" className="text-sm font-medium text-emerald-600 hover:text-emerald-700 no-underline">
           &larr; Recipes
         </Link>
-        <h1 className="mt-2 mb-0 text-2xl font-bold text-slate-900">{isEdit ? 'Edit Recipe' : 'New Recipe'}</h1>
+        <h1 className="mt-2 mb-0 text-2xl font-bold text-text">{isEdit ? 'Edit Recipe' : 'New Recipe'}</h1>
       </div>
 
       {saveError && (
-        <p className="text-red-600 bg-red-50 px-3.5 py-2.5 rounded-md border border-red-200">{saveError}</p>
+        <p className="text-danger-text bg-danger-subtle px-3.5 py-2.5 rounded-md border border-danger">{saveError}</p>
       )}
 
       {/* ============================================================ */}
       {/*  RECIPE FIELDS                                                */}
       {/* ============================================================ */}
-      <div data-testid="recipe-fields" className="bg-white border border-slate-200 rounded-lg p-5 mb-4">
+      <div data-testid="recipe-fields" className="bg-surface border border-border rounded-lg p-5 mb-4">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="md:col-span-3">
             <label className={labelCls}>Name</label>
@@ -484,8 +484,8 @@ export function RecipeFormPage() {
       {/* ============================================================ */}
       {/*  INGREDIENTS SECTION                                          */}
       {/* ============================================================ */}
-      <div data-testid="ingredients-section" className="bg-white border border-slate-200 rounded-lg p-5 mb-4">
-        <h3 className="m-0 mb-4 text-lg font-bold text-slate-900">Ingredients</h3>
+      <div data-testid="ingredients-section" className="bg-surface border border-border rounded-lg p-5 mb-4">
+        <h3 className="m-0 mb-4 text-lg font-bold text-text">Ingredients</h3>
 
         {/* Add ingredient form — stacks vertically on mobile */}
         <div
@@ -504,14 +504,14 @@ export function RecipeFormPage() {
             {showDropdown && (
               <div
                 data-testid="ingredient-product-dropdown"
-                className="absolute top-full left-0 right-0 bg-white border border-slate-300 rounded shadow-lg z-10 max-h-[200px] overflow-auto"
+                className="absolute top-full left-0 right-0 bg-surface border border-border-strong rounded shadow-lg z-10 max-h-[200px] overflow-auto"
               >
                 {searchResults.map((p) => (
                   <div
                     key={p.product_id}
                     onClick={() => selectProduct(p)}
                     data-testid={`ing-dropdown-item-${p.product_id}`}
-                    className="px-3 py-2 cursor-pointer border-b border-slate-100 hover:bg-slate-50 text-sm"
+                    className="px-3 py-2 cursor-pointer border-b border-border-light hover:bg-surface-hover text-sm"
                   >
                     {p.name}
                   </div>
@@ -571,49 +571,49 @@ export function RecipeFormPage() {
               <div
                 key={`${ing.product_id}-${idx}`}
                 data-testid={`ingredient-row-${idx}`}
-                className="bg-white border border-slate-200 rounded-lg p-3"
+                className="bg-surface border border-border rounded-lg p-3"
               >
                 <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-sm text-slate-900">{ing.product_name}</span>
+                  <span className="font-medium text-sm text-text">{ing.product_name}</span>
                   <button
                     onClick={() => removeIngredient(idx)}
                     data-testid={`remove-ingredient-${idx}`}
-                    className="bg-transparent border-none text-red-600 cursor-pointer font-semibold text-xs px-2 py-1 hover:text-red-700"
+                    className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-xs px-2 py-1 hover:text-red-700"
                   >
                     Remove
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-2 items-end">
                   <div className="w-20">
-                    <label className="block text-[11px] text-slate-500 mb-0.5">Qty</label>
+                    <label className="block text-[11px] text-text-tertiary mb-0.5">Qty</label>
                     <input
                       type="number"
                       min="0"
                       value={ing.quantity}
                       onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
-                      className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                      className="w-full px-2 py-1.5 border border-border-strong rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-focus-ring"
                       data-testid={`edit-qty-${idx}`}
                     />
                   </div>
                   <div className="w-[110px]">
-                    <label className="block text-[11px] text-slate-500 mb-0.5">Unit</label>
+                    <label className="block text-[11px] text-text-tertiary mb-0.5">Unit</label>
                     <select
                       value={ing.unit}
                       onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
                       data-testid={`edit-unit-${idx}`}
-                      className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                      className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
                     >
                       <option value="serving">Serving</option>
                       <option value="container">Container</option>
                     </select>
                   </div>
                   <div className="flex-1 min-w-[100px]">
-                    <label className="block text-[11px] text-slate-500 mb-0.5">Note</label>
+                    <label className="block text-[11px] text-text-tertiary mb-0.5">Note</label>
                     <input
                       value={ing.note}
                       placeholder={'\u2014'}
                       onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
-                      className="w-full px-2 py-1.5 border border-slate-300 rounded text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40"
+                      className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
                       data-testid={`edit-note-${idx}`}
                     />
                   </div>
@@ -624,16 +624,16 @@ export function RecipeFormPage() {
         )}
 
         {ingredients.length === 0 && (
-          <p data-testid="no-ingredients" className="text-slate-400 italic">
+          <p data-testid="no-ingredients" className="text-text-tertiary italic">
             No ingredients added yet.
           </p>
         )}
 
         {/* Dynamic macro display — visual badges */}
-        <div data-testid="macro-display" className="mt-4 p-4 bg-slate-50 rounded-lg">
+        <div data-testid="macro-display" className="mt-4 p-4 bg-surface-sunken rounded-lg">
           {/* Per Serving (prominent) */}
           <div data-testid="per-serving-macros" className="mb-3">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+            <div className="text-xs font-semibold text-text-tertiary uppercase tracking-wide mb-2">
               Per Serving ({baseServings})
             </div>
             <div className="flex gap-2 flex-wrap">
@@ -658,18 +658,18 @@ export function RecipeFormPage() {
 
           {/* Total (smaller) */}
           <div data-testid="total-macros">
-            <div className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1.5">Total Recipe</div>
+            <div className="text-xs font-semibold text-text-tertiary uppercase tracking-wide mb-1.5">Total Recipe</div>
             <div className="flex gap-2 flex-wrap">
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-border text-text-secondary">
                 {totalMacros.calories} Cal
               </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-border text-text-secondary">
                 {totalMacros.protein}g P
               </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-border text-text-secondary">
                 {totalMacros.carbs}g C
               </span>
-              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-slate-200 text-slate-700">
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-border text-text-secondary">
                 {totalMacros.fat}g F
               </span>
             </div>
@@ -692,7 +692,7 @@ export function RecipeFormPage() {
 
         <button
           onClick={() => navigate('/chef/recipes')}
-          className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+          className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
         >
           Cancel
         </button>
@@ -714,15 +714,18 @@ export function RecipeFormPage() {
           className="fixed inset-0 bg-black/50 flex items-center justify-center z-50"
           onClick={() => setShowDeleteAlert(false)}
         >
-          <div className="bg-white rounded-xl shadow-xl p-5 max-w-sm w-full mx-4" onClick={(e) => e.stopPropagation()}>
-            <h3 className="m-0 mb-3 text-lg font-bold text-slate-900">Delete Recipe</h3>
-            <p className="text-slate-500 m-0 mb-5">
+          <div
+            className="bg-surface rounded-xl shadow-xl p-5 max-w-sm w-full mx-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="m-0 mb-3 text-lg font-bold text-text">Delete Recipe</h3>
+            <p className="text-text-tertiary m-0 mb-5">
               Are you sure you want to delete this recipe? This cannot be undone.
             </p>
             <div className="flex gap-2 justify-end">
               <button
                 onClick={() => setShowDeleteAlert(false)}
-                className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+                className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
               >
                 Cancel
               </button>

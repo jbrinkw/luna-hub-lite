@@ -105,7 +105,7 @@ export function RestTimer({
         </div>
 
         {state === 'expired' && (
-          <p data-testid="timer-expired" className="text-center font-bold text-red-600">
+          <p data-testid="timer-expired" className="text-center font-bold text-danger-text">
             Timer expired
           </p>
         )}
@@ -130,12 +130,12 @@ export function RestTimer({
 
         <div className="flex gap-2 mt-3 items-end">
           <div className="flex flex-col gap-1 flex-1">
-            <label className="text-sm font-semibold text-slate-700">Custom (seconds)</label>
+            <label className="text-sm font-semibold text-text-secondary">Custom (seconds)</label>
             <input
               type="number"
               value={customDuration}
               onChange={(e) => setCustomDuration(e.target.value)}
-              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              className="w-full px-3 py-2 text-sm border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               data-testid="custom-duration-input"
             />
           </div>

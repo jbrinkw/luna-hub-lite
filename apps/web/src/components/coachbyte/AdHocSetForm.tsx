@@ -40,11 +40,11 @@ export function AdHocSetForm({ exercises, onSubmit, onCancel }: AdHocSetFormProp
         <CardContent>
           <form onSubmit={handleSubmit}>
             <div className="flex flex-col gap-1 mb-3">
-              <label className="text-sm font-semibold text-slate-700">Exercise</label>
+              <label className="text-sm font-semibold text-text-secondary">Exercise</label>
               <select
                 value={exerciseId}
                 onChange={(e) => setExerciseId(e.target.value)}
-                className="w-full appearance-none rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                className="w-full appearance-none rounded-lg border border-border-strong px-3 py-2 text-sm text-text bg-surface focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                 data-testid="exercise-select"
               >
                 <option value="">Select exercise...</option>
@@ -58,22 +58,22 @@ export function AdHocSetForm({ exercises, onSubmit, onCancel }: AdHocSetFormProp
 
             <div className="flex gap-4 mb-3">
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-semibold text-slate-700">Reps</label>
+                <label className="text-sm font-semibold text-text-secondary">Reps</label>
                 <input
                   type="number"
                   value={reps}
                   onChange={(e) => setReps(e.target.value)}
-                  className="w-20 px-3 py-2 text-sm text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                  className="w-20 px-3 py-2 text-sm text-center border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                   data-testid="adhoc-reps"
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-semibold text-slate-700">Load</label>
+                <label className="text-sm font-semibold text-text-secondary">Load</label>
                 <input
                   type="number"
                   value={load}
                   onChange={(e) => setLoad(e.target.value)}
-                  className="w-20 px-3 py-2 text-sm text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                  className="w-20 px-3 py-2 text-sm text-center border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                   data-testid="adhoc-load"
                 />
               </div>

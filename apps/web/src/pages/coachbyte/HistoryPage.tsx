@@ -258,12 +258,12 @@ export function HistoryPage() {
 
   return (
     <CoachLayout title="History">
-      <div className="flex justify-between items-center flex-wrap gap-2 border-b-2 border-slate-200 pb-2.5 mb-5">
-        <h2 className="text-2xl font-bold text-slate-900 m-0">Workout History</h2>
+      <div className="flex justify-between items-center flex-wrap gap-2 border-b-2 border-border pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-text m-0">Workout History</h2>
         <select
           value={exerciseFilter}
           onChange={(e) => setExerciseFilter(e.target.value)}
-          className="appearance-none rounded-lg border border-slate-300 px-3 py-1.5 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+          className="appearance-none rounded-lg border border-border-strong px-3 py-1.5 text-sm text-text bg-surface focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
           data-testid="exercise-filter"
         >
           <option value="all">All Exercises</option>
@@ -276,9 +276,9 @@ export function HistoryPage() {
       </div>
 
       {loadError && (
-        <Card className="border-red-300 mb-5" data-testid="load-error">
+        <Card className="border-danger mb-5" data-testid="load-error">
           <div className="p-4">
-            <p className="text-red-600 text-sm mb-2">Failed to load data: {(loadError as any).message}</p>
+            <p className="text-danger-text text-sm mb-2">Failed to load data: {(loadError as any).message}</p>
             <Button
               variant="primary"
               size="sm"
@@ -294,7 +294,7 @@ export function HistoryPage() {
         <ListSkeleton count={5} data-testid="history-loading" />
       ) : filteredDays.length === 0 ? (
         <div
-          className="text-center py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500"
+          className="text-center py-10 border-2 border-dashed border-border-strong rounded-xl bg-surface-sunken text-text-secondary"
           data-testid="no-history"
         >
           <h3 className="text-lg font-semibold mb-1">No workout history yet</h3>
@@ -303,7 +303,7 @@ export function HistoryPage() {
       ) : (
         <>
           {/* Pagination context */}
-          <p className="text-slate-500 text-xs mb-2" data-testid="pagination-context">
+          <p className="text-text-secondary text-xs mb-2" data-testid="pagination-context">
             Showing 1&ndash;{filteredDays.length}
             {totalCount !== null ? ` of ${totalCount} workouts` : ' workouts'}
           </p>
@@ -315,15 +315,15 @@ export function HistoryPage() {
                 <Card data-testid={`history-row-${day.plan_date}`} className="overflow-hidden">
                   <div className="p-3.5">
                     <div className="flex justify-between items-start gap-2 mb-1.5">
-                      <strong className="text-sm text-slate-900">{formatDateDisplay(day.plan_date)}</strong>
-                      <span className="text-xs text-slate-500 tabular-nums shrink-0">
+                      <strong className="text-sm text-text">{formatDateDisplay(day.plan_date)}</strong>
+                      <span className="text-xs text-text-secondary tabular-nums shrink-0">
                         {day.completed_count}/{day.planned_count} sets
                       </span>
                     </div>
                     {day.summary ? (
-                      <p className="text-xs text-slate-600 mb-2.5 m-0 line-clamp-2">{day.summary}</p>
+                      <p className="text-xs text-text-secondary mb-2.5 m-0 line-clamp-2">{day.summary}</p>
                     ) : (
-                      <p className="text-xs text-slate-400 italic mb-2.5 m-0">No summary</p>
+                      <p className="text-xs text-text-tertiary italic mb-2.5 m-0">No summary</p>
                     )}
                     <Button
                       variant="primary"
@@ -344,28 +344,28 @@ export function HistoryPage() {
                   {expandedPlan === day.plan_id && (
                     <div
                       data-testid="detail-card"
-                      className="border-t border-l-4 border-l-violet-300 border-t-slate-100 bg-slate-50/50 px-3.5 py-3"
+                      className="border-t border-l-4 border-l-coach-accent border-t-border-light bg-surface-sunken/50 px-3.5 py-3"
                     >
-                      <p className="text-xs font-bold text-slate-600 mb-2">Completed Sets</p>
+                      <p className="text-xs font-bold text-text-secondary mb-2">Completed Sets</p>
                       {detailLoading ? (
-                        <p className="text-slate-500 text-sm">Loading...</p>
+                        <p className="text-text-secondary text-sm">Loading...</p>
                       ) : detail.length === 0 ? (
-                        <p className="text-slate-500 text-sm">No sets completed.</p>
+                        <p className="text-text-secondary text-sm">No sets completed.</p>
                       ) : (
                         <div className="space-y-1.5">
                           {detail.map((d, i) => (
                             <div
                               key={i}
                               data-testid={`detail-row-${i + 1}`}
-                              className="flex items-baseline justify-between gap-2 text-sm border-b border-slate-100 pb-1.5 last:border-0"
+                              className="flex items-baseline justify-between gap-2 text-sm border-b border-border-light pb-1.5 last:border-0"
                             >
                               <div className="min-w-0">
-                                <span className="text-slate-400 text-xs mr-1.5">{i + 1}.</span>
+                                <span className="text-text-tertiary text-xs mr-1.5">{i + 1}.</span>
                                 <span className="font-medium">{d.exercise_name}</span>
                               </div>
-                              <div className="text-xs text-slate-600 shrink-0 tabular-nums">
+                              <div className="text-xs text-text-secondary shrink-0 tabular-nums">
                                 {d.actual_reps}r @ {d.actual_load} {WEIGHT_UNIT}
-                                <span className="text-slate-400 ml-1.5">
+                                <span className="text-text-tertiary ml-1.5">
                                   {timeFormatter.format(new Date(d.completed_at))}
                                 </span>
                               </div>
@@ -386,16 +386,16 @@ export function HistoryPage() {
               <table className="w-full text-sm" data-testid="history-table-desktop">
                 <thead>
                   <tr>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                    <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                       Date
                     </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                    <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                       Summary
                     </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                    <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                       Sets
                     </th>
-                    <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                    <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                       Actions
                     </th>
                   </tr>
@@ -405,7 +405,7 @@ export function HistoryPage() {
                     <Fragment key={day.plan_id}>
                       <tr
                         data-testid={`history-row-${day.plan_date}`}
-                        className="border-b border-slate-100 last:border-b-0"
+                        className="border-b border-border-light last:border-b-0"
                       >
                         <td className="px-3 py-2 align-middle">
                           <strong>{formatDateDisplay(day.plan_date)}</strong>
@@ -419,7 +419,7 @@ export function HistoryPage() {
                               {day.summary}
                             </div>
                           ) : (
-                            <em className="text-slate-500">No summary</em>
+                            <em className="text-text-secondary">No summary</em>
                           )}
                         </td>
                         <td className="px-3 py-2 align-middle">
@@ -446,21 +446,29 @@ export function HistoryPage() {
                       {expandedPlan === day.plan_id && (
                         <tr key={`${day.plan_id}-detail`} data-testid="detail-card">
                           <td colSpan={4} className="px-0 py-0">
-                            <div className="border-t border-l-4 border-l-violet-300 border-t-slate-100 bg-slate-50/50 px-4 py-3">
-                              <p className="text-xs font-bold text-slate-600 mb-2">Completed Sets</p>
+                            <div className="border-t border-l-4 border-l-coach-accent border-t-border-light bg-surface-sunken/50 px-4 py-3">
+                              <p className="text-xs font-bold text-text-secondary mb-2">Completed Sets</p>
                               {detailLoading ? (
-                                <p className="text-slate-500 text-sm">Loading...</p>
+                                <p className="text-text-secondary text-sm">Loading...</p>
                               ) : detail.length === 0 ? (
-                                <p className="text-slate-500 text-sm">No sets completed.</p>
+                                <p className="text-text-secondary text-sm">No sets completed.</p>
                               ) : (
                                 <table className="w-full text-sm">
                                   <thead>
                                     <tr>
-                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">#</th>
-                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">Exercise</th>
-                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">Reps</th>
-                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">Load</th>
-                                      <th className="px-2 py-1 text-left text-xs font-bold text-slate-500">Time</th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-text-secondary">#</th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-text-secondary">
+                                        Exercise
+                                      </th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-text-secondary">
+                                        Reps
+                                      </th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-text-secondary">
+                                        Load
+                                      </th>
+                                      <th className="px-2 py-1 text-left text-xs font-bold text-text-secondary">
+                                        Time
+                                      </th>
                                     </tr>
                                   </thead>
                                   <tbody>
@@ -468,16 +476,16 @@ export function HistoryPage() {
                                       <tr
                                         key={i}
                                         data-testid={`detail-row-${i + 1}`}
-                                        className="border-t border-slate-100"
+                                        className="border-t border-border-light"
                                       >
-                                        <td className="px-2 py-1 align-middle text-slate-500">{i + 1}</td>
+                                        <td className="px-2 py-1 align-middle text-text-secondary">{i + 1}</td>
                                         <td className="px-2 py-1 align-middle font-medium">{d.exercise_name}</td>
                                         <td className="px-2 py-1 align-middle font-medium">{d.actual_reps}</td>
                                         <td className="px-2 py-1 align-middle font-medium">
                                           {d.actual_load} {WEIGHT_UNIT}
                                         </td>
                                         <td className="px-2 py-1 align-middle">
-                                          <span className="text-slate-500 text-xs">
+                                          <span className="text-text-secondary text-xs">
                                             {timeFormatter.format(new Date(d.completed_at))}
                                           </span>
                                         </td>

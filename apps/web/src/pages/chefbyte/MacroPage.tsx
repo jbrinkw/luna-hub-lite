@@ -427,15 +427,15 @@ export function MacroPage() {
 
   return (
     <ChefLayout title="Macros">
-      <Link to="/chef" className="text-sm font-medium text-emerald-600 hover:text-emerald-700 no-underline">
+      <Link to="/chef" className="text-sm font-medium text-chef-accent hover:text-chef-accent no-underline">
         &larr; Dashboard
       </Link>
-      <h1 className="mt-2 mb-0 text-2xl font-bold text-slate-900">Macros</h1>
+      <h1 className="mt-2 mb-0 text-2xl font-bold text-text">Macros</h1>
       {loadError && (
-        <div className="border border-red-500 bg-red-50 rounded-lg p-4 mb-4" data-testid="load-error">
-          <p className="text-red-600 m-0 mb-2">Failed to load data: {loadError.message}</p>
+        <div className="border border-danger bg-danger-subtle rounded-lg p-4 mb-4" data-testid="load-error">
+          <p className="text-danger-text m-0 mb-2">Failed to load data: {loadError.message}</p>
           <button
-            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+            className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
             onClick={() => invalidateMacros()}
           >
             Retry
@@ -443,7 +443,7 @@ export function MacroPage() {
         </div>
       )}
       {mutationError && (
-        <div className="text-red-600 mb-3">
+        <div className="text-danger-text mb-3">
           <p>{mutationError}</p>
         </div>
       )}
@@ -453,21 +453,21 @@ export function MacroPage() {
       {/* ============================================================ */}
       <div data-testid="date-nav" className="flex items-center gap-2 mb-4 flex-wrap">
         <button
-          className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm hover:bg-slate-50 transition-colors"
+          className="px-4 py-2 bg-surface border border-border-strong rounded-md text-sm hover:bg-surface-hover transition-colors"
           onClick={prevDate}
           data-testid="prev-date-btn"
         >
           Prev
         </button>
         <button
-          className="px-4 py-2 bg-emerald-600 text-white border-none rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          className="px-4 py-2 bg-success text-white border-none rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
           onClick={goToday}
           data-testid="today-date-btn"
         >
           Today
         </button>
         <button
-          className="px-4 py-2 bg-white border border-slate-300 rounded-md text-sm hover:bg-slate-50 transition-colors"
+          className="px-4 py-2 bg-surface border border-border-strong rounded-md text-sm hover:bg-surface-hover transition-colors"
           onClick={nextDate}
           data-testid="next-date-btn"
         >
@@ -480,9 +480,9 @@ export function MacroPage() {
             if (e.target.value) setCurrentDate(e.target.value);
           }}
           data-testid="date-picker"
-          className="px-3 py-1.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+          className="px-3 py-1.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
         />
-        <span data-testid="current-date" className="ml-2 font-bold text-slate-900">
+        <span data-testid="current-date" className="ml-2 font-bold text-text">
           {formatDateDisplay(currentDate)}
         </span>
       </div>
@@ -491,7 +491,7 @@ export function MacroPage() {
       {/*  DAY SUMMARY -- PROGRESS BARS                                 */}
       {/* ============================================================ */}
       <div data-testid="macro-summary" className="mb-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-3">Day Summary</h3>
+        <h3 className="text-lg font-semibold text-text mb-3">Day Summary</h3>
         <MacroProgressBar
           label="Calories"
           current={consumedTotals.calories}
@@ -533,9 +533,9 @@ export function MacroPage() {
       {/*  CONSUMED ITEMS — CARD LIST                                   */}
       {/* ============================================================ */}
       <div data-testid="consumed-section" className="mb-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-3">Consumed Items</h3>
+        <h3 className="text-lg font-semibold text-text mb-3">Consumed Items</h3>
         {consumed.length === 0 ? (
-          <p data-testid="no-consumed" className="text-slate-500">
+          <p data-testid="no-consumed" className="text-text-secondary">
             No consumed items for this day.
           </p>
         ) : (
@@ -543,7 +543,7 @@ export function MacroPage() {
             {consumed.map((item) => {
               const badgeColor =
                 item.source === 'Meal Plan'
-                  ? 'bg-emerald-100 text-emerald-700'
+                  ? 'bg-success-subtle text-chef-accent'
                   : item.source === 'Temp Item'
                     ? 'bg-violet-100 text-violet-700'
                     : 'bg-sky-100 text-sky-700';
@@ -551,7 +551,7 @@ export function MacroPage() {
                 <div
                   key={item.id}
                   data-testid={`consumed-row-${item.id}`}
-                  className="bg-white border border-slate-200 rounded-lg px-3 py-2.5"
+                  className="bg-surface border border-border rounded-lg px-3 py-2.5"
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0 flex-1">
@@ -561,9 +561,9 @@ export function MacroPage() {
                         >
                           {item.source}
                         </span>
-                        <span className="text-sm font-medium text-slate-900">{item.name}</span>
+                        <span className="text-sm font-medium text-text">{item.name}</span>
                       </div>
-                      <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-slate-600 mt-1 flex-wrap">
+                      <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-text-secondary mt-1 flex-wrap">
                         <span>{item.calories} cal</span>
                         <span>{item.protein}g P</span>
                         <span>{item.carbs}g C</span>
@@ -572,7 +572,7 @@ export function MacroPage() {
                     </div>
                     {item.source !== 'LiquidTrack' && (
                       <button
-                        className="text-red-500 hover:text-red-700 font-bold text-base bg-transparent border-none cursor-pointer shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center"
+                        className="text-danger-text hover:text-danger-text font-bold text-base bg-transparent border-none cursor-pointer shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center"
                         data-testid={`delete-consumed-${item.id}`}
                         onClick={() => deleteMutation.mutate(item)}
                         aria-label={`Remove ${item.name}`}
@@ -588,13 +588,13 @@ export function MacroPage() {
             {/* Totals row */}
             <div
               data-testid="consumed-total-row"
-              className="bg-slate-50 border border-slate-300 rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-2 font-bold"
+              className="bg-surface-sunken border border-border-strong rounded-lg px-3 py-2.5 flex flex-wrap items-center gap-2 font-bold"
             >
-              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-slate-200 text-slate-600 whitespace-nowrap">
+              <span className="text-[11px] font-semibold px-2 py-0.5 rounded-full bg-border text-text-secondary whitespace-nowrap">
                 Total
               </span>
-              <span className="flex-1 text-sm text-slate-900">TOTAL</span>
-              <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-slate-900 flex-wrap">
+              <span className="flex-1 text-sm text-text">TOTAL</span>
+              <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-text flex-wrap">
                 <span>{consumed.reduce((sum, i) => sum + i.calories, 0)} cal</span>
                 <span>{consumed.reduce((sum, i) => sum + i.protein, 0)}g P</span>
                 <span>{consumed.reduce((sum, i) => sum + i.carbs, 0)}g C</span>
@@ -609,9 +609,9 @@ export function MacroPage() {
       {/*  PLANNED ITEMS                                                */}
       {/* ============================================================ */}
       <div data-testid="planned-section" className="mb-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-3">Planned (not yet consumed)</h3>
+        <h3 className="text-lg font-semibold text-text mb-3">Planned (not yet consumed)</h3>
         {planned.length === 0 ? (
-          <p data-testid="no-planned" className="text-slate-500">
+          <p data-testid="no-planned" className="text-text-secondary">
             No planned items for this day.
           </p>
         ) : (
@@ -622,10 +622,10 @@ export function MacroPage() {
                 <div
                   key={item.meal_id}
                   data-testid={`planned-row-${item.meal_id}`}
-                  className="bg-white border border-slate-200 rounded-lg px-3 py-2.5"
+                  className="bg-surface border border-border rounded-lg px-3 py-2.5"
                 >
-                  <div className="text-sm font-medium text-slate-900">{item.name}</div>
-                  <div className="flex flex-wrap gap-x-3 text-xs text-slate-600 mt-1">
+                  <div className="text-sm font-medium text-text">{item.name}</div>
+                  <div className="flex flex-wrap gap-x-3 text-xs text-text-secondary mt-1">
                     <span>{item.calories} cal</span>
                     <span>{item.protein}g P</span>
                     <span>{item.carbs}g C</span>
@@ -636,15 +636,15 @@ export function MacroPage() {
             </div>
 
             {/* Desktop table */}
-            <div className="hidden sm:block overflow-x-auto rounded-lg border border-slate-200">
+            <div className="hidden sm:block overflow-x-auto rounded-lg border border-border">
               <table data-testid="planned-table" className="w-full border-collapse text-sm">
                 <thead>
-                  <tr className="bg-slate-50 border-b-2 border-slate-200">
-                    <th className="p-2.5 text-left font-semibold text-slate-700 text-xs">Item</th>
-                    <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">Cal</th>
-                    <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">P</th>
-                    <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">C</th>
-                    <th className="p-2.5 text-right font-semibold text-slate-700 text-xs">F</th>
+                  <tr className="bg-surface-sunken border-b-2 border-border">
+                    <th className="p-2.5 text-left font-semibold text-text-secondary text-xs">Item</th>
+                    <th className="p-2.5 text-right font-semibold text-text-secondary text-xs">Cal</th>
+                    <th className="p-2.5 text-right font-semibold text-text-secondary text-xs">P</th>
+                    <th className="p-2.5 text-right font-semibold text-text-secondary text-xs">C</th>
+                    <th className="p-2.5 text-right font-semibold text-text-secondary text-xs">F</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -652,9 +652,9 @@ export function MacroPage() {
                     <tr
                       key={item.meal_id}
                       data-testid={`planned-row-${item.meal_id}`}
-                      className="border-b border-slate-100"
+                      className="border-b border-border-light"
                     >
-                      <td className="p-2 text-slate-900 font-medium">{item.name}</td>
+                      <td className="p-2 text-text font-medium">{item.name}</td>
                       <td className="p-2 text-right tabular-nums">{item.calories}</td>
                       <td className="p-2 text-right tabular-nums">{item.protein}g</td>
                       <td className="p-2 text-right tabular-nums">{item.carbs}g</td>
@@ -673,21 +673,21 @@ export function MacroPage() {
       {/* ============================================================ */}
       <div className="flex gap-2 mb-6 flex-wrap [&>button]:flex-1 [&>button]:sm:flex-initial">
         <button
-          className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
           onClick={openTempModal}
           data-testid="log-temp-btn"
         >
           + Log Temp Item
         </button>
         <button
-          className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
           onClick={openTargetModal}
           data-testid="target-macros-btn"
         >
           Edit Targets
         </button>
         <button
-          className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
           onClick={openTasteModal}
           data-testid="taste-profile-btn"
         >
@@ -706,18 +706,18 @@ export function MacroPage() {
       >
         <div className="grid gap-3">
           <div>
-            <label className="block mb-1 text-xs font-semibold text-slate-700">Name</label>
+            <label className="block mb-1 text-xs font-semibold text-text-secondary">Name</label>
             <input
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               value={tempName}
               onChange={(e) => setTempName(e.target.value)}
               data-testid="temp-name"
             />
           </div>
           <div>
-            <label className="block mb-1 text-xs font-semibold text-slate-700">Calories</label>
+            <label className="block mb-1 text-xs font-semibold text-text-secondary">Calories</label>
             <input
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               type="number"
               min="0"
               value={tempCalories}
@@ -726,9 +726,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label className="block mb-1 text-xs font-semibold text-slate-700">Protein</label>
+            <label className="block mb-1 text-xs font-semibold text-text-secondary">Protein</label>
             <input
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               type="number"
               min="0"
               value={tempProtein}
@@ -737,9 +737,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label className="block mb-1 text-xs font-semibold text-slate-700">Carbs</label>
+            <label className="block mb-1 text-xs font-semibold text-text-secondary">Carbs</label>
             <input
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               type="number"
               min="0"
               value={tempCarbs}
@@ -748,9 +748,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label className="block mb-1 text-xs font-semibold text-slate-700">Fat</label>
+            <label className="block mb-1 text-xs font-semibold text-text-secondary">Fat</label>
             <input
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               type="number"
               min="0"
               value={tempFat}
@@ -761,14 +761,14 @@ export function MacroPage() {
         </div>
         <div className="flex gap-2 justify-end mt-4">
           <button
-            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+            className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
             onClick={() => setShowTempModal(false)}
             data-testid="temp-cancel-btn"
           >
             Cancel
           </button>
           <button
-            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors disabled:opacity-50"
             onClick={() => addTempMutation.mutate()}
             disabled={!tempName.trim()}
             data-testid="temp-save-btn"
@@ -789,9 +789,9 @@ export function MacroPage() {
       >
         <div className="grid gap-3">
           <div>
-            <label className="block mb-1 text-xs font-semibold text-slate-700">Protein (g)</label>
+            <label className="block mb-1 text-xs font-semibold text-text-secondary">Protein (g)</label>
             <input
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               type="number"
               min="0"
               value={targetProtein}
@@ -800,9 +800,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label className="block mb-1 text-xs font-semibold text-slate-700">Carbs (g)</label>
+            <label className="block mb-1 text-xs font-semibold text-text-secondary">Carbs (g)</label>
             <input
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               type="number"
               min="0"
               value={targetCarbs}
@@ -811,9 +811,9 @@ export function MacroPage() {
             />
           </div>
           <div>
-            <label className="block mb-1 text-xs font-semibold text-slate-700">Fats (g)</label>
+            <label className="block mb-1 text-xs font-semibold text-text-secondary">Fats (g)</label>
             <input
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               type="number"
               min="0"
               value={targetFat}
@@ -821,22 +821,22 @@ export function MacroPage() {
               data-testid="target-fats"
             />
           </div>
-          <div data-testid="target-calories" className="p-2 bg-slate-50 rounded text-sm">
+          <div data-testid="target-calories" className="p-2 bg-surface-sunken rounded text-sm">
             <strong>Calories (auto): </strong>
             {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
-            <div className="text-xs text-slate-500 mt-0.5">(protein*4 + carbs*4 + fat*9)</div>
+            <div className="text-xs text-text-secondary mt-0.5">(protein*4 + carbs*4 + fat*9)</div>
           </div>
         </div>
         <div className="flex gap-2 justify-end mt-4">
           <button
-            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+            className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
             onClick={() => setShowTargetModal(false)}
             data-testid="target-cancel-btn"
           >
             Cancel
           </button>
           <button
-            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+            className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
             onClick={() => saveTargetsMutation.mutate()}
             data-testid="target-save-btn"
           >
@@ -854,11 +854,11 @@ export function MacroPage() {
         title="Taste Profile"
         testId="taste-modal"
       >
-        <p className="text-sm text-slate-500 mb-3">
+        <p className="text-sm text-text-secondary mb-3">
           Dietary preferences and notes for recipe filtering and AI suggestions:
         </p>
         <textarea
-          className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm resize-y min-h-[120px] font-[inherit] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+          className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm resize-y min-h-[120px] font-[inherit] focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
           value={tasteProfile}
           onChange={(e) => setTasteProfile(e.target.value)}
           data-testid="taste-textarea"
@@ -867,14 +867,14 @@ export function MacroPage() {
         />
         <div className="flex gap-2 justify-end mt-4">
           <button
-            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+            className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
             onClick={() => setShowTasteModal(false)}
             data-testid="taste-cancel-btn"
           >
             Cancel
           </button>
           <button
-            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+            className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
             onClick={() => saveTasteMutation.mutate()}
             data-testid="taste-save-btn"
           >

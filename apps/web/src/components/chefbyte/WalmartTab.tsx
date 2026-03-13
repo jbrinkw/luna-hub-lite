@@ -44,10 +44,10 @@ interface PriceResult {
 /* ------------------------------------------------------------------ */
 
 const inputCls =
-  'w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
-const cardCls = 'border border-slate-200 rounded-lg p-4 mb-4 bg-white';
+  'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
+const cardCls = 'border border-border rounded-lg p-4 mb-4 bg-surface';
 const primaryBtnCls =
-  'bg-emerald-600 text-white border-none px-4 py-2.5 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed';
+  'bg-success text-white border-none px-4 py-2.5 rounded-md cursor-pointer font-semibold text-sm hover:bg-success-hover disabled:opacity-60 disabled:cursor-not-allowed';
 
 /* ================================================================== */
 /*  WalmartTab                                                         */
@@ -445,7 +445,7 @@ export function WalmartTab() {
 
   if (loading) {
     return (
-      <div data-testid="walmart-loading" className="p-5 text-slate-500">
+      <div data-testid="walmart-loading" className="p-5 text-text-secondary">
         Loading...
       </div>
     );
@@ -454,16 +454,18 @@ export function WalmartTab() {
   return (
     <>
       <div className="mb-6">
-        <h1 className="m-0 text-2xl font-bold text-slate-900">Walmart Price Manager</h1>
-        <p className="mt-2 mb-0 text-slate-500 text-sm">Link products to Walmart and manage pricing</p>
+        <h1 className="m-0 text-2xl font-bold text-text">Walmart Price Manager</h1>
+        <p className="mt-2 mb-0 text-text-secondary text-sm">Link products to Walmart and manage pricing</p>
       </div>
 
-      {error && <p className="text-red-600 bg-red-50 px-3.5 py-2.5 rounded-md border border-red-200 mb-4">{error}</p>}
+      {error && (
+        <p className="text-danger-text bg-danger-subtle px-3.5 py-2.5 rounded-md border border-danger mb-4">{error}</p>
+      )}
 
       {/* ============================================================ */}
       {/*  SEARCH & PICK — MISSING WALMART LINKS                       */}
       {/* ============================================================ */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 mb-6">
+      <div className="bg-surface border border-border rounded-xl shadow-sm p-5 mb-6">
         <div data-testid="missing-links-section">
           <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
             <h2 className="m-0 text-lg font-bold">Missing Walmart Links ({missingLinksCount})</h2>
@@ -479,9 +481,9 @@ export function WalmartTab() {
 
           {/* Loading indicator */}
           {searchLoading && (
-            <div className="py-10 px-5 text-center bg-emerald-50 rounded-lg my-3">
-              <div className="text-base font-semibold text-emerald-700">Searching Walmart...</div>
-              <div className="text-sm text-slate-500 mt-2">
+            <div className="py-10 px-5 text-center bg-success-subtle rounded-lg my-3">
+              <div className="text-base font-semibold text-success-text">Searching Walmart...</div>
+              <div className="text-sm text-text-secondary mt-2">
                 Fetching search results for {products.filter((p) => p.loading).length} products
               </div>
             </div>
@@ -489,13 +491,13 @@ export function WalmartTab() {
 
           {/* Empty state */}
           {products.length === 0 && !searchLoading && missingLinksCount === 0 && (
-            <p data-testid="no-missing-links" className="text-slate-500 italic py-5 text-center">
+            <p data-testid="no-missing-links" className="text-text-secondary italic py-5 text-center">
               All products have Walmart links
             </p>
           )}
 
           {products.length === 0 && !searchLoading && missingLinksCount > 0 && (
-            <p className="text-slate-500 text-center py-5">
+            <p className="text-text-secondary text-center py-5">
               Click "Load Next 5 Products" to start linking products to Walmart
             </p>
           )}
@@ -506,12 +508,12 @@ export function WalmartTab() {
               {/* Product header */}
               <div className="flex items-center gap-3 mb-3 flex-wrap">
                 <span className="flex-1 font-semibold text-base">{product.name}</span>
-                {product.barcode && <span className="text-[13px] text-slate-500">({product.barcode})</span>}
+                {product.barcode && <span className="text-[13px] text-text-secondary">({product.barcode})</span>}
                 <a
                   href={`https://www.walmart.com/search?q=${encodeURIComponent(product.name)}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  className="text-blue-600 no-underline text-sm hover:underline"
+                  className="text-primary no-underline text-sm hover:underline"
                 >
                   Search Walmart
                 </a>
@@ -527,10 +529,12 @@ export function WalmartTab() {
               </div>
 
               {/* Loading state for individual product */}
-              {product.loading && <div className="py-5 text-center text-slate-500">Loading options...</div>}
+              {product.loading && <div className="py-5 text-center text-text-secondary">Loading options...</div>}
 
               {/* Error state */}
-              {product.error && !product.loading && <div className="p-2.5 text-red-600 text-sm">{product.error}</div>}
+              {product.error && !product.loading && (
+                <div className="p-2.5 text-danger-text text-sm">{product.error}</div>
+              )}
 
               {/* Options grid */}
               {!product.loading && product.options.length > 0 && !product.notWalmart && (
@@ -547,19 +551,19 @@ export function WalmartTab() {
                         data-testid={`option-${product.product_id}-${index}`}
                         className={`rounded-lg p-3 cursor-pointer transition-all ${
                           isSelected
-                            ? 'border-[3px] border-green-500 bg-green-50'
-                            : 'border border-slate-200 bg-slate-50 hover:border-slate-300'
+                            ? 'border-[3px] border-success bg-success-subtle'
+                            : 'border border-border bg-surface-sunken hover:border-border-strong'
                         }`}
                       >
                         {/* Radio indicator */}
                         <div
-                          className={`w-[18px] h-[18px] rounded-full border-2 border-green-500 mb-2 ${
-                            isSelected ? 'bg-green-500' : 'bg-transparent'
+                          className={`w-[18px] h-[18px] rounded-full border-2 border-success mb-2 ${
+                            isSelected ? 'bg-success' : 'bg-transparent'
                           }`}
                         />
 
                         {/* Product image */}
-                        <div className="w-full h-[100px] bg-slate-100 rounded flex items-center justify-center mb-2 overflow-hidden">
+                        <div className="w-full h-[100px] bg-surface-hover rounded flex items-center justify-center mb-2 overflow-hidden">
                           {option.image_url ? (
                             <img
                               src={option.image_url}
@@ -570,7 +574,7 @@ export function WalmartTab() {
                               }}
                             />
                           ) : (
-                            <span className="text-slate-400 text-xs">No image</span>
+                            <span className="text-text-tertiary text-xs">No image</span>
                           )}
                         </div>
 
@@ -585,7 +589,7 @@ export function WalmartTab() {
                           target="_blank"
                           rel="noopener noreferrer"
                           onClick={(e) => e.stopPropagation()}
-                          className="text-green-700 font-semibold text-sm no-underline hover:underline"
+                          className="text-success-text font-semibold text-sm no-underline hover:underline"
                         >
                           {option.price ? `$${option.price.toFixed(2)}` : 'Price N/A'}
                         </a>
@@ -597,8 +601,10 @@ export function WalmartTab() {
 
               {/* Custom URL fallback */}
               {!product.notWalmart && !product.loading && (
-                <div className={product.options.length > 0 ? 'border-t border-slate-100 pt-3' : ''}>
-                  <label className="text-[13px] text-slate-500 block mb-1.5">Or paste a custom Walmart link:</label>
+                <div className={product.options.length > 0 ? 'border-t border-border-light pt-3' : ''}>
+                  <label className="text-[13px] text-text-secondary block mb-1.5">
+                    Or paste a custom Walmart link:
+                  </label>
                   <input
                     type="text"
                     value={product.customUrl}
@@ -615,7 +621,7 @@ export function WalmartTab() {
           {/* Complete & Update Selected button */}
           {hasSelections && (
             <button
-              className="w-full py-3.5 bg-green-500 text-white border-none rounded-md text-base font-semibold cursor-pointer mt-3 hover:bg-green-600 disabled:opacity-60 disabled:cursor-not-allowed"
+              className="w-full py-3.5 bg-success text-white border-none rounded-md text-base font-semibold cursor-pointer mt-3 hover:bg-success-hover disabled:opacity-60 disabled:cursor-not-allowed"
               onClick={completeUpdates}
               disabled={saving}
               data-testid="complete-updates-btn"
@@ -629,7 +635,7 @@ export function WalmartTab() {
       {/* ============================================================ */}
       {/*  MISSING PRICES                                               */}
       {/* ============================================================ */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5 mb-6">
+      <div className="bg-surface border border-border rounded-xl shadow-sm p-5 mb-6">
         <div data-testid="missing-prices-section">
           <div className="flex justify-between items-center mb-4 flex-wrap gap-3">
             <h2 className="m-0 text-lg font-bold">Missing Prices ({missingPricesCount})</h2>
@@ -644,7 +650,7 @@ export function WalmartTab() {
           </div>
 
           {missingPricesCount === 0 && priceResults.length === 0 && (
-            <p data-testid="no-missing-prices" className="text-slate-500 italic py-5 text-center">
+            <p data-testid="no-missing-prices" className="text-text-secondary italic py-5 text-center">
               All linked products have prices
             </p>
           )}
@@ -652,13 +658,13 @@ export function WalmartTab() {
           {/* Progress bar */}
           {priceFinding && priceProgress && (
             <div className="mb-4">
-              <div className="h-2 bg-slate-200 rounded overflow-hidden">
+              <div className="h-2 bg-border rounded overflow-hidden">
                 <div
-                  className="h-full bg-green-500 transition-[width] duration-300"
+                  className="h-full bg-success transition-[width] duration-300"
                   style={{ width: `${progressPercent(priceProgress)}%` }}
                 />
               </div>
-              <div className="text-[13px] text-slate-500 mt-1.5">Progress: {priceProgress}</div>
+              <div className="text-[13px] text-text-secondary mt-1.5">Progress: {priceProgress}</div>
             </div>
           )}
 
@@ -670,14 +676,14 @@ export function WalmartTab() {
                   key={r.product_id}
                   data-testid={`price-result-${r.product_id}`}
                   className={`${cardCls} flex justify-between items-center gap-3 !mb-0 ${
-                    r.saved ? 'border-l-4 border-l-green-500' : 'border-l-4 border-l-red-500'
+                    r.saved ? 'border-l-4 border-l-success' : 'border-l-4 border-l-danger'
                   }`}
                 >
                   <div className="flex-1">
                     <div className="font-medium">{r.name}</div>
-                    {r.source && <div className="text-xs text-slate-500 mt-0.5">Matched: {r.source}</div>}
+                    {r.source && <div className="text-xs text-text-secondary mt-0.5">Matched: {r.source}</div>}
                   </div>
-                  <div className={`font-semibold text-base ${r.saved ? 'text-green-700' : 'text-red-600'}`}>
+                  <div className={`font-semibold text-base ${r.saved ? 'text-success-text' : 'text-danger-text'}`}>
                     {r.price != null ? `$${r.price.toFixed(2)}` : 'Not found'}
                   </div>
                 </div>
@@ -690,19 +696,19 @@ export function WalmartTab() {
       {/* ============================================================ */}
       {/*  REFRESH ALL PRICES                                           */}
       {/* ============================================================ */}
-      <div className="bg-white border border-slate-200 rounded-xl shadow-sm p-5">
+      <div className="bg-surface border border-border rounded-xl shadow-sm p-5">
         <h2 className="m-0 mb-4 text-lg font-bold">Refresh All Prices</h2>
-        <p className="text-slate-500 text-sm m-0 mb-4">Update prices for all products with Walmart links</p>
+        <p className="text-text-secondary text-sm m-0 mb-4">Update prices for all products with Walmart links</p>
 
         {refreshing && refreshProgress && (
           <div className="mb-4">
-            <div className="h-2 bg-slate-200 rounded overflow-hidden">
+            <div className="h-2 bg-border rounded overflow-hidden">
               <div
-                className="h-full bg-green-500 transition-[width] duration-300"
+                className="h-full bg-success transition-[width] duration-300"
                 style={{ width: `${progressPercent(refreshProgress)}%` }}
               />
             </div>
-            <div className="text-[13px] text-slate-500 mt-1.5">Progress: {refreshProgress}</div>
+            <div className="text-[13px] text-text-secondary mt-1.5">Progress: {refreshProgress}</div>
           </div>
         )}
 

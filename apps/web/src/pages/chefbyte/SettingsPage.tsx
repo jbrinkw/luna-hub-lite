@@ -68,10 +68,10 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
 /* ------------------------------------------------------------------ */
 
 const inputCls =
-  'w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
-const labelCls = 'block mb-1 font-semibold text-[13px] text-slate-700';
-const cardCls = 'border border-slate-200 rounded-lg p-3 mb-2 bg-white';
-const productCardCls = 'border border-slate-200 rounded-lg p-4 bg-white min-h-[180px] flex flex-col';
+  'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
+const labelCls = 'block mb-1 font-semibold text-[13px] text-text-secondary';
+const cardCls = 'border border-border rounded-lg p-3 mb-2 bg-surface';
+const productCardCls = 'border border-border rounded-lg p-4 bg-surface min-h-[180px] flex flex-col';
 
 /* ------------------------------------------------------------------ */
 /*  Blank-product template for Add Product form                       */
@@ -536,11 +536,13 @@ export function SettingsPage() {
     <ChefLayout title="Settings">
       {/* Header */}
       <div className="mb-6">
-        <h1 className="m-0 text-2xl font-bold text-slate-900">Settings</h1>
-        <p className="mt-2 mb-0 text-slate-500 text-sm">Manage your products, devices, and data</p>
+        <h1 className="m-0 text-2xl font-bold text-text">Settings</h1>
+        <p className="mt-2 mb-0 text-text-secondary text-sm">Manage your products, devices, and data</p>
       </div>
 
-      {error && <p className="text-red-600 bg-red-50 px-3.5 py-2.5 rounded-md border border-red-200 mb-4">{error}</p>}
+      {error && (
+        <p className="text-danger-text bg-danger-subtle px-3.5 py-2.5 rounded-md border border-danger mb-4">{error}</p>
+      )}
 
       {/* Mobile tab select */}
       <div className="sm:hidden mb-3">
@@ -548,7 +550,7 @@ export function SettingsPage() {
           value={activeTab}
           onChange={(e) => setActiveTab(e.target.value as Tab)}
           data-testid="settings-tabs"
-          className="py-2.5 px-3 w-full rounded-lg border border-slate-200 text-sm"
+          className="py-2.5 px-3 w-full rounded-lg border border-border text-sm"
         >
           {tabs.map((tab) => (
             <option key={tab.id} value={tab.id}>
@@ -559,11 +561,11 @@ export function SettingsPage() {
       </div>
 
       {/* Desktop Tabs */}
-      <div className="hidden sm:flex gap-2 mb-6 bg-slate-100 p-1.5 rounded-xl w-fit" data-testid="settings-tabs">
+      <div className="hidden sm:flex gap-2 mb-6 bg-surface-hover p-1.5 rounded-xl w-fit" data-testid="settings-tabs">
         {tabs.map((tab) => (
           <button
             className={`px-5 py-2.5 border-none rounded-lg cursor-pointer font-semibold text-sm transition-all flex items-center gap-2 ${
-              activeTab === tab.id ? 'bg-white text-slate-800 shadow-sm' : 'bg-transparent text-slate-500'
+              activeTab === tab.id ? 'bg-surface text-text shadow-sm' : 'bg-transparent text-text-secondary'
             }`}
             onClick={() => setActiveTab(tab.id)}
             key={tab.id}
@@ -574,16 +576,16 @@ export function SettingsPage() {
       </div>
 
       {/* Tab Content Container */}
-      <div className="bg-white rounded-xl border border-slate-200 min-h-[400px] shadow-sm">
+      <div className="bg-surface rounded-xl border border-border min-h-[400px] shadow-sm">
         {/* ========================================================== */}
         {/*  PRODUCTS TAB                                                */}
         {/* ========================================================== */}
         {activeTab === 'products' && (
           <div data-testid="products-tab" className="p-5">
             {/* Section Header */}
-            <div className="mb-4 pb-3 border-b border-slate-200">
-              <h2 className="m-0 text-lg font-bold text-slate-800">Product Library</h2>
-              <p className="m-0 mt-1 text-sm text-slate-500">Manage your product catalog and nutritional info</p>
+            <div className="mb-4 pb-3 border-b border-border">
+              <h2 className="m-0 text-lg font-bold text-text">Product Library</h2>
+              <p className="m-0 mt-1 text-sm text-text-secondary">Manage your product catalog and nutritional info</p>
             </div>
 
             {/* Search bar */}
@@ -598,10 +600,10 @@ export function SettingsPage() {
             {/* Add Product */}
             <div data-testid="add-product-section" className={`${cardCls} !mb-5`}>
               <div className={`flex justify-between items-center ${showAddProduct ? 'mb-4' : ''}`}>
-                <h3 className="m-0 text-base font-bold text-slate-900">Add Product</h3>
+                <h3 className="m-0 text-base font-bold text-text">Add Product</h3>
                 <button
                   className={`text-white border-none rounded-md cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 ${
-                    showAddProduct ? 'bg-slate-500' : 'bg-green-600 hover:bg-green-700'
+                    showAddProduct ? 'bg-text-secondary' : 'bg-green-600 hover:bg-green-700'
                   }`}
                   onClick={() => setShowAddProduct(!showAddProduct)}
                   data-testid="toggle-add-product"
@@ -629,8 +631,8 @@ export function SettingsPage() {
             </div>
 
             {/* Product list */}
-            <div className="mb-3 pb-2 border-b border-slate-100">
-              <span className="text-sm font-semibold text-slate-500">
+            <div className="mb-3 pb-2 border-b border-border-light">
+              <span className="text-sm font-semibold text-text-secondary">
                 {filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}
               </span>
             </div>
@@ -657,7 +659,7 @@ export function SettingsPage() {
                           Save
                         </button>
                         <button
-                          className="bg-white text-slate-600 border border-slate-200 px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-slate-50"
+                          className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
                           onClick={cancelEdit}
                           data-testid="cancel-edit-product"
                         >
@@ -670,9 +672,9 @@ export function SettingsPage() {
                     <div className="flex flex-col flex-1">
                       <h4 className="m-0 mb-2 text-base font-semibold">{p.name}</h4>
                       {p.barcode && (
-                        <span className="text-xs text-slate-500 mb-1.5 break-all">Barcode: {p.barcode}</span>
+                        <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>
                       )}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-slate-600 flex-1">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-text-secondary flex-1">
                         <span>Srv/Ctn: {Number(p.servings_per_container)}</span>
                         <span>Cal: {Number(p.calories_per_serving)}</span>
                         <span>C: {Number(p.carbs_per_serving)}g</span>
@@ -681,7 +683,7 @@ export function SettingsPage() {
                         <span>Min Stock: {Number(p.min_stock_amount)}</span>
                         {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
                       </div>
-                      <div className="flex gap-2 mt-3 pt-2 border-t border-slate-100">
+                      <div className="flex gap-2 mt-3 pt-2 border-t border-border-light">
                         <button
                           className="bg-emerald-600 text-white border-none px-3.5 py-1.5 rounded-md cursor-pointer font-semibold text-[13px] hover:bg-emerald-700"
                           onClick={() => startEdit(p)}
@@ -692,7 +694,7 @@ export function SettingsPage() {
                         <button
                           onClick={() => setDeleteTarget(p.product_id)}
                           data-testid={`delete-product-${p.product_id}`}
-                          className="bg-transparent border-none text-red-600 cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:text-red-700"
+                          className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:text-red-700"
                         >
                           Delete
                         </button>
@@ -710,16 +712,16 @@ export function SettingsPage() {
                 onClick={() => setDeleteTarget(null)}
               >
                 <div
-                  className="bg-white rounded-xl shadow-xl p-5 max-w-sm w-full mx-4"
+                  className="bg-surface rounded-xl shadow-xl p-5 max-w-sm w-full mx-4"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <h3 className="m-0 mb-3 text-lg font-bold">Delete Product</h3>
-                  <p className="text-slate-500 m-0 mb-5">
+                  <p className="text-text-secondary m-0 mb-5">
                     Are you sure you want to delete this product? This cannot be undone.
                   </p>
                   <div className="flex gap-2 justify-end">
                     <button
-                      className="bg-white text-slate-600 border border-slate-200 px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-slate-50"
+                      className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
                       onClick={() => setDeleteTarget(null)}
                     >
                       Cancel
@@ -744,9 +746,9 @@ export function SettingsPage() {
         {/* ========================================================== */}
         {activeTab === 'walmart' && (
           <div data-testid="walmart-tab" className="p-5">
-            <div className="mb-4 pb-3 border-b border-slate-200">
-              <h2 className="m-0 text-lg font-bold text-slate-800">Walmart Price Manager</h2>
-              <p className="m-0 mt-1 text-sm text-slate-500">Track and update Walmart prices for your products</p>
+            <div className="mb-4 pb-3 border-b border-border">
+              <h2 className="m-0 text-lg font-bold text-text">Walmart Price Manager</h2>
+              <p className="m-0 mt-1 text-sm text-text-secondary">Track and update Walmart prices for your products</p>
             </div>
             <WalmartTab />
           </div>
@@ -758,18 +760,18 @@ export function SettingsPage() {
         {activeTab === 'liquidtrack' && (
           <div data-testid="liquidtrack-tab" className="p-5">
             {/* Section Header */}
-            <div className="mb-4 pb-3 border-b border-slate-200">
-              <h2 className="m-0 text-lg font-bold text-slate-800">LiquidTrack Devices</h2>
-              <p className="m-0 mt-1 text-sm text-slate-500">Manage IoT scale devices and view event history</p>
+            <div className="mb-4 pb-3 border-b border-border">
+              <h2 className="m-0 text-lg font-bold text-text">LiquidTrack Devices</h2>
+              <p className="m-0 mt-1 text-sm text-text-secondary">Manage IoT scale devices and view event history</p>
             </div>
 
             {/* Add Device */}
             <div data-testid="add-device-section" className={cardCls}>
               <div className={`flex justify-between items-center ${showAddDevice ? 'mb-4' : ''}`}>
-                <h3 className="m-0 text-base font-bold text-slate-900">Add Device</h3>
+                <h3 className="m-0 text-base font-bold text-text">Add Device</h3>
                 <button
                   className={`text-white border-none rounded-md cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 ${
-                    showAddDevice ? 'bg-slate-500' : 'bg-emerald-600 hover:bg-emerald-700'
+                    showAddDevice ? 'bg-text-secondary' : 'bg-emerald-600 hover:bg-emerald-700'
                   }`}
                   onClick={() => setShowAddDevice(!showAddDevice)}
                   data-testid="toggle-add-device"
@@ -821,20 +823,21 @@ export function SettingsPage() {
             {generatedDevice && (
               <div
                 data-testid="generated-device-info"
-                className="border-2 border-green-600 rounded-lg p-3 mb-2 bg-green-50"
+                className="border-2 border-success rounded-lg p-3 mb-2 bg-success-subtle"
               >
-                <h3 className="m-0 mb-3 text-base font-bold text-green-600">Device Created!</h3>
+                <h3 className="m-0 mb-3 text-base font-bold text-success-text">Device Created!</h3>
                 <div className="flex items-center gap-2 mb-2">
                   <strong>Device ID:</strong>
-                  <code className="bg-slate-200 px-1.5 py-0.5 rounded text-[13px]">{generatedDevice.device_id}</code>
+                  <code className="bg-border px-1.5 py-0.5 rounded text-[13px]">{generatedDevice.device_id}</code>
                   <button
                     onClick={() => copyToClipboard(generatedDevice.device_id, 'device-id')}
                     data-testid="copy-device-id-btn"
-                    className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-xs cursor-pointer hover:bg-slate-50 transition-colors"
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-surface border border-border-strong rounded text-xs cursor-pointer hover:bg-surface-hover transition-colors"
                   >
                     {copiedKey === 'device-id' ? (
                       <>
-                        <Check className="w-3 h-3 text-green-600" /> <span className="text-green-600">Copied!</span>
+                        <Check className="w-3 h-3 text-success-text" />{' '}
+                        <span className="text-success-text">Copied!</span>
                       </>
                     ) : (
                       <>
@@ -845,17 +848,18 @@ export function SettingsPage() {
                 </div>
                 <div className="flex items-center gap-2 mb-2">
                   <strong>Import Key:</strong>
-                  <code className="bg-slate-200 px-1.5 py-0.5 rounded text-[13px] break-all">
+                  <code className="bg-border px-1.5 py-0.5 rounded text-[13px] break-all">
                     {generatedDevice.raw_key}
                   </code>
                   <button
                     onClick={() => copyToClipboard(generatedDevice.raw_key, 'import-key')}
                     data-testid="copy-import-key-btn"
-                    className="inline-flex items-center gap-1 px-2 py-1 bg-white border border-slate-300 rounded text-xs cursor-pointer hover:bg-slate-50 transition-colors shrink-0"
+                    className="inline-flex items-center gap-1 px-2 py-1 bg-surface border border-border-strong rounded text-xs cursor-pointer hover:bg-surface-hover transition-colors shrink-0"
                   >
                     {copiedKey === 'import-key' ? (
                       <>
-                        <Check className="w-3 h-3 text-green-600" /> <span className="text-green-600">Copied!</span>
+                        <Check className="w-3 h-3 text-success-text" />{' '}
+                        <span className="text-success-text">Copied!</span>
                       </>
                     ) : (
                       <>
@@ -864,11 +868,11 @@ export function SettingsPage() {
                     )}
                   </button>
                 </div>
-                <p className="text-red-600 m-0 mb-3 text-sm font-semibold">
+                <p className="text-danger-text m-0 mb-3 text-sm font-semibold">
                   Save this key now -- you will not be able to see it again!
                 </p>
                 <button
-                  className="bg-slate-500 text-white border-none rounded-md cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:bg-slate-600"
+                  className="bg-text-secondary text-white border-none rounded-md cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:bg-text-tertiary"
                   onClick={() => setGeneratedDevice(null)}
                 >
                   Dismiss
@@ -878,8 +882,8 @@ export function SettingsPage() {
 
             {/* Device list */}
             {devices.length > 0 && (
-              <div className="mb-3 mt-4 pb-2 border-b border-slate-100">
-                <span className="text-sm font-semibold text-slate-500">
+              <div className="mb-3 mt-4 pb-2 border-b border-border-light">
+                <span className="text-sm font-semibold text-text-secondary">
                   {devices.length} device{devices.length !== 1 ? 's' : ''}
                 </span>
               </div>
@@ -888,11 +892,11 @@ export function SettingsPage() {
               {devices.map((d) => (
                 <div key={d.device_id} data-testid={`device-${d.device_id}`} className={cardCls}>
                   <h4 className="m-0 mb-2 text-base font-semibold">{d.device_name}</h4>
-                  <div className="grid grid-cols-3 gap-1 text-[0.9em] text-slate-600">
+                  <div className="grid grid-cols-3 gap-1 text-[0.9em] text-text-secondary">
                     <span>Product: {d.products?.name ?? 'None'}</span>
                     <span>
                       Status:{' '}
-                      <span className={`font-semibold ${d.is_active ? 'text-green-600' : 'text-red-600'}`}>
+                      <span className={`font-semibold ${d.is_active ? 'text-success-text' : 'text-danger-text'}`}>
                         {d.is_active ? 'Active' : 'Revoked'}
                       </span>
                     </span>
@@ -903,7 +907,7 @@ export function SettingsPage() {
                       <button
                         onClick={() => setRevokeTarget(d.device_id)}
                         data-testid={`revoke-device-${d.device_id}`}
-                        className="bg-transparent border-none text-red-600 cursor-pointer font-semibold text-[13px] px-2 py-1 hover:text-red-700"
+                        className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-2 py-1 hover:text-red-700"
                       >
                         Revoke
                       </button>
@@ -911,7 +915,7 @@ export function SettingsPage() {
                     <button
                       onClick={() => loadDeviceEvents(d.device_id)}
                       data-testid={`toggle-events-${d.device_id}`}
-                      className="bg-transparent border-none text-emerald-600 cursor-pointer font-semibold text-[13px] px-2 py-1 hover:text-emerald-700"
+                      className="bg-transparent border-none text-chef-accent cursor-pointer font-semibold text-[13px] px-2 py-1 hover:text-emerald-700"
                     >
                       {expandedDeviceId === d.device_id ? 'Hide Events' : 'Show Events'}
                     </button>
@@ -921,12 +925,12 @@ export function SettingsPage() {
                   {expandedDeviceId === d.device_id && (
                     <div data-testid={`events-${d.device_id}`} className="mt-3">
                       {deviceEvents.length === 0 ? (
-                        <p className="text-slate-400 italic">No events recorded.</p>
+                        <p className="text-text-tertiary italic">No events recorded.</p>
                       ) : (
-                        <div className="overflow-x-auto rounded-lg border border-slate-200">
+                        <div className="overflow-x-auto rounded-lg border border-border">
                           <table className="w-full text-[0.85em] border-collapse">
                             <thead>
-                              <tr className="bg-slate-50 border-b-2 border-slate-200">
+                              <tr className="bg-surface-sunken border-b-2 border-border">
                                 <th className="text-left p-2">Time</th>
                                 <th className="text-right p-2">Before</th>
                                 <th className="text-right p-2">After</th>
@@ -936,7 +940,7 @@ export function SettingsPage() {
                             </thead>
                             <tbody>
                               {deviceEvents.map((ev) => (
-                                <tr key={ev.event_id} className="border-b border-slate-100">
+                                <tr key={ev.event_id} className="border-b border-border-light">
                                   <td className="px-2 py-1.5">{formatDate(ev.created_at)}</td>
                                   <td className="text-right px-2 py-1.5">{Number(ev.weight_before).toFixed(1)}</td>
                                   <td className="text-right px-2 py-1.5">{Number(ev.weight_after).toFixed(1)}</td>
@@ -965,16 +969,16 @@ export function SettingsPage() {
                 onClick={() => setRevokeTarget(null)}
               >
                 <div
-                  className="bg-white rounded-xl shadow-xl p-5 max-w-sm w-full mx-4"
+                  className="bg-surface rounded-xl shadow-xl p-5 max-w-sm w-full mx-4"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <h3 className="m-0 mb-3 text-lg font-bold">Revoke Device</h3>
-                  <p className="text-slate-500 m-0 mb-5">
+                  <p className="text-text-secondary m-0 mb-5">
                     Are you sure you want to revoke this device? It will stop working immediately.
                   </p>
                   <div className="flex gap-2 justify-end">
                     <button
-                      className="bg-white text-slate-600 border border-slate-200 px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-slate-50"
+                      className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
                       onClick={() => setRevokeTarget(null)}
                     >
                       Cancel
@@ -999,16 +1003,16 @@ export function SettingsPage() {
         {/* ========================================================== */}
         {activeTab === 'locations' && (
           <div data-testid="locations-tab" className="p-5">
-            <div className="mb-4 pb-3 border-b border-slate-200">
-              <h2 className="m-0 text-lg font-bold text-slate-800">Storage Locations</h2>
-              <p className="m-0 mt-1 text-sm text-slate-500">Define where you store your inventory items</p>
+            <div className="mb-4 pb-3 border-b border-border">
+              <h2 className="m-0 text-lg font-bold text-text">Storage Locations</h2>
+              <p className="m-0 mt-1 text-sm text-text-secondary">Define where you store your inventory items</p>
             </div>
             <div data-testid="locations-section" className={cardCls}>
-              <h3 className="m-0 mb-4 text-base font-bold text-slate-900">Manage Locations</h3>
+              <h3 className="m-0 mb-4 text-base font-bold text-text">Manage Locations</h3>
 
               {/* Existing locations list */}
               {locations.length === 0 ? (
-                <p className="text-slate-400 italic" data-testid="no-locations-msg">
+                <p className="text-text-tertiary italic" data-testid="no-locations-msg">
                   No locations yet. Add one below.
                 </p>
               ) : (
@@ -1017,13 +1021,13 @@ export function SettingsPage() {
                     <div
                       key={loc.location_id}
                       data-testid={`location-${loc.location_id}`}
-                      className="flex justify-between items-center px-3 py-2.5 border border-slate-100 rounded-md bg-slate-50"
+                      className="flex justify-between items-center px-3 py-2.5 border border-border-light rounded-md bg-surface-sunken"
                     >
                       <span className="font-medium">{loc.name}</span>
                       <button
                         onClick={() => setDeleteLocationTarget(loc.location_id)}
                         data-testid={`delete-location-${loc.location_id}`}
-                        className="bg-transparent border-none text-red-600 cursor-pointer font-semibold text-[13px] px-2 py-1 hover:text-red-700"
+                        className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-2 py-1 hover:text-red-700"
                       >
                         Delete
                       </button>
@@ -1059,16 +1063,16 @@ export function SettingsPage() {
                 onClick={() => setDeleteLocationTarget(null)}
               >
                 <div
-                  className="bg-white rounded-xl shadow-xl p-5 max-w-sm w-full mx-4"
+                  className="bg-surface rounded-xl shadow-xl p-5 max-w-sm w-full mx-4"
                   onClick={(e) => e.stopPropagation()}
                 >
                   <h3 className="m-0 mb-3 text-lg font-bold">Delete Location</h3>
-                  <p className="text-slate-500 m-0 mb-5">
+                  <p className="text-text-secondary m-0 mb-5">
                     Are you sure you want to delete this location? This cannot be undone.
                   </p>
                   <div className="flex gap-2 justify-end">
                     <button
-                      className="bg-white text-slate-600 border border-slate-200 px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-slate-50"
+                      className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
                       onClick={() => setDeleteLocationTarget(null)}
                     >
                       Cancel

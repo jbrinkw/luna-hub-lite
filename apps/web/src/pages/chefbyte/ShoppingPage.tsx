@@ -443,7 +443,7 @@ export function ShoppingPage() {
     <ChefLayout title="Shopping">
       <div>
         <div className="flex justify-between items-center flex-wrap gap-2 mb-5">
-          <h1 className="m-0 text-2xl font-bold text-slate-900">Shopping List</h1>
+          <h1 className="m-0 text-2xl font-bold text-text">Shopping List</h1>
           <button
             onClick={() => {
               const missingLink = toBuy.filter(
@@ -485,7 +485,7 @@ export function ShoppingPage() {
         <button
           onClick={autoAddBelowMinStock}
           data-testid="auto-add-btn"
-          className="w-full mb-5 flex items-center gap-3 px-5 py-4 bg-emerald-50 border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer hover:bg-emerald-100 hover:border-emerald-400 transition-colors text-left"
+          className="w-full mb-5 flex items-center gap-3 px-5 py-4 bg-success-subtle border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer hover:bg-emerald-100 hover:border-emerald-400 transition-colors text-left"
         >
           <PackageSearch className="w-7 h-7 text-emerald-600 shrink-0" />
           <div>
@@ -496,12 +496,12 @@ export function ShoppingPage() {
           </div>
         </button>
 
-        {error && <div className="text-red-600 text-sm p-2">{error}</div>}
+        {error && <div className="text-danger-text text-sm p-2">{error}</div>}
 
         {/* ============================================================ */}
         {/*  ADD ITEM FORM                                                */}
         {/* ============================================================ */}
-        <div data-testid="add-item-form" className="bg-slate-50 p-4 rounded-lg mb-5 flex gap-3 flex-wrap">
+        <div data-testid="add-item-form" className="bg-surface-sunken p-4 rounded-lg mb-5 flex gap-3 flex-wrap">
           <div className="flex-1 relative">
             <input
               type="text"
@@ -510,20 +510,20 @@ export function ShoppingPage() {
               onChange={(e) => handleSearchInput(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addItem()}
               data-testid="add-item-name"
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
             />
             {/* Autocomplete dropdown */}
             {showDropdown && (
               <div
                 data-testid="product-dropdown"
-                className="absolute top-full left-0 right-0 bg-white border border-slate-300 rounded z-10 max-h-[200px] overflow-auto shadow-md"
+                className="absolute top-full left-0 right-0 bg-surface border border-border-strong rounded z-10 max-h-[200px] overflow-auto shadow-md"
               >
                 {searchResults.map((p) => (
                   <div
                     key={p.product_id}
                     onClick={() => selectProduct(p)}
                     data-testid={`dropdown-item-${p.product_id}`}
-                    className="px-3 py-2 cursor-pointer hover:bg-slate-50"
+                    className="px-3 py-2 cursor-pointer hover:bg-surface-hover"
                   >
                     {p.name}
                   </div>
@@ -538,7 +538,7 @@ export function ShoppingPage() {
             value={addQty}
             onChange={(e) => setAddQty(Number(e.target.value) || 1)}
             data-testid="add-item-qty"
-            className="w-[100px] px-3 py-2.5 border border-slate-300 rounded-md text-sm"
+            className="w-[100px] px-3 py-2.5 border border-border-strong rounded-md text-sm"
           />
           <button
             onClick={addItem}
@@ -553,10 +553,10 @@ export function ShoppingPage() {
         {/* ============================================================ */}
         {/*  TO BUY SECTION                                               */}
         {/* ============================================================ */}
-        <div data-testid="to-buy-section" className="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+        <div data-testid="to-buy-section" className="bg-surface border border-border rounded-lg p-4 mb-5">
           <h3 className="m-0 mb-3 text-base font-semibold">To Buy ({toBuy.length})</h3>
           {toBuy.length === 0 ? (
-            <div data-testid="no-to-buy" className="text-center text-slate-400 py-5">
+            <div data-testid="no-to-buy" className="text-center text-text-tertiary py-5">
               Your shopping list is empty. Scan items or auto-add low-stock products.
             </div>
           ) : (
@@ -569,7 +569,7 @@ export function ShoppingPage() {
                     data-testid={`item-${item.cart_item_id}`}
                     className={[
                       'flex items-center gap-3 p-2.5 rounded-md transition-colors duration-500',
-                      justPurchased ? 'bg-green-100' : 'bg-slate-50',
+                      justPurchased ? 'bg-success-subtle' : 'bg-surface-sunken',
                     ].join(' ')}
                   >
                     <div className="relative flex items-center justify-center w-[28px] h-[28px]">
@@ -582,19 +582,19 @@ export function ShoppingPage() {
                         className="cursor-pointer w-5 h-5 accent-green-600"
                       />
                       {justPurchased && (
-                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none animate-ping text-green-600 text-sm">
+                        <span className="absolute inset-0 flex items-center justify-center pointer-events-none animate-ping text-success-text text-sm">
                           &#10003;
                         </span>
                       )}
                     </div>
                     <div className="flex-1">
                       <strong>{item.products?.name ?? 'Unknown Product'}</strong>
-                      <span className="ml-3 text-slate-500">{formatQty(item.qty_containers)}</span>
+                      <span className="ml-3 text-text-secondary">{formatQty(item.qty_containers)}</span>
                     </div>
                     <button
                       onClick={() => removeMutation.mutate(item.cart_item_id)}
                       data-testid={`remove-${item.cart_item_id}`}
-                      className="px-3 py-1 bg-transparent text-slate-500 border border-slate-200 rounded cursor-pointer text-xs hover:bg-slate-100"
+                      className="px-3 py-1 bg-transparent text-text-secondary border border-border rounded cursor-pointer text-xs hover:bg-surface-hover"
                     >
                       Remove
                     </button>
@@ -608,9 +608,9 @@ export function ShoppingPage() {
         {/* ============================================================ */}
         {/*  PURCHASED SECTION                                            */}
         {/* ============================================================ */}
-        <div data-testid="purchased-section" className="bg-white border border-slate-200 rounded-lg p-4 mb-5">
+        <div data-testid="purchased-section" className="bg-surface border border-border rounded-lg p-4 mb-5">
           <div className="flex justify-between items-center mb-3">
-            <h3 className="m-0 text-base font-semibold text-slate-500">Purchased ({purchased.length})</h3>
+            <h3 className="m-0 text-base font-semibold text-text-secondary">Purchased ({purchased.length})</h3>
             {purchased.length > 0 && (
               <button
                 onClick={importToInventory}
@@ -622,7 +622,7 @@ export function ShoppingPage() {
             )}
           </div>
           {purchased.length === 0 ? (
-            <div data-testid="no-purchased" className="text-center text-slate-400 py-5">
+            <div data-testid="no-purchased" className="text-center text-text-tertiary py-5">
               No purchased items.
             </div>
           ) : (
@@ -631,7 +631,7 @@ export function ShoppingPage() {
                 <div
                   key={item.cart_item_id}
                   data-testid={`item-${item.cart_item_id}`}
-                  className="flex items-center gap-3 p-2.5 bg-slate-100 rounded-md opacity-70"
+                  className="flex items-center gap-3 p-2.5 bg-surface-hover rounded-md opacity-70"
                 >
                   <input
                     type="checkbox"
@@ -641,14 +641,14 @@ export function ShoppingPage() {
                     data-testid={`check-${item.cart_item_id}`}
                     className="cursor-pointer w-[18px] h-[18px]"
                   />
-                  <div className="flex-1 line-through text-slate-500">
+                  <div className="flex-1 line-through text-text-secondary">
                     <strong>{item.products?.name ?? 'Unknown Product'}</strong>
                     <span className="ml-3">{formatQty(item.qty_containers)}</span>
                   </div>
                   <button
                     onClick={() => removeMutation.mutate(item.cart_item_id)}
                     data-testid={`remove-${item.cart_item_id}`}
-                    className="px-3 py-1 bg-transparent text-slate-500 border border-slate-200 rounded cursor-pointer text-xs hover:bg-slate-100"
+                    className="px-3 py-1 bg-transparent text-text-secondary border border-border rounded cursor-pointer text-xs hover:bg-surface-hover"
                   >
                     Remove
                   </button>

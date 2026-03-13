@@ -337,9 +337,9 @@ export function InventoryPage() {
   /* ---------------------------------------------------------------- */
 
   const stockDotColor = (totalStock: number, minStock: number): string => {
-    if (totalStock <= 0) return 'bg-red-600';
-    if (totalStock < minStock) return 'bg-amber-500';
-    return 'bg-green-600';
+    if (totalStock <= 0) return 'bg-danger';
+    if (totalStock < minStock) return 'bg-warning';
+    return 'bg-success';
   };
 
   /* ================================================================ */
@@ -347,7 +347,7 @@ export function InventoryPage() {
   /* ================================================================ */
 
   const inputCls =
-    'w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500 box-border';
+    'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary box-border';
 
   if (loading) {
     return (
@@ -361,27 +361,27 @@ export function InventoryPage() {
 
   return (
     <ChefLayout title="Inventory">
-      <h1 className="m-0 text-2xl font-bold text-slate-900">Inventory</h1>
+      <h1 className="m-0 text-2xl font-bold text-text">Inventory</h1>
       {loadError && (
-        <div data-testid="load-error" className="bg-red-50 border border-red-600 rounded-lg p-3 mb-3">
-          <p className="text-red-600 m-0 mb-2">Failed to load data: {loadError}</p>
+        <div data-testid="load-error" className="bg-danger-subtle border border-danger rounded-lg p-3 mb-3">
+          <p className="text-danger-text m-0 mb-2">Failed to load data: {loadError}</p>
           <button
-            className="bg-emerald-600 text-white border-none px-4 py-1.5 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700"
+            className="bg-success text-white border-none px-4 py-1.5 rounded-md cursor-pointer font-semibold text-sm hover:bg-success-hover"
             onClick={() => invalidateInventory()}
           >
             Retry
           </button>
         </div>
       )}
-      {error && <p className="text-red-600">{error}</p>}
+      {error && <p className="text-danger-text">{error}</p>}
 
       {/* View toggle */}
       <div className="flex gap-2 mb-4" data-testid="inventory-view-toggle">
         <button
           className={`px-4 py-1.5 rounded-md cursor-pointer font-semibold border text-sm ${
             viewMode === 'grouped'
-              ? 'bg-emerald-600 text-white border-emerald-600'
-              : 'bg-white text-slate-600 border-slate-200'
+              ? 'bg-success text-white border-success'
+              : 'bg-surface text-text-secondary border-border'
           }`}
           onClick={() => {
             setViewMode('grouped');
@@ -393,8 +393,8 @@ export function InventoryPage() {
         <button
           className={`px-4 py-1.5 rounded-md cursor-pointer font-semibold border text-sm ${
             viewMode === 'lots'
-              ? 'bg-emerald-600 text-white border-emerald-600'
-              : 'bg-white text-slate-600 border-slate-200'
+              ? 'bg-success text-white border-success'
+              : 'bg-surface text-text-secondary border-border'
           }`}
           onClick={() => {
             setViewMode('lots');
@@ -428,15 +428,15 @@ export function InventoryPage() {
       {viewMode === 'grouped' && (
         <div data-testid="grouped-view">
           {filteredGrouped.length === 0 && (
-            <p data-testid="no-products" className="text-slate-500">
+            <p data-testid="no-products" className="text-text-secondary">
               No products in inventory. Scan a barcode or add products in Settings to get started.
             </p>
           )}
 
           {filteredGrouped.length > 0 && (
-            <div className="bg-white border border-slate-200 rounded-lg overflow-hidden">
+            <div className="bg-surface border border-border rounded-lg overflow-hidden">
               {/* Table header */}
-              <div className="grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2 bg-slate-50 border-b-2 border-slate-200 text-xs font-semibold text-slate-500 uppercase tracking-wide">
+              <div className="grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2 bg-surface-sunken border-b-2 border-border text-xs font-semibold text-text-secondary uppercase tracking-wide">
                 <span />
                 <span>Product</span>
                 <span>Stock</span>
@@ -459,21 +459,21 @@ export function InventoryPage() {
                   <div
                     key={product.product_id}
                     data-testid={`inv-product-${product.product_id}`}
-                    className={`${idx < filteredGrouped.length - 1 ? 'border-b border-slate-100' : ''} ${isZeroStock ? 'opacity-50' : ''}`}
+                    className={`${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock ? 'opacity-50' : ''}`}
                   >
                     {/* Collapsed row — always visible, clickable to toggle */}
                     <button
                       type="button"
-                      className={`grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-slate-50 transition-colors ${isExpanded ? 'bg-slate-50' : ''}`}
+                      className={`grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover transition-colors ${isExpanded ? 'bg-surface-hover' : ''}`}
                       onClick={() => setExpandedProductId(isExpanded ? null : product.product_id)}
                       aria-expanded={isExpanded}
                       data-testid={`inv-row-toggle-${product.product_id}`}
                     >
                       {/* Chevron indicator */}
                       {isExpanded ? (
-                        <ChevronDown className="w-4 h-4 text-slate-400" />
+                        <ChevronDown className="w-4 h-4 text-text-tertiary" />
                       ) : (
-                        <ChevronRight className="w-4 h-4 text-slate-400" />
+                        <ChevronRight className="w-4 h-4 text-text-tertiary" />
                       )}
 
                       {/* Product name + stock dot */}
@@ -494,7 +494,7 @@ export function InventoryPage() {
                       {/* Expiry (hidden on small screens) */}
                       <span
                         data-testid={`expiry-${product.product_id}`}
-                        className="text-[13px] text-slate-600 hidden sm:block"
+                        className="text-[13px] text-text-secondary hidden sm:block"
                       >
                         {expiryLabel}
                       </span>
@@ -503,11 +503,11 @@ export function InventoryPage() {
                     {/* Expanded detail panel */}
                     {isExpanded && (
                       <div
-                        className="px-4 pb-4 pt-1 bg-slate-50/50 border-t border-slate-100"
+                        className="px-4 pb-4 pt-1 bg-surface-sunken/50 border-t border-border-light"
                         data-testid={`inv-detail-${product.product_id}`}
                       >
                         {/* Detail info */}
-                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-slate-600 mb-3">
+                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-text-secondary mb-3">
                           <span data-testid={`stock-servings-${product.product_id}`}>
                             {totalStock.toFixed(1)} containers ({servingsTotal.toFixed(1)} servings)
                           </span>
@@ -523,7 +523,7 @@ export function InventoryPage() {
                         {/* Action buttons — clean grid layout */}
                         <div className="grid grid-cols-2 gap-2 max-w-sm">
                           <button
-                            className="flex items-center justify-center gap-1.5 bg-green-600 text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-green-700 transition-colors"
+                            className="flex items-center justify-center gap-1.5 bg-success text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-success-hover transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               openAddStockModal(product.product_id, 1);
@@ -533,7 +533,7 @@ export function InventoryPage() {
                             Add Container
                           </button>
                           <button
-                            className="flex items-center justify-center gap-1.5 bg-red-600 text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-red-700 transition-colors"
+                            className="flex items-center justify-center gap-1.5 bg-danger text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-hover transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               consumeStockMutation.mutate({ productId: product.product_id, qty: 1, unit: 'container' });
@@ -543,7 +543,7 @@ export function InventoryPage() {
                             Remove Container
                           </button>
                           <button
-                            className="flex items-center justify-center gap-1.5 bg-white text-green-600 border-2 border-green-600 px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-green-50 transition-colors"
+                            className="flex items-center justify-center gap-1.5 bg-surface text-success-text border-2 border-success px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-success-subtle transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               openAddStockModal(product.product_id, 1 / Number(product.servings_per_container));
@@ -553,7 +553,7 @@ export function InventoryPage() {
                             Add Serving
                           </button>
                           <button
-                            className="flex items-center justify-center gap-1.5 bg-white text-red-600 border-2 border-red-600 px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-red-50 transition-colors"
+                            className="flex items-center justify-center gap-1.5 bg-surface text-danger-text border-2 border-danger px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-subtle transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
                               consumeStockMutation.mutate({ productId: product.product_id, qty: 1, unit: 'serving' });
@@ -566,7 +566,7 @@ export function InventoryPage() {
 
                         {/* Consume All — separate, text-style */}
                         <button
-                          className="mt-2 bg-transparent text-slate-500 border-none px-0 py-1 cursor-pointer text-sm underline hover:text-slate-700 transition-colors"
+                          className="mt-2 bg-transparent text-text-secondary border-none px-0 py-1 cursor-pointer text-sm underline hover:text-text transition-colors"
                           onClick={(e) => {
                             e.stopPropagation();
                             handleConsumeAll(product.product_id);
@@ -600,10 +600,10 @@ export function InventoryPage() {
                   <div
                     key={lot.lot_id}
                     data-testid={`lot-row-${lot.lot_id}`}
-                    className="bg-white border border-slate-200 rounded-lg p-3"
+                    className="bg-surface border border-border rounded-lg p-3"
                   >
-                    <div className="font-semibold text-sm text-slate-900 mb-1">{lot.productName}</div>
-                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-slate-600">
+                    <div className="font-semibold text-sm text-text mb-1">{lot.productName}</div>
+                    <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-secondary">
                       <span>{Number(lot.qty_containers).toFixed(1)} ctn</span>
                       <span>{lot.locations?.name ?? '\u2014'}</span>
                       <span>Expires: {lot.expires_on ?? '\u2014'}</span>
@@ -613,10 +613,10 @@ export function InventoryPage() {
               </div>
 
               {/* Desktop table */}
-              <div className="hidden sm:block overflow-x-auto rounded-lg border border-slate-200 mt-3">
+              <div className="hidden sm:block overflow-x-auto rounded-lg border border-border mt-3">
                 <table className="w-full border-collapse" data-testid="lots-table-desktop">
                   <thead>
-                    <tr className="bg-slate-50 border-b-2 border-slate-200">
+                    <tr className="bg-surface-sunken border-b-2 border-border">
                       <th className="p-3 text-left font-semibold">Product</th>
                       <th className="p-3 text-left font-semibold">Location</th>
                       <th className="p-3 text-right font-semibold">Qty (ctn)</th>
@@ -625,7 +625,11 @@ export function InventoryPage() {
                   </thead>
                   <tbody>
                     {sortedLots.map((lot) => (
-                      <tr key={lot.lot_id} data-testid={`lot-row-${lot.lot_id}`} className="border-b border-slate-100">
+                      <tr
+                        key={lot.lot_id}
+                        data-testid={`lot-row-${lot.lot_id}`}
+                        className="border-b border-border-light"
+                      >
                         <td className="p-3">{lot.productName}</td>
                         <td className="p-3">{lot.locations?.name ?? '\u2014'}</td>
                         <td className="text-right p-3">{Number(lot.qty_containers).toFixed(1)}</td>
@@ -651,7 +655,7 @@ export function InventoryPage() {
       >
         <div className="flex flex-col gap-3">
           <div>
-            <label className="text-[0.85em] text-slate-400 block mb-1">Quantity (containers)</label>
+            <label className="text-[0.85em] text-text-tertiary block mb-1">Quantity (containers)</label>
             <input
               type="number"
               aria-label="Quantity in containers"
@@ -667,7 +671,7 @@ export function InventoryPage() {
             />
           </div>
           <div>
-            <label className="text-[0.85em] text-slate-400 block mb-1">Expiry Date (optional)</label>
+            <label className="text-[0.85em] text-text-tertiary block mb-1">Expiry Date (optional)</label>
             <input
               type="date"
               aria-label="Expiry date"
@@ -679,7 +683,7 @@ export function InventoryPage() {
           </div>
           <div className="flex justify-end gap-2 mt-2">
             <button
-              className="bg-transparent text-slate-600 border-none px-4 py-1.5 rounded-md cursor-pointer hover:text-slate-900"
+              className="bg-transparent text-text-secondary border-none px-4 py-1.5 rounded-md cursor-pointer hover:text-text"
               onClick={closeAddStockModal}
               data-testid="add-stock-cancel"
             >
@@ -687,7 +691,7 @@ export function InventoryPage() {
             </button>
             <button
               className={`text-white border-none px-4 py-1.5 rounded-md cursor-pointer font-semibold ${
-                addStockQty <= 0 ? 'bg-slate-300 cursor-not-allowed' : 'bg-emerald-600 hover:bg-emerald-700'
+                addStockQty <= 0 ? 'bg-border cursor-not-allowed' : 'bg-success hover:bg-success-hover'
               }`}
               onClick={confirmAddStock}
               disabled={addStockQty <= 0}

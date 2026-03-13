@@ -35,24 +35,24 @@ export function CoachLayout({ children }: CoachLayoutProps) {
   const activeTab = getActiveTab(location.pathname);
 
   return (
-    <div className="flex flex-col h-full overflow-y-hidden bg-slate-50 text-slate-900">
+    <div className="flex flex-col h-full overflow-y-hidden bg-surface-sunken text-text">
       {/* Header */}
       <header
-        className="flex items-center justify-between h-14 px-4 sm:px-6 bg-white border-b border-slate-200 shrink-0"
+        className="flex items-center justify-between h-14 px-4 sm:px-6 bg-surface border-b border-border shrink-0"
         data-testid="coach-header"
       >
-        <div className="flex items-center font-bold text-lg sm:text-xl text-slate-900">
+        <div className="flex items-center font-bold text-lg sm:text-xl text-text">
           <Link
             to="/hub"
-            className="text-inherit no-underline hover:text-violet-600 transition-colors"
+            className="text-inherit no-underline hover:text-coach-accent transition-colors"
             onClick={() => setDrawerOpen(false)}
           >
             Luna Hub
           </Link>
-          <span className="text-slate-400 mx-1 sm:mx-1.5">/</span>
+          <span className="text-text-tertiary mx-1 sm:mx-1.5">/</span>
           <Link
             to="/coach"
-            className="text-inherit no-underline hover:text-violet-600 transition-colors"
+            className="text-inherit no-underline hover:text-coach-accent transition-colors"
             onClick={() => setDrawerOpen(false)}
           >
             CoachByte
@@ -60,7 +60,7 @@ export function CoachLayout({ children }: CoachLayoutProps) {
         </div>
         <div className="flex items-center gap-2.5">
           <button
-            className="md:hidden inline-flex items-center justify-center p-1.5 rounded-lg border border-slate-300 text-slate-700 hover:bg-slate-50 transition-colors"
+            className="md:hidden inline-flex items-center justify-center p-1.5 rounded-lg border border-border-strong text-text-secondary hover:bg-surface-hover transition-colors"
             aria-label="Toggle navigation"
             onClick={() => setDrawerOpen(!drawerOpen)}
           >
@@ -71,7 +71,7 @@ export function CoachLayout({ children }: CoachLayoutProps) {
 
       {/* Tab bar — desktop */}
       <nav
-        className="hidden md:flex items-center bg-white border-b border-slate-200 px-4 shrink-0"
+        className="hidden md:flex items-center bg-surface border-b border-border px-4 shrink-0"
         data-testid="coach-tabs"
       >
         <Tabs items={tabItems} activeValue={activeTab} />
@@ -80,7 +80,7 @@ export function CoachLayout({ children }: CoachLayoutProps) {
       {/* Mobile drawer */}
       <div
         className={[
-          'md:hidden flex-col bg-white border-b border-slate-200 overflow-hidden transition-all duration-200',
+          'md:hidden flex-col bg-surface border-b border-border overflow-hidden transition-all duration-200',
           drawerOpen ? 'flex' : 'hidden',
         ].join(' ')}
       >
@@ -92,7 +92,9 @@ export function CoachLayout({ children }: CoachLayoutProps) {
                 to={tab.href!}
                 className={[
                   'block px-3 py-2.5 text-sm font-medium rounded-lg transition-colors no-underline',
-                  activeTab === tab.value ? 'text-violet-600 bg-violet-50' : 'text-slate-700 hover:bg-slate-100',
+                  activeTab === tab.value
+                    ? 'text-coach-accent bg-primary-subtle'
+                    : 'text-text-secondary hover:bg-surface-hover',
                 ].join(' ')}
                 onClick={() => setDrawerOpen(false)}
               >
@@ -104,7 +106,7 @@ export function CoachLayout({ children }: CoachLayoutProps) {
                 setDrawerOpen(false);
                 navigate('/hub');
               }}
-              className="block px-3 py-2.5 text-sm font-medium rounded-lg text-slate-700 hover:bg-slate-100 text-left transition-colors"
+              className="block px-3 py-2.5 text-sm font-medium rounded-lg text-text-secondary hover:bg-surface-hover text-left transition-colors"
             >
               Hub
             </button>
@@ -113,7 +115,7 @@ export function CoachLayout({ children }: CoachLayoutProps) {
                 setDrawerOpen(false);
                 signOut();
               }}
-              className="block px-3 py-2.5 text-sm font-medium rounded-lg text-red-600 hover:bg-red-50 text-left transition-colors"
+              className="block px-3 py-2.5 text-sm font-medium rounded-lg text-danger-text hover:bg-danger-subtle text-left transition-colors"
             >
               Logout
             </button>

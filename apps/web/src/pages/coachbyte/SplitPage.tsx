@@ -219,11 +219,11 @@ export function SplitPage() {
 
   return (
     <CoachLayout title="Split">
-      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
-        <h2 className="text-2xl font-bold text-slate-900 m-0">Weekly Split Planner</h2>
+      <div className="flex justify-between items-center border-b-2 border-border pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-text m-0">Weekly Split Planner</h2>
       </div>
 
-      {saveError && <p className="text-red-600 text-sm mb-3">{saveError}</p>}
+      {saveError && <p className="text-danger-text text-sm mb-3">{saveError}</p>}
 
       {splits.map((day) => {
         const isCollapsed = collapsedDays.has(day.weekday);
@@ -238,14 +238,14 @@ export function SplitPage() {
               data-testid={`day-${day.weekday}-toggle`}
             >
               {isCollapsed ? (
-                <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+                <ChevronRight className="w-5 h-5 text-text-tertiary group-hover:text-text-secondary transition-colors" />
               ) : (
-                <ChevronDown className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+                <ChevronDown className="w-5 h-5 text-text-tertiary group-hover:text-text-secondary transition-colors" />
               )}
-              <h3 className="text-lg font-semibold text-slate-900 m-0">{WEEKDAYS[day.weekday]}</h3>
-              {isRestDay && <span className="text-sm text-slate-400 italic ml-1">Rest day</span>}
+              <h3 className="text-lg font-semibold text-text m-0">{WEEKDAYS[day.weekday]}</h3>
+              {isRestDay && <span className="text-sm text-text-tertiary italic ml-1">Rest day</span>}
               {!isRestDay && (
-                <span className="text-sm text-slate-500 ml-1">
+                <span className="text-sm text-text-secondary ml-1">
                   ({day.template_sets.length} exercise{day.template_sets.length !== 1 ? 's' : ''})
                 </span>
               )}
@@ -254,7 +254,7 @@ export function SplitPage() {
             {!isCollapsed && (
               <>
                 {isRestDay ? (
-                  <p className="text-slate-500 italic text-sm ml-7" data-testid={`day-${day.weekday}-empty`}>
+                  <p className="text-text-secondary italic text-sm ml-7" data-testid={`day-${day.weekday}-empty`}>
                     No exercises scheduled
                   </p>
                 ) : (
@@ -263,25 +263,25 @@ export function SplitPage() {
                     <table className="hidden sm:table w-full text-sm" data-testid={`day-${day.weekday}-table`}>
                       <thead>
                         <tr>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                             #
                           </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                             Exercise
                           </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                             Reps
                           </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                             Load
                           </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                             % of 1RM
                           </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                             Rest
                           </th>
-                          <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                          <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                             Action
                           </th>
                         </tr>
@@ -291,7 +291,7 @@ export function SplitPage() {
                           <tr
                             key={i}
                             data-testid={`day-${day.weekday}-set-${i}`}
-                            className="border-b border-slate-100 last:border-b-0"
+                            className="border-b border-border-light last:border-b-0"
                           >
                             <td className="px-3 py-2 align-middle" data-testid={`day-${day.weekday}-set-${i}-order`}>
                               {set.order}
@@ -305,7 +305,7 @@ export function SplitPage() {
                                   updateSet(day.weekday, i, 'exercise_id', e.target.value);
                                   if (ex) updateSet(day.weekday, i, 'exercise_name', ex.name);
                                 }}
-                                className="appearance-none rounded-md border border-slate-300 px-2 py-1 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                className="appearance-none rounded-md border border-border-strong px-2 py-1 text-sm text-text bg-surface focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                 data-testid={`day-${day.weekday}-set-${i}-exercise`}
                               >
                                 {exercises.map((ex) => (
@@ -318,7 +318,7 @@ export function SplitPage() {
                             <td className="px-3 py-2 align-middle">
                               <input
                                 type="number"
-                                className="w-15 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                className="w-15 text-center px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                 min="0"
                                 aria-label="Target reps"
                                 value={set.target_reps ?? ''}
@@ -337,7 +337,7 @@ export function SplitPage() {
                               {set.target_load_percentage ? (
                                 <input
                                   type="number"
-                                  className="w-20 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                  className="w-20 text-center px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                   min="0"
                                   aria-label="Load percentage"
                                   value={set.target_load_percentage}
@@ -354,7 +354,7 @@ export function SplitPage() {
                               ) : (
                                 <input
                                   type="number"
-                                  className="w-20 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                  className="w-20 text-center px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                   min="0"
                                   aria-label="Target load"
                                   value={set.target_load ?? ''}
@@ -388,7 +388,7 @@ export function SplitPage() {
                                     updateSet(day.weekday, i, 'target_load_percentage', null);
                                   }
                                 }}
-                                className="h-5 w-5 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40"
+                                className="h-5 w-5 rounded border-border-strong text-coach-accent focus:ring-focus-ring"
                                 data-testid={`day-${day.weekday}-set-${i}-rel`}
                               />
                             </td>
@@ -396,7 +396,7 @@ export function SplitPage() {
                               <div className="flex items-center gap-1.5">
                                 <input
                                   type="number"
-                                  className="w-[70px] text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                  className="w-[70px] text-center px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                   min="0"
                                   aria-label="Rest seconds"
                                   value={set.rest_seconds}
@@ -418,8 +418,8 @@ export function SplitPage() {
                                       onClick={() => updateSet(day.weekday, i, 'rest_seconds', preset)}
                                       className={`px-2 py-1.5 text-xs rounded border transition-colors min-w-[36px] ${
                                         set.rest_seconds === preset
-                                          ? 'bg-violet-100 border-violet-300 text-violet-700 font-semibold'
-                                          : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300'
+                                          ? 'bg-primary-subtle border-coach-accent text-coach-accent font-semibold'
+                                          : 'bg-surface-sunken border-border text-text-secondary hover:bg-surface-hover hover:border-border-strong'
                                       }`}
                                       data-testid={`day-${day.weekday}-set-${i}-rest-preset-${preset}`}
                                     >
@@ -451,12 +451,12 @@ export function SplitPage() {
                         <div
                           key={i}
                           data-testid={`day-${day.weekday}-set-${i}`}
-                          className="border border-slate-200 rounded-lg p-3 bg-white"
+                          className="border border-border rounded-lg p-3 bg-surface"
                         >
                           {/* Top row: order badge + exercise select */}
                           <div className="flex items-center gap-2 mb-2">
                             <span
-                              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-violet-100 text-violet-700 text-xs font-bold shrink-0"
+                              className="inline-flex items-center justify-center w-6 h-6 rounded-full bg-primary-subtle text-coach-accent text-xs font-bold shrink-0"
                               data-testid={`day-${day.weekday}-set-${i}-order`}
                             >
                               {set.order}
@@ -469,7 +469,7 @@ export function SplitPage() {
                                 updateSet(day.weekday, i, 'exercise_id', e.target.value);
                                 if (ex) updateSet(day.weekday, i, 'exercise_name', ex.name);
                               }}
-                              className="flex-1 min-w-0 appearance-none rounded-md border border-slate-300 px-2 py-1.5 text-sm text-slate-900 bg-white focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                              className="flex-1 min-w-0 appearance-none rounded-md border border-border-strong px-2 py-1.5 text-sm text-text bg-surface focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                               data-testid={`day-${day.weekday}-set-${i}-exercise`}
                             >
                               {exercises.map((ex) => (
@@ -483,12 +483,12 @@ export function SplitPage() {
                           {/* Middle row: Reps, Load, Rest inputs */}
                           <div className="grid grid-cols-3 gap-2 mb-2">
                             <div>
-                              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-0.5">
+                              <label className="text-[10px] font-semibold text-text-secondary uppercase tracking-wide block mb-0.5">
                                 Reps
                               </label>
                               <input
                                 type="number"
-                                className="w-full text-center px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                className="w-full text-center px-2 py-1.5 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                 min="0"
                                 aria-label="Target reps"
                                 value={set.target_reps ?? ''}
@@ -504,13 +504,13 @@ export function SplitPage() {
                               />
                             </div>
                             <div>
-                              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-0.5">
+                              <label className="text-[10px] font-semibold text-text-secondary uppercase tracking-wide block mb-0.5">
                                 {set.target_load_percentage ? 'Load %' : 'Load'}
                               </label>
                               {set.target_load_percentage ? (
                                 <input
                                   type="number"
-                                  className="w-full text-center px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                  className="w-full text-center px-2 py-1.5 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                   min="0"
                                   aria-label="Load percentage"
                                   value={set.target_load_percentage}
@@ -527,7 +527,7 @@ export function SplitPage() {
                               ) : (
                                 <input
                                   type="number"
-                                  className="w-full text-center px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                  className="w-full text-center px-2 py-1.5 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                   min="0"
                                   aria-label="Target load"
                                   value={set.target_load ?? ''}
@@ -544,12 +544,12 @@ export function SplitPage() {
                               )}
                             </div>
                             <div>
-                              <label className="text-[10px] font-semibold text-slate-500 uppercase tracking-wide block mb-0.5">
+                              <label className="text-[10px] font-semibold text-text-secondary uppercase tracking-wide block mb-0.5">
                                 Rest (s)
                               </label>
                               <input
                                 type="number"
-                                className="w-full text-center px-2 py-1.5 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                                className="w-full text-center px-2 py-1.5 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                                 min="0"
                                 aria-label="Rest seconds"
                                 value={set.rest_seconds}
@@ -586,10 +586,10 @@ export function SplitPage() {
                                     updateSet(day.weekday, i, 'target_load_percentage', null);
                                   }
                                 }}
-                                className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40"
+                                className="h-4 w-4 rounded border-border-strong text-coach-accent focus:ring-focus-ring"
                                 data-testid={`day-${day.weekday}-set-${i}-rel`}
                               />
-                              <span className="text-xs text-slate-600">%1RM</span>
+                              <span className="text-xs text-text-secondary">%1RM</span>
                             </label>
                             <div className="flex gap-1">
                               {REST_PRESETS.map((preset) => (
@@ -599,8 +599,8 @@ export function SplitPage() {
                                   onClick={() => updateSet(day.weekday, i, 'rest_seconds', preset)}
                                   className={`px-1.5 py-1 text-[11px] rounded border transition-colors ${
                                     set.rest_seconds === preset
-                                      ? 'bg-violet-100 border-violet-300 text-violet-700 font-semibold'
-                                      : 'bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100 hover:border-slate-300'
+                                      ? 'bg-primary-subtle border-coach-accent text-coach-accent font-semibold'
+                                      : 'bg-surface-sunken border-border text-text-secondary hover:bg-surface-hover hover:border-border-strong'
                                   }`}
                                   data-testid={`day-${day.weekday}-set-${i}-rest-preset-${preset}`}
                                 >
@@ -646,13 +646,13 @@ export function SplitPage() {
                 </div>
 
                 <div className="mt-2 sm:ml-7">
-                  <label className="text-sm font-semibold text-slate-700 block mb-1">Notes</label>
+                  <label className="text-sm font-semibold text-text-secondary block mb-1">Notes</label>
                   <textarea
                     value={day.split_notes}
                     onChange={(e) => updateNotes(day.weekday, e.target.value)}
                     data-testid={`day-${day.weekday}-notes`}
                     rows={2}
-                    className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500 min-h-[60px]"
+                    className="w-full px-3 py-2 text-sm border border-border-strong rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary min-h-[60px]"
                   />
                 </div>
               </>

@@ -40,7 +40,7 @@ export function MacroProgressBar({
           {suffix} ({percentage}%)
         </span>
       </div>
-      <div className={`bg-slate-200 rounded ${barHeight} overflow-hidden`}>
+      <div className={`bg-border rounded ${barHeight} overflow-hidden`}>
         <div
           className="h-full rounded"
           style={{

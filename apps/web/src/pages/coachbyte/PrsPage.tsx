@@ -201,14 +201,14 @@ export function PrsPage() {
 
   return (
     <CoachLayout title="PRs">
-      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
-        <h2 className="text-2xl font-bold text-slate-900 m-0">PR Tracker</h2>
+      <div className="flex justify-between items-center border-b-2 border-border pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-text m-0">PR Tracker</h2>
       </div>
 
       {loadError && (
-        <Card className="border-red-300 mb-5" data-testid="load-error">
+        <Card className="border-danger mb-5" data-testid="load-error">
           <CardContent>
-            <p className="text-red-600 text-sm mb-2">Failed to load data: {(loadError as any).message}</p>
+            <p className="text-danger-text text-sm mb-2">Failed to load data: {(loadError as any).message}</p>
             <Button
               variant="primary"
               size="sm"
@@ -222,7 +222,7 @@ export function PrsPage() {
 
       {filteredPRs.length === 0 ? (
         <div
-          className="text-center py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500"
+          className="text-center py-10 border-2 border-dashed border-border-strong rounded-xl bg-surface-sunken text-text-secondary"
           data-testid="no-prs"
         >
           <h3 className="text-lg font-semibold mb-1">No PRs recorded yet</h3>
@@ -232,11 +232,11 @@ export function PrsPage() {
         filteredPRs.map((pr) => (
           <Card className="mb-5 p-5" key={pr.exercise_id} data-testid={`pr-card-${pr.exercise_id}`}>
             <div className="flex justify-between items-center mb-4">
-              <span className="text-xl font-bold text-slate-900 capitalize" data-testid={`pr-name-${pr.exercise_id}`}>
+              <span className="text-xl font-bold text-text capitalize" data-testid={`pr-name-${pr.exercise_id}`}>
                 {pr.exercise_name}
               </span>
               <span
-                className="text-base font-bold text-violet-600 cursor-help"
+                className="text-base font-bold text-coach-accent cursor-help"
                 data-testid={`pr-e1rm-${pr.exercise_id}`}
                 title="Estimated 1-rep max using Epley formula"
               >
@@ -260,7 +260,7 @@ export function PrsPage() {
       )}
 
       <div className="flex items-center justify-between my-2">
-        <p data-testid="date-range-info" className="text-slate-500 text-sm m-0">
+        <p data-testid="date-range-info" className="text-text-secondary text-sm m-0">
           {dateRange < 9999 ? `Showing PRs from last ${dateRange} days` : 'Showing PRs from all history'}
         </p>
         {dateRange < 9999 && (
@@ -278,27 +278,27 @@ export function PrsPage() {
       </div>
 
       {/* Collapsible tracked exercises panel */}
-      <div className="bg-slate-50 rounded-xl border border-slate-200 mt-5" data-testid="tracked-exercises-card">
+      <div className="bg-surface-sunken rounded-xl border border-border mt-5" data-testid="tracked-exercises-card">
         <button
           type="button"
           onClick={() => setTrackedPanelOpen((prev) => !prev)}
           className="flex items-center gap-2 w-full text-left px-5 py-3 group"
           data-testid="tracked-exercises-toggle"
         >
-          <Settings className="w-4 h-4 text-slate-500" />
-          <h3 className="text-base font-semibold text-slate-900 m-0 flex-1">
+          <Settings className="w-4 h-4 text-text-secondary" />
+          <h3 className="text-base font-semibold text-text m-0 flex-1">
             Tracked Exercises ({trackedExercises.length})
           </h3>
           {trackedPanelOpen ? (
-            <ChevronDown className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+            <ChevronDown className="w-5 h-5 text-text-tertiary group-hover:text-text-secondary transition-colors" />
           ) : (
-            <ChevronRight className="w-5 h-5 text-slate-400 group-hover:text-slate-600 transition-colors" />
+            <ChevronRight className="w-5 h-5 text-text-tertiary group-hover:text-text-secondary transition-colors" />
           )}
         </button>
 
         {trackedPanelOpen && (
-          <div className="px-5 pb-5 border-t border-slate-200 pt-3">
-            <p className="text-slate-500 text-xs mb-4">
+          <div className="px-5 pb-5 border-t border-border pt-3">
+            <p className="text-text-secondary text-xs mb-4">
               Add exercises to track all rep ranges for those exercises automatically.
             </p>
 
@@ -310,7 +310,7 @@ export function PrsPage() {
                 placeholder="Enter exercise name..."
                 aria-label="Search exercises to track"
                 data-testid="pr-search-input"
-                className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                className="flex-1 px-3 py-2 text-sm border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               />
             </div>
 
@@ -331,16 +331,16 @@ export function PrsPage() {
             )}
 
             {trackedExercises.length === 0 ? (
-              <p className="text-slate-500 italic text-sm">No exercises being tracked</p>
+              <p className="text-text-secondary italic text-sm">No exercises being tracked</p>
             ) : (
               <>
-                <div className="text-sm font-bold text-slate-700 mb-2.5">
+                <div className="text-sm font-bold text-text-secondary mb-2.5">
                   Currently Tracking ({trackedExercises.length} exercises)
                 </div>
                 <div className="flex flex-wrap gap-2" data-testid="tracked-chips">
                   {trackedExercises.map((ex) => (
                     <div
-                      className="flex items-center gap-2 bg-white px-2.5 py-1.5 rounded-lg border border-slate-200 text-sm cursor-pointer hover:border-slate-300 transition-colors"
+                      className="flex items-center gap-2 bg-surface px-2.5 py-1.5 rounded-lg border border-border text-sm cursor-pointer hover:border-border-strong transition-colors"
                       key={ex.exercise_id}
                       data-testid={`tracked-${ex.exercise_id}`}
                       onClick={() => removeTrackedExercise(ex.exercise_id)}

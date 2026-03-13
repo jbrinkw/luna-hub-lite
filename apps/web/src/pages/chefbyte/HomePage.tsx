@@ -773,10 +773,10 @@ export function HomePage() {
 
   /* Helper: progress bar colors */
   const macroColors = {
-    calories: 'bg-emerald-600',
-    protein: 'bg-green-500',
+    calories: 'bg-success',
+    protein: 'bg-success',
     carbs: 'bg-amber-500',
-    fat: 'bg-red-500',
+    fat: 'bg-danger',
   } as const;
 
   const macroColorValues = {
@@ -809,16 +809,16 @@ export function HomePage() {
     const pct = pctOf(value, goal);
     const plannedPct = plannedValue ? Math.min(pctOf(value + plannedValue, goal), 100) : 0;
     return (
-      <div data-testid={testId} className="bg-white/70 border border-slate-200/60 rounded-lg p-3.5">
+      <div data-testid={testId} className="bg-surface/70 border border-border/60 rounded-lg p-3.5">
         <div className="flex justify-between items-center mb-1.5">
-          <label className="font-semibold text-sm text-slate-700">{label}</label>
+          <label className="font-semibold text-sm text-text-secondary">{label}</label>
           <span className="text-xs font-bold tabular-nums" style={{ color }}>
             {pct}%
           </span>
         </div>
         <div
           data-testid={`${testId}-bar`}
-          className="w-full h-2.5 bg-slate-200 rounded-full overflow-hidden relative mb-1"
+          className="w-full h-2.5 bg-border rounded-full overflow-hidden relative mb-1"
         >
           {plannedPct > pct && (
             <div
@@ -832,7 +832,7 @@ export function HomePage() {
             style={{ width: `${pct}%` }}
           />
         </div>
-        <div className="text-xs text-slate-500">
+        <div className="text-xs text-text-secondary">
           {Math.round(value)}
           {plannedValue ? ` + ${Math.round(plannedValue)} planned` : ''} / {goal}
           {unit}
@@ -849,8 +849,8 @@ export function HomePage() {
       className={[
         'px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors',
         confirmDeleteId === id
-          ? 'bg-red-600 text-white border-none'
-          : 'bg-transparent text-red-600 border border-red-600 hover:bg-red-50',
+          ? 'bg-danger text-white border-none'
+          : 'bg-transparent text-danger-text border border-danger hover:bg-danger-subtle',
       ].join(' ')}
     >
       {confirmDeleteId === id ? 'You sure?' : 'Delete'}
@@ -862,24 +862,24 @@ export function HomePage() {
     const base = 'inline-block px-1.5 py-0.5 rounded text-[10px] font-bold text-white';
     switch (status) {
       case 'CAN MAKE':
-        return `${base} bg-green-600`;
+        return `${base} bg-success`;
       case 'PARTIAL':
         return `${base} bg-amber-500`;
       case 'NO STOCK':
-        return `${base} bg-red-600`;
+        return `${base} bg-danger`;
       case 'N/A':
-        return `${base} bg-slate-400`;
+        return `${base} bg-text-tertiary`;
     }
   };
 
   return (
     <ChefLayout title="Home">
       {(loadError || mutationError) && (
-        <div data-testid="load-error" className="border border-red-400 bg-red-50 rounded-lg p-4 mb-4">
-          <p className="m-0 mb-2 text-red-600">Failed to load data: {loadError?.message ?? mutationError}</p>
+        <div data-testid="load-error" className="border border-danger bg-danger-subtle rounded-lg p-4 mb-4">
+          <p className="m-0 mb-2 text-danger-text">Failed to load data: {loadError?.message ?? mutationError}</p>
           <button
             onClick={invalidateHome}
-            className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
+            className="px-4 py-2 bg-danger text-white rounded-md font-semibold text-sm hover:bg-danger-hover transition-colors"
           >
             Retry
           </button>
@@ -891,10 +891,10 @@ export function HomePage() {
       {/* ============================================================ */}
       <div data-testid="macro-summary" className="mb-5">
         <Link to="/chef/macros" className="no-underline text-inherit block">
-          <div className="bg-gradient-to-br from-slate-50 to-emerald-50 border border-slate-200 rounded-xl p-4 shadow-sm hover:shadow transition-shadow">
+          <div className="bg-gradient-to-br from-surface-sunken to-success-subtle border border-border rounded-xl p-4 shadow-sm hover:shadow transition-shadow">
             <div className="mb-3">
-              <span className="font-bold text-base text-slate-900">Today</span>{' '}
-              <span className="text-sm text-slate-500">(6:00 AM - 5:59 AM)</span>
+              <span className="font-bold text-base text-text">Today</span>{' '}
+              <span className="text-sm text-text-secondary">(6:00 AM - 5:59 AM)</span>
             </div>
             <div data-testid="status-cards" className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 cursor-pointer">
               <ProgressBar
@@ -951,7 +951,9 @@ export function HomePage() {
           data-testid="card-below-min"
           className={[
             'no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium transition-colors',
-            belowMinStock > 0 ? 'bg-amber-100 text-amber-700 hover:bg-amber-200' : 'bg-slate-100 text-slate-400',
+            belowMinStock > 0
+              ? 'bg-warning-subtle text-amber-700 hover:bg-amber-200'
+              : 'bg-surface-hover text-text-tertiary',
           ].join(' ')}
         >
           <AlertTriangle className="w-3 h-3" />
@@ -962,7 +964,9 @@ export function HomePage() {
           data-testid="card-missing-prices"
           className={[
             'no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium transition-colors',
-            missingPrices > 0 ? 'bg-red-100 text-red-600 hover:bg-red-200' : 'bg-slate-100 text-slate-400',
+            missingPrices > 0
+              ? 'bg-danger-subtle text-danger-text hover:bg-danger'
+              : 'bg-surface-hover text-text-tertiary',
           ].join(' ')}
         >
           <DollarSign className="w-3 h-3" />
@@ -971,7 +975,7 @@ export function HomePage() {
         <Link
           to="/chef/settings?tab=products"
           data-testid="card-placeholders"
-          className="no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium bg-slate-100 text-slate-400 hover:bg-slate-200 transition-colors"
+          className="no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium bg-surface-hover text-text-tertiary hover:bg-border transition-colors"
         >
           <PackageSearch className="w-3 h-3" />
           Placeholders: {placeholders}
@@ -979,7 +983,7 @@ export function HomePage() {
         <Link
           to="/chef/shopping"
           data-testid="card-cart-value"
-          className="no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium bg-slate-100 text-slate-400 hover:bg-slate-200 transition-colors"
+          className="no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium bg-surface-hover text-text-tertiary hover:bg-border transition-colors"
         >
           <ShoppingCart className="w-3 h-3" />
           Cart: ${cartValue.toFixed(2)}
@@ -987,7 +991,7 @@ export function HomePage() {
         <button
           onClick={() => importShoppingMutation.mutate()}
           data-testid="import-shopping-btn"
-          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+          className="px-3 py-1.5 bg-success text-white rounded-md font-semibold text-xs hover:bg-success-hover transition-colors"
         >
           Import Shopping List
         </button>
@@ -995,21 +999,21 @@ export function HomePage() {
           onClick={syncMealPlanToCart}
           disabled={syncing}
           data-testid="meal-plan-cart-btn"
-          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
+          className="px-3 py-1.5 bg-success text-white rounded-md font-semibold text-xs hover:bg-success-hover transition-colors disabled:opacity-60 disabled:cursor-not-allowed"
         >
           {syncing ? 'Syncing...' : 'Meal Plan \u2192 Cart'}
         </button>
         <button
           onClick={openTasteModal}
           data-testid="taste-profile-btn"
-          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+          className="px-3 py-1.5 bg-success text-white rounded-md font-semibold text-xs hover:bg-success-hover transition-colors"
         >
           Taste Profile
         </button>
         <button
           onClick={openTargetModal}
           data-testid="target-macros-btn"
-          className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+          className="px-3 py-1.5 bg-success text-white rounded-md font-semibold text-xs hover:bg-success-hover transition-colors"
         >
           Target Macros
         </button>
@@ -1019,12 +1023,12 @@ export function HomePage() {
       {/*  TODAY'S MEALS — green accent                                 */}
       {/* ============================================================ */}
       <div data-testid="todays-meals-section" className="mb-6 border-l-4 border-l-green-500 pl-3">
-        <h3 className="text-lg font-semibold text-slate-900 mb-3 flex items-center gap-2">
-          <UtensilsCrossed className="w-5 h-5 text-green-600" />
+        <h3 className="text-lg font-semibold text-text mb-3 flex items-center gap-2">
+          <UtensilsCrossed className="w-5 h-5 text-success-text" />
           Today&apos;s Meals
         </h3>
         {todaysMeals.length === 0 ? (
-          <p data-testid="no-todays-meals" className="text-slate-500 italic">
+          <p data-testid="no-todays-meals" className="text-text-secondary italic">
             No meals planned for today
           </p>
         ) : (
@@ -1058,8 +1062,8 @@ export function HomePage() {
                   key={entry.meal_id}
                   data-testid={`meal-entry-${entry.meal_id}`}
                   className={[
-                    'py-2.5 px-3 border border-slate-200 border-l-4 rounded-md',
-                    isDone ? 'border-l-green-600 bg-green-50 opacity-80' : 'border-l-amber-400 bg-slate-50',
+                    'py-2.5 px-3 border border-border border-l-4 rounded-md',
+                    isDone ? 'border-l-success bg-success-subtle opacity-80' : 'border-l-amber-400 bg-surface-sunken',
                   ].join(' ')}
                 >
                   {/* Content + actions: stack on mobile, side-by-side on sm+ */}
@@ -1067,7 +1071,7 @@ export function HomePage() {
                     {/* Top: name, badge, meal type, macros */}
                     <div className="min-w-0">
                       <div className="flex flex-wrap gap-1.5 items-center">
-                        <span className={['font-semibold text-slate-900', isDone ? 'line-through' : ''].join(' ')}>
+                        <span className={['font-semibold text-text', isDone ? 'line-through' : ''].join(' ')}>
                           {name}
                         </span>
                         {!isDone && mealStockStatus !== 'N/A' && (
@@ -1080,12 +1084,15 @@ export function HomePage() {
                         )}
                       </div>
                       {entry.meal_type && (
-                        <span data-testid={`meal-type-${entry.meal_id}`} className="text-xs text-slate-400 capitalize">
+                        <span
+                          data-testid={`meal-type-${entry.meal_id}`}
+                          className="text-xs text-text-tertiary capitalize"
+                        >
                           {entry.meal_type}
                         </span>
                       )}
                       {mealMacros && (
-                        <div data-testid={`meal-macros-${entry.meal_id}`} className="text-xs text-slate-500 mt-1">
+                        <div data-testid={`meal-macros-${entry.meal_id}`} className="text-xs text-text-secondary mt-1">
                           {mealMacros.calories} cal | {mealMacros.protein}g P | {mealMacros.carbs}g C | {mealMacros.fat}
                           g F
                         </div>
@@ -1097,7 +1104,7 @@ export function HomePage() {
                         <button
                           onClick={() => unmarkMealDoneMutation.mutate(entry.meal_id)}
                           data-testid={`meal-undo-${entry.meal_id}`}
-                          className="px-2.5 py-1 bg-white text-amber-500 border border-amber-500 rounded text-xs font-semibold hover:bg-amber-50 transition-colors"
+                          className="px-2.5 py-1 bg-surface text-amber-500 border border-amber-500 rounded text-xs font-semibold hover:bg-warning-subtle transition-colors"
                         >
                           Undo
                         </button>
@@ -1105,7 +1112,7 @@ export function HomePage() {
                         <button
                           onClick={() => markMealDoneMutation.mutate(entry.meal_id)}
                           data-testid={`meal-done-${entry.meal_id}`}
-                          className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
+                          className="px-2.5 py-1 bg-success text-white rounded text-xs font-semibold hover:bg-success-hover transition-colors"
                         >
                           Mark Done
                         </button>
@@ -1130,12 +1137,12 @@ export function HomePage() {
       {/*  TODAY'S MEAL PREP — amber accent                             */}
       {/* ============================================================ */}
       <div data-testid="meal-prep-section" className="mb-6 border-l-4 border-l-amber-400 pl-3">
-        <h3 className="text-lg font-semibold text-slate-900 mb-3 flex items-center gap-2">
+        <h3 className="text-lg font-semibold text-text mb-3 flex items-center gap-2">
           <ChefHat className="w-5 h-5 text-amber-500" />
           Today&apos;s Meal Prep
         </h3>
         {mealPrep.length === 0 ? (
-          <p data-testid="no-meal-prep" className="text-slate-500 italic">
+          <p data-testid="no-meal-prep" className="text-text-secondary italic">
             No meal prep scheduled for today
           </p>
         ) : (
@@ -1144,32 +1151,32 @@ export function HomePage() {
               <div
                 key={entry.meal_id}
                 data-testid={`prep-entry-${entry.meal_id}`}
-                className="py-2.5 px-3 border border-slate-200 border-l-4 border-l-emerald-600 rounded-md bg-slate-50"
+                className="py-2.5 px-3 border border-border border-l-4 border-l-success rounded-md bg-surface-sunken"
               >
                 <div className="flex justify-between items-start gap-2">
                   <div className="min-w-0">
-                    <span className="font-semibold text-slate-900">
+                    <span className="font-semibold text-text">
                       {entry.recipes?.name ?? entry.products?.name ?? 'Unknown'}
                     </span>
-                    <span className="text-slate-500 text-sm ml-2">
+                    <span className="text-text-secondary text-sm ml-2">
                       {entry.servings} serving{entry.servings !== 1 ? 's' : ''}
                     </span>
                   </div>
                   <div className="flex gap-1.5 items-center shrink-0">
                     {confirmPrepId === entry.meal_id ? (
                       <>
-                        <span className="text-xs text-slate-500">Execute?</span>
+                        <span className="text-xs text-text-secondary">Execute?</span>
                         <button
                           onClick={() => executePrepMeal(entry.meal_id)}
                           data-testid={`prep-confirm-${entry.meal_id}`}
-                          className="px-2.5 py-1 bg-green-500 text-white rounded text-xs font-semibold hover:bg-green-600 transition-colors"
+                          className="px-2.5 py-1 bg-success text-white rounded text-xs font-semibold hover:bg-success-hover transition-colors"
                         >
                           Yes
                         </button>
                         <button
                           onClick={() => setConfirmPrepId(null)}
                           data-testid={`prep-cancel-${entry.meal_id}`}
-                          className="px-2.5 py-1 bg-slate-200 text-slate-700 rounded text-xs font-semibold hover:bg-slate-300 transition-colors"
+                          className="px-2.5 py-1 bg-border text-text-secondary rounded text-xs font-semibold hover:bg-border-strong transition-colors"
                         >
                           No
                         </button>
@@ -1178,7 +1185,7 @@ export function HomePage() {
                       <button
                         onClick={() => setConfirmPrepId(entry.meal_id)}
                         data-testid={`prep-execute-${entry.meal_id}`}
-                        className="px-3 py-1 bg-emerald-600 text-white rounded text-xs font-semibold hover:bg-emerald-700 transition-colors"
+                        className="px-3 py-1 bg-success text-white rounded text-xs font-semibold hover:bg-success-hover transition-colors"
                       >
                         Execute
                       </button>
@@ -1203,7 +1210,7 @@ export function HomePage() {
       {/* ============================================================ */}
       {(foodLogs.length > 0 || tempItems.length > 0) && (
         <div data-testid="consumed-section" className="mb-6">
-          <h3 className="text-lg font-semibold text-slate-900 mb-3">Consumed Today</h3>
+          <h3 className="text-lg font-semibold text-text mb-3">Consumed Today</h3>
           <div className="flex flex-col gap-1.5">
             {/* Grouped meal entries */}
             {mealGroups.map((group) => {
@@ -1212,25 +1219,25 @@ export function HomePage() {
                 <div
                   key={`meal-${group.meal_id}`}
                   data-testid={`consumed-meal-${group.meal_id}`}
-                  className="border border-slate-200 border-l-4 border-l-emerald-500 rounded-md bg-emerald-50 overflow-hidden"
+                  className="border border-border border-l-4 border-l-success rounded-md bg-success-subtle overflow-hidden"
                 >
                   {/* Meal header — clickable to expand */}
                   <button
                     type="button"
                     onClick={() => toggleMealExpand(group.meal_id)}
-                    className="w-full py-2 px-3 text-left hover:bg-emerald-100/50 transition-colors"
+                    className="w-full py-2 px-3 text-left hover:bg-success-subtle/50 transition-colors"
                     data-testid={`meal-toggle-${group.meal_id}`}
                   >
                     <div className="flex justify-between items-start gap-2">
-                      <span className="font-semibold text-sm text-slate-900 min-w-0 flex items-center gap-1.5">
+                      <span className="font-semibold text-sm text-text min-w-0 flex items-center gap-1.5">
                         {group.mealName}
-                        <span className="font-normal text-slate-500 text-xs">
+                        <span className="font-normal text-text-secondary text-xs">
                           ({group.logs.length} item{group.logs.length !== 1 ? 's' : ''})
                         </span>
                         {isExpanded ? (
-                          <ChevronUp className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <ChevronUp className="h-3.5 w-3.5 text-text-tertiary shrink-0" />
                         ) : (
-                          <ChevronDown className="h-3.5 w-3.5 text-slate-400 shrink-0" />
+                          <ChevronDown className="h-3.5 w-3.5 text-text-tertiary shrink-0" />
                         )}
                       </span>
                       <span onClick={(e) => e.stopPropagation()} role="presentation">
@@ -1243,7 +1250,7 @@ export function HomePage() {
                         />
                       </span>
                     </div>
-                    <div className="text-xs text-slate-500 mt-1">
+                    <div className="text-xs text-text-secondary mt-1">
                       {Math.round(group.totalCalories)} cal | {Math.round(group.totalProtein)}g P |{' '}
                       {Math.round(group.totalCarbs)}g C | {Math.round(group.totalFat)}g F
                     </div>
@@ -1251,7 +1258,7 @@ export function HomePage() {
                   {/* Expanded ingredient list */}
                   {isExpanded && (
                     <div
-                      className="border-t border-slate-200 bg-white/60 px-3 py-1.5 flex flex-col gap-1"
+                      className="border-t border-border bg-surface/60 px-3 py-1.5 flex flex-col gap-1"
                       data-testid={`meal-ingredients-${group.meal_id}`}
                     >
                       {group.logs.map((log) => (
@@ -1260,14 +1267,14 @@ export function HomePage() {
                           className="flex justify-between items-center py-1 text-xs"
                           data-testid={`consumed-log-${log.log_id}`}
                         >
-                          <span className="text-slate-700">
+                          <span className="text-text-secondary">
                             {log.products?.name ?? 'Unknown'}
-                            <span className="text-slate-400 ml-1.5">
+                            <span className="text-text-tertiary ml-1.5">
                               {Number(log.qty_consumed)} {log.unit}
                               {Number(log.qty_consumed) !== 1 ? 's' : ''}
                             </span>
                           </span>
-                          <span className="text-slate-500 whitespace-nowrap ml-2">
+                          <span className="text-text-secondary whitespace-nowrap ml-2">
                             {Math.round(Number(log.calories))} cal
                           </span>
                         </div>
@@ -1282,12 +1289,12 @@ export function HomePage() {
               <div
                 key={log.log_id}
                 data-testid={`consumed-log-${log.log_id}`}
-                className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-green-50"
+                className="py-2 px-3 border border-border border-l-4 border-l-success rounded-md bg-success-subtle"
               >
                 <div className="flex justify-between items-start gap-2">
-                  <span className="font-semibold text-sm text-slate-900 min-w-0">
+                  <span className="font-semibold text-sm text-text min-w-0">
                     {log.products?.name ?? 'Unknown'}
-                    <span className="font-normal text-slate-500 text-xs ml-2">
+                    <span className="font-normal text-text-secondary text-xs ml-2">
                       {Number(log.qty_consumed)} {log.unit}
                       {Number(log.qty_consumed) !== 1 ? 's' : ''}
                     </span>
@@ -1300,7 +1307,7 @@ export function HomePage() {
                     testId={`delete-log-${log.log_id}`}
                   />
                 </div>
-                <div className="text-xs text-slate-500 mt-1">
+                <div className="text-xs text-text-secondary mt-1">
                   {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
                   {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
                 </div>
@@ -1311,12 +1318,12 @@ export function HomePage() {
               <div
                 key={item.temp_id}
                 data-testid={`consumed-temp-${item.temp_id}`}
-                className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-amber-50"
+                className="py-2 px-3 border border-border border-l-4 border-l-amber-500 rounded-md bg-warning-subtle"
               >
                 <div className="flex justify-between items-start gap-2">
-                  <span className="font-semibold text-sm text-slate-900 min-w-0">
+                  <span className="font-semibold text-sm text-text min-w-0">
                     {item.name}
-                    <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
+                    <span className="font-normal text-text-tertiary text-xs ml-1.5">quick-add</span>
                   </span>
                   <DeleteBtn
                     id={`temp-${item.temp_id}`}
@@ -1326,7 +1333,7 @@ export function HomePage() {
                     testId={`delete-temp-${item.temp_id}`}
                   />
                 </div>
-                <div className="text-xs text-slate-500 mt-1">
+                <div className="text-xs text-text-secondary mt-1">
                   {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
                   {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
                 </div>
@@ -1347,39 +1354,39 @@ export function HomePage() {
       >
         <div className="grid gap-3">
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Protein (g)</label>
+            <label className="block text-xs font-semibold text-text-secondary mb-1">Protein (g)</label>
             <input
               type="number"
               min={0}
               value={targetProtein}
               onChange={(e) => setTargetProtein(Number(e.target.value) || 0)}
               data-testid="target-protein"
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Carbs (g)</label>
+            <label className="block text-xs font-semibold text-text-secondary mb-1">Carbs (g)</label>
             <input
               type="number"
               min={0}
               value={targetCarbs}
               onChange={(e) => setTargetCarbs(Number(e.target.value) || 0)}
               data-testid="target-carbs"
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
             />
           </div>
           <div>
-            <label className="block text-xs font-semibold text-slate-600 mb-1">Fats (g)</label>
+            <label className="block text-xs font-semibold text-text-secondary mb-1">Fats (g)</label>
             <input
               type="number"
               min={0}
               value={targetFat}
               onChange={(e) => setTargetFat(Number(e.target.value) || 0)}
               data-testid="target-fats"
-              className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+              className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
             />
           </div>
-          <div data-testid="target-calories" className="p-2 bg-slate-50 rounded text-sm">
+          <div data-testid="target-calories" className="p-2 bg-surface-sunken rounded text-sm">
             <strong>Calories (auto): </strong>
             {calcCaloriesFromMacros(targetProtein, targetCarbs, targetFat)}
           </div>
@@ -1387,14 +1394,14 @@ export function HomePage() {
         <div className="flex gap-2 justify-end mt-4">
           <button
             onClick={() => setShowTargetModal(false)}
-            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+            className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
             data-testid="target-cancel-btn"
           >
             Cancel
           </button>
           <button
             onClick={() => saveTargetsMutation.mutate()}
-            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+            className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
             data-testid="target-save-btn"
           >
             Save
@@ -1416,19 +1423,19 @@ export function HomePage() {
           onChange={(e) => setTasteProfile(e.target.value ?? '')}
           data-testid="taste-textarea"
           rows={5}
-          className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm resize-y font-[inherit] focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+          className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm resize-y font-[inherit] focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
         />
         <div className="flex gap-2 justify-end mt-4">
           <button
             onClick={() => setShowTasteModal(false)}
-            className="px-4 py-2 bg-white border border-slate-300 text-slate-600 rounded-md text-sm hover:bg-slate-50 transition-colors"
+            className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
             data-testid="taste-cancel-btn"
           >
             Cancel
           </button>
           <button
             onClick={() => saveTasteMutation.mutate()}
-            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+            className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors"
             data-testid="taste-save-btn"
           >
             Save

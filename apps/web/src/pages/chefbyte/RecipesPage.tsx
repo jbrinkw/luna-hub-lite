@@ -132,7 +132,7 @@ function stockBadgeClass(status: StockStatus): string {
     case 'NO STOCK':
       return `${base} bg-red-600`;
     case 'N/A':
-      return `${base} bg-slate-400`;
+      return `${base} bg-text-tertiary`;
   }
 }
 
@@ -308,7 +308,7 @@ export function RecipesPage() {
   return (
     <ChefLayout title="Recipes">
       {loadError && (
-        <div className="bg-amber-50 border border-amber-400 rounded-lg px-4 py-3 mb-4" data-testid="load-error">
+        <div className="bg-warning-subtle border border-amber-400 rounded-lg px-4 py-3 mb-4" data-testid="load-error">
           <strong>Error:</strong> {loadError}
         </div>
       )}
@@ -317,7 +317,7 @@ export function RecipesPage() {
       {/*  HEADER                                                       */}
       {/* ============================================================ */}
       <div className="flex items-center justify-between mb-4">
-        <h1 className="m-0 text-2xl font-bold text-slate-900">Recipes</h1>
+        <h1 className="m-0 text-2xl font-bold text-text">Recipes</h1>
         <div className="flex gap-2 flex-wrap">
           <Link
             to="/chef/recipes/new"
@@ -341,7 +341,7 @@ export function RecipesPage() {
             value={searchText}
             onChange={(e) => setSearchText(e.target.value)}
             data-testid="recipe-search"
-            className="flex-1 px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+            className="flex-1 px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
           />
           <div className="relative" ref={filterRef}>
             <button
@@ -351,7 +351,7 @@ export function RecipesPage() {
                 'px-4 py-2.5 rounded-md text-sm font-semibold transition-colors whitespace-nowrap',
                 activeFilterCount > 0
                   ? 'bg-emerald-600 text-white hover:bg-emerald-700'
-                  : 'bg-white border border-slate-300 text-slate-700 hover:bg-slate-50',
+                  : 'bg-surface border border-border-strong text-text-secondary hover:bg-surface-hover',
               ].join(' ')}
             >
               Filters{activeFilterCount > 0 ? ` (${activeFilterCount})` : ''}
@@ -360,20 +360,20 @@ export function RecipesPage() {
             {showFilters && (
               <div
                 data-testid="filters-popover"
-                className="absolute right-0 top-full mt-1 w-72 max-w-[calc(100vw-2rem)] bg-white border border-slate-200 rounded-xl shadow-lg z-20 p-4"
+                className="absolute right-0 top-full mt-1 w-72 max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-xl shadow-lg z-20 p-4"
               >
-                <h4 className="m-0 mb-3 text-sm font-bold text-slate-900">Filter Recipes</h4>
+                <h4 className="m-0 mb-3 text-sm font-bold text-text">Filter Recipes</h4>
                 <div className="space-y-3">
                   {/* Can Be Made toggle */}
                   <label className="flex items-center justify-between cursor-pointer" data-testid="can-be-made-filter">
-                    <span className="text-sm text-slate-700">Can Be Made</span>
+                    <span className="text-sm text-text-secondary">Can Be Made</span>
                     <div
                       role="switch"
                       aria-checked={canBeMadeOnly}
                       onClick={() => setCanBeMadeOnly(!canBeMadeOnly)}
                       className={[
                         'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
-                        canBeMadeOnly ? 'bg-green-600' : 'bg-slate-300',
+                        canBeMadeOnly ? 'bg-green-600' : 'bg-border-strong',
                       ].join(' ')}
                     >
                       <div
@@ -387,14 +387,14 @@ export function RecipesPage() {
 
                   {/* Quick (< 30 min) toggle */}
                   <label className="flex items-center justify-between cursor-pointer" data-testid="active-time-filter">
-                    <span className="text-sm text-slate-700">Quick (&lt; 30 min)</span>
+                    <span className="text-sm text-text-secondary">Quick (&lt; 30 min)</span>
                     <div
                       role="switch"
                       aria-checked={maxActiveTime === 30}
                       onClick={() => setMaxActiveTime(maxActiveTime === 30 ? null : 30)}
                       className={[
                         'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
-                        maxActiveTime === 30 ? 'bg-emerald-600' : 'bg-slate-300',
+                        maxActiveTime === 30 ? 'bg-emerald-600' : 'bg-border-strong',
                       ].join(' ')}
                     >
                       <div
@@ -407,19 +407,19 @@ export function RecipesPage() {
                   </label>
 
                   {/* High Protein toggle + threshold */}
-                  <div className="border-t border-slate-100 pt-3">
+                  <div className="border-t border-border-light pt-3">
                     <label
                       className="flex items-center justify-between cursor-pointer"
                       data-testid="high-protein-filter"
                     >
-                      <span className="text-sm text-slate-700">High Protein</span>
+                      <span className="text-sm text-text-secondary">High Protein</span>
                       <div
                         role="switch"
                         aria-checked={highProteinOnly}
                         onClick={() => setHighProteinOnly(!highProteinOnly)}
                         className={[
                           'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
-                          highProteinOnly ? 'bg-violet-600' : 'bg-slate-300',
+                          highProteinOnly ? 'bg-violet-600' : 'bg-border-strong',
                         ].join(' ')}
                       >
                         <div
@@ -431,7 +431,7 @@ export function RecipesPage() {
                       </div>
                     </label>
                     <div className="flex items-center gap-2 mt-1.5 ml-1">
-                      <span className="text-xs text-slate-500">Threshold:</span>
+                      <span className="text-xs text-text-tertiary">Threshold:</span>
                       <input
                         type="number"
                         value={editingThreshold === 'protein' ? thresholdInput : proteinThreshold}
@@ -460,23 +460,23 @@ export function RecipesPage() {
                         step="0.5"
                         min="0"
                         data-testid="protein-threshold-input"
-                        className="w-16 px-2 py-1 border border-slate-300 rounded text-xs text-center focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                        className="w-16 px-2 py-1 border border-border-strong rounded text-xs text-center focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
                       />
-                      <span className="text-xs text-slate-500">g/100cal</span>
+                      <span className="text-xs text-text-tertiary">g/100cal</span>
                     </div>
                   </div>
 
                   {/* High Carbs toggle + threshold */}
-                  <div className="border-t border-slate-100 pt-3">
+                  <div className="border-t border-border-light pt-3">
                     <label className="flex items-center justify-between cursor-pointer" data-testid="high-carbs-filter">
-                      <span className="text-sm text-slate-700">High Carbs</span>
+                      <span className="text-sm text-text-secondary">High Carbs</span>
                       <div
                         role="switch"
                         aria-checked={highCarbsOnly}
                         onClick={() => setHighCarbsOnly(!highCarbsOnly)}
                         className={[
                           'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
-                          highCarbsOnly ? 'bg-amber-600' : 'bg-slate-300',
+                          highCarbsOnly ? 'bg-amber-600' : 'bg-border-strong',
                         ].join(' ')}
                       >
                         <div
@@ -488,7 +488,7 @@ export function RecipesPage() {
                       </div>
                     </label>
                     <div className="flex items-center gap-2 mt-1.5 ml-1">
-                      <span className="text-xs text-slate-500">Threshold:</span>
+                      <span className="text-xs text-text-tertiary">Threshold:</span>
                       <input
                         type="number"
                         value={editingThreshold === 'carbs' ? thresholdInput : carbsThreshold}
@@ -517,9 +517,9 @@ export function RecipesPage() {
                         step="0.5"
                         min="0"
                         data-testid="carbs-threshold-input"
-                        className="w-16 px-2 py-1 border border-slate-300 rounded text-xs text-center focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500"
+                        className="w-16 px-2 py-1 border border-border-strong rounded text-xs text-center focus:outline-none focus:ring-2 focus:ring-amber-500/40 focus:border-amber-500"
                       />
-                      <span className="text-xs text-slate-500">g/100cal</span>
+                      <span className="text-xs text-text-tertiary">g/100cal</span>
                     </div>
                   </div>
                 </div>
@@ -534,7 +534,7 @@ export function RecipesPage() {
       {/* ============================================================ */}
       <div data-testid="recipe-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredRecipes.length === 0 && (
-          <div data-testid="no-recipes" className="text-slate-500">
+          <div data-testid="no-recipes" className="text-text-secondary">
             {searchText || maxActiveTime !== null || canBeMadeOnly || highProteinOnly || highCarbsOnly ? (
               <p>No recipes match the current filters.</p>
             ) : (
@@ -557,23 +557,23 @@ export function RecipesPage() {
               key={recipe.recipe_id}
               to={`/chef/recipes/${recipe.recipe_id}`}
               data-testid={`recipe-card-${recipe.recipe_id}`}
-              className="bg-white border border-slate-200 rounded-xl p-4 block no-underline text-inherit hover:border-emerald-300 hover:shadow-sm transition-all"
+              className="bg-surface border border-border rounded-xl p-4 block no-underline text-inherit hover:border-emerald-300 hover:shadow-sm transition-all"
             >
               <h3
-                className="m-0 mb-1 text-base font-semibold text-slate-900"
+                className="m-0 mb-1 text-base font-semibold text-text"
                 data-testid={`recipe-name-${recipe.recipe_id}`}
               >
                 {recipe.name}
               </h3>
               {recipe.description && (
                 <p
-                  className="text-sm text-slate-500 mt-1 mb-0 line-clamp-2"
+                  className="text-sm text-text-secondary mt-1 mb-0 line-clamp-2"
                   data-testid={`recipe-desc-${recipe.recipe_id}`}
                 >
                   {recipe.description}
                 </p>
               )}
-              <div className="flex gap-3 text-xs text-slate-400 my-1.5">
+              <div className="flex gap-3 text-xs text-text-tertiary my-1.5">
                 <span data-testid={`recipe-servings-${recipe.recipe_id}`}>
                   {Number(recipe.base_servings)} serving{Number(recipe.base_servings) !== 1 ? 's' : ''}
                 </span>
@@ -588,20 +588,20 @@ export function RecipesPage() {
               {/* Per-serving macros */}
               <div data-testid={`recipe-macros-${recipe.recipe_id}`} className="flex gap-3 mb-2.5 text-sm">
                 <div>
-                  <span className="font-semibold text-slate-900">{macros.calories}</span>
-                  <span className="text-xs text-slate-400 ml-0.5">Cal</span>
+                  <span className="font-semibold text-text">{macros.calories}</span>
+                  <span className="text-xs text-text-tertiary ml-0.5">Cal</span>
                 </div>
                 <div>
-                  <span className="font-semibold text-slate-900">{macros.protein}g</span>
-                  <span className="text-xs text-slate-400 ml-0.5">P</span>
+                  <span className="font-semibold text-text">{macros.protein}g</span>
+                  <span className="text-xs text-text-tertiary ml-0.5">P</span>
                 </div>
                 <div>
-                  <span className="font-semibold text-slate-900">{macros.carbs}g</span>
-                  <span className="text-xs text-slate-400 ml-0.5">C</span>
+                  <span className="font-semibold text-text">{macros.carbs}g</span>
+                  <span className="text-xs text-text-tertiary ml-0.5">C</span>
                 </div>
                 <div>
-                  <span className="font-semibold text-slate-900">{macros.fat}g</span>
-                  <span className="text-xs text-slate-400 ml-0.5">F</span>
+                  <span className="font-semibold text-text">{macros.fat}g</span>
+                  <span className="text-xs text-text-tertiary ml-0.5">F</span>
                 </div>
               </div>
 

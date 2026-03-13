@@ -113,12 +113,12 @@ export function SetQueue({
 
   if (sets.length === 0) {
     return (
-      <div className="text-center py-10 border-2 border-dashed border-slate-300 rounded-xl bg-slate-50 text-slate-500">
+      <div className="text-center py-10 border-2 border-dashed border-border-strong rounded-xl bg-surface-sunken text-text-secondary">
         <h3 className="text-lg font-semibold mb-1">No workout planned for today.</h3>
         <p className="text-sm">Add sets manually or configure your weekly split.</p>
         <Link
           to="/coach/split"
-          className="inline-block mt-3 text-sm font-medium text-violet-600 hover:text-violet-800 no-underline hover:underline"
+          className="inline-block mt-3 text-sm font-medium text-coach-accent hover:text-coach-accent no-underline hover:underline"
         >
           Set up your weekly split &rarr;
         </Link>
@@ -129,32 +129,32 @@ export function SetQueue({
   return (
     <>
       {/* Next In Queue Section */}
-      <div className="border border-emerald-400 rounded-xl p-5 mb-5 bg-emerald-50/50" data-testid="next-in-queue">
-        <h3 className="mt-0 mb-5 text-xl text-emerald-800 font-bold">Next in Queue:</h3>
+      <div className="border border-success rounded-xl p-5 mb-5 bg-success-subtle/50" data-testid="next-in-queue">
+        <h3 className="mt-0 mb-5 text-xl text-success-text font-bold">Next in Queue:</h3>
 
         {nextSet ? (
           <>
             <div
-              className="bg-emerald-100 p-4 rounded-lg mb-4 border-2 border-emerald-400 flex flex-col sm:flex-row justify-between items-start gap-3"
+              className="bg-success-subtle p-4 rounded-lg mb-4 border-2 border-success flex flex-col sm:flex-row justify-between items-start gap-3"
               data-testid="next-exercise"
             >
               <div className="flex-1 min-w-0">
-                <div className="text-xl sm:text-2xl font-bold text-emerald-800 mb-1.5 break-words">
+                <div className="text-xl sm:text-2xl font-bold text-success-text mb-1.5 break-words">
                   {nextSet.exercise_name}
                 </div>
-                <div className="text-base sm:text-lg font-bold text-slate-900">
+                <div className="text-base sm:text-lg font-bold text-text">
                   {nextSet.target_reps} reps @ {formatLoadDisplay(nextSet)}
                 </div>
-                <div className="text-sm text-slate-500 mt-1">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
+                <div className="text-sm text-text-secondary mt-1">Rest: {nextSet.rest_seconds ?? 60} seconds</div>
               </div>
               <div
                 className={[
                   'font-bold sm:text-right sm:ml-5 shrink-0',
                   timerState === 'running'
-                    ? 'text-violet-600'
+                    ? 'text-coach-accent'
                     : timerState === 'expired'
-                      ? 'text-red-600'
-                      : 'text-slate-500',
+                      ? 'text-danger-text'
+                      : 'text-text-secondary',
                 ].join(' ')}
                 data-testid="inline-timer"
               >
@@ -187,13 +187,13 @@ export function SetQueue({
               )}
               {(timerState === 'idle' || timerState === 'expired') && onTimerStart && (
                 <div className="flex gap-1.5 items-center ml-auto">
-                  <Timer className="w-4 h-4 text-slate-400" />
+                  <Timer className="w-4 h-4 text-text-tertiary" />
                   <input
                     type="number"
                     value={customDuration}
                     onChange={(e) => setCustomDuration(e.target.value)}
                     placeholder="sec"
-                    className="w-16 px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                    className="w-16 px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                     data-testid="custom-duration-input"
                   />
                   <Button variant="secondary" size="sm" onClick={handleCustomTimerStart} data-testid="custom-start-btn">
@@ -212,32 +212,32 @@ export function SetQueue({
               data-testid="completion-form"
             >
               <div className="flex flex-col gap-1 col-span-2 sm:col-span-1">
-                <label className="text-sm font-semibold text-slate-700">Exercise</label>
+                <label className="text-sm font-semibold text-text-secondary">Exercise</label>
                 <input
                   type="text"
                   value={nextSet.exercise_name}
                   readOnly
-                  className="w-full px-3 py-2 text-base border border-slate-300 rounded-lg bg-slate-50 text-slate-900"
+                  className="w-full px-3 py-2 text-base border border-border-strong rounded-lg bg-surface-sunken text-text"
                   data-testid="override-exercise"
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-semibold text-slate-700">Reps Done</label>
+                <label className="text-sm font-semibold text-text-secondary">Reps Done</label>
                 <input
                   type="number"
                   value={reps}
                   onChange={(e) => setReps(e.target.value)}
-                  className="w-full px-3 py-2 text-base text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                  className="w-full px-3 py-2 text-base text-center border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                   data-testid="override-reps"
                 />
               </div>
               <div className="flex flex-col gap-1">
-                <label className="text-sm font-semibold text-slate-700">Weight ({WEIGHT_UNIT})</label>
+                <label className="text-sm font-semibold text-text-secondary">Weight ({WEIGHT_UNIT})</label>
                 <input
                   type="number"
                   value={load}
                   onChange={(e) => setLoad(e.target.value)}
-                  className="w-full px-3 py-2 text-base text-center border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                  className="w-full px-3 py-2 text-base text-center border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                   data-testid="override-load"
                 />
               </div>
@@ -250,14 +250,14 @@ export function SetQueue({
             </form>
 
             {validationError && (
-              <p className="text-red-600 text-sm mt-2" data-testid="validation-error">
+              <p className="text-danger-text text-sm mt-2" data-testid="validation-error">
                 {validationError}
               </p>
             )}
           </>
         ) : (
-          <div className="bg-slate-50 border-2 border-slate-400 p-4 rounded-lg text-center">
-            <div className="text-xl font-bold text-slate-500 py-2.5">All sets completed!</div>
+          <div className="bg-surface-sunken border-2 border-border-strong p-4 rounded-lg text-center">
+            <div className="text-xl font-bold text-text-secondary py-2.5">All sets completed!</div>
           </div>
         )}
       </div>
@@ -268,16 +268,16 @@ export function SetQueue({
           {/* Coming Up Preview — compact cards for next 2-3 sets */}
           {!queueExpanded && (
             <div data-testid="coming-up-preview">
-              <h4 className="text-sm font-semibold text-slate-500 uppercase tracking-wide mb-2">Coming Up</h4>
+              <h4 className="text-sm font-semibold text-text-secondary uppercase tracking-wide mb-2">Coming Up</h4>
               <div className="space-y-1.5">
                 {previewSets.map((set) => (
                   <div
                     key={set.planned_set_id}
-                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 bg-white border border-slate-200 rounded-lg px-3 py-2"
+                    className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-0.5 bg-surface border border-border rounded-lg px-3 py-2"
                     data-testid={`preview-set-${set.order}`}
                   >
-                    <span className="font-medium text-slate-800 text-sm truncate">{set.exercise_name}</span>
-                    <span className="text-sm text-slate-500 sm:text-right shrink-0">
+                    <span className="font-medium text-text text-sm truncate">{set.exercise_name}</span>
+                    <span className="text-sm text-text-secondary sm:text-right shrink-0">
                       {set.target_reps ?? '—'} reps @ {formatLoadDisplay(set)}
                     </span>
                   </div>
@@ -286,7 +286,7 @@ export function SetQueue({
               <button
                 type="button"
                 onClick={() => setQueueExpanded(true)}
-                className="mt-2 text-sm text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                className="mt-2 text-sm text-coach-accent hover:text-coach-accent font-medium flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
                 data-testid="expand-queue-btn"
                 aria-expanded={queueExpanded}
               >
@@ -307,7 +307,7 @@ export function SetQueue({
                   <button
                     type="button"
                     onClick={() => setQueueExpanded(false)}
-                    className="text-sm text-violet-600 hover:text-violet-800 font-medium flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
+                    className="text-sm text-coach-accent hover:text-coach-accent font-medium flex items-center gap-1 cursor-pointer bg-transparent border-none p-0"
                     data-testid="collapse-queue-btn"
                     aria-expanded={queueExpanded}
                   >
@@ -321,19 +321,19 @@ export function SetQueue({
                   <table className="w-full text-sm">
                     <thead>
                       <tr>
-                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                           Exercise
                         </th>
-                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                           Reps
                         </th>
-                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                           Load
                         </th>
-                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                           Rest
                         </th>
-                        <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                        <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                           Action
                         </th>
                       </tr>
@@ -343,13 +343,13 @@ export function SetQueue({
                         <tr
                           key={set.planned_set_id}
                           data-testid={`queue-row-${set.order}`}
-                          className="border-b border-slate-100 last:border-b-0"
+                          className="border-b border-border-light last:border-b-0"
                         >
                           <td className="px-3 py-2 align-middle">{set.exercise_name}</td>
                           <td className="px-3 py-2 align-middle">
                             <input
                               type="number"
-                              className="w-15 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                              className="w-15 text-center px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                               defaultValue={set.target_reps ?? ''}
                               onBlur={(e) => {
                                 const val = e.target.value ? Number(e.target.value) : null;
@@ -361,7 +361,7 @@ export function SetQueue({
                           <td className="px-3 py-2 align-middle">
                             <input
                               type="number"
-                              className="w-20 text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                              className="w-20 text-center px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                               defaultValue={set.target_load_percentage ?? set.target_load ?? ''}
                               onBlur={(e) => {
                                 const val = e.target.value ? Number(e.target.value) : null;
@@ -375,7 +375,7 @@ export function SetQueue({
                           <td className="px-3 py-2 align-middle">
                             <input
                               type="number"
-                              className="w-[70px] text-center px-2 py-1 text-sm border border-slate-300 rounded-md focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+                              className="w-[70px] text-center px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
                               defaultValue={set.rest_seconds ?? 60}
                               onBlur={(e) => {
                                 const val = e.target.value ? Number(e.target.value) : null;
@@ -414,7 +414,7 @@ export function SetQueue({
       {pendingSets.length === 0 && !nextSet && (
         <Card className="mb-5">
           <CardContent>
-            <p className="text-slate-500 italic text-center text-sm">No sets remaining</p>
+            <p className="text-text-secondary italic text-center text-sm">No sets remaining</p>
             {onAddSet && (
               <Button variant="success" size="sm" onClick={onAddSet} className="mt-2">
                 + Add Set

@@ -540,10 +540,10 @@ export function TodayPage() {
 
   return (
     <CoachLayout title="Today">
-      <div className="flex justify-between items-center flex-wrap gap-2 border-b-2 border-slate-200 pb-2.5 mb-5">
-        <h2 className="text-2xl font-bold text-slate-900 m-0">Today's Workout</h2>
+      <div className="flex justify-between items-center flex-wrap gap-2 border-b-2 border-border pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-text m-0">Today's Workout</h2>
         <div className="flex gap-2.5 items-center">
-          <span className="text-slate-500 text-sm">{today}</span>
+          <span className="text-text-secondary text-sm">{today}</span>
           <Button
             variant={confirmReset ? 'danger' : 'secondary'}
             size="sm"
@@ -556,9 +556,9 @@ export function TodayPage() {
       </div>
 
       {planError && (
-        <Card className="border-red-300 mb-5" data-testid="load-error">
+        <Card className="border-danger mb-5" data-testid="load-error">
           <CardContent>
-            <p className="text-red-600 text-sm mb-2">Failed to load data: {(planError as any).message}</p>
+            <p className="text-danger-text text-sm mb-2">Failed to load data: {(planError as any).message}</p>
             <Button
               variant="primary"
               size="sm"
@@ -570,7 +570,7 @@ export function TodayPage() {
         </Card>
       )}
 
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-danger-text text-sm mb-3">{error}</p>}
 
       {prToast && (
         <Alert variant="success" onDismiss={() => setPrToast(null)} className="mb-4" data-testid="pr-toast">
@@ -609,7 +609,7 @@ export function TodayPage() {
       )}
 
       {/* Completed Sets — collapsible */}
-      <div className="border border-slate-200 rounded-xl bg-white mb-5" data-testid="completed-section">
+      <div className="border border-border rounded-xl bg-surface mb-5" data-testid="completed-section">
         <button
           type="button"
           onClick={() => setCompletedExpanded(!completedExpanded)}
@@ -617,36 +617,36 @@ export function TodayPage() {
           data-testid="toggle-completed"
           aria-expanded={completedExpanded}
         >
-          <h3 className="text-lg font-semibold text-slate-900 m-0">Completed ({completedSets.length})</h3>
+          <h3 className="text-lg font-semibold text-text m-0">Completed ({completedSets.length})</h3>
           {completedExpanded ? (
-            <ChevronUp className="w-5 h-5 text-slate-400" />
+            <ChevronUp className="w-5 h-5 text-text-tertiary" />
           ) : (
-            <ChevronDown className="w-5 h-5 text-slate-400" />
+            <ChevronDown className="w-5 h-5 text-text-tertiary" />
           )}
         </button>
 
         {completedExpanded && (
           <div className="px-4 pb-4">
             {completedSets.length === 0 ? (
-              <p className="text-slate-500 italic text-center text-sm">No sets completed yet</p>
+              <p className="text-text-secondary italic text-center text-sm">No sets completed yet</p>
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
                   <thead>
                     <tr>
-                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                         #
                       </th>
-                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                         Exercise
                       </th>
-                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                         Reps
                       </th>
-                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                         Load
                       </th>
-                      <th className="bg-slate-50 px-3 py-2 text-left border-b-2 border-slate-200 text-xs font-bold text-slate-700">
+                      <th className="bg-surface-sunken px-3 py-2 text-left border-b-2 border-border text-xs font-bold text-text-secondary">
                         Action
                       </th>
                     </tr>
@@ -656,7 +656,7 @@ export function TodayPage() {
                       <tr
                         key={cs.completed_set_id}
                         data-testid={`completed-row-${i + 1}`}
-                        className="border-b border-slate-100 last:border-b-0"
+                        className="border-b border-border-light last:border-b-0"
                       >
                         <td className="px-3 py-2 align-middle">{i + 1}</td>
                         <td className="px-3 py-2 align-middle">
@@ -691,7 +691,7 @@ export function TodayPage() {
       </div>
 
       {/* Notes — collapsible */}
-      <div className="border border-slate-200 rounded-xl bg-white mb-5" data-testid="notes-section">
+      <div className="border border-border rounded-xl bg-surface mb-5" data-testid="notes-section">
         <button
           type="button"
           onClick={() => setNotesExpanded(!notesExpanded)}
@@ -700,13 +700,13 @@ export function TodayPage() {
           aria-expanded={notesExpanded}
         >
           <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold text-slate-900 m-0">Notes</h3>
+            <h3 className="text-lg font-semibold text-text m-0">Notes</h3>
             <SaveIndicator show={notesSaved} />
           </div>
           {notesExpanded ? (
-            <ChevronUp className="w-5 h-5 text-slate-400" />
+            <ChevronUp className="w-5 h-5 text-text-tertiary" />
           ) : (
-            <ChevronDown className="w-5 h-5 text-slate-400" />
+            <ChevronDown className="w-5 h-5 text-text-tertiary" />
           )}
         </button>
 
@@ -718,7 +718,7 @@ export function TodayPage() {
               onChange={(e) => handleNotesChange(e.target.value)}
               onBlur={handleNotesBlur}
               placeholder="How did the workout feel? Any observations..."
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              className="w-full px-3 py-2.5 text-sm border border-border-strong rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               data-testid="notes-textarea"
             />
           </div>
@@ -726,7 +726,7 @@ export function TodayPage() {
       </div>
 
       {/* Summary — collapsible */}
-      <div className="border border-slate-200 rounded-xl bg-white" data-testid="summary-section">
+      <div className="border border-border rounded-xl bg-surface" data-testid="summary-section">
         <button
           type="button"
           onClick={() => setSummaryExpanded(!summaryExpanded)}
@@ -735,13 +735,13 @@ export function TodayPage() {
           aria-expanded={summaryExpanded}
         >
           <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold text-slate-900 m-0">Summary</h3>
+            <h3 className="text-lg font-semibold text-text m-0">Summary</h3>
             <SaveIndicator show={summarySaved} />
           </div>
           {summaryExpanded ? (
-            <ChevronUp className="w-5 h-5 text-slate-400" />
+            <ChevronUp className="w-5 h-5 text-text-tertiary" />
           ) : (
-            <ChevronDown className="w-5 h-5 text-slate-400" />
+            <ChevronDown className="w-5 h-5 text-text-tertiary" />
           )}
         </button>
 
@@ -753,7 +753,7 @@ export function TodayPage() {
               onChange={(e) => handleSummaryChange(e.target.value)}
               onBlur={handleSummaryBlur}
               placeholder="Add your workout summary here..."
-              className="w-full px-3 py-2.5 text-sm border border-slate-300 rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              className="w-full px-3 py-2.5 text-sm border border-border-strong rounded-lg resize-y focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               data-testid="summary-textarea"
             />
           </div>

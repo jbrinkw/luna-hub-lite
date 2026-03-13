@@ -553,8 +553,8 @@ export function MealPlanPage() {
       className={[
         'px-2.5 py-1 rounded text-xs font-semibold whitespace-nowrap transition-colors',
         confirmDeleteId === id
-          ? 'bg-red-600 text-white border-none'
-          : 'bg-transparent text-red-600 border border-red-600 hover:bg-red-50',
+          ? 'bg-danger text-white border-none'
+          : 'bg-transparent text-danger-text border border-danger hover:bg-danger-subtle',
       ].join(' ')}
     >
       {confirmDeleteId === id ? 'You sure?' : 'Delete'}
@@ -562,7 +562,7 @@ export function MealPlanPage() {
   );
 
   const inputCls =
-    'w-full px-3 py-2 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500';
+    'w-full px-3 py-2 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
 
   /* ================================================================ */
   /*  RENDER                                                           */
@@ -604,11 +604,11 @@ export function MealPlanPage() {
       {/* ============================================================ */}
       <div data-testid="week-nav" className="mb-4 flex justify-between items-center flex-wrap gap-3">
         <div className="flex items-center gap-3">
-          <h1 className="m-0 text-xl font-bold text-slate-900">Meal Plan</h1>
+          <h1 className="m-0 text-xl font-bold text-text">Meal Plan</h1>
           <button
             onClick={openAddModal}
             data-testid="add-meal-btn"
-            className="px-3.5 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+            className="px-3.5 py-1.5 bg-success text-white rounded-md font-semibold text-xs hover:bg-success-hover transition-colors"
           >
             + Add Meal
           </button>
@@ -617,31 +617,31 @@ export function MealPlanPage() {
           <button
             onClick={prevWeek}
             data-testid="prev-week-btn"
-            className="px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs hover:bg-slate-50 transition-colors"
+            className="px-3 py-1.5 bg-surface border border-border-strong rounded-md text-xs hover:bg-surface-hover transition-colors"
           >
             Prev
           </button>
           <button
             onClick={goToday}
             data-testid="today-btn"
-            className="px-3 py-1.5 bg-emerald-600 text-white rounded-md font-semibold text-xs hover:bg-emerald-700 transition-colors"
+            className="px-3 py-1.5 bg-success text-white rounded-md font-semibold text-xs hover:bg-success-hover transition-colors"
           >
             Today
           </button>
           <button
             onClick={nextWeek}
             data-testid="next-week-btn"
-            className="px-3 py-1.5 bg-white border border-slate-300 rounded-md text-xs hover:bg-slate-50 transition-colors"
+            className="px-3 py-1.5 bg-surface border border-border-strong rounded-md text-xs hover:bg-surface-hover transition-colors"
           >
             Next
           </button>
-          <span data-testid="week-range" className="ml-2 font-bold text-xs text-slate-500">
+          <span data-testid="week-range" className="ml-2 font-bold text-xs text-text-secondary">
             {formatWeekRange(weekStart)}
           </span>
         </div>
       </div>
 
-      {error && <p className="text-red-600 m-0 mb-3">{error}</p>}
+      {error && <p className="text-danger-text m-0 mb-3">{error}</p>}
 
       {/* ============================================================ */}
       {/*  RESPONSIVE LAYOUT: vertical on mobile, side-by-side on md+  */}
@@ -667,19 +667,21 @@ export function MealPlanPage() {
                 className={[
                   'flex flex-col items-center px-3 py-2 rounded-lg cursor-pointer transition-colors shrink-0 border-none min-w-[56px]',
                   isSelected
-                    ? 'bg-emerald-600 text-white'
+                    ? 'bg-success text-white'
                     : isToday
-                      ? 'bg-emerald-50 text-emerald-700 ring-2 ring-emerald-300'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
+                      ? 'bg-success-subtle text-chef-accent ring-2 ring-emerald-300'
+                      : 'bg-surface-hover text-text-secondary hover:bg-border',
                 ].join(' ')}
               >
                 <span className="font-bold text-xs">{DAY_NAMES[i]}</span>
-                <span className={['text-[11px] mt-0.5', isSelected ? 'text-white/80' : 'text-slate-500'].join(' ')}>
+                <span
+                  className={['text-[11px] mt-0.5', isSelected ? 'text-white/80' : 'text-text-secondary'].join(' ')}
+                >
                   {formatDateShort(date)}
                 </span>
                 {mealCount > 0 && (
                   <span
-                    className={['mt-1 w-1.5 h-1.5 rounded-full', isSelected ? 'bg-white' : 'bg-emerald-500'].join(' ')}
+                    className={['mt-1 w-1.5 h-1.5 rounded-full', isSelected ? 'bg-white' : 'bg-success'].join(' ')}
                   />
                 )}
               </button>
@@ -688,7 +690,7 @@ export function MealPlanPage() {
         </div>
 
         {/* Desktop: vertical week list */}
-        <div className="hidden md:flex w-[280px] min-w-[280px] flex-col gap-0.5 bg-slate-100 rounded-lg overflow-hidden border border-slate-200">
+        <div className="hidden md:flex w-[280px] min-w-[280px] flex-col gap-0.5 bg-surface-hover rounded-lg overflow-hidden border border-border">
           {dayDates.map((date, i) => {
             const dayMeals = mealsByDay.get(date) ?? [];
             const isSelected = selectedDay === date;
@@ -703,30 +705,30 @@ export function MealPlanPage() {
                 className={[
                   'flex items-center justify-between px-3.5 py-2.5 cursor-pointer transition-colors border-l-[3px]',
                   isToday
-                    ? 'bg-emerald-50 border-l-emerald-600'
+                    ? 'bg-success-subtle border-l-emerald-600'
                     : isSelected
-                      ? 'bg-slate-50 border-l-emerald-600'
-                      : 'bg-white border-l-transparent hover:bg-slate-50',
+                      ? 'bg-surface-sunken border-l-emerald-600'
+                      : 'bg-surface border-l-transparent hover:bg-surface-hover',
                 ].join(' ')}
               >
                 <div className="flex items-center gap-2">
                   <span
                     className={[
                       'font-semibold text-xs min-w-[30px]',
-                      isToday ? 'text-emerald-600' : 'text-slate-700',
+                      isToday ? 'text-chef-accent' : 'text-text-secondary',
                     ].join(' ')}
                   >
                     {DAY_NAMES[i]}
                   </span>
-                  <span className="text-xs text-slate-500">{formatDateShort(date)}</span>
+                  <span className="text-xs text-text-secondary">{formatDateShort(date)}</span>
                   {isToday && (
-                    <span className="text-[10px] font-bold text-emerald-600 bg-emerald-100 px-1.5 py-0.5 rounded">
+                    <span className="text-[10px] font-bold text-chef-accent bg-success-subtle px-1.5 py-0.5 rounded">
                       TODAY
                     </span>
                   )}
                 </div>
                 {mealCount > 0 && (
-                  <span className="text-xs text-slate-400">
+                  <span className="text-xs text-text-tertiary">
                     {mealCount} meal{mealCount !== 1 ? 's' : ''}
                   </span>
                 )}
@@ -740,28 +742,28 @@ export function MealPlanPage() {
         {/* ---------------------------------------------------------- */}
         <div className="flex-1 min-w-0">
           {!selectedDay ? (
-            <div className="py-10 px-5 text-center text-slate-400 text-sm bg-slate-50 rounded-lg border border-slate-200">
+            <div className="py-10 px-5 text-center text-text-tertiary text-sm bg-surface-sunken rounded-lg border border-border">
               Select a day to view details
             </div>
           ) : (
             <div data-testid="day-detail">
-              <h3 data-testid="day-detail-title" className="m-0 mb-4 text-base font-semibold text-slate-800">
+              <h3 data-testid="day-detail-title" className="m-0 mb-4 text-base font-semibold text-text">
                 {formatDateLong(selectedDay, selectedDayIndex)}
               </h3>
 
               {/* ------- Planned Meals Section ------- */}
-              <div className="bg-white border border-slate-200 rounded-lg overflow-hidden mb-4">
-                <div className="px-4 py-2.5 bg-slate-50 border-b border-slate-200">
-                  <h4 className="m-0 text-sm font-bold text-slate-700 uppercase tracking-wide">Planned Meals</h4>
+              <div className="bg-surface border border-border rounded-lg overflow-hidden mb-4">
+                <div className="px-4 py-2.5 bg-surface-sunken border-b border-border">
+                  <h4 className="m-0 text-sm font-bold text-text-secondary uppercase tracking-wide">Planned Meals</h4>
                 </div>
 
                 {selectedDayMeals.length === 0 ? (
-                  <p data-testid="no-meals" className="text-slate-400 text-sm px-4 py-5 text-center m-0">
+                  <p data-testid="no-meals" className="text-text-tertiary text-sm px-4 py-5 text-center m-0">
                     No meals planned for this day. Use the{' '}
                     <button
                       type="button"
                       onClick={openAddModal}
-                      className="text-emerald-600 font-medium hover:underline bg-transparent border-none cursor-pointer p-0 text-sm"
+                      className="text-chef-accent font-medium hover:underline bg-transparent border-none cursor-pointer p-0 text-sm"
                     >
                       + Add Meal
                     </button>{' '}
@@ -775,7 +777,7 @@ export function MealPlanPage() {
                         <div
                           key={meal.meal_id}
                           data-testid={`detail-row-${meal.meal_id}`}
-                          className="bg-white border border-slate-200 rounded-lg p-3.5"
+                          className="bg-surface border border-border rounded-lg p-3.5"
                         >
                           <div
                             data-testid={`grid-meal-${meal.meal_id}`}
@@ -784,11 +786,11 @@ export function MealPlanPage() {
                             <div className="flex-1 min-w-0">
                               {/* Row 1: Meal name + type badge */}
                               <div className="flex items-center gap-2 flex-wrap">
-                                <div className="font-semibold text-[15px] text-slate-900">{entryName(meal)}</div>
+                                <div className="font-semibold text-[15px] text-text">{entryName(meal)}</div>
                                 {meal.meal_type && (
                                   <span
                                     data-testid={`meal-type-label-${meal.meal_id}`}
-                                    className="inline-block text-[11px] bg-slate-200 px-2 py-0.5 rounded text-slate-600 capitalize"
+                                    className="inline-block text-[11px] bg-border px-2 py-0.5 rounded text-text-secondary capitalize"
                                   >
                                     {meal.meal_type}
                                   </span>
@@ -799,7 +801,7 @@ export function MealPlanPage() {
                               {macros && (macros.calories > 0 || macros.protein > 0) && (
                                 <div
                                   data-testid={`grid-macros-${meal.meal_id}`}
-                                  className="text-xs text-slate-500 mt-1.5"
+                                  className="text-xs text-text-secondary mt-1.5"
                                 >
                                   {macros.calories}cal | {macros.protein}g P | {macros.carbs}g C | {macros.fat}g F
                                 </div>
@@ -810,7 +812,7 @@ export function MealPlanPage() {
                                 {meal.completed_at && (
                                   <span
                                     data-testid={`done-badge-${meal.meal_id}`}
-                                    className="inline-block text-[11px] bg-green-600 text-white px-2 py-0.5 rounded font-semibold"
+                                    className="inline-block text-[11px] bg-success text-white px-2 py-0.5 rounded font-semibold"
                                   >
                                     Done
                                   </span>
@@ -824,13 +826,15 @@ export function MealPlanPage() {
                                   </span>
                                 )}
                                 {!meal.meal_prep && !meal.completed_at && (
-                                  <span className="text-[11px] text-slate-400">Regular</span>
+                                  <span className="text-[11px] text-text-tertiary">Regular</span>
                                 )}
                                 {meal.completed_at && (
-                                  <span className="text-[11px] text-slate-400">at {formatTime(meal.completed_at)}</span>
+                                  <span className="text-[11px] text-text-tertiary">
+                                    at {formatTime(meal.completed_at)}
+                                  </span>
                                 )}
                                 {!meal.completed_at && (
-                                  <label className="inline-flex items-center gap-1 text-[11px] text-slate-400 cursor-pointer">
+                                  <label className="inline-flex items-center gap-1 text-[11px] text-text-tertiary cursor-pointer">
                                     <input
                                       type="checkbox"
                                       checked={meal.meal_prep}
@@ -853,7 +857,7 @@ export function MealPlanPage() {
                                   <button
                                     onClick={() => markDoneMutation.mutate(meal.meal_id)}
                                     data-testid={`mark-done-${meal.meal_id}`}
-                                    className="px-3 py-1 bg-green-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-green-700 transition-colors"
+                                    className="px-3 py-1 bg-success text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-success-hover transition-colors"
                                   >
                                     Mark Done
                                   </button>
@@ -871,7 +875,7 @@ export function MealPlanPage() {
                                 <button
                                   onClick={() => unmarkDoneMutation.mutate(meal.meal_id)}
                                   data-testid={`undo-done-${meal.meal_id}`}
-                                  className="px-3 py-1 bg-white text-amber-500 border border-amber-500 rounded text-xs font-semibold whitespace-nowrap hover:bg-amber-50 transition-colors"
+                                  className="px-3 py-1 bg-surface text-amber-500 border border-amber-500 rounded text-xs font-semibold whitespace-nowrap hover:bg-warning-subtle transition-colors"
                                 >
                                   Undo
                                 </button>
@@ -892,10 +896,10 @@ export function MealPlanPage() {
                     {/* TOTAL macros row */}
                     <div
                       data-testid="day-detail-total-row"
-                      className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1"
+                      className="bg-surface-sunken border border-border rounded-lg px-4 py-3 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1"
                     >
-                      <span className="font-bold text-sm text-slate-800">TOTAL</span>
-                      <span className="text-sm text-slate-600 font-semibold">
+                      <span className="font-bold text-sm text-text">TOTAL</span>
+                      <span className="text-sm text-text-secondary font-semibold">
                         {dayTotals.calories} cal | {dayTotals.protein}g P | {dayTotals.carbs}g C | {dayTotals.fat}g F
                       </span>
                     </div>
@@ -908,10 +912,10 @@ export function MealPlanPage() {
               {(selectedDayLogs.length > 0 || selectedDayTemps.length > 0) && (
                 <div
                   data-testid="consumed-section"
-                  className="bg-green-50/50 border border-green-200 rounded-lg overflow-hidden"
+                  className="bg-success-subtle/50 border border-success rounded-lg overflow-hidden"
                 >
-                  <div className="px-4 py-2.5 bg-green-100/60 border-b border-green-200">
-                    <h4 className="m-0 text-sm font-bold text-green-800 uppercase tracking-wide">Consumed</h4>
+                  <div className="px-4 py-2.5 bg-success-subtle/60 border-b border-success">
+                    <h4 className="m-0 text-sm font-bold text-success-text uppercase tracking-wide">Consumed</h4>
                   </div>
                   <div className="flex flex-col gap-1.5 p-3">
                     {selectedDayLogs.map((log) => {
@@ -920,12 +924,12 @@ export function MealPlanPage() {
                         <div
                           key={log.log_id}
                           data-testid={`consumed-log-${log.log_id}`}
-                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-green-500 rounded-md bg-white"
+                          className="py-2 px-3 border border-border border-l-4 border-l-success rounded-md bg-surface"
                         >
                           <div className="flex justify-between items-start gap-2">
                             <span className="font-semibold text-sm min-w-0">
                               {log.products?.name ?? 'Unknown'}
-                              <span className="font-normal text-slate-500 text-xs ml-2">
+                              <span className="font-normal text-text-secondary text-xs ml-2">
                                 {Number(log.qty_consumed)} {log.unit}
                                 {Number(log.qty_consumed) !== 1 ? 's' : ''}
                               </span>
@@ -938,7 +942,7 @@ export function MealPlanPage() {
                               testId={`delete-log-${log.log_id}`}
                             />
                           </div>
-                          <div className="text-xs text-slate-500 mt-1">
+                          <div className="text-xs text-text-secondary mt-1">
                             {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
                             {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
                           </div>
@@ -951,12 +955,12 @@ export function MealPlanPage() {
                         <div
                           key={item.temp_id}
                           data-testid={`consumed-temp-${item.temp_id}`}
-                          className="py-2 px-3 border border-slate-200 border-l-4 border-l-amber-500 rounded-md bg-white"
+                          className="py-2 px-3 border border-border border-l-4 border-l-amber-500 rounded-md bg-surface"
                         >
                           <div className="flex justify-between items-start gap-2">
                             <span className="font-semibold text-sm min-w-0">
                               {item.name}
-                              <span className="font-normal text-slate-400 text-xs ml-1.5">quick-add</span>
+                              <span className="font-normal text-text-tertiary text-xs ml-1.5">quick-add</span>
                             </span>
                             <DeleteBtn
                               id={delId}
@@ -966,7 +970,7 @@ export function MealPlanPage() {
                               testId={`delete-temp-${item.temp_id}`}
                             />
                           </div>
-                          <div className="text-xs text-slate-500 mt-1">
+                          <div className="text-xs text-text-secondary mt-1">
                             {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
                             {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
                           </div>
@@ -991,7 +995,7 @@ export function MealPlanPage() {
         testId="add-meal-modal"
       >
         <div className="mb-3">
-          <label className="block text-sm font-semibold mb-1 text-slate-700">Date</label>
+          <label className="block text-sm font-semibold mb-1 text-text-secondary">Date</label>
           <input
             type="date"
             value={addDate}
@@ -1001,7 +1005,7 @@ export function MealPlanPage() {
           />
         </div>
         <div className="mb-3 relative">
-          <label className="block text-sm font-semibold mb-1 text-slate-700">Search recipe or product</label>
+          <label className="block text-sm font-semibold mb-1 text-text-secondary">Search recipe or product</label>
           <input
             type="text"
             value={addSearchText}
@@ -1013,14 +1017,14 @@ export function MealPlanPage() {
           {addShowDropdown && (
             <div
               data-testid="add-meal-dropdown"
-              className="absolute top-full left-0 right-0 bg-white border border-slate-300 rounded shadow-lg z-10 max-h-[200px] overflow-auto"
+              className="absolute top-full left-0 right-0 bg-surface border border-border-strong rounded shadow-lg z-10 max-h-[200px] overflow-auto"
             >
               {addSearchResults.map((item) => (
                 <div
                   key={`${item.type}-${item.id}`}
                   onClick={() => selectAddItem(item)}
                   data-testid={`add-dropdown-${item.type}-${item.id}`}
-                  className="px-3 py-2 cursor-pointer hover:bg-slate-50 text-sm"
+                  className="px-3 py-2 cursor-pointer hover:bg-surface-hover text-sm"
                 >
                   {item.name} ({item.type})
                 </div>
@@ -1029,7 +1033,7 @@ export function MealPlanPage() {
           )}
         </div>
         <div className="mb-3">
-          <label className="block text-sm font-semibold mb-1 text-slate-700">Servings</label>
+          <label className="block text-sm font-semibold mb-1 text-text-secondary">Servings</label>
           <input
             type="number"
             min={0}
@@ -1040,7 +1044,7 @@ export function MealPlanPage() {
           />
         </div>
         <div className="mb-3">
-          <label className="block text-sm font-semibold mb-1 text-slate-700">Meal Type</label>
+          <label className="block text-sm font-semibold mb-1 text-text-secondary">Meal Type</label>
           <select
             value={addMealType ?? ''}
             onChange={(e) => setAddMealType(e.target.value || null)}
@@ -1055,7 +1059,7 @@ export function MealPlanPage() {
           </select>
         </div>
         <div className="mb-3 flex items-center gap-2">
-          <label className="text-sm text-slate-700">Meal Prep</label>
+          <label className="text-sm text-text-secondary">Meal Prep</label>
           <input
             type="checkbox"
             checked={addMealPrep}
@@ -1067,7 +1071,7 @@ export function MealPlanPage() {
           <button
             onClick={() => setShowAddModal(false)}
             data-testid="add-meal-cancel"
-            className="px-4 py-2 bg-slate-100 text-slate-600 rounded-md text-sm hover:bg-slate-200 transition-colors"
+            className="px-4 py-2 bg-surface-hover text-text-secondary rounded-md text-sm hover:bg-border transition-colors"
           >
             Cancel
           </button>
@@ -1075,7 +1079,7 @@ export function MealPlanPage() {
             onClick={() => addMealMutation.mutate()}
             disabled={!addSelected}
             data-testid="add-meal-confirm"
-            className="px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            className="px-4 py-2 bg-success text-white rounded-md font-semibold text-sm hover:bg-success-hover transition-colors disabled:opacity-50"
           >
             Add
           </button>

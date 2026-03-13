@@ -159,11 +159,11 @@ export function SettingsPage() {
 
   return (
     <CoachLayout title="Settings">
-      <div className="flex justify-between items-center border-b-2 border-slate-200 pb-2.5 mb-5">
-        <h2 className="text-2xl font-bold text-slate-900 m-0">Settings</h2>
+      <div className="flex justify-between items-center border-b-2 border-border pb-2.5 mb-5">
+        <h2 className="text-2xl font-bold text-text m-0">Settings</h2>
       </div>
 
-      {error && <p className="text-red-600 text-sm mb-3">{error}</p>}
+      {error && <p className="text-danger-text text-sm mb-3">{error}</p>}
 
       <Card className="mb-5" data-testid="defaults-card">
         <CardHeader>
@@ -174,14 +174,14 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-1 max-w-[300px]">
-            <label className="text-sm font-semibold text-slate-700">Default Rest Duration (seconds)</label>
+            <label className="text-sm font-semibold text-text-secondary">Default Rest Duration (seconds)</label>
             <input
               type="number"
               min="0"
               value={settings.default_rest_seconds}
               onChange={(e) => setSettings((prev) => ({ ...prev, default_rest_seconds: Number(e.target.value) || 90 }))}
               onBlur={saveSettings}
-              className="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              className="px-3 py-2 text-sm border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               data-testid="default-rest-input"
             />
           </div>
@@ -194,19 +194,19 @@ export function SettingsPage() {
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-1 max-w-[300px] mb-4">
-            <label className="text-sm font-semibold text-slate-700">Bar Weight (lbs)</label>
+            <label className="text-sm font-semibold text-text-secondary">Bar Weight (lbs)</label>
             <input
               type="number"
               min="0"
               value={settings.bar_weight_lbs}
               onChange={(e) => setSettings((prev) => ({ ...prev, bar_weight_lbs: Number(e.target.value) || 45 }))}
               onBlur={saveSettings}
-              className="px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              className="px-3 py-2 text-sm border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
               data-testid="bar-weight-input"
             />
           </div>
 
-          <p className="mb-1 font-bold text-sm text-slate-700">Available Plates:</p>
+          <p className="mb-1 font-bold text-sm text-text-secondary">Available Plates:</p>
           <div className="flex flex-wrap gap-3">
             {DEFAULT_PLATES.map((plate) => (
               <label className="flex items-center gap-1.5 text-sm cursor-pointer" key={plate}>
@@ -233,7 +233,7 @@ export function SettingsPage() {
                       else flashSettings();
                     })();
                   }}
-                  className="h-4 w-4 rounded border-slate-300 text-violet-600 focus:ring-violet-500/40"
+                  className="h-4 w-4 rounded border-border-strong text-coach-accent focus:ring-focus-ring"
                   data-testid={`plate-${plate}`}
                 />
                 {plate} lb
@@ -255,20 +255,20 @@ export function SettingsPage() {
               value={searchText}
               onChange={(e) => setSearchText(e.target.value)}
               data-testid="exercise-search"
-              className="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              className="w-full px-3 py-2 text-sm border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
             />
           </div>
 
           <div data-testid="exercise-list">
             {filteredExercises.map((ex) => (
               <div
-                className="flex items-center justify-between py-2 border-b border-slate-100 last:border-b-0"
+                className="flex items-center justify-between py-2 border-b border-border-light last:border-b-0"
                 key={ex.exercise_id}
                 data-testid={`exercise-${ex.exercise_id}`}
               >
-                <span className="text-sm text-slate-900">
+                <span className="text-sm text-text">
                   {ex.name}
-                  <span className="text-slate-400 ml-2 text-xs">({ex.user_id ? 'custom' : 'global'})</span>
+                  <span className="text-text-tertiary ml-2 text-xs">({ex.user_id ? 'custom' : 'global'})</span>
                 </span>
                 {ex.user_id && (
                   <Button
@@ -291,7 +291,7 @@ export function SettingsPage() {
               value={newExerciseName}
               onChange={(e) => setNewExerciseName(e.target.value)}
               data-testid="new-exercise-input"
-              className="flex-1 px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-violet-500/40 focus:border-violet-500"
+              className="flex-1 px-3 py-2 text-sm border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
             />
             <Button
               variant="success"

@@ -669,7 +669,7 @@ export function ScannerPage() {
 
   return (
     <ChefLayout title="Scanner">
-      <h1 className="text-2xl font-bold text-slate-900 mb-4">Scanner</h1>
+      <h1 className="text-2xl font-bold text-text mb-4">Scanner</h1>
 
       <div
         data-testid="scanner-container"
@@ -693,7 +693,7 @@ export function ScannerPage() {
                 handleBarcodeSubmit(e.currentTarget.value);
               }
             }}
-            className="w-full px-3 py-2.5 border border-slate-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500/40 focus:border-emerald-500"
+            className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
           />
 
           {/* Filter buttons */}
@@ -702,8 +702,8 @@ export function ScannerPage() {
               onClick={() => setFilter('all')}
               className={`px-3.5 py-1.5 rounded-md font-medium text-sm cursor-pointer border ${
                 filter === 'all'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                  : 'border-slate-200 bg-white text-slate-600'
+                  ? 'border-emerald-200 bg-success-subtle text-chef-accent'
+                  : 'border-border bg-surface text-text-secondary'
               }`}
               data-testid="filter-all"
             >
@@ -713,8 +713,8 @@ export function ScannerPage() {
               onClick={() => setFilter('new')}
               className={`px-3.5 py-1.5 rounded-md font-medium text-sm cursor-pointer border ${
                 filter === 'new'
-                  ? 'border-emerald-200 bg-emerald-50 text-emerald-700'
-                  : 'border-slate-200 bg-white text-slate-600'
+                  ? 'border-emerald-200 bg-success-subtle text-chef-accent'
+                  : 'border-border bg-surface text-text-secondary'
               }`}
               data-testid="filter-new"
             >
@@ -725,7 +725,7 @@ export function ScannerPage() {
           {/* Queue list */}
           <div data-testid="queue-list" className="flex-1 overflow-y-auto flex flex-col gap-1.5">
             {filteredQueue.length === 0 && (
-              <p data-testid="queue-empty" className="text-slate-500 italic text-center">
+              <p data-testid="queue-empty" className="text-text-secondary italic text-center">
                 Scan a barcode to start
               </p>
             )}
@@ -735,13 +735,13 @@ export function ScannerPage() {
                 data-testid={`queue-item-${item.id}`}
                 onClick={() => setActiveItemId(item.id)}
                 className={`px-2.5 py-2 border-2 rounded-md cursor-pointer ${queueItemBorderColor(item)} ${
-                  activeItemId === item.id ? 'bg-emerald-50' : item.isNew ? 'bg-red-50' : 'bg-white'
+                  activeItemId === item.id ? 'bg-success-subtle' : item.isNew ? 'bg-danger-subtle' : 'bg-surface'
                 }`}
               >
                 <div className="flex justify-between items-center">
                   <span className="font-semibold text-[0.9em]">
                     {item.isNew && (
-                      <span data-testid={`new-badge-${item.id}`} className="text-red-600 mr-1">
+                      <span data-testid={`new-badge-${item.id}`} className="text-danger-text mr-1">
                         [!NEW]
                       </span>
                     )}
@@ -754,12 +754,12 @@ export function ScannerPage() {
                       undoScan(item);
                     }}
                     aria-label={`Undo and remove ${item.name}`}
-                    className="bg-transparent border-none text-red-600 cursor-pointer font-bold text-base"
+                    className="bg-transparent border-none text-danger-text cursor-pointer font-bold text-base"
                   >
                     &times;
                   </button>
                 </div>
-                <div className="text-[0.8em] text-slate-500">
+                <div className="text-[0.8em] text-text-secondary">
                   {item.mode === 'purchase' ? 'Purchased' : item.mode === 'shopping' ? 'Added to cart' : 'Consumed'}{' '}
                   {item.quantity} {item.unit}
                 </div>
@@ -786,8 +786,8 @@ export function ScannerPage() {
                 key={m.key}
                 className={`p-2.5 border-2 rounded-lg cursor-pointer w-full flex items-center justify-center text-center leading-tight transition-all ${
                   mode === m.key
-                    ? 'bg-slate-800 text-white border-slate-800 font-extrabold text-base ring-2 ring-slate-800/30 ring-offset-1'
-                    : 'bg-white text-slate-900 border-slate-300 font-semibold text-[15px]'
+                    ? 'bg-text text-text-inverse border-text font-extrabold text-base ring-2 ring-text/30 ring-offset-1'
+                    : 'bg-surface text-text border-border-strong font-semibold text-[15px]'
                 }`}
                 onClick={() => setMode(m.key)}
                 data-testid={`mode-${m.key}`}
@@ -815,12 +815,12 @@ export function ScannerPage() {
                   (e.target as HTMLInputElement).blur();
                 }
               }}
-              className="px-2 py-2 bg-slate-100 rounded-md text-center font-semibold border border-slate-300 w-full text-inherit"
+              className="px-2 py-2 bg-surface-hover rounded-md text-center font-semibold border border-border-strong w-full text-inherit"
             />
           ) : (
             <div
               data-testid="active-item-display"
-              className="px-2 py-2 bg-slate-100 rounded-md text-center font-semibold"
+              className="px-2 py-2 bg-surface-hover rounded-md text-center font-semibold"
             >
               {activeItem ? activeItem.name : 'No item selected'}
             </div>
@@ -829,7 +829,7 @@ export function ScannerPage() {
           {/* Screen value */}
           <div
             data-testid="screen-value"
-            className="px-3 py-3 bg-white border-2 border-slate-200 rounded-md text-right text-2xl font-bold font-mono"
+            className="px-3 py-3 bg-surface border-2 border-border rounded-md text-right text-2xl font-bold font-mono"
           >
             {screenValue}
           </div>
@@ -845,7 +845,7 @@ export function ScannerPage() {
                 { key: 'protein' as const, label: 'Protein' },
               ].map((f) => (
                 <div key={f.key} className="text-center">
-                  <label className="text-[0.7em] text-slate-500 block">{f.label}</label>
+                  <label className="text-[0.7em] text-text-tertiary block">{f.label}</label>
                   <input
                     data-testid={`nut-${f.key}`}
                     type="text"
@@ -853,7 +853,7 @@ export function ScannerPage() {
                     aria-label={f.label}
                     value={nutrition[f.key]}
                     onChange={(e) => handleNutritionChange(f.key, e.target.value)}
-                    className="w-full px-1.5 py-2 text-center border border-slate-200 rounded text-sm min-h-[36px]"
+                    className="w-full px-1.5 py-2 text-center border border-border rounded text-sm min-h-[36px]"
                   />
                 </div>
               ))}
@@ -868,8 +868,8 @@ export function ScannerPage() {
             {['7', '8', '9', '4', '5', '6', '1', '2', '3', '.', '0', '\u2190'].map((key) => (
               <button
                 key={key}
-                className={`border rounded-lg text-2xl font-bold cursor-pointer select-none flex items-center justify-center min-h-14 text-slate-900 hover:bg-slate-100 ${
-                  key === '\u2190' ? 'bg-red-50 border-red-200 hover:bg-red-100' : 'bg-white border-slate-200'
+                className={`border rounded-lg text-2xl font-bold cursor-pointer select-none flex items-center justify-center min-h-14 text-text hover:bg-surface-hover ${
+                  key === '\u2190' ? 'bg-danger-subtle border-danger hover:bg-red-100' : 'bg-surface border-border'
                 }`}
                 data-testid={`key-${key === '\u2190' ? 'backspace' : key}`}
                 onClick={() => handleKeypadClick(key)}
@@ -883,7 +883,7 @@ export function ScannerPage() {
           {/* Unit toggle (consume modes only) */}
           {(mode === 'consume_macros' || mode === 'consume_no_macros') && (
             <button
-              className="bg-blue-50 border border-blue-300 rounded-lg text-sm font-semibold p-2 leading-tight cursor-pointer hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-slate-100"
+              className="bg-info-subtle border border-blue-300 rounded-lg text-sm font-semibold p-2 leading-tight cursor-pointer hover:bg-blue-100 disabled:opacity-40 disabled:cursor-not-allowed disabled:bg-surface-hover"
               data-testid="unit-toggle"
               onClick={() => {
                 const spc = parseFloat(nutrition.servingsPerContainer) || 1;

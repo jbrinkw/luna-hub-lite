@@ -47,7 +47,7 @@ export function ModalOverlay({ isOpen, onClose, title, children, maxWidth = '500
       }}
     >
       <div
-        className="bg-white p-5 rounded-xl w-[92vw] max-h-[90vh] overflow-y-auto shadow-xl m-4 animate-modal-card"
+        className="bg-surface p-5 rounded-xl w-[92vw] max-h-[90vh] overflow-y-auto shadow-xl m-4 animate-modal-card"
         style={{ maxWidth }}
       >
         <h3 className="m-0 mb-4 text-lg font-bold">{title}</h3>
