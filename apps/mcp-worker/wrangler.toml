@@ -1,6 +1,12 @@
 name = "luna-hub-mcp"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
+workers_dev = true
+
+# Custom domain — routes mcp.lunahub.dev to this worker
+[[routes]]
+pattern = "mcp.lunahub.dev/*"
+zone_name = "lunahub.dev"
 
 [durable_objects]
 bindings = [
