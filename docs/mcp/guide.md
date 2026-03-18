@@ -2,11 +2,13 @@
 
 ## Architecture
 
-The MCP server is a single Cloudflare Worker deployed at `mcp.lunahub.dev`. It uses Durable Objects for OAuth session context per connected client. Tool calls are stateless request-response — the Durable Object provides session continuity for OAuth clients, not tool execution state. All critical session state is persisted to Durable Object SQLite storage on every write (no shutdown hook exists — Cloudflare does not provide one).
+The MCP server is a single Cloudflare Worker deployed at `mcp.lunahub.dev`.
 
-Transport is Server-Sent Events (SSE) at `https://mcp.lunahub.dev/sse`.
+**Primary transport: Streamable HTTP** at `POST /mcp`. Fully stateless — no Durable Objects. Each request authenticates via Bearer token, builds the user's tool list inline, processes the JSON-RPC message, and returns a JSON response. Session IDs (`Mcp-Session-Id` header) are protocol formalities with no server-side state.
 
-Remote MCP server proxying is **not included at launch**. It is a future feature. The MCP server exposes local tools only (CoachByte, ChefByte, extensions).
+**Legacy transport: SSE** at `GET /sse`. Uses Durable Objects for session state. Still functional but not recommended — each SSE reconnect creates a new Durable Object that burns DO duration billing. MCP clients that maintain persistent SSE connections (like Claude.ai) will accumulate significant DO costs on this transport.
+
+Remote MCP server proxying is **not included at launch**. The MCP server exposes local tools only (CoachByte, ChefByte, extensions).
 
 ## Tool Sources
 
@@ -121,12 +123,12 @@ MCP clients that support OAuth 2.1 (Claude Desktop, Cursor, etc.) authenticate v
 
 **How it works:**
 
-1. MCP client connects to `mcp.lunahub.dev` without credentials
+1. MCP client connects to `mcp.lunahub.dev/mcp` without credentials
 2. Worker returns `401` with `WWW-Authenticate` header pointing to `/.well-known/oauth-protected-resource`
 3. Client discovers Supabase as the authorization server (RFC 9728)
 4. Client dynamically registers as a public PKCE client with Supabase
 5. User logs in with email/password and approves access on the consent page (`/oauth/consent`)
-6. Client receives tokens, connects via `Authorization: Bearer <token>` on the SSE endpoint
+6. Client receives tokens, sends `POST /mcp` with `Authorization: Bearer <token>` on each request
 
 **Supabase Dashboard Setup (one-time):**
 
@@ -138,7 +140,8 @@ MCP clients that support OAuth 2.1 (Claude Desktop, Cursor, etc.) authenticate v
 
 ### API Keys (Manual Setup)
 
-Generate keys in Hub > Settings > MCP Keys. Two connection flows:
+Generate keys in Hub > Settings > MCP Keys. Connection flows:
 
-1. **Preferred:** `POST /auth` with `{ "apiKey": "lh_..." }` → returns `{ sessionId, sseUrl }` → `GET /sse?sessionId=xxx`
-2. **Legacy:** `GET /sse?apiKey=lh_...` (key in URL — deprecated)
+1. **Preferred (Streamable HTTP):** `POST /mcp` with `Authorization: Bearer lh_...` — API key passed as Bearer token, each request is self-contained
+2. **Legacy SSE:** `POST /auth` with `{ "apiKey": "lh_..." }` → returns `{ sessionId, sseUrl }` → `GET /sse?sessionId=xxx`
+3. **Deprecated:** `GET /sse?apiKey=lh_...` (key in URL)
