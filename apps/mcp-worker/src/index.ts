@@ -204,23 +204,20 @@ export default {
     }
 
     // Streamable HTTP transport (MCP 2025-03-26): POST /sse
-    // Client sends JSON-RPC messages via POST, server responds with JSON or SSE.
-    // Session tracked via Mcp-Session-Id header.
+    // Now routes to stateless handler (same as POST /mcp) to avoid DO duration costs.
     if (url.pathname === '/sse' && request.method === 'POST') {
       const authHeader = request.headers.get('Authorization');
-      if (!authHeader?.startsWith('Bearer ')) {
-        return new Response(null, {
-          status: 401,
-          headers: {
-            'WWW-Authenticate': `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
-            ...CORS_HEADERS,
-          },
-        });
+      let userId: string | null = null;
+      const supabase = createServiceClient(env);
+
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.slice(7);
+        userId = await authenticateJwt(supabase, token);
+        if (!userId) {
+          userId = await authenticateApiKey(supabase, token);
+        }
       }
 
-      const token = authHeader.slice(7);
-      const supabase = createServiceClient(env);
-      const userId = await authenticateJwt(supabase, token);
       if (!userId) {
         return new Response(null, {
           status: 401,
@@ -231,59 +228,41 @@ export default {
         });
       }
 
-      const mcpSessionId = request.headers.get('Mcp-Session-Id');
-      let stub: DurableObjectStub;
-      let doId: string;
-
-      if (mcpSessionId) {
-        // Existing session — look up the DO
-        let id: DurableObjectId;
-        try {
-          id = env.MCP_SESSION.idFromString(mcpSessionId);
-        } catch {
-          return jsonResponse({ error: 'Invalid Mcp-Session-Id' }, 400);
-        }
-        stub = env.MCP_SESSION.get(id);
-        doId = mcpSessionId;
-      } else {
-        // New session — create DO and initialize with userId
-        const id = env.MCP_SESSION.newUniqueId();
-        doId = id.toString();
-        stub = env.MCP_SESSION.get(id);
-
-        const doInitUrl = new URL(request.url);
-        doInitUrl.pathname = '/init';
-        doInitUrl.searchParams.set('userId', userId);
-        const initResp = await stub.fetch(new Request(doInitUrl.toString()));
-        if (!initResp.ok) {
-          return jsonResponse({ error: 'Failed to initialize session' }, 500);
-        }
+      let rpc: any;
+      try {
+        rpc = await request.json();
+      } catch {
+        return new Response(JSON.stringify(jsonRpcError(undefined, -32700, 'Parse error: invalid JSON')), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        });
       }
 
-      // Forward JSON-RPC to the DO's streamable handler
-      const doUrl = new URL(request.url);
-      doUrl.pathname = '/streamable';
-      const doResponse = await stub.fetch(
-        new Request(doUrl.toString(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: request.body,
-        }),
-      );
+      const incomingSessionId = request.headers.get('Mcp-Session-Id');
+      const sessionId = incomingSessionId || crypto.randomUUID();
 
-      return new Response(doResponse.body, {
-        status: doResponse.status,
+      const response = await handleStatelessMcp(rpc, userId, supabase);
+
+      if (response === null) {
+        return new Response('', {
+          status: 202,
+          headers: { 'Mcp-Session-Id': sessionId, ...CORS_HEADERS },
+        });
+      }
+
+      return new Response(JSON.stringify(response), {
+        status: 200,
         headers: {
-          ...Object.fromEntries(doResponse.headers),
+          'Content-Type': 'application/json',
+          'Mcp-Session-Id': sessionId,
           ...CORS_HEADERS,
-          'Mcp-Session-Id': doId,
         },
       });
     }
 
-    // Session termination: DELETE /sse — not supported
+    // Session termination: DELETE /sse — no-op (stateless)
     if (url.pathname === '/sse' && request.method === 'DELETE') {
-      return new Response(null, { status: 405, headers: CORS_HEADERS });
+      return new Response(null, { status: 200, headers: CORS_HEADERS });
     }
 
     // Legacy SSE transport: GET /sse
