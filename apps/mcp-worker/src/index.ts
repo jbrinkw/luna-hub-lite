@@ -265,93 +265,13 @@ export default {
       return new Response(null, { status: 200, headers: CORS_HEADERS });
     }
 
-    // Legacy SSE transport: GET /sse
-    // Supports two flows:
-    //   1. (Preferred) GET /sse?sessionId=xxx — uses pre-authenticated session from POST /auth
-    //   2. (Legacy)    GET /sse?apiKey=xxx   — authenticates inline, creates new DO
+    // GET /sse — reject with 405 to force clients to use POST (Streamable HTTP).
+    // The old SSE transport created Durable Objects on every reconnect, causing
+    // excessive DO duration billing. Claude.ai reconnects every ~2 min 24/7.
     if (url.pathname === '/sse' && request.method === 'GET') {
-      // Flow 1: OAuth 2.1 Bearer token in Authorization header
-      const authHeader = request.headers.get('Authorization');
-      if (authHeader?.startsWith('Bearer ')) {
-        const token = authHeader.slice(7);
-        const supabase = createServiceClient(env);
-        const userId = await authenticateJwt(supabase, token);
-        if (!userId) {
-          return new Response(null, {
-            status: 401,
-            headers: {
-              'WWW-Authenticate': `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
-              ...CORS_HEADERS,
-            },
-          });
-        }
-
-        const id = env.MCP_SESSION.newUniqueId();
-        const stub = env.MCP_SESSION.get(id);
-        const doInitUrl = new URL(request.url);
-        doInitUrl.pathname = '/init';
-        doInitUrl.searchParams.set('userId', userId);
-        const initResp = await stub.fetch(new Request(doInitUrl.toString()));
-        if (!initResp.ok) {
-          return jsonResponse({ error: 'Failed to initialize session' }, 500);
-        }
-
-        const doUrl = new URL(request.url);
-        doUrl.pathname = '/sse';
-        const sseResponse = await stub.fetch(new Request(doUrl.toString(), request));
-        return new Response(sseResponse.body, {
-          status: sseResponse.status,
-          headers: { ...Object.fromEntries(sseResponse.headers), ...CORS_HEADERS },
-        });
-      }
-
-      const sessionId = url.searchParams.get('sessionId');
-      const apiKey = url.searchParams.get('apiKey');
-
-      if (sessionId) {
-        // Preferred flow: session was pre-authenticated via POST /auth
-        let id: DurableObjectId;
-        try {
-          id = env.MCP_SESSION.idFromString(sessionId);
-        } catch {
-          return jsonResponse({ error: 'Invalid sessionId' }, 400);
-        }
-        const stub = env.MCP_SESSION.get(id);
-        const doUrl = new URL(request.url);
-        doUrl.pathname = '/sse';
-        const sseResponse = await stub.fetch(new Request(doUrl.toString(), request));
-        return new Response(sseResponse.body, {
-          status: sseResponse.status,
-          headers: { ...Object.fromEntries(sseResponse.headers), ...CORS_HEADERS },
-        });
-      }
-
-      if (apiKey) {
-        // Legacy flow: authenticate inline (API key in URL — deprecated)
-        const supabase = createServiceClient(env);
-        const userId = await authenticateApiKey(supabase, apiKey);
-        if (!userId) {
-          return jsonResponse({ error: 'Invalid API key' }, 401);
-        }
-
-        const id = env.MCP_SESSION.newUniqueId();
-        const stub = env.MCP_SESSION.get(id);
-        const doUrl = new URL(request.url);
-        doUrl.pathname = '/sse';
-        doUrl.searchParams.set('userId', userId);
-        const sseResponse = await stub.fetch(new Request(doUrl.toString(), request));
-        return new Response(sseResponse.body, {
-          status: sseResponse.status,
-          headers: { ...Object.fromEntries(sseResponse.headers), ...CORS_HEADERS },
-        });
-      }
-
       return new Response(null, {
-        status: 401,
-        headers: {
-          'WWW-Authenticate': `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
-          ...CORS_HEADERS,
-        },
+        status: 405,
+        headers: { Allow: 'POST, DELETE', ...CORS_HEADERS },
       });
     }
 
