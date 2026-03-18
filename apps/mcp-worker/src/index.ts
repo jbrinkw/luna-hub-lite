@@ -1,5 +1,7 @@
 import { authenticateApiKey, authenticateJwt } from './auth';
 import { createServiceClient } from './supabase';
+import { handleStatelessMcp } from './stateless';
+import { jsonRpcError } from './protocol';
 
 export { McpSession } from './session';
 
@@ -89,6 +91,79 @@ export default {
     // Health check
     if (url.pathname === '/health') {
       return new Response('ok', { headers: CORS_HEADERS });
+    }
+
+    // ─── Streamable HTTP transport (stateless) ────────────────────────────
+    // Primary MCP endpoint. No Durable Objects — each request is self-contained.
+    // Auth: Bearer token (Supabase JWT or API key) in Authorization header.
+
+    if (url.pathname === '/mcp' && request.method === 'POST') {
+      const authHeader = request.headers.get('Authorization');
+      let userId: string | null = null;
+      const supabase = createServiceClient(env);
+
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.slice(7);
+        // Try JWT first, fall back to API key
+        userId = await authenticateJwt(supabase, token);
+        if (!userId) {
+          userId = await authenticateApiKey(supabase, token);
+        }
+      }
+
+      if (!userId) {
+        return new Response(null, {
+          status: 401,
+          headers: {
+            'WWW-Authenticate': `Bearer resource_metadata="${url.origin}/.well-known/oauth-protected-resource"`,
+            ...CORS_HEADERS,
+          },
+        });
+      }
+
+      let rpc: any;
+      try {
+        rpc = await request.json();
+      } catch {
+        return new Response(JSON.stringify(jsonRpcError(undefined, -32700, 'Parse error: invalid JSON')), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        });
+      }
+
+      const incomingSessionId = request.headers.get('Mcp-Session-Id');
+      const sessionId = incomingSessionId || crypto.randomUUID();
+
+      const response = await handleStatelessMcp(rpc, userId, supabase);
+
+      if (response === null) {
+        return new Response('', {
+          status: 202,
+          headers: { 'Mcp-Session-Id': sessionId, ...CORS_HEADERS },
+        });
+      }
+
+      return new Response(JSON.stringify(response), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+          'Mcp-Session-Id': sessionId,
+          ...CORS_HEADERS,
+        },
+      });
+    }
+
+    // GET /mcp — not supported (stateless server, no server-initiated SSE)
+    if (url.pathname === '/mcp' && request.method === 'GET') {
+      return new Response(null, {
+        status: 405,
+        headers: { Allow: 'POST, DELETE', ...CORS_HEADERS },
+      });
+    }
+
+    // DELETE /mcp — session termination (no-op since stateless)
+    if (url.pathname === '/mcp' && request.method === 'DELETE') {
+      return new Response(null, { status: 200, headers: CORS_HEADERS });
     }
 
     // Auth endpoint: POST /auth — validates API key in body, creates DO session,
