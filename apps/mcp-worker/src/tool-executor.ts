@@ -13,7 +13,7 @@ import { validateToolArgs } from './validate';
  * Returns a ToolResult (content array + optional isError flag).
  */
 export async function executeTool(
-  toolName: string,
+  _toolName: string,
   toolArgs: Record<string, unknown>,
   tool: ToolDefinition | ExtensionToolDefinition,
   userId: string,
