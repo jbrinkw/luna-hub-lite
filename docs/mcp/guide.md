@@ -145,3 +145,57 @@ Generate keys in Hub > Settings > MCP Keys. Connection flows:
 1. **Preferred (Streamable HTTP):** `POST /mcp` with `Authorization: Bearer lh_...` — API key passed as Bearer token, each request is self-contained
 2. **Legacy SSE:** `POST /auth` with `{ "apiKey": "lh_..." }` → returns `{ sessionId, sseUrl }` → `GET /sse?sessionId=xxx`
 3. **Deprecated:** `GET /sse?apiKey=lh_...` (key in URL)
+
+---
+
+## AI Agent API (OpenAI-Compatible)
+
+An OpenAI-compatible `POST /v1/chat/completions` endpoint that acts as an agentic voice assistant backbone. Designed for use with Home Assistant's `extended_openai_conversation` custom component.
+
+### How It Works
+
+1. Client sends standard OpenAI chat completions request with `Authorization: Bearer lh_...`
+2. Worker authenticates via same API keys as MCP
+3. Worker fetches user's Anthropic API key from encrypted vault storage
+4. Worker builds user's enabled tools (same activation/toggle rules as MCP)
+5. Worker calls Claude Haiku with an agentic tool loop — if Haiku wants to call tools, the worker executes them inline and feeds results back, repeating until Haiku produces a text response
+6. Worker returns the response in OpenAI format
+
+### Configuration (Hub UI)
+
+Go to **Hub > AI Agent** to configure:
+
+- **API Endpoint** — Copy the base URL (`https://mcp.lunahub.dev/v1`) for your HA integration
+- **Anthropic API Key** — Your personal Anthropic key, stored encrypted via pgcrypto vault. Required for the agent to call Claude Haiku.
+- **System Prompt** — Customize the assistant's personality and behavior. Default prompt identifies as "Luna" with awareness of all tool categories.
+
+### Endpoints
+
+| Method | Path                   | Description                                        |
+| ------ | ---------------------- | -------------------------------------------------- |
+| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions (auth required) |
+| `GET`  | `/v1/models`           | List available models (no auth required)           |
+
+### Request Format
+
+```json
+{
+  "model": "claude-haiku-4-5-20251001",
+  "messages": [{ "role": "user", "content": "Turn on the living room lights" }],
+  "stream": false,
+  "max_tokens": 4096
+}
+```
+
+- `model` is ignored — always uses Claude Haiku
+- `stream: true` supported (tool calls run server-side, final text streamed as SSE)
+- `max_tokens` capped at 8192
+- `tools` field ignored — tools are built server-side from user's enabled tools
+
+### Home Assistant Setup
+
+1. Install [extended_openai_conversation](https://github.com/jekalmin/extended_openai_conversation) via HACS
+2. Add integration in HA: Settings > Devices & Services > Add Integration
+3. Set **Base URL** to `https://mcp.lunahub.dev/v1`
+4. Set **API Key** to your Luna Hub API key (`lh_...` from Hub > MCP Settings)
+5. Assign as conversation agent in your voice pipeline
