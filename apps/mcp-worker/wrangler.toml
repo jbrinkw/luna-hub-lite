@@ -1,6 +1,7 @@
 name = "luna-hub-mcp"
 main = "src/index.ts"
 compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
 workers_dev = true
 
 # Custom domain — routes mcp.lunahub.dev to this worker
