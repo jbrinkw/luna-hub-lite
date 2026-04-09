@@ -1,8 +1,7 @@
-import type { ToolContext, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolError } from '@luna-hub/app-tools';
 import { JsonRpcRequest, JsonRpcResponse, jsonRpcSuccess, jsonRpcError, McpToolSchema } from './protocol';
 import { buildUserTools } from './registry';
-import { validateToolArgs } from './validate';
+import { executeTool } from './tool-executor';
 
 /**
  * Handle a single MCP JSON-RPC request statelessly.
@@ -61,55 +60,9 @@ export async function handleStatelessMcp(
         return jsonRpcError(rpc.id, -32602, `Unknown tool: ${toolName}`);
       }
 
-      const validationError = validateToolArgs(toolArgs, tool.inputSchema);
-      if (validationError) {
-        return jsonRpcSuccess(rpc.id, toolError(validationError));
-      }
-
-      const toolCtx: ToolContext = { userId, supabase };
       try {
-        if ('extensionName' in tool) {
-          const extensionName = (tool as any).extensionName as string | undefined;
-          if (!extensionName) {
-            return jsonRpcSuccess(rpc.id, toolError('Invalid extension tool definition'));
-          }
-          const { data: settings } = await supabase
-            .schema('hub')
-            .from('extension_settings')
-            .select('enabled')
-            .eq('user_id', userId)
-            .eq('extension_name', extensionName)
-            .eq('enabled', true)
-            .single();
-
-          if (!settings) {
-            return jsonRpcSuccess(rpc.id, toolError(`Configure ${extensionName} credentials in Hub settings.`));
-          }
-
-          const { data: decryptedJson, error: decryptErr } = await supabase
-            .schema('hub')
-            .rpc('get_extension_credentials_admin', {
-              p_user_id: userId,
-              p_extension_name: extensionName,
-            });
-
-          if (decryptErr || !decryptedJson) {
-            return jsonRpcSuccess(rpc.id, toolError(`Configure ${extensionName} credentials in Hub settings.`));
-          }
-
-          let credentials: Record<string, string>;
-          try {
-            credentials = JSON.parse(decryptedJson);
-          } catch {
-            return jsonRpcSuccess(rpc.id, toolError('Failed to parse extension credentials.'));
-          }
-          const extCtx: ExtensionToolContext = { ...toolCtx, credentials };
-          const result = await tool.handler(toolArgs, extCtx);
-          return jsonRpcSuccess(rpc.id, result);
-        } else {
-          const result = await tool.handler(toolArgs, toolCtx);
-          return jsonRpcSuccess(rpc.id, result);
-        }
+        const result = await executeTool(toolName, toolArgs, tool, userId, supabase);
+        return jsonRpcSuccess(rpc.id, result);
       } catch (err: any) {
         console.error(`Tool ${toolName} error:`, err);
         return jsonRpcSuccess(rpc.id, toolError(`Tool error: ${err.message}`));
