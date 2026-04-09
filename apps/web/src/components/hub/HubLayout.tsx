@@ -3,7 +3,7 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { HubHeader } from './HubHeader';
 import { SideNav } from './SideNav';
-import { Menu, X, User, LayoutGrid, Wrench, Puzzle, KeyRound } from 'lucide-react';
+import { Menu, X, User, LayoutGrid, Wrench, Puzzle, KeyRound, Bot } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 interface HubLayoutProps {
@@ -23,6 +23,7 @@ const mobileNavItems: MobileNavItem[] = [
   { label: 'Tools', path: '/hub/tools', icon: Wrench },
   { label: 'Extensions', path: '/hub/extensions', icon: Puzzle },
   { label: 'MCP Settings', path: '/hub/mcp', icon: KeyRound },
+  { label: 'AI Agent', path: '/hub/agent', icon: Bot },
 ];
 
 export function HubLayout({ title, children }: HubLayoutProps) {

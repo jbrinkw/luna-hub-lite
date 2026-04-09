@@ -5,6 +5,7 @@ export const queryKeys = {
   apiKeys: (userId: string) => ['api-keys', userId] as const,
   tools: (userId: string) => ['tools', userId] as const,
   extensions: (userId: string) => ['extensions', userId] as const,
+  agentSettings: (userId: string) => ['agent-settings', userId] as const,
 
   // CoachByte
   exercises: (userId: string) => ['exercises', userId] as const,

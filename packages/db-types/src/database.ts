@@ -977,6 +977,33 @@ export type Database = {
         }
         Relationships: []
       }
+      agent_settings: {
+        Row: {
+          id: string
+          user_id: string
+          anthropic_key_encrypted: string | null
+          system_prompt: string | null
+          created_at: string
+          updated_at: string
+        }
+        Insert: {
+          id?: string
+          user_id: string
+          anthropic_key_encrypted?: string | null
+          system_prompt?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Update: {
+          id?: string
+          user_id?: string
+          anthropic_key_encrypted?: string | null
+          system_prompt?: string | null
+          created_at?: string
+          updated_at?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
@@ -997,6 +1024,9 @@ export type Database = {
         Args: { p_credentials_json: string; p_extension_name: string }
         Returns: undefined
       }
+      save_agent_anthropic_key: { Args: { p_key: string }; Returns: undefined }
+      clear_agent_anthropic_key: { Args: never; Returns: undefined }
+      save_agent_system_prompt: { Args: { p_prompt: string }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never

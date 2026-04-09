@@ -1,5 +1,5 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { User, LayoutGrid, Wrench, Puzzle, KeyRound } from 'lucide-react';
+import { User, LayoutGrid, Wrench, Puzzle, KeyRound, Bot } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 
 interface NavItem {
@@ -14,6 +14,7 @@ const navItems: NavItem[] = [
   { label: 'Tools', path: '/hub/tools', icon: Wrench },
   { label: 'Extensions', path: '/hub/extensions', icon: Puzzle },
   { label: 'MCP Settings', path: '/hub/mcp', icon: KeyRound },
+  { label: 'AI Agent', path: '/hub/agent', icon: Bot },
 ];
 
 export function SideNav() {
