@@ -3,15 +3,12 @@ import type { ToolDefinition, ExtensionToolDefinition } from '@luna-hub/app-tool
 import { buildUserTools } from './registry';
 import { executeTool } from './tool-executor';
 import type { ChatCompletionRequest, ChatCompletionResponse, ChatMessage } from './openai-types';
+import { CORS_HEADERS } from './cors';
 
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
 const MAX_TOOL_ROUNDS = 10;
 
 const DEFAULT_SYSTEM_PROMPT = `You are Luna, a helpful voice assistant. You have access to tools for managing workouts (CoachByte), food/nutrition (ChefByte), tasks (Todoist), and smart home devices (Home Assistant). Keep responses concise and conversational — the user is talking to you via voice. When calling tools, explain what you're doing briefly. If a tool fails, tell the user plainly.`;
-
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-};
 
 /**
  * Handle an OpenAI-compatible POST /v1/chat/completions request.

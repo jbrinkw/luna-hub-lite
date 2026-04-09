@@ -2,6 +2,8 @@ import { authenticateApiKey, authenticateJwt } from './auth';
 import { createServiceClient } from './supabase';
 import { handleStatelessMcp } from './stateless';
 import { jsonRpcError } from './protocol';
+import { handleChatCompletion } from './openai-compat';
+import { CORS_HEADERS } from './cors';
 
 export { McpSession } from './session';
 
@@ -10,11 +12,6 @@ export interface Env {
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
 }
-
-const CORS_HEADERS: Record<string, string> = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Expose-Headers': 'Mcp-Session-Id',
-};
 
 function jsonResponse(body: Record<string, unknown>, status: number): Response {
   return new Response(JSON.stringify(body), {
@@ -91,6 +88,43 @@ export default {
     // Health check
     if (url.pathname === '/health') {
       return new Response('ok', { headers: CORS_HEADERS });
+    }
+
+    // ─── OpenAI-compatible Chat Completions API ────────────────────────
+    // Used by Home Assistant voice assistant via extended_openai_conversation.
+    // Auth: Bearer token (same API keys as MCP).
+    if (url.pathname === '/v1/chat/completions' && request.method === 'POST') {
+      const authHeader = request.headers.get('Authorization');
+      let userId: string | null = null;
+      const supabase = createServiceClient(env);
+
+      if (authHeader?.startsWith('Bearer ')) {
+        const token = authHeader.slice(7);
+        userId = await authenticateJwt(supabase, token);
+        if (!userId) {
+          userId = await authenticateApiKey(supabase, token);
+        }
+      }
+
+      if (!userId) {
+        return new Response(JSON.stringify({ error: { message: 'Invalid API key', type: 'authentication_error' } }), {
+          status: 401,
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        });
+      }
+
+      return handleChatCompletion(request, userId, supabase);
+    }
+
+    // GET /v1/models — return available model list (for client compatibility)
+    if (url.pathname === '/v1/models' && request.method === 'GET') {
+      return new Response(
+        JSON.stringify({
+          object: 'list',
+          data: [{ id: 'claude-haiku-4-5-20251001', object: 'model', owned_by: 'anthropic' }],
+        }),
+        { headers: { 'Content-Type': 'application/json', ...CORS_HEADERS } },
+      );
     }
 
     // ─── Streamable HTTP transport (stateless) ────────────────────────────
