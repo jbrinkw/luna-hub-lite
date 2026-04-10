@@ -14,7 +14,7 @@ const EXTENSIONS = [
     credentialFields: [
       { key: 'github_repo', label: 'GitHub Repo (owner/repo)' },
       { key: 'github_token', label: 'GitHub Personal Access Token' },
-      { key: 'github_api_url', label: 'API URL (default: https://api.github.com)' },
+      { key: 'github_api_url', label: 'API URL (default: https://api.github.com)', optional: true },
     ],
   },
   {

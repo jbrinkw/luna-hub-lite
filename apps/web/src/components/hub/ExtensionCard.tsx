@@ -15,7 +15,7 @@ interface ExtensionCardProps {
   description: string;
   enabled: boolean;
   hasCredentials: boolean;
-  credentialFields: { key: string; label: string }[];
+  credentialFields: { key: string; label: string; optional?: boolean }[];
   onToggle: (enabled: boolean) => void;
   onSaveCredentials: (credentials: Record<string, string>) => Promise<{ error?: string }>;
 }
@@ -40,7 +40,7 @@ export function ExtensionCard({
 
     // Validate required fields
     for (const field of credentialFields) {
-      if (!credentials[field.key]?.trim()) {
+      if (!field.optional && !credentials[field.key]?.trim()) {
         setError(`${field.label} is required`);
         return;
       }
