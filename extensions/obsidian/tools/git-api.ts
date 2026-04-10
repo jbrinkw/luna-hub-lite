@@ -28,6 +28,7 @@ function headers(creds: GitCredentials): Record<string, string> {
     Authorization: `token ${creds.token}`,
     Accept: 'application/json',
     'Content-Type': 'application/json',
+    'User-Agent': 'luna-hub-mcp/1.0',
   };
 }
 
