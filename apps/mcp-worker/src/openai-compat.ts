@@ -269,7 +269,10 @@ async function handleStreaming(
         toolResults.push({
           type: 'tool_result',
           tool_use_id: toolUse.id,
-          content: result.content.map((c) => c.text).join('\n'),
+          content: result.content
+            .filter((c) => c.type === 'text')
+            .map((c) => c.text)
+            .join('\n'),
           is_error: result.isError ?? false,
         });
       } catch (err: any) {
