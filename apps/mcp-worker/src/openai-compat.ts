@@ -27,6 +27,10 @@ export async function handleChatCompletion(request: Request, userId: string, sup
     return jsonError('messages array is required', 400);
   }
 
+  if (body.messages.length === 0) {
+    return jsonError('messages array must not be empty', 400);
+  }
+
   // 2. Fetch user's Anthropic API key from vault
   const { data: anthropicKey, error: keyErr } = await supabase
     .schema('hub')
@@ -60,7 +64,7 @@ export async function handleChatCompletion(request: Request, userId: string, sup
   const anthropic = new Anthropic({ apiKey: anthropicKey });
 
   const model = DEFAULT_MODEL; // Always use Haiku regardless of what client sends
-  const maxTokens = Math.min(body.max_tokens ?? 4096, 8192);
+  const maxTokens = Math.max(1, Math.min(body.max_tokens ?? 4096, 4096));
 
   // 8. Check if streaming requested
   if (body.stream) {
@@ -83,13 +87,25 @@ export async function handleChatCompletion(request: Request, userId: string, sup
   let totalOutputTokens = 0;
 
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: maxTokens,
-      system,
-      messages: currentMessages,
-      tools: anthropicTools.length > 0 ? anthropicTools : undefined,
-    });
+    let response;
+    try {
+      response = await anthropic.messages.create({
+        model,
+        max_tokens: maxTokens,
+        system,
+        messages: currentMessages,
+        tools: anthropicTools.length > 0 ? anthropicTools : undefined,
+      });
+    } catch (err: any) {
+      const status = err?.status ?? 500;
+      const msg =
+        status === 401
+          ? 'Invalid Anthropic API key. Update it in Hub > AI Agent.'
+          : status === 429
+            ? 'Anthropic rate limit exceeded. Try again later.'
+            : `Anthropic API error: ${err?.message ?? 'Unknown error'}`;
+      return jsonError(msg, status >= 400 && status < 500 ? 422 : 502);
+    }
 
     totalInputTokens += response.usage.input_tokens;
     totalOutputTokens += response.usage.output_tokens;
@@ -184,13 +200,25 @@ async function handleStreaming(
 
   // Run tool loop (non-streaming) until the last round needs a text response
   for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    const response = await anthropic.messages.create({
-      model,
-      max_tokens: maxTokens,
-      system,
-      messages: currentMessages,
-      tools: tools.length > 0 ? tools : undefined,
-    });
+    let response;
+    try {
+      response = await anthropic.messages.create({
+        model,
+        max_tokens: maxTokens,
+        system,
+        messages: currentMessages,
+        tools: tools.length > 0 ? tools : undefined,
+      });
+    } catch (err: any) {
+      const status = err?.status ?? 500;
+      const msg =
+        status === 401
+          ? 'Invalid Anthropic API key. Update it in Hub > AI Agent.'
+          : status === 429
+            ? 'Anthropic rate limit exceeded. Try again later.'
+            : `Anthropic API error: ${err?.message ?? 'Unknown error'}`;
+      return jsonError(msg, status >= 400 && status < 500 ? 422 : 502);
+    }
 
     if (response.stop_reason !== 'tool_use') {
       // Not a tool call — we have the final text. Emit it as a synthetic SSE stream.
@@ -314,11 +342,17 @@ function convertMessages(
           content.push({ type: 'text', text: msg.content });
         }
         for (const tc of msg.tool_calls) {
+          let parsedInput: Record<string, unknown> = {};
+          try {
+            parsedInput = JSON.parse(tc.function.arguments);
+          } catch {
+            /* leave as empty */
+          }
           content.push({
             type: 'tool_use',
             id: tc.id,
             name: tc.function.name,
-            input: JSON.parse(tc.function.arguments),
+            input: parsedInput,
           });
         }
         messages.push({ role: 'assistant', content });

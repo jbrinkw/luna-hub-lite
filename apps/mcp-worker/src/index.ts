@@ -165,6 +165,13 @@ export default {
         });
       }
 
+      if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc)) {
+        return new Response(JSON.stringify(jsonRpcError(undefined, -32600, 'Invalid Request')), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        });
+      }
+
       const incomingSessionId = request.headers.get('Mcp-Session-Id');
       const sessionId = incomingSessionId || crypto.randomUUID();
 
@@ -200,43 +207,6 @@ export default {
       return new Response(null, { status: 200, headers: CORS_HEADERS });
     }
 
-    // Auth endpoint: POST /auth — validates API key in body, creates DO session,
-    // returns sessionId + sseUrl. Keeps API key out of URLs/logs.
-    if (url.pathname === '/auth' && request.method === 'POST') {
-      let body: { apiKey?: string };
-      try {
-        body = await request.json();
-      } catch {
-        return jsonResponse({ error: 'Invalid JSON body' }, 400);
-      }
-
-      const apiKey = body.apiKey;
-      if (!apiKey) {
-        return jsonResponse({ error: 'Missing apiKey in request body' }, 400);
-      }
-
-      const supabase = createServiceClient(env);
-      const userId = await authenticateApiKey(supabase, apiKey);
-      if (!userId) {
-        return jsonResponse({ error: 'Invalid API key' }, 401);
-      }
-
-      // Create a new Durable Object and pre-initialize it with the userId.
-      // This starts tool building early; the client then connects via GET /sse?sessionId=xxx.
-      const id = env.MCP_SESSION.newUniqueId();
-      const sessionId = id.toString();
-      const stub = env.MCP_SESSION.get(id);
-      const doInitUrl = new URL(request.url);
-      doInitUrl.pathname = '/init';
-      doInitUrl.searchParams.set('userId', userId);
-      const initResponse = await stub.fetch(new Request(doInitUrl.toString()));
-      if (!initResponse.ok) {
-        return jsonResponse({ error: 'Failed to initialize session' }, 500);
-      }
-
-      return jsonResponse({ sessionId, sseUrl: `/sse?sessionId=${sessionId}` }, 200);
-    }
-
     // Streamable HTTP transport (MCP 2025-03-26): POST /sse
     // Now routes to stateless handler (same as POST /mcp) to avoid DO duration costs.
     if (url.pathname === '/sse' && request.method === 'POST') {
@@ -267,6 +237,13 @@ export default {
         rpc = await request.json();
       } catch {
         return new Response(JSON.stringify(jsonRpcError(undefined, -32700, 'Parse error: invalid JSON')), {
+          status: 400,
+          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+        });
+      }
+
+      if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc)) {
+        return new Response(JSON.stringify(jsonRpcError(undefined, -32600, 'Invalid Request')), {
           status: 400,
           headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });
@@ -306,30 +283,6 @@ export default {
       return new Response(null, {
         status: 405,
         headers: { Allow: 'POST, DELETE', ...CORS_HEADERS },
-      });
-    }
-
-    // Message endpoint: POST /message?sessionId=xxx
-    if (url.pathname === '/message' && request.method === 'POST') {
-      const sessionId = url.searchParams.get('sessionId');
-      if (!sessionId) {
-        return jsonResponse({ error: 'Missing sessionId' }, 400);
-      }
-
-      let id: DurableObjectId;
-      try {
-        id = env.MCP_SESSION.idFromString(sessionId);
-      } catch {
-        return jsonResponse({ error: 'Invalid sessionId' }, 400);
-      }
-      const stub = env.MCP_SESSION.get(id);
-      const doUrl = new URL(request.url);
-      doUrl.pathname = '/message';
-      const doResponse = await stub.fetch(new Request(doUrl.toString(), request));
-      // Add CORS headers — DO responses don't include them, but browser clients need them
-      return new Response(doResponse.body, {
-        status: doResponse.status,
-        headers: { ...Object.fromEntries(doResponse.headers), ...CORS_HEADERS },
       });
     }
 
