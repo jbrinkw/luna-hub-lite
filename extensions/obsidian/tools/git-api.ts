@@ -2,6 +2,21 @@ import type { ExtensionToolContext } from '@luna-hub/app-tools';
 
 const GITHUB_API = 'https://api.github.com';
 
+/** Decode base64 to UTF-8 string (handles multi-byte chars unlike atob) */
+function base64ToUtf8(b64: string): string {
+  const binary = atob(b64.replace(/\n/g, ''));
+  const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+  return new TextDecoder().decode(bytes);
+}
+
+/** Encode UTF-8 string to base64 (handles multi-byte chars unlike btoa) */
+function utf8ToBase64(str: string): string {
+  const bytes = new TextEncoder().encode(str);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary);
+}
+
 export interface GitCredentials {
   token: string;
   repo: string; // "owner/repo"
@@ -61,7 +76,7 @@ export async function getBlobContent(creds: GitCredentials, sha: string): Promis
   if (!resp.ok) throw new Error(`Git API error: ${resp.status} ${resp.statusText}`);
   const data = (await resp.json()) as { content: string; encoding: string };
   if (data.encoding === 'base64') {
-    return atob(data.content.replace(/\n/g, ''));
+    return base64ToUtf8(data.content);
   }
   return data.content;
 }
@@ -73,7 +88,7 @@ export async function getBlobContent(creds: GitCredentials, sha: string): Promis
 export async function getMultipleBlobs(
   creds: GitCredentials,
   entries: Array<{ path: string; sha: string }>,
-  maxFiles = 20,
+  maxFiles = 40,
 ): Promise<Map<string, { content: string; sha: string }>> {
   const results = new Map<string, { content: string; sha: string }>();
   const toFetch = entries.slice(0, maxFiles);
@@ -94,12 +109,13 @@ export async function getFileContent(
   creds: GitCredentials,
   path: string,
 ): Promise<{ content: string; sha: string } | null> {
-  const url = `${repoUrl(creds)}/contents/${encodeURIComponent(path)}`;
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const url = `${repoUrl(creds)}/contents/${encodedPath}`;
   const resp = await fetch(url, { headers: headers(creds) });
   if (resp.status === 404) return null;
   if (!resp.ok) throw new Error(`Git API error: ${resp.status} ${resp.statusText}`);
   const data = await resp.json();
-  const content = atob((data as { content: string }).content.replace(/\n/g, ''));
+  const content = base64ToUtf8((data as { content: string }).content);
   return { content, sha: (data as { sha: string }).sha };
 }
 
@@ -111,10 +127,11 @@ export async function putFileContent(
   message: string,
   sha?: string,
 ): Promise<void> {
-  const url = `${repoUrl(creds)}/contents/${encodeURIComponent(path)}`;
+  const encodedPath = path.split('/').map(encodeURIComponent).join('/');
+  const url = `${repoUrl(creds)}/contents/${encodedPath}`;
   const body: Record<string, string> = {
     message,
-    content: btoa(content),
+    content: utf8ToBase64(content),
   };
   if (sha) body.sha = sha;
   const resp = await fetch(url, {
