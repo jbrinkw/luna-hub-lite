@@ -30,19 +30,19 @@ export function AgentPage() {
   const endpointUrl = `${import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/v1`;
 
   // Load agent settings
-  const { data: settings, isLoading } = useQuery({
+  const {
+    data: settings,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: queryKeys.agentSettings(user!.id),
     queryFn: async () => {
-      const { data, error } = await supabase
-        .schema('hub')
-        .from('agent_settings')
-        .select('anthropic_key_encrypted, system_prompt')
-        .eq('user_id', user!.id)
-        .maybeSingle();
+      const { data, error } = await supabase.schema('hub').rpc('get_agent_settings');
       if (error) throw error;
+      const row = Array.isArray(data) ? data[0] : data;
       return {
-        hasKey: !!data?.anthropic_key_encrypted,
-        systemPrompt: data?.system_prompt || '',
+        hasKey: row?.has_key ?? false,
+        systemPrompt: row?.system_prompt || '',
       };
     },
     enabled: !!user,
@@ -74,6 +74,7 @@ export function AgentPage() {
       if (error) throw error;
     },
     onSuccess: () => {
+      setKeySaveError(null);
       queryClient.invalidateQueries({ queryKey: queryKeys.agentSettings(user!.id) });
       setKeySaveSuccess(false);
     },
@@ -89,6 +90,7 @@ export function AgentPage() {
       if (error) throw error;
     },
     onSuccess: () => {
+      setSystemPromptDraft(null);
       setPromptSaveSuccess(true);
       queryClient.invalidateQueries({ queryKey: queryKeys.agentSettings(user!.id) });
     },
@@ -124,6 +126,7 @@ export function AgentPage() {
   const handleResetPrompt = () => {
     setSystemPromptDraft(DEFAULT_SYSTEM_PROMPT);
     setPromptSaveSuccess(false);
+    savePromptMutation.mutate(DEFAULT_SYSTEM_PROMPT);
   };
 
   if (isLoading) {
@@ -134,6 +137,14 @@ export function AgentPage() {
           <CardSkeleton />
           <CardSkeleton />
         </div>
+      </HubLayout>
+    );
+  }
+
+  if (isError) {
+    return (
+      <HubLayout title="AI Agent">
+        <Alert variant="error">Failed to load agent settings. Please refresh the page.</Alert>
       </HubLayout>
     );
   }

@@ -1024,6 +1024,10 @@ export type Database = {
         Args: { p_credentials_json: string; p_extension_name: string }
         Returns: undefined
       }
+      get_agent_settings: {
+        Args: Record<PropertyKey, never>
+        Returns: { has_key: boolean; system_prompt: string }[]
+      }
       save_agent_anthropic_key: { Args: { p_key: string }; Returns: undefined }
       clear_agent_anthropic_key: { Args: never; Returns: undefined }
       save_agent_system_prompt: { Args: { p_prompt: string }; Returns: undefined }

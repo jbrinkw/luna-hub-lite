@@ -1004,6 +1004,13 @@ export type Database = {
         Args: { p_user_id: string }
         Returns: string
       }
+      get_agent_settings: {
+        Args: never
+        Returns: {
+          has_key: boolean
+          system_prompt: string
+        }[]
+      }
       get_agent_system_prompt_admin: {
         Args: { p_user_id: string }
         Returns: string

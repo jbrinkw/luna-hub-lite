@@ -9,7 +9,16 @@ export interface HACredentials {
 export function getHACredentials(ctx: ExtensionToolContext): HACredentials | null {
   const { ha_api_key, ha_url } = ctx.credentials;
   if (!ha_api_key || !ha_url) return null;
-  return { token: ha_api_key, url: ha_url.replace(/\/+$/, '') };
+  let parsed: URL;
+  try {
+    parsed = new URL(ha_url);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  const host = parsed.hostname;
+  if (host === '169.254.169.254' || host === 'metadata.google.internal' || host.endsWith('.internal')) return null;
+  return { token: ha_api_key, url: parsed.origin };
 }
 
 function haHeaders(creds: HACredentials): Record<string, string> {
