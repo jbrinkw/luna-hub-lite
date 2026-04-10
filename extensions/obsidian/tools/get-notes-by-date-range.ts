@@ -1,6 +1,6 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-import { getGitCredentials, listAllFiles, getMultipleFiles } from './git-api';
+import { getGitCredentials, getTree, getMultipleBlobs } from './git-api';
 import { parseNoteEntries } from './vault-parser';
 
 function parseDateArg(s: string): Date {
@@ -35,9 +35,12 @@ export const OBSIDIAN_get_notes_by_date_range: ExtensionToolDefinition = {
     if (endDt < startDt) [startDt, endDt] = [endDt, startDt];
 
     try {
-      const allFiles = await listAllFiles(creds);
-      const noteFiles = allFiles.filter((f) => /notes\.md$/i.test(f));
-      const fileContents = await getMultipleFiles(creds, noteFiles);
+      // 1 call: get tree, filter to Notes.md files only
+      const tree = await getTree(creds);
+      const noteEntries = tree.filter((e) => /notes\.md$/i.test(e.path));
+
+      // Fetch only note files (capped at 20)
+      const fileContents = await getMultipleBlobs(creds, noteEntries);
 
       const results: Array<{ file: string; date: string; date_str: string; content: string }> = [];
 

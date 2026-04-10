@@ -1,6 +1,6 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-import { getGitCredentials, listAllFiles, getMultipleFiles, getFileContent, putFileContent } from './git-api';
+import { getGitCredentials, getTree, getMultipleBlobs, getFileContent, putFileContent } from './git-api';
 import { buildProjects, linkNotes, formatDateShort } from './vault-parser';
 
 export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
@@ -27,9 +27,12 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
     if (!args.content) return toolError('content is required');
 
     try {
-      const allFiles = await listAllFiles(creds);
-      const mdFiles = allFiles.filter((f) => f.endsWith('.md'));
-      const fileContents = await getMultipleFiles(creds, mdFiles);
+      // 1 call: get tree
+      const tree = await getTree(creds);
+      const mdEntries = tree.filter((e) => e.path.endsWith('.md'));
+
+      // Fetch md files to build project map (capped at 20)
+      const fileContents = await getMultipleBlobs(creds, mdEntries);
       const projects = buildProjects(fileContents);
       linkNotes(fileContents, projects);
 
@@ -52,10 +55,17 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
       let existingSha: string | undefined;
 
       if (notePath) {
-        const file = await getFileContent(creds, notePath);
-        if (file) {
-          existingContent = file.content;
-          existingSha = file.sha;
+        // Try to get from cached blobs first, fall back to Contents API for sha
+        const cached = fileContents.get(notePath);
+        if (cached) {
+          existingContent = cached.content;
+          existingSha = cached.sha;
+        } else {
+          const file = await getFileContent(creds, notePath);
+          if (file) {
+            existingContent = file.content;
+            existingSha = file.sha;
+          }
         }
       }
 
@@ -129,10 +139,8 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
             }
           }
           if (secIdx === -1) {
-            // Add new section at end of entry
             bodyLines.splice(entryEnd, 0, '\n', `## ${args.section_id}\n`, '\n', contentLine);
           } else {
-            // Find section end
             let secEnd = entryEnd;
             for (let i = secIdx + 1; i < entryEnd; i++) {
               if (/^\s*#{1,6}\s+/.test(bodyLines[i])) {
@@ -149,6 +157,14 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
       }
 
       const newContent = [...fmLines, ...bodyLines].join('\n');
+      // putFileContent needs the Contents API sha, not the blob sha
+      // If we got sha from getFileContent it's correct; from blobs it may differ
+      // Re-fetch via Contents API to get the correct sha for update
+      if (existingSha && !createdFile) {
+        const fresh = await getFileContent(creds, notePath!);
+        if (fresh) existingSha = fresh.sha;
+      }
+
       await putFileContent(
         creds,
         notePath!,

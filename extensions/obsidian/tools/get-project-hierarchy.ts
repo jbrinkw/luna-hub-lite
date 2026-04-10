@@ -1,6 +1,6 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-import { getGitCredentials, listAllFiles, getMultipleFiles } from './git-api';
+import { getGitCredentials, getTree, getMultipleBlobs } from './git-api';
 import { buildProjects, linkNotes, rootsOf } from './vault-parser';
 
 export const OBSIDIAN_get_project_hierarchy: ExtensionToolDefinition = {
@@ -14,9 +14,12 @@ export const OBSIDIAN_get_project_hierarchy: ExtensionToolDefinition = {
     if (!creds) return toolError('Missing credentials (github_token, github_repo)');
 
     try {
-      const allFiles = await listAllFiles(creds);
-      const mdFiles = allFiles.filter((f) => f.endsWith('.md'));
-      const fileContents = await getMultipleFiles(creds, mdFiles);
+      // 1 call: get full tree
+      const tree = await getTree(creds);
+      const mdEntries = tree.filter((e) => e.path.endsWith('.md'));
+
+      // N calls (capped at 20): fetch md file contents via Blobs API
+      const fileContents = await getMultipleBlobs(creds, mdEntries);
 
       const projects = buildProjects(fileContents);
       linkNotes(fileContents, projects);

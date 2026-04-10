@@ -8,6 +8,12 @@ export interface GitCredentials {
   apiUrl: string; // base URL (no trailing slash)
 }
 
+export interface TreeEntry {
+  path: string;
+  sha: string;
+  type: 'blob' | 'tree';
+}
+
 export function getGitCredentials(ctx: ExtensionToolContext): GitCredentials | null {
   const { github_token, github_repo, github_api_url } = ctx.credentials;
   if (!github_token || !github_repo) return null;
@@ -23,7 +29,6 @@ function repoUrl(creds: GitCredentials): string {
 }
 
 function headers(creds: GitCredentials): Record<string, string> {
-  // "token" style works with both GitHub and Gitea
   return {
     Authorization: `token ${creds.token}`,
     Accept: 'application/json',
@@ -32,7 +37,59 @@ function headers(creds: GitCredentials): Record<string, string> {
   };
 }
 
-/** Fetch a single file's content (decoded from base64). Returns null if 404. */
+/**
+ * Fetch the full repo tree in ONE call. Returns all blob entries with path + sha.
+ * This is the only "list" call needed — everything else uses sha-based lookups.
+ */
+export async function getTree(creds: GitCredentials): Promise<TreeEntry[]> {
+  const url = `${repoUrl(creds)}/git/trees/main?recursive=1`;
+  const resp = await fetch(url, { headers: headers(creds) });
+  if (!resp.ok) throw new Error(`Git API error: ${resp.status} ${resp.statusText}`);
+  const data = (await resp.json()) as { tree: Array<{ type: string; path: string; sha: string }> };
+  return (data.tree || [])
+    .filter((node) => node.type === 'blob')
+    .map((node) => ({ path: node.path, sha: node.sha, type: 'blob' as const }));
+}
+
+/**
+ * Fetch a single file's content by SHA using the Blobs API (1 call).
+ * More efficient than Contents API — no path encoding issues, works with SHA from tree.
+ */
+export async function getBlobContent(creds: GitCredentials, sha: string): Promise<string> {
+  const url = `${repoUrl(creds)}/git/blobs/${sha}`;
+  const resp = await fetch(url, { headers: headers(creds) });
+  if (!resp.ok) throw new Error(`Git API error: ${resp.status} ${resp.statusText}`);
+  const data = (await resp.json()) as { content: string; encoding: string };
+  if (data.encoding === 'base64') {
+    return atob(data.content.replace(/\n/g, ''));
+  }
+  return data.content;
+}
+
+/**
+ * Fetch multiple files by SHA in parallel. Capped at maxFiles to stay within
+ * the Cloudflare Workers subrequest limit.
+ */
+export async function getMultipleBlobs(
+  creds: GitCredentials,
+  entries: Array<{ path: string; sha: string }>,
+  maxFiles = 20,
+): Promise<Map<string, { content: string; sha: string }>> {
+  const results = new Map<string, { content: string; sha: string }>();
+  const toFetch = entries.slice(0, maxFiles);
+  const fetches = toFetch.map(async (e) => {
+    try {
+      const content = await getBlobContent(creds, e.sha);
+      results.set(e.path, { content, sha: e.sha });
+    } catch {
+      // Skip files that fail to fetch
+    }
+  });
+  await Promise.all(fetches);
+  return results;
+}
+
+/** Fetch a single file's content by path via Contents API. Returns null if 404. */
 export async function getFileContent(
   creds: GitCredentials,
   path: string,
@@ -71,18 +128,15 @@ export async function putFileContent(
   }
 }
 
-/** List all files in the repo recursively. Returns array of file paths. */
+// ── Legacy exports (kept for backward compat, but prefer getTree + getMultipleBlobs) ──
+
+/** @deprecated Use getTree() instead */
 export async function listAllFiles(creds: GitCredentials): Promise<string[]> {
-  const url = `${repoUrl(creds)}/git/trees/main?recursive=1`;
-  const resp = await fetch(url, { headers: headers(creds) });
-  if (!resp.ok) throw new Error(`Git API error: ${resp.status} ${resp.statusText}`);
-  const data = await resp.json();
-  return ((data as { tree: Array<{ type: string; path: string }> }).tree || [])
-    .filter((node) => node.type === 'blob')
-    .map((node) => node.path);
+  const tree = await getTree(creds);
+  return tree.map((e) => e.path);
 }
 
-/** Fetch multiple files' content in parallel. Skips files that don't exist. */
+/** @deprecated Use getMultipleBlobs() instead — this makes N+0 subrequests */
 export async function getMultipleFiles(
   creds: GitCredentials,
   paths: string[],
