@@ -86,7 +86,8 @@ export const HOMEASSISTANT_tv_remote: ExtensionToolDefinition = {
     const button: string = args.button;
     if (!button?.trim()) return toolError('Missing required argument: button');
 
-    const remoteEntity = (ctx as ExtensionToolContext).credentials.ha_remote_entity_id || 'remote.living_room_tv';
+    const rawRemoteEntity = (ctx as ExtensionToolContext).credentials.ha_remote_entity_id || 'remote.living_room_tv';
+    const remoteEntity = /^remote\.[a-z0-9_]+$/.test(rawRemoteEntity) ? rawRemoteEntity : 'remote.living_room_tv';
 
     const intent = parseIntent(button);
 

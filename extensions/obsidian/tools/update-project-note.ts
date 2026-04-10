@@ -69,7 +69,7 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
         }
       }
 
-      if (!notePath || (!existingSha && !notePath)) {
+      if (!notePath || !existingSha) {
         // Derive notes path from project file path
         const projDir = proj.filePath.split('/').slice(0, -1).join('/');
         notePath = projDir ? `${projDir}/Notes.md` : 'Notes.md';

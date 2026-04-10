@@ -47,7 +47,7 @@ export async function buildUserTools(
   // 3. Filter app tools by active modules and enabled status
   for (const [name, tool] of Object.entries(allAppTools)) {
     const module = name.startsWith('COACHBYTE_') ? 'coachbyte' : name.startsWith('CHEFBYTE_') ? 'chefbyte' : null;
-    if (module && !activeApps.has(module)) continue;
+    if (!module || !activeApps.has(module)) continue;
     if (disabledTools.has(name)) continue;
     userTools[name] = tool;
   }

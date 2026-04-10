@@ -17,7 +17,20 @@ export function getHACredentials(ctx: ExtensionToolContext): HACredentials | nul
   }
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
   const host = parsed.hostname;
-  if (host === '169.254.169.254' || host === 'metadata.google.internal' || host.endsWith('.internal')) return null;
+  const isBlocked =
+    host === 'localhost' ||
+    host === '169.254.169.254' ||
+    host === 'metadata.google.internal' ||
+    host.endsWith('.internal') ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host === '[::1]' ||
+    host.startsWith('fe80:') ||
+    /^127\./.test(host) ||
+    /^10\./.test(host) ||
+    /^192\.168\./.test(host) ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+  if (isBlocked) return null;
   return { token: ha_api_key, url: parsed.origin };
 }
 

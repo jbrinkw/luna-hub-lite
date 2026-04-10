@@ -8,6 +8,7 @@ import { queryKeys } from '@/shared/queryKeys';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
+import { Alert } from '@/components/ui/Alert';
 import { Copy, Check } from 'lucide-react';
 
 interface ActiveKey {
@@ -35,7 +36,11 @@ export function McpSettingsPage() {
   const endpointUrl = `${import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/sse`;
 
   // Load active API keys via useQuery
-  const { data: activeKeys = [], isLoading } = useQuery({
+  const {
+    data: activeKeys = [],
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: queryKeys.apiKeys(user!.id),
     queryFn: async () => {
       const { data, error: err } = await supabase
@@ -163,7 +168,9 @@ export function McpSettingsPage() {
           </CardContent>
         </Card>
 
-        {isLoading ? (
+        {isError ? (
+          <Alert variant="error">Failed to load API keys. Please refresh the page.</Alert>
+        ) : isLoading ? (
           <CardSkeleton />
         ) : (
           <ApiKeyGenerator

@@ -5,6 +5,7 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { CardSkeleton } from '@/components/ui/Skeleton';
+import { Alert } from '@/components/ui/Alert';
 
 const EXTENSIONS = [
   {
@@ -44,7 +45,11 @@ export function ExtensionsPage() {
   const queryClient = useQueryClient();
 
   // Load extension settings via useQuery
-  const { data: states = {} as Record<string, ExtensionState>, isLoading } = useQuery({
+  const {
+    data: states = {} as Record<string, ExtensionState>,
+    isLoading,
+    isError,
+  } = useQuery({
     queryKey: queryKeys.extensions(user!.id),
     queryFn: async () => {
       const { data, error } = await supabase
@@ -129,7 +134,9 @@ export function ExtensionsPage() {
 
   return (
     <HubLayout title="Extensions">
-      {isLoading ? (
+      {isError ? (
+        <Alert variant="error">Failed to load extension settings. Please refresh the page.</Alert>
+      ) : isLoading ? (
         <div className="space-y-4">
           <CardSkeleton />
           <CardSkeleton />

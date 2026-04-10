@@ -65,7 +65,7 @@ export async function handleStatelessMcp(
         return jsonRpcSuccess(rpc.id, result);
       } catch (err: any) {
         console.error(`Tool ${toolName} error:`, err);
-        return jsonRpcSuccess(rpc.id, toolError(`Tool error: ${err.message}`));
+        return jsonRpcSuccess(rpc.id, toolError('An internal error occurred executing the tool.'));
       }
     }
 

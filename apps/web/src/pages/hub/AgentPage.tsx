@@ -244,7 +244,7 @@ export function AgentPage() {
               <Button onClick={handleSavePrompt} loading={savePromptMutation.isPending} size="sm">
                 Save Prompt
               </Button>
-              <Button variant="secondary" size="sm" onClick={handleResetPrompt}>
+              <Button variant="secondary" size="sm" onClick={handleResetPrompt} disabled={savePromptMutation.isPending}>
                 Reset to Default
               </Button>
             </div>

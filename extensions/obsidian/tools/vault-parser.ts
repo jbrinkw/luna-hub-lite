@@ -13,17 +13,24 @@ export function parseFrontmatter(text: string): Record<string, string> {
   const lines = text.split('\n');
   if (lines[0]?.trim() !== '---') return {};
   const fm: Record<string, string> = {};
+  let closed = false;
   for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim() === '---') break;
+    if (lines[i].trim() === '---') {
+      closed = true;
+      break;
+    }
     const colonIdx = lines[i].indexOf(':');
     if (colonIdx === -1) continue;
     const key = lines[i].slice(0, colonIdx).trim();
     let val = lines[i].slice(colonIdx + 1).trim();
-    // Strip inline comments
-    const commentIdx = val.indexOf(' #');
-    if (commentIdx !== -1) val = val.slice(0, commentIdx).trim();
+    // Strip inline comments (only on unquoted values)
+    if (!val.startsWith('"') && !val.startsWith("'")) {
+      const commentIdx = val.indexOf(' #');
+      if (commentIdx !== -1) val = val.slice(0, commentIdx).trim();
+    }
     if (key) fm[key] = val;
   }
+  if (!closed) return {};
   return fm;
 }
 

@@ -73,7 +73,7 @@ export async function handleChatCompletion(request: Request, userId: string, sup
   const anthropic = new Anthropic({ apiKey: anthropicKey });
 
   const model = DEFAULT_MODEL; // Always use Haiku regardless of what client sends
-  const maxTokens = Math.max(1, Math.min(body.max_tokens ?? 4096, 4096));
+  const maxTokens = Math.max(1, Math.min(body.max_tokens ?? 4096, 8192));
 
   // 8. Check if streaming requested
   if (body.stream) {

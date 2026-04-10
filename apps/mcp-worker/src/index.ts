@@ -102,9 +102,10 @@ export default {
 
       if (authHeader?.startsWith('Bearer ')) {
         const token = authHeader.slice(7);
-        userId = await authenticateJwt(supabase, token);
+        // Try API key first (primary HA use case), fall back to JWT
+        userId = await authenticateApiKey(supabase, token);
         if (!userId) {
-          userId = await authenticateApiKey(supabase, token);
+          userId = await authenticateJwt(supabase, token);
         }
       }
 
