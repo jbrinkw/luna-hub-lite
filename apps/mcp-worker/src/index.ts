@@ -27,10 +27,12 @@ export default {
     // CORS preflight
     if (request.method === 'OPTIONS') {
       return new Response(null, {
+        status: 204,
         headers: {
           ...CORS_HEADERS,
           'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
           'Access-Control-Allow-Headers': 'Content-Type, Authorization, Mcp-Session-Id',
+          'Access-Control-Max-Age': '86400',
         },
       });
     }
@@ -166,10 +168,15 @@ export default {
       }
 
       if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc)) {
-        return new Response(JSON.stringify(jsonRpcError(undefined, -32600, 'Invalid Request')), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-        });
+        return new Response(
+          JSON.stringify(
+            jsonRpcError(undefined, -32600, 'Invalid Request: expected a JSON-RPC object (batch arrays not supported)'),
+          ),
+          {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+          },
+        );
       }
 
       const incomingSessionId = request.headers.get('Mcp-Session-Id');
@@ -243,10 +250,15 @@ export default {
       }
 
       if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc)) {
-        return new Response(JSON.stringify(jsonRpcError(undefined, -32600, 'Invalid Request')), {
-          status: 400,
-          headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
-        });
+        return new Response(
+          JSON.stringify(
+            jsonRpcError(undefined, -32600, 'Invalid Request: expected a JSON-RPC object (batch arrays not supported)'),
+          ),
+          {
+            status: 400,
+            headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
+          },
+        );
       }
 
       const incomingSessionId = request.headers.get('Mcp-Session-Id');

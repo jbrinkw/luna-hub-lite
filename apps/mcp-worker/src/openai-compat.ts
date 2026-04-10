@@ -48,7 +48,12 @@ export async function handleChatCompletion(request: Request, userId: string, sup
   const systemPrompt = customPrompt || DEFAULT_SYSTEM_PROMPT;
 
   // 4. Build user's enabled tools
-  const userTools = await buildUserTools(supabase, userId);
+  let userTools;
+  try {
+    userTools = await buildUserTools(supabase, userId);
+  } catch {
+    return jsonError('Failed to load tools', 502);
+  }
 
   // 5. Convert tools to Anthropic format
   const anthropicTools = Object.values(userTools).map((t) => ({
@@ -59,6 +64,10 @@ export async function handleChatCompletion(request: Request, userId: string, sup
 
   // 6. Convert OpenAI messages to Anthropic format
   const { system, messages: anthropicMessages } = convertMessages(body.messages, systemPrompt);
+
+  if (anthropicMessages.length === 0) {
+    return jsonError('No non-system messages provided', 400);
+  }
 
   // 7. Create Anthropic client with user's key
   const anthropic = new Anthropic({ apiKey: anthropicKey });
@@ -104,7 +113,7 @@ export async function handleChatCompletion(request: Request, userId: string, sup
           : status === 429
             ? 'Anthropic rate limit exceeded. Try again later.'
             : `Anthropic API error: ${err?.message ?? 'Unknown error'}`;
-      return jsonError(msg, status >= 400 && status < 500 ? 422 : 502);
+      return jsonError(msg, status === 401 ? 401 : status === 429 ? 429 : 502);
     }
 
     totalInputTokens += response.usage.input_tokens;
@@ -144,7 +153,10 @@ export async function handleChatCompletion(request: Request, userId: string, sup
           toolResults.push({
             type: 'tool_result',
             tool_use_id: toolUse.id,
-            content: result.content.map((c) => c.text).join('\n'),
+            content: result.content
+              .filter((c) => c.type === 'text')
+              .map((c) => c.text)
+              .join('\n'),
             is_error: result.isError ?? false,
           });
         } catch (err: any) {
@@ -217,7 +229,7 @@ async function handleStreaming(
           : status === 429
             ? 'Anthropic rate limit exceeded. Try again later.'
             : `Anthropic API error: ${err?.message ?? 'Unknown error'}`;
-      return jsonError(msg, status >= 400 && status < 500 ? 422 : 502);
+      return jsonError(msg, status === 401 ? 401 : status === 429 ? 429 : 502);
     }
 
     if (response.stop_reason !== 'tool_use') {
