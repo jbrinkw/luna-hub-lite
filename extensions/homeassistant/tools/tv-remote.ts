@@ -54,13 +54,22 @@ function parseIntent(button: string): { type: 'command'; command: string } | { t
   // Check direct app name
   if (APP_MAP[b]) return { type: 'app', activity: APP_MAP[b] };
 
-  // URL-like strings → treat as app activity
-  if (b.startsWith('http://') || b.startsWith('https://') || (b.includes('.') && !b.includes(' ') && !COMMAND_MAP[b])) {
+  // Known app package names (contain dots, no spaces)
+  if (b.startsWith('http://') || b.startsWith('https://')) {
     return { type: 'app', activity: button.trim() };
   }
 
-  // Check command map — fall back to raw uppercase for unknown commands
-  return { type: 'command', command: COMMAND_MAP[b] || button.trim().toUpperCase() };
+  // Check command map — reject unknown commands
+  const command = COMMAND_MAP[b];
+  if (command) return { type: 'command', command };
+
+  // Fall back to uppercase command for single-word inputs only
+  if (!b.includes(' ') && !b.includes('.') && !b.includes('/') && b.length <= 30) {
+    return { type: 'command', command: button.trim().toUpperCase() };
+  }
+
+  // Reject anything else — don't pass arbitrary strings to HA
+  return { type: 'command', command: 'UNKNOWN' };
 }
 
 export const HOMEASSISTANT_tv_remote: ExtensionToolDefinition = {

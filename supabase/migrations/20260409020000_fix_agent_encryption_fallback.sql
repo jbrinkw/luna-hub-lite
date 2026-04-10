@@ -55,3 +55,7 @@ BEGIN
   RETURN extensions.pgp_sym_decrypt(v_encrypted::bytea, v_enc_key);
 END;
 $$;
+
+-- Re-GRANT permissions (CREATE OR REPLACE may not preserve grants in all environments)
+GRANT EXECUTE ON FUNCTION hub.save_agent_anthropic_key(TEXT) TO authenticated;
+GRANT EXECUTE ON FUNCTION hub.get_agent_anthropic_key_admin(UUID) TO service_role;

@@ -7,7 +7,7 @@ export interface JsonRpcRequest {
 
 export interface JsonRpcResponse {
   jsonrpc: '2.0';
-  id?: string | number;
+  id?: string | number | null;
   result?: unknown;
   error?: { code: number; message: string; data?: unknown };
 }
@@ -22,7 +22,7 @@ export function jsonRpcSuccess(id: string | number | undefined, result: unknown)
   return { jsonrpc: '2.0', id, result };
 }
 
-export function jsonRpcError(id: string | number | undefined, code: number, message: string): JsonRpcResponse {
+export function jsonRpcError(id: string | number | null | undefined, code: number, message: string): JsonRpcResponse {
   return { jsonrpc: '2.0', id, error: { code, message } };
 }
 

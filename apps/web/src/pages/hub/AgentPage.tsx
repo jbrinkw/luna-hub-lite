@@ -199,7 +199,12 @@ export function AgentPage() {
               onChange={(e) => setApiKey(e.target.value)}
             />
             <div className="flex gap-2">
-              <Button onClick={handleSaveKey} loading={saveKeyMutation.isPending} size="sm">
+              <Button
+                onClick={handleSaveKey}
+                loading={saveKeyMutation.isPending}
+                disabled={saveKeyMutation.isPending}
+                size="sm"
+              >
                 {settings?.hasKey ? 'Update Key' : 'Save Key'}
               </Button>
               {settings?.hasKey && (
@@ -241,7 +246,12 @@ export function AgentPage() {
               placeholder={DEFAULT_SYSTEM_PROMPT}
             />
             <div className="flex gap-2">
-              <Button onClick={handleSavePrompt} loading={savePromptMutation.isPending} size="sm">
+              <Button
+                onClick={handleSavePrompt}
+                loading={savePromptMutation.isPending}
+                disabled={savePromptMutation.isPending}
+                size="sm"
+              >
                 Save Prompt
               </Button>
               <Button variant="secondary" size="sm" onClick={handleResetPrompt} disabled={savePromptMutation.isPending}>

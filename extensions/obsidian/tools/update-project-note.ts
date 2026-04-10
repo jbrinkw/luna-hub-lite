@@ -106,14 +106,14 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
 
       let createdEntry = false;
       let appended = false;
-      const contentLine = args.content.endsWith('\n') ? args.content : args.content + '\n';
+      const contentLine = args.content.trimEnd();
 
       if (todayIdx === -1) {
         // Insert new entry at top (before first date or end of body)
         const insertAt = dateIndices.length > 0 ? dateIndices[0] : bodyLines.length;
         const newEntry = args.section_id
-          ? [`${todayStr}\n`, '\n', `## ${args.section_id}\n`, '\n', contentLine]
-          : [`${todayStr}\n`, '\n', contentLine];
+          ? [todayStr, '', `## ${args.section_id}`, '', contentLine]
+          : [todayStr, '', contentLine];
         bodyLines.splice(insertAt, 0, ...newEntry);
         createdEntry = true;
       } else {
@@ -139,7 +139,7 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
             }
           }
           if (secIdx === -1) {
-            bodyLines.splice(entryEnd, 0, '\n', `## ${args.section_id}\n`, '\n', contentLine);
+            bodyLines.splice(entryEnd, 0, '', `## ${args.section_id}`, '', contentLine);
           } else {
             let secEnd = entryEnd;
             for (let i = secIdx + 1; i < entryEnd; i++) {

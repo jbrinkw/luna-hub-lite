@@ -162,16 +162,16 @@ export default {
       try {
         rpc = await request.json();
       } catch {
-        return new Response(JSON.stringify(jsonRpcError(undefined, -32700, 'Parse error: invalid JSON')), {
+        return new Response(JSON.stringify(jsonRpcError(null, -32700, 'Parse error: invalid JSON')), {
           status: 400,
           headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });
       }
 
-      if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc)) {
+      if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc) || typeof rpc.method !== 'string') {
         return new Response(
           JSON.stringify(
-            jsonRpcError(undefined, -32600, 'Invalid Request: expected a JSON-RPC object (batch arrays not supported)'),
+            jsonRpcError(rpc?.id ?? null, -32600, 'Invalid Request: expected a JSON-RPC object with a method field'),
           ),
           {
             status: 400,
@@ -244,16 +244,16 @@ export default {
       try {
         rpc = await request.json();
       } catch {
-        return new Response(JSON.stringify(jsonRpcError(undefined, -32700, 'Parse error: invalid JSON')), {
+        return new Response(JSON.stringify(jsonRpcError(null, -32700, 'Parse error: invalid JSON')), {
           status: 400,
           headers: { 'Content-Type': 'application/json', ...CORS_HEADERS },
         });
       }
 
-      if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc)) {
+      if (!rpc || typeof rpc !== 'object' || Array.isArray(rpc) || typeof rpc.method !== 'string') {
         return new Response(
           JSON.stringify(
-            jsonRpcError(undefined, -32600, 'Invalid Request: expected a JSON-RPC object (batch arrays not supported)'),
+            jsonRpcError(rpc?.id ?? null, -32600, 'Invalid Request: expected a JSON-RPC object with a method field'),
           ),
           {
             status: 400,

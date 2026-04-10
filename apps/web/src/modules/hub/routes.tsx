@@ -1,4 +1,4 @@
-import { Routes, Route } from 'react-router-dom';
+import { Routes, Route, Link } from 'react-router-dom';
 import { HubHomePage } from '@/pages/hub/HubHomePage';
 import { AccountPage } from '@/pages/hub/AccountPage';
 import { AppsPage } from '@/pages/hub/AppsPage';
@@ -20,12 +20,12 @@ export function HubRoutes() {
       <Route
         path="*"
         element={
-          <div style={{ padding: '2rem', textAlign: 'center' }}>
+          <div className="p-8 text-center">
             <h2>Page not found</h2>
             <p>The page you requested does not exist.</p>
-            <a href="/hub" style={{ color: '#3880ff' }}>
+            <Link to="/hub" className="text-primary">
               Go to Hub
-            </a>
+            </Link>
           </div>
         }
       />
