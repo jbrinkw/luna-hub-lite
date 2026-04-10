@@ -26,6 +26,8 @@ export function getHACredentials(ctx: ExtensionToolContext): HACredentials | nul
     host === '::1' ||
     host === '[::1]' ||
     host.startsWith('fe80:') ||
+    /^fd[0-9a-f]{2}:/i.test(host) ||
+    /^fc[0-9a-f]{2}:/i.test(host) ||
     /^127\./.test(host) ||
     /^10\./.test(host) ||
     /^192\.168\./.test(host) ||

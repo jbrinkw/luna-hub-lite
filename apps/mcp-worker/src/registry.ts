@@ -67,7 +67,7 @@ export async function buildUserTools(
 
   // 5. Extension tools: only include if the extension is enabled and the tool is not individually disabled
   for (const [name, tool] of Object.entries(allExtensionTools)) {
-    if (!enabledExtensions.has(tool.extensionName)) continue;
+    if (!tool.extensionName || !enabledExtensions.has(tool.extensionName)) continue;
     if (disabledTools.has(name)) continue;
     userTools[name] = tool;
   }

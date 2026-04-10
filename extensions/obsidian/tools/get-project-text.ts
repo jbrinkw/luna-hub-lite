@@ -24,7 +24,7 @@ export const OBSIDIAN_get_project_text: ExtensionToolDefinition = {
       const tree = await getTree(creds);
       const mdEntries = tree.filter((e) => e.path.endsWith('.md'));
 
-      // Fetch all md files to build project map (capped at 20)
+      // Fetch all md files to build project map (capped at 40)
       const fileContents = await getMultipleBlobs(creds, mdEntries);
       const projects = buildProjects(fileContents);
       linkNotes(fileContents, projects);

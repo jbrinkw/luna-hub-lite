@@ -18,7 +18,7 @@ export const OBSIDIAN_get_project_hierarchy: ExtensionToolDefinition = {
       const tree = await getTree(creds);
       const mdEntries = tree.filter((e) => e.path.endsWith('.md'));
 
-      // N calls (capped at 20): fetch md file contents via Blobs API
+      // N calls (capped at 40): fetch md file contents via Blobs API
       const fileContents = await getMultipleBlobs(creds, mdEntries);
 
       const projects = buildProjects(fileContents);

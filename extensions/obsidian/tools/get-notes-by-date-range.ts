@@ -39,7 +39,7 @@ export const OBSIDIAN_get_notes_by_date_range: ExtensionToolDefinition = {
       const tree = await getTree(creds);
       const noteEntries = tree.filter((e) => /notes\.md$/i.test(e.path));
 
-      // Fetch only note files (capped at 20)
+      // Fetch only note files (capped at 40)
       const fileContents = await getMultipleBlobs(creds, noteEntries);
 
       const results: Array<{ file: string; date: string; date_str: string; content: string }> = [];
