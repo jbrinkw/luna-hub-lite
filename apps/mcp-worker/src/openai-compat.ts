@@ -6,6 +6,7 @@ import type { ChatCompletionRequest, ChatCompletionResponse, ChatMessage } from 
 import { CORS_HEADERS } from './cors';
 
 const DEFAULT_MODEL = 'claude-haiku-4-5-20251001';
+const MAX_OUTPUT_TOKENS = 8192; // Must match DEFAULT_MODEL's max output
 const MAX_TOOL_ROUNDS = 10;
 
 const DEFAULT_SYSTEM_PROMPT = `You are Luna, a helpful voice assistant. You have access to tools for managing workouts (CoachByte), food/nutrition (ChefByte), tasks (Todoist), and smart home devices (Home Assistant). Keep responses concise and conversational — the user is talking to you via voice. When calling tools, explain what you're doing briefly. If a tool fails, tell the user plainly.`;
@@ -73,7 +74,7 @@ export async function handleChatCompletion(request: Request, userId: string, sup
   const anthropic = new Anthropic({ apiKey: anthropicKey });
 
   const model = DEFAULT_MODEL; // Always use Haiku regardless of what client sends
-  const maxTokens = Math.max(1, Math.min(body.max_tokens ?? 4096, 8192));
+  const maxTokens = Math.max(1, Math.min(body.max_tokens ?? 4096, MAX_OUTPUT_TOKENS));
 
   // 8. Check if streaming requested
   if (body.stream) {
@@ -123,7 +124,20 @@ export async function handleChatCompletion(request: Request, userId: string, sup
       // Extract tool use blocks
       const toolUseBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
 
-      if (toolUseBlocks.length === 0) break;
+      if (toolUseBlocks.length === 0) {
+        // tool_use stop reason but no tool blocks — extract any text content
+        const textContent = response.content
+          .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+          .map((b) => b.text)
+          .join('');
+        return formatCompletionResponse(
+          textContent || 'I was unable to complete the request.',
+          model,
+          totalInputTokens,
+          totalOutputTokens,
+          response.stop_reason,
+        );
+      }
 
       // Add assistant message with all content blocks
       currentMessages.push({ role: 'assistant', content: response.content });
@@ -188,7 +202,7 @@ export async function handleChatCompletion(request: Request, userId: string, sup
     model,
     totalInputTokens,
     totalOutputTokens,
-    'stop',
+    'max_tokens', // signals truncation (maps to finish_reason: 'length')
   );
 }
 
@@ -242,7 +256,13 @@ async function handleStreaming(
     }
 
     const toolUseBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
-    if (toolUseBlocks.length === 0) break;
+    if (toolUseBlocks.length === 0) {
+      const textContent = response.content
+        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
+        .map((b) => b.text)
+        .join('');
+      return emitSyntheticStream(textContent || 'I was unable to complete the request.', model);
+    }
 
     currentMessages.push({ role: 'assistant', content: response.content });
 
@@ -345,7 +365,7 @@ function convertMessages(
     }
 
     if (msg.role === 'user') {
-      messages.push({ role: 'user', content: msg.content || '' });
+      if (msg.content) messages.push({ role: 'user', content: msg.content });
       continue;
     }
 
