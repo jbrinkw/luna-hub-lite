@@ -10,10 +10,11 @@ const EXTENSIONS = [
   {
     name: 'obsidian',
     displayName: 'Obsidian',
-    description: 'Sync notes and data with your Obsidian vault',
+    description: 'Read and write notes in your Obsidian vault via GitHub/Gitea API',
     credentialFields: [
-      { key: 'obsidian_url', label: 'Obsidian Local REST API URL' },
-      { key: 'obsidian_api_key', label: 'API Key' },
+      { key: 'github_repo', label: 'GitHub Repo (owner/repo)' },
+      { key: 'github_token', label: 'GitHub Personal Access Token' },
+      { key: 'github_api_url', label: 'API URL (default: https://api.github.com)' },
     ],
   },
   {

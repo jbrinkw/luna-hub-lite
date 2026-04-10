@@ -7,7 +7,7 @@ import { Alert } from '@/components/ui/Alert';
 import { Badge } from '@/components/ui/Badge';
 
 /** Credential field keys that represent URLs (not secrets) */
-const URL_FIELD_KEYS = new Set(['obsidian_url', 'ha_url']);
+const URL_FIELD_KEYS = new Set(['ha_url', 'github_api_url', 'github_repo']);
 
 interface ExtensionCardProps {
   extensionName: string;
