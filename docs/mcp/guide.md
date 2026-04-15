@@ -105,13 +105,72 @@ If credentials are missing or invalid, the tool returns `isError: true` with "Co
 
 ### Included Extensions
 
-| Extension      | Tools                                                                                    | External API              |
-| -------------- | ---------------------------------------------------------------------------------------- | ------------------------- |
-| Obsidian       | Get project hierarchy, get project text, get notes by date range, update note            | GitHub/Gitea Contents API |
-| Todoist        | Get tasks, get task, create task, update task, complete task, get projects, get sections | Todoist REST API v1       |
-| Home Assistant | Get devices, get entity status, turn on, turn off, TV remote                             | Home Assistant REST API   |
+| Extension      | Tools                                                                                    | External API                          |
+| -------------- | ---------------------------------------------------------------------------------------- | ------------------------------------- |
+| Obsidian       | Get project hierarchy, get project text, get notes by date range, update note            | GitHub/Gitea Git Trees + Contents API |
+| Todoist        | Get tasks, get task, create task, update task, complete task, get projects, get sections | Todoist REST API v1                   |
+| Home Assistant | Get devices, get entity status, turn on, turn off, TV remote                             | Home Assistant REST API               |
 
 Additional extensions can be added by creating a new folder in `extensions/` with the tool definitions and config manifest. The MCP server Worker must be updated to import the new tools.
+
+### Obsidian Extension — Folder Convention
+
+The Obsidian extension treats the vault's **folder structure** as the source of truth for the project hierarchy. No frontmatter is required or read.
+
+**Project detection rule:** A folder is a project if and only if it contains a markdown file whose stem (filename without `.md`) matches the folder name, case-insensitive.
+
+- `Eco AI/Eco AI.md` → project "Eco AI"
+- `gamegenai/gamegenai.md` → project "gamegenai"
+- `luna-personal-assistant/CoachByte/CoachByte.md` → sub-project "CoachByte" under "luna-personal-assistant"
+
+**Parent-child:** A project's parent is the nearest ancestor folder that is itself a project. Non-project folders are transparent (a project nested inside an organizational folder still links to its nearest ancestor project).
+
+**Notes file:** A file named `Notes.md` or `notes.md` (case-insensitive) in the project folder is that project's notes file. Only one per project; first in tree order wins.
+
+**Canonical ID:** A project's canonical id is its full folder path from the vault root (e.g., `luna-personal-assistant/CoachByte`). Tools accept either the full path (always unambiguous) or a case-insensitive folder name match (if unique in the vault). Duplicate folder names at different paths return an ambiguous-candidates error.
+
+**Dated entries inside `Notes.md`:** Entries use `MM/DD/YY` date headers (optionally with trailing `:`), with entry body on subsequent lines until the next date header or end of file. Example:
+
+```markdown
+---
+note_project_id: Eco AI
+---
+
+4/15/26
+
+## Refactor done
+
+Today's notes...
+
+4/14/26
+Some older notes.
+```
+
+**Subrequest budget (Cloudflare Workers, 50/request limit):**
+
+| Tool                      | Subrequests | Notes                                                                                                                                                                     |
+| ------------------------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `get_project_hierarchy`   | 1           | Single Git Trees call, builds full project map from paths + SHAs                                                                                                          |
+| `get_project_text`        | 2–3         | Tree + 1 blob for root file + optional 1 blob for Notes.md                                                                                                                |
+| `get_notes_by_date_range` | 1 + N       | Tree + N notes-file blobs (N capped at 40; response includes `truncated` flag if more exist). Accepts optional `project_id` to restrict scan to a single project subtree. |
+| `update_project_note`     | 2–3         | Tree + Contents-API fetch for existing Notes.md sha + Contents-API write                                                                                                  |
+
+**Vault setup requirements:**
+
+1. Push your Obsidian vault to a GitHub (or Gitea) repo. [obsidian-git](https://github.com/denolehov/obsidian-git) handles this automatically.
+2. Generate a fine-grained GitHub PAT with Contents: Read and write permission on the vault repo.
+3. In Hub → Extensions → Obsidian, enter:
+   - GitHub Repo (owner/repo format)
+   - GitHub Personal Access Token
+   - API URL (optional, defaults to `https://api.github.com`)
+
+**What to rename (migration from frontmatter-based model):** Each project's root file must match its folder name. If you had `project_id: custom-id` in frontmatter pointing to a file whose name didn't match the folder, rename the file so the folder and filename match, or rename the folder. Any existing frontmatter is ignored (harmless).
+
+**Limitations:**
+
+- Hardcoded to `main` branch — repos on `master` or other default branches not supported.
+- Notes files must be named exactly `Notes.md` or `notes.md` — not "Meeting Notes.md" or similar.
+- Root-level `.md` files at the vault root are not projects (they have no folder to match). Move them into a folder to promote them to a project.
 
 ---
 
