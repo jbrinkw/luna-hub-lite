@@ -1,114 +1,152 @@
+import type { TreeEntry } from './git-api';
+
+/** A project resolved from the vault's folder tree. */
 export interface Project {
-  projectId: string;
-  filePath: string;
+  /** Canonical id: full folder path from vault root, e.g. "Luna/CoachByte". */
+  id: string;
+  /** Display name: the last segment of the folder path. */
   displayName: string;
+  /** Same as id — kept for readability at call sites. */
+  folderPath: string;
+  /** Path to the project's root .md file (FolderName/FolderName.md). */
+  rootFilePath: string;
+  /** Git SHA of the root .md file (from the tree). */
+  rootFileSha: string;
+  /** Path to the project's Notes.md (case-insensitive match), if present. */
+  noteFilePath: string | null;
+  /** Git SHA of the Notes.md file, if present. */
+  noteFileSha: string | null;
+  /** Id of the nearest ancestor project folder, or null if this project is a root. */
   parentId: string | null;
-  children: string[];
-  noteFile: string | null;
-  frontmatter: Record<string, string>;
+  /** Ids of direct child projects, sorted alphabetically by displayName. */
+  childrenIds: string[];
 }
 
-/** Parse YAML frontmatter from markdown text. Returns key-value pairs. */
-export function parseFrontmatter(text: string): Record<string, string> {
-  const lines = text.split('\n');
-  if (lines[0]?.trim() !== '---') return {};
-  const fm: Record<string, string> = {};
-  let closed = false;
-  for (let i = 1; i < lines.length; i++) {
-    if (lines[i].trim() === '---') {
-      closed = true;
-      break;
-    }
-    const colonIdx = lines[i].indexOf(':');
-    if (colonIdx === -1) continue;
-    const key = lines[i].slice(0, colonIdx).trim();
-    let val = lines[i].slice(colonIdx + 1).trim();
-    // Strip inline comments (only on unquoted values)
-    if (!val.startsWith('"') && !val.startsWith("'")) {
-      const commentIdx = val.indexOf(' #');
-      if (commentIdx !== -1) val = val.slice(0, commentIdx).trim();
-    }
-    if (key) fm[key] = val;
-  }
-  if (!closed) return {};
-  return fm;
-}
+/**
+ * Build the project map from a repository tree. Pure function — no network calls.
+ *
+ * Detection rules:
+ * - A folder F is a project iff it contains a file F/X.md whose stem X matches
+ *   the last segment of F (case-insensitive).
+ * - The project's notes file is a sibling named "Notes.md" or "notes.md"
+ *   (case-insensitive match on stem). First-in-tree-order wins.
+ * - A project's parent is the nearest ancestor folder that is itself a project.
+ *   Non-project folders are transparent (skipped).
+ */
+export function buildProjectTree(entries: TreeEntry[]): Map<string, Project> {
+  // 1. Identify project folders by scanning every .md blob.
+  //    A project folder is one whose last segment matches the stem of a child .md file.
+  const projectsByPath = new Map<string, Project>();
+  for (const entry of entries) {
+    if (!entry.path.endsWith('.md')) continue;
+    const slashIdx = entry.path.lastIndexOf('/');
+    if (slashIdx === -1) continue; // root-level files are not projects under this convention
+    const dir = entry.path.slice(0, slashIdx);
+    const fileName = entry.path.slice(slashIdx + 1);
+    const stem = fileName.slice(0, -3); // strip .md
+    const lastSeg = dir.slice(dir.lastIndexOf('/') + 1);
+    if (stem.toLowerCase() !== lastSeg.toLowerCase()) continue;
 
-/** Derive display name from file path (prefer folder name if stem matches). */
-export function deriveDisplayName(filePath: string, projectId: string): string {
-  const parts = filePath.split('/');
-  const fileName = parts[parts.length - 1];
-  const stem = fileName.replace(/\.md$/, '');
-  const parentDir = parts.length >= 2 ? parts[parts.length - 2] : '';
-  if (stem.toLowerCase() === parentDir.toLowerCase()) return parentDir;
-  return stem || projectId;
-}
-
-/** Build projects map from file contents. */
-export function buildProjects(files: Map<string, { content: string; sha: string }>): Map<string, Project> {
-  const projects = new Map<string, Project>();
-
-  for (const [path, { content }] of files) {
-    if (!path.endsWith('.md')) continue;
-    const fm = parseFrontmatter(content);
-    const pid = fm.project_id;
-    if (!pid) continue;
-    projects.set(pid, {
-      projectId: pid,
-      filePath: path,
-      displayName: deriveDisplayName(path, pid),
-      parentId: fm.project_parent || null,
-      children: [],
-      noteFile: null,
-      frontmatter: fm,
+    // Found a project folder — dir. If we've already registered it (duplicate), skip.
+    if (projectsByPath.has(dir)) continue;
+    projectsByPath.set(dir, {
+      id: dir,
+      displayName: lastSeg,
+      folderPath: dir,
+      rootFilePath: entry.path,
+      rootFileSha: entry.sha,
+      noteFilePath: null,
+      noteFileSha: null,
+      parentId: null,
+      childrenIds: [],
     });
   }
 
-  // Link children
-  for (const proj of projects.values()) {
-    if (proj.parentId && projects.has(proj.parentId)) {
-      projects.get(proj.parentId)!.children.push(proj.projectId);
+  // 2. For each project, find its Notes.md / notes.md sibling.
+  //    Iterate the tree in order so "first-in-tree-order wins" is deterministic.
+  for (const entry of entries) {
+    if (!entry.path.endsWith('.md')) continue;
+    const slashIdx = entry.path.lastIndexOf('/');
+    if (slashIdx === -1) continue;
+    const dir = entry.path.slice(0, slashIdx);
+    const fileName = entry.path.slice(slashIdx + 1);
+    const stem = fileName.slice(0, -3);
+    if (stem.toLowerCase() !== 'notes') continue;
+    const proj = projectsByPath.get(dir);
+    if (!proj) continue; // notes.md in a non-project folder — ignored
+    if (proj.noteFilePath !== null) continue; // already have a notes file for this project
+    proj.noteFilePath = entry.path;
+    proj.noteFileSha = entry.sha;
+  }
+
+  // 3. Determine each project's parent by walking ancestor folders.
+  for (const proj of projectsByPath.values()) {
+    let cursor = proj.folderPath;
+    while (true) {
+      const slashIdx = cursor.lastIndexOf('/');
+      if (slashIdx === -1) break; // no more ancestors
+      cursor = cursor.slice(0, slashIdx);
+      if (projectsByPath.has(cursor)) {
+        proj.parentId = cursor;
+        break;
+      }
     }
   }
 
-  // Sort children by display name
-  for (const proj of projects.values()) {
-    proj.children.sort((a, b) => {
-      const pa = projects.get(a);
-      const pb = projects.get(b);
-      return (pa?.displayName || '').toLowerCase().localeCompare((pb?.displayName || '').toLowerCase());
+  // 4. Populate children arrays.
+  for (const proj of projectsByPath.values()) {
+    if (proj.parentId === null) continue;
+    const parent = projectsByPath.get(proj.parentId);
+    if (parent) parent.childrenIds.push(proj.id);
+  }
+
+  // 5. Sort children alphabetically by displayName for deterministic output.
+  const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
+  for (const proj of projectsByPath.values()) {
+    proj.childrenIds.sort((a, b) => {
+      const pa = projectsByPath.get(a);
+      const pb = projectsByPath.get(b);
+      return collator.compare(pa?.displayName ?? a, pb?.displayName ?? b);
     });
   }
 
-  return projects;
+  return projectsByPath;
 }
 
-/** Link *Notes.md files to projects via note_project_id frontmatter. */
-export function linkNotes(files: Map<string, { content: string; sha: string }>, projects: Map<string, Project>): void {
-  for (const [path, { content }] of files) {
-    if (!path.endsWith('.md')) continue;
-    const fm = parseFrontmatter(content);
-    const nid = fm.note_project_id;
-    if (!nid) continue;
-    const proj = projects.get(nid);
-    if (proj && !proj.noteFile) proj.noteFile = path;
+/**
+ * Resolve a user query against the project map.
+ *
+ * Resolution order:
+ *   1. Exact canonical id match (case-sensitive) — always wins if found.
+ *   2. Case-insensitive exact displayName match — wins only if unique.
+ *   3. Otherwise returns { project: null, ambiguous: [] } (not found) or
+ *      { project: null, ambiguous: [multiple] } (multiple displayName matches).
+ */
+export function resolveProject(
+  projects: Map<string, Project>,
+  query: string,
+): { project: Project | null; ambiguous: Project[] } {
+  if (!query) return { project: null, ambiguous: [] };
+
+  // 1. Exact canonical id.
+  const exact = projects.get(query);
+  if (exact) return { project: exact, ambiguous: [] };
+
+  // 2. Case-insensitive displayName match.
+  const q = query.toLowerCase();
+  const nameMatches: Project[] = [];
+  for (const proj of projects.values()) {
+    if (proj.displayName.toLowerCase() === q) nameMatches.push(proj);
   }
+  if (nameMatches.length === 1) return { project: nameMatches[0], ambiguous: [] };
+  if (nameMatches.length > 1) return { project: null, ambiguous: nameMatches };
+
+  return { project: null, ambiguous: [] };
 }
 
-/** Get root project IDs (no parent or parent not found). */
-export function rootsOf(projects: Map<string, Project>): string[] {
-  const roots: string[] = [];
-  for (const [pid, proj] of projects) {
-    if (!proj.parentId || !projects.has(proj.parentId)) roots.push(pid);
-  }
-  return roots.sort((a, b) => {
-    const pa = projects.get(a);
-    const pb = projects.get(b);
-    return (pa?.displayName || '').toLowerCase().localeCompare((pb?.displayName || '').toLowerCase());
-  });
-}
+// ───────────────────────────── Note-entry parsing ─────────────────────────────
+// These helpers are independent of the project model and are kept as-is.
 
-/** Date regex matching MM/DD/YY with optional trailing colon. */
 const DATE_RE = /^(\d{1,2})\/(\d{1,2})\/(\d{2}):?\s*$/;
 
 export interface NoteEntry {
@@ -117,11 +155,11 @@ export interface NoteEntry {
   content: string;
 }
 
-/** Parse dated entries from a Notes.md file body (after frontmatter). */
+/** Parse dated entries from a Notes.md body (after any frontmatter). */
 export function parseNoteEntries(text: string): NoteEntry[] {
   const lines = text.split('\n');
 
-  // Skip frontmatter
+  // Skip frontmatter if present.
   let bodyStart = 0;
   if (lines[0]?.trim() === '---') {
     for (let i = 1; i < lines.length; i++) {
@@ -171,7 +209,7 @@ export function parseNoteEntries(text: string): NoteEntry[] {
   return entries;
 }
 
-/** Format a date as M/D/YY (matching legacy format). */
+/** Format a Date as M/D/YY (matching the legacy note-entry header format). */
 export function formatDateShort(d: Date): string {
   const m = d.getMonth() + 1;
   const day = d.getDate();
