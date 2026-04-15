@@ -1,34 +1,36 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-import { getGitCredentials, getTree, getMultipleBlobs } from './git-api';
-import { buildProjects, linkNotes, rootsOf } from './vault-parser';
+import { getGitCredentials, getTree } from './git-api';
+import { buildProjectTree, type Project } from './vault-parser';
 
 export const OBSIDIAN_get_project_hierarchy: ExtensionToolDefinition = {
   name: 'OBSIDIAN_get_project_hierarchy',
   extensionName: 'obsidian',
   description:
-    'Return a simplified hierarchy of projects in the Obsidian vault: root project names and immediate child names.',
+    'Return a simplified hierarchy of projects in the Obsidian vault: root project names and immediate child names. Projects are identified by folder convention (a folder with FolderName/FolderName.md).',
   inputSchema: { type: 'object', properties: {} },
   handler: async (_args, ctx) => {
     const creds = getGitCredentials(ctx as ExtensionToolContext);
     if (!creds) return toolError('Missing credentials (github_token, github_repo)');
 
     try {
-      // 1 call: get full tree
+      // Single subrequest for all metadata.
       const tree = await getTree(creds);
-      const mdEntries = tree.filter((e) => e.path.endsWith('.md'));
+      const projects = buildProjectTree(tree);
 
-      // N calls (capped at 40): fetch md file contents via Blobs API
-      const fileContents = await getMultipleBlobs(creds, mdEntries);
+      // Collect root projects (parent null), sorted alphabetically.
+      const collator = new Intl.Collator(undefined, { sensitivity: 'base' });
+      const roots: Project[] = [];
+      for (const proj of projects.values()) {
+        if (proj.parentId === null) roots.push(proj);
+      }
+      roots.sort((a, b) => collator.compare(a.displayName, b.displayName));
 
-      const projects = buildProjects(fileContents);
-      linkNotes(fileContents, projects);
-
+      // Format as root name with indented immediate children.
       const lines: string[] = [];
-      for (const rootId of rootsOf(projects)) {
-        const root = projects.get(rootId)!;
+      for (const root of roots) {
         lines.push(root.displayName);
-        for (const childId of root.children) {
+        for (const childId of root.childrenIds) {
           const child = projects.get(childId);
           if (child) lines.push(`- ${child.displayName}`);
         }
