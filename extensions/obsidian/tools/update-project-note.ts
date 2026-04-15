@@ -1,17 +1,20 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-import { getGitCredentials, getTree, getMultipleBlobs, getFileContent, putFileContent } from './git-api';
-import { buildProjects, linkNotes, formatDateShort } from './vault-parser';
+import { getGitCredentials, getTree, getFileContent, putFileContent } from './git-api';
+import { buildProjectTree, resolveProject, formatDateShort } from './vault-parser';
 
 export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
   name: 'OBSIDIAN_update_project_note',
   extensionName: 'obsidian',
   description:
-    "Append content to today's dated note entry for a project. Creates file/entry if needed. Optionally place under a markdown section.",
+    "Append content to today's dated note entry for a project. Creates the Notes.md file and/or today's entry if needed. Optionally place content under a markdown section.",
   inputSchema: {
     type: 'object',
     properties: {
-      project_id: { type: 'string', description: 'Project ID or display name' },
+      project_id: {
+        type: 'string',
+        description: 'Project folder path or folder name (case-insensitive).',
+      },
       content: { type: 'string', description: 'Content to append' },
       section_id: {
         type: 'string',
@@ -27,60 +30,46 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
     if (!args.content) return toolError('content is required');
 
     try {
-      // 1 call: get tree
       const tree = await getTree(creds);
-      const mdEntries = tree.filter((e) => e.path.endsWith('.md'));
+      const projects = buildProjectTree(tree);
 
-      // Fetch md files to build project map (capped at 40)
-      const fileContents = await getMultipleBlobs(creds, mdEntries);
-      const projects = buildProjects(fileContents);
-      linkNotes(fileContents, projects);
-
-      // Resolve project
-      const query = args.project_id.toLowerCase();
-      let found: string | undefined;
-      for (const [pid, proj] of projects) {
-        if (pid.toLowerCase() === query || proj.displayName.toLowerCase() === query) {
-          found = pid;
-          break;
+      const { project, ambiguous } = resolveProject(projects, args.project_id);
+      if (!project) {
+        if (ambiguous.length > 0) {
+          const cands = ambiguous.map((p) => p.id).join(', ');
+          return toolError(`Ambiguous project "${args.project_id}". Candidates: ${cands}`);
         }
+        return toolError(`Project not found: ${args.project_id}`);
       }
-      if (!found) return toolError(`Project not found: ${args.project_id}`);
 
-      const proj = projects.get(found)!;
       const todayStr = formatDateShort(new Date());
-      let notePath = proj.noteFile;
+
+      // Decide notes path: existing or derived.
+      let notePath = project.noteFilePath;
       let createdFile = false;
       let existingContent = '';
       let existingSha: string | undefined;
 
       if (notePath) {
-        // Try to get from cached blobs first, fall back to Contents API for sha
-        const cached = fileContents.get(notePath);
-        if (cached) {
-          existingContent = cached.content;
-          existingSha = cached.sha;
+        // Fetch current Notes.md via Contents API for the Contents-API sha (putFileContent requires it).
+        const fresh = await getFileContent(creds, notePath);
+        if (fresh) {
+          existingContent = fresh.content;
+          existingSha = fresh.sha;
         } else {
-          const file = await getFileContent(creds, notePath);
-          if (file) {
-            existingContent = file.content;
-            existingSha = file.sha;
-          }
+          // Tree says file exists but Contents API returned 404 — treat as create.
+          notePath = null;
         }
       }
 
-      if (!notePath || !existingSha) {
-        // Derive notes path from project file path
-        const projDir = proj.filePath.split('/').slice(0, -1).join('/');
-        notePath = projDir ? `${projDir}/Notes.md` : 'Notes.md';
+      if (!notePath) {
+        notePath = `${project.folderPath}/Notes.md`;
         createdFile = true;
-        existingContent = `---\nnote_project_id: ${found}\n---\n\n`;
+        existingContent = '';
       }
 
-      // Parse existing content and build new content
+      // Split existing content into frontmatter + body. New files have no frontmatter.
       const lines = existingContent.split('\n');
-
-      // Find frontmatter end
       let bodyStart = 0;
       if (lines[0]?.trim() === '---') {
         for (let i = 1; i < lines.length; i++) {
@@ -93,7 +82,7 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
       const fmLines = lines.slice(0, bodyStart);
       const bodyLines = lines.slice(bodyStart);
 
-      // Find today's entry
+      // Find date headers in the body.
       const dateRe = /^(\d{1,2})\/(\d{1,2})\/(\d{2}):?\s*$/;
       let todayIdx = -1;
       const dateIndices: number[] = [];
@@ -104,12 +93,12 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
         }
       }
 
+      const contentLine = args.content.trimEnd();
       let createdEntry = false;
       let appended = false;
-      const contentLine = args.content.trimEnd();
 
       if (todayIdx === -1) {
-        // Insert new entry at top (before first date or end of body)
+        // Insert new dated entry at the top (before first existing date, or end of body if none).
         const insertAt = dateIndices.length > 0 ? dateIndices[0] : bodyLines.length;
         const newEntry = args.section_id
           ? [todayStr, '', `## ${args.section_id}`, '', contentLine]
@@ -117,7 +106,7 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
         bodyLines.splice(insertAt, 0, ...newEntry);
         createdEntry = true;
       } else {
-        // Find entry end
+        // Find the end of today's entry (next date or EOF).
         let entryEnd = bodyLines.length;
         for (const di of dateIndices) {
           if (di > todayIdx) {
@@ -157,17 +146,10 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
       }
 
       const newContent = [...fmLines, ...bodyLines].join('\n');
-      // putFileContent needs the Contents API sha, not the blob sha
-      // If we got sha from getFileContent it's correct; from blobs it may differ
-      // Re-fetch via Contents API to get the correct sha for update
-      if (existingSha && !createdFile) {
-        const fresh = await getFileContent(creds, notePath!);
-        if (fresh) existingSha = fresh.sha;
-      }
 
       await putFileContent(
         creds,
-        notePath!,
+        notePath,
         newContent,
         `note: ${todayStr} ${args.section_id ? `[${args.section_id}] ` : ''}update`,
         existingSha,
@@ -175,7 +157,7 @@ export const OBSIDIAN_update_project_note: ExtensionToolDefinition = {
 
       return toolSuccess({
         status: 'success',
-        project_id: found,
+        project_id: project.id,
         note_file: notePath,
         created_file: createdFile,
         created_entry: createdEntry,
