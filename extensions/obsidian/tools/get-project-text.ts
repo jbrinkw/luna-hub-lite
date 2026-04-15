@@ -1,16 +1,20 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-import { getGitCredentials, getTree, getMultipleBlobs, getBlobContent } from './git-api';
-import { buildProjects, linkNotes } from './vault-parser';
+import { getGitCredentials, getTree, getBlobContent } from './git-api';
+import { buildProjectTree, resolveProject } from './vault-parser';
 
 export const OBSIDIAN_get_project_text: ExtensionToolDefinition = {
   name: 'OBSIDIAN_get_project_text',
   extensionName: 'obsidian',
-  description: 'Return the root project page text and note page text for a given project_id or display name.',
+  description:
+    'Return the root project page text and note page text for a given project. The project argument is either its folder path (e.g. "Luna/CoachByte") or its folder name (e.g. "CoachByte") if unique in the vault.',
   inputSchema: {
     type: 'object',
     properties: {
-      project_id: { type: 'string', description: 'Project ID or display name to look up' },
+      project_id: {
+        type: 'string',
+        description: 'Project folder path or folder name (case-insensitive).',
+      },
     },
     required: ['project_id'],
   },
@@ -20,57 +24,36 @@ export const OBSIDIAN_get_project_text: ExtensionToolDefinition = {
     if (!args.project_id) return toolError('project_id is required');
 
     try {
-      // 1 call: get full tree
       const tree = await getTree(creds);
-      const mdEntries = tree.filter((e) => e.path.endsWith('.md'));
+      const projects = buildProjectTree(tree);
 
-      // Fetch all md files to build project map (capped at 40)
-      const fileContents = await getMultipleBlobs(creds, mdEntries);
-      const projects = buildProjects(fileContents);
-      linkNotes(fileContents, projects);
-
-      // Resolve by project_id or display name (case-insensitive)
-      const query = args.project_id.toLowerCase();
-      let found: string | undefined;
-      for (const [pid, proj] of projects) {
-        if (pid.toLowerCase() === query || proj.displayName.toLowerCase() === query) {
-          found = pid;
-          break;
+      const { project, ambiguous } = resolveProject(projects, args.project_id);
+      if (!project) {
+        if (ambiguous.length > 0) {
+          const candidates = ambiguous.map((p) => p.id).join(', ');
+          return toolError(
+            `Ambiguous project "${args.project_id}" — multiple matches. Use the full path. Candidates: ${candidates}`,
+          );
         }
-      }
-      if (!found) return toolError(`Project not found: ${args.project_id}`);
-
-      const proj = projects.get(found)!;
-
-      // Get the project file content (may already be in fileContents)
-      let rootText: string | null = null;
-      const rootEntry = fileContents.get(proj.filePath);
-      if (rootEntry) {
-        rootText = rootEntry.content;
-      } else {
-        // Fetch individually if it wasn't in the capped batch
-        const treeEntry = mdEntries.find((e) => e.path === proj.filePath);
-        if (treeEntry) rootText = await getBlobContent(creds, treeEntry.sha);
+        return toolError(`Project not found: ${args.project_id}`);
       }
 
-      // Get note file content
+      // Fetch root file content by SHA.
+      const rootText = await getBlobContent(creds, project.rootFileSha);
+
+      // Fetch notes file content by SHA if present.
       let noteText: string | null = null;
-      if (proj.noteFile) {
-        const noteEntry = fileContents.get(proj.noteFile);
-        if (noteEntry) {
-          noteText = noteEntry.content;
-        } else {
-          const treeEntry = mdEntries.find((e) => e.path === proj.noteFile);
-          if (treeEntry) noteText = await getBlobContent(creds, treeEntry.sha);
-        }
+      if (project.noteFileSha) {
+        noteText = await getBlobContent(creds, project.noteFileSha);
       }
 
       return toolSuccess({
         status: 'success',
-        project_id: found,
-        root_page_path: proj.filePath,
+        project_id: project.id,
+        display_name: project.displayName,
+        root_page_path: project.rootFilePath,
         root_page_text: rootText,
-        note_page_path: proj.noteFile,
+        note_page_path: project.noteFilePath,
         note_page_text: noteText,
       });
     } catch (e) {
