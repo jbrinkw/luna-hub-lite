@@ -1,7 +1,8 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { ToolDefinition, ExtensionToolDefinition } from '@luna-hub/app-tools';
 import { buildUserTools } from './registry';
 import { executeToolWithLogging, type LoggerCtx } from './tool-logger';
+import { handleStreaming } from './chat-streaming';
+import { loadVoiceAckSettings } from './voice-ack';
 import type { ChatCompletionRequest, ChatCompletionResponse, ChatMessage } from './openai-types';
 import { CORS_HEADERS } from './cors';
 
@@ -83,18 +84,20 @@ export async function handleChatCompletion(
 
   // 8. Check if streaming requested
   if (body.stream) {
-    return handleStreaming(
+    const voiceAck = await loadVoiceAckSettings(supabase, userId);
+    return handleStreaming({
       anthropic,
       model,
       system,
-      anthropicMessages,
-      anthropicTools,
+      initialMessages: anthropicMessages,
+      tools: anthropicTools,
       maxTokens,
       userTools,
       userId,
       supabase,
+      voiceAck,
       ctx,
-    );
+    });
   }
 
   // 9. Non-streaming agentic loop
@@ -204,142 +207,6 @@ export async function handleChatCompletion(
     totalOutputTokens,
     'max_tokens', // signals truncation (maps to finish_reason: 'length')
   );
-}
-
-/**
- * Handle streaming response.
- * Runs the agentic tool loop non-streaming, then emits the final text as a synthetic SSE stream.
- * This avoids double-generating the final response.
- */
-async function handleStreaming(
-  anthropic: Anthropic,
-  model: string,
-  system: string,
-  initialMessages: Anthropic.MessageParam[],
-  tools: Anthropic.Tool[],
-  maxTokens: number,
-  userTools: Record<string, ToolDefinition | ExtensionToolDefinition>,
-  userId: string,
-  supabase: any,
-  ctx?: LoggerCtx,
-): Promise<Response> {
-  const currentMessages = [...initialMessages];
-
-  // Run tool loop (non-streaming) until the last round needs a text response
-  for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
-    let response;
-    try {
-      response = await anthropic.messages.create({
-        model,
-        max_tokens: maxTokens,
-        system,
-        messages: currentMessages,
-        tools: tools.length > 0 ? tools : undefined,
-      });
-    } catch (err: any) {
-      const status = err?.status ?? 500;
-      const msg =
-        status === 401
-          ? 'Invalid Anthropic API key. Update it in Hub > AI Agent.'
-          : status === 429
-            ? 'Anthropic rate limit exceeded. Try again later.'
-            : `Anthropic API error: ${err?.message ?? 'Unknown error'}`;
-      return jsonError(msg, status === 401 ? 401 : status === 429 ? 429 : 502);
-    }
-
-    if (response.stop_reason !== 'tool_use') {
-      // Not a tool call — we have the final text. Emit it as a synthetic SSE stream.
-      const textContent = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-      return emitSyntheticStream(textContent, model);
-    }
-
-    const toolUseBlocks = response.content.filter((b): b is Anthropic.ToolUseBlock => b.type === 'tool_use');
-    if (toolUseBlocks.length === 0) {
-      const textContent = response.content
-        .filter((b): b is Anthropic.TextBlock => b.type === 'text')
-        .map((b) => b.text)
-        .join('');
-      return emitSyntheticStream(textContent || 'I was unable to complete the request.', model);
-    }
-
-    currentMessages.push({ role: 'assistant', content: response.content });
-
-    const toolResults: Anthropic.ToolResultBlockParam[] = [];
-    for (const toolUse of toolUseBlocks) {
-      const tool = userTools[toolUse.name];
-      if (!tool) {
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: `Unknown tool: ${toolUse.name}`,
-          is_error: true,
-        });
-        continue;
-      }
-      // executeToolWithLogging never throws — internal errors are caught,
-      // logged, and returned as a generic tool_error ToolResult.
-      const result = await executeToolWithLogging(
-        toolUse.name,
-        (toolUse.input ?? {}) as Record<string, unknown>,
-        tool,
-        userId,
-        supabase,
-        ctx,
-      );
-      toolResults.push({
-        type: 'tool_result',
-        tool_use_id: toolUse.id,
-        content: result.content
-          .filter((c) => c.type === 'text')
-          .map((c) => c.text)
-          .join('\n'),
-        is_error: result.isError ?? false,
-      });
-    }
-    currentMessages.push({ role: 'user', content: toolResults });
-  }
-
-  // Exceeded max rounds
-  return emitSyntheticStream('I was unable to complete the request within the allowed number of steps.', model);
-}
-
-/**
- * Emit already-obtained text as a synthetic OpenAI SSE stream.
- * Sends the text in one chunk followed by [DONE].
- */
-function emitSyntheticStream(text: string, model: string): Response {
-  const completionId = `chatcmpl-${crypto.randomUUID()}`;
-  const created = Math.floor(Date.now() / 1000);
-  const encoder = new TextEncoder();
-
-  const body = [
-    `data: ${JSON.stringify({
-      id: completionId,
-      object: 'chat.completion.chunk',
-      created,
-      model,
-      choices: [{ index: 0, delta: { role: 'assistant', content: text }, finish_reason: null }],
-    })}\n\n`,
-    `data: ${JSON.stringify({
-      id: completionId,
-      object: 'chat.completion.chunk',
-      created,
-      model,
-      choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-    })}\n\n`,
-    'data: [DONE]\n\n',
-  ].join('');
-
-  return new Response(encoder.encode(body), {
-    headers: {
-      'Content-Type': 'text/event-stream',
-      'Cache-Control': 'no-cache',
-      ...CORS_HEADERS,
-    },
-  });
 }
 
 /**
