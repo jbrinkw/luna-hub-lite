@@ -456,6 +456,147 @@ describe('OBSIDIAN_update_project_note', () => {
   });
 });
 
+describe('OBSIDIAN_create_project', () => {
+  const handler = obsidianTools.OBSIDIAN_create_project.handler;
+
+  // Tight mock: tree → root existence probe → notes existence probe → PUT root → PUT notes.
+  function mockCreateFlow(
+    options: {
+      treePaths?: Array<{ path: string }>;
+      rootExists?: boolean;
+      notesExists?: boolean;
+    } = {},
+  ) {
+    mockFetch.mockReturnValueOnce(
+      mockFetchResponse({ tree: (options.treePaths ?? []).map((n) => ({ type: 'blob', ...n })) }),
+    );
+    // Root existence probe: 404 = doesn't exist
+    if (options.rootExists) {
+      mockFetch.mockReturnValueOnce(mockFetchResponse({ content: btoa('# existing'), sha: 'sha-root' }));
+    } else {
+      mockFetch.mockReturnValueOnce(mockFetchResponse({}, false, 404));
+    }
+    // Notes existence probe
+    if (options.notesExists) {
+      mockFetch.mockReturnValueOnce(
+        mockFetchResponse({ content: btoa('---\nnote_project_id: x\n---\n'), sha: 'sha-notes' }),
+      );
+    } else {
+      mockFetch.mockReturnValueOnce(mockFetchResponse({}, false, 404));
+    }
+    // PUT root + PUT notes
+    mockFetch.mockReturnValueOnce(mockFetchResponse({}, true, 200));
+    mockFetch.mockReturnValueOnce(mockFetchResponse({}, true, 200));
+  }
+
+  function putCalls() {
+    return mockFetch.mock.calls.filter(([, o]: any) => o?.method === 'PUT');
+  }
+
+  it('returns error when credentials are missing', async () => {
+    const result = await handler({ name: 'NewProject' }, emptyCredentialsCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects invalid names (path separators, reserved segments)', async () => {
+    for (const bad of ['', '   ', '..', '.', 'foo/bar', 'a<b', 'a|b']) {
+      mockFetch.mockReset();
+      const result = await handler({ name: bad }, obsidianCtx());
+      expect(result.isError).toBe(true);
+      expect(mockFetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it('creates root + notes at the vault root when no parent_id is given', async () => {
+    mockCreateFlow({ treePaths: [] });
+
+    const result = await handler({ name: 'NewProject' }, obsidianCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.status).toBe('success');
+    expect(parsed.project_id).toBe('NewProject');
+    expect(parsed.root_page_path).toBe('NewProject/NewProject.md');
+    expect(parsed.note_page_path).toBe('NewProject/Notes.md');
+    expect(parsed.created_notes).toBe(true);
+    expect(parsed.parent_id).toBeNull();
+
+    const puts = putCalls();
+    expect(puts.length).toBe(2);
+    const rootPut = puts[0];
+    const notesPut = puts[1];
+    expect(rootPut[0]).toContain('/contents/NewProject/NewProject.md');
+    expect(notesPut[0]).toContain('/contents/NewProject/Notes.md');
+    // Root file has the heading; notes file has the frontmatter
+    const rootBody = atob(JSON.parse(rootPut[1].body).content);
+    const notesBody = atob(JSON.parse(notesPut[1].body).content);
+    expect(rootBody).toContain('# NewProject');
+    expect(notesBody).toContain('note_project_id: NewProject');
+  });
+
+  it('nests under a parent project when parent_id is given (full path)', async () => {
+    mockCreateFlow({
+      treePaths: [{ path: 'Parent/Parent.md' }],
+    });
+
+    const result = await handler({ name: 'Child', parent_id: 'Parent' }, obsidianCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.project_id).toBe('Parent/Child');
+    expect(parsed.root_page_path).toBe('Parent/Child/Child.md');
+    expect(parsed.note_page_path).toBe('Parent/Child/Notes.md');
+    expect(parsed.parent_id).toBe('Parent');
+  });
+
+  it('writes the description into the root page when provided', async () => {
+    mockCreateFlow({ treePaths: [] });
+
+    await handler({ name: 'P1', description: 'A short blurb.' }, obsidianCtx());
+
+    const rootPut = putCalls()[0];
+    const rootBody = atob(JSON.parse(rootPut[1].body).content);
+    expect(rootBody).toContain('# P1');
+    expect(rootBody).toContain('A short blurb.');
+  });
+
+  it('refuses to clobber an existing project', async () => {
+    mockCreateFlow({ treePaths: [], rootExists: true });
+
+    const result = await handler({ name: 'Existing' }, obsidianCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Project already exists');
+    expect(putCalls().length).toBe(0);
+  });
+
+  it('skips Notes.md creation if it already exists', async () => {
+    mockCreateFlow({ treePaths: [], notesExists: true });
+
+    const result = await handler({ name: 'WithNotes' }, obsidianCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.created_notes).toBe(false);
+    // Only the root PUT should have fired.
+    expect(putCalls().length).toBe(1);
+  });
+
+  it('errors when parent_id cannot be resolved', async () => {
+    // Only tree + no probes (we should short-circuit before hitting Contents API)
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ tree: [] }));
+
+    const result = await handler({ name: 'Orphan', parent_id: 'DoesNotExist' }, obsidianCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Parent project not found');
+    expect(putCalls().length).toBe(0);
+  });
+});
+
 // ===========================================================================
 // Todoist
 // ===========================================================================
