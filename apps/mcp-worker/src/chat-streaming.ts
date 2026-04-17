@@ -1,6 +1,6 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { ToolDefinition, ExtensionToolDefinition } from '@luna-hub/app-tools';
-import { executeTool } from './tool-executor';
+import { executeToolWithLogging, type LoggerCtx } from './tool-logger';
 import { buildChunk, encodeDataLine, encodeComment, encodeDone, buildErrorChunk } from './sse';
 import type { VoiceAckSettings } from './voice-ack';
 import { CORS_HEADERS } from './cors';
@@ -19,6 +19,7 @@ export interface HandleStreamingParams {
   userId: string;
   supabase: any;
   voiceAck: VoiceAckSettings;
+  ctx?: LoggerCtx;
 }
 
 export function handleStreaming(params: HandleStreamingParams): Response {
@@ -69,13 +70,25 @@ async function runStreamingLoop(
   const { anthropic, model, system, tools, maxTokens, userTools, userId, supabase, voiceAck } = params;
 
   const writeChunk = (delta: Record<string, unknown>, finish_reason: string | null = null) => {
-    controller.enqueue(encodeDataLine(encoder, buildChunk(completionId, created, model, delta, finish_reason)));
+    try {
+      controller.enqueue(encodeDataLine(encoder, buildChunk(completionId, created, model, delta, finish_reason)));
+    } catch {
+      /* stream already closed */
+    }
   };
   const writeError = (message: string) => {
-    controller.enqueue(encodeDataLine(encoder, buildErrorChunk(message)));
+    try {
+      controller.enqueue(encodeDataLine(encoder, buildErrorChunk(message)));
+    } catch {
+      /* stream already closed */
+    }
   };
   const writeDone = () => {
-    controller.enqueue(encodeDone(encoder));
+    try {
+      controller.enqueue(encodeDone(encoder));
+    } catch {
+      /* stream already closed */
+    }
   };
 
   // Initial role chunk
@@ -153,31 +166,25 @@ async function runStreamingLoop(
             });
             continue;
           }
-          try {
-            const result = await executeTool(
-              toolUse.name,
-              (toolUse.input ?? {}) as Record<string, unknown>,
-              tool,
-              userId,
-              supabase,
-            );
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: toolUse.id,
-              content: result.content
-                .filter((c) => c.type === 'text')
-                .map((c) => c.text)
-                .join('\n'),
-              is_error: result.isError ?? false,
-            });
-          } catch (err: any) {
-            toolResults.push({
-              type: 'tool_result',
-              tool_use_id: toolUse.id,
-              content: `Tool error: ${err?.message ?? 'unknown'}`,
-              is_error: true,
-            });
-          }
+          // executeToolWithLogging never throws — internal errors are caught,
+          // logged, and returned as a generic tool_error ToolResult.
+          const result = await executeToolWithLogging(
+            toolUse.name,
+            (toolUse.input ?? {}) as Record<string, unknown>,
+            tool,
+            userId,
+            supabase,
+            params.ctx,
+          );
+          toolResults.push({
+            type: 'tool_result',
+            tool_use_id: toolUse.id,
+            content: result.content
+              .filter((c) => c.type === 'text')
+              .map((c) => c.text)
+              .join('\n'),
+            is_error: result.isError ?? false,
+          });
         }
         currentMessages.push({ role: 'user', content: toolResults });
         continue;
