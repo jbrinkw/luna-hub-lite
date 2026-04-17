@@ -514,3 +514,34 @@ describe('handleStreaming — voice ACK timer', () => {
     expect(contents[0]).toBe('Thinking ');
   });
 });
+
+describe('handleStreaming — client disconnect', () => {
+  it('aborts the Anthropic stream when the consumer cancels the response body', async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation((_body: any, opts: any) => {
+          capturedSignal = opts?.signal;
+          return createFakeStream({
+            events: [
+              // Very slow — simulate a stream that would never end unless aborted.
+              { type: 'text', delta: 'slow', delayMs: 5_000 },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+            signal: opts?.signal,
+          });
+        }),
+      },
+    } as any;
+
+    const response = handleStreaming({ ...baseParams, anthropic });
+    const reader = response.body!.getReader();
+    // Read the first chunk (role marker), then cancel.
+    await reader.read();
+    await reader.cancel();
+
+    // Give the abort microtask a moment to propagate.
+    await new Promise((r) => setTimeout(r, 10));
+    expect(capturedSignal?.aborted).toBe(true);
+  });
+});
