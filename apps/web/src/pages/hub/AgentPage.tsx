@@ -26,6 +26,11 @@ export function AgentPage() {
   const [keySaveSuccess, setKeySaveSuccess] = useState(false);
   const [promptSaveError, setPromptSaveError] = useState<string | null>(null);
   const [promptSaveSuccess, setPromptSaveSuccess] = useState(false);
+  const [voiceAckEnabledDraft, setVoiceAckEnabledDraft] = useState<boolean | null>(null);
+  const [voiceAckTextDraft, setVoiceAckTextDraft] = useState<string | null>(null);
+  const [voiceAckDelayDraft, setVoiceAckDelayDraft] = useState<number | null>(null);
+  const [voiceAckSaveError, setVoiceAckSaveError] = useState<string | null>(null);
+  const [voiceAckSaveSuccess, setVoiceAckSaveSuccess] = useState(false);
 
   const endpointUrl = `${import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/v1`;
 
@@ -43,6 +48,9 @@ export function AgentPage() {
       return {
         hasKey: row?.has_key ?? false,
         systemPrompt: row?.system_prompt || '',
+        voiceAckEnabled: row?.voice_ack_enabled ?? false,
+        voiceAckText: row?.voice_ack_text ?? 'Working on that…',
+        voiceAckDelayMs: row?.voice_ack_delay_ms ?? 1200,
       };
     },
     enabled: !!user,
@@ -50,6 +58,10 @@ export function AgentPage() {
 
   // Displayed prompt: user draft takes priority; falls back to server value once loaded
   const systemPrompt = systemPromptDraft ?? settings?.systemPrompt ?? '';
+
+  const voiceAckEnabled = voiceAckEnabledDraft ?? settings?.voiceAckEnabled ?? false;
+  const voiceAckText = voiceAckTextDraft ?? settings?.voiceAckText ?? 'Working on that…';
+  const voiceAckDelayMs = voiceAckDelayDraft ?? settings?.voiceAckDelayMs ?? 1200;
 
   // Save API key mutation
   const saveKeyMutation = useMutation({
@@ -96,6 +108,46 @@ export function AgentPage() {
     },
     onError: (err: Error) => setPromptSaveError(err.message),
   });
+
+  const saveVoiceAckMutation = useMutation({
+    mutationFn: async (payload: { enabled: boolean; text: string; delayMs: number }) => {
+      const { error } = await supabase.schema('hub').rpc('save_agent_voice_ack', {
+        p_enabled: payload.enabled,
+        p_text: payload.text,
+        p_delay_ms: payload.delayMs,
+      });
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      setVoiceAckEnabledDraft(null);
+      setVoiceAckTextDraft(null);
+      setVoiceAckDelayDraft(null);
+      setVoiceAckSaveSuccess(true);
+      queryClient.invalidateQueries({ queryKey: queryKeys.agentSettings(user!.id) });
+    },
+    onError: (err: Error) => setVoiceAckSaveError(err.message),
+  });
+
+  const handleSaveVoiceAck = () => {
+    setVoiceAckSaveError(null);
+    setVoiceAckSaveSuccess(false);
+    if (!voiceAckText.trim()) {
+      setVoiceAckSaveError('Voice ACK text is required');
+      return;
+    }
+    saveVoiceAckMutation.mutate({
+      enabled: voiceAckEnabled,
+      text: voiceAckText.trim(),
+      delayMs: voiceAckDelayMs,
+    });
+  };
+
+  const handleResetVoiceAck = () => {
+    setVoiceAckEnabledDraft(false);
+    setVoiceAckTextDraft('Working on that…');
+    setVoiceAckDelayDraft(1200);
+    setVoiceAckSaveSuccess(false);
+  };
 
   const handleCopyEndpoint = async () => {
     try {
@@ -260,6 +312,83 @@ export function AgentPage() {
             </div>
             {promptSaveError && <Alert variant="error">{promptSaveError}</Alert>}
             {promptSaveSuccess && <Alert variant="success">System prompt saved</Alert>}
+          </CardContent>
+        </Card>
+
+        {/* Voice Assist (filler during tool execution) */}
+        <Card>
+          <CardHeader>
+            <div className="flex items-center justify-between">
+              <CardTitle>Voice Assist</CardTitle>
+              <Badge variant={voiceAckEnabled ? 'success' : 'default'}>
+                {voiceAckEnabled ? 'Enabled' : 'Disabled'}
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-text-secondary">
+              When voice commands trigger tools that take a moment to run, Luna can speak a short filler phrase so your
+              voice device isn't sitting in silence. Real responses stream as soon as they're ready — the filler is
+              skipped when the answer comes back quickly.
+            </p>
+
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={voiceAckEnabled}
+                onChange={(e) => {
+                  setVoiceAckEnabledDraft(e.target.checked);
+                  setVoiceAckSaveSuccess(false);
+                }}
+              />
+              Speak a filler phrase while tools run
+            </label>
+
+            <Input
+              label="Filler phrase"
+              type="text"
+              maxLength={200}
+              value={voiceAckText}
+              onChange={(e) => {
+                setVoiceAckTextDraft(e.target.value);
+                setVoiceAckSaveSuccess(false);
+              }}
+              placeholder="Working on that…"
+            />
+
+            <Input
+              label="Delay before filler (milliseconds)"
+              type="number"
+              min={0}
+              max={5000}
+              step={100}
+              value={voiceAckDelayMs}
+              onChange={(e) => {
+                setVoiceAckDelayDraft(Math.max(0, Math.min(5000, Number(e.target.value) || 0)));
+                setVoiceAckSaveSuccess(false);
+              }}
+            />
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleSaveVoiceAck}
+                loading={saveVoiceAckMutation.isPending}
+                disabled={saveVoiceAckMutation.isPending}
+                size="sm"
+              >
+                Save
+              </Button>
+              <Button
+                variant="secondary"
+                size="sm"
+                onClick={handleResetVoiceAck}
+                disabled={saveVoiceAckMutation.isPending}
+              >
+                Reset to Defaults
+              </Button>
+            </div>
+            {voiceAckSaveError && <Alert variant="error">{voiceAckSaveError}</Alert>}
+            {voiceAckSaveSuccess && <Alert variant="success">Voice Assist saved</Alert>}
           </CardContent>
         </Card>
       </div>
