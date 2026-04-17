@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
   chefbyte: {
     Tables: {
       food_logs: {
@@ -858,6 +853,9 @@ export type Database = {
           system_prompt: string | null
           updated_at: string
           user_id: string
+          voice_ack_delay_ms: number
+          voice_ack_enabled: boolean
+          voice_ack_text: string
         }
         Insert: {
           anthropic_key_encrypted?: string | null
@@ -865,6 +863,9 @@ export type Database = {
           system_prompt?: string | null
           updated_at?: string
           user_id: string
+          voice_ack_delay_ms?: number
+          voice_ack_enabled?: boolean
+          voice_ack_text?: string
         }
         Update: {
           anthropic_key_encrypted?: string | null
@@ -872,6 +873,9 @@ export type Database = {
           system_prompt?: string | null
           updated_at?: string
           user_id?: string
+          voice_ack_delay_ms?: number
+          voice_ack_enabled?: boolean
+          voice_ack_text?: string
         }
         Relationships: []
       }
@@ -947,6 +951,39 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_tool_logs: {
+        Row: {
+          created_at: string
+          duration_ms: number
+          error_message: string | null
+          id: number
+          status: string
+          tool_args: Json
+          tool_name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          duration_ms: number
+          error_message?: string | null
+          id?: number
+          status: string
+          tool_args?: Json
+          tool_name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number
+          error_message?: string | null
+          id?: number
+          status?: string
+          tool_args?: Json
+          tool_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -1009,11 +1046,22 @@ export type Database = {
         Returns: {
           has_key: boolean
           system_prompt: string
+          voice_ack_delay_ms: number
+          voice_ack_enabled: boolean
+          voice_ack_text: string
         }[]
       }
       get_agent_system_prompt_admin: {
         Args: { p_user_id: string }
         Returns: string
+      }
+      get_agent_voice_ack_admin: {
+        Args: { p_user_id: string }
+        Returns: {
+          voice_ack_delay_ms: number
+          voice_ack_enabled: boolean
+          voice_ack_text: string
+        }[]
       }
       get_extension_credentials: {
         Args: { p_extension_name: string }
@@ -1027,6 +1075,10 @@ export type Database = {
       save_agent_anthropic_key: { Args: { p_key: string }; Returns: undefined }
       save_agent_system_prompt: {
         Args: { p_prompt: string }
+        Returns: undefined
+      }
+      save_agent_voice_ack: {
+        Args: { p_delay_ms: number; p_enabled: boolean; p_text: string }
         Returns: undefined
       }
       save_extension_credentials: {
@@ -1116,23 +1168,6 @@ export type Database = {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: Json
       }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
-  public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      [_ in never]: never
     }
     Enums: {
       [_ in never]: never
@@ -1273,7 +1308,5 @@ export const Constants = {
   private: {
     Enums: {},
   },
-  public: {
-    Enums: {},
-  },
 } as const
+
