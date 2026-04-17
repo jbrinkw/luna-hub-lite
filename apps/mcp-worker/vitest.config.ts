@@ -15,6 +15,7 @@ export default defineConfig({
       'src/__tests__/tool-logger.test.ts',
       'src/__tests__/tool-executor.test.ts',
       'src/__tests__/sse.test.ts',
+      'src/__tests__/voice-ack.test.ts',
     ],
     environment: 'node',
     testTimeout: 30_000,
