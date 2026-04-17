@@ -123,10 +123,11 @@ describe('handleStreaming — tool rounds', () => {
       },
     };
 
+    let secondCallArgs: any = null;
     let callIndex = 0;
     const anthropic = {
       messages: {
-        stream: vi.fn().mockImplementation(() => {
+        stream: vi.fn().mockImplementation((args: any) => {
           callIndex++;
           if (callIndex === 1) {
             return createFakeStream({
@@ -136,6 +137,7 @@ describe('handleStreaming — tool rounds', () => {
               ],
             });
           }
+          secondCallArgs = args;
           return createFakeStream({
             events: [
               { type: 'text', delta: 'Sorry, that failed.' },
@@ -156,13 +158,26 @@ describe('handleStreaming — tool rounds', () => {
 
     expect(chunks.some((c: any) => c.choices[0].delta.content === 'Sorry, that failed.')).toBe(true);
     expect(chunks[chunks.length - 1].choices[0].finish_reason).toBe('stop');
+
+    // Verify the tool_result block sent back to Anthropic on the second call
+    // records the error (is_error=true) with a meaningful message.
+    const lastMsg = secondCallArgs.messages[secondCallArgs.messages.length - 1];
+    expect(lastMsg.role).toBe('user');
+    expect(lastMsg.content).toHaveLength(1);
+    expect(lastMsg.content[0]).toMatchObject({
+      type: 'tool_result',
+      tool_use_id: 'tu_1',
+      is_error: true,
+    });
+    expect(lastMsg.content[0].content).toMatch(/An internal error occurred|Tool error|boom/);
   });
 
   it('handles unknown tool name with is_error tool_result, loop continues', async () => {
+    let secondCallArgs: any = null;
     let callIndex = 0;
     const anthropic = {
       messages: {
-        stream: vi.fn().mockImplementation(() => {
+        stream: vi.fn().mockImplementation((args: any) => {
           callIndex++;
           if (callIndex === 1) {
             return createFakeStream({
@@ -172,6 +187,7 @@ describe('handleStreaming — tool rounds', () => {
               ],
             });
           }
+          secondCallArgs = args;
           return createFakeStream({
             events: [
               { type: 'text', delta: 'no such tool' },
@@ -186,17 +202,32 @@ describe('handleStreaming — tool rounds', () => {
     const events = await readSse(response);
     const chunks = dataChunks(events);
     expect(chunks[chunks.length - 1].choices[0].finish_reason).toBe('stop');
+
+    // Verify the unknown-tool tool_result block is shaped correctly.
+    const lastMsg = secondCallArgs.messages[secondCallArgs.messages.length - 1];
+    expect(lastMsg.role).toBe('user');
+    expect(lastMsg.content).toHaveLength(1);
+    expect(lastMsg.content[0]).toMatchObject({
+      type: 'tool_result',
+      tool_use_id: 'tu_1',
+      content: 'Unknown tool: NOPE',
+      is_error: true,
+    });
   });
 
   it('executes two parallel tool_use blocks serially and sends results in one user message', async () => {
     const calls: string[] = [];
+    const timings: { tool: string; startedAt: number; endedAt: number }[] = [];
     const userTools = {
       A: {
         name: 'A',
         description: '',
         inputSchema: { type: 'object' as const, properties: {} },
         handler: async () => {
+          const startedAt = Date.now();
           calls.push('A');
+          await new Promise((r) => setTimeout(r, 50));
+          timings.push({ tool: 'A', startedAt, endedAt: Date.now() });
           return { content: [{ type: 'text' as const, text: 'a-result' }] };
         },
       },
@@ -205,7 +236,9 @@ describe('handleStreaming — tool rounds', () => {
         description: '',
         inputSchema: { type: 'object' as const, properties: {} },
         handler: async () => {
+          const startedAt = Date.now();
           calls.push('B');
+          timings.push({ tool: 'B', startedAt, endedAt: Date.now() });
           return { content: [{ type: 'text' as const, text: 'b-result' }] };
         },
       },
@@ -251,6 +284,12 @@ describe('handleStreaming — tool rounds', () => {
     expect(lastMsg.content).toHaveLength(2);
     expect(lastMsg.content[0].tool_use_id).toBe('tu_1');
     expect(lastMsg.content[1].tool_use_id).toBe('tu_2');
+
+    // Serial execution: B's start must be after A's end (minus small scheduling slack).
+    // With Promise.all this would fail — both would start within microseconds of each other.
+    const aRun = timings.find((t) => t.tool === 'A')!;
+    const bRun = timings.find((t) => t.tool === 'B')!;
+    expect(bRun.startedAt).toBeGreaterThanOrEqual(aRun.endedAt - 5);
   });
 });
 
@@ -343,12 +382,14 @@ describe('handleStreaming — stop reasons and errors', () => {
 
 describe('handleStreaming — voice ACK timer', () => {
   it('does NOT emit ACK when voice_ack_enabled=false even with long silence', async () => {
+    // Use a short delayMs (10ms) that WOULD fire before the text delta (100ms)
+    // if the `enabled` guard were removed. This makes the guard falsifiable.
     const anthropic = {
       messages: {
         stream: vi.fn().mockImplementation(() =>
           createFakeStream({
             events: [
-              { type: 'text', delta: 'slow', delayMs: 50 },
+              { type: 'text', delta: 'slow', delayMs: 100 },
               { type: 'stop', reason: 'end_turn' },
             ],
           }),
@@ -356,10 +397,14 @@ describe('handleStreaming — voice ACK timer', () => {
       },
     } as any;
 
-    const response = handleStreaming({ ...baseParams, anthropic, voiceAck: DEFAULT_VOICE_ACK });
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      voiceAck: { enabled: false, text: 'SHOULD_NOT_APPEAR', delayMs: 10 },
+    });
     const chunks = dataChunks(await readSse(response));
     const contents = chunks.map((c: any) => c.choices[0]?.delta?.content).filter(Boolean);
-    expect(contents).not.toContain('Working on that… ');
+    expect(contents).not.toContain('SHOULD_NOT_APPEAR ');
     expect(contents).toContain('slow');
   });
 
@@ -512,6 +557,71 @@ describe('handleStreaming — voice ACK timer', () => {
       .map((c: any) => c.choices[0]?.delta?.content)
       .filter((x: any) => typeof x === 'string' && x.length > 0);
     expect(contents[0]).toBe('Thinking ');
+  });
+});
+
+describe('handleStreaming — keepalive', () => {
+  it('emits SSE keepalive comments every 15s during long tool execution', async () => {
+    vi.useFakeTimers();
+
+    let resolveTool: (() => void) | undefined;
+    const userTools = {
+      SLOW: {
+        name: 'SLOW',
+        description: '',
+        inputSchema: { type: 'object' as const, properties: {} },
+        handler: async () => {
+          await new Promise<void>((r) => {
+            resolveTool = r;
+          });
+          return { content: [{ type: 'text' as const, text: 'done' }] };
+        },
+      },
+    };
+
+    let callIndex = 0;
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() => {
+          callIndex++;
+          if (callIndex === 1) {
+            return createFakeStream({
+              events: [
+                { type: 'tool_use', id: 'tu_1', name: 'SLOW', input: {} },
+                { type: 'stop', reason: 'tool_use' },
+              ],
+            });
+          }
+          return createFakeStream({
+            events: [
+              { type: 'text', delta: 'all set' },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          });
+        }),
+      },
+    } as any;
+
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      userTools: userTools as any,
+    });
+
+    // Drain the response in the background
+    const readPromise = readSse(response);
+
+    // Let microtasks flush, then advance past the 15s keepalive threshold
+    await vi.advanceTimersByTimeAsync(20_000);
+
+    // Release the tool handler so the stream can complete
+    resolveTool?.();
+    await vi.advanceTimersByTimeAsync(100);
+
+    vi.useRealTimers();
+    const events = await readPromise;
+    const keepalives = events.filter((e: any) => e.kind === 'comment' && e.text === 'keepalive');
+    expect(keepalives.length).toBeGreaterThanOrEqual(1);
   });
 });
 
