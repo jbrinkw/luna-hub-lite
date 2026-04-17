@@ -49,3 +49,207 @@ describe('handleStreaming — direct text', () => {
     expect(events[events.length - 1]).toEqual({ kind: 'done' });
   });
 });
+
+describe('handleStreaming — tool rounds', () => {
+  function makeUserTool(name: string, handler: (args: any) => any) {
+    return {
+      name,
+      description: 'test',
+      inputSchema: { type: 'object' as const, properties: {} },
+      handler: async (args: any) => ({ content: [{ type: 'text', text: JSON.stringify(await handler(args)) }] }),
+    };
+  }
+
+  it('executes tool_use, feeds result back, streams round-2 text', async () => {
+    const calls: any[] = [];
+    const userTools = {
+      FOO: makeUserTool('FOO', (args) => {
+        calls.push(args);
+        return { ok: true };
+      }),
+    };
+
+    let callIndex = 0;
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() => {
+          callIndex++;
+          if (callIndex === 1) {
+            return createFakeStream({
+              events: [
+                { type: 'text', delta: 'Let me check… ' },
+                { type: 'tool_use', id: 'tu_1', name: 'FOO', input: { x: 1 } },
+                { type: 'stop', reason: 'tool_use' },
+              ],
+            });
+          }
+          return createFakeStream({
+            events: [
+              { type: 'text', delta: 'Done.' },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          });
+        }),
+      },
+    } as any;
+
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      userTools: userTools as any,
+    });
+    const events = await readSse(response);
+    const chunks = dataChunks(events);
+
+    // role, "Let me check… ", "Done.", finish stop, [DONE]
+    const contents = chunks
+      .map((c: any) => c.choices[0].delta.content)
+      .filter((x: unknown) => typeof x === 'string' && x.length > 0);
+    expect(contents).toEqual(['Let me check… ', 'Done.']);
+    expect(chunks[chunks.length - 1].choices[0].finish_reason).toBe('stop');
+    expect(calls).toEqual([{ x: 1 }]);
+    expect(anthropic.messages.stream).toHaveBeenCalledTimes(2);
+  });
+
+  it('records tool error and continues loop when tool handler throws', async () => {
+    const userTools = {
+      FOO: {
+        name: 'FOO',
+        description: 'test',
+        inputSchema: { type: 'object' as const, properties: {} },
+        handler: async () => {
+          throw new Error('boom');
+        },
+      },
+    };
+
+    let callIndex = 0;
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() => {
+          callIndex++;
+          if (callIndex === 1) {
+            return createFakeStream({
+              events: [
+                { type: 'tool_use', id: 'tu_1', name: 'FOO', input: {} },
+                { type: 'stop', reason: 'tool_use' },
+              ],
+            });
+          }
+          return createFakeStream({
+            events: [
+              { type: 'text', delta: 'Sorry, that failed.' },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          });
+        }),
+      },
+    } as any;
+
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      userTools: userTools as any,
+    });
+    const events = await readSse(response);
+    const chunks = dataChunks(events);
+
+    expect(chunks.some((c: any) => c.choices[0].delta.content === 'Sorry, that failed.')).toBe(true);
+    expect(chunks[chunks.length - 1].choices[0].finish_reason).toBe('stop');
+  });
+
+  it('handles unknown tool name with is_error tool_result, loop continues', async () => {
+    let callIndex = 0;
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() => {
+          callIndex++;
+          if (callIndex === 1) {
+            return createFakeStream({
+              events: [
+                { type: 'tool_use', id: 'tu_1', name: 'NOPE', input: {} },
+                { type: 'stop', reason: 'tool_use' },
+              ],
+            });
+          }
+          return createFakeStream({
+            events: [
+              { type: 'text', delta: 'no such tool' },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          });
+        }),
+      },
+    } as any;
+
+    const response = handleStreaming({ ...baseParams, anthropic });
+    const events = await readSse(response);
+    const chunks = dataChunks(events);
+    expect(chunks[chunks.length - 1].choices[0].finish_reason).toBe('stop');
+  });
+
+  it('executes two parallel tool_use blocks serially and sends results in one user message', async () => {
+    const calls: string[] = [];
+    const userTools = {
+      A: {
+        name: 'A',
+        description: '',
+        inputSchema: { type: 'object' as const, properties: {} },
+        handler: async () => {
+          calls.push('A');
+          return { content: [{ type: 'text' as const, text: 'a-result' }] };
+        },
+      },
+      B: {
+        name: 'B',
+        description: '',
+        inputSchema: { type: 'object' as const, properties: {} },
+        handler: async () => {
+          calls.push('B');
+          return { content: [{ type: 'text' as const, text: 'b-result' }] };
+        },
+      },
+    };
+
+    let secondCallArgs: any = null;
+    let callIndex = 0;
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation((args: any) => {
+          callIndex++;
+          if (callIndex === 1) {
+            return createFakeStream({
+              events: [
+                { type: 'tool_use', id: 'tu_1', name: 'A', input: {} },
+                { type: 'tool_use', id: 'tu_2', name: 'B', input: {} },
+                { type: 'stop', reason: 'tool_use' },
+              ],
+            });
+          }
+          secondCallArgs = args;
+          return createFakeStream({
+            events: [
+              { type: 'text', delta: 'both done' },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          });
+        }),
+      },
+    } as any;
+
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      userTools: userTools as any,
+    });
+    await readSse(response);
+
+    expect(calls).toEqual(['A', 'B']);
+    // Second Anthropic call's last message is a user message with two tool_result blocks
+    const lastMsg = secondCallArgs.messages[secondCallArgs.messages.length - 1];
+    expect(lastMsg.role).toBe('user');
+    expect(lastMsg.content).toHaveLength(2);
+    expect(lastMsg.content[0].tool_use_id).toBe('tu_1');
+    expect(lastMsg.content[1].tool_use_id).toBe('tu_2');
+  });
+});
