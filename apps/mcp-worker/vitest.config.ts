@@ -14,6 +14,7 @@ export default defineConfig({
       'src/__tests__/obsidian-parser.test.ts',
       'src/__tests__/tool-logger.test.ts',
       'src/__tests__/tool-executor.test.ts',
+      'src/__tests__/sse.test.ts',
     ],
     environment: 'node',
     testTimeout: 30_000,
