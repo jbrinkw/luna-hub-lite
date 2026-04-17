@@ -32,6 +32,20 @@ Account management, MCP server configuration, and extension management. Minimal 
 - Per-extension settings forms (API credentials, configuration)
 - Extensions can be enabled without credentials — first tool call without credentials returns `isError: true` with instructions to configure in Hub. Credential validation on save is a future feature.
 
+### AI Agent
+
+The `/hub/agent` page configures the OpenAI-compatible `/v1/chat/completions` endpoint used by Home Assistant Voice Preview and similar clients. It shows the base URL (`https://mcp.lunahub.dev/v1`), stores the user's Anthropic API key (encrypted via pgcrypto vault), and lets the user customize the system prompt used for every request.
+
+#### Voice Assist
+
+A card on the Agent page that controls optional filler phrases for voice streaming:
+
+- **Enable** toggles filler emission during slow tool execution.
+- **Filler phrase** (≤200 chars) is emitted verbatim when the delay expires without a real token having been streamed.
+- **Delay** (0–5000 ms) is the silence threshold. Keep it long enough that fast responses skip the filler, short enough that voice users don't perceive a hang.
+
+The filler is only ever spoken via `POST /v1/chat/completions` streaming responses. It has no effect on non-streaming requests or on the Luna chat UI.
+
 ## Shared Components
 
 ### AuthGuard
@@ -73,4 +87,4 @@ A catch-all `*` route inside the authenticated layout renders a "Page not found"
 
 - Desktop-optimized layout with side navigation
 - Responsive for narrower viewports
-- Pages: Account, Apps, Tools, Extensions, MCP Settings
+- Pages: Account, Apps, Tools, Extensions, MCP Settings, AI Agent

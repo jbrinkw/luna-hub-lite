@@ -98,6 +98,20 @@ Default locations (Fridge, Pantry, Freezer) are seeded per user on ChefByte acti
 - `chefbyte.products`: `calories_per_serving >= 0`, `protein_per_serving >= 0`, `carbs_per_serving >= 0`, `fat_per_serving >= 0`
 - `coachbyte.planned_sets`: `target_reps >= 0 OR target_reps IS NULL`, `target_load >= 0 OR target_load IS NULL`
 
+### `hub.agent_settings` — voice-ack columns (migration 20260416020000)
+
+Opt-in filler phrase emitted during slow tool execution over `POST /v1/chat/completions` streaming responses (Home Assistant Voice Preview):
+
+- `voice_ack_enabled` BOOLEAN NOT NULL DEFAULT FALSE — opt-in toggle for filler emission during voice streaming
+- `voice_ack_text` TEXT NOT NULL DEFAULT 'Working on that…' — filler phrase (CHECK `char_length(voice_ack_text) <= 200`)
+- `voice_ack_delay_ms` INTEGER NOT NULL DEFAULT 1200 — delay (ms) before emitting filler (CHECK `voice_ack_delay_ms BETWEEN 0 AND 5000`)
+
+Associated RPCs:
+
+- `hub.save_agent_voice_ack(p_enabled BOOLEAN, p_text TEXT, p_delay_ms INTEGER)` — user-facing voice-ack update (authenticated, SECURITY DEFINER, keyed on `auth.uid()`)
+- `hub.get_agent_voice_ack_admin(p_user_id UUID)` — service-role read used by the MCP Worker on each `/v1/chat/completions` request
+- `hub.get_agent_settings()` — now also returns voice-ack fields (`has_key`, `system_prompt`, `voice_ack_enabled`, `voice_ack_text`, `voice_ack_delay_ms`)
+
 ## Day Boundary System
 
 A single PostgreSQL function computes the "logical date" for any timestamp:

@@ -266,10 +266,31 @@ Go to **Hub > AI Agent** to configure:
 - `max_tokens` capped at 8192
 - `tools` field ignored — tools are built server-side from user's enabled tools
 
-### Home Assistant Setup
+## Home Assistant Voice Preview
 
-1. Install [extended_openai_conversation](https://github.com/jekalmin/extended_openai_conversation) via HACS
-2. Add integration in HA: Settings > Devices & Services > Add Integration
-3. Set **Base URL** to `https://mcp.lunahub.dev/v1`
-4. Set **API Key** to your Luna Hub API key (`lh_...` from Hub > MCP Settings)
-5. Assign as conversation agent in your voice pipeline
+Luna Hub's `/v1/chat/completions` endpoint is OpenAI-compatible. Home Assistant's HACS `extended_openai_conversation` integration consumes it directly, which lets the Home Assistant Voice Preview Edition (VoicePE) speak through Luna.
+
+### Setup
+
+1. Install `extended_openai_conversation` from HACS in your Home Assistant instance.
+2. Add the integration (Settings → Devices & Services → Add Integration → Extended OpenAI Conversation).
+3. Set:
+   - **Base URL**: `https://mcp.lunahub.dev/v1`
+   - **API Key**: a Luna Hub API key (create one at `/hub/settings` → MCP API Keys). OAuth/JWT also works.
+   - **Model**: any string (the endpoint always uses Claude Haiku 4.5).
+4. In Settings → Voice Assistants, create or edit your Assist pipeline and set the Conversation Agent to the new Extended OpenAI entry.
+5. Assign the pipeline to your Voice PE device.
+
+### How streaming works
+
+The endpoint emits standard OpenAI SSE chunks token-by-token as Claude generates them. Server-side tool execution is invisible to HA — it appears as a normal streaming response with occasional keepalive comments.
+
+### Voice ACK (optional filler)
+
+Voice commands that require tool execution ("turn on the kitchen lights") can cause a perceptible 1–2 s silence before TTS speaks, because Luna needs to call Home Assistant, get the result, then ask Claude to phrase the reply. You can opt into a short filler phrase ("Working on that…") that plays only when the first real token is late.
+
+Configure in Luna Hub → AI Agent → Voice Assist:
+
+- **Enabled**: off by default. Turn on for voice use.
+- **Filler phrase**: any short string (≤200 chars). Default "Working on that…".
+- **Delay**: how long to wait (ms) before emitting the filler. Default 1200 ms. Fast responses cancel the filler; you'll never hear it on a direct answer.
