@@ -39,6 +39,10 @@ export function createFakeStream(opts: FakeStreamOptions) {
   }
 
   (async () => {
+    // Yield a microtask so the caller can register listeners (e.g. `stream.on('text', ...)`)
+    // before we start emitting events. Matches real Anthropic SDK stream behavior where
+    // events are asynchronous relative to the stream() call returning.
+    await Promise.resolve();
     const content: Anthropic.ContentBlock[] = [];
     let stopReason: Anthropic.Message['stop_reason'] = null;
     try {
