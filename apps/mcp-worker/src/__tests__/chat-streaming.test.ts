@@ -340,3 +340,177 @@ describe('handleStreaming — stop reasons and errors', () => {
     expect(errPayload.error.message).toMatch(/rate limit/i);
   });
 });
+
+describe('handleStreaming — voice ACK timer', () => {
+  it('does NOT emit ACK when voice_ack_enabled=false even with long silence', async () => {
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() =>
+          createFakeStream({
+            events: [
+              { type: 'text', delta: 'slow', delayMs: 50 },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          }),
+        ),
+      },
+    } as any;
+
+    const response = handleStreaming({ ...baseParams, anthropic, voiceAck: DEFAULT_VOICE_ACK });
+    const chunks = dataChunks(await readSse(response));
+    const contents = chunks.map((c: any) => c.choices[0]?.delta?.content).filter(Boolean);
+    expect(contents).not.toContain('Working on that… ');
+    expect(contents).toContain('slow');
+  });
+
+  it('cancels ACK when real text arrives before delay expires', async () => {
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() =>
+          createFakeStream({
+            events: [
+              // Text arrives almost immediately; ACK delay is 100ms.
+              { type: 'text', delta: 'fast', delayMs: 10 },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          }),
+        ),
+      },
+    } as any;
+
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      voiceAck: { enabled: true, text: 'One moment', delayMs: 100 },
+    });
+    const chunks = dataChunks(await readSse(response));
+    const contents = chunks.map((c: any) => c.choices[0]?.delta?.content).filter(Boolean);
+    expect(contents).toEqual(['fast']);
+  });
+
+  it('emits ACK when no text arrives within delay', async () => {
+    // Round 1: pure tool_use (no text). Tool takes 200ms.
+    // Round 2: text arrives at 250ms total. ACK delay is 100ms -> fires.
+    const userTools = {
+      SLOW: {
+        name: 'SLOW',
+        description: '',
+        inputSchema: { type: 'object' as const, properties: {} },
+        handler: async () => {
+          await new Promise((r) => setTimeout(r, 200));
+          return { content: [{ type: 'text' as const, text: 'ok' }] };
+        },
+      },
+    };
+
+    let callIndex = 0;
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() => {
+          callIndex++;
+          if (callIndex === 1) {
+            return createFakeStream({
+              events: [
+                { type: 'tool_use', id: 'tu_1', name: 'SLOW', input: {} },
+                { type: 'stop', reason: 'tool_use' },
+              ],
+            });
+          }
+          return createFakeStream({
+            events: [
+              { type: 'text', delta: 'all set' },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          });
+        }),
+      },
+    } as any;
+
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      userTools: userTools as any,
+      voiceAck: { enabled: true, text: 'One moment', delayMs: 100 },
+    });
+    const chunks = dataChunks(await readSse(response));
+    const contents = chunks
+      .map((c: any) => c.choices[0]?.delta?.content)
+      .filter((x: any) => typeof x === 'string' && x.length > 0);
+    expect(contents[0]).toBe('One moment ');
+    expect(contents).toContain('all set');
+  });
+
+  it('ACK fires at most once even if multiple tool rounds stay silent', async () => {
+    const userTools = {
+      X: {
+        name: 'X',
+        description: '',
+        inputSchema: { type: 'object' as const, properties: {} },
+        // Each tool call takes 60ms, pushing first text past the 50ms ACK delay.
+        handler: async () => {
+          await new Promise((r) => setTimeout(r, 60));
+          return { content: [{ type: 'text' as const, text: 'ok' }] };
+        },
+      },
+    };
+
+    let callIndex = 0;
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() => {
+          callIndex++;
+          if (callIndex <= 2) {
+            return createFakeStream({
+              events: [
+                { type: 'tool_use', id: `tu_${callIndex}`, name: 'X', input: {} },
+                { type: 'stop', reason: 'tool_use' },
+              ],
+            });
+          }
+          return createFakeStream({
+            events: [
+              { type: 'text', delta: 'finally' },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          });
+        }),
+      },
+    } as any;
+
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      userTools: userTools as any,
+      voiceAck: { enabled: true, text: 'Hold on', delayMs: 50 },
+    });
+    const chunks = dataChunks(await readSse(response));
+    const acks = chunks.filter((c: any) => c.choices[0]?.delta?.content === 'Hold on ');
+    expect(acks).toHaveLength(1);
+  });
+
+  it('always appends a trailing space to ACK text', async () => {
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() =>
+          createFakeStream({
+            events: [
+              { type: 'text', delta: 'reply', delayMs: 100 },
+              { type: 'stop', reason: 'end_turn' },
+            ],
+          }),
+        ),
+      },
+    } as any;
+
+    const response = handleStreaming({
+      ...baseParams,
+      anthropic,
+      voiceAck: { enabled: true, text: 'Thinking', delayMs: 10 },
+    });
+    const chunks = dataChunks(await readSse(response));
+    const contents = chunks
+      .map((c: any) => c.choices[0]?.delta?.content)
+      .filter((x: any) => typeof x === 'string' && x.length > 0);
+    expect(contents[0]).toBe('Thinking ');
+  });
+});
