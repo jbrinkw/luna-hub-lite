@@ -1,7 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ToolDefinition, ExtensionToolDefinition } from '@luna-hub/app-tools';
 import { buildUserTools } from './registry';
-import { executeTool } from './tool-executor';
+import { executeToolWithLogging, type LoggerCtx } from './tool-logger';
 import type { ChatCompletionRequest, ChatCompletionResponse, ChatMessage } from './openai-types';
 import { CORS_HEADERS } from './cors';
 
@@ -15,7 +15,12 @@ const DEFAULT_SYSTEM_PROMPT = `You are Luna, a helpful voice assistant. You have
  * Handle an OpenAI-compatible POST /v1/chat/completions request.
  * Runs an agentic loop with Claude Haiku and the user's enabled tools.
  */
-export async function handleChatCompletion(request: Request, userId: string, supabase: any): Promise<Response> {
+export async function handleChatCompletion(
+  request: Request,
+  userId: string,
+  supabase: any,
+  ctx?: LoggerCtx,
+): Promise<Response> {
   // 1. Parse request body
   let body: ChatCompletionRequest;
   try {
@@ -88,6 +93,7 @@ export async function handleChatCompletion(request: Request, userId: string, sup
       userTools,
       userId,
       supabase,
+      ctx,
     );
   }
 
@@ -156,31 +162,25 @@ export async function handleChatCompletion(request: Request, userId: string, sup
           continue;
         }
 
-        try {
-          const result = await executeTool(
-            toolUse.name,
-            (toolUse.input ?? {}) as Record<string, unknown>,
-            tool,
-            userId,
-            supabase,
-          );
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: toolUse.id,
-            content: result.content
-              .filter((c) => c.type === 'text')
-              .map((c) => c.text)
-              .join('\n'),
-            is_error: result.isError ?? false,
-          });
-        } catch (err: any) {
-          toolResults.push({
-            type: 'tool_result',
-            tool_use_id: toolUse.id,
-            content: `Tool error: ${err.message}`,
-            is_error: true,
-          });
-        }
+        // executeToolWithLogging never throws — internal errors are caught,
+        // logged, and returned as a generic tool_error ToolResult.
+        const result = await executeToolWithLogging(
+          toolUse.name,
+          (toolUse.input ?? {}) as Record<string, unknown>,
+          tool,
+          userId,
+          supabase,
+          ctx,
+        );
+        toolResults.push({
+          type: 'tool_result',
+          tool_use_id: toolUse.id,
+          content: result.content
+            .filter((c) => c.type === 'text')
+            .map((c) => c.text)
+            .join('\n'),
+          is_error: result.isError ?? false,
+        });
       }
 
       currentMessages.push({ role: 'user', content: toolResults });
@@ -221,6 +221,7 @@ async function handleStreaming(
   userTools: Record<string, ToolDefinition | ExtensionToolDefinition>,
   userId: string,
   supabase: any,
+  ctx?: LoggerCtx,
 ): Promise<Response> {
   const currentMessages = [...initialMessages];
 
@@ -278,31 +279,25 @@ async function handleStreaming(
         });
         continue;
       }
-      try {
-        const result = await executeTool(
-          toolUse.name,
-          (toolUse.input ?? {}) as Record<string, unknown>,
-          tool,
-          userId,
-          supabase,
-        );
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: result.content
-            .filter((c) => c.type === 'text')
-            .map((c) => c.text)
-            .join('\n'),
-          is_error: result.isError ?? false,
-        });
-      } catch (err: any) {
-        toolResults.push({
-          type: 'tool_result',
-          tool_use_id: toolUse.id,
-          content: `Tool error: ${err.message}`,
-          is_error: true,
-        });
-      }
+      // executeToolWithLogging never throws — internal errors are caught,
+      // logged, and returned as a generic tool_error ToolResult.
+      const result = await executeToolWithLogging(
+        toolUse.name,
+        (toolUse.input ?? {}) as Record<string, unknown>,
+        tool,
+        userId,
+        supabase,
+        ctx,
+      );
+      toolResults.push({
+        type: 'tool_result',
+        tool_use_id: toolUse.id,
+        content: result.content
+          .filter((c) => c.type === 'text')
+          .map((c) => c.text)
+          .join('\n'),
+        is_error: result.isError ?? false,
+      });
     }
     currentMessages.push({ role: 'user', content: toolResults });
   }

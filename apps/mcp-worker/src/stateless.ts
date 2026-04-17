@@ -1,7 +1,6 @@
-import { toolError } from '@luna-hub/app-tools';
 import { JsonRpcRequest, JsonRpcResponse, jsonRpcSuccess, jsonRpcError, McpToolSchema } from './protocol';
 import { buildUserTools } from './registry';
-import { executeTool } from './tool-executor';
+import { executeToolWithLogging, type LoggerCtx } from './tool-logger';
 
 /**
  * Handle a single MCP JSON-RPC request statelessly.
@@ -11,6 +10,7 @@ export async function handleStatelessMcp(
   rpc: JsonRpcRequest,
   userId: string,
   supabase: any,
+  ctx?: LoggerCtx,
 ): Promise<JsonRpcResponse | null> {
   switch (rpc.method) {
     case 'initialize': {
@@ -60,13 +60,10 @@ export async function handleStatelessMcp(
         return jsonRpcError(rpc.id, -32602, `Unknown tool: ${toolName}`);
       }
 
-      try {
-        const result = await executeTool(toolName, toolArgs, tool, userId, supabase);
-        return jsonRpcSuccess(rpc.id, result);
-      } catch (err: any) {
-        console.error(`Tool ${toolName} error:`, err);
-        return jsonRpcSuccess(rpc.id, toolError('An internal error occurred executing the tool.'));
-      }
+      // executeToolWithLogging never throws — exceptions are caught, logged,
+      // and converted to a generic tool_error ToolResult.
+      const result = await executeToolWithLogging(toolName, toolArgs, tool, userId, supabase, ctx);
+      return jsonRpcSuccess(rpc.id, result);
     }
 
     default:

@@ -21,7 +21,7 @@ function jsonResponse(body: Record<string, unknown>, status: number): Response {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
 
     // CORS preflight
@@ -116,7 +116,7 @@ export default {
         });
       }
 
-      return handleChatCompletion(request, userId, supabase);
+      return handleChatCompletion(request, userId, supabase, ctx);
     }
 
     // GET /v1/models — return available model list (for client compatibility)
@@ -183,7 +183,7 @@ export default {
       const incomingSessionId = request.headers.get('Mcp-Session-Id');
       const sessionId = incomingSessionId || crypto.randomUUID();
 
-      const response = await handleStatelessMcp(rpc, userId, supabase);
+      const response = await handleStatelessMcp(rpc, userId, supabase, ctx);
 
       if (response === null) {
         return new Response('', {
@@ -265,7 +265,7 @@ export default {
       const incomingSessionId = request.headers.get('Mcp-Session-Id');
       const sessionId = incomingSessionId || crypto.randomUUID();
 
-      const response = await handleStatelessMcp(rpc, userId, supabase);
+      const response = await handleStatelessMcp(rpc, userId, supabase, ctx);
 
       if (response === null) {
         return new Response('', {
