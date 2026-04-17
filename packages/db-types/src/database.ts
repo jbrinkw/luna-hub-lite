@@ -191,6 +191,7 @@ export type Database = {
           logical_date: string
           meal_id: string
           meal_prep: boolean
+          meal_type: string | null
           product_id: string | null
           recipe_id: string | null
           servings: number
@@ -202,6 +203,7 @@ export type Database = {
           logical_date: string
           meal_id?: string
           meal_prep?: boolean
+          meal_type?: string | null
           product_id?: string | null
           recipe_id?: string | null
           servings?: number
@@ -213,6 +215,7 @@ export type Database = {
           logical_date?: string
           meal_id?: string
           meal_prep?: boolean
+          meal_type?: string | null
           product_id?: string | null
           recipe_id?: string | null
           servings?: number
@@ -553,6 +556,11 @@ export type Database = {
         Args: { p_ingredients: Json; p_recipe_id: string }
         Returns: undefined
       }
+      unmark_meal_done: { Args: { p_meal_id: string }; Returns: Json }
+      unmark_meal_done_admin: {
+        Args: { p_meal_id: string; p_user_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
@@ -625,6 +633,7 @@ export type Database = {
         Row: {
           created_at: string
           logical_date: string | null
+          notes: string | null
           plan_date: string
           plan_id: string
           summary: string | null
@@ -633,6 +642,7 @@ export type Database = {
         Insert: {
           created_at?: string
           logical_date?: string | null
+          notes?: string | null
           plan_date: string
           plan_id?: string
           summary?: string | null
@@ -641,6 +651,7 @@ export type Database = {
         Update: {
           created_at?: string
           logical_date?: string | null
+          notes?: string | null
           plan_date?: string
           plan_id?: string
           summary?: string | null
@@ -833,33 +844,41 @@ export type Database = {
       [_ in never]: never
     }
   }
-  graphql_public: {
-    Tables: {
-      [_ in never]: never
-    }
-    Views: {
-      [_ in never]: never
-    }
-    Functions: {
-      graphql: {
-        Args: {
-          extensions?: Json
-          operationName?: string
-          query?: string
-          variables?: Json
-        }
-        Returns: Json
-      }
-    }
-    Enums: {
-      [_ in never]: never
-    }
-    CompositeTypes: {
-      [_ in never]: never
-    }
-  }
   hub: {
     Tables: {
+      agent_settings: {
+        Row: {
+          anthropic_key_encrypted: string | null
+          created_at: string
+          system_prompt: string | null
+          updated_at: string
+          user_id: string
+          voice_ack_delay_ms: number
+          voice_ack_enabled: boolean
+          voice_ack_text: string
+        }
+        Insert: {
+          anthropic_key_encrypted?: string | null
+          created_at?: string
+          system_prompt?: string | null
+          updated_at?: string
+          user_id: string
+          voice_ack_delay_ms?: number
+          voice_ack_enabled?: boolean
+          voice_ack_text?: string
+        }
+        Update: {
+          anthropic_key_encrypted?: string | null
+          created_at?: string
+          system_prompt?: string | null
+          updated_at?: string
+          user_id?: string
+          voice_ack_delay_ms?: number
+          voice_ack_enabled?: boolean
+          voice_ack_text?: string
+        }
+        Relationships: []
+      }
       api_keys: {
         Row: {
           api_key_hash: string
@@ -932,6 +951,39 @@ export type Database = {
         }
         Relationships: []
       }
+      mcp_tool_logs: {
+        Row: {
+          created_at: string
+          duration_ms: number
+          error_message: string | null
+          id: number
+          status: string
+          tool_args: Json
+          tool_name: string
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          duration_ms: number
+          error_message?: string | null
+          id?: number
+          status: string
+          tool_args?: Json
+          tool_name: string
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          duration_ms?: number
+          error_message?: string | null
+          id?: number
+          status?: string
+          tool_args?: Json
+          tool_name?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           created_at: string
@@ -977,40 +1029,40 @@ export type Database = {
         }
         Relationships: []
       }
-      agent_settings: {
-        Row: {
-          id: string
-          user_id: string
-          anthropic_key_encrypted: string | null
-          system_prompt: string | null
-          created_at: string
-          updated_at: string
-        }
-        Insert: {
-          id?: string
-          user_id: string
-          anthropic_key_encrypted?: string | null
-          system_prompt?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Update: {
-          id?: string
-          user_id?: string
-          anthropic_key_encrypted?: string | null
-          system_prompt?: string | null
-          created_at?: string
-          updated_at?: string
-        }
-        Relationships: []
-      }
     }
     Views: {
       [_ in never]: never
     }
     Functions: {
       activate_app: { Args: { p_app_name: string }; Returns: undefined }
+      clear_agent_anthropic_key: { Args: never; Returns: undefined }
       deactivate_app: { Args: { p_app_name: string }; Returns: undefined }
+      get_agent_anthropic_key_admin: {
+        Args: { p_user_id: string }
+        Returns: string
+      }
+      get_agent_settings: {
+        Args: never
+        Returns: {
+          has_key: boolean
+          system_prompt: string
+          voice_ack_delay_ms: number
+          voice_ack_enabled: boolean
+          voice_ack_text: string
+        }[]
+      }
+      get_agent_system_prompt_admin: {
+        Args: { p_user_id: string }
+        Returns: string
+      }
+      get_agent_voice_ack_admin: {
+        Args: { p_user_id: string }
+        Returns: {
+          voice_ack_delay_ms: number
+          voice_ack_enabled: boolean
+          voice_ack_text: string
+        }[]
+      }
       get_extension_credentials: {
         Args: { p_extension_name: string }
         Returns: string
@@ -1020,17 +1072,19 @@ export type Database = {
         Returns: string
       }
       reset_demo_dates: { Args: never; Returns: undefined }
+      save_agent_anthropic_key: { Args: { p_key: string }; Returns: undefined }
+      save_agent_system_prompt: {
+        Args: { p_prompt: string }
+        Returns: undefined
+      }
+      save_agent_voice_ack: {
+        Args: { p_delay_ms: number; p_enabled: boolean; p_text: string }
+        Returns: undefined
+      }
       save_extension_credentials: {
         Args: { p_credentials_json: string; p_extension_name: string }
         Returns: undefined
       }
-      get_agent_settings: {
-        Args: Record<PropertyKey, never>
-        Returns: { has_key: boolean; system_prompt: string }[]
-      }
-      save_agent_anthropic_key: { Args: { p_key: string }; Returns: undefined }
-      clear_agent_anthropic_key: { Args: never; Returns: undefined }
-      save_agent_system_prompt: { Args: { p_prompt: string }; Returns: undefined }
     }
     Enums: {
       [_ in never]: never
@@ -1039,7 +1093,7 @@ export type Database = {
       [_ in never]: never
     }
   }
-  public: {
+  private: {
     Tables: {
       [_ in never]: never
     }
@@ -1047,7 +1101,73 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      activate_app: {
+        Args: { p_app_name: string; p_user_id: string }
+        Returns: undefined
+      }
+      complete_next_set: {
+        Args: {
+          p_actual_load: number
+          p_actual_reps: number
+          p_plan_id: string
+          p_user_id: string
+        }
+        Returns: {
+          rest_seconds: number
+        }[]
+      }
+      consume_product: {
+        Args: {
+          p_log_macros: boolean
+          p_logical_date: string
+          p_product_id: string
+          p_qty: number
+          p_unit: string
+          p_user_id: string
+        }
+        Returns: Json
+      }
+      deactivate_app: {
+        Args: { p_app_name: string; p_user_id: string }
+        Returns: undefined
+      }
+      ensure_daily_plan: {
+        Args: { p_day: string; p_user_id: string }
+        Returns: Json
+      }
+      get_daily_macros: {
+        Args: { p_logical_date: string; p_user_id: string }
+        Returns: Json
+      }
+      get_extension_credentials: {
+        Args: { p_extension_name: string; p_user_id: string }
+        Returns: string
+      }
+      get_logical_date: {
+        Args: { day_start_hour: number; ts: string; tz: string }
+        Returns: string
+      }
+      mark_meal_done: {
+        Args: { p_meal_id: string; p_user_id: string }
+        Returns: Json
+      }
+      reset_demo_dates: { Args: never; Returns: undefined }
+      save_extension_credentials: {
+        Args: {
+          p_credentials_json: string
+          p_extension_name: string
+          p_user_id: string
+        }
+        Returns: undefined
+      }
+      save_recipe_ingredients: {
+        Args: { p_ingredients: Json; p_recipe_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      unmark_meal_done: {
+        Args: { p_meal_id: string; p_user_id: string }
+        Returns: Json
+      }
     }
     Enums: {
       [_ in never]: never
@@ -1182,13 +1302,10 @@ export const Constants = {
   coachbyte: {
     Enums: {},
   },
-  graphql_public: {
-    Enums: {},
-  },
   hub: {
     Enums: {},
   },
-  public: {
+  private: {
     Enums: {},
   },
 } as const
