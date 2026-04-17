@@ -253,3 +253,90 @@ describe('handleStreaming — tool rounds', () => {
     expect(lastMsg.content[1].tool_use_id).toBe('tu_2');
   });
 });
+
+describe('handleStreaming — stop reasons and errors', () => {
+  it('maps stop_reason=max_tokens to finish_reason=length', async () => {
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() =>
+          createFakeStream({
+            events: [
+              { type: 'text', delta: 'partial' },
+              { type: 'stop', reason: 'max_tokens' },
+            ],
+          }),
+        ),
+      },
+    } as any;
+
+    const response = handleStreaming({ ...baseParams, anthropic });
+    const chunks = dataChunks(await readSse(response));
+    expect(chunks[chunks.length - 1].choices[0].finish_reason).toBe('length');
+  });
+
+  it('emits error chunk + DONE when MAX_TOOL_ROUNDS exceeded', async () => {
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() =>
+          createFakeStream({
+            events: [
+              { type: 'tool_use', id: 'tu_1', name: 'X', input: {} },
+              { type: 'stop', reason: 'tool_use' },
+            ],
+          }),
+        ),
+      },
+    } as any;
+    const userTools = {
+      X: {
+        name: 'X',
+        description: '',
+        inputSchema: { type: 'object' as const, properties: {} },
+        handler: async () => ({ content: [{ type: 'text' as const, text: 'ok' }] }),
+      },
+    };
+
+    const response = handleStreaming({ ...baseParams, anthropic, userTools: userTools as any });
+    const events = await readSse(response);
+    const payloads = dataChunks(events);
+    const lastPayload = payloads[payloads.length - 1] as any;
+    expect(lastPayload).toEqual({ error: { message: 'Tool round limit exceeded', type: 'server_error' } });
+    expect(events[events.length - 1]).toEqual({ kind: 'done' });
+  });
+
+  it('emits Anthropic 401 as server_error chunk with actionable message', async () => {
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() =>
+          createFakeStream({
+            events: [{ type: 'error', error: Object.assign(new Error('unauthorized'), { status: 401 }) }],
+          }),
+        ),
+      },
+    } as any;
+
+    const response = handleStreaming({ ...baseParams, anthropic });
+    const events = await readSse(response);
+    const payloads = dataChunks(events) as any[];
+    const errPayload = payloads.find((p) => p.error);
+    expect(errPayload.error.message).toMatch(/Invalid Anthropic API key/);
+    expect(events[events.length - 1]).toEqual({ kind: 'done' });
+  });
+
+  it('emits rate-limit message on Anthropic 429', async () => {
+    const anthropic = {
+      messages: {
+        stream: vi.fn().mockImplementation(() =>
+          createFakeStream({
+            events: [{ type: 'error', error: Object.assign(new Error('rate'), { status: 429 }) }],
+          }),
+        ),
+      },
+    } as any;
+
+    const response = handleStreaming({ ...baseParams, anthropic });
+    const payloads = dataChunks(await readSse(response)) as any[];
+    const errPayload = payloads.find((p) => p.error);
+    expect(errPayload.error.message).toMatch(/rate limit/i);
+  });
+});
