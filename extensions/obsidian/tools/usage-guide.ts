@@ -25,7 +25,7 @@ Date: MM/DD/YY[:] (year = 2000+YY).
 - \`get_project_hierarchy\` — roots + immediate children.
 - \`get_project_text(project_id)\` — full root + Notes.md. Can be 100KB+; prefer date-range.
 - \`get_notes_by_date_range(start, end, project_id?)\` — MM/DD/YY, newest-first. 40-file cap (\`truncated\` flag); scope by project.
-- \`update_project_note(project_id, content, section_id?)\` — appends to today's entry; creates as needed.
+- \`update_project_note(project_id, content, section_id?, date?)\` — appends to that date's entry (default today). Repeat calls for the same date append into the existing entry (no new date header). Pass \`date\` (MM/DD/YY) to backdate; new backdated entries are placed chronologically (newest-first). Two blank lines trail every insert.
 
 ## Limits
 Branch hardcoded to \`main\`. Case-insensitive bare name, case-sensitive path. "Today" = server clock.

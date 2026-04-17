@@ -372,6 +372,88 @@ describe('OBSIDIAN_update_project_note', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Network failure');
   });
+
+  it('rejects invalid `date` arg', async () => {
+    mockObsidianVault([
+      { path: 'Projects/A/A.md', content: PROJECT_A_MD },
+      { path: 'Projects/A/Notes.md', content: NOTES_A_MD },
+    ]);
+
+    const result = await handler({ project_id: 'Projects/A', content: 'x', date: 'not-a-date' }, obsidianCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('MM/DD/YY');
+  });
+
+  // Tight mock builder: tree → Notes.md contents → PUT. Avoids mockObsidianVault
+  // which queues extra per-file content responses that can get consumed out of
+  // order by getFileContent.
+  function mockUpdateFlow(existing: string) {
+    mockFetch.mockReturnValueOnce(
+      mockFetchResponse({
+        tree: [
+          { type: 'blob', path: 'Projects/A/A.md' },
+          { type: 'blob', path: 'Projects/A/Notes.md' },
+        ],
+      }),
+    );
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ content: btoa(existing), sha: 'sha-notes' }));
+    mockFetch.mockReturnValueOnce(mockFetchResponse({}, true, 200));
+  }
+
+  function putBodyText(): string {
+    const putCall = mockFetch.mock.calls.find(([, o]: any) => o?.method === 'PUT');
+    return atob(JSON.parse((putCall as any)[1].body).content);
+  }
+
+  it('same-date repeat call appends inside the existing entry (no duplicate header)', async () => {
+    const existing = `---\nnote_project_id: a\n---\n\n4/14/26\nfirst entry\n`;
+    mockUpdateFlow(existing);
+
+    const result = await handler({ project_id: 'Projects/A', content: 'second entry', date: '4/14/26' }, obsidianCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.appended).toBe(true);
+    expect(parsed.created_entry).toBe(false);
+
+    const written = putBodyText();
+    const headerMatches = written.match(/^4\/14\/26$/gm) || [];
+    expect(headerMatches.length).toBe(1);
+    expect(written).toContain('first entry');
+    expect(written).toContain('second entry');
+  });
+
+  it('backdate inserts a new entry chronologically between existing dates', async () => {
+    const existing = `---\nnote_project_id: a\n---\n\n4/14/26\nnewer\n\n4/10/26\nolder\n`;
+    mockUpdateFlow(existing);
+
+    const result = await handler({ project_id: 'Projects/A', content: 'middle entry', date: '4/12/26' }, obsidianCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.created_entry).toBe(true);
+    expect(parsed.backdated).toBe(true);
+    expect(parsed.date_str).toBe('4/12/26');
+
+    const written = putBodyText();
+    const idx14 = written.indexOf('4/14/26');
+    const idx12 = written.indexOf('4/12/26');
+    const idx10 = written.indexOf('4/10/26');
+    expect(idx14).toBeGreaterThanOrEqual(0);
+    expect(idx12).toBeGreaterThan(idx14);
+    expect(idx10).toBeGreaterThan(idx12);
+  });
+
+  it('leaves two blank lines after every insert', async () => {
+    const existing = `---\nnote_project_id: a\n---\n\n4/14/26\nfirst\n`;
+    mockUpdateFlow(existing);
+
+    await handler({ project_id: 'Projects/A', content: 'second', date: '4/14/26' }, obsidianCtx());
+
+    const written = putBodyText();
+    expect(written).toMatch(/second\n\n\n/);
+  });
 });
 
 // ===========================================================================
