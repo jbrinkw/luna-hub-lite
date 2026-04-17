@@ -27,7 +27,8 @@ export async function executeTool(
   const toolCtx: ToolContext = { userId, supabase };
 
   if ('extensionName' in tool) {
-    const extensionName = (tool as ExtensionToolDefinition).extensionName;
+    const extTool = tool as ExtensionToolDefinition;
+    const extensionName = extTool.extensionName;
     if (!extensionName) {
       return toolError('Invalid extension tool definition');
     }
@@ -45,22 +46,24 @@ export async function executeTool(
       return toolError(`Configure ${extensionName} credentials in Hub settings.`);
     }
 
-    const { data: decryptedJson, error: decryptErr } = await supabase
-      .schema('hub')
-      .rpc('get_extension_credentials_admin', {
-        p_user_id: userId,
-        p_extension_name: extensionName,
-      });
+    let credentials: Record<string, string> = {};
+    if (extTool.requiresCredentials !== false) {
+      const { data: decryptedJson, error: decryptErr } = await supabase
+        .schema('hub')
+        .rpc('get_extension_credentials_admin', {
+          p_user_id: userId,
+          p_extension_name: extensionName,
+        });
 
-    if (decryptErr || !decryptedJson) {
-      return toolError(`Configure ${extensionName} credentials in Hub settings.`);
-    }
+      if (decryptErr || !decryptedJson) {
+        return toolError(`Configure ${extensionName} credentials in Hub settings.`);
+      }
 
-    let credentials: Record<string, string>;
-    try {
-      credentials = JSON.parse(decryptedJson);
-    } catch {
-      return toolError('Failed to parse extension credentials.');
+      try {
+        credentials = JSON.parse(decryptedJson);
+      } catch {
+        return toolError('Failed to parse extension credentials.');
+      }
     }
 
     const extCtx: ExtensionToolContext = { ...toolCtx, credentials };

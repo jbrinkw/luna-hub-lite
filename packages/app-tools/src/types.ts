@@ -19,6 +19,8 @@ export interface ToolResult {
 
 export interface ExtensionToolDefinition extends ToolDefinition {
   extensionName: string;
+  /** When false, the executor skips the credentials fetch and passes `credentials: {}`. Default true. */
+  requiresCredentials?: boolean;
 }
 
 export interface ExtensionToolContext extends ToolContext {

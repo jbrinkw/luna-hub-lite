@@ -9,7 +9,12 @@ try {
 
 export default defineConfig({
   test: {
-    include: ['src/__tests__/validate.test.ts', 'src/__tests__/obsidian-parser.test.ts'],
+    include: [
+      'src/__tests__/validate.test.ts',
+      'src/__tests__/obsidian-parser.test.ts',
+      'src/__tests__/tool-logger.test.ts',
+      'src/__tests__/tool-executor.test.ts',
+    ],
     environment: 'node',
     testTimeout: 30_000,
   },

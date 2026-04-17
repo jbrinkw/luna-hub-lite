@@ -1,0 +1,45 @@
+import type { ExtensionToolDefinition } from '@luna-hub/app-tools';
+import { toolSuccess } from '@luna-hub/app-tools';
+
+const GUIDE = `# Obsidian Vault
+
+## Model
+Project = folder F with F/F.md (stem = folder, case-insensitive). Canonical ID = full path from root (e.g. \`luna-personal-assistant/CoachByte\`); bare folder name works if unique else ambiguous error. Parent = nearest ancestor project; non-project folders are transparent.
+
+Notes.md = dated entries, newest-first:
+
+    ---
+    note_project_id: Foo
+    ---
+    4/14/26
+    ## optional section
+    body until next date
+
+Date: MM/DD/YY[:] (year = 2000+YY).
+
+## Content
+- **Projects** (builds): \`Eco AI\`, \`gamegenai\`, \`Home Assistant\`, \`luna-personal-assistant/{chefbyte,CoachByte,ProfessorByte,Universal Architecture}\`, \`Open Ethos\`, \`Project*\`. Technical.
+- **Journal** (personal): \`Journal/Notes.md\`, Day One import 9/7/24+. Diary, not work.
+
+## Tools
+- \`get_project_hierarchy\` — roots + immediate children.
+- \`get_project_text(project_id)\` — full root + Notes.md. Can be 100KB+; prefer date-range.
+- \`get_notes_by_date_range(start, end, project_id?)\` — MM/DD/YY, newest-first. 40-file cap (\`truncated\` flag); scope by project.
+- \`update_project_note(project_id, content, section_id?)\` — appends to today's entry; creates as needed.
+
+## Limits
+Branch hardcoded to \`main\`. Case-insensitive bare name, case-sensitive path. "Today" = server clock.
+`;
+
+export const OBSIDIAN_usage_guide: ExtensionToolDefinition = {
+  name: 'OBSIDIAN_usage_guide',
+  extensionName: 'obsidian',
+  requiresCredentials: false,
+  description:
+    'Obsidian vault primer. Call (no args) for full guide.\n\n' +
+    'Project = folder F containing F/F.md. Optional sibling Notes.md holds dated entries: MM/DD/YY headers, newest-first, body until next date. Projects nest; parent = nearest ancestor project.\n\n' +
+    "Content types: (1) projects = user's builds/ventures, technical notes; (2) Journal = personal diary (Day One import, 9/7/24+), same format different purpose — life entries, not work.\n\n" +
+    'Tools: OBSIDIAN_{get_project_hierarchy, get_project_text, get_notes_by_date_range, update_project_note}.',
+  inputSchema: { type: 'object', properties: {} },
+  handler: async () => toolSuccess({ guide: GUIDE }),
+};

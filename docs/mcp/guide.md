@@ -33,6 +33,16 @@ All tool handlers return structured responses. On failure, tools return `isError
 
 MVP note: mutating tools do **not** use idempotency keys yet. If a network timeout occurs and write status is unknown, the tool returns an error instructing the client to refresh state before retrying.
 
+## Tool Call Logging
+
+Every MCP tool invocation (through `tools/call` or the OpenAI-compatible `/v1/chat/completions` agentic loop) is logged to `hub.mcp_tool_logs`. Each row captures `user_id`, `tool_name`, `tool_args` (with top-level secret-looking keys redacted), `status` (`ok` | `tool_error` | `exception`), `error_message`, and `duration_ms`.
+
+- Writes use the service role and are fired-and-forgotten via `ctx.waitUntil` so latency on the hot path is unaffected.
+- A structured JSON line is also emitted to `console.log` (visible in `wrangler tail`) on every call, excluding `tool_args`.
+- RLS: users can read their own rows; only `service_role` can insert.
+- A failure partial index (`WHERE status <> 'ok'`) makes "recent failures for this user" queries cheap.
+- Logging never breaks the tool call — insert errors are swallowed and surfaced to `console.error` only.
+
 ## Tool Schema Loading
 
 MCP clients load tool schemas fresh on each connection. Tool schema changes take effect on the next client connection — no versioning or migration needed.
@@ -83,6 +93,7 @@ extensions/{name}/
   "description": "Read and write notes in your Obsidian vault via Git API",
   "required_secrets": ["github_token", "github_repo", "github_api_url"],
   "tools": [
+    "OBSIDIAN_usage_guide",
     "OBSIDIAN_get_project_hierarchy",
     "OBSIDIAN_get_project_text",
     "OBSIDIAN_get_notes_by_date_range",
@@ -90,6 +101,8 @@ extensions/{name}/
   ]
 }
 ```
+
+**Credentials opt-out:** An extension tool can set `requiresCredentials: false` on its definition to skip the credentials fetch (e.g., static-content tools like `OBSIDIAN_usage_guide`). The extension-enabled gate is still enforced; the handler receives `credentials: {}`.
 
 ### Extension Tool Execution
 
@@ -105,17 +118,19 @@ If credentials are missing or invalid, the tool returns `isError: true` with "Co
 
 ### Included Extensions
 
-| Extension      | Tools                                                                                    | External API                          |
-| -------------- | ---------------------------------------------------------------------------------------- | ------------------------------------- |
-| Obsidian       | Get project hierarchy, get project text, get notes by date range, update note            | GitHub/Gitea Git Trees + Contents API |
-| Todoist        | Get tasks, get task, create task, update task, complete task, get projects, get sections | Todoist REST API v1                   |
-| Home Assistant | Get devices, get entity status, turn on, turn off, TV remote                             | Home Assistant REST API               |
+| Extension      | Tools                                                                                      | External API                          |
+| -------------- | ------------------------------------------------------------------------------------------ | ------------------------------------- |
+| Obsidian       | Usage guide, get project hierarchy, get project text, get notes by date range, update note | GitHub/Gitea Git Trees + Contents API |
+| Todoist        | Get tasks, get task, create task, update task, complete task, get projects, get sections   | Todoist REST API v1                   |
+| Home Assistant | Get devices, get entity status, turn on, turn off, TV remote                               | Home Assistant REST API               |
 
 Additional extensions can be added by creating a new folder in `extensions/` with the tool definitions and config manifest. The MCP server Worker must be updated to import the new tools.
 
 ### Obsidian Extension — Folder Convention
 
 The Obsidian extension treats the vault's **folder structure** as the source of truth for the project hierarchy. No frontmatter is required or read.
+
+**Primer tool:** `OBSIDIAN_usage_guide` is a zero-op, zero-credential tool. Its description (always loaded in `tools/list`) carries the core vault model primer — what a project is, that `Journal/` is a personal-diary bucket distinct from project work, and the names of the four companion tools. Calling it returns a detailed guide with format specs, tool args, and limits. Intended as always-current context for MCP clients.
 
 **Project detection rule:** A folder is a project if and only if it contains a markdown file whose stem (filename without `.md`) matches the folder name, case-insensitive.
 

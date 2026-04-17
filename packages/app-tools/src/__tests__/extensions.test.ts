@@ -117,6 +117,35 @@ beforeEach(() => {
 // Obsidian
 // ===========================================================================
 
+describe('OBSIDIAN_usage_guide', () => {
+  const tool = obsidianTools.OBSIDIAN_usage_guide;
+
+  it('declares extensionName and opts out of credentials', () => {
+    expect(tool.extensionName).toBe('obsidian');
+    expect(tool.requiresCredentials).toBe(false);
+  });
+
+  it('returns a guide payload without making network calls', async () => {
+    const result = await tool.handler({}, { ...baseCtx, credentials: {} } as ExtensionToolContext);
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(typeof parsed.guide).toBe('string');
+    expect(parsed.guide).toContain('Project =');
+    expect(parsed.guide).toContain('Journal');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('mentions all four companion tools in the guide body', async () => {
+    const result = await tool.handler({}, { ...baseCtx, credentials: {} } as ExtensionToolContext);
+    const { guide } = JSON.parse(result.content[0].text) as { guide: string };
+    expect(guide).toContain('get_project_hierarchy');
+    expect(guide).toContain('get_project_text');
+    expect(guide).toContain('get_notes_by_date_range');
+    expect(guide).toContain('update_project_note');
+  });
+});
+
 describe('OBSIDIAN_get_project_hierarchy', () => {
   const handler = obsidianTools.OBSIDIAN_get_project_hierarchy.handler;
 
