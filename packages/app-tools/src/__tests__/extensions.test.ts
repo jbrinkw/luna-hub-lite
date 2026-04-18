@@ -852,6 +852,220 @@ describe('OBSIDIAN_patch_project_root', () => {
   });
 });
 
+describe('OBSIDIAN_get_morning_brief', () => {
+  const handler = obsidianTools.OBSIDIAN_get_morning_brief.handler;
+
+  // Helper: yyyy-mm-dd for today/offset, using local midnight.
+  function offsetDate(daysAgo: number): Date {
+    const d = new Date();
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - daysAgo);
+    return d;
+  }
+  function mmddyy(d: Date): string {
+    const m = d.getMonth() + 1;
+    const day = d.getDate();
+    const yy = String(d.getFullYear() % 100).padStart(2, '0');
+    return `${m}/${day}/${yy}`;
+  }
+  // URL-aware mock: keyed by sha for blob fetches, always returns the right tree for /git/trees.
+  // Order-independent so parallel fetches in the handler don't need careful queuing.
+  function mockMorningFlow(vault: { files: Array<{ path: string; content: string; sha?: string }> }) {
+    const files = vault.files;
+    const bySha = new Map<string, string>();
+    const treeEntries = files.map((f) => {
+      const sha = f.sha || `sha-${f.path.replace(/[/.]/g, '-')}`;
+      bySha.set(sha, f.content);
+      return { type: 'blob', path: f.path, sha };
+    });
+
+    // UTF-8 safe base64 (btoa alone rejects non-Latin1 chars like em-dash).
+    const utf8b64 = (s: string) => {
+      const bytes = new TextEncoder().encode(s);
+      let bin = '';
+      for (const b of bytes) bin += String.fromCharCode(b);
+      return btoa(bin);
+    };
+    mockFetch.mockImplementation((url: unknown) => {
+      if (typeof url !== 'string') return mockFetchResponse({}, false, 404);
+      if (url.includes('/git/trees/')) {
+        return mockFetchResponse({ tree: treeEntries });
+      }
+      const m = url.match(/\/git\/blobs\/([^/?]+)/);
+      if (m) {
+        const content = bySha.get(m[1]);
+        if (content === undefined) return mockFetchResponse({}, false, 404);
+        return mockFetchResponse({ content: utf8b64(content), encoding: 'base64' });
+      }
+      return mockFetchResponse({}, false, 404);
+    });
+  }
+
+  const ROOT_DOC = `# Morning Review
+
+## 5-Year Arc
+Top school PhD.
+
+## 2026
+- [ ] Submit paper
+
+## April 2026
+- [ ] Ship ChefByte v1 cloud
+
+## Week of 4/13/26
+- [ ] Ship barcode flow
+`;
+
+  it('returns error when credentials are missing', async () => {
+    const result = await handler({}, emptyCredentialsCtx());
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns a clear error pointing at create_project when Morning Review is missing', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ tree: [] }));
+
+    const result = await handler({}, obsidianCtx());
+    expect(result.isError).toBe(true);
+    const msg = result.content[0].text;
+    expect(msg).toContain('Morning Review');
+    expect(msg).toContain('not found');
+    expect(msg).toContain('OBSIDIAN_create_project');
+  });
+
+  it('returns root doc + recent_notes + routine_instructions on success', async () => {
+    const today = mmddyy(offsetDate(0));
+    const twoDaysAgo = mmddyy(offsetDate(2));
+    const notesContent = `---\nnote_project_id: Morning Review\n---\n\n${today}\nMorning Brief goes here.\n\n${twoDaysAgo}\nEarlier entry.\n`;
+    mockMorningFlow({
+      files: [
+        { path: 'Morning Review/Morning Review.md', content: ROOT_DOC },
+        { path: 'Morning Review/Notes.md', content: notesContent },
+      ],
+    });
+
+    const result = await handler({}, obsidianCtx());
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.status).toBe('success');
+    expect(parsed.project_id).toBe('Morning Review');
+    expect(parsed.root_doc.text).toContain('# Morning Review');
+    expect(parsed.root_doc.text).toContain('## 2026');
+    expect(parsed.recent_notes.window_days).toBe(7);
+    expect(Array.isArray(parsed.recent_notes.entries)).toBe(true);
+    expect(parsed.recent_notes.entries.length).toBeGreaterThanOrEqual(2);
+    expect(typeof parsed.routine_instructions).toBe('string');
+    expect(parsed.routine_instructions).toContain('MORNING ROUTINE INSTRUCTIONS');
+    expect(parsed.routine_instructions).toContain('STEP 1');
+  });
+
+  it('filters entries to the last 7 days (inclusive), newest-first', async () => {
+    const today = mmddyy(offsetDate(0));
+    const sixDaysAgo = mmddyy(offsetDate(6));
+    const eightDaysAgo = mmddyy(offsetDate(8));
+
+    const notesContent =
+      `---\nnote_project_id: Morning Review\n---\n\n` +
+      `${today}\nToday entry.\n\n` +
+      `${sixDaysAgo}\nSix days ago entry.\n\n` +
+      `${eightDaysAgo}\nOutside window — eight days ago.\n`;
+
+    mockMorningFlow({
+      files: [
+        { path: 'Morning Review/Morning Review.md', content: ROOT_DOC },
+        { path: 'Morning Review/Notes.md', content: notesContent },
+      ],
+    });
+
+    const result = await handler({}, obsidianCtx());
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    const entries = parsed.recent_notes.entries as Array<{
+      date: string;
+      content: string;
+      date_str: string;
+    }>;
+
+    // 8-days-ago entry must be out; today + 6-days-ago must be in
+    expect(entries.some((e) => e.content.includes('Outside window'))).toBe(false);
+    expect(entries.some((e) => e.content.includes('Today entry'))).toBe(true);
+    expect(entries.some((e) => e.content.includes('Six days ago entry'))).toBe(true);
+
+    // Newest-first
+    expect(entries[0].date >= entries[entries.length - 1].date).toBe(true);
+    const dates = entries.map((e) => e.date);
+    expect([...dates].sort((a, b) => b.localeCompare(a))).toEqual(dates);
+  });
+
+  it('pulls notes unscoped (from other projects too, not just Morning Review)', async () => {
+    const today = mmddyy(offsetDate(0));
+    const morningNotes = `---\nnote_project_id: Morning Review\n---\n\n${today}\nMR entry.\n`;
+    const journalNotes = `---\nnote_project_id: Journal\n---\n\n${today}\nJournal entry.\n`;
+    const coachNotes = `---\nnote_project_id: coach\n---\n\n${today}\nCoach entry.\n`;
+
+    mockMorningFlow({
+      files: [
+        { path: 'Morning Review/Morning Review.md', content: ROOT_DOC },
+        { path: 'Morning Review/Notes.md', content: morningNotes },
+        { path: 'Journal/Journal.md', content: '# Journal\n' },
+        { path: 'Journal/Notes.md', content: journalNotes },
+        { path: 'coach/coach.md', content: '# coach\n' },
+        { path: 'coach/Notes.md', content: coachNotes },
+      ],
+    });
+
+    const result = await handler({}, obsidianCtx());
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    const entries = parsed.recent_notes.entries as Array<{ file: string; content: string }>;
+
+    const fileSet = new Set(entries.map((e) => e.file));
+    expect(fileSet.has('Morning Review/Notes.md')).toBe(true);
+    expect(fileSet.has('Journal/Notes.md')).toBe(true);
+    expect(fileSet.has('coach/Notes.md')).toBe(true);
+  });
+
+  it('accepts a custom project_id', async () => {
+    const today = mmddyy(offsetDate(0));
+    const customRoot = `# Custom Daily\n\n## 2026\n- [ ] x\n`;
+    const customNotes = `---\nnote_project_id: Custom Daily\n---\n\n${today}\nHi.\n`;
+
+    mockMorningFlow({
+      files: [
+        { path: 'Custom Daily/Custom Daily.md', content: customRoot },
+        { path: 'Custom Daily/Notes.md', content: customNotes },
+      ],
+    });
+
+    const result = await handler({ project_id: 'Custom Daily' }, obsidianCtx());
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.project_id).toBe('Custom Daily');
+    expect(parsed.root_doc.text).toContain('# Custom Daily');
+  });
+
+  it('surfaces truncation metadata when notes files exceed the 40-file cap', async () => {
+    // Synthesize 45 projects, each with a Notes.md.
+    const today = mmddyy(offsetDate(0));
+    const files: Array<{ path: string; content: string }> = [
+      { path: 'Morning Review/Morning Review.md', content: ROOT_DOC },
+      { path: 'Morning Review/Notes.md', content: `---\nx: y\n---\n\n${today}\nmr\n` },
+    ];
+    for (let i = 0; i < 45; i++) {
+      files.push({ path: `p${i}/p${i}.md`, content: `# p${i}\n` });
+      files.push({ path: `p${i}/Notes.md`, content: `---\nx: y\n---\n\n${today}\np${i}\n` });
+    }
+    mockMorningFlow({ files });
+
+    const result = await handler({}, obsidianCtx());
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.recent_notes.truncated).toBe(true);
+    expect(parsed.recent_notes.omitted_notes_files).toBeGreaterThan(0);
+  });
+});
+
 // ===========================================================================
 // Todoist
 // ===========================================================================

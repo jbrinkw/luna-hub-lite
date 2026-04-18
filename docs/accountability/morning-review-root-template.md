@@ -1,4 +1,4 @@
-# Daily Review
+# Morning Review
 
 Accountability system. Multi-tier commitment stack — daily closure + morning brief + planning at every horizon from 5-year arc down to today.
 
@@ -22,7 +22,7 @@ Fallback: senior research engineer at a frontier lab.
 
 ## April 2026
 
-> Current month's commits. Replaced wholesale on the 1st of each month by the morning-sync skill.
+> Current month's commits. Replaced wholesale on the 1st of each month by the morning routine.
 
 - [ ] Ship ChefByte v1 cloud
 - [ ] Submit Minecraft agent alpha demo
@@ -30,7 +30,7 @@ Fallback: senior research engineer at a frontier lab.
 
 ## Week of 4/13/26
 
-> Current week's commits. Replaced wholesale every Monday by the morning-sync skill.
+> Current week's commits. Replaced wholesale every Monday by the morning routine.
 
 - [ ] Ship barcode flow
 - [ ] 8h Open Ethos stress test
@@ -38,7 +38,7 @@ Fallback: senior research engineer at a frontier lab.
 
 ## Active Projects
 
-> Project IDs (folder names matching Obsidian project folders) the midnight task should give attention to. Keep this list short — projects not listed get ignored by the daily loop.
+> Project IDs (folder names matching Obsidian project folders) the nightly skill should give attention to. Keep this list short — projects not listed get ignored by the daily loop.
 
 - luna-personal-assistant/chefbyte
 - luna-personal-assistant/CoachByte
@@ -47,7 +47,7 @@ Fallback: senior research engineer at a frontier lab.
 
 ## News Topics
 
-> Topics for the midnight news digest. Keep narrow — broader topics generate noise.
+> Topics for the nightly news digest. Keep narrow — broader topics generate noise.
 
 - AI research news (agents, RL, world models, embodied AI)
 - Anthropic / OpenAI / Google DeepMind releases

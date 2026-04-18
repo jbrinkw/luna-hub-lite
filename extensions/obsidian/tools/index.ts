@@ -5,6 +5,7 @@ import { OBSIDIAN_get_notes_by_date_range } from './get-notes-by-date-range';
 import { OBSIDIAN_update_project_note } from './update-project-note';
 import { OBSIDIAN_create_project } from './create-project';
 import { OBSIDIAN_patch_project_root } from './patch-project-root';
+import { OBSIDIAN_get_morning_brief } from './get-morning-brief';
 import { OBSIDIAN_usage_guide } from './usage-guide';
 
 export const obsidianTools: Record<string, ExtensionToolDefinition> = {
@@ -15,4 +16,5 @@ export const obsidianTools: Record<string, ExtensionToolDefinition> = {
   OBSIDIAN_update_project_note,
   OBSIDIAN_create_project,
   OBSIDIAN_patch_project_root,
+  OBSIDIAN_get_morning_brief,
 };
