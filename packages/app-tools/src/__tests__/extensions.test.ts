@@ -1070,6 +1070,82 @@ Top school PhD.
 // Todoist
 // ===========================================================================
 
+describe('TODOIST_get_completed_tasks', () => {
+  const handler = todoistTools.TODOIST_get_completed_tasks.handler;
+
+  it('sends correct URL with since/until and unwraps { items: [...] }', async () => {
+    const items = [
+      { content: 'Ship barcode flow', completed_at: '2026-04-17T14:00:00Z' },
+      { content: 'Recruiter outreach', completed_at: '2026-04-17T16:30:00Z' },
+    ];
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ items }));
+
+    const result = await handler({ since: '2026-04-17T00:00:00Z', until: '2026-04-18T00:00:00Z' }, todoistCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed).toEqual(items);
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain('https://api.todoist.com/api/v1/tasks/completed/by_completion_date');
+    expect(url).toContain('since=2026-04-17T00%3A00%3A00Z');
+    expect(url).toContain('until=2026-04-18T00%3A00%3A00Z');
+    expect(opts.method).toBe('GET');
+    expect(opts.headers.Authorization).toBe('Bearer todoist-key-456');
+  });
+
+  it('passes optional project_id and limit through', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ items: [] }));
+
+    await handler(
+      {
+        since: '2026-04-17',
+        until: '2026-04-18',
+        project_id: 'proj-9',
+        limit: 100,
+      },
+      todoistCtx(),
+    );
+
+    const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('project_id=proj-9');
+    expect(url).toContain('limit=100');
+  });
+
+  it('returns toolError when since or until is missing', async () => {
+    const r1 = await handler({ until: '2026-04-18' }, todoistCtx());
+    mockFetch.mockReset();
+    const r2 = await handler({ since: '2026-04-17' }, todoistCtx());
+    expect(r1.isError).toBe(true);
+    expect(r1.content[0].text).toContain('since is required');
+    expect(r2.isError).toBe(true);
+    expect(r2.content[0].text).toContain('until is required');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns toolError when credentials are missing', async () => {
+    const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, emptyCredentialsCtx());
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing Todoist credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('returns toolError on API error', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('Forbidden', false, 403));
+    const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, todoistCtx());
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Todoist API error: 403');
+  });
+
+  it('returns toolError on network failure', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network down'));
+    const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, todoistCtx());
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network down');
+  });
+});
+
 describe('TODOIST_get_tasks', () => {
   const handler = todoistTools.TODOIST_get_tasks.handler;
 

@@ -25,15 +25,27 @@ arc / yearly / monthly / weekly). The last 7 days of vault-wide notes
 (\`recent_notes.entries\`, newest-first) give you closure history and
 rollover evidence.
 
-BEFORE ANYTHING: call \`TODOIST_get_tasks\` (no filter) for live task state.
+BEFORE ANYTHING: call these two Todoist tools in parallel for live state:
+- \`TODOIST_get_tasks\` (no filter) — the full open ledger
+- \`TODOIST_get_completed_tasks(since: '<yesterday>T00:00:00Z', until: '<today>T00:00:00Z')\`
+  — what the user actually checked off yesterday. Prevents you from asking
+  about tasks that are already done.
 
 STEP 1 — DAILY CLOSURE (gated; no planning until done)
 ------------------------------------------------------
 Look at yesterday's Morning Review Notes.md entry in \`recent_notes\`. If it
 already has an "## Evening Summary" section, skip to Step 2.
 
-Otherwise, for each Todoist task that was due yesterday or is overdue, ask
-the user: closed / rolled / dropped.
+Otherwise, split yesterday's tasks into two buckets:
+
+A. Already-completed in Todoist (from get_completed_tasks) — these close
+   automatically as [x]. Confirm each quickly with the user ("closed these
+   — any to reclassify as rolled/dropped?") but don't iterate through them
+   one by one.
+
+B. Still-open in Todoist that were due yesterday + overdue (from get_tasks
+   filtered to yesterday/overdue) — for each, ask the user:
+   closed / rolled / dropped.
 
   closed   → TODOIST_complete_task(task_id). Closure line: [x] <task>
   rolled   → TODOIST_update_task(task_id, due_string: "today").

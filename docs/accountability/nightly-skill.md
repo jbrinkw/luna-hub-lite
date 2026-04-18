@@ -21,6 +21,7 @@ Canonical tool names (your client may prefix them):
 - `OBSIDIAN_get_notes_by_date_range(start, end, project_id?)` — windowed Notes.md reads; unscoped when `project_id` omitted
 - `OBSIDIAN_update_project_note(project_id, content, section_id?, date?)` — appends to a dated Notes.md entry's section
 - `TODOIST_get_tasks` — all active Todoist tasks (no filter)
+- `TODOIST_get_completed_tasks(since, until)` — tasks the user already checked off in a date range (ISO datetime strings)
 
 You do NOT edit the root doc. That's the user's (and morning routine's) territory.
 
@@ -31,13 +32,15 @@ You do NOT edit the root doc. That's the user's (and morning routine's) territor
 - `OBSIDIAN_get_project_text("Morning Review")` — root doc (5y / yearly / monthly / weekly commits + active projects list + news topics list) + recent `Notes.md` entries
 - `OBSIDIAN_get_notes_by_date_range(<7-days-ago MM/DD/YY>, <today MM/DD/YY>)` — UNSCOPED (no `project_id`). Returns last 7 days of every Notes.md in the vault: accountability history + journal + every project's progress notes. 40-Notes.md cap applies but is fine for this vault.
 - `TODOIST_get_tasks` — full open ledger, no filter. Todoist holds long-term tasks in addition to today's items.
+- `TODOIST_get_completed_tasks(since: '<yesterday>T00:00:00Z', until: '<today>T00:00:00Z')` — what the user actually checked off yesterday. Use this to know what got done (closure is not written to Obsidian yet by the user; the morning routine will do that). Without this, the brief can't distinguish "open and rolled" from "open but completed in Todoist, waiting for morning closure to log".
 
 If `get_project_text("Morning Review")` errors with "project not found", the user hasn't initialized the Morning Review project yet. Log the error and end the run — do NOT attempt to create it yourself.
 
-### 2. Identify rollover patterns
+### 2. Identify rollover patterns + yesterday's completions
 
 - From the last 7 days of Notes.md entries, count rollover occurrences per task (look for `[~] <task> [rolls: N]` in closure blocks).
 - From the root doc, note any `[rolls: N]` tag where N ≥ 2 on live commits — these are auto-flag candidates.
+- From `TODOIST_get_completed_tasks` for yesterday, record the actual completions: what the user checked off. This is ground truth for "what got done yesterday." The morning routine will turn these into closure lines tomorrow; your job is to reflect them in the brief so the user sees the night's accounting accurately.
 
 ### 3. News research (web search)
 
@@ -80,6 +83,10 @@ Multiple can fire in one run (Mon Apr 1 = daily + weekly + monthly suggestions).
 Use this structure exactly. The `## Morning Brief` heading is added by the tool — don't include it in your `content`.
 
 ```
+### Yesterday — completed
+- [x] <each item the user checked off in Todoist yesterday>
+(skip section if nothing was completed)
+
 ### Open commitments
 - daily (Todoist due today + overdue): <list, item names only>
 - this week: <list from root doc weekly section, inline [rolls: N] tags where present>
