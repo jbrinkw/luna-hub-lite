@@ -597,6 +597,261 @@ describe('OBSIDIAN_create_project', () => {
   });
 });
 
+describe('OBSIDIAN_patch_project_root', () => {
+  const handler = obsidianTools.OBSIDIAN_patch_project_root.handler;
+
+  // Tight mock: tree → root file fetch (Contents API) → PUT.
+  function mockPatchFlow(rootContent: string) {
+    mockFetch.mockReturnValueOnce(
+      mockFetchResponse({
+        tree: [{ type: 'blob', path: 'Projects/A/A.md' }],
+      }),
+    );
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ content: btoa(rootContent), sha: 'sha-root' }));
+    mockFetch.mockReturnValueOnce(mockFetchResponse({}, true, 200));
+  }
+
+  function lastPutBody(): string | null {
+    const putCall = mockFetch.mock.calls.find(([, o]: any) => o?.method === 'PUT');
+    if (!putCall) return null;
+    return atob(JSON.parse((putCall as any)[1].body).content);
+  }
+
+  function putCalls() {
+    return mockFetch.mock.calls.filter(([, o]: any) => o?.method === 'PUT');
+  }
+
+  it('returns error when credentials are missing', async () => {
+    const result = await handler(
+      { project_id: 'Projects/A', patches: [{ find: 'a', replace: 'b' }] },
+      emptyCredentialsCtx(),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Missing credentials');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects empty patches array', async () => {
+    const result = await handler({ project_id: 'Projects/A', patches: [] }, obsidianCtx());
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('non-empty');
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+
+  it('rejects malformed patches (missing find / non-string replace / empty find)', async () => {
+    const cases = [
+      [{ replace: 'x' }],
+      [{ find: '', replace: 'x' }],
+      [{ find: 'foo', replace: 123 }],
+      [{ find: 'foo' }],
+    ];
+    for (const patches of cases) {
+      mockFetch.mockReset();
+      const result = await handler({ project_id: 'Projects/A', patches }, obsidianCtx());
+      expect(result.isError).toBe(true);
+      expect(mockFetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it('toggles a checkbox via a single patch', async () => {
+    const root = `# Project A\n\n## Week of 4/13/26\n- [ ] ship it\n- [ ] write tests\n`;
+    mockPatchFlow(root);
+
+    const result = await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [{ find: '- [ ] ship it', replace: '- [x] ship it' }],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.patches_applied).toBe(1);
+    expect(parsed.unchanged).toBe(false);
+
+    const written = lastPutBody();
+    expect(written).toContain('- [x] ship it');
+    expect(written).toContain('- [ ] write tests');
+    expect(written).not.toContain('- [ ] ship it');
+  });
+
+  it('deletes matched text when replace is empty', async () => {
+    const root = `# Project A\n\n- [ ] keep me\n- [ ] drop me\n- [ ] keep me too\n`;
+    mockPatchFlow(root);
+
+    const result = await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [{ find: '- [ ] drop me\n', replace: '' }],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const written = lastPutBody()!;
+    expect(written).not.toContain('drop me');
+    expect(written).toContain('- [ ] keep me');
+    expect(written).toContain('- [ ] keep me too');
+  });
+
+  it('applies multiple patches in one call atomically and sequentially', async () => {
+    const root = `# Project A\n\n- [ ] one\n- [ ] two\n- [ ] three\n`;
+    mockPatchFlow(root);
+
+    const result = await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [
+          { find: '- [ ] one', replace: '- [x] one' },
+          { find: '- [ ] two\n', replace: '' },
+          { find: '- [ ] three', replace: '- [~] three [rolls: 1]' },
+        ],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.patches_applied).toBe(3);
+
+    const written = lastPutBody()!;
+    expect(written).toContain('- [x] one');
+    expect(written).not.toContain('- [ ] two');
+    expect(written).toContain('- [~] three [rolls: 1]');
+  });
+
+  it('lets a later patch find text written by an earlier patch (sequential semantics)', async () => {
+    const root = `# Project A\n\nALPHA\n`;
+    mockPatchFlow(root);
+
+    const result = await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [
+          { find: 'ALPHA', replace: 'BETA' },
+          { find: 'BETA', replace: 'GAMMA' },
+        ],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBeUndefined();
+    expect(lastPutBody()).toContain('GAMMA');
+  });
+
+  it('errors and writes nothing when find is not present (atomic)', async () => {
+    const root = `# Project A\n\n- [ ] present\n`;
+    mockPatchFlow(root);
+
+    const result = await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [
+          { find: '- [ ] present', replace: '- [x] present' },
+          { find: '- [ ] missing', replace: '- [x] missing' },
+        ],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain("'find' not found");
+    expect(putCalls().length).toBe(0);
+  });
+
+  it('errors and writes nothing when find matches more than once', async () => {
+    const root = `# Project A\n\n- [ ] dup\n- [ ] dup\n`;
+    mockPatchFlow(root);
+
+    const result = await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [{ find: '- [ ] dup', replace: '- [x] dup' }],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('more than once');
+    expect(putCalls().length).toBe(0);
+  });
+
+  it('replaces a whole section in one patch', async () => {
+    const root = `# Project A\n\n` + `## Week of 4/13/26\n\n- [ ] old1\n- [ ] old2\n\n` + `## Active Projects\n- foo\n`;
+    mockPatchFlow(root);
+
+    const oldSection = `## Week of 4/13/26\n\n- [ ] old1\n- [ ] old2\n`;
+    const newSection = `## Week of 4/20/26\n\n- [ ] new1\n- [ ] new2\n- [ ] new3\n`;
+    const result = await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [{ find: oldSection, replace: newSection }],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const written = lastPutBody()!;
+    expect(written).toContain('## Week of 4/20/26');
+    expect(written).not.toContain('## Week of 4/13/26');
+    expect(written).toContain('## Active Projects');
+    expect(written).toContain('- foo');
+  });
+
+  it('preserves frontmatter when no patch touches it', async () => {
+    const root = `---\nproject_id: a\n---\n# Project A\n\n- [ ] item\n`;
+    mockPatchFlow(root);
+
+    await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [{ find: '- [ ] item', replace: '- [x] item' }],
+      },
+      obsidianCtx(),
+    );
+
+    const written = lastPutBody()!;
+    expect(written.startsWith('---\nproject_id: a\n---')).toBe(true);
+  });
+
+  it('skips the PUT when patches result in no change', async () => {
+    const root = `# Project A\n\n- [x] same\n`;
+    // Only tree + root fetch — NO put expected
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ tree: [{ type: 'blob', path: 'Projects/A/A.md' }] }));
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ content: btoa(root), sha: 'sha-root' }));
+
+    const result = await handler(
+      {
+        project_id: 'Projects/A',
+        patches: [{ find: '- [x] same', replace: '- [x] same' }],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.unchanged).toBe(true);
+    expect(putCalls().length).toBe(0);
+  });
+
+  it('errors when project is not found', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ tree: [] }));
+
+    const result = await handler(
+      {
+        project_id: 'NoSuchProject',
+        patches: [{ find: 'x', replace: 'y' }],
+      },
+      obsidianCtx(),
+    );
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Project not found');
+    expect(putCalls().length).toBe(0);
+  });
+});
+
 // ===========================================================================
 // Todoist
 // ===========================================================================
