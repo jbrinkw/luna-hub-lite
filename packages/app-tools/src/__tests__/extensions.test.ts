@@ -1447,20 +1447,52 @@ describe('TODOIST_update_task', () => {
 describe('TODOIST_complete_task', () => {
   const handler = todoistTools.TODOIST_complete_task.handler;
 
-  it('sends POST to close endpoint on success', async () => {
+  it('sends POST to close endpoint on success (default)', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('', true, 204));
 
     const result = await handler({ task_id: 'task-abc' }, todoistCtx());
 
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
-    expect(parsed).toEqual({ task_id: 'task-abc', completed: true });
+    expect(parsed).toEqual({ task_id: 'task-abc', completed: true, deleted: false });
 
     expect(mockFetch).toHaveBeenCalledOnce();
     const [url, opts] = mockFetch.mock.calls[0];
     expect(url).toBe('https://api.todoist.com/api/v1/tasks/task-abc/close');
     expect(opts.method).toBe('POST');
     expect(opts.headers.Authorization).toBe('Bearer todoist-key-456');
+  });
+
+  it('sends DELETE to /tasks/{id} when delete=true', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('', true, 204));
+
+    const result = await handler({ task_id: 'task-abc', delete: true }, todoistCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed).toEqual({ task_id: 'task-abc', completed: false, deleted: true });
+
+    expect(mockFetch).toHaveBeenCalledOnce();
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toBe('https://api.todoist.com/api/v1/tasks/task-abc');
+    expect(opts.method).toBe('DELETE');
+  });
+
+  it('still closes (not deletes) when delete=false is explicit', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('', true, 204));
+
+    await handler({ task_id: 'task-abc', delete: false }, todoistCtx());
+
+    const [url, opts] = mockFetch.mock.calls[0];
+    expect(url).toContain('/close');
+    expect(opts.method).toBe('POST');
+  });
+
+  it('returns toolError when task_id is missing', async () => {
+    const result = await handler({}, todoistCtx());
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('task_id is required');
+    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('returns toolError when credentials are missing', async () => {
@@ -1478,6 +1510,15 @@ describe('TODOIST_complete_task', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Todoist API error: 404');
+  });
+
+  it('returns toolError on network failure during DELETE', async () => {
+    mockFetch.mockRejectedValueOnce(new Error('Network failure'));
+
+    const result = await handler({ task_id: 'task-abc', delete: true }, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('Network error: Network failure');
   });
 
   it('returns toolError on network failure', async () => {

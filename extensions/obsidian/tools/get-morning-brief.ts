@@ -71,10 +71,13 @@ Outcomes:
              [~] <task> [rolls: N] where N = (prior rolls from the last
              7 days of notes) + 1. If N ≥ 2, ASK "what's different this
              time?" before accepting.
-  dropped  → TODOIST_complete_task(task_id) if Todoist-tracked.
-             Closure line: [-] <task> — <one-line reason>. Todoist
-             can't distinguish drop from done; the [-] in Obsidian is
-             the truth.
+  dropped  → TODOIST_complete_task(task_id, delete: true) if
+             Todoist-tracked. The delete flag removes the task from
+             Todoist entirely so it doesn't pollute the completion
+             log — dropped items shouldn't read as "done" in the
+             audit trail. Closure line:
+             [-] <task> — <one-line reason>. The [-] in Obsidian is
+             the accountability truth.
 
 Writing closure to yesterday's Notes.md entry:
   OBSIDIAN_update_project_note(
