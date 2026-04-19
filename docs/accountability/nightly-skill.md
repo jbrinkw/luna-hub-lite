@@ -1,6 +1,6 @@
 ---
 name: nightly-accountability-sync
-description: Nightly accountability pass — reads yesterday's state, composes today's Morning Brief with a suggested plan (cadence-aware on Sunday/Monday/last day/1st of month), writes the brief to the Morning Review Notes.md entry. One autonomous run per night; no user interaction.
+description: Nightly accountability pass — reads yesterday's state, composes today's Morning Brief with a suggested plan (cadence-aware on Sunday/Monday/last day/1st of month), writes the brief to the Daily Review Notes.md entry. One autonomous run per night; no user interaction.
 ---
 
 # Nightly Skill
@@ -9,7 +9,7 @@ Scheduled run, once per night (recommended: 3am Charlotte time — post-midnight
 
 ## Your job
 
-Assemble the **Morning Brief** — a short accountability summary + a suggested plan for today — and write it as a `## Morning Brief` section to today's `Morning Review/Notes.md` entry. The user will read this in the morning with fresh eyes, review / modify / accept the suggested plan, and run closure on yesterday. That's the morning routine — not your problem. You just prepare the ground.
+Assemble the **Morning Brief** — a short accountability summary + a suggested plan for today — and write it as a `## Morning Brief` section to today's `Daily Review/Notes.md` entry. The user will read this in the morning with fresh eyes, review / modify / accept the suggested plan, and run closure on yesterday. That's the morning routine — not your problem. You just prepare the ground.
 
 ## Tools available
 
@@ -29,12 +29,12 @@ You do NOT edit the root doc. That's the user's (and morning routine's) territor
 
 ### 1. Read everything in parallel
 
-- `OBSIDIAN_get_project_text("Morning Review")` — root doc (5y / yearly / monthly / weekly commits + active projects list + news topics list) + recent `Notes.md` entries
+- `OBSIDIAN_get_project_text("Daily Review")` — root doc (5y / yearly / monthly / weekly commits + active projects list + news topics list) + recent `Notes.md` entries
 - `OBSIDIAN_get_notes_by_date_range(<7-days-ago MM/DD/YY>, <today MM/DD/YY>)` — UNSCOPED (no `project_id`). Returns last 7 days of every Notes.md in the vault: accountability history + journal + every project's progress notes. 40-Notes.md cap applies but is fine for this vault.
 - `TODOIST_get_tasks` — full open ledger, no filter. Todoist holds long-term tasks in addition to today's items.
 - `TODOIST_get_completed_tasks(since: '<yesterday>T00:00:00Z', until: '<today>T00:00:00Z')` — what the user actually checked off yesterday. Use this to know what got done (closure is not written to Obsidian yet by the user; the morning routine will do that). Without this, the brief can't distinguish "open and rolled" from "open but completed in Todoist, waiting for morning closure to log".
 
-If `get_project_text("Morning Review")` errors with "project not found", the user hasn't initialized the Morning Review project yet. Log the error and end the run — do NOT attempt to create it yourself.
+If `get_project_text("Daily Review")` errors with "project not found", the user hasn't initialized the Daily Review project yet. Log the error and end the run — do NOT attempt to create it yourself.
 
 ### 2. Identify rollover patterns + yesterday's completions
 
@@ -134,7 +134,7 @@ Current week: <list each live item with a proposed outcome>
 
 ```
 OBSIDIAN_update_project_note(
-  project_id: "Morning Review",
+  project_id: "Daily Review",
   section_id: "Morning Brief",
   content: "<the assembled brief body, without the '## Morning Brief' heading>"
 )
@@ -144,7 +144,7 @@ OBSIDIAN_update_project_note(
 
 ### 8. Verify
 
-Re-read today's Morning Review entry via `OBSIDIAN_get_notes_by_date_range(<today>, <today>, "Morning Review")`. Confirm a `## Morning Brief` section is present with at least Open commitments, News digest, and Suggested plan.
+Re-read today's Daily Review entry via `OBSIDIAN_get_notes_by_date_range(<today>, <today>, "Daily Review")`. Confirm a `## Morning Brief` section is present with at least Open commitments, News digest, and Suggested plan.
 
 If something is missing, retry the write **once**. If the second attempt fails, end the run cleanly — the morning tool handles "no brief" gracefully.
 
@@ -153,7 +153,7 @@ If something is missing, retry the write **once**. If the second attempt fails, 
 - **Push back first, validate second.** Flag rollovers and drift; don't cheerlead.
 - **Keep it short.** The user reads this groggy.
 - **Do NOT edit the root doc.** Only the user (via the morning routine) changes tier commitments.
-- **Do NOT create the Morning Review project.** If it's missing, surface the error and end.
+- **Do NOT create the Daily Review project.** If it's missing, surface the error and end.
 - If a tool call fails mid-run, capture the failure in `### Task errors` instead of aborting.
 - Don't repeat news from prior briefs — scan recent briefs and vary the digest.
 - The brief is for the human, not the next agent. Plain English, no JSON, no internal-state dumps.

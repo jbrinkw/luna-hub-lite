@@ -1,18 +1,18 @@
-# Morning Review Accountability System
+# Daily Review Accountability System
 
 Daily accountability loop using the LunaHubLite MCP server. Three pieces:
 
-1. **`Morning Review` Obsidian project** — system of record. `Morning Review.md` (root) holds the live commitment stack at every tier (5-year arc → yearly → monthly → weekly) plus active projects + news topics lists. `Notes.md` holds dated entries with the morning briefs, plan mirrors, and closure blocks.
+1. **`Daily Review` Obsidian project** — system of record. `Daily Review.md` (root) holds the live commitment stack at every tier (5-year arc → yearly → monthly → weekly) plus active projects + news topics lists. `Notes.md` holds dated entries with the morning briefs, plan mirrors, and closure blocks.
 2. **Nightly skill** — one scheduled run late at night (post-midnight). Reads yesterday's state, all Todoist tasks, and the root doc. Composes today's Morning Brief _with a suggested plan_ — cadence-aware on Sunday/Monday/last day/1st of month — and writes it as `## Morning Brief` in today's Notes.md entry. No user interaction.
 3. **`OBSIDIAN_get_morning_brief` MCP tool** — the morning side is now a tool, not a skill. Any Claude agent with LunaHubLite MCP can run the morning routine by calling this one tool: it returns the brief + current goals doc + last 7 days of vault notes + the full routine instructions. Agent follows the instructions verbatim.
 
 ## Files in this folder
 
-| File                              | Purpose                                                                                                                    |
-| --------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `nightly-skill.md`                | Paste into your scheduled agent's instructions (Cowork desktop or claude.ai cloud scheduled tasks).                        |
-| `morning-review-root-template.md` | Initial `Morning Review/Morning Review.md` content. Paste manually during initial setup — the system does not auto-create. |
-| `README.md`                       | This file.                                                                                                                 |
+| File                            | Purpose                                                                                                                |
+| ------------------------------- | ---------------------------------------------------------------------------------------------------------------------- |
+| `nightly-skill.md`              | Paste into your scheduled agent's instructions (Cowork desktop or claude.ai cloud scheduled tasks).                    |
+| `daily-review-root-template.md` | Initial `Daily Review/Daily Review.md` content. Paste manually during initial setup — the system does not auto-create. |
+| `README.md`                     | This file.                                                                                                             |
 
 No morning-side skill to install. `OBSIDIAN_get_morning_brief` lives in the MCP server; any agent with the Obsidian extension enabled can call it.
 
@@ -20,8 +20,8 @@ No morning-side skill to install. `OBSIDIAN_get_morning_brief` lives in the MCP 
 
 One-time, in order:
 
-1. **Create the Morning Review project** in your Obsidian vault. Either manually (make the folder + `Morning Review.md` + empty `Notes.md`) or ask an agent with MCP access to call `OBSIDIAN_create_project("Morning Review")`.
-2. **Populate the root doc** from `morning-review-root-template.md`. Edit your 5-year arc, current yearly/monthly/weekly commits, active projects, and news topics.
+1. **Create the Daily Review project** in your Obsidian vault. Either manually (make the folder + `Daily Review.md` + empty `Notes.md`) or ask an agent with MCP access to call `OBSIDIAN_create_project("Daily Review")`.
+2. **Populate the root doc** from `daily-review-root-template.md`. Edit your 5-year arc, current yearly/monthly/weekly commits, active projects, and news topics.
 3. **Set up the scheduled task** with the `nightly-skill.md` contents. Recommended: claude.ai cloud scheduled tasks (`claude.ai/code/scheduled`), daily at 3am Charlotte time. Post-midnight scheduling keeps "today" aligned with the day you wake up into.
 4. **No install needed on the morning side.** Just ask any Claude agent with LunaHubLite MCP for your morning brief.
 

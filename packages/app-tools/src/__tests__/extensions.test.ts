@@ -901,7 +901,7 @@ describe('OBSIDIAN_get_morning_brief', () => {
     });
   }
 
-  const ROOT_DOC = `# Morning Review
+  const ROOT_DOC = `# Daily Review
 
 ## 5-Year Arc
 Top school PhD.
@@ -923,13 +923,13 @@ Top school PhD.
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('returns a clear error pointing at create_project when Morning Review is missing', async () => {
+  it('returns a clear error pointing at create_project when Daily Review is missing', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse({ tree: [] }));
 
     const result = await handler({}, obsidianCtx());
     expect(result.isError).toBe(true);
     const msg = result.content[0].text;
-    expect(msg).toContain('Morning Review');
+    expect(msg).toContain('Daily Review');
     expect(msg).toContain('not found');
     expect(msg).toContain('OBSIDIAN_create_project');
   });
@@ -937,11 +937,11 @@ Top school PhD.
   it('returns root doc + recent_notes + routine_instructions on success', async () => {
     const today = mmddyy(offsetDate(0));
     const twoDaysAgo = mmddyy(offsetDate(2));
-    const notesContent = `---\nnote_project_id: Morning Review\n---\n\n${today}\nMorning Brief goes here.\n\n${twoDaysAgo}\nEarlier entry.\n`;
+    const notesContent = `---\nnote_project_id: Daily Review\n---\n\n${today}\nMorning Brief goes here.\n\n${twoDaysAgo}\nEarlier entry.\n`;
     mockMorningFlow({
       files: [
-        { path: 'Morning Review/Morning Review.md', content: ROOT_DOC },
-        { path: 'Morning Review/Notes.md', content: notesContent },
+        { path: 'Daily Review/Daily Review.md', content: ROOT_DOC },
+        { path: 'Daily Review/Notes.md', content: notesContent },
       ],
     });
 
@@ -949,8 +949,8 @@ Top school PhD.
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.status).toBe('success');
-    expect(parsed.project_id).toBe('Morning Review');
-    expect(parsed.root_doc.text).toContain('# Morning Review');
+    expect(parsed.project_id).toBe('Daily Review');
+    expect(parsed.root_doc.text).toContain('# Daily Review');
     expect(parsed.root_doc.text).toContain('## 2026');
     expect(parsed.recent_notes.window_days).toBe(7);
     expect(Array.isArray(parsed.recent_notes.entries)).toBe(true);
@@ -966,15 +966,15 @@ Top school PhD.
     const eightDaysAgo = mmddyy(offsetDate(8));
 
     const notesContent =
-      `---\nnote_project_id: Morning Review\n---\n\n` +
+      `---\nnote_project_id: Daily Review\n---\n\n` +
       `${today}\nToday entry.\n\n` +
       `${sixDaysAgo}\nSix days ago entry.\n\n` +
       `${eightDaysAgo}\nOutside window — eight days ago.\n`;
 
     mockMorningFlow({
       files: [
-        { path: 'Morning Review/Morning Review.md', content: ROOT_DOC },
-        { path: 'Morning Review/Notes.md', content: notesContent },
+        { path: 'Daily Review/Daily Review.md', content: ROOT_DOC },
+        { path: 'Daily Review/Notes.md', content: notesContent },
       ],
     });
 
@@ -998,16 +998,16 @@ Top school PhD.
     expect([...dates].sort((a, b) => b.localeCompare(a))).toEqual(dates);
   });
 
-  it('pulls notes unscoped (from other projects too, not just Morning Review)', async () => {
+  it('pulls notes unscoped (from other projects too, not just Daily Review)', async () => {
     const today = mmddyy(offsetDate(0));
-    const morningNotes = `---\nnote_project_id: Morning Review\n---\n\n${today}\nMR entry.\n`;
+    const morningNotes = `---\nnote_project_id: Daily Review\n---\n\n${today}\nMR entry.\n`;
     const journalNotes = `---\nnote_project_id: Journal\n---\n\n${today}\nJournal entry.\n`;
     const coachNotes = `---\nnote_project_id: coach\n---\n\n${today}\nCoach entry.\n`;
 
     mockMorningFlow({
       files: [
-        { path: 'Morning Review/Morning Review.md', content: ROOT_DOC },
-        { path: 'Morning Review/Notes.md', content: morningNotes },
+        { path: 'Daily Review/Daily Review.md', content: ROOT_DOC },
+        { path: 'Daily Review/Notes.md', content: morningNotes },
         { path: 'Journal/Journal.md', content: '# Journal\n' },
         { path: 'Journal/Notes.md', content: journalNotes },
         { path: 'coach/coach.md', content: '# coach\n' },
@@ -1021,7 +1021,7 @@ Top school PhD.
     const entries = parsed.recent_notes.entries as Array<{ file: string; content: string }>;
 
     const fileSet = new Set(entries.map((e) => e.file));
-    expect(fileSet.has('Morning Review/Notes.md')).toBe(true);
+    expect(fileSet.has('Daily Review/Notes.md')).toBe(true);
     expect(fileSet.has('Journal/Notes.md')).toBe(true);
     expect(fileSet.has('coach/Notes.md')).toBe(true);
   });
@@ -1049,8 +1049,8 @@ Top school PhD.
     // Synthesize 45 projects, each with a Notes.md.
     const today = mmddyy(offsetDate(0));
     const files: Array<{ path: string; content: string }> = [
-      { path: 'Morning Review/Morning Review.md', content: ROOT_DOC },
-      { path: 'Morning Review/Notes.md', content: `---\nx: y\n---\n\n${today}\nmr\n` },
+      { path: 'Daily Review/Daily Review.md', content: ROOT_DOC },
+      { path: 'Daily Review/Notes.md', content: `---\nx: y\n---\n\n${today}\nmr\n` },
     ];
     for (let i = 0; i < 45; i++) {
       files.push({ path: `p${i}/p${i}.md`, content: `# p${i}\n` });

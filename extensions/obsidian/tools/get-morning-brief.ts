@@ -3,7 +3,7 @@ import { toolSuccess, toolError } from '@luna-hub/app-tools';
 import { getGitCredentials, getTree, getBlobContent, getMultipleBlobs } from './git-api';
 import { buildProjectTree, resolveProject, parseNoteEntries } from './vault-parser';
 
-const DEFAULT_PROJECT_ID = 'Morning Review';
+const DEFAULT_PROJECT_ID = 'Daily Review';
 const WINDOW_DAYS = 7;
 const MAX_NOTES = 40;
 
@@ -33,7 +33,7 @@ BEFORE ANYTHING: call these two Todoist tools in parallel for live state:
 
 STEP 1 — DAILY CLOSURE (gated; no planning until done)
 ------------------------------------------------------
-Look at yesterday's Morning Review Notes.md entry in \`recent_notes\`. If it
+Look at yesterday's Daily Review Notes.md entry in \`recent_notes\`. If it
 already has an "## Evening Summary" section, skip to Step 2.
 
 Otherwise, split yesterday's tasks into two buckets:
@@ -58,7 +58,7 @@ B. Still-open in Todoist that were due yesterday + overdue (from get_tasks
 
 Write the closure block in ONE call to YESTERDAY's Notes.md entry:
   OBSIDIAN_update_project_note(
-    project_id: "Morning Review",
+    project_id: "Daily Review",
     date: "<yesterday MM/DD/YY>",
     section_id: "Evening Summary",
     content: <all closure lines joined by \\n>

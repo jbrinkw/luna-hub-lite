@@ -1,4 +1,4 @@
-# Morning Review
+# Daily Review
 
 Accountability system. Multi-tier commitment stack — daily closure + morning brief + planning at every horizon from 5-year arc down to today.
 
