@@ -35,39 +35,57 @@ BEFORE ANYTHING: call these two Todoist tools in parallel for live state:
 
 STEP 1 — DAILY CLOSURE (gated; no planning until done)
 ------------------------------------------------------
-Look at yesterday's Daily Review Notes.md entry in \`recent_notes\`. If it
-already has an "## Evening Summary" section, skip to Step 2.
+Yesterday's closure comes from two complementary sources — treat them as
+ADDITIVE, not competing. Content differs; that's normal:
 
-Otherwise, split yesterday's tasks into two buckets:
+- Todoist completed (get_completed_tasks, filtered to yesterday local):
+  what was checked off in the app.
+- Evening Summary section in yesterday's Daily Review Notes.md entry:
+  the user's first-person closure. Often contains unplanned work,
+  context (blockers, "built not verified"), and items that were never
+  Todoist tasks.
 
-A. Already-completed in Todoist (from get_completed_tasks) — these close
-   automatically as [x]. Confirm each quickly with the user ("closed these
-   — any to reclassify as rolled/dropped?") but don't iterate through them
-   one by one.
+A. If yesterday's entry has an "## Evening Summary" section AND the
+   nightly Morning Brief's "### Unresolved from yesterday" section is
+   empty or absent → closure is already done. Skip to Step 2.
 
-B. Still-open in Todoist that were due yesterday + overdue (from get_tasks
-   filtered to yesterday/overdue) — for each, ask the user:
-   closed / rolled / dropped.
+B. If the Morning Brief lists any "### Unresolved from yesterday" items
+   (ones the user mentioned but didn't explicitly close) → for each,
+   prompt the user right now:
+     "Yesterday you noted '<item> — <their phrasing>'. Closed, rolled,
+      or dropped?"
+   Apply the user's answer per the outcome table below. Append the
+   resolution to yesterday's Evening Summary via update_project_note
+   (it appends inside the existing section — no duplicate header).
 
-  closed   → TODOIST_complete_task(task_id). Closure line: [x] <task>
-  rolled   → TODOIST_update_task(task_id, due_string: "today").
-             Closure line: [~] <task> [rolls: N] where N = (prior rolls from
-             the last 7 days of notes) + 1. If N >= 2, ASK "what's different
-             this time?" before accepting.
-  dropped  → TODOIST_complete_task(task_id) AND closure line:
-             [-] <task> — <one-line reason>. Todoist can't distinguish drop
-             from done; the [-] in Obsidian is the truth.
+C. If there is NO Evening Summary at all → fall back to full closure:
+   iterate through Todoist items due yesterday + overdue, and for each
+   ask closed / rolled / dropped. Write the closure block as the
+   Evening Summary for yesterday.
 
-Write the closure block in ONE call to YESTERDAY's Notes.md entry:
+Outcomes:
+  closed   → TODOIST_complete_task(task_id) if the item is a Todoist
+             task. Closure line: [x] <task>
+  rolled   → TODOIST_update_task(task_id, due_string: "today") if
+             Todoist-tracked. Closure line:
+             [~] <task> [rolls: N] where N = (prior rolls from the last
+             7 days of notes) + 1. If N ≥ 2, ASK "what's different this
+             time?" before accepting.
+  dropped  → TODOIST_complete_task(task_id) if Todoist-tracked.
+             Closure line: [-] <task> — <one-line reason>. Todoist
+             can't distinguish drop from done; the [-] in Obsidian is
+             the truth.
+
+Writing closure to yesterday's Notes.md entry:
   OBSIDIAN_update_project_note(
     project_id: "Daily Review",
     date: "<yesterday MM/DD/YY>",
     section_id: "Evening Summary",
-    content: <all closure lines joined by \\n>
+    content: <new closure lines joined by \\n>
   )
 
-If a closed/dropped commit was also at weekly/monthly/yearly tier (lives in
-the root doc, NOT Todoist), patch it out of the root doc:
+If a closed/dropped commit was also at weekly/monthly/yearly tier (lives
+in the root doc, NOT Todoist), patch it out of the root doc:
   - Closed/dropped at higher tier → remove the line.
   - Rolled at higher tier → toggle to [ ] X [rolls: N+1] (still open).
 Use OBSIDIAN_patch_project_root (see Patch Construction below).
@@ -75,8 +93,10 @@ Use OBSIDIAN_patch_project_root (see Patch Construction below).
 STEP 2 — BRIEF REVIEW
 ---------------------
 Find today's entry in \`recent_notes\` and read the "## Morning Brief"
-section. Summarize for the user up top: open commits across tiers,
-rollover flags, news highlights, drift notes, the suggested plan.
+section. Summarize for the user up top: yesterday's merged closure,
+rollover/risk flags, news highlights, the suggested plan. For open
+commitments at the weekly/monthly/yearly tier, reference the root doc
+directly — don't re-list them in the summary.
 
 If no brief exists (nightly skill missed or hasn't run yet), say "no brief
 tonight" and proceed without one.

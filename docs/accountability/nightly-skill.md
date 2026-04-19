@@ -9,7 +9,14 @@ Scheduled run, once per night (recommended: 3am Charlotte time — post-midnight
 
 ## Your job
 
-Assemble the **Morning Brief** — a short accountability summary + a suggested plan for today — and write it as a `## Morning Brief` section to today's `Daily Review/Notes.md` entry. The user will read this in the morning with fresh eyes, review / modify / accept the suggested plan, and run closure on yesterday. That's the morning routine — not your problem. You just prepare the ground.
+Assemble the **Morning Brief** — a short accountability summary + a suggested plan for today — and write it as a `## Morning Brief` section to today's `Daily Review/Notes.md` entry. The user will read this groggy, then run closure + plan with the morning routine. You just prepare the ground.
+
+## What NOT to include
+
+- **No open-commitments listing.** The root doc already holds the live weekly/monthly/yearly stack. The user can open it. The brief does not re-print it.
+- **No jargon from the root doc** (e.g. tier tags like "dogfood-pending"). If you reference a commit, use its name and the user's own words. Don't quote vocabulary that needs decoding.
+- **No editorializing on the suggested plan.** Surface options; the morning routine has the pushback conversation. Lines like "pick one of X or Y" or "don't half-ass both" belong in the morning convo, not the brief.
+- **No re-printing what the Evening Summary already said.** Use it as a source, not as content.
 
 ## Tools available
 
@@ -21,7 +28,7 @@ Canonical tool names (your client may prefix them):
 - `OBSIDIAN_get_notes_by_date_range(start, end, project_id?)` — windowed Notes.md reads; unscoped when `project_id` omitted
 - `OBSIDIAN_update_project_note(project_id, content, section_id?, date?)` — appends to a dated Notes.md entry's section
 - `TODOIST_get_tasks` — all active Todoist tasks (no filter)
-- `TODOIST_get_completed_tasks()` — tasks the user already checked off. Defaults to last 7 days in the Inbox project; no args needed for the common case. Filter `completed_at` locally to narrow to yesterday/today. Pass `project_id` to target a different project; `since`/`until` to override the window.
+- `TODOIST_get_completed_tasks()` — tasks the user checked off. Defaults to last 7 days in the Inbox project; no args needed for the common case.
 
 You do NOT edit the root doc. That's the user's (and morning routine's) territory.
 
@@ -29,45 +36,52 @@ You do NOT edit the root doc. That's the user's (and morning routine's) territor
 
 ### 1. Read everything in parallel
 
-- `OBSIDIAN_get_project_text("Daily Review")` — root doc (5y / yearly / monthly / weekly commits + active projects list + news topics list) + recent `Notes.md` entries
-- `OBSIDIAN_get_notes_by_date_range(<7-days-ago MM/DD/YY>, <today MM/DD/YY>)` — UNSCOPED (no `project_id`). Returns last 7 days of every Notes.md in the vault: accountability history + journal + every project's progress notes. 40-Notes.md cap applies but is fine for this vault.
-- `TODOIST_get_tasks` — full open ledger, no filter. Todoist holds long-term tasks in addition to today's items.
-- `TODOIST_get_completed_tasks()` — the last 7 days of inbox completions (no args needed). Filter `completed_at` locally to get yesterday's / today's items. Ground truth for "what got done" — without it the brief can't distinguish "open and rolled" from "completed in Todoist, waiting for morning closure to log."
+- `OBSIDIAN_get_project_text("Daily Review")` — root doc (5y / yearly / monthly / weekly + active projects + news topics) and recent `Notes.md` entries.
+- `OBSIDIAN_get_notes_by_date_range(<7-days-ago MM/DD/YY>, <today MM/DD/YY>)` — UNSCOPED. Last 7 days of every Notes.md in the vault (accountability history + journal + project notes).
+- `TODOIST_get_tasks` — full open ledger.
+- `TODOIST_get_completed_tasks()` — last 7 days of inbox completions.
 
-If `get_project_text("Daily Review")` errors with "project not found", the user hasn't initialized the Daily Review project yet. Log the error and end the run — do NOT attempt to create it yourself.
+If `get_project_text("Daily Review")` errors with "project not found", log and end. Do not create the project.
 
-### 2. Identify rollover patterns + yesterday's completions
+### 2. Reconcile yesterday's closure
 
-- From the last 7 days of Notes.md entries, count rollover occurrences per task (look for `[~] <task> [rolls: N]` in closure blocks).
-- From the root doc, note any `[rolls: N]` tag where N ≥ 2 on live commits — these are auto-flag candidates.
-- From `TODOIST_get_completed_tasks` for yesterday, record the actual completions: what the user checked off. This is ground truth for "what got done yesterday." The morning routine will turn these into closure lines tomorrow; your job is to reflect them in the brief so the user sees the night's accounting accurately.
+Yesterday's state comes from two sources. **Treat them as complementary.** Content will differ — that's normal, not a conflict.
 
-### 3. News research (web search)
+- **Todoist completed** (filter `completed_at` to yesterday local) — what the user checked off in the app.
+- **Evening Summary** in yesterday's `Daily Review/Notes.md` entry — the user's first-person closure. Can mention unplanned work, context (blockers, why something rolled), and items that were never Todoist tasks.
 
-For each topic in the root doc's `## News Topics` section, search for items from the last 24 hours.
+Merge into a single yesterday view (dedupe by content match — same task named both places = one line). Preserve any context notes the Evening Summary carried (e.g. "built, not bench-verified"). If a commit appears in the summary as **unresolved** (`"didn't get to"`, `"nidnt get to"`, or written without an explicit `[x] / [~] / [-]` marker), tag it as **unresolved** — do NOT guess its outcome. The morning routine will prompt the user.
 
-- **Filter ruthlessly**. Aim for **3–5 bullets TOTAL across all topics**, not per topic.
+If no Evening Summary exists, use Todoist completions alone.
+
+### 3. Rollover patterns
+
+- From the last 7 days of Notes.md closure blocks, count rollover occurrences per task (`[~] <task> [rolls: N]`).
+- From the root doc, note any `[rolls: N]` tag where N ≥ 2 on live commits — auto-flag candidates.
+
+### 4. News research (web search)
+
+For each topic in the root doc's `## News Topics` section, search items from the last 24 hours.
+
+- **3–5 bullets TOTAL** across all topics, not per topic.
 - Prefer directly relevant over broadly interesting.
-- Don't repeat news already in recent briefs (scan the last few `## Morning Brief` sections in Notes.md to dedupe).
+- Don't repeat news from recent briefs.
 
-### 4. Drift check (one line, only if obvious)
+### 5. Drift (one line, only if obvious)
 
-Compare the last 7 days of project activity (from the unscoped notes read) to the root doc's monthly + weekly commits.
+- Project getting heavy attention but not on active-projects list → one line.
+- Committed project not touched in 5+ days → one line.
+- Don't propose root doc edits. Don't use jargon from the root doc — say what the user would say. "CoachByte hasn't been touched in 7 days — still active?" not "CoachByte is dogfood-pending."
 
-- If a project's getting heavy attention but isn't on the active-projects list → one-line mention.
-- If a committed project hasn't been touched in 5+ days → one-line mention.
-- **Don't propose root doc edits.** That's the user's call.
-
-### 5. Suggest a plan for today (cadence-aware)
-
-Always suggest a daily plan:
+### 6. Suggest a plan for today (cadence-aware)
 
 - Start from open Todoist items due today + any overdue.
 - Weight toward commits that serve active weekly/monthly goals.
-- Respect scope realism: aim for 3–4 items max based on last week's observed hit rate.
-- If a rolled item has `[rolls: N ≥ 2]`, flag it in the suggestion — don't silently re-propose.
+- 3–4 items max. Respect last week's observed hit rate.
+- If a rolled item has `[rolls: N ≥ 2]`, surface it with the rollover count — don't silently re-propose.
+- **No editorializing.** No "pick one of", "Monday-gating", "half-assed". List the items; the morning routine argues about scope.
 
-**If today is Sunday, Monday, last day of month, or 1st of month**, also suggest commits for the relevant higher tier:
+If today is Sunday, Monday, last day of month, or 1st of month, also suggest commits for the relevant higher tier:
 
 | Today             | Also suggest                                             |
 | ----------------- | -------------------------------------------------------- |
@@ -78,51 +92,50 @@ Always suggest a daily plan:
 
 Multiple can fire in one run (Mon Apr 1 = daily + weekly + monthly suggestions).
 
-### 6. Assemble the Morning Brief
+### 7. Assemble the Morning Brief
 
-Use this structure exactly. The `## Morning Brief` heading is added by the tool — don't include it in your `content`.
+Use this structure. The `## Morning Brief` heading is added by the tool — don't include it in your `content`.
 
 ```
-### Yesterday — completed
-- [x] <each item the user checked off in Todoist yesterday>
-(skip section if nothing was completed)
+### Yesterday
+Merged from Todoist completions + Evening Summary. Dedupe. Keep any context.
+- [x] <item>
+- [~] <item> [rolls: N]  (if rolled-and-closed)
+- [-] <item> — <reason>  (if dropped)
 
-### Open commitments
-- daily (Todoist due today + overdue): <list, item names only>
-- this week: <list from root doc weekly section, inline [rolls: N] tags where present>
-- this month: <list from root doc monthly section>
+### Unresolved from yesterday
+Items the user mentioned but didn't explicitly close. Morning routine prompts.
+- <item> — user noted: "<their phrasing>"
+(skip section if empty)
 
 ### Flags
-- <task> rolled <N>× — what's different this time?
-(skip section entirely if no flags)
+Lead with the biggest risk. Rollover counts ≥ 2, drift, blockers.
+- <item> rolled <N>× — what's different this time?
+- <blocker one-liner>
+(skip section if empty)
 
 ### News digest
 - <bullet 1>
 - <bullet 2>
 - <bullet 3>
 
-### Drift
-<one short line, or skip if nothing notable>
-
 ### Suggested plan for today
-- [ ] <suggested commit 1>
-- [ ] <suggested commit 2>
-- [ ] <suggested commit 3>
+- [ ] <commit 1>
+- [ ] <commit 2>
+- [ ] <commit 3>
 
-### Suggested weekly commits (if Monday)
+### Suggested weekly commits (Monday only)
 - [ ] <weekly 1>
-- [ ] <weekly 2>
-(skip unless Monday; on Sunday, instead list weekly close candidates)
+(skip unless Monday)
 
-### Suggested weekly close (if Sunday)
-Current week: <list each live item with a proposed outcome>
-- <item 1> → suggest: closed / rolled / dropped (with reason)
+### Suggested weekly close (Sunday only)
+- <live weekly item> → suggest: closed / rolled / dropped
 (skip unless Sunday)
 
-### Suggested monthly commits (if 1st of month)
+### Suggested monthly commits (1st of month only)
 (same pattern)
 
-### Suggested monthly close (if last day of month)
+### Suggested monthly close (last day of month only)
 (same pattern)
 
 ### Task errors
@@ -130,7 +143,7 @@ Current week: <list each live item with a proposed outcome>
 (skip if none)
 ```
 
-### 7. Write the brief
+### 8. Write the brief
 
 ```
 OBSIDIAN_update_project_note(
@@ -140,20 +153,17 @@ OBSIDIAN_update_project_note(
 )
 ```
 
-`date` defaults to today (the calendar date when this task runs). Post-midnight scheduling makes "today" = the day the user wakes up into.
+### 9. Verify
 
-### 8. Verify
+Re-read today's Daily Review entry via `OBSIDIAN_get_notes_by_date_range(<today>, <today>, "Daily Review")`. Confirm a `## Morning Brief` section exists with Yesterday, News digest, and Suggested plan at minimum.
 
-Re-read today's Daily Review entry via `OBSIDIAN_get_notes_by_date_range(<today>, <today>, "Daily Review")`. Confirm a `## Morning Brief` section is present with at least Open commitments, News digest, and Suggested plan.
-
-If something is missing, retry the write **once**. If the second attempt fails, end the run cleanly — the morning tool handles "no brief" gracefully.
+If something is missing, retry once. If the second attempt fails, end the run cleanly.
 
 ## Constraints
 
-- **Push back first, validate second.** Flag rollovers and drift; don't cheerlead.
-- **Keep it short.** The user reads this groggy.
+- **Push back first, validate second.** Flag rollovers, drift, risks — don't cheerlead.
+- **Keep it short.** Groggy reader.
 - **Do NOT edit the root doc.** Only the user (via the morning routine) changes tier commitments.
-- **Do NOT create the Daily Review project.** If it's missing, surface the error and end.
-- If a tool call fails mid-run, capture the failure in `### Task errors` instead of aborting.
-- Don't repeat news from prior briefs — scan recent briefs and vary the digest.
+- **Do NOT create the Daily Review project.** If it's missing, surface and end.
+- Capture tool failures in `### Task errors` instead of aborting.
 - The brief is for the human, not the next agent. Plain English, no JSON, no internal-state dumps.
