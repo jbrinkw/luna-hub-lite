@@ -1,14 +1,13 @@
 import type { ExtensionToolDefinition, ExtensionToolContext } from '@luna-hub/app-tools';
 import { toolSuccess, toolError } from '@luna-hub/app-tools';
-import { getGitCredentials, getTree, getFileContent, putFileContent } from './git-api';
-import { buildProjectTree, resolveProject } from './vault-parser';
+import { getGitCredentials, getFileContent, putFileContent } from './git-api';
 
 interface Patch {
   find: string;
   replace: string;
 }
 
-/** Validate the patches array shape; returns null on success or an error message. */
+/** Validate the patches array shape; returns { patches } on success or an error string. */
 function validatePatches(raw: unknown): { patches: Patch[] } | string {
   if (!Array.isArray(raw) || raw.length === 0) {
     return 'patches must be a non-empty array';
@@ -41,7 +40,7 @@ export function applyPatches(text: string, patches: Patch[]): string {
     const { find, replace } = patches[i];
     const first = next.indexOf(find);
     if (first === -1) {
-      throw new Error(`patch ${i + 1}: 'find' not found in root doc`);
+      throw new Error(`patch ${i + 1}: 'find' not found in file`);
     }
     const last = next.lastIndexOf(find);
     if (last !== first) {
@@ -52,17 +51,18 @@ export function applyPatches(text: string, patches: Patch[]): string {
   return next;
 }
 
-export const OBSIDIAN_patch_project_root: ExtensionToolDefinition = {
-  name: 'OBSIDIAN_patch_project_root',
+export const OBSIDIAN_patch_file: ExtensionToolDefinition = {
+  name: 'OBSIDIAN_patch_file',
   extensionName: 'obsidian',
   description:
-    "Apply one or more search-replace patches to a project's root .md page. Each patch's `find` must match exactly once in the current file (errors on 0 or 2+ matches). Patches apply sequentially (patch N sees the result of patch N-1) and atomically — if any patch fails to match, none are written. Set `replace` to an empty string to delete the matched text. Use for surgical edits (toggle a checkbox, remove a line) or wholesale section swaps. Frontmatter is just text; patch it like anything else.",
+    "Apply one or more search-replace patches to any existing file in the Obsidian vault (project root docs, Notes.md, or any other text file). Takes a full path from the vault root, e.g. 'Daily Review/Notes.md' or 'luna-personal-assistant/CoachByte/CoachByte.md'. Each patch's `find` must match exactly once in the current file (errors on 0 or 2+ matches). Patches apply sequentially (patch N sees the result of patch N-1) and atomically — if any patch fails to match, none are written. Set `replace` to an empty string to delete the matched text. Use for surgical edits, section swaps, or cleaning up bad content written by a prior run. Fails if the file doesn't exist; use `update_project_note` to append to Notes.md and `create_project` to scaffold a new project.",
   inputSchema: {
     type: 'object',
     properties: {
-      project_id: {
+      path: {
         type: 'string',
-        description: 'Project folder path or unique folder name (case-insensitive).',
+        description:
+          "Full path of the file from the vault root, case-sensitive (e.g. 'Daily Review/Daily Review.md' for a project root doc, 'Daily Review/Notes.md' for a notes file).",
       },
       patches: {
         type: 'array',
@@ -84,35 +84,26 @@ export const OBSIDIAN_patch_project_root: ExtensionToolDefinition = {
         },
       },
     },
-    required: ['project_id', 'patches'],
+    required: ['path', 'patches'],
   },
   handler: async (args, ctx) => {
     const creds = getGitCredentials(ctx as ExtensionToolContext);
     if (!creds) return toolError('Missing credentials (github_token, github_repo)');
-    if (!args.project_id) return toolError('project_id is required');
+    if (typeof args.path !== 'string' || args.path.trim().length === 0) {
+      return toolError('path is required');
+    }
+    const path = args.path.trim();
 
     const validated = validatePatches(args.patches);
     if (typeof validated === 'string') return toolError(validated);
     const { patches } = validated;
 
     try {
-      const tree = await getTree(creds);
-      const projects = buildProjectTree(tree);
-
-      const { project, ambiguous } = resolveProject(projects, args.project_id);
-      if (!project) {
-        if (ambiguous.length > 0) {
-          const cands = ambiguous.map((p) => p.id).join(', ');
-          return toolError(`Ambiguous project "${args.project_id}". Candidates: ${cands}`);
-        }
-        return toolError(`Project not found: ${args.project_id}`);
-      }
-
-      // Fetch current root file via Contents API (the SHA returned here is what
+      // Fetch the file via Contents API (the SHA returned here is what
       // putFileContent needs; the tree's blob SHA is a different value).
-      const fresh = await getFileContent(creds, project.rootFilePath);
+      const fresh = await getFileContent(creds, path);
       if (!fresh) {
-        return toolError(`Root file not found: ${project.rootFilePath}`);
+        return toolError(`File not found: ${path}`);
       }
 
       let nextContent: string;
@@ -122,12 +113,11 @@ export const OBSIDIAN_patch_project_root: ExtensionToolDefinition = {
         return toolError((e as Error).message);
       }
 
-      // Avoid an empty commit when the patches happen to be no-ops.
+      // Skip the PUT when patches are a no-op (avoids a spurious commit).
       if (nextContent === fresh.content) {
         return toolSuccess({
           status: 'success',
-          project_id: project.id,
-          root_page_path: project.rootFilePath,
+          path,
           patches_applied: patches.length,
           bytes_before: fresh.content.length,
           bytes_after: nextContent.length,
@@ -135,18 +125,11 @@ export const OBSIDIAN_patch_project_root: ExtensionToolDefinition = {
         });
       }
 
-      await putFileContent(
-        creds,
-        project.rootFilePath,
-        nextContent,
-        `root: patch ${project.id} (${patches.length})`,
-        fresh.sha,
-      );
+      await putFileContent(creds, path, nextContent, `patch ${path} (${patches.length})`, fresh.sha);
 
       return toolSuccess({
         status: 'success',
-        project_id: project.id,
-        root_page_path: project.rootFilePath,
+        path,
         patches_applied: patches.length,
         bytes_before: fresh.content.length,
         bytes_after: nextContent.length,

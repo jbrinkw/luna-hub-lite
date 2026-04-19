@@ -88,7 +88,8 @@ If a closed/dropped commit was also at weekly/monthly/yearly tier (lives
 in the root doc, NOT Todoist), patch it out of the root doc:
   - Closed/dropped at higher tier → remove the line.
   - Rolled at higher tier → toggle to [ ] X [rolls: N+1] (still open).
-Use OBSIDIAN_patch_project_root (see Patch Construction below).
+Use OBSIDIAN_patch_file (see Patch Construction below) with the root doc
+path, e.g. \`Daily Review/Daily Review.md\`.
 
 STEP 2 — BRIEF REVIEW
 ---------------------
@@ -159,20 +160,29 @@ COMMITMENT FORMAT
 Live commits with [rolls: 2]+ MUST trigger auto-pushback at their tier's
 plan day. Non-optional.
 
-PATCH CONSTRUCTION (for OBSIDIAN_patch_project_root)
-----------------------------------------------------
-Each \`find\` must match exactly once in the current root doc. If a line
+PATCH CONSTRUCTION (for OBSIDIAN_patch_file)
+--------------------------------------------
+Takes a full vault-relative \`path\` + a \`patches\` array. Works on any
+existing text file: root doc (\`Daily Review/Daily Review.md\`),
+Notes.md (\`Daily Review/Notes.md\`), or any other project's files.
+
+Each \`find\` must match exactly once in the current file. If a line
 might appear in multiple sections, include the section heading in \`find\`
 for disambiguation:
 
+  path: "Daily Review/Daily Review.md"
   patches: [{
     find: "## Week of 4/13/26\\n\\n- [ ] ship barcode\\n- [ ] recruiter\\n",
     replace: "## Week of 4/13/26\\n\\n- [ ] ship barcode\\n"
   }]
 
 Batch multiple edits into one call — patches apply atomically. On HTTP 409
-(concurrent edit), re-read the root doc and retry once. Two failures =
-surface to user.
+(concurrent edit), re-read the file and retry once. Two failures = surface
+to user.
+
+Notes.md can also be patched with this tool (e.g. to remove a bad section
+written earlier in a session). \`update_project_note\` is still the tool
+for appending new content; \`patch_file\` is for surgical edits + cleanup.
 
 DON'TS
 ------
@@ -197,7 +207,7 @@ export const OBSIDIAN_get_morning_brief: ExtensionToolDefinition = {
     properties: {
       project_id: {
         type: 'string',
-        description: `Morning review project. Defaults to "${DEFAULT_PROJECT_ID}". Must exist in the vault with a root doc and Notes.md.`,
+        description: `Accountability project to read. Defaults to "${DEFAULT_PROJECT_ID}". Must exist in the vault with a root doc and Notes.md.`,
       },
     },
   },
@@ -226,7 +236,7 @@ export const OBSIDIAN_get_morning_brief: ExtensionToolDefinition = {
       }
 
       // Collect every Notes.md in the vault (unscoped — the whole vault, not
-      // just the morning review project's subtree). Shallowest-first for
+      // just the accountability project's subtree). Shallowest-first for
       // deterministic truncation if we hit the 40-file cap.
       const noteFileEntries: Array<{ path: string; sha: string }> = [];
       for (const p of projects.values()) {

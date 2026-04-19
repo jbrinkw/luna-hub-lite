@@ -47,7 +47,7 @@ The agent follows the instructions: closure on yesterday (calls `TODOIST_get_tas
 | Weekly     | root doc                     | Monday        | Sunday              |
 | Daily      | Todoist + today's `Notes.md` | every morning | every morning       |
 
-Nightly skill suggests commits at whichever tiers have a boundary tomorrow. Morning agent reviews + commits to root doc via `OBSIDIAN_patch_project_root` after user approval.
+Nightly skill suggests commits at whichever tiers have a boundary tomorrow. Morning agent reviews + commits to root doc via `OBSIDIAN_patch_file` after user approval.
 
 ## Commitment format
 
@@ -65,7 +65,7 @@ Any **live** commit with `[rolls: 2]` or higher auto-triggers a "what's differen
 
 ## Persistence model
 
-- **Root doc** — current state at each tier. Sections replaced wholesale on plan days via `OBSIDIAN_patch_project_root` (atomic search-replace patches). Nightly skill never writes here.
+- **Root doc** — current state at each tier. Sections replaced wholesale on plan days via `OBSIDIAN_patch_file` (atomic search-replace patches). Nightly skill never writes here.
 - **`Notes.md`** — append-only history. Daily entries contain `## Evening Summary`, `## Plan for today`, `## Morning Brief`, and on transition days `## Weekly Close (Week of X)` / `## Monthly Close (Month)`. Edited via `OBSIDIAN_update_project_note`.
 - **Todoist** — daily-tier working list. Nightly pulls all active tasks (no filter) for the brief; morning closes yesterday's items. Longer-horizon commits live in the root doc, not Todoist.
 - **Git log** — audit trail. Vault auto-commits, so tier-section history is recoverable.
@@ -77,7 +77,7 @@ All in LunaHubLite. Enable the Obsidian extension in Hub; the rest is automatic:
 - `OBSIDIAN_get_morning_brief` — bundled read + routine instructions for the morning side
 - `OBSIDIAN_get_project_text`, `OBSIDIAN_get_notes_by_date_range` — used by the nightly skill
 - `OBSIDIAN_update_project_note` — appends to Notes.md entries (supports backdate via `date` arg)
-- `OBSIDIAN_patch_project_root` — atomic batch edits to the root doc (used by the morning agent on plan/close days)
+- `OBSIDIAN_patch_file` — atomic batch edits to the root doc (used by the morning agent on plan/close days)
 - `TODOIST_get_tasks`, `TODOIST_complete_task`, `TODOIST_update_task`, `TODOIST_create_task`
 
 The nightly skill additionally needs web search (provided natively by scheduled-agent runtimes).

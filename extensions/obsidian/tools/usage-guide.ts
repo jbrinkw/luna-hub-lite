@@ -27,8 +27,8 @@ Date: MM/DD/YY[:] (year = 2000+YY).
 - \`get_notes_by_date_range(start, end, project_id?)\` — MM/DD/YY, newest-first. 40-file cap (\`truncated\` flag); scope by project.
 - \`update_project_note(project_id, content, section_id?, date?)\` — appends to that date's entry (default today). Repeat calls for the same date append into the existing entry (no new date header). Pass \`date\` (MM/DD/YY) to backdate; new backdated entries are placed chronologically (newest-first). Two blank lines trail every insert.
 - \`create_project(name, parent_id?, description?)\` — scaffolds a new project: commits \`<path>/<name>.md\` (root page) and \`<path>/Notes.md\` (empty, with frontmatter). Defaults to vault root; \`parent_id\` nests it under an existing project.
-- \`patch_project_root(project_id, patches[])\` — search-replace edits to a project's root .md page. Each patch's \`find\` must match exactly once. Patches apply sequentially and atomically (none commit if any fails to match). Empty \`replace\` deletes. Use for surgical edits or section swaps; the root file is never appended to like Notes.md.
-- \`get_morning_brief(project_id?)\` — bundled read for the morning accountability routine. Returns the Morning Review root doc + last 7 days of vault-wide notes + full routine instructions. Call once when the user asks for their morning brief.
+- \`patch_file(path, patches[])\` — search-replace edits to ANY .md file in the vault (root docs, Notes.md, anything). Each patch's \`find\` must match exactly once. Patches apply sequentially and atomically (none commit if any fails to match). Empty \`replace\` deletes. Pass a full vault-relative path (e.g. \`Daily Review/Notes.md\`).
+- \`get_morning_brief(project_id?)\` — bundled read for the morning accountability routine. Defaults to \`Daily Review\`. Returns root doc + last 7 days of vault-wide notes + full routine instructions. Call once when the user asks for their morning brief.
 
 ## Limits
 Branch hardcoded to \`main\`. Case-insensitive bare name, case-sensitive path. "Today" = server clock.
