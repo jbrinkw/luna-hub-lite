@@ -21,7 +21,7 @@ Canonical tool names (your client may prefix them):
 - `OBSIDIAN_get_notes_by_date_range(start, end, project_id?)` — windowed Notes.md reads; unscoped when `project_id` omitted
 - `OBSIDIAN_update_project_note(project_id, content, section_id?, date?)` — appends to a dated Notes.md entry's section
 - `TODOIST_get_tasks` — all active Todoist tasks (no filter)
-- `TODOIST_get_completed_tasks(since, until)` — tasks the user already checked off in a date range (ISO datetime strings). **Defaults to the user's Inbox project** — pass `project_id` to override.
+- `TODOIST_get_completed_tasks()` — tasks the user already checked off. Defaults to last 7 days in the Inbox project; no args needed for the common case. Filter `completed_at` locally to narrow to yesterday/today. Pass `project_id` to target a different project; `since`/`until` to override the window.
 
 You do NOT edit the root doc. That's the user's (and morning routine's) territory.
 
@@ -32,7 +32,7 @@ You do NOT edit the root doc. That's the user's (and morning routine's) territor
 - `OBSIDIAN_get_project_text("Daily Review")` — root doc (5y / yearly / monthly / weekly commits + active projects list + news topics list) + recent `Notes.md` entries
 - `OBSIDIAN_get_notes_by_date_range(<7-days-ago MM/DD/YY>, <today MM/DD/YY>)` — UNSCOPED (no `project_id`). Returns last 7 days of every Notes.md in the vault: accountability history + journal + every project's progress notes. 40-Notes.md cap applies but is fine for this vault.
 - `TODOIST_get_tasks` — full open ledger, no filter. Todoist holds long-term tasks in addition to today's items.
-- `TODOIST_get_completed_tasks(since: '<yesterday>T00:00:00Z', until: '<today>T00:00:00Z')` — what the user actually checked off yesterday. Use this to know what got done (closure is not written to Obsidian yet by the user; the morning routine will do that). Without this, the brief can't distinguish "open and rolled" from "open but completed in Todoist, waiting for morning closure to log".
+- `TODOIST_get_completed_tasks()` — the last 7 days of inbox completions (no args needed). Filter `completed_at` locally to get yesterday's / today's items. Ground truth for "what got done" — without it the brief can't distinguish "open and rolled" from "completed in Todoist, waiting for morning closure to log."
 
 If `get_project_text("Daily Review")` errors with "project not found", the user hasn't initialized the Daily Review project yet. Log the error and end the run — do NOT attempt to create it yourself.
 

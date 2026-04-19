@@ -1086,7 +1086,6 @@ describe('TODOIST_get_completed_tasks', () => {
       { content: 'Ship barcode flow', completed_at: '2026-04-17T14:00:00Z' },
       { content: 'Recruiter outreach', completed_at: '2026-04-17T16:30:00Z' },
     ];
-    // First fetch: /projects (inbox lookup). Second fetch: the completed endpoint.
     mockFetch.mockReturnValueOnce(mockFetchResponse(PROJECTS_RESP));
     mockFetch.mockReturnValueOnce(mockFetchResponse({ items }));
 
@@ -1094,7 +1093,10 @@ describe('TODOIST_get_completed_tasks', () => {
 
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
-    expect(parsed).toEqual(items);
+    expect(parsed.items).toEqual(items);
+    expect(parsed.project_id).toBe('proj-inbox');
+    expect(parsed.since).toBe('2026-04-17T00:00:00Z');
+    expect(parsed.until).toBe('2026-04-18T00:00:00Z');
 
     expect(mockFetch).toHaveBeenCalledTimes(2);
     const [projectsUrl] = mockFetch.mock.calls[0];
@@ -1107,6 +1109,46 @@ describe('TODOIST_get_completed_tasks', () => {
     expect(completedUrl).toContain('until=2026-04-18T00%3A00%3A00Z');
     expect(completedOpts.method).toBe('GET');
     expect(completedOpts.headers.Authorization).toBe('Bearer todoist-key-456');
+  });
+
+  it('defaults to a 7-day window ending ~now when since/until are omitted', async () => {
+    const before = Date.now();
+    mockFetch.mockReturnValueOnce(mockFetchResponse(PROJECTS_RESP));
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ items: [] }));
+
+    const result = await handler({}, todoistCtx());
+    const after = Date.now();
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+
+    // since should be roughly 7 days before "now"
+    const sinceMs = Date.parse(parsed.since);
+    const untilMs = Date.parse(parsed.until);
+    const sevenDaysMs = 7 * 24 * 60 * 60 * 1000;
+    expect(sinceMs).toBeGreaterThanOrEqual(before - sevenDaysMs - 1000);
+    expect(sinceMs).toBeLessThanOrEqual(after - sevenDaysMs + 1000);
+    // until should be slightly after now (1h buffer)
+    expect(untilMs).toBeGreaterThan(after);
+    expect(untilMs).toBeLessThan(after + 2 * 60 * 60 * 1000);
+
+    // The completed-endpoint URL should reflect both computed defaults
+    const [, completedCall] = mockFetch.mock.calls;
+    const [completedUrl] = completedCall;
+    expect(completedUrl).toContain(`since=${encodeURIComponent(parsed.since)}`);
+    expect(completedUrl).toContain(`until=${encodeURIComponent(parsed.until)}`);
+  });
+
+  it('accepts `since` alone and fills in `until` from the default', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse(PROJECTS_RESP));
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ items: [] }));
+
+    const result = await handler({ since: '2026-04-01T00:00:00Z' }, todoistCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.since).toBe('2026-04-01T00:00:00Z');
+    expect(parsed.until).toMatch(/^\d{4}-\d{2}-\d{2}T/);
   });
 
   it('skips the inbox lookup when project_id is passed explicitly', async () => {
@@ -1130,7 +1172,6 @@ describe('TODOIST_get_completed_tasks', () => {
   });
 
   it('errors when the inbox project cannot be located', async () => {
-    // Projects list with no inbox flag
     mockFetch.mockReturnValueOnce(
       mockFetchResponse({
         results: [
@@ -1143,7 +1184,6 @@ describe('TODOIST_get_completed_tasks', () => {
     const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, todoistCtx());
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('inbox');
-    // Should have called /projects but NOT the completed endpoint
     expect(mockFetch).toHaveBeenCalledOnce();
   });
 
@@ -1154,17 +1194,6 @@ describe('TODOIST_get_completed_tasks', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('fetching projects');
     expect(result.content[0].text).toContain('500');
-  });
-
-  it('returns toolError when since or until is missing', async () => {
-    const r1 = await handler({ until: '2026-04-18' }, todoistCtx());
-    mockFetch.mockReset();
-    const r2 = await handler({ since: '2026-04-17' }, todoistCtx());
-    expect(r1.isError).toBe(true);
-    expect(r1.content[0].text).toContain('since is required');
-    expect(r2.isError).toBe(true);
-    expect(r2.content[0].text).toContain('until is required');
-    expect(mockFetch).not.toHaveBeenCalled();
   });
 
   it('returns toolError when credentials are missing', async () => {

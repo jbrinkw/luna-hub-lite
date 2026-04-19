@@ -27,10 +27,11 @@ rollover evidence.
 
 BEFORE ANYTHING: call these two Todoist tools in parallel for live state:
 - \`TODOIST_get_tasks\` (no filter) — the full open ledger
-- \`TODOIST_get_completed_tasks(since: '<yesterday>T00:00:00Z', until: '<today>T00:00:00Z')\`
-  — what the user actually checked off yesterday. Defaults to the Inbox
-  project; pass \`project_id\` to override. Prevents you from asking about
-  tasks that are already done.
+- \`TODOIST_get_completed_tasks()\` — no args needed. Defaults to the last
+  7 days of completions in the Inbox project (where daily commits live).
+  Filter results by \`completed_at\` locally if you only want yesterday
+  or today. The wide UTC window is intentional: a user's local-yesterday
+  often straddles UTC midnight, and a tight window misses completions.
 
 STEP 1 — DAILY CLOSURE (gated; no planning until done)
 ------------------------------------------------------
