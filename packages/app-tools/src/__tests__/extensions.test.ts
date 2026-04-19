@@ -1073,11 +1073,21 @@ Top school PhD.
 describe('TODOIST_get_completed_tasks', () => {
   const handler = todoistTools.TODOIST_get_completed_tasks.handler;
 
-  it('sends correct URL with since/until and unwraps { items: [...] }', async () => {
+  const PROJECTS_RESP = {
+    results: [
+      { id: 'proj-work', name: 'Work', is_inbox_project: false },
+      { id: 'proj-inbox', name: 'Inbox', is_inbox_project: true },
+      { id: 'proj-side', name: 'Side', is_inbox_project: false },
+    ],
+  };
+
+  it('defaults to filtering by the inbox project when project_id is omitted', async () => {
     const items = [
       { content: 'Ship barcode flow', completed_at: '2026-04-17T14:00:00Z' },
       { content: 'Recruiter outreach', completed_at: '2026-04-17T16:30:00Z' },
     ];
+    // First fetch: /projects (inbox lookup). Second fetch: the completed endpoint.
+    mockFetch.mockReturnValueOnce(mockFetchResponse(PROJECTS_RESP));
     mockFetch.mockReturnValueOnce(mockFetchResponse({ items }));
 
     const result = await handler({ since: '2026-04-17T00:00:00Z', until: '2026-04-18T00:00:00Z' }, todoistCtx());
@@ -1086,16 +1096,20 @@ describe('TODOIST_get_completed_tasks', () => {
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed).toEqual(items);
 
-    expect(mockFetch).toHaveBeenCalledOnce();
-    const [url, opts] = mockFetch.mock.calls[0];
-    expect(url).toContain('https://api.todoist.com/api/v1/tasks/completed/by_completion_date');
-    expect(url).toContain('since=2026-04-17T00%3A00%3A00Z');
-    expect(url).toContain('until=2026-04-18T00%3A00%3A00Z');
-    expect(opts.method).toBe('GET');
-    expect(opts.headers.Authorization).toBe('Bearer todoist-key-456');
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    const [projectsUrl] = mockFetch.mock.calls[0];
+    expect(projectsUrl).toContain('https://api.todoist.com/api/v1/projects');
+
+    const [completedUrl, completedOpts] = mockFetch.mock.calls[1];
+    expect(completedUrl).toContain('https://api.todoist.com/api/v1/tasks/completed/by_completion_date');
+    expect(completedUrl).toContain('project_id=proj-inbox');
+    expect(completedUrl).toContain('since=2026-04-17T00%3A00%3A00Z');
+    expect(completedUrl).toContain('until=2026-04-18T00%3A00%3A00Z');
+    expect(completedOpts.method).toBe('GET');
+    expect(completedOpts.headers.Authorization).toBe('Bearer todoist-key-456');
   });
 
-  it('passes optional project_id and limit through', async () => {
+  it('skips the inbox lookup when project_id is passed explicitly', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse({ items: [] }));
 
     await handler(
@@ -1108,9 +1122,38 @@ describe('TODOIST_get_completed_tasks', () => {
       todoistCtx(),
     );
 
+    expect(mockFetch).toHaveBeenCalledOnce();
     const [url] = mockFetch.mock.calls[0];
+    expect(url).toContain('/tasks/completed/by_completion_date');
     expect(url).toContain('project_id=proj-9');
     expect(url).toContain('limit=100');
+  });
+
+  it('errors when the inbox project cannot be located', async () => {
+    // Projects list with no inbox flag
+    mockFetch.mockReturnValueOnce(
+      mockFetchResponse({
+        results: [
+          { id: 'proj-a', name: 'A', is_inbox_project: false },
+          { id: 'proj-b', name: 'B', is_inbox_project: false },
+        ],
+      }),
+    );
+
+    const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, todoistCtx());
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('inbox');
+    // Should have called /projects but NOT the completed endpoint
+    expect(mockFetch).toHaveBeenCalledOnce();
+  });
+
+  it('surfaces a clear error when the /projects lookup fails', async () => {
+    mockFetch.mockReturnValueOnce(mockFetchResponse('Server error', false, 500));
+
+    const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, todoistCtx());
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('fetching projects');
+    expect(result.content[0].text).toContain('500');
   });
 
   it('returns toolError when since or until is missing', async () => {
@@ -1131,14 +1174,14 @@ describe('TODOIST_get_completed_tasks', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('returns toolError on API error', async () => {
+  it('returns toolError on completed-endpoint API error (with explicit project_id)', async () => {
     mockFetch.mockReturnValueOnce(mockFetchResponse('Forbidden', false, 403));
-    const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, todoistCtx());
+    const result = await handler({ since: '2026-04-17', until: '2026-04-18', project_id: 'proj-9' }, todoistCtx());
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Todoist API error: 403');
   });
 
-  it('returns toolError on network failure', async () => {
+  it('returns toolError on network failure during inbox lookup', async () => {
     mockFetch.mockRejectedValueOnce(new Error('Network down'));
     const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, todoistCtx());
     expect(result.isError).toBe(true);

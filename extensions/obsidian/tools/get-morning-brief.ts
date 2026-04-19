@@ -28,8 +28,9 @@ rollover evidence.
 BEFORE ANYTHING: call these two Todoist tools in parallel for live state:
 - \`TODOIST_get_tasks\` (no filter) — the full open ledger
 - \`TODOIST_get_completed_tasks(since: '<yesterday>T00:00:00Z', until: '<today>T00:00:00Z')\`
-  — what the user actually checked off yesterday. Prevents you from asking
-  about tasks that are already done.
+  — what the user actually checked off yesterday. Defaults to the Inbox
+  project; pass \`project_id\` to override. Prevents you from asking about
+  tasks that are already done.
 
 STEP 1 — DAILY CLOSURE (gated; no planning until done)
 ------------------------------------------------------

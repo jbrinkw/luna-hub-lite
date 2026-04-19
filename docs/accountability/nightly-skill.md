@@ -21,7 +21,7 @@ Canonical tool names (your client may prefix them):
 - `OBSIDIAN_get_notes_by_date_range(start, end, project_id?)` — windowed Notes.md reads; unscoped when `project_id` omitted
 - `OBSIDIAN_update_project_note(project_id, content, section_id?, date?)` — appends to a dated Notes.md entry's section
 - `TODOIST_get_tasks` — all active Todoist tasks (no filter)
-- `TODOIST_get_completed_tasks(since, until)` — tasks the user already checked off in a date range (ISO datetime strings)
+- `TODOIST_get_completed_tasks(since, until)` — tasks the user already checked off in a date range (ISO datetime strings). **Defaults to the user's Inbox project** — pass `project_id` to override.
 
 You do NOT edit the root doc. That's the user's (and morning routine's) territory.
 
