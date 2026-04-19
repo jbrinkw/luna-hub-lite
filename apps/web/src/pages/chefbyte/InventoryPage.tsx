@@ -11,6 +11,7 @@ import { chefbyte } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { todayStr } from '@/shared/dates';
+import { isValidLanIp } from '@/components/chefbyte/ScalesTab';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -30,7 +31,16 @@ interface StockLot {
   product_id: string;
   qty_containers: number;
   expires_on: string | null;
+  last_update_source: 'manual' | 'live_shelf' | 'live_scale' | 'catch_all' | null;
+  last_update_ts: string | null;
   locations: { name: string } | null;
+}
+
+interface LiveShelfDeviceLite {
+  device_id: string;
+  lan_ip: string | null;
+  pending_review_count: number;
+  last_heartbeat_ts: string | null;
 }
 
 interface GroupedProduct {
@@ -38,6 +48,15 @@ interface GroupedProduct {
   totalStock: number;
   nearestExpiry: string | null;
   lotCount: number;
+  /**
+   * Most recent automated-source tag across this product's lots, or null if the
+   * last update was manual / untagged. Manual rows are intentionally excluded
+   * from the pill UI, so they're excluded from this type too — keeps the
+   * `sourcePillCls` switch exhaustive without a dead default branch.
+   */
+  latestSource: 'live_shelf' | 'live_scale' | 'catch_all' | null;
+  /** Timestamp of the row that produced `latestSource` — used as tie-breaker. */
+  latestSourceTs: string | null;
 }
 
 type ViewMode = 'grouped' | 'lots';
@@ -99,12 +118,30 @@ export function InventoryPage() {
     queryFn: async () => {
       const { data, error } = await chefbyte()
         .from('stock_lots')
-        .select('lot_id,product_id,qty_containers,expires_on,locations:location_id(name)')
+        .select(
+          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,locations:location_id(name)',
+        )
         .eq('user_id', user!.id);
       if (error) throw error;
       return (data ?? []) as StockLot[];
     },
     enabled: !!user,
+  });
+
+  /* Live Shelf devices — used to total pending_review_count and resolve the
+     LAN IP for the "Review (N)" deep-link. Short refetch keeps the badge honest. */
+  const { data: shelfDevices = [] } = useQuery({
+    queryKey: queryKeys.liveShelfDevices(user!.id),
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
+        .from('live_shelf_devices')
+        .select('device_id,lan_ip,pending_review_count,last_heartbeat_ts')
+        .eq('user_id', user!.id);
+      if (error) throw error;
+      return (data ?? []) as LiveShelfDeviceLite[];
+    },
+    enabled: !!user,
+    refetchInterval: 15_000,
   });
 
   const { data: locationId = null } = useQuery({
@@ -132,6 +169,11 @@ export function InventoryPage() {
   useRealtimeInvalidation('inventory-changes', [
     { schema: 'chefbyte', table: 'stock_lots', queryKeys: [queryKeys.stockLots(user!.id)] },
     { schema: 'chefbyte', table: 'products', queryKeys: [queryKeys.products(user!.id)] },
+    {
+      schema: 'chefbyte',
+      table: 'live_shelf_devices',
+      queryKeys: [queryKeys.liveShelfDevices(user!.id)],
+    },
   ]);
 
   /* ---------------------------------------------------------------- */
@@ -157,11 +199,34 @@ export function InventoryPage() {
         .sort();
       const nearestExpiry = expiries[0] ?? null;
 
+      // Pick the most-recently-updated lot's automated source tag as the
+      // product's pill. Skip lots with a null source (pure manual entries we
+      // never tagged) AND lots tagged 'manual' — the pill is reserved for
+      // automated sources (live_shelf / live_scale / catch_all), matching the
+      // render-side guard `latestSource !== 'manual'` further down.
+      let latestSource: GroupedProduct['latestSource'] = null;
+      let latestSourceTs: string | null = null;
+      for (const l of productLots) {
+        if (!l.last_update_source || l.last_update_source === 'manual') continue;
+        if (!l.last_update_ts) {
+          // Fall back: if we have a source but no ts, still show it unless we
+          // already have one with a ts.
+          if (latestSource === null) latestSource = l.last_update_source;
+          continue;
+        }
+        if (!latestSourceTs || l.last_update_ts > latestSourceTs) {
+          latestSourceTs = l.last_update_ts;
+          latestSource = l.last_update_source;
+        }
+      }
+
       return {
         product,
         totalStock,
         nearestExpiry,
         lotCount: productLots.length,
+        latestSource,
+        latestSourceTs,
       };
     });
   }, [products, lots]);
@@ -342,6 +407,59 @@ export function InventoryPage() {
     return 'bg-success';
   };
 
+  /* ---------------------------------------------------------------- */
+  /*  Review queue — pending_review_count summed across shelf devices   */
+  /* ---------------------------------------------------------------- */
+
+  const { pendingReviewTotal, reviewUrl, reviewDisabledReason } = useMemo(() => {
+    const total = shelfDevices.reduce((sum, d) => sum + (d.pending_review_count ?? 0), 0);
+    // Prefer the most-recently-heartbeated device that actually has a LAN IP set.
+    // Re-validate the stored lan_ip at URL-build time as a defense-in-depth measure:
+    // if a bad value slipped into the DB before the Settings-tab validation was in
+    // place, we refuse to interpolate it into the href and fall back to the
+    // disabled-button surface with a distinct explanation.
+    const withIp = shelfDevices.filter((d) => d.lan_ip && d.lan_ip.trim() !== '');
+    withIp.sort((a, b) => {
+      const ta = a.last_heartbeat_ts ? new Date(a.last_heartbeat_ts).getTime() : 0;
+      const tb = b.last_heartbeat_ts ? new Date(b.last_heartbeat_ts).getTime() : 0;
+      return tb - ta;
+    });
+    const target = withIp[0];
+    const targetIpValid = target && target.lan_ip ? isValidLanIp(target.lan_ip) : false;
+    const url = target && targetIpValid ? `http://${target.lan_ip}:8000/inventory#review` : null;
+    let reason: string | null = null;
+    if (!target) {
+      reason = 'Set LAN IP in Settings → Scales';
+    } else if (!targetIpValid) {
+      reason = 'Invalid LAN IP — update in Settings → Scales';
+    }
+    return { pendingReviewTotal: total, reviewUrl: url, reviewDisabledReason: reason };
+  }, [shelfDevices]);
+
+  /* ---------------------------------------------------------------- */
+  /*  Source pill                                                      */
+  /* ---------------------------------------------------------------- */
+
+  const sourceLabel: Record<NonNullable<GroupedProduct['latestSource']>, string> = {
+    live_shelf: 'live shelf',
+    live_scale: 'live scale',
+    catch_all: 'catch-all',
+  };
+
+  /** Pill style per source kind — uses existing tokens, no new colors.
+   * Exhaustive over the tightened `latestSource` type (manual is excluded
+   * upstream, so there's no dead default branch). */
+  const sourcePillCls = (src: NonNullable<GroupedProduct['latestSource']>): string => {
+    switch (src) {
+      case 'live_shelf':
+        return 'bg-info-subtle text-info-text';
+      case 'live_scale':
+        return 'bg-success-subtle text-success-text';
+      case 'catch_all':
+        return 'bg-warning-subtle text-warning-text';
+    }
+  };
+
   /* ================================================================ */
   /*  RENDER                                                           */
   /* ================================================================ */
@@ -361,7 +479,32 @@ export function InventoryPage() {
 
   return (
     <ChefLayout title="Inventory">
-      <h1 className="m-0 text-2xl font-bold text-text">Inventory</h1>
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <h1 className="m-0 text-2xl font-bold text-text">Inventory</h1>
+        {/* Review (N) button — deep-links to the Pi's local review UI.
+            Always visible; disabled with tooltip when no device has a LAN IP. */}
+        {reviewUrl ? (
+          <a
+            href={reviewUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            data-testid="inventory-review-btn"
+            className="inline-flex items-center gap-2 bg-surface border border-border-strong text-text hover:bg-surface-hover px-3 py-1.5 rounded-lg text-sm font-semibold no-underline transition-colors"
+          >
+            Review ({pendingReviewTotal})
+          </a>
+        ) : (
+          <button
+            type="button"
+            disabled
+            title={reviewDisabledReason ?? ''}
+            data-testid="inventory-review-btn-disabled"
+            className="inline-flex items-center gap-2 bg-surface border border-border text-text-tertiary px-3 py-1.5 rounded-lg text-sm font-semibold opacity-60 cursor-not-allowed"
+          >
+            Review ({pendingReviewTotal})
+          </button>
+        )}
+      </div>
       {loadError && (
         <div data-testid="load-error" className="bg-danger-subtle border border-danger rounded-lg p-3 mb-3">
           <p className="text-danger-text m-0 mb-2">Failed to load data: {loadError}</p>
@@ -444,7 +587,7 @@ export function InventoryPage() {
               </div>
 
               {/* Product rows */}
-              {filteredGrouped.map(({ product, totalStock, nearestExpiry }, idx) => {
+              {filteredGrouped.map(({ product, totalStock, nearestExpiry, latestSource }, idx) => {
                 const isZeroStock = totalStock <= 0;
                 const servingsTotal = totalStock * Number(product.servings_per_container);
                 const isExpanded = expandedProductId === product.product_id;
@@ -476,7 +619,7 @@ export function InventoryPage() {
                         <ChevronRight className="w-4 h-4 text-text-tertiary" />
                       )}
 
-                      {/* Product name + stock dot */}
+                      {/* Product name + stock dot + source pill */}
                       <div className="flex items-center gap-2 min-w-0">
                         <span
                           className={`w-2.5 h-2.5 rounded-full shrink-0 ${stockDotColor(totalStock, Number(product.min_stock_amount))}`}
@@ -484,6 +627,14 @@ export function InventoryPage() {
                         <span className="font-semibold sm:whitespace-nowrap sm:overflow-hidden sm:text-ellipsis">
                           {product.name}
                         </span>
+                        {latestSource && (
+                          <span
+                            data-testid={`source-pill-${product.product_id}`}
+                            className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(latestSource)}`}
+                          >
+                            {sourceLabel[latestSource]}
+                          </span>
+                        )}
                       </div>
 
                       {/* Stock */}
@@ -602,7 +753,17 @@ export function InventoryPage() {
                     data-testid={`lot-row-${lot.lot_id}`}
                     className="bg-surface border border-border rounded-lg p-3"
                   >
-                    <div className="font-semibold text-sm text-text mb-1">{lot.productName}</div>
+                    <div className="flex items-center gap-2 mb-1 flex-wrap">
+                      <span className="font-semibold text-sm text-text">{lot.productName}</span>
+                      {lot.last_update_source && lot.last_update_source !== 'manual' && (
+                        <span
+                          data-testid={`lot-source-pill-${lot.lot_id}`}
+                          className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(lot.last_update_source)}`}
+                        >
+                          {sourceLabel[lot.last_update_source]}
+                        </span>
+                      )}
+                    </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-secondary">
                       <span>{Number(lot.qty_containers).toFixed(1)} ctn</span>
                       <span>{lot.locations?.name ?? '\u2014'}</span>
@@ -630,7 +791,19 @@ export function InventoryPage() {
                         data-testid={`lot-row-${lot.lot_id}`}
                         className="border-b border-border-light"
                       >
-                        <td className="p-3">{lot.productName}</td>
+                        <td className="p-3">
+                          <span className="inline-flex items-center gap-2 flex-wrap">
+                            {lot.productName}
+                            {lot.last_update_source && lot.last_update_source !== 'manual' && (
+                              <span
+                                data-testid={`lot-source-pill-${lot.lot_id}`}
+                                className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(lot.last_update_source)}`}
+                              >
+                                {sourceLabel[lot.last_update_source]}
+                              </span>
+                            )}
+                          </span>
+                        </td>
                         <td className="p-3">{lot.locations?.name ?? '\u2014'}</td>
                         <td className="text-right p-3">{Number(lot.qty_containers).toFixed(1)}</td>
                         <td className="p-3">{lot.expires_on ?? '\u2014'}</td>

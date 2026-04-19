@@ -382,6 +382,10 @@ verify_jwt = false
 [functions.walmart-scrape]
 verify_jwt = false
 
+# shelf-ingest uses API key auth (x-api-key header, SHA-256 → chefbyte.live_shelf_devices).
+[functions.shelf-ingest]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

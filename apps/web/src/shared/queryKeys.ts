@@ -32,6 +32,8 @@ export const queryKeys = {
   tempItems: (userId: string, date: string) => ['temp-items', userId, date] as const,
   liquidtrackEvents: (userId: string, date: string) => ['lt-events', userId, date] as const,
   devices: (userId: string) => ['devices', userId] as const,
+  liveShelfDevices: (userId: string) => ['live-shelf-devices', userId] as const,
+  scalePairings: (userId: string) => ['scale-pairings', userId] as const,
   userConfig: (userId: string, key: string) => ['user-config', userId, key] as const,
   chefSettings: (userId: string) => ['chef-settings', userId] as const,
 };
