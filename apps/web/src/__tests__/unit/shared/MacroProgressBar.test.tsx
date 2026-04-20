@@ -37,17 +37,21 @@ describe('MacroProgressBar', () => {
     const { container } = render(
       <MacroProgressBar label="Carbs" current={125} goal={250} color="#2196f3" testId="width-bar" />,
     );
-    const fillBar = container.querySelector('[style*="width: 50%"]');
-    expect(fillBar).toBeTruthy();
+    const fillBar = container.querySelector<HTMLElement>('[style*="width: 50%"]');
+    // Verify the element exists *and* that its inline width style is exactly
+    // 50% — not just that some matching substring appeared somewhere.
+    expect(fillBar).not.toBeNull();
+    expect(fillBar!.style.width).toBe('50%');
   });
 
   it('applies the color to the fill bar', () => {
     const { container } = render(
       <MacroProgressBar label="Fat" current={30} goal={65} color="#ff9800" testId="color-bar" />,
     );
-    const fillBar =
-      container.querySelector('[style*="background: rgb(255, 152, 0)"]') ||
-      container.querySelector('[style*="background: #ff9800"]');
-    expect(fillBar).toBeTruthy();
+    // jsdom normalizes CSS color values, so check both hex and rgb() forms.
+    const fillBar = container.querySelector<HTMLElement>('[style*="background"]');
+    expect(fillBar).not.toBeNull();
+    const bg = fillBar!.style.background;
+    expect(bg === '#ff9800' || bg === 'rgb(255, 152, 0)').toBe(true);
   });
 });
