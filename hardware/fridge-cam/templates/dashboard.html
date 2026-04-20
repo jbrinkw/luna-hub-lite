@@ -1,0 +1,166 @@
+{% extends "_base.html" %}
+{% block title %}dashboard - fridge-cam{% endblock %}
+{% block content %}
+<h1>dashboard</h1>
+
+<div class="row">
+  <div class="col" style="flex: 2; min-width: 420px;">
+    <div class="panel">
+      <h3>live preview</h3>
+      <div class="preview-wrap">
+        <img src="/live.mjpg" alt="live camera preview" />
+      </div>
+      <div style="margin-top: 8px;">
+        <span class="stat"><span class="label">door:</span>
+          <span class="dot" id="door-dot"></span>
+          <span class="value" id="door-label">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">brightness:</span>
+          <span class="value" id="brightness">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">resolution:</span>
+          <span class="value" id="resolution">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">fps:</span>
+          <span class="value" id="fps">&mdash;</span>
+        </span>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h3>manual triggers</h3>
+      <p class="muted" style="margin-top: 0;">
+        Force a door-open or door-close event without brightness change.
+        Useful at a desk or when brightness detection is disabled.
+      </p>
+      <button class="primary" onclick="trigger('start')">force open</button>
+      <button class="danger"  onclick="trigger('end')">force close</button>
+    </div>
+  </div>
+
+  <div class="col" style="flex: 1; min-width: 280px;">
+    <div class="panel">
+      <h3>detection config</h3>
+      <form id="cfg-form" class="form-grid" onsubmit="return saveConfig(event);">
+        <label for="c-enabled">detection on</label>
+        <input type="checkbox" id="c-enabled" name="brightness_detection_enabled" />
+
+        <label for="c-thr">threshold</label>
+        <input type="number" id="c-thr" name="brightness_threshold" min="0" max="255" step="1" />
+
+        <label for="c-hys">hysteresis</label>
+        <input type="number" id="c-hys" name="brightness_hysteresis" min="0" max="255" step="1" />
+
+        <label for="c-deb">debounce (s)</label>
+        <input type="number" id="c-deb" name="debounce_seconds" min="0" step="0.1" />
+
+        <label for="c-fps">capture fps</label>
+        <input type="number" id="c-fps" name="capture_fps" min="1" max="60" step="1" />
+
+        <label for="c-bef">before offset (s)</label>
+        <input type="number" id="c-bef" name="before_frame_offset_seconds" min="0" step="0.1" />
+
+        <span></span>
+        <span>
+          <button class="primary" type="submit">save</button>
+          <button type="button" onclick="loadConfig()">reload</button>
+        </span>
+      </form>
+      <p class="muted" style="margin-top: 8px; font-size: 11px;">
+        camera index + resolution require restart.
+      </p>
+    </div>
+  </div>
+</div>
+
+<h2>recent events</h2>
+<div class="panel">
+  {% if events %}
+    <div class="thumb-grid">
+      {% for ev in events %}
+        <a class="thumb-card" href="/event/{{ ev._dir }}">
+          <div class="thumbs">
+            {% if ev.has_before %}
+              <img src="/event/{{ ev._dir }}/before.jpg" alt="before">
+            {% else %}
+              <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='96'><rect width='100%25' height='100%25' fill='%23151d20'/><text x='50%25' y='54%25' text-anchor='middle' fill='%237f8c87' font-family='monospace' font-size='11'>(no before)</text></svg>" alt="no before">
+            {% endif %}
+            {% if ev.has_after %}
+              <img src="/event/{{ ev._dir }}/after.jpg" alt="after">
+            {% else %}
+              <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='96'><rect width='100%25' height='100%25' fill='%23151d20'/><text x='50%25' y='54%25' text-anchor='middle' fill='%237f8c87' font-family='monospace' font-size='11'>(no after)</text></svg>" alt="no after">
+            {% endif %}
+          </div>
+          <div class="caption">
+            <span class="id">{{ ev._dir }}</span>
+            <span class="dur">{% if ev.duration_s is defined and ev.duration_s is not none %}{{ '%.1fs'|format(ev.duration_s) }}{% else %}&hellip;{% endif %}</span>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+    <div style="margin-top: 10px;"><a href="/events">all events &rarr;</a></div>
+  {% else %}
+    <p class="muted">no events yet. cover/uncover the lens or use the manual triggers above.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  async function refreshState() {
+    try {
+      const s = await fetchJSON('/api/state');
+      document.getElementById('brightness').textContent = s.current_brightness.toFixed(1);
+      document.getElementById('resolution').textContent = s.resolution[0] + 'x' + s.resolution[1];
+      document.getElementById('fps').textContent = s.fps.toFixed(2);
+      const dot = document.getElementById('door-dot');
+      const lbl = document.getElementById('door-label');
+      dot.className = 'dot ' + (s.door_open ? 'on' : 'off');
+      lbl.textContent = s.door_open ? 'OPEN' : 'closed';
+      lbl.style.color = s.door_open ? 'var(--accent)' : 'var(--muted)';
+    } catch (_) {}
+  }
+  async function loadConfig() {
+    try {
+      const c = await fetchJSON('/api/config');
+      document.getElementById('c-enabled').checked = !!c.brightness_detection_enabled;
+      document.getElementById('c-thr').value = c.brightness_threshold;
+      document.getElementById('c-hys').value = c.brightness_hysteresis;
+      document.getElementById('c-deb').value = c.debounce_seconds;
+      document.getElementById('c-fps').value = c.capture_fps;
+      document.getElementById('c-bef').value = c.before_frame_offset_seconds;
+    } catch (e) { showToast('config load failed: ' + e.message, true); }
+  }
+  async function saveConfig(ev) {
+    ev.preventDefault();
+    const body = {
+      brightness_detection_enabled: document.getElementById('c-enabled').checked,
+      brightness_threshold: parseFloat(document.getElementById('c-thr').value),
+      brightness_hysteresis: parseFloat(document.getElementById('c-hys').value),
+      debounce_seconds: parseFloat(document.getElementById('c-deb').value),
+      capture_fps: parseFloat(document.getElementById('c-fps').value),
+      before_frame_offset_seconds: parseFloat(document.getElementById('c-bef').value),
+    };
+    try {
+      await fetchJSON('/api/config', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+      });
+      showToast('config saved');
+    } catch (e) { showToast('save failed: ' + e.message, true); }
+    return false;
+  }
+  async function trigger(kind) {
+    try {
+      await fetchJSON('/api/trigger/' + kind, { method: 'POST' });
+      showToast('trigger ' + kind + ' sent');
+      setTimeout(() => window.location.reload(), 800);
+    } catch (e) { showToast('trigger failed: ' + e.message, true); }
+  }
+  refreshState();
+  loadConfig();
+  setInterval(refreshState, 1000);
+</script>
+{% endblock %}

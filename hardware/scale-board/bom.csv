@@ -1,0 +1,23 @@
+reference,value,footprint,lcsc,manufacturer,mfg_part_num,description,quantity
+C1,100uF,Capacitor_THT:CP_Radial_D6.3mm_P2.50mm,C16133,,,3V3 rail bulk capacitor,1
+C10,100nF,Capacitor_SMD:C_0603_1608Metric,C14663,,,HX711 AVDD/DVDD ceramic decoupling,1
+C11,10uF,Capacitor_THT:CP_Radial_D5.0mm_P2.00mm,C68116,,,HX711 AVDD electrolytic decoupling,1
+C12,100nF,Capacitor_SMD:C_0603_1608Metric,C14663,,,HX711 AVDD/DVDD ceramic decoupling,1
+C13,10uF,Capacitor_THT:CP_Radial_D5.0mm_P2.00mm,C68116,,,HX711 AVDD electrolytic decoupling,1
+C14,100nF,Capacitor_SMD:C_0603_1608Metric,C14663,,,HX711 AVDD/DVDD ceramic decoupling,1
+C15,10uF,Capacitor_THT:CP_Radial_D5.0mm_P2.00mm,C68116,,,HX711 AVDD electrolytic decoupling,1
+C16,100nF,Capacitor_SMD:C_0603_1608Metric,C14663,,,HX711 AVDD/DVDD ceramic decoupling,1
+C17,10uF,Capacitor_THT:CP_Radial_D5.0mm_P2.00mm,C68116,,,HX711 AVDD electrolytic decoupling,1
+D1,PWR,LED_SMD:LED_0603_1608Metric,C72043,,,3V3 power indicator LED,1
+J1,LoadCell0,Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical,C144394,,,4-pin JST-XH connector to load cell,1
+J2,LoadCell1,Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical,C144394,,,4-pin JST-XH connector to load cell,1
+J3,LoadCell2,Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical,C144394,,,4-pin JST-XH connector to load cell,1
+J4,LoadCell3,Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical,C144394,,,4-pin JST-XH connector to load cell,1
+R1,1k,Resistor_SMD:R_0603_1608Metric,C21190,,,Power LED current limit (~2 mA at 3V3),1
+U1,WEMOS_D1_mini,RF_Module:WEMOS_D1_mini_light,,,WEMOS_D1_mini,Wemos D1 Mini ESP8266 module socket (2x 1x8 female header) -- module supplied by user,1
+U2,HX711,Package_SO:SOIC-16_3.9x9.9mm_P1.27mm,C24951,Avia Semiconductor,HX711,24-bit ADC for weigh scales,1
+U3,HX711,Package_SO:SOIC-16_3.9x9.9mm_P1.27mm,C24951,Avia Semiconductor,HX711,24-bit ADC for weigh scales,1
+U4,HX711,Package_SO:SOIC-16_3.9x9.9mm_P1.27mm,C24951,Avia Semiconductor,HX711,24-bit ADC for weigh scales,1
+U5,HX711,Package_SO:SOIC-16_3.9x9.9mm_P1.27mm,C24951,Avia Semiconductor,HX711,24-bit ADC for weigh scales,1
+U1_socket_a,1x8 Female Pin Socket (2.54mm),Connector_PinSocket_2.54mm:PinSocket_1x08_P2.54mm_Vertical,C146454,Boomele,1*8P-2.54-Female,Female header into D1 Mini through-hole row A (solder into U1 footprint),1
+U1_socket_b,1x8 Female Pin Socket (2.54mm),Connector_PinSocket_2.54mm:PinSocket_1x08_P2.54mm_Vertical,C146454,Boomele,1*8P-2.54-Female,Female header into D1 Mini through-hole row B (solder into U1 footprint),1

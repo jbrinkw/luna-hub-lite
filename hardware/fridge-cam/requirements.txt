@@ -1,0 +1,8 @@
+# fridge-cam daemon dependencies.
+# opencv-python-headless ships prebuilt wheels for x86_64 and aarch64 (covers
+# Raspberry Pi 4 and Zero 2W on 64-bit Raspberry Pi OS Lite) without pulling in
+# libGL/X11. On 32-bit Pi OS, `sudo apt install python3-opencv` from apt and
+# skip this wheel — app code is identical.
+opencv-python-headless>=4.8,<5
+Flask>=3.0,<4
+numpy>=1.24,<3

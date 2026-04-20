@@ -1,0 +1,3269 @@
+{
+  "name": "scale_carrier_board",
+  "description": "Wemos D1 Mini + 4x HX711 carrier board (Luna scale-board).",
+  "tstamps": "/scale_carrier_board-123484850948144/",
+  "source_file": "scale_carrier_board.kicad_sch",
+  "components": {
+    "U1": {
+      "symbol": "RF_Module:WEMOS_D1_mini",
+      "ref": "U1",
+      "value": "WEMOS_D1_mini",
+      "footprint": "RF_Module:WEMOS_D1_mini_light",
+      "datasheet": "https://wiki.wemos.cc/products:d1:d1_mini#documentation",
+      "description": "Wemos D1 Mini ESP8266 module socket (2x 1x8 female header) -- module supplied by user",
+      "properties": {
+        "ki_fp_filters": "WEMOS*D1*mini*"
+      },
+      "_extra_fields": {
+        "mfg_part_num": "WEMOS_D1_mini",
+        "ki_fp_filters": "WEMOS*D1*mini*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~{RST}",
+          "func": "input",
+          "unit": 1,
+          "x": -10.16,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "A0",
+          "func": "input",
+          "unit": 1,
+          "x": 10.16,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "3",
+          "name": "D0",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "4",
+          "name": "SCK/D5",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "5",
+          "name": "MISO/D6",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": -5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "6",
+          "name": "MOSI/D7",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": -7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "7",
+          "name": "CS/D8",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "8",
+          "name": "3V3",
+          "func": "power_out",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "9",
+          "name": "5V",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "10",
+          "name": "GND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "11",
+          "name": "D4",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "12",
+          "name": "D3",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": 2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "13",
+          "name": "SDA/D2",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "14",
+          "name": "SCL/D1",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "15",
+          "name": "RX",
+          "func": "input",
+          "unit": 1,
+          "x": -10.16,
+          "y": 2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "16",
+          "name": "TX",
+          "func": "output",
+          "unit": 1,
+          "x": -10.16,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3V3",
+          "name": "3V3",
+          "func": "power_out",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "GND",
+          "name": "GND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "MOSI/D7",
+          "name": "MOSI/D7",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": -7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "MISO/D6",
+          "name": "MISO/D6",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": -5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "SCL/D1",
+          "name": "SCL/D1",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "SDA/D2",
+          "name": "SDA/D2",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "SCK/D5",
+          "name": "SCK/D5",
+          "func": "bidirectional",
+          "unit": 1,
+          "x": 10.16,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        }
+      ],
+      "mfg_part_num": "WEMOS_D1_mini"
+    },
+    "C1": {
+      "symbol": "Device:C_Polarized",
+      "ref": "C1",
+      "value": "100uF",
+      "footprint": "Capacitor_THT:CP_Radial_D6.3mm_P2.50mm",
+      "datasheet": "~",
+      "description": "3V3 rail bulk capacitor",
+      "properties": {
+        "ki_fp_filters": "CP_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C16133",
+        "ki_fp_filters": "CP_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C16133"
+    },
+    "D1": {
+      "symbol": "Device:LED",
+      "ref": "D1",
+      "value": "PWR",
+      "footprint": "LED_SMD:LED_0603_1608Metric",
+      "datasheet": "~",
+      "description": "3V3 power indicator LED",
+      "properties": {
+        "ki_fp_filters": "LED* LED_SMD:* LED_THT:*"
+      },
+      "_extra_fields": {
+        "lcsc": "C72043",
+        "ki_fp_filters": "LED* LED_SMD:* LED_THT:*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "K",
+          "func": "passive",
+          "unit": 1,
+          "x": -3.81,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "A",
+          "func": "passive",
+          "unit": 1,
+          "x": 3.81,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        }
+      ],
+      "lcsc": "C72043"
+    },
+    "R1": {
+      "symbol": "Device:R",
+      "ref": "R1",
+      "value": "1k",
+      "footprint": "Resistor_SMD:R_0603_1608Metric",
+      "datasheet": "~",
+      "description": "Power LED current limit (~2 mA at 3V3)",
+      "properties": {
+        "ki_fp_filters": "R_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C21190",
+        "ki_fp_filters": "R_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 1.27,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 1.27,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C21190"
+    },
+    "U2": {
+      "symbol": "Analog_ADC:HX711",
+      "ref": "U2",
+      "value": "HX711",
+      "footprint": "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm",
+      "datasheet": "https://web.archive.org/web/20220615044707/https://akizukidenshi.com/download/ds/avia/hx711.pdf",
+      "description": "24-bit ADC for weigh scales",
+      "properties": {
+        "ki_fp_filters": "SOP*3.9x9.9mm*P1.27mm*"
+      },
+      "_extra_fields": {
+        "mfg_part_num": "HX711",
+        "manufacturer": "Avia Semiconductor",
+        "lcsc": "C24951",
+        "ki_fp_filters": "SOP*3.9x9.9mm*P1.27mm*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "VSUP",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "BASE",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "AVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": -12.7,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "VFB",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "5",
+          "name": "AGND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "6",
+          "name": "VBG",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": -15.24,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "7",
+          "name": "INA-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "8",
+          "name": "INA+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "9",
+          "name": "INB-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "10",
+          "name": "INB+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "11",
+          "name": "PD_SCK",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "12",
+          "name": "DOUT",
+          "func": "output",
+          "unit": 1,
+          "x": 12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "13",
+          "name": "XO",
+          "func": "passive",
+          "unit": 1,
+          "x": 12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "14",
+          "name": "XI",
+          "func": "passive",
+          "unit": 1,
+          "x": 12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "15",
+          "name": "RATE",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "16",
+          "name": "DVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "AVDD",
+          "name": "AVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": -12.7,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "DVDD",
+          "name": "DVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "VSUP",
+          "name": "VSUP",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "AGND",
+          "name": "AGND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "BASE",
+          "name": "BASE",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "RATE",
+          "name": "RATE",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "PD_SCK",
+          "name": "PD_SCK",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "DOUT",
+          "name": "DOUT",
+          "func": "output",
+          "unit": 1,
+          "x": 12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "INA+",
+          "name": "INA+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "INA-",
+          "name": "INA-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        }
+      ],
+      "mfg_part_num": "HX711",
+      "manufacturer": "Avia Semiconductor",
+      "lcsc": "C24951"
+    },
+    "J1": {
+      "symbol": "Connector_Generic:Conn_01x04",
+      "ref": "J1",
+      "value": "LoadCell0",
+      "footprint": "Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical",
+      "datasheet": "~",
+      "description": "4-pin JST-XH connector to load cell",
+      "properties": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C144394",
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "Pin_1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "Pin_2",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "Pin_3",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "Pin_4",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -5.08,
+          "length": 3.81,
+          "orientation": 0.0
+        }
+      ],
+      "lcsc": "C144394"
+    },
+    "C10": {
+      "symbol": "Device:C",
+      "ref": "C10",
+      "value": "100nF",
+      "footprint": "Capacitor_SMD:C_0603_1608Metric",
+      "datasheet": "~",
+      "description": "HX711 AVDD/DVDD ceramic decoupling",
+      "properties": {
+        "ki_fp_filters": "C_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C14663",
+        "ki_fp_filters": "C_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C14663"
+    },
+    "C11": {
+      "symbol": "Device:C_Polarized",
+      "ref": "C11",
+      "value": "10uF",
+      "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm",
+      "datasheet": "~",
+      "description": "HX711 AVDD electrolytic decoupling",
+      "properties": {
+        "ki_fp_filters": "CP_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C68116",
+        "ki_fp_filters": "CP_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C68116"
+    },
+    "U3": {
+      "symbol": "Analog_ADC:HX711",
+      "ref": "U3",
+      "value": "HX711",
+      "footprint": "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm",
+      "datasheet": "https://web.archive.org/web/20220615044707/https://akizukidenshi.com/download/ds/avia/hx711.pdf",
+      "description": "24-bit ADC for weigh scales",
+      "properties": {
+        "ki_fp_filters": "SOP*3.9x9.9mm*P1.27mm*"
+      },
+      "_extra_fields": {
+        "mfg_part_num": "HX711",
+        "manufacturer": "Avia Semiconductor",
+        "lcsc": "C24951",
+        "ki_fp_filters": "SOP*3.9x9.9mm*P1.27mm*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "VSUP",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "BASE",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "AVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": -12.7,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "VFB",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "5",
+          "name": "AGND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "6",
+          "name": "VBG",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": -15.24,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "7",
+          "name": "INA-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "8",
+          "name": "INA+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "9",
+          "name": "INB-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "10",
+          "name": "INB+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "11",
+          "name": "PD_SCK",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "12",
+          "name": "DOUT",
+          "func": "output",
+          "unit": 1,
+          "x": 12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "13",
+          "name": "XO",
+          "func": "passive",
+          "unit": 1,
+          "x": 12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "14",
+          "name": "XI",
+          "func": "passive",
+          "unit": 1,
+          "x": 12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "15",
+          "name": "RATE",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "16",
+          "name": "DVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "AVDD",
+          "name": "AVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": -12.7,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "DVDD",
+          "name": "DVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "VSUP",
+          "name": "VSUP",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "AGND",
+          "name": "AGND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "BASE",
+          "name": "BASE",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "RATE",
+          "name": "RATE",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "PD_SCK",
+          "name": "PD_SCK",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "DOUT",
+          "name": "DOUT",
+          "func": "output",
+          "unit": 1,
+          "x": 12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "INA+",
+          "name": "INA+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "INA-",
+          "name": "INA-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        }
+      ],
+      "mfg_part_num": "HX711",
+      "manufacturer": "Avia Semiconductor",
+      "lcsc": "C24951"
+    },
+    "J2": {
+      "symbol": "Connector_Generic:Conn_01x04",
+      "ref": "J2",
+      "value": "LoadCell1",
+      "footprint": "Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical",
+      "datasheet": "~",
+      "description": "4-pin JST-XH connector to load cell",
+      "properties": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C144394",
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "Pin_1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "Pin_2",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "Pin_3",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "Pin_4",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -5.08,
+          "length": 3.81,
+          "orientation": 0.0
+        }
+      ],
+      "lcsc": "C144394"
+    },
+    "C12": {
+      "symbol": "Device:C",
+      "ref": "C12",
+      "value": "100nF",
+      "footprint": "Capacitor_SMD:C_0603_1608Metric",
+      "datasheet": "~",
+      "description": "HX711 AVDD/DVDD ceramic decoupling",
+      "properties": {
+        "ki_fp_filters": "C_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C14663",
+        "ki_fp_filters": "C_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C14663"
+    },
+    "C13": {
+      "symbol": "Device:C_Polarized",
+      "ref": "C13",
+      "value": "10uF",
+      "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm",
+      "datasheet": "~",
+      "description": "HX711 AVDD electrolytic decoupling",
+      "properties": {
+        "ki_fp_filters": "CP_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C68116",
+        "ki_fp_filters": "CP_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C68116"
+    },
+    "U4": {
+      "symbol": "Analog_ADC:HX711",
+      "ref": "U4",
+      "value": "HX711",
+      "footprint": "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm",
+      "datasheet": "https://web.archive.org/web/20220615044707/https://akizukidenshi.com/download/ds/avia/hx711.pdf",
+      "description": "24-bit ADC for weigh scales",
+      "properties": {
+        "ki_fp_filters": "SOP*3.9x9.9mm*P1.27mm*"
+      },
+      "_extra_fields": {
+        "mfg_part_num": "HX711",
+        "manufacturer": "Avia Semiconductor",
+        "lcsc": "C24951",
+        "ki_fp_filters": "SOP*3.9x9.9mm*P1.27mm*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "VSUP",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "BASE",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "AVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": -12.7,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "VFB",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "5",
+          "name": "AGND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "6",
+          "name": "VBG",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": -15.24,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "7",
+          "name": "INA-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "8",
+          "name": "INA+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "9",
+          "name": "INB-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "10",
+          "name": "INB+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "11",
+          "name": "PD_SCK",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "12",
+          "name": "DOUT",
+          "func": "output",
+          "unit": 1,
+          "x": 12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "13",
+          "name": "XO",
+          "func": "passive",
+          "unit": 1,
+          "x": 12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "14",
+          "name": "XI",
+          "func": "passive",
+          "unit": 1,
+          "x": 12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "15",
+          "name": "RATE",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "16",
+          "name": "DVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "AVDD",
+          "name": "AVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": -12.7,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "DVDD",
+          "name": "DVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "VSUP",
+          "name": "VSUP",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "AGND",
+          "name": "AGND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "BASE",
+          "name": "BASE",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "RATE",
+          "name": "RATE",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "PD_SCK",
+          "name": "PD_SCK",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "DOUT",
+          "name": "DOUT",
+          "func": "output",
+          "unit": 1,
+          "x": 12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "INA+",
+          "name": "INA+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "INA-",
+          "name": "INA-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        }
+      ],
+      "mfg_part_num": "HX711",
+      "manufacturer": "Avia Semiconductor",
+      "lcsc": "C24951"
+    },
+    "J3": {
+      "symbol": "Connector_Generic:Conn_01x04",
+      "ref": "J3",
+      "value": "LoadCell2",
+      "footprint": "Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical",
+      "datasheet": "~",
+      "description": "4-pin JST-XH connector to load cell",
+      "properties": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C144394",
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "Pin_1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "Pin_2",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "Pin_3",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "Pin_4",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -5.08,
+          "length": 3.81,
+          "orientation": 0.0
+        }
+      ],
+      "lcsc": "C144394"
+    },
+    "C14": {
+      "symbol": "Device:C",
+      "ref": "C14",
+      "value": "100nF",
+      "footprint": "Capacitor_SMD:C_0603_1608Metric",
+      "datasheet": "~",
+      "description": "HX711 AVDD/DVDD ceramic decoupling",
+      "properties": {
+        "ki_fp_filters": "C_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C14663",
+        "ki_fp_filters": "C_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C14663"
+    },
+    "C15": {
+      "symbol": "Device:C_Polarized",
+      "ref": "C15",
+      "value": "10uF",
+      "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm",
+      "datasheet": "~",
+      "description": "HX711 AVDD electrolytic decoupling",
+      "properties": {
+        "ki_fp_filters": "CP_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C68116",
+        "ki_fp_filters": "CP_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C68116"
+    },
+    "U5": {
+      "symbol": "Analog_ADC:HX711",
+      "ref": "U5",
+      "value": "HX711",
+      "footprint": "Package_SO:SOIC-16_3.9x9.9mm_P1.27mm",
+      "datasheet": "https://web.archive.org/web/20220615044707/https://akizukidenshi.com/download/ds/avia/hx711.pdf",
+      "description": "24-bit ADC for weigh scales",
+      "properties": {
+        "ki_fp_filters": "SOP*3.9x9.9mm*P1.27mm*"
+      },
+      "_extra_fields": {
+        "mfg_part_num": "HX711",
+        "manufacturer": "Avia Semiconductor",
+        "lcsc": "C24951",
+        "ki_fp_filters": "SOP*3.9x9.9mm*P1.27mm*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "VSUP",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "BASE",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "AVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": -12.7,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "VFB",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "5",
+          "name": "AGND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "6",
+          "name": "VBG",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": -15.24,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "7",
+          "name": "INA-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "8",
+          "name": "INA+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "9",
+          "name": "INB-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "10",
+          "name": "INB+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -7.62,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "11",
+          "name": "PD_SCK",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "12",
+          "name": "DOUT",
+          "func": "output",
+          "unit": 1,
+          "x": 12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "13",
+          "name": "XO",
+          "func": "passive",
+          "unit": 1,
+          "x": 12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "14",
+          "name": "XI",
+          "func": "passive",
+          "unit": 1,
+          "x": 12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "15",
+          "name": "RATE",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "16",
+          "name": "DVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "AVDD",
+          "name": "AVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": -12.7,
+          "y": 10.16,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "DVDD",
+          "name": "DVDD",
+          "func": "power_in",
+          "unit": 1,
+          "x": 2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "VSUP",
+          "name": "VSUP",
+          "func": "power_in",
+          "unit": 1,
+          "x": -2.54,
+          "y": 20.32,
+          "length": 2.54,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "AGND",
+          "name": "AGND",
+          "func": "power_in",
+          "unit": 1,
+          "x": 0.0,
+          "y": -20.32,
+          "length": 2.54,
+          "orientation": 90.0
+        },
+        {
+          "pin_id": "BASE",
+          "name": "BASE",
+          "func": "passive",
+          "unit": 1,
+          "x": -12.7,
+          "y": 12.7,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "RATE",
+          "name": "RATE",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": -10.16,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "PD_SCK",
+          "name": "PD_SCK",
+          "func": "input",
+          "unit": 1,
+          "x": 12.7,
+          "y": 5.08,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "DOUT",
+          "name": "DOUT",
+          "func": "output",
+          "unit": 1,
+          "x": 12.7,
+          "y": 7.62,
+          "length": 2.54,
+          "orientation": 180.0
+        },
+        {
+          "pin_id": "INA+",
+          "name": "INA+",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": 0.0,
+          "length": 2.54,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "INA-",
+          "name": "INA-",
+          "func": "input",
+          "unit": 1,
+          "x": -12.7,
+          "y": -2.54,
+          "length": 2.54,
+          "orientation": 0.0
+        }
+      ],
+      "mfg_part_num": "HX711",
+      "manufacturer": "Avia Semiconductor",
+      "lcsc": "C24951"
+    },
+    "J4": {
+      "symbol": "Connector_Generic:Conn_01x04",
+      "ref": "J4",
+      "value": "LoadCell3",
+      "footprint": "Connector_JST:JST_XH_B4B-XH-A_1x04_P2.50mm_Vertical",
+      "datasheet": "~",
+      "description": "4-pin JST-XH connector to load cell",
+      "properties": {
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C144394",
+        "ki_fp_filters": "Connector*:*_1x??_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "Pin_1",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "2",
+          "name": "Pin_2",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": 0.0,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "3",
+          "name": "Pin_3",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -2.54,
+          "length": 3.81,
+          "orientation": 0.0
+        },
+        {
+          "pin_id": "4",
+          "name": "Pin_4",
+          "func": "passive",
+          "unit": 1,
+          "x": -5.08,
+          "y": -5.08,
+          "length": 3.81,
+          "orientation": 0.0
+        }
+      ],
+      "lcsc": "C144394"
+    },
+    "C16": {
+      "symbol": "Device:C",
+      "ref": "C16",
+      "value": "100nF",
+      "footprint": "Capacitor_SMD:C_0603_1608Metric",
+      "datasheet": "~",
+      "description": "HX711 AVDD/DVDD ceramic decoupling",
+      "properties": {
+        "ki_fp_filters": "C_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C14663",
+        "ki_fp_filters": "C_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C14663"
+    },
+    "C17": {
+      "symbol": "Device:C_Polarized",
+      "ref": "C17",
+      "value": "10uF",
+      "footprint": "Capacitor_THT:CP_Radial_D5.0mm_P2.00mm",
+      "datasheet": "~",
+      "description": "HX711 AVDD electrolytic decoupling",
+      "properties": {
+        "ki_fp_filters": "CP_*"
+      },
+      "_extra_fields": {
+        "lcsc": "C68116",
+        "ki_fp_filters": "CP_*"
+      },
+      "pins": [
+        {
+          "pin_id": "1",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": 3.81,
+          "length": 2.794,
+          "orientation": 270.0
+        },
+        {
+          "pin_id": "2",
+          "name": "~",
+          "func": "passive",
+          "unit": 1,
+          "x": 0.0,
+          "y": -3.81,
+          "length": 2.794,
+          "orientation": 90.0
+        }
+      ],
+      "lcsc": "C68116"
+    }
+  },
+  "nets": {
+    "GND": {
+      "nodes": [
+        {
+          "component": "U1",
+          "pin": {
+            "number": "10",
+            "name": "GND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "10",
+            "name": "GND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "C1",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "D1",
+          "pin": {
+            "number": "1",
+            "name": "K",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "15",
+            "name": "RATE",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "2",
+            "name": "BASE",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "5",
+            "name": "AGND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "5",
+            "name": "AGND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "2",
+            "name": "BASE",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "15",
+            "name": "RATE",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J1",
+          "pin": {
+            "number": "2",
+            "name": "Pin_2",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C10",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C11",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "15",
+            "name": "RATE",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "2",
+            "name": "BASE",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "5",
+            "name": "AGND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "5",
+            "name": "AGND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "2",
+            "name": "BASE",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "15",
+            "name": "RATE",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J2",
+          "pin": {
+            "number": "2",
+            "name": "Pin_2",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C12",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C13",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "15",
+            "name": "RATE",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "2",
+            "name": "BASE",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "5",
+            "name": "AGND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "5",
+            "name": "AGND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "2",
+            "name": "BASE",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "15",
+            "name": "RATE",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J3",
+          "pin": {
+            "number": "2",
+            "name": "Pin_2",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C14",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C15",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "15",
+            "name": "RATE",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "2",
+            "name": "BASE",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "5",
+            "name": "AGND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "5",
+            "name": "AGND",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "2",
+            "name": "BASE",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "15",
+            "name": "RATE",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J4",
+          "pin": {
+            "number": "2",
+            "name": "Pin_2",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C16",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C17",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": true,
+      "power_symbol": "power:GND",
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "HX2_DOUT": {
+      "nodes": [
+        {
+          "component": "U1",
+          "pin": {
+            "number": "13",
+            "name": "SDA/D2",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "13",
+            "name": "SDA/D2",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "12",
+            "name": "DOUT",
+            "type": "output"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "12",
+            "name": "DOUT",
+            "type": "output"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "HX1_DOUT": {
+      "nodes": [
+        {
+          "component": "U1",
+          "pin": {
+            "number": "14",
+            "name": "SCL/D1",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "14",
+            "name": "SCL/D1",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "12",
+            "name": "DOUT",
+            "type": "output"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "12",
+            "name": "DOUT",
+            "type": "output"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "HX3_DOUT": {
+      "nodes": [
+        {
+          "component": "U1",
+          "pin": {
+            "number": "4",
+            "name": "SCK/D5",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "4",
+            "name": "SCK/D5",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "12",
+            "name": "DOUT",
+            "type": "output"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "12",
+            "name": "DOUT",
+            "type": "output"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "HX0_DOUT": {
+      "nodes": [
+        {
+          "component": "U1",
+          "pin": {
+            "number": "5",
+            "name": "MISO/D6",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "5",
+            "name": "MISO/D6",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "12",
+            "name": "DOUT",
+            "type": "output"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "12",
+            "name": "DOUT",
+            "type": "output"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "HX_SCK": {
+      "nodes": [
+        {
+          "component": "U1",
+          "pin": {
+            "number": "6",
+            "name": "MOSI/D7",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "6",
+            "name": "MOSI/D7",
+            "type": "bidirectional"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "11",
+            "name": "PD_SCK",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "11",
+            "name": "PD_SCK",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "11",
+            "name": "PD_SCK",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "11",
+            "name": "PD_SCK",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "11",
+            "name": "PD_SCK",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "11",
+            "name": "PD_SCK",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "11",
+            "name": "PD_SCK",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "11",
+            "name": "PD_SCK",
+            "type": "input"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "3V3": {
+      "nodes": [
+        {
+          "component": "U1",
+          "pin": {
+            "number": "8",
+            "name": "3V3",
+            "type": "power_out"
+          }
+        },
+        {
+          "component": "U1",
+          "pin": {
+            "number": "8",
+            "name": "3V3",
+            "type": "power_out"
+          }
+        },
+        {
+          "component": "C1",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "R1",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "1",
+            "name": "VSUP",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "16",
+            "name": "DVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "3",
+            "name": "AVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "3",
+            "name": "AVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "16",
+            "name": "DVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "1",
+            "name": "VSUP",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "J1",
+          "pin": {
+            "number": "1",
+            "name": "Pin_1",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C10",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C11",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "1",
+            "name": "VSUP",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "16",
+            "name": "DVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "3",
+            "name": "AVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "3",
+            "name": "AVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "16",
+            "name": "DVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "1",
+            "name": "VSUP",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "J2",
+          "pin": {
+            "number": "1",
+            "name": "Pin_1",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C12",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C13",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "1",
+            "name": "VSUP",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "16",
+            "name": "DVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "3",
+            "name": "AVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "3",
+            "name": "AVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "16",
+            "name": "DVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "1",
+            "name": "VSUP",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "J3",
+          "pin": {
+            "number": "1",
+            "name": "Pin_1",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C14",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C15",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "1",
+            "name": "VSUP",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "16",
+            "name": "DVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "3",
+            "name": "AVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "3",
+            "name": "AVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "16",
+            "name": "DVDD",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "1",
+            "name": "VSUP",
+            "type": "power_in"
+          }
+        },
+        {
+          "component": "J4",
+          "pin": {
+            "number": "1",
+            "name": "Pin_1",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C16",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "C17",
+          "pin": {
+            "number": "1",
+            "name": "~",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": true,
+      "power_symbol": "power:+3V3",
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "N$1": {
+      "nodes": [
+        {
+          "component": "D1",
+          "pin": {
+            "number": "2",
+            "name": "A",
+            "type": "passive"
+          }
+        },
+        {
+          "component": "R1",
+          "pin": {
+            "number": "2",
+            "name": "~",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "LC0_A-": {
+      "nodes": [
+        {
+          "component": "U2",
+          "pin": {
+            "number": "7",
+            "name": "INA-",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "7",
+            "name": "INA-",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J1",
+          "pin": {
+            "number": "4",
+            "name": "Pin_4",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "LC0_A+": {
+      "nodes": [
+        {
+          "component": "U2",
+          "pin": {
+            "number": "8",
+            "name": "INA+",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U2",
+          "pin": {
+            "number": "8",
+            "name": "INA+",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J1",
+          "pin": {
+            "number": "3",
+            "name": "Pin_3",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "LC1_A-": {
+      "nodes": [
+        {
+          "component": "U3",
+          "pin": {
+            "number": "7",
+            "name": "INA-",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "7",
+            "name": "INA-",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J2",
+          "pin": {
+            "number": "4",
+            "name": "Pin_4",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "LC1_A+": {
+      "nodes": [
+        {
+          "component": "U3",
+          "pin": {
+            "number": "8",
+            "name": "INA+",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U3",
+          "pin": {
+            "number": "8",
+            "name": "INA+",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J2",
+          "pin": {
+            "number": "3",
+            "name": "Pin_3",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "LC2_A-": {
+      "nodes": [
+        {
+          "component": "U4",
+          "pin": {
+            "number": "7",
+            "name": "INA-",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "7",
+            "name": "INA-",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J3",
+          "pin": {
+            "number": "4",
+            "name": "Pin_4",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "LC2_A+": {
+      "nodes": [
+        {
+          "component": "U4",
+          "pin": {
+            "number": "8",
+            "name": "INA+",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U4",
+          "pin": {
+            "number": "8",
+            "name": "INA+",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J3",
+          "pin": {
+            "number": "3",
+            "name": "Pin_3",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "LC3_A-": {
+      "nodes": [
+        {
+          "component": "U5",
+          "pin": {
+            "number": "7",
+            "name": "INA-",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "7",
+            "name": "INA-",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J4",
+          "pin": {
+            "number": "4",
+            "name": "Pin_4",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    },
+    "LC3_A+": {
+      "nodes": [
+        {
+          "component": "U5",
+          "pin": {
+            "number": "8",
+            "name": "INA+",
+            "type": "input"
+          }
+        },
+        {
+          "component": "U5",
+          "pin": {
+            "number": "8",
+            "name": "INA+",
+            "type": "input"
+          }
+        },
+        {
+          "component": "J4",
+          "pin": {
+            "number": "3",
+            "name": "Pin_3",
+            "type": "passive"
+          }
+        }
+      ],
+      "is_power": false,
+      "power_symbol": null,
+      "trace_current": null,
+      "impedance": null,
+      "properties": {}
+    }
+  },
+  "subcircuits": [],
+  "annotations": [
+    {
+      "type": "TextBox",
+      "text": "Wemos D1 Mini + 4x HX711 carrier board (Luna scale-board).",
+      "position": [
+        184.0,
+        110.0
+      ],
+      "size": [
+        80.0,
+        30.0
+      ],
+      "margins": [
+        1.0,
+        1.0,
+        1.0,
+        1.0
+      ],
+      "text_size": 1.2,
+      "bold": true,
+      "italic": false,
+      "text_color": "black",
+      "background": true,
+      "background_color": "lightyellow",
+      "border": true,
+      "border_width": 0.1,
+      "border_color": "black",
+      "justify": "center center",
+      "rotation": 0,
+      "uuid": "f0d2f64b-9f32-42f7-96e2-d2a454b4ab1b"
+    }
+  ]
+}
