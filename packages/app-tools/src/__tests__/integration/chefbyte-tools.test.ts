@@ -983,8 +983,11 @@ describe('ChefByte Tool Integration Tests', () => {
 
     // Store mealId for markDone test
     it('getMealPlan confirms the entries exist with product/recipe names', () => {
-      // mealId is set by the first addMeal test — used by markDone below
-      expect(mealId).toBeTruthy();
+      // mealId is set by the first addMeal test — used by markDone below.
+      // Verify it was populated with a real UUID (not just truthy — e.g. the
+      // string 'undefined' or '0' would also pass toBeTruthy).
+      expect(typeof mealId).toBe('string');
+      expect(mealId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
     });
   });
 
@@ -1463,7 +1466,11 @@ describe('ChefByte Tool Integration Tests', () => {
       const result = await addMeal.handler({ logical_date: today, product_id: productId, servings: 1 }, ctx);
       const data = parseToolResult(result);
       testMealId = data.meal.meal_id;
-      expect(testMealId).toBeTruthy();
+      // A meaningful identity check: UUID shape, not just truthiness.
+      expect(typeof testMealId).toBe('string');
+      expect(testMealId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+      expect(data.meal.logical_date).toBe(today);
+      expect(data.meal.product_id).toBe(productId);
     });
 
     it('deletes the meal entry successfully', async () => {
