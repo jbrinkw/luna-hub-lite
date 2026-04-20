@@ -359,6 +359,60 @@ class TestSingleItemHook:
         assert payload["event_kind"] == "refilled"
         assert payload["delta_g"] == pytest.approx(200.0)
 
+    def test_refill_threshold_is_inclusive(self, conn):
+        """Mutation-testing gap: ``delta_g >= abs(refill_threshold_g)``
+        flipped to ``>`` silently drops the boundary event. An input
+        exactly equal to the refill threshold must still enqueue a
+        ``refilled`` event — otherwise the single-item classifier
+        silently under-reports refills that land on the configured
+        threshold.
+        """
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_single_item_event(
+            scale_id="scale-single",
+            product_id="prod-1",
+            delta_g=15.0,           # exactly the threshold
+            noise_floor_g=2.0,
+            refill_threshold_g=15.0,
+            depleted=False,
+        )
+        assert cid is not None, (
+            "delta_g == refill_threshold_g must still emit a refilled "
+            "event — boundary is inclusive"
+        )
+        row = conn.execute(
+            "SELECT payload_json FROM cloud_outbox"
+        ).fetchone()
+        payload = json.loads(row["payload_json"])
+        assert payload["event_kind"] == "refilled"
+        assert payload["delta_g"] == pytest.approx(15.0)
+
+    def test_consumption_threshold_is_inclusive(self, conn):
+        """Mutation-testing gap: ``delta_g <= -abs(noise_floor_g)``
+        flipped to ``<`` silently drops the boundary consumed event.
+        An input exactly equal to -noise_floor must still enqueue a
+        ``consumed`` event.
+        """
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_single_item_event(
+            scale_id="scale-single",
+            product_id="prod-1",
+            delta_g=-2.0,           # exactly the negative noise floor
+            noise_floor_g=2.0,
+            refill_threshold_g=15.0,
+            depleted=False,
+        )
+        assert cid is not None, (
+            "delta_g == -noise_floor_g must still emit a consumed event "
+            "— boundary is inclusive"
+        )
+        row = conn.execute(
+            "SELECT payload_json FROM cloud_outbox"
+        ).fetchone()
+        payload = json.loads(row["payload_json"])
+        assert payload["event_kind"] == "consumed"
+        assert payload["delta_g"] == pytest.approx(-2.0)
+
     def test_depleted_emits_depleted_event(self, conn):
         """depleted=True routes to a ``depleted`` event with negative
         delta regardless of the input sign."""
