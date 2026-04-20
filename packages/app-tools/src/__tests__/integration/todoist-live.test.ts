@@ -282,8 +282,14 @@ describe.skipIf(skip)('Todoist Live Integration Tests', () => {
     );
     const updated = parse(result);
 
-    // Due date format from API may differ from the input string — just verify it's set
+    // FP-AUDIT: weak-matcher:toBeTruthy — the Todoist API normalizes
+    // `due_string: 'next week'` into an ISO date that varies by when the
+    // test runs, so we can't pin an exact value. Verify the returned `due`
+    // object has a parseable date field, which fails if the API returns
+    // null/false/empty but not if the date semantics change.
     expect(updated.due).toBeTruthy();
+    expect(typeof updated.due.date).toBe('string');
+    expect(Number.isNaN(Date.parse(updated.due.date))).toBe(false);
   });
 
   // -----------------------------------------------------------------------
