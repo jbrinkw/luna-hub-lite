@@ -1130,6 +1130,41 @@ def test_save_cloud_mode_returns_400_on_cloud_error_4xx(
     assert cloud_upsert_spy.calls == []
 
 
+def test_save_cloud_mode_returns_400_when_cloud_returns_exactly_400(
+    cloud_client_http, fake_repo, fake_cloud_client, cloud_upsert_spy
+):
+    """Mutation-testing gap: the 4xx passthrough condition is
+    ``400 <= exc.status_code < 500``. Flipping ``<=`` to ``<`` silently
+    demotes an exactly-400 cloud response to 503 — hiding the real
+    error code from the UI and making every validation-rejection look
+    like a network outage.
+
+    The existing 409 test covers the mid-range but not the 400 lower
+    boundary, which is the single most common validation status and
+    the one the comment on the route explicitly calls out
+    ("4xx surfaces the user-visible validation error").
+    """
+    from server.cloud.client import CloudError
+
+    def _boom(path, body):  # noqa: ARG001
+        raise CloudError(400, "barcode format invalid")
+
+    fake_cloud_client.post_behavior = _boom
+
+    resp = cloud_client_http.post(
+        "/api/intake/save",
+        json={"name": "Thing", "barcode": "123456"},
+    )
+    assert resp.status_code == 400, (
+        "cloud 400 must pass through as 400 (lower boundary of the 4xx "
+        "range); dropping the inclusive comparison hides validation "
+        "errors behind a generic 503"
+    )
+    assert "400" in resp.get_json()["error"]
+    assert fake_repo.products_created == []
+    assert cloud_upsert_spy.calls == []
+
+
 def test_save_cloud_mode_returns_503_on_network_error(
     cloud_client_http, fake_repo, fake_cloud_client, cloud_upsert_spy
 ):
