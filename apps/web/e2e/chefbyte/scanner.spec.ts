@@ -1173,12 +1173,37 @@ test.describe('ChefByte Scanner', () => {
     });
   }
 
-  // ----- Scenario 1 — Real OFF barcode in Buy mode produces real product --
-  test('SCN1 — clean user scans real barcode, full nutrition lands', async ({ page }) => {
+  // ----- Scenario 1 — Clean user scans known-OFF barcode, real product lands
+  // Stubs analyze-product so the mutation check (flipping `!efError && efData`
+  // to `efError && efData`) fails LOUDLY instead of being hidden behind the
+  // flake-skip. Uses BARCODE `073731004197` (Mission Flour Tortillas Burrito)
+  // per the audit spec.
+  test('SCN1 — clean user scans known-OFF barcode, full nutrition lands', async ({ page }) => {
     test.setTimeout(120_000);
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scn1-real');
     try {
       const BARCODE = '073731004197'; // Mission Flour Tortillas Burrito
+
+      // Stub analyze-product so the test does not depend on OFF/Anthropic
+      // uptime. The stub mirrors what a real Mission tortilla lookup returns.
+      await stubAnalyzeProduct(page, {
+        status: 200,
+        body: {
+          source: 'ai',
+          suggestion: {
+            name: 'Mission Flour Tortillas Burrito',
+            servings_per_container: 8,
+            calories_per_serving: 210,
+            protein_per_serving: 6,
+            carbs_per_serving: 35,
+            fat_per_serving: 5,
+            description: 'Burrito-size flour tortillas',
+          },
+          ai_degraded: false,
+          ai_reason: null,
+          off: { product_name: 'Mission Flour Tortillas', nutriments: {} },
+        },
+      });
 
       await page.goto('/chef/scanner');
       await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 30000 });
@@ -1186,13 +1211,13 @@ test.describe('ChefByte Scanner', () => {
       await page.getByTestId('barcode-input').fill(BARCODE);
       await page.getByTestId('barcode-input').press('Enter');
 
-      // Wait for queue to finish processing — name must not still be "Processing"
+      // Queue must show the real product name (NOT `Unknown (barcode)`).
       const queueList = page.getByTestId('queue-list');
-      await expect(queueList).not.toContainText('Processing', { timeout: 45_000 });
+      await expect(queueList).toContainText('Mission Flour Tortillas Burrito', { timeout: 45_000 });
+      await expect(queueList).not.toContainText(`Unknown (${BARCODE})`, { timeout: 5_000 });
 
-      // Read the DB row to verify non-placeholder with real nutrition
+      // DB: non-placeholder row with the real nutrition payload.
       const chef = (client as any).schema('chefbyte');
-      let product: any = null;
       await expect(async () => {
         const { data } = await chef
           .from('products')
@@ -1201,26 +1226,12 @@ test.describe('ChefByte Scanner', () => {
           .eq('barcode', BARCODE)
           .single();
         expect(data).toBeTruthy();
-        product = data;
+        expect(data.is_placeholder).toBe(false);
+        expect(String(data.name)).toMatch(/Mission|Tortilla/i);
+        expect(Number(data.calories_per_serving)).toBe(210);
+        expect(Number(data.carbs_per_serving)).toBe(35);
+        expect(Number(data.protein_per_serving)).toBe(6);
       }).toPass({ timeout: 30_000 });
-
-      // If upstream AI/OFF was transiently unavailable, the row will still
-      // be a placeholder. Treat that as a flake skip — this scenario tests
-      // the happy path contract, not upstream availability.
-      if (product.is_placeholder === true) {
-        test.info().annotations.push({
-          type: 'skip-reason',
-          description: 'analyze-product upstream (OFF or Anthropic) unavailable — skip SCN1',
-        });
-        test.skip();
-        return;
-      }
-
-      expect(product.is_placeholder).toBe(false);
-      expect(String(product.name)).toMatch(/Mission|Tortilla/i);
-      expect(Number(product.calories_per_serving)).toBeGreaterThan(0);
-      // Carbs should be > 0 for tortillas specifically
-      expect(Number(product.carbs_per_serving)).toBeGreaterThan(0);
     } finally {
       await cleanup();
     }

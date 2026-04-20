@@ -209,7 +209,10 @@ export function ScannerPage() {
           .eq('barcode', barcode)
           .single();
 
-        if (product) {
+        // A placeholder row (from a previously failed scan) MUST fall through
+        // to analyze-product so we can upgrade it to a real product, not
+        // short-circuit and leave the user stuck with `Unknown (barcode)`.
+        if (product && !product.is_placeholder) {
           // Product found
           setNutrition({
             servingsPerContainer: String(product.servings_per_container ?? 1),
@@ -252,14 +255,39 @@ export function ScannerPage() {
             ),
           );
         } else {
-          // Product not found — try analyze-product edge function first,
-          // fall back to placeholder if it fails or returns no data
+          // No product OR stale-placeholder row — call analyze-product and
+          // either INSERT a new row or UPDATE the placeholder in place.
+          const existingPlaceholderId: string | undefined = product?.is_placeholder
+            ? product.product_id
+            : undefined;
+
           let analyzedProduct: any = null;
+          let hardAiError: { message: string; reason: string } | null = null;
           try {
             const { data: efData, error: efError } = await supabase.functions.invoke('analyze-product', {
               body: { barcode },
             });
-            if (!efError && efData) {
+
+            // supabase-js returns 4xx/5xx as `efError` (FunctionsHttpError). If
+            // the function body included `ai_reason`, treat HARD reasons
+            // (bad_key/missing_key/billing) as user-actionable — do NOT silently
+            // fall through to a placeholder.
+            let errBody: any = null;
+            if (efError) {
+              try {
+                errBody = await (efError as any)?.context?.json?.();
+              } catch {
+                errBody = null;
+              }
+            }
+            const payload = (efData as any) ?? errBody ?? null;
+            const HARD = new Set(['bad_key', 'missing_key', 'billing']);
+            if (payload?.ai_reason && HARD.has(payload.ai_reason)) {
+              hardAiError = {
+                message: payload.error || `AI service unavailable (${payload.ai_reason})`,
+                reason: payload.ai_reason,
+              };
+            } else if (!efError && efData) {
               // Use AI suggestion if available, otherwise fall back to raw OFF data
               const s = efData.suggestion;
               const off = efData.off;
@@ -289,26 +317,44 @@ export function ScannerPage() {
               }
 
               if (productName !== `Product (${barcode})` || hasNutrition) {
-                const { data: created } = await chefbyte()
-                  .from('products')
-                  .insert({
-                    user_id: user.id,
-                    barcode,
-                    name: productName,
-                    description: s?.description || null,
-                    is_placeholder: false,
-                    calories_per_serving: cals,
-                    protein_per_serving: prot,
-                    carbs_per_serving: carb,
-                    fat_per_serving: fatVal,
-                    servings_per_container: spc,
-                  })
-                  .select(
-                    'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
-                  )
-                  .single();
-                if (created) {
-                  analyzedProduct = created;
+                const productFields = {
+                  barcode,
+                  name: productName,
+                  description: s?.description || null,
+                  is_placeholder: false,
+                  calories_per_serving: cals,
+                  protein_per_serving: prot,
+                  carbs_per_serving: carb,
+                  fat_per_serving: fatVal,
+                  servings_per_container: spc,
+                };
+
+                let resultRow: any = null;
+                if (existingPlaceholderId) {
+                  // Upgrade the stale placeholder row instead of creating a
+                  // duplicate — preserves stock lots / food logs referencing
+                  // the placeholder id.
+                  const { data: updated } = await chefbyte()
+                    .from('products')
+                    .update(productFields)
+                    .eq('product_id', existingPlaceholderId)
+                    .select(
+                      'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+                    )
+                    .single();
+                  resultRow = updated;
+                } else {
+                  const { data: created } = await chefbyte()
+                    .from('products')
+                    .insert({ user_id: user.id, ...productFields })
+                    .select(
+                      'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
+                    )
+                    .single();
+                  resultRow = created;
+                }
+                if (resultRow) {
+                  analyzedProduct = resultRow;
                 }
               }
             }
@@ -316,8 +362,24 @@ export function ScannerPage() {
             // Edge function call failed — fall through to placeholder
           }
 
-          if (analyzedProduct) {
-            // AI-analyzed product created successfully
+          if (hardAiError) {
+            // Surface the actionable error in the queue — explicitly do NOT
+            // write a placeholder row (that would pollute the catalog with
+            // Unknown entries while the admin fixes the key).
+            setQueue((prev) =>
+              prev.map((item) =>
+                item.id === tempId
+                  ? {
+                      ...item,
+                      status: 'error',
+                      name: hardAiError!.message,
+                      errorMsg: hardAiError!.message,
+                    }
+                  : item,
+              ),
+            );
+          } else if (analyzedProduct) {
+            // AI-analyzed product created/updated successfully
             const freshNut: NutritionData = {
               servingsPerContainer: String(analyzedProduct.servings_per_container ?? 1),
               calories: String(analyzedProduct.calories_per_serving ?? ''),
@@ -340,6 +402,22 @@ export function ScannerPage() {
                       status: 'success',
                       isNew: false,
                       undoInfo,
+                    }
+                  : item,
+              ),
+            );
+          } else if (existingPlaceholderId) {
+            // We already have a placeholder from a prior failed scan; don't
+            // create another. Just surface the existing placeholder.
+            setQueue((prev) =>
+              prev.map((item) =>
+                item.id === tempId
+                  ? {
+                      ...item,
+                      name: product.name,
+                      productId: existingPlaceholderId,
+                      status: 'success',
+                      isNew: true,
                     }
                   : item,
               ),
