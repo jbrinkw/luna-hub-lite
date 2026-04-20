@@ -29,7 +29,6 @@ apps/web/              # Single React SPA (all modules), deployed to Vercel
 packages/app-tools/    # MCP tool definitions + handlers (CoachByte + ChefByte)
 packages/db-types/     # Generated Supabase TypeScript types
 packages/ui-kit/       # Shared layout components (AppShell wrapper)
-packages/config/       # Shared config (Supabase URLs)
 supabase/              # Migrations, edge functions, seeds
 extensions/            # Obsidian, Todoist, Home Assistant
 apps/mcp-worker/       # Cloudflare Worker MCP server
@@ -106,3 +105,20 @@ After all implementation tasks in a test layer batch (pgTAP, unit, integration, 
 2. **ChefByte AI pipeline** — `legacy/luna-ext-chefbyte/` has the barcode → OpenFoodFacts → LLM pipeline in Python. Rewrite to TypeScript for Supabase Edge Functions. Switch from GPT-4/OpenAI to Claude Haiku 4.5/Anthropic SDK.
 3. **CoachByte DB logic** — `legacy/luna_ext_coachbyte/` has Postgres schemas and Python service logic. Port DB functions to plpgsql, build UI fresh from `docs/ascii-layouts.md`.
 4. **Always verify** — Legacy code may have patterns that conflict with the current spec (different unit systems, different auth, different state management). The docs are the source of truth.
+
+---
+
+## Live Shelf (hardware/live-shelf)
+
+A separate, actively-developed sub-project that does NOT share the Supabase/Vercel stack above. Stands alone on a Raspberry Pi.
+
+**What it is:** Fridge-shelf computer-vision demo. ESP8266 + 4× HX711 load cells → Pi 4 (Flask + SQLite + USB camera) → Anthropic Sonnet classifier. Detects items being placed on / removed from a shelf via weight deltas, records per-session before/after photos + MP4 video, and classifies the item visually.
+
+**Tech stack (NOT Supabase/Vercel):**
+- Pi: Python 3.13, Flask (threaded dev server), SQLite, OpenCV, Anthropic Python SDK
+- ESP8266: Arduino, ESP8266WiFi, HX711 library, ArduinoOTA
+- No cloud, no auth, LAN-only demo. Runs at `192.168.0.181:8000`.
+
+**Before doing ANY work in `hardware/live-shelf/`:** Read `/home/jeremy/luna-hub-lite/LIVE_SHELF_HANDOFF.txt` top-to-bottom. It has the full architecture, every known bug + fix, deploy workflow, debug tools, and production state. The React/Supabase guidance above does NOT apply here.
+
+**Deploy skill:** `~/.claude/skills/live-shelf-deploy/` — automates scp+ssh+restart+healthcheck. Invoke via `~/.claude/skills/live-shelf-deploy/deploy.sh --restart <files>...` or `--status` / `--logs [N]`.

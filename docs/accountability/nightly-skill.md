@@ -14,7 +14,6 @@ Assemble the **Morning Brief** — a short accountability summary + a suggested 
 ## What NOT to include
 
 - **No open-commitments listing.** The root doc already holds the live weekly/monthly/yearly stack. The user can open it. The brief does not re-print it.
-- **No jargon from the root doc** (e.g. tier tags like "dogfood-pending"). If you reference a commit, use its name and the user's own words. Don't quote vocabulary that needs decoding.
 - **No editorializing on the suggested plan.** Surface options; the morning routine has the pushback conversation. Lines like "pick one of X or Y" or "don't half-ass both" belong in the morning convo, not the brief.
 - **No re-printing what the Evening Summary already said.** Use it as a source, not as content.
 

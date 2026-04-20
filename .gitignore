@@ -22,3 +22,9 @@ qa-screenshots/
 .vercel/
 .vercel
 legacy/
+
+# Agent runtime state (scheduled tasks, per-machine settings, worktrees)
+.claude/
+
+# Personal journal — not code
+Journal.json
