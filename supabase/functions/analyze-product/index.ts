@@ -4,7 +4,10 @@ import Anthropic from 'npm:@anthropic-ai/sdk';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  // supabase-js always sends `x-client-info` + `apikey`; both must be
+  // listed here or the browser's preflight fails and the scanner silently
+  // falls through to an "Unknown (barcode)" placeholder.
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 const DAILY_QUOTA = 100;
@@ -70,7 +73,12 @@ async function normalizeWithAI(offProduct: any): Promise<any> {
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) {
     console.error('ANTHROPIC_API_KEY not configured — returning raw OFF data');
-    return null;
+    // Throwing with a typed reason lets the caller translate to an
+    // actionable error message instead of a silent "Unknown (barcode)"
+    // placeholder.
+    throw Object.assign(new Error('ANTHROPIC_API_KEY not configured'), {
+      aiReason: 'missing_key',
+    });
   }
 
   try {
@@ -102,6 +110,30 @@ async function normalizeWithAI(offProduct: any): Promise<any> {
       '- All numeric values rounded to 1 decimal.',
     ].join('\n');
 
+    // Slim nutriments to only the 4 macros + energy (per-serving + per-100g
+    // variants). The raw OFF nutriments object for a typical product is
+    // 10–20 KB (dozens of vitamins/minerals, variant suffixes for each)
+    // which causes Claude to spend tokens reading irrelevant data and
+    // often hit the timeout. Keep only what the 4-4-9 validation needs.
+    const n = offProduct.nutriments ?? {};
+    const slim_nutriments: Record<string, unknown> = {};
+    for (const key of [
+      'energy-kcal',
+      'energy-kcal_serving',
+      'energy-kcal_100g',
+      'carbohydrates',
+      'carbohydrates_serving',
+      'carbohydrates_100g',
+      'proteins',
+      'proteins_serving',
+      'proteins_100g',
+      'fat',
+      'fat_serving',
+      'fat_100g',
+    ]) {
+      if (n[key] != null) slim_nutriments[key] = n[key];
+    }
+
     const userPrompt =
       'Normalize this Open Food Facts product:\n' +
       JSON.stringify({
@@ -112,13 +144,13 @@ async function normalizeWithAI(offProduct: any): Promise<any> {
         serving_size: offProduct.serving_size,
         serving_quantity: offProduct.serving_quantity,
         product_quantity: offProduct.product_quantity,
-        nutriments: offProduct.nutriments,
+        nutriments: slim_nutriments,
       });
 
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
       max_tokens: 512,
-      timeout: 15_000,
+      timeout: 25_000,
       system: systemPrompt,
       messages: [{ role: 'user', content: userPrompt }],
     });
@@ -131,8 +163,26 @@ async function normalizeWithAI(offProduct: any): Promise<any> {
       return null;
     }
   } catch (err: any) {
-    console.error('AI normalization failed:', err?.message ?? err);
-    return null;
+    // Classify Anthropic SDK errors so the edge function can surface a
+    // specific actionable message instead of silently returning null
+    // (which falls through to an "Unknown (barcode)" placeholder).
+    const status = err?.status ?? err?.statusCode;
+    const msg = (err?.message ?? String(err)).toLowerCase();
+    let reason = 'transient';
+    if (status === 401 || /invalid.*api.?key|incorrect api key|authentication/i.test(msg)) {
+      reason = 'bad_key';
+    } else if (status === 402 || /credit|billing|balance.*low|insufficient.*funds/i.test(msg)) {
+      reason = 'billing';
+    } else if (status === 429 || /rate.?limit|too many requests/i.test(msg)) {
+      reason = 'rate_limit';
+    } else if (/timeout|timed out/i.test(msg)) {
+      reason = 'timeout';
+    }
+    console.error(`AI normalization failed (${reason}):`, err?.message ?? err);
+    throw Object.assign(new Error(err?.message ?? 'AI call failed'), {
+      aiReason: reason,
+      aiStatus: status,
+    });
   }
 }
 
@@ -203,8 +253,39 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Product not found in OpenFoodFacts' }, 404);
     }
 
-    // Normalize with Claude Haiku 4.5
-    const suggestion = await normalizeWithAI(offProduct);
+    // Normalize with Claude Haiku 4.5. Failures are classified into two
+    // buckets:
+    //   * HARD  (missing_key, bad_key, billing) — admin intervention
+    //     required, short-circuit with 503 so the UI surfaces it clearly.
+    //   * SOFT  (rate_limit, timeout, transient) — the raw OFF data is
+    //     still useful, so we fall through and return 200 with
+    //     ``suggestion: null`` + ``ai_degraded`` flag. The scanner's
+    //     existing OFF fallback path (ScannerPage.tsx:272–279) produces
+    //     a product with macro values from OFF nutriments, which beats a
+    //     silent "Unknown (barcode)" placeholder.
+    const HARD_FAILURES = new Set(['missing_key', 'bad_key', 'billing']);
+    let suggestion: any = null;
+    let aiDegradedReason: string | null = null;
+    try {
+      suggestion = await normalizeWithAI(offProduct);
+    } catch (err: any) {
+      const reason: string = err?.aiReason ?? 'transient';
+      if (HARD_FAILURES.has(reason)) {
+        const REASON_COPY: Record<string, string> = {
+          missing_key: 'AI service not configured — ask admin to set ANTHROPIC_API_KEY',
+          bad_key: 'AI service auth failed — check ANTHROPIC_API_KEY',
+          billing: 'AI service has no credits — top up billing and try again',
+        };
+        return jsonResponse(
+          { error: REASON_COPY[reason], ai_reason: reason, off: offProduct },
+          503,
+        );
+      }
+      // Soft failure — degrade to OFF-only and let the scanner use its
+      // nutriments fallback. Record the reason so the UI can still hint
+      // "AI degraded, data from OpenFoodFacts only."
+      aiDegradedReason = reason;
+    }
 
     // Validate required fields in AI response before returning
     if (suggestion) {
@@ -232,6 +313,8 @@ Deno.serve(async (req) => {
     return jsonResponse({
       source: 'ai',
       suggestion,
+      ai_degraded: aiDegradedReason !== null,
+      ai_reason: aiDegradedReason,
       off: {
         product_name: offProduct.product_name,
         brands: offProduct.brands,

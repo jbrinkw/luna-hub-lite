@@ -7,6 +7,11 @@ export type Json =
   | Json[]
 
 export type Database = {
+  // Allows to automatically instantiate createClient with right options
+  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
+  __InternalSupabase: {
+    PostgrestVersion: "14.1"
+  }
   chefbyte: {
     Tables: {
       food_logs: {
@@ -163,6 +168,42 @@ export type Database = {
           },
         ]
       }
+      live_shelf_devices: {
+        Row: {
+          created_at: string
+          device_id: string
+          device_name: string
+          import_key_hash: string
+          is_active: boolean
+          lan_ip: string | null
+          last_heartbeat_ts: string | null
+          pending_review_count: number
+          user_id: string
+        }
+        Insert: {
+          created_at?: string
+          device_id?: string
+          device_name: string
+          import_key_hash: string
+          is_active?: boolean
+          lan_ip?: string | null
+          last_heartbeat_ts?: string | null
+          pending_review_count?: number
+          user_id: string
+        }
+        Update: {
+          created_at?: string
+          device_id?: string
+          device_name?: string
+          import_key_hash?: string
+          is_active?: boolean
+          lan_ip?: string | null
+          last_heartbeat_ts?: string | null
+          pending_review_count?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
       locations: {
         Row: {
           created_at: string
@@ -241,53 +282,83 @@ export type Database = {
       products: {
         Row: {
           barcode: string | null
+          brand: string | null
           calories_per_serving: number
           carbs_per_serving: number
+          certified: boolean | null
+          container_type: string | null
           created_at: string
+          density_g_per_ml: number | null
           description: string | null
           fat_per_serving: number
+          gross_weight_g: number | null
           is_placeholder: boolean
           min_stock_amount: number
           name: string
+          net_weight_g: number | null
           price: number | null
           product_id: string
           protein_per_serving: number
+          serving_weight_g: number | null
           servings_per_container: number
+          tare_weight_g: number | null
+          unit_type: string | null
           user_id: string
+          variant: string | null
           walmart_link: string | null
         }
         Insert: {
           barcode?: string | null
+          brand?: string | null
           calories_per_serving?: number
           carbs_per_serving?: number
+          certified?: boolean | null
+          container_type?: string | null
           created_at?: string
+          density_g_per_ml?: number | null
           description?: string | null
           fat_per_serving?: number
+          gross_weight_g?: number | null
           is_placeholder?: boolean
           min_stock_amount?: number
           name: string
+          net_weight_g?: number | null
           price?: number | null
           product_id?: string
           protein_per_serving?: number
+          serving_weight_g?: number | null
           servings_per_container?: number
+          tare_weight_g?: number | null
+          unit_type?: string | null
           user_id: string
+          variant?: string | null
           walmart_link?: string | null
         }
         Update: {
           barcode?: string | null
+          brand?: string | null
           calories_per_serving?: number
           carbs_per_serving?: number
+          certified?: boolean | null
+          container_type?: string | null
           created_at?: string
+          density_g_per_ml?: number | null
           description?: string | null
           fat_per_serving?: number
+          gross_weight_g?: number | null
           is_placeholder?: boolean
           min_stock_amount?: number
           name?: string
+          net_weight_g?: number | null
           price?: number | null
           product_id?: string
           protein_per_serving?: number
+          serving_weight_g?: number | null
           servings_per_container?: number
+          tare_weight_g?: number | null
+          unit_type?: string | null
           user_id?: string
+          variant?: string | null
           walmart_link?: string | null
         }
         Relationships: []
@@ -376,6 +447,98 @@ export type Database = {
         }
         Relationships: []
       }
+      scale_pairings: {
+        Row: {
+          device_id: string
+          first_seen_at: string
+          kind: string
+          last_heartbeat_ts: string | null
+          pairing_id: string
+          product_id: string | null
+          scale_id: string
+          user_id: string
+        }
+        Insert: {
+          device_id: string
+          first_seen_at?: string
+          kind: string
+          last_heartbeat_ts?: string | null
+          pairing_id?: string
+          product_id?: string | null
+          scale_id: string
+          user_id: string
+        }
+        Update: {
+          device_id?: string
+          first_seen_at?: string
+          kind?: string
+          last_heartbeat_ts?: string | null
+          pairing_id?: string
+          product_id?: string | null
+          scale_id?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scale_pairings_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_devices"
+            referencedColumns: ["device_id"]
+          },
+          {
+            foreignKeyName: "scale_pairings_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      shelf_event_log: {
+        Row: {
+          applied: boolean
+          client_event_id: string
+          created_at: string
+          device_id: string
+          event_id: string
+          payload: Json
+          reason: string | null
+          resolved_lot_id: string | null
+          user_id: string
+        }
+        Insert: {
+          applied: boolean
+          client_event_id: string
+          created_at?: string
+          device_id: string
+          event_id?: string
+          payload: Json
+          reason?: string | null
+          resolved_lot_id?: string | null
+          user_id: string
+        }
+        Update: {
+          applied?: boolean
+          client_event_id?: string
+          created_at?: string
+          device_id?: string
+          event_id?: string
+          payload?: Json
+          reason?: string | null
+          resolved_lot_id?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "shelf_event_log_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_devices"
+            referencedColumns: ["device_id"]
+          },
+        ]
+      }
       shopping_list: {
         Row: {
           cart_item_id: string
@@ -415,6 +578,8 @@ export type Database = {
         Row: {
           created_at: string
           expires_on: string | null
+          last_update_source: string | null
+          last_update_ts: string | null
           location_id: string
           lot_id: string
           product_id: string
@@ -424,6 +589,8 @@ export type Database = {
         Insert: {
           created_at?: string
           expires_on?: string | null
+          last_update_source?: string | null
+          last_update_ts?: string | null
           location_id: string
           lot_id?: string
           product_id: string
@@ -433,6 +600,8 @@ export type Database = {
         Update: {
           created_at?: string
           expires_on?: string | null
+          last_update_source?: string | null
+          last_update_ts?: string | null
           location_id?: string
           lot_id?: string
           product_id?: string
@@ -521,6 +690,26 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      apply_shelf_event_admin: {
+        Args: {
+          p_client_event_id: string
+          p_delta_g: number
+          p_device_id: string
+          p_event_kind: string
+          p_kind: string
+          p_occurred_at: string
+          p_product_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       consume_product: {
         Args: {
           p_log_macros: boolean
@@ -566,7 +755,11 @@ export type Database = {
       [_ in never]: never
     }
     CompositeTypes: {
-      [_ in never]: never
+      shelf_event_result: {
+        resolved_lot_id: string | null
+        applied: boolean | null
+        reason: string | null
+      }
     }
   }
   coachbyte: {
@@ -1105,6 +1298,26 @@ export type Database = {
         Args: { p_app_name: string; p_user_id: string }
         Returns: undefined
       }
+      apply_shelf_event: {
+        Args: {
+          p_client_event_id: string
+          p_delta_g: number
+          p_device_id: string
+          p_event_kind: string
+          p_kind: string
+          p_occurred_at: string
+          p_product_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       complete_next_set: {
         Args: {
           p_actual_load: number
@@ -1309,4 +1522,3 @@ export const Constants = {
     Enums: {},
   },
 } as const
-

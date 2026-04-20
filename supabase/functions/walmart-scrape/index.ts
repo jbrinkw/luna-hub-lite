@@ -3,7 +3,10 @@ import { createClient } from 'jsr:@supabase/supabase-js@2';
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+  // supabase-js always sends `x-client-info` + `apikey` on every browser
+  // invocation; both must be listed here or the browser's preflight fails
+  // and the WalmartTab UI silently loses its data fetches.
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 };
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {

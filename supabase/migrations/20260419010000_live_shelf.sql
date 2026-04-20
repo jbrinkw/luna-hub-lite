@@ -38,7 +38,7 @@ ALTER TABLE chefbyte.stock_lots
 -- 3. Device registry: one row per Pi
 ------------------------------------------------------------
 
-CREATE TABLE chefbyte.live_shelf_devices (
+CREATE TABLE IF NOT EXISTS chefbyte.live_shelf_devices (
   device_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id              UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   device_name          TEXT NOT NULL,
@@ -60,7 +60,7 @@ CREATE INDEX live_shelf_devices_user_idx
 -- product_id is NULL except for `live_scale` kind, where the user must pair
 -- the scale to a product before its events apply.
 
-CREATE TABLE chefbyte.scale_pairings (
+CREATE TABLE IF NOT EXISTS chefbyte.scale_pairings (
   pairing_id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   user_id            UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   device_id          UUID NOT NULL REFERENCES chefbyte.live_shelf_devices(device_id) ON DELETE CASCADE,
@@ -82,11 +82,13 @@ CREATE INDEX scale_pairings_user_idx
 ALTER TABLE chefbyte.live_shelf_devices ENABLE ROW LEVEL SECURITY;
 ALTER TABLE chefbyte.scale_pairings     ENABLE ROW LEVEL SECURITY;
 
+DROP POLICY IF EXISTS live_shelf_devices_rls ON chefbyte.live_shelf_devices;
 CREATE POLICY live_shelf_devices_rls ON chefbyte.live_shelf_devices
   FOR ALL TO authenticated
   USING ((select auth.uid()) = user_id)
   WITH CHECK ((select auth.uid()) = user_id);
 
+DROP POLICY IF EXISTS scale_pairings_rls ON chefbyte.scale_pairings;
 CREATE POLICY scale_pairings_rls ON chefbyte.scale_pairings
   FOR ALL TO authenticated
   USING ((select auth.uid()) = user_id)
@@ -114,11 +116,20 @@ CREATE POLICY scale_pairings_rls ON chefbyte.scale_pairings
 --   applied         — true if stock mutated, false if skipped (missing weight)
 --   reason          — short human-readable outcome
 
-CREATE TYPE chefbyte.shelf_event_result AS (
-  resolved_lot_id UUID,
-  applied BOOLEAN,
-  reason TEXT
-);
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_type t
+      JOIN pg_namespace n ON n.oid = t.typnamespace
+     WHERE t.typname = 'shelf_event_result' AND n.nspname = 'chefbyte'
+  ) THEN
+    CREATE TYPE chefbyte.shelf_event_result AS (
+      resolved_lot_id UUID,
+      applied BOOLEAN,
+      reason TEXT
+    );
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION private.apply_shelf_event(
   p_user_id      UUID,
@@ -168,7 +179,7 @@ BEGIN
 
   -- Resolve logical_date via user's profile
   SELECT timezone, day_start_hour INTO v_tz, v_dsh
-    FROM hub.profile WHERE user_id = p_user_id;
+    FROM hub.profiles WHERE user_id = p_user_id;
   IF v_tz IS NULL THEN v_tz := 'UTC'; END IF;
   IF v_dsh IS NULL THEN v_dsh := 0;    END IF;
   v_logical_date := private.get_logical_date(p_occurred_at, v_tz, v_dsh);

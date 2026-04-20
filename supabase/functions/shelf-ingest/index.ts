@@ -20,6 +20,20 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
 };
 
+// ─── Validation constants ────────────────────────────────────────────
+// Centralized so tests + future tuning land in one place.
+const MAX_CLIENT_EVENT_ID_LEN = 128;
+const MAX_SCALE_ID_LEN = 128;
+const MAX_SCALES_PER_HEARTBEAT = 32;
+// occurred_at must be within [now-30d, now+5m]. The upper bound catches 2099
+// typos without rejecting minor clock drift on the Pi; the lower bound keeps
+// an offline backlog reasonable.
+const OCCURRED_AT_PAST_MS = 30 * 24 * 60 * 60 * 1000;
+const OCCURRED_AT_FUTURE_MS = 5 * 60 * 1000;
+
+const VALID_KINDS = ['live_shelf', 'live_scale', 'catch_all'] as const;
+const VALID_EVENT_KINDS = ['consumed', 'added', 'refilled', 'depleted'] as const;
+
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -35,14 +49,31 @@ async function sha256(input: string): Promise<string> {
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
 }
 
+/** True iff `s` round-trips through the Date ISO parser unchanged-ish. */
+function isValidIsoTimestamp(s: unknown): s is string {
+  if (typeof s !== 'string' || s.length === 0) return false;
+  const d = new Date(s);
+  if (Number.isNaN(d.getTime())) return false;
+  // Bound the year so wildly out-of-range parses (e.g. 99999-12-31) don't
+  // slip through just because Date accepted them.
+  const y = d.getUTCFullYear();
+  return y >= 1970 && y <= 2999;
+}
+
 type Device = {
   device_id: string;
   user_id: string;
 };
 
-/** Authenticate by x-api-key header. Returns device or null. */
-async function authenticate(supabase: SupabaseClient, apiKey: string | null): Promise<Device | null> {
-  if (!apiKey) return null;
+type AuthFailReason = 'bad_key' | 'inactive_device' | 'db_error';
+
+type AuthResult =
+  | { ok: true; device: Device }
+  | { ok: false; reason: AuthFailReason };
+
+/** Authenticate by x-api-key header. Returns {ok, device} or failure reason. */
+async function authenticate(supabase: SupabaseClient, apiKey: string | null): Promise<AuthResult> {
+  if (!apiKey) return { ok: false, reason: 'bad_key' };
   const keyHash = await sha256(apiKey);
   const { data, error } = await supabase
     .schema('chefbyte')
@@ -51,12 +82,13 @@ async function authenticate(supabase: SupabaseClient, apiKey: string | null): Pr
     .eq('import_key_hash', keyHash)
     .maybeSingle();
 
-  if (error || !data) return null;
-  if (!data.is_active) return null;
-  return { device_id: data.device_id, user_id: data.user_id };
+  if (error) return { ok: false, reason: 'db_error' };
+  if (!data) return { ok: false, reason: 'bad_key' };
+  if (!data.is_active) return { ok: false, reason: 'inactive_device' };
+  return { ok: true, device: { device_id: data.device_id, user_id: data.user_id } };
 }
 
-// ─── Route handlers ──────────────────────────────────────────────────────
+// ─── Route handlers ──────────────────────────────────────────────────
 
 async function handleCatalog(supabase: SupabaseClient, device: Device): Promise<Response> {
   const userId = device.user_id;
@@ -66,7 +98,7 @@ async function handleCatalog(supabase: SupabaseClient, device: Device): Promise<
       .schema('chefbyte')
       .from('products')
       .select(
-        'product_id, name, barcode, net_weight_g, gross_weight_g, tare_weight_g, container_type, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving',
+        'product_id, name, barcode, brand, variant, net_weight_g, gross_weight_g, tare_weight_g, serving_weight_g, container_type, unit_type, density_g_per_ml, certified, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving',
       )
       .eq('user_id', userId),
     supabase
@@ -101,7 +133,8 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
   const scaleId: string | undefined = body?.scale_id;
   const kind: string | undefined = body?.kind;
   const eventKind: string | undefined = body?.event_kind;
-  const deltaG: number | undefined = typeof body?.delta_g === 'number' ? body.delta_g : undefined;
+  const rawDelta: unknown = body?.delta_g;
+  const deltaG: number | undefined = typeof rawDelta === 'number' ? rawDelta : undefined;
   const occurredAt: string | undefined = body?.occurred_at;
   const clientEventId: string | undefined =
     typeof body?.client_event_id === 'string' && body.client_event_id.length > 0 ? body.client_event_id : undefined;
@@ -116,6 +149,17 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     );
   }
 
+  // Structured log at event start. Logs every event, including duplicates +
+  // validation failures downstream — gives a single grep point for a client
+  // retrying / misbehaving.
+  console.log('shelf-ingest: event', {
+    client_event_id: clientEventId ?? null,
+    device_id: device.device_id,
+    scale_id: scaleId,
+    kind,
+    event_kind: eventKind,
+  });
+
   // The Pi always sends client_event_id — absence is a client bug, not a
   // network hiccup. Bail early so retries can't slip through without a
   // dedup key.
@@ -123,30 +167,38 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     return jsonResponse({ error: 'client_event_id required' }, 400);
   }
 
-  if (!['live_shelf', 'live_scale', 'catch_all'].includes(kind)) {
+  if (clientEventId.length > MAX_CLIENT_EVENT_ID_LEN) {
+    return jsonResponse({ error: 'client_event_id too long' }, 400);
+  }
+
+  if (typeof scaleId !== 'string' || scaleId.length === 0 || scaleId.length > MAX_SCALE_ID_LEN) {
+    return jsonResponse({ error: 'invalid scale_id' }, 400);
+  }
+
+  if (!VALID_KINDS.includes(kind as (typeof VALID_KINDS)[number])) {
     return jsonResponse({ error: 'invalid kind' }, 400);
   }
 
-  // Idempotency: if we've already processed this client_event_id for this
-  // user, return the prior result and don't re-apply. Keyed on user_id so
-  // different users can independently use the same UUID (defensive — the
-  // Pi generates v4 so collisions are astronomically unlikely).
-  const { data: existingLog } = await supabase
-    .schema('chefbyte')
-    .from('shelf_event_log')
-    .select('applied, resolved_lot_id, reason')
-    .eq('user_id', device.user_id)
-    .eq('client_event_id', clientEventId)
-    .maybeSingle();
+  if (!VALID_EVENT_KINDS.includes(eventKind as (typeof VALID_EVENT_KINDS)[number])) {
+    return jsonResponse({ error: 'invalid event_kind' }, 400);
+  }
 
-  if (existingLog) {
-    return jsonResponse({
-      ok: true,
-      applied: false,
-      resolved_lot_id: existingLog.resolved_lot_id ?? null,
-      reason: 'duplicate',
-      original_reason: existingLog.reason ?? null,
-    });
+  // delta_g must be a finite number. NaN is already excluded by the typeof
+  // check above (typeof NaN === 'number') so !isFinite is the right filter.
+  if (!Number.isFinite(deltaG)) {
+    return jsonResponse({ error: 'invalid delta_g' }, 400);
+  }
+
+  if (!isValidIsoTimestamp(occurredAt)) {
+    return jsonResponse({ error: 'invalid occurred_at' }, 400);
+  }
+
+  const occurredMs = new Date(occurredAt).getTime();
+  const nowMs = Date.now();
+  if (occurredMs < nowMs - OCCURRED_AT_PAST_MS || occurredMs > nowMs + OCCURRED_AT_FUTURE_MS) {
+    // 422 (not 400) so the Pi's retry worker treats this as retryable —
+    // wall-clock drift is a transient condition, not a permanent client bug.
+    return jsonResponse({ error: 'occurred_at out of range' }, 422);
   }
 
   // Resolve product_id for live_scale via pairing when not provided.
@@ -175,10 +227,9 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     return jsonResponse({ error: 'product_id required' }, 400);
   }
 
-  // `private.apply_shelf_event` isn't exposed via PostgREST (schema not in
-  // config.toml `schemas`), so we call it through the service-role-only
-  // wrapper `chefbyte.apply_shelf_event_admin` (see migration
-  // 20260419030000_shelf_ingest_wrapper.sql).
+  // Hand off to the plpgsql function. It owns idempotency: if this
+  // client_event_id was already processed, it replays the cached result
+  // inside the same transaction (no race window).
   const { data, error } = await (supabase as any).schema('chefbyte').rpc('apply_shelf_event_admin', {
     p_user_id: device.user_id,
     p_device_id: device.device_id,
@@ -188,73 +239,37 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     p_product_id: productId,
     p_delta_g: deltaG,
     p_occurred_at: occurredAt,
+    p_client_event_id: clientEventId,
   });
 
   if (error) {
-    console.error('apply_shelf_event error:', error);
+    // Always include client_event_id so operators can correlate a 500 with
+    // the Pi's retry queue.
+    console.error('shelf-ingest: apply_shelf_event failed', {
+      client_event_id: clientEventId,
+      code: (error as any).code ?? null,
+      message: (error as any).message ?? null,
+    });
     return jsonResponse({ error: 'apply_shelf_event failed' }, 500);
   }
 
-  // RPC returns the composite row as an object.
+  // RPC returns the composite row as an object (or an array with one row
+  // depending on the client version).
   const row = Array.isArray(data) ? data[0] : data;
   const applied = Boolean(row?.applied);
   const resolvedLotId = row?.resolved_lot_id ?? null;
   const reason = row?.reason ?? null;
 
-  // Log the result keyed on client_event_id so a retry returns the cached
-  // outcome. ON CONFLICT DO NOTHING handles concurrent duplicates: the
-  // losing INSERT returns no row, and we fetch the winner's result below.
-  const { data: inserted, error: logErr } = await supabase
-    .schema('chefbyte')
-    .from('shelf_event_log')
-    .upsert(
-      {
-        user_id: device.user_id,
-        device_id: device.device_id,
-        client_event_id: clientEventId,
-        payload: {
-          scale_id: scaleId,
-          kind,
-          event_kind: eventKind,
-          product_id: productId,
-          delta_g: deltaG,
-          occurred_at: occurredAt,
-        },
-        applied,
-        resolved_lot_id: resolvedLotId,
-        reason,
-      },
-      { onConflict: 'user_id,client_event_id', ignoreDuplicates: true },
-    )
-    .select('applied, resolved_lot_id, reason')
-    .maybeSingle();
-
-  if (logErr) {
-    // Don't fail the request if the log write fails — the stock mutation
-    // already happened. Just surface the error in logs.
-    console.error('shelf_event_log insert failed:', logErr);
-  }
-
-  // If the upsert didn't insert a row (concurrent duplicate), fetch the
-  // winning row's result so the caller still sees the canonical outcome.
-  if (!inserted) {
-    const { data: winner } = await supabase
-      .schema('chefbyte')
-      .from('shelf_event_log')
-      .select('applied, resolved_lot_id, reason')
-      .eq('user_id', device.user_id)
-      .eq('client_event_id', clientEventId)
-      .maybeSingle();
-    if (winner) {
-      return jsonResponse({
-        ok: true,
-        applied: false,
-        resolved_lot_id: winner.resolved_lot_id ?? null,
-        reason: 'duplicate',
-        original_reason: winner.reason ?? null,
-      });
-    }
-  }
+  // Note: as of migration 20260419060000 the plpgsql no longer collapses
+  // every replay to reason='duplicate'. A successful replay echoes the
+  // cached applied=true + original reason + resolved_lot_id, so the Pi
+  // can reconcile its retry queue against real outcomes.
+  console.log('shelf-ingest: result', {
+    client_event_id: clientEventId,
+    applied,
+    reason,
+    resolved_lot_id: resolvedLotId,
+  });
 
   return jsonResponse({
     ok: true,
@@ -271,15 +286,24 @@ async function handleIntake(supabase: SupabaseClient, device: Device, body: any)
   }
 
   const userId = device.user_id;
+  // Build the payload from everything the Pi sends that we know how to
+  // persist. Columns are all nullable (see migration 050000) so this
+  // pass-through is safe.
   const payload: Record<string, unknown> = {
     user_id: userId,
     name,
     barcode: body?.barcode ?? null,
+    brand: body?.brand ?? null,
+    variant: body?.variant ?? null,
     description: body?.description ?? null,
     net_weight_g: body?.net_weight_g ?? null,
     gross_weight_g: body?.gross_weight_g ?? null,
     tare_weight_g: body?.tare_weight_g ?? null,
+    serving_weight_g: body?.serving_weight_g ?? null,
     container_type: body?.container_type ?? null,
+    unit_type: body?.unit_type ?? null,
+    density_g_per_ml: body?.density_g_per_ml ?? null,
+    certified: body?.certified ?? null,
   };
   // Only overwrite macro fields if provided — columns are NOT NULL with defaults.
   if (body?.servings_per_container !== undefined) payload.servings_per_container = body.servings_per_container;
@@ -289,8 +313,8 @@ async function handleIntake(supabase: SupabaseClient, device: Device, body: any)
   if (body?.fat_per_serving !== undefined) payload.fat_per_serving = body.fat_per_serving;
 
   // Upsert semantics on (user_id, barcode): if a row exists with the same
-  // barcode for this user, update it; otherwise insert. No composite unique
-  // constraint exists in the schema, so we check-then-write.
+  // barcode for this user, update it; otherwise insert. The unique partial
+  // index `products_user_barcode_unique` guarantees at most one match.
   const barcode = body?.barcode ?? null;
   if (barcode) {
     const { data: existing } = await supabase
@@ -302,21 +326,18 @@ async function handleIntake(supabase: SupabaseClient, device: Device, body: any)
       .maybeSingle();
 
     if (existing?.product_id) {
-      // Don't overwrite user_id on update.
       const updatePayload = { ...payload };
       delete updatePayload.user_id;
-      // Scope the update on BOTH product_id AND user_id as defense-in-depth —
-      // even though we only select products.product_id for the current
-      // user above, pinning user_id guarantees we can never mutate another
-      // user's row if the product_id lookup ever widens.
-      const { error: updErr } = await supabase
+      const { data: updated, error: updErr } = await supabase
         .schema('chefbyte')
         .from('products')
         .update(updatePayload)
         .eq('product_id', existing.product_id)
-        .eq('user_id', userId);
+        .eq('user_id', userId)
+        .select('*')
+        .single();
       if (updErr) throw updErr;
-      return jsonResponse({ product_id: existing.product_id });
+      return jsonResponse(updated!);
     }
   }
 
@@ -324,79 +345,96 @@ async function handleIntake(supabase: SupabaseClient, device: Device, body: any)
     .schema('chefbyte')
     .from('products')
     .insert(payload)
-    .select('product_id')
+    .select('*')
     .single();
 
   if (insErr) throw insErr;
-  return jsonResponse({ product_id: inserted!.product_id });
+  return jsonResponse(inserted!);
 }
 
 async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
   const pendingReviewCount: number = typeof body?.pending_review_count === 'number' ? body.pending_review_count : 0;
+  // Scenario 7: the Pi heartbeat_provider includes these two counters so
+  // the cloud UI can render backlog state (finding #10 of the cloud audit).
+  // Non-negative guard: a bad client (or negative-number-as-string) must not
+  // violate the CHECK constraint. Fall back to 0 silently — the next tick
+  // will carry a valid number.
+  const rawOutboxPending = body?.outbox_pending_count;
+  const outboxPendingCount: number =
+    typeof rawOutboxPending === 'number' && Number.isFinite(rawOutboxPending) && rawOutboxPending >= 0
+      ? Math.trunc(rawOutboxPending)
+      : 0;
+  const rawOutboxPermanent = body?.outbox_permanent_failures;
+  const outboxPermanentFailures: number =
+    typeof rawOutboxPermanent === 'number' && Number.isFinite(rawOutboxPermanent) && rawOutboxPermanent >= 0
+      ? Math.trunc(rawOutboxPermanent)
+      : 0;
   const scales: Array<{ scale_id: string; kind: string }> = Array.isArray(body?.scales) ? body.scales : [];
+
+  if (scales.length > MAX_SCALES_PER_HEARTBEAT) {
+    return jsonResponse({ error: 'too many scales in heartbeat' }, 400);
+  }
+
+  // Pre-validate every scale entry so a 400 prevents partial writes.
+  for (const s of scales) {
+    if (!s || typeof s !== 'object') {
+      return jsonResponse({ error: 'invalid scales entry' }, 400);
+    }
+    if (typeof s.scale_id !== 'string' || s.scale_id.length === 0 || s.scale_id.length > MAX_SCALE_ID_LEN) {
+      return jsonResponse({ error: 'invalid scale_id' }, 400);
+    }
+    if (typeof s.kind !== 'string' || !VALID_KINDS.includes(s.kind as (typeof VALID_KINDS)[number])) {
+      return jsonResponse({ error: 'invalid kind' }, 400);
+    }
+  }
 
   const now = new Date().toISOString();
   const userId = device.user_id;
 
-  // Update device heartbeat + pending review count. Scope on both
-  // device_id and user_id as defense-in-depth: we authenticated the
-  // device via its import_key_hash, but pinning user_id prevents any
-  // accidental cross-tenant write if the device row is ever reassigned.
+  // Update device heartbeat + pending review count + outbox counters.
+  // Scope on both device_id and user_id as defense-in-depth.
   const { error: devErr } = await supabase
     .schema('chefbyte')
     .from('live_shelf_devices')
     .update({
       last_heartbeat_ts: now,
       pending_review_count: pendingReviewCount,
+      outbox_pending_count: outboxPendingCount,
+      outbox_permanent_failures: outboxPermanentFailures,
     })
     .eq('device_id', device.device_id)
     .eq('user_id', userId);
   if (devErr) throw devErr;
 
-  // For each reported scale: upsert keyed on (device_id, scale_id) WITHOUT
-  // overwriting product_id on subsequent heartbeats. We check-then-write
-  // rather than relying on ON CONFLICT because the set of columns we want
-  // to write differs between insert and update.
-  for (const s of scales) {
-    if (!s?.scale_id || !s?.kind) continue;
-    if (!['live_shelf', 'live_scale', 'catch_all'].includes(s.kind)) continue;
-
-    const { data: existing } = await supabase
-      .schema('chefbyte')
-      .from('scale_pairings')
-      .select('pairing_id')
-      .eq('user_id', userId)
-      .eq('device_id', device.device_id)
-      .eq('scale_id', s.scale_id)
-      .maybeSingle();
-
-    if (existing?.pairing_id) {
-      const { error: upErr } = await supabase
-        .schema('chefbyte')
-        .from('scale_pairings')
-        .update({
-          kind: s.kind,
-          last_heartbeat_ts: now,
-        })
-        .eq('pairing_id', existing.pairing_id)
-        .eq('user_id', userId);
-      if (upErr) throw upErr;
-    } else {
-      const { error: inErr } = await supabase.schema('chefbyte').from('scale_pairings').insert({
-        user_id: userId,
+  // Atomic bulk UPSERT via plpgsql helper. Critical properties:
+  //   - Single round-trip (was up to 64 SELECT+INSERT/UPDATE before).
+  //   - Concurrent heartbeats are race-free — ON CONFLICT (device_id,
+  //     scale_id) DO UPDATE serializes on the unique index.
+  //   - product_id is explicitly omitted from the UPDATE SET clause so
+  //     existing pairings keep whatever product the user set via the UI.
+  if (scales.length > 0) {
+    const { error: hbErr } = await (supabase as any).schema('chefbyte').rpc(
+      'heartbeat_upsert_pairings_admin',
+      {
+        p_device_id: device.device_id,
+        p_user_id: userId,
+        p_scales: scales,
+      },
+    );
+    if (hbErr) {
+      console.error('shelf-ingest: heartbeat_upsert_pairings_admin failed', {
         device_id: device.device_id,
-        scale_id: s.scale_id,
-        kind: s.kind,
-        last_heartbeat_ts: now,
+        code: (hbErr as any).code ?? null,
+        message: (hbErr as any).message ?? null,
       });
-      if (inErr) throw inErr;
+      throw hbErr;
     }
   }
 
   return jsonResponse({ ok: true });
 }
 
-// ─── Entrypoint ──────────────────────────────────────────────────────────
+// ─── Entrypoint ──────────────────────────────────────────────────────
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -406,24 +444,31 @@ Deno.serve(async (req) => {
   try {
     const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
-    const device = await authenticate(supabase, req.headers.get('x-api-key'));
-    if (!device) return jsonResponse({ error: 'unauthorized' }, 401);
-
     const url = new URL(req.url);
-    // Supabase routes /functions/v1/shelf-ingest/<subpath>. The function only
-    // sees the tail; accept both with and without a /shelf-ingest prefix.
-    const path = url.pathname.replace(/\/+$/, ''); // strip trailing slash
+    // Supabase routes /functions/v1/shelf-ingest/<subpath>. Strip trailing
+    // slashes and derive the last path segment so `/catalog` matches exactly
+    // (not `/catalogg`, `/catalog/evil`, etc.).
+    const cleanedPath = url.pathname.replace(/\/+$/, '');
+    const segments = cleanedPath.split('/').filter(Boolean);
+    const leaf = segments[segments.length - 1] ?? '';
 
-    if (req.method === 'GET' && path.endsWith('/catalog')) {
+    const authRes = await authenticate(supabase, req.headers.get('x-api-key'));
+    if (!authRes.ok) {
+      console.warn('shelf-ingest: auth failed', { path: cleanedPath, reason: authRes.reason });
+      return jsonResponse({ error: 'unauthorized' }, 401);
+    }
+    const device = authRes.device;
+
+    if (req.method === 'GET' && leaf === 'catalog') {
       return await handleCatalog(supabase, device);
     }
 
     if (req.method === 'POST') {
       const body = await req.json().catch(() => ({}));
 
-      if (path.endsWith('/event')) return await handleEvent(supabase, device, body);
-      if (path.endsWith('/intake')) return await handleIntake(supabase, device, body);
-      if (path.endsWith('/heartbeat')) return await handleHeartbeat(supabase, device, body);
+      if (leaf === 'event') return await handleEvent(supabase, device, body);
+      if (leaf === 'intake') return await handleIntake(supabase, device, body);
+      if (leaf === 'heartbeat') return await handleHeartbeat(supabase, device, body);
     }
 
     return jsonResponse({ error: 'not found' }, 404);
