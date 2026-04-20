@@ -64,6 +64,89 @@ interface GroupedProduct {
 
 type ViewMode = 'grouped' | 'lots';
 
+/* ------------------------------------------------------------------ */
+/*  Pure helpers (exported for testing)                                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Compute the Review (N) button state from a set of live-shelf devices.
+ *
+ * - `pendingReviewTotal` is the sum of every device's `pending_review_count`
+ *   (null-coalesced to 0). The sum is displayed in the UI even when the
+ *   button is disabled so the user can see backlog at a glance.
+ * - `reviewUrl` is built from the most-recently-heartbeated device whose
+ *   `lan_ip` passes `isValidLanIp`. Because the IP is interpolated into an
+ *   href, we re-validate at URL-build time — a value that slipped into the
+ *   DB before the Settings-tab validation existed MUST NOT produce a clickable
+ *   `javascript:`-style URL.
+ * - `reviewDisabledReason` distinguishes "no device has a LAN IP" from
+ *   "a device has one but it failed re-validation" so the user knows what
+ *   to fix.
+ */
+export function computeReviewState(
+  shelfDevices: ReadonlyArray<{
+    lan_ip: string | null;
+    pending_review_count: number | null;
+    last_heartbeat_ts: string | null;
+  }>,
+): {
+  pendingReviewTotal: number;
+  reviewUrl: string | null;
+  reviewDisabledReason: string | null;
+} {
+  const total = shelfDevices.reduce((sum, d) => sum + (d.pending_review_count ?? 0), 0);
+  const withIp = shelfDevices.filter((d) => d.lan_ip && d.lan_ip.trim() !== '');
+  const sorted = [...withIp].sort((a, b) => {
+    const ta = a.last_heartbeat_ts ? new Date(a.last_heartbeat_ts).getTime() : 0;
+    const tb = b.last_heartbeat_ts ? new Date(b.last_heartbeat_ts).getTime() : 0;
+    return tb - ta;
+  });
+  const target = sorted[0];
+  const targetIpValid = target && target.lan_ip ? isValidLanIp(target.lan_ip) : false;
+  const url = target && targetIpValid ? `http://${target.lan_ip}:8000/inventory#review` : null;
+  let reason: string | null = null;
+  if (!target) {
+    reason = 'Set LAN IP in Settings → Scales';
+  } else if (!targetIpValid) {
+    reason = 'Invalid LAN IP — update in Settings → Scales';
+  }
+  return { pendingReviewTotal: total, reviewUrl: url, reviewDisabledReason: reason };
+}
+
+/**
+ * Pick the most-recently-updated automated source tag across a product's lots.
+ *
+ * Manual-source rows are intentionally excluded — the pill is reserved for
+ * automated sources (live_shelf / live_scale / catch_all). A lot with a
+ * source but a null ts falls back to "first non-manual seen" so we still
+ * show something sensible for legacy data written before `last_update_ts`
+ * was populated.
+ */
+export function pickLatestAutomatedSource(
+  lots: ReadonlyArray<{
+    last_update_source: 'manual' | 'live_shelf' | 'live_scale' | 'catch_all' | null;
+    last_update_ts: string | null;
+  }>,
+): {
+  latestSource: 'live_shelf' | 'live_scale' | 'catch_all' | null;
+  latestSourceTs: string | null;
+} {
+  let latestSource: 'live_shelf' | 'live_scale' | 'catch_all' | null = null;
+  let latestSourceTs: string | null = null;
+  for (const l of lots) {
+    if (!l.last_update_source || l.last_update_source === 'manual') continue;
+    if (!l.last_update_ts) {
+      if (latestSource === null) latestSource = l.last_update_source;
+      continue;
+    }
+    if (!latestSourceTs || l.last_update_ts > latestSourceTs) {
+      latestSourceTs = l.last_update_ts;
+      latestSource = l.last_update_source;
+    }
+  }
+  return { latestSource, latestSourceTs };
+}
+
 /* ================================================================== */
 /*  InventoryPage                                                      */
 /* ================================================================== */
@@ -202,26 +285,9 @@ export function InventoryPage() {
         .sort();
       const nearestExpiry = expiries[0] ?? null;
 
-      // Pick the most-recently-updated lot's automated source tag as the
-      // product's pill. Skip lots with a null source (pure manual entries we
-      // never tagged) AND lots tagged 'manual' — the pill is reserved for
-      // automated sources (live_shelf / live_scale / catch_all), matching the
-      // render-side guard `latestSource !== 'manual'` further down.
-      let latestSource: GroupedProduct['latestSource'] = null;
-      let latestSourceTs: string | null = null;
-      for (const l of productLots) {
-        if (!l.last_update_source || l.last_update_source === 'manual') continue;
-        if (!l.last_update_ts) {
-          // Fall back: if we have a source but no ts, still show it unless we
-          // already have one with a ts.
-          if (latestSource === null) latestSource = l.last_update_source;
-          continue;
-        }
-        if (!latestSourceTs || l.last_update_ts > latestSourceTs) {
-          latestSourceTs = l.last_update_ts;
-          latestSource = l.last_update_source;
-        }
-      }
+      // Pick the most-recently-updated automated source tag for the pill.
+      // See `pickLatestAutomatedSource` for the full rationale.
+      const { latestSource, latestSourceTs } = pickLatestAutomatedSource(productLots);
 
       return {
         product,
@@ -414,30 +480,10 @@ export function InventoryPage() {
   /*  Review queue — pending_review_count summed across shelf devices   */
   /* ---------------------------------------------------------------- */
 
-  const { pendingReviewTotal, reviewUrl, reviewDisabledReason } = useMemo(() => {
-    const total = shelfDevices.reduce((sum, d) => sum + (d.pending_review_count ?? 0), 0);
-    // Prefer the most-recently-heartbeated device that actually has a LAN IP set.
-    // Re-validate the stored lan_ip at URL-build time as a defense-in-depth measure:
-    // if a bad value slipped into the DB before the Settings-tab validation was in
-    // place, we refuse to interpolate it into the href and fall back to the
-    // disabled-button surface with a distinct explanation.
-    const withIp = shelfDevices.filter((d) => d.lan_ip && d.lan_ip.trim() !== '');
-    withIp.sort((a, b) => {
-      const ta = a.last_heartbeat_ts ? new Date(a.last_heartbeat_ts).getTime() : 0;
-      const tb = b.last_heartbeat_ts ? new Date(b.last_heartbeat_ts).getTime() : 0;
-      return tb - ta;
-    });
-    const target = withIp[0];
-    const targetIpValid = target && target.lan_ip ? isValidLanIp(target.lan_ip) : false;
-    const url = target && targetIpValid ? `http://${target.lan_ip}:8000/inventory#review` : null;
-    let reason: string | null = null;
-    if (!target) {
-      reason = 'Set LAN IP in Settings → Scales';
-    } else if (!targetIpValid) {
-      reason = 'Invalid LAN IP — update in Settings → Scales';
-    }
-    return { pendingReviewTotal: total, reviewUrl: url, reviewDisabledReason: reason };
-  }, [shelfDevices]);
+  const { pendingReviewTotal, reviewUrl, reviewDisabledReason } = useMemo(
+    () => computeReviewState(shelfDevices),
+    [shelfDevices],
+  );
 
   /* ---------------------------------------------------------------- */
   /*  Source pill                                                      */

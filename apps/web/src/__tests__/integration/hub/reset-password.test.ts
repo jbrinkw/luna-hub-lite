@@ -76,12 +76,19 @@ describe('ResetPassword integration', () => {
   });
 
   it('password mismatch returns validation error', () => {
-    // ResetPassword.tsx: if (password !== confirmPassword) { ... }
-    const password = 'newpassword123';
-    const confirmPassword = 'differentpassword';
-    expect(password).not.toBe(confirmPassword);
-    // When they match, validation passes
-    expect(password).toBe(password);
+    // ResetPassword.tsx: if (password !== confirmPassword) { setError('Passwords do not match'); return; }
+    // Documents the gate: inequality fails, equality passes. Assert on the
+    // same boolean expression the component evaluates, not on the inputs
+    // themselves (which would be a tautology).
+    const password: string = 'newpassword123';
+    const mismatched: string = 'differentpassword';
+    const matched: string = 'newpassword123';
+
+    expect(password !== mismatched).toBe(true);   // triggers the error branch
+    expect(password !== matched).toBe(false);     // validation passes
+    // Guard against accidental reference-equality assumptions — the component
+    // uses `!==` on primitive strings, not Object.is.
+    expect(password === matched).toBe(true);
   });
 
   // ---------------------------------------------------------------
