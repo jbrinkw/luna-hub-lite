@@ -1,0 +1,393 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>{% block title %}live shelf{% endblock %}</title>
+  <style>
+    :root {
+      --bg:       #0f1115;
+      --panel:    #151822;
+      --panel-2:  #1b1f2b;
+      --border:   #232837;
+      --text:     #d8e2dc;
+      --muted:    #7f8c87;
+      --accent:   #00e676;
+      --accent-d: #00b957;
+      --warn:     #ffb347;
+      --danger:   #ff5c6c;
+      --info:     #4fc3f7;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+                   "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    header.nav {
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 16px;
+      flex-wrap: wrap;
+    }
+    header.nav .brand {
+      color: var(--accent);
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+    header.nav a.nlink {
+      color: var(--muted);
+      padding: 2px 4px;
+      border-radius: 3px;
+    }
+    header.nav a.nlink:hover { color: var(--text); }
+    header.nav a.nlink.active { color: var(--accent); }
+    header.nav .badge {
+      display: inline-block;
+      background: var(--danger);
+      color: #08090c;
+      font-weight: 700;
+      border-radius: 999px;
+      padding: 0 6px;
+      font-size: 10px;
+      line-height: 16px;
+      min-width: 16px;
+      text-align: center;
+      margin-left: 4px;
+      vertical-align: 1px;
+    }
+    header.nav .spacer { flex: 1; }
+    header.nav .meta { color: var(--muted); font-size: 12px; }
+
+    main { padding: 16px; max-width: 1280px; margin: 0 auto; }
+    h1, h2, h3 { margin: 0 0 10px 0; font-weight: 600; }
+    h1 { font-size: 18px; color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
+    h2 { font-size: 15px; color: var(--text); margin-top: 18px; }
+    h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+    .row { display: flex; gap: 12px; flex-wrap: wrap; }
+    .col { flex: 1; min-width: 280px; }
+    button, .btn {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    button:hover, .btn:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary { border-color: var(--accent-d); color: var(--accent); }
+    button.primary:hover { background: var(--accent); color: #041108; }
+    button.danger { border-color: var(--danger); color: var(--danger); }
+    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
+    .dot.on  { background: var(--accent); box-shadow: 0 0 8px var(--accent-d); }
+    .dot.off { background: #3a4543; }
+    .dot.warn { background: var(--warn); }
+    .dot.bad { background: var(--danger); }
+    kbd, code, .mono { font-family: inherit; color: var(--accent); }
+    table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    th, td {
+      text-align: left; padding: 6px 8px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: top;
+    }
+    th { color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; }
+    tr:hover td { background: var(--panel-2); }
+    .muted { color: var(--muted); }
+    .pill {
+      display: inline-block;
+      padding: 1px 8px;
+      border-radius: 999px;
+      font-size: 10px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border: 1px solid var(--border);
+    }
+    .pill.ok { color: var(--accent); border-color: var(--accent-d); }
+    .pill.warn { color: var(--warn); border-color: var(--warn); }
+    .pill.bad { color: var(--danger); border-color: var(--danger); }
+    .pill.info { color: var(--info); border-color: var(--info); }
+    .pill.muted { color: var(--muted); }
+    .stat {
+      display: inline-flex; align-items: center; gap: 6px;
+      margin-right: 18px;
+      font-size: 13px;
+    }
+    .stat .label { color: var(--muted); }
+    .stat .value { color: var(--accent); font-weight: 600; }
+    .preview-wrap {
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      display: inline-block;
+      max-width: 100%;
+      min-height: 120px;
+    }
+    .preview-wrap img { display: block; width: 100%; height: auto; }
+    .thumb-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+      gap: 10px;
+    }
+    .thumb-card {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      color: inherit;
+    }
+    .thumb-card:hover { border-color: var(--accent); }
+    .thumb-card .thumbs {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
+      background: #000;
+    }
+    .thumb-card .thumbs img { width: 100%; height: 96px; object-fit: cover; display: block; }
+    .thumb-card .caption {
+      padding: 6px 8px;
+      font-size: 12px;
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 6px;
+    }
+    .thumb-card .caption .id { color: var(--accent); font-size: 11px; }
+    .thumb-card .caption .dur { color: var(--muted); font-size: 11px; }
+    .thumb-card .caption .delta {
+      color: var(--muted);
+      font-weight: 600;
+    }
+    .thumb-card .caption .delta.pos { color: var(--accent); }
+    .thumb-card .caption .delta.neg { color: var(--warn); }
+    .form-grid {
+      display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px;
+      align-items: center;
+    }
+    input[type=number], input[type=text], select, textarea {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 4px 6px;
+      font-family: inherit;
+      font-size: 12px;
+      border-radius: 3px;
+    }
+    input[type=number], input[type=text], select { width: 180px; }
+    textarea { width: 100%; min-height: 60px; }
+    input[type=checkbox], input[type=radio] { accent-color: var(--accent); }
+    .pager {
+      display: flex; align-items: center; gap: 6px;
+      margin-top: 12px;
+    }
+    .pager a, .pager span.page {
+      padding: 4px 10px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      color: var(--muted);
+    }
+    .pager a:hover { border-color: var(--accent); color: var(--accent); text-decoration: none; }
+    .pager span.page.current {
+      border-color: var(--accent-d);
+      color: var(--accent);
+    }
+    .pager span.disabled { opacity: 0.4; pointer-events: none; }
+    .side-by-side {
+      display: grid; grid-template-columns: 1fr 1fr; gap: 8px;
+    }
+    .side-by-side .label {
+      color: var(--muted); font-size: 11px;
+      text-transform: uppercase; letter-spacing: 0.05em;
+      margin-bottom: 4px;
+    }
+    .side-by-side img {
+      width: 100%; border: 1px solid var(--border); border-radius: 3px;
+      background: #000;
+    }
+    .timeline {
+      list-style: none;
+      margin: 0; padding: 0;
+      border-left: 2px solid var(--border);
+    }
+    .timeline li {
+      position: relative;
+      padding: 6px 0 6px 18px;
+      margin-left: 0;
+    }
+    .timeline li::before {
+      content: '';
+      position: absolute;
+      left: -6px; top: 12px;
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: var(--panel-2);
+      border: 2px solid var(--border);
+    }
+    .timeline li.add::before { border-color: var(--accent); }
+    .timeline li.remove::before { border-color: var(--warn); }
+    .timeline li.noise::before { border-color: var(--muted); }
+    .candidate {
+      display: flex; gap: 10px;
+      padding: 8px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      margin-bottom: 6px;
+      background: var(--panel-2);
+      align-items: flex-start;
+    }
+    .candidate input[type=radio] { margin-top: 2px; }
+    .candidate .thumbs {
+      display: flex; gap: 2px; flex-wrap: wrap;
+    }
+    .candidate .thumbs img {
+      width: 56px; height: 56px; object-fit: cover;
+      border-radius: 2px; background: #000;
+      border: 1px solid var(--border);
+    }
+    .candidate .info { flex: 1; min-width: 0; }
+    .candidate .info .name { color: var(--text); font-weight: 600; }
+    .candidate .info .why {
+      color: var(--muted); font-size: 11px;
+    }
+    .toast {
+      position: fixed; right: 16px; bottom: 16px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      padding: 8px 12px;
+      border-radius: 3px;
+      font-size: 12px;
+      color: var(--text);
+      display: none;
+      z-index: 10;
+    }
+    .toast.err { border-left-color: var(--danger); }
+    footer.foot {
+      padding: 10px 16px;
+      color: var(--muted);
+      font-size: 11px;
+      border-top: 1px solid var(--border);
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <span class="brand">&gt; live-shelf</span>
+    <a class="nlink {% if request.path == '/' %}active{% endif %}" href="/">dashboard</a>
+    <a class="nlink {% if request.path.startswith('/inventory') or request.path.startswith('/registry') or request.path.startswith('/usage') %}active{% endif %}" href="/inventory">inventory</a>
+    <a class="nlink {% if request.path.startswith('/events') or request.path.startswith('/event/') %}active{% endif %}" href="/events">events</a>
+    <a class="nlink {% if request.path.startswith('/sessions') or request.path.startswith('/session/') %}active{% endif %}" href="/sessions">sessions</a>
+    <a class="nlink {% if request.path.startswith('/review') %}active{% endif %}" href="/review">review{% if pending_reviews %}<span class="badge">{{ pending_reviews }}</span>{% endif %}</a>
+    <a class="nlink {% if request.path.startswith('/intake') %}active{% endif %}" href="/intake">intake</a>
+    <span class="spacer"></span>
+    <span class="meta" id="nav-meta">connecting&hellip;</span>
+    <button id="wipe-btn" onclick="wipeAllData()" title="Delete all products, lots, events, sessions, review items + associated files. Keeps camera calibration + app state."
+            style="margin-left:12px;padding:4px 10px;font-size:11px;background:#2a1115;color:#ff6b6b;border:1px solid #5c1a22;border-radius:3px;cursor:pointer;font-family:inherit;letter-spacing:1px;text-transform:uppercase;">
+      wipe
+    </button>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="foot">
+    live-shelf daemon &middot; luna-hub-lite hardware
+  </footer>
+  <div class="toast" id="toast"></div>
+  <script>
+    function showToast(msg, isErr) {
+      const t = document.getElementById('toast');
+      if (!t) return;
+      t.textContent = msg;
+      t.className = 'toast' + (isErr ? ' err' : '');
+      t.style.display = 'block';
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2500);
+    }
+    async function fetchJSON(url, opts) {
+      const r = await fetch(url, opts);
+      const text = await r.text();
+      let body;
+      try { body = text ? JSON.parse(text) : null; } catch (_) { body = null; }
+      if (!r.ok) throw new Error((body && body.error) || ('http ' + r.status));
+      return body;
+    }
+    function fmtGrams(g) {
+      if (g === null || g === undefined || Number.isNaN(g)) return '—';
+      return (Math.round(g * 10) / 10).toFixed(1) + ' g';
+    }
+    async function refreshNav() {
+      try {
+        const s = await fetchJSON('/api/state');
+        const m = document.getElementById('nav-meta');
+        if (m) {
+          const door = s.door_open ? 'OPEN' : 'closed';
+          const w = fmtGrams(s.last_scale_weight_g);
+          const sess = s.current_session_id ? s.current_session_id.slice(0, 8) : '—';
+          // Build the nav meta via DOM APIs rather than innerHTML so API
+          // fields (even opaque ones like session_id) can never be
+          // interpreted as HTML. UUIDs are safe in practice but the
+          // pattern is risky if the response shape ever widens.
+          m.textContent = '';
+          m.appendChild(document.createTextNode('door: '));
+          const doorSpan = document.createElement('span');
+          doorSpan.style.color = s.door_open ? 'var(--accent)' : 'var(--muted)';
+          doorSpan.textContent = door;
+          m.appendChild(doorSpan);
+          m.appendChild(document.createTextNode(' \u00b7 weight ' + w + ' \u00b7 session '));
+          const sessSpan = document.createElement('span');
+          sessSpan.className = 'mono';
+          sessSpan.textContent = sess;
+          m.appendChild(sessSpan);
+        }
+      } catch (_) {
+        const m = document.getElementById('nav-meta');
+        if (m) m.textContent = 'offline';
+      }
+    }
+    refreshNav();
+    setInterval(refreshNav, 2000);
+
+    async function wipeAllData() {
+      const step1 = confirm(
+        'Delete ALL products, lots, events, sessions, and review items? ' +
+        'This cannot be undone. Camera calibration stays intact.'
+      );
+      if (!step1) return;
+      const phrase = prompt('Type WIPE to confirm:');
+      if (phrase !== 'WIPE') {
+        showToast('cancelled');
+        return;
+      }
+      const btn = document.getElementById('wipe-btn');
+      if (btn) { btn.disabled = true; btn.textContent = 'wiping…'; }
+      try {
+        const body = await fetchJSON('/api/admin/wipe', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: '{}',
+        });
+        showToast('wiped: ' + (body && body.summary ? body.summary : 'ok'));
+        setTimeout(() => { window.location.reload(); }, 800);
+      } catch (e) {
+        showToast('wipe failed: ' + e.message, true);
+        if (btn) { btn.disabled = false; btn.textContent = 'wipe'; }
+      }
+    }
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

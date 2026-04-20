@@ -1,0 +1,159 @@
+{% extends "_base.html" %}
+{% block title %}event {{ event_id[:8] }} - live shelf{% endblock %}
+{% block content %}
+<h1>event <span class="mono" style="color: var(--text);">{{ event_id[:8] }}</span></h1>
+<p><a href="/events">&larr; all events</a> &middot; <a href="/event/{{ event_id }}/timeline">timeline</a></p>
+
+{% if has_video %}
+<div class="panel">
+  <h3>session video</h3>
+  <video controls width="640" style="max-width: 100%;">
+    <source src="/event/{{ event_id }}/session.mp4" type="video/mp4" />
+    no video available
+  </video>
+</div>
+{% endif %}
+
+<div class="panel">
+  <h3>before / after</h3>
+  <div class="side-by-side">
+    <div>
+      <div class="label">before (~t-2.0s)</div>
+      {% if has_before %}
+        <img src="/event/{{ event_id }}/before.jpg" alt="before">
+      {% else %}
+        <p class="muted">(not available)</p>
+      {% endif %}
+    </div>
+    <div>
+      <div class="label">after (event ts)</div>
+      {% if has_after %}
+        <img src="/event/{{ event_id }}/after.jpg" alt="after">
+      {% else %}
+        <p class="muted">(not available)</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="row">
+  <div class="col">
+    <div class="panel">
+      <h3>event metadata</h3>
+      <table>
+        <tbody>
+          <tr><th>event id</th><td class="mono">{{ event.event_id }}</td></tr>
+          <tr><th>session</th><td class="mono">
+            {% if event.session_id %}
+              <a href="/session/{{ event.session_id }}">{{ event.session_id[:8] }}</a>
+            {% else %}
+              &mdash;
+            {% endif %}
+          </td></tr>
+          <tr><th>ts</th><td class="mono">{{ event.ts or '—' }}</td></tr>
+          <tr>
+            <th>direction</th>
+            <td>
+              {% if event.direction == 'add' %}
+                <span class="pill ok">add</span>
+              {% elif event.direction == 'remove' %}
+                <span class="pill warn">remove</span>
+              {% else %}
+                <span class="pill muted">{{ event.direction or '—' }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr><th>delta</th><td class="mono">
+            {% if event.delta_g is not none %}{{ '%+.1f g'|format(event.delta_g) }}{% else %}&mdash;{% endif %}
+          </td></tr>
+          <tr><th>before weight</th><td class="mono">
+            {% if event.before_weight_g is not none %}{{ '%.1f g'|format(event.before_weight_g) }}{% else %}&mdash;{% endif %}
+          </td></tr>
+          <tr><th>after weight</th><td class="mono">
+            {% if event.after_weight_g is not none %}{{ '%.1f g'|format(event.after_weight_g) }}{% else %}&mdash;{% endif %}
+          </td></tr>
+          <tr>
+            <th>classifier</th>
+            <td>
+              {% if event.classifier_status == 'classified' %}
+                <span class="pill ok">classified</span>
+              {% elif event.classifier_status == 'review' %}
+                <span class="pill warn">review</span>
+              {% elif event.classifier_status == 'failed' %}
+                <span class="pill bad">failed</span>
+              {% elif event.classifier_status %}
+                <span class="pill muted">{{ event.classifier_status }}</span>
+              {% else %}
+                <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr><th>created</th><td class="mono muted">{{ event.created_at or '—' }}</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="col">
+    <div class="panel">
+      <h3>classifier output</h3>
+      {% if event.classification %}
+        {% set cls = event.classification %}
+        <table>
+          <tbody>
+            {# Defence-in-depth: cls.* fields are LLM-generated output.
+               Autoescape is on, but explicit |e keeps this safe even if a
+               future template refactor moves any of these into an
+               attribute or |safe context. #}
+            <tr><th>item id</th><td class="mono">{{ (cls.item_id or '—')|e }}</td></tr>
+            <tr><th>action</th><td>
+              {% if cls.action %}
+                <span class="pill info">{{ cls.action|e }}</span>
+              {% else %}&mdash;{% endif %}
+            </td></tr>
+            <tr><th>confidence</th><td class="mono">
+              {% set _conf = cls.get('confidence') if cls is mapping else (cls.confidence|default(none)) %}
+              {% if _conf is not none %}{{ '%.2f'|format(_conf) }}{% else %}&mdash;{% endif %}
+            </td></tr>
+            {% if event.matched_product %}
+              <tr><th>matched product</th>
+                <td>
+                  <strong>{{ event.matched_product.name }}</strong>
+                  {% if event.matched_product.brand %}
+                    <div class="muted" style="font-size: 11px;">{{ event.matched_product.brand }}</div>
+                  {% endif %}
+                </td>
+              </tr>
+            {% endif %}
+            {% if cls.reasoning %}
+              <tr><th>reasoning</th><td>{{ cls.reasoning|e }}</td></tr>
+            {% endif %}
+            {% if cls.multi_match %}
+              <tr>
+                <th>multi match</th>
+                <td>
+                  <ul style="margin: 0; padding-left: 16px;">
+                  {% for m in cls.multi_match %}
+                    <li class="mono">
+                      {{ (m.candidate_id[:8] if m.candidate_id else '—')|e }}
+                      ({{ '%.2f'|format(m.confidence or 0) }})
+                    </li>
+                  {% endfor %}
+                  </ul>
+                </td>
+              </tr>
+            {% endif %}
+          </tbody>
+        </table>
+
+        <details style="margin-top: 10px;">
+          <summary class="muted" style="cursor: pointer;">raw classification JSON</summary>
+          <pre style="background: var(--panel-2); padding: 8px; border: 1px solid var(--border); border-radius: 3px; overflow: auto; font-size: 11px;">{{ cls | tojson(indent=2) }}</pre>
+        </details>
+      {% else %}
+        <p class="muted">no classifier output recorded.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

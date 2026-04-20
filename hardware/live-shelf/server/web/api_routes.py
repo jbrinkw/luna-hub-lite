@@ -1,0 +1,584 @@
+"""Non-intake / non-scale JSON endpoints for Live Shelf (Bundle G).
+
+These are the endpoints the web UI polls or submits to:
+
+    GET  /api/state
+    POST /api/config
+    GET  /api/events
+    POST /review/<id>/resolve
+
+Scale ingestion (``/api/scale-event``, ``/api/scale-heartbeat``) belongs to
+Bundle H. Intake endpoints (``/api/intake/*``) belong to Bundle F.
+
+The ``/review/<id>/resolve`` endpoint is exposed as an API but mounted under
+``/review/*`` (matching the HTML routes) rather than ``/api/*`` — that is
+what §4.6 of the plan specifies.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any, Callable, Optional
+
+from flask import Blueprint, abort, jsonify, request
+
+from .routes import EVENTS_PER_PAGE, WebRepo
+
+log = logging.getLogger(__name__)
+
+# Allowlist for the /api/camera/auto-exposure `device` field. The value is
+# passed to v4l2-ctl via subprocess argv, so a permissive value would let a
+# LAN client substitute arbitrary argv tokens. Keep this strict:
+# /dev/video0..9999 and cap the overall length.
+_V4L2_DEVICE_RE = re.compile(r"^/dev/video\d+$")
+_V4L2_DEVICE_MAX_LEN = 32
+
+
+# Type alias: a config patcher that the host app supplies.
+# Contract: receives the JSON body of POST /api/config and returns the
+# current config dict (post-merge). Implementations should validate keys
+# and raise ValueError with a descriptive message on bad input.
+ConfigPatcher = Callable[[dict[str, Any]], dict[str, Any]]
+
+# Type alias: a config reader (GET /api/config counterpart for the POST
+# round trip). Returns the current full config dict.
+ConfigReader = Callable[[], dict[str, Any]]
+
+# Wipe callable: returns a small summary dict describing what was cleared.
+# Host app owns the DB + filesystem side-effects; the route just invokes it.
+WipeFn = Callable[[], dict[str, Any]]
+
+
+# Session control callables — let the dashboard force-open / force-close a
+# session without relying on brightness detection (useful on a bench where
+# the camera isn't behind a door with reliable brightness transitions).
+ForceOpenFn = Callable[[], dict[str, Any]]
+ForceCloseFn = Callable[[], dict[str, Any]]
+
+
+# Delete a single product (+ its lots + its reference images). The host app
+# owns the DB + filesystem side-effects; the route just looks up the id and
+# dispatches. Raise ``LookupError`` for an unknown product id so the route
+# can turn it into a 404.
+DeleteProductFn = Callable[[str], dict[str, Any]]
+
+# Per-lot delete callable. Raises LookupError when the id isn't known so
+# the route can return a 404.
+DeleteLotFn = Callable[[str], dict[str, Any]]
+
+# Per-usage-row delete callable. Reverts consumption on the associated lot
+# and removes the usage_log row. Returns a summary dict. Does NOT raise for
+# unknown ids — deletes are idempotent (summary reports ``deleted: 0``).
+DeleteUsageFn = Callable[[str], dict[str, Any]]
+
+
+def make_api_bp(
+    repo: WebRepo,
+    *,
+    read_config: Optional[ConfigReader] = None,
+    update_config: Optional[ConfigPatcher] = None,
+    wipe_fn: Optional[WipeFn] = None,
+    force_open_session: Optional[ForceOpenFn] = None,
+    force_close_session: Optional[ForceCloseFn] = None,
+    delete_product_fn: Optional[DeleteProductFn] = None,
+    delete_lot_fn: Optional[DeleteLotFn] = None,
+    delete_usage_fn: Optional[DeleteUsageFn] = None,
+) -> Blueprint:
+    """Build the JSON API blueprint.
+
+    Args:
+        repo: storage read/write interface (same protocol used by HTML bp).
+        read_config: returns the current config dict (optional — if None, the
+            GET branch of /api/config returns 501).
+        update_config: applies a config patch (optional — if None, POST
+            /api/config returns 501).
+    """
+    bp = Blueprint("web_api", __name__)
+
+    # ----- /api/state ------------------------------------------------------
+
+    @bp.get("/api/state")
+    def api_state():
+        # Per-shelf dispatch — when the caller asks for ``?shelf=catch_all``
+        # the response mirrors the catch-all's fields (session id, last
+        # weight from scale-02, on/in-flight counts). The default path
+        # (no query, or ``?shelf=live_shelf``) returns the existing
+        # app_state shape unchanged for backward compat.
+        #
+        # Unknown ``shelf`` values are rejected with 400 rather than silently
+        # falling back to live-shelf state — silently coercing would mask
+        # typos in clients and hide the fact that a new shelf key hasn't
+        # been wired into the backend yet.
+        shelf = request.args.get("shelf")
+        if shelf is not None and shelf not in {"live_shelf", "catch_all"}:
+            return jsonify({"error": "unknown shelf"}), 400
+        if shelf == "catch_all":
+            get_ca = getattr(repo, "get_catch_all_state", None)
+            if not callable(get_ca):
+                return jsonify({"error": "catch-all state not configured"}), 501
+            ca = get_ca()
+            return jsonify(dict(ca))
+        state = repo.get_app_state()
+        # Shape defensively: Jinja-friendly dict already, but ensure bools
+        # are primitives not 0/1 ints for JS polling code.
+        out = dict(state)
+        if "door_open" in out:
+            out["door_open"] = bool(out["door_open"])
+        return jsonify(out)
+
+    # ----- /api/config -----------------------------------------------------
+
+    @bp.get("/api/config")
+    def api_config_get():
+        if read_config is None:
+            return jsonify({"error": "config read not configured"}), 501
+        return jsonify(read_config())
+
+    @bp.post("/api/config")
+    def api_config_post():
+        if update_config is None:
+            return jsonify({"error": "config update not configured"}), 501
+        if not request.is_json:
+            return jsonify({"error": "expected application/json"}), 400
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "body must be a JSON object"}), 400
+        try:
+            updated = update_config(body)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        # Persistence contract: the current host-supplied update_config is
+        # in-memory only — changes apply to the running process but do NOT
+        # survive a restart. Surface that to the client explicitly so the UI
+        # can show a "changes are session-only" notice if desired.
+        # TODO(persist): when the host wires up a disk-backed patcher (e.g.
+        # writing to config.json), switch to calling update_config(body,
+        # persist=True) and propagate its truthy return value into
+        # `persisted`. Until then, always False.
+        persisted = False
+        if not persisted:
+            log.warning(
+                "config update is in-memory only; changes will not survive "
+                "a restart (keys=%s)",
+                sorted(body.keys()),
+            )
+        response: dict[str, Any] = {"ok": True, "persisted": persisted}
+        # Preserve the existing contract: the updated config dict is spread
+        # into the response so clients that read individual keys keep working.
+        if isinstance(updated, dict):
+            for k, v in updated.items():
+                response.setdefault(k, v)
+        return jsonify(response)
+
+    # ----- /api/camera/auto-exposure ---------------------------------------
+    #
+    # Toggle the camera between manual (calibrated) exposure and auto
+    # exposure. Calibrated values work inside a lit fridge but produce
+    # near-black frames on a dark bench; the dashboard exposes this
+    # toggle so the user can flip to auto for bench demos.
+
+    @bp.post("/api/camera/auto-exposure")
+    def api_camera_auto_exposure():
+        from ..camera.locked_settings import set_auto_exposure
+        body = request.get_json(silent=True) or {}
+        enabled = bool(body.get("enabled", True))
+        device = str(body.get("device", "/dev/video0"))
+        # Defence-in-depth: the `device` field is forwarded to v4l2-ctl
+        # subprocess argv. Allowlist to /dev/videoN so a LAN client can't
+        # smuggle shell metacharacters or argv-splitting spaces through.
+        if len(device) > _V4L2_DEVICE_MAX_LEN or not re.fullmatch(
+            _V4L2_DEVICE_RE, device
+        ):
+            return jsonify({"error": "invalid device path"}), 400
+        ok = set_auto_exposure(device=device, enabled=enabled)
+        return jsonify({"ok": ok, "enabled": enabled, "device": device})
+
+    # ----- /api/session/start + /api/session/end ---------------------------
+    #
+    # Manual door-open / door-close trigger for bench demos. The
+    # brightness watcher still runs in the background; these endpoints
+    # simply invoke the same handler path so the session lifecycle
+    # semantics are identical.
+
+    @bp.post("/api/session/start")
+    def api_session_start():
+        if force_open_session is None:
+            return jsonify({"error": "session control not configured"}), 501
+        try:
+            result = force_open_session()
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:  # defensive — DB failures etc.
+            log.exception("force-open failed")
+            return jsonify({"error": f"force-open failed: {exc}"}), 500
+        return jsonify({"ok": True, **result})
+
+    @bp.post("/api/session/end")
+    def api_session_end():
+        if force_close_session is None:
+            return jsonify({"error": "session control not configured"}), 501
+        try:
+            result = force_close_session()
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+        except Exception as exc:  # defensive
+            log.exception("force-close failed")
+            return jsonify({"error": f"force-close failed: {exc}"}), 500
+        return jsonify({"ok": True, **result})
+
+    # ----- /api/diag/dump-session ------------------------------------------
+    #
+    # Diagnostic capture. Call RIGHT AFTER performing a real transaction
+    # (open fridge → grab item → close fridge → hit this endpoint). The
+    # server dumps:
+    #   * every frame currently in the ring buffer (last ~30s of footage),
+    #     saved as timestamped JPEGs in data/diag/<dump_id>/frames/
+    #   * the last 20 scale events with full metadata (ts + Pi receipt +
+    #     motion timing + classifier output + saved frame paths) → events.json
+    #   * recent app_state snapshot (door flag, last weight/ts, stable flag)
+    #     → state.json
+    #
+    # Then SCP the folder off the Pi and hand it to an LLM to eyeball
+    # exactly when the door was open, when the item moved, and whether our
+    # frame-anchor math is landing in the right window.
+
+    @bp.post("/api/diag/dump-session")
+    def api_diag_dump_session():
+        import cv2
+        import json as _json
+        import uuid as _uuid
+        from ..camera.extract import get_daemon
+        from ..handlers.scale_events import get_weight_trace
+
+        try:
+            d = get_daemon()
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
+
+        # Where to write — use the existing data dir convention.
+        import os
+        data_root = os.environ.get("DATA_DIR") or "./data"
+        diag_id = _uuid.uuid4().hex[:12]
+        dump_dir = os.path.join(data_root, "diag", diag_id)
+        frames_dir = os.path.join(dump_dir, "frames")
+        os.makedirs(frames_dir, exist_ok=True)
+
+        # Snapshot the ring buffer and write each frame as JPEG, naming
+        # files with their ISO timestamp so brightness + timing analysis
+        # is trivial ex post.
+        #
+        # Cap at the most recent 60 frames (~6s @ 10fps) so a LAN client
+        # can't trigger multi-tens-of-megabyte writes per call.
+        snaps = d.snapshot_ring()[-60:]
+        frames_meta = []
+        for ts, frame in snaps:
+            safe_ts = ts.replace(":", "-")
+            fname = f"frame-{safe_ts}.jpg"
+            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, 80])
+            if not ok:
+                continue
+            path = os.path.join(frames_dir, fname)
+            with open(path, "wb") as f:
+                f.write(buf.tobytes())
+            frames_meta.append({"ts": ts, "filename": fname, "mean": float(frame.mean())})
+
+        # Pull recent events + state via the shared web_repo adapter so the
+        # reads happen under the same db_lock every other DB access uses
+        # (see handoff §7.1). The previous implementation opened a second
+        # sqlite3 connection outside the lock, which can surface as
+        # `sqlite3.InterfaceError: bad parameter or other API misuse` under
+        # concurrent load.
+        events_list: list[dict] = []
+        state_snapshot: dict = {}
+        try:
+            events_list = list(repo.list_events(limit=20, offset=0))
+            state_snapshot = dict(repo.get_app_state())
+        except Exception as exc:
+            log.exception("diag dump: db read failed")
+            events_list.append({"error": f"db read failed: {exc}"})
+
+        weight_trace = get_weight_trace()
+
+        with open(os.path.join(dump_dir, "events.json"), "w") as f:
+            _json.dump(events_list, f, indent=2, default=str)
+        with open(os.path.join(dump_dir, "state.json"), "w") as f:
+            _json.dump(state_snapshot, f, indent=2, default=str)
+        with open(os.path.join(dump_dir, "frames_meta.json"), "w") as f:
+            _json.dump(frames_meta, f, indent=2)
+        with open(os.path.join(dump_dir, "weight_trace.json"), "w") as f:
+            _json.dump(weight_trace, f, indent=2)
+
+        # Absolute path so scp can fetch it without worrying about the
+        # Pi-side working directory (data_root is './data' relative to the
+        # server process cwd, which the caller can't easily know).
+        abs_dump_dir = os.path.abspath(dump_dir)
+        return jsonify({
+            "ok": True,
+            "diag_id": diag_id,
+            "dump_dir": abs_dump_dir,
+            "frame_count": len(frames_meta),
+            "event_count": len(events_list),
+            "trace_count": len(weight_trace),
+            "scp_cmd": (
+                f"scp -r jeremy@192.168.0.181:{abs_dump_dir} /tmp/diag-{diag_id}"
+            ),
+        })
+
+    # ----- /api/debug/ring-buffer ------------------------------------------
+    # Temporary diagnostic: dump ring buffer timestamps + per-frame brightness
+    # so we can tell whether black event frames are due to (a) camera never
+    # seeing light at the event timestamp, (b) frame-at lookup miss, or
+    # (c) buffer retention being too shallow.
+
+    @bp.get("/api/debug/ring-buffer")
+    def api_debug_ring_buffer():
+        from ..camera.extract import get_daemon
+        try:
+            d = get_daemon()
+        except RuntimeError as exc:
+            return jsonify({"error": str(exc)}), 503
+        snaps = d.snapshot_ring()
+        if not snaps:
+            return jsonify({"size": 0})
+        means = [float(frame.mean()) for (_, frame) in snaps]
+        step = max(1, len(snaps) // 20)
+        timeline = []
+        for i in range(0, len(snaps), step):
+            ts, frame = snaps[i]
+            timeline.append({"i": i, "ts": ts, "mean": round(float(frame.mean()), 1)})
+        return jsonify({
+            "size": len(snaps),
+            "oldest_ts": snaps[0][0],
+            "newest_ts": snaps[-1][0],
+            "mean_min": round(min(means), 1),
+            "mean_max": round(max(means), 1),
+            "mean_avg": round(sum(means) / len(means), 1),
+            "lit_count": sum(1 for m in means if m > 30),
+            "dark_count": sum(1 for m in means if m < 5),
+            "timeline": timeline,
+        })
+
+    # ----- /api/admin/wipe -------------------------------------------------
+
+    @bp.post("/api/admin/wipe")
+    def api_admin_wipe():
+        """Destroy all product + transaction state. Keeps app_state + camera.
+
+        This is the backend for the top-right "wipe" button in the nav. The
+        host app owns the actual wipe logic (DB deletes + filesystem cleanup);
+        this route is a thin authenticated (by LAN scope) trigger.
+        """
+        if wipe_fn is None:
+            return jsonify({"error": "wipe not configured"}), 501
+        try:
+            summary = wipe_fn()
+        except Exception as exc:  # defensive — host side-effects can fail
+            log.exception("wipe failed")
+            return jsonify({"error": f"wipe failed: {exc}"}), 500
+        # Clear in-memory session-capture state so _CURRENT / _CLOSED
+        # don't keep dangling references to sessions whose JPEGs and MP4
+        # have just been deleted from disk by wipe_fn.
+        try:
+            from ..camera import session_capture
+            session_capture.reset()
+        except Exception:  # pragma: no cover — defensive, don't fail the wipe
+            log.exception("wipe: session_capture.reset() failed")
+        log.warning("admin wipe executed: %s", summary)
+        return jsonify({"ok": True, "summary": summary})
+
+    # ----- /api/product/<product_id>/delete --------------------------------
+    #
+    # Per-row delete from the registry catalog table. Removes the product,
+    # any lots referencing it, and the product's reference-image directory
+    # under data/refs/<product_id>/. Not exposed as DELETE because the UI
+    # calls it from a plain fetch() and the dashboard only has LAN scope.
+
+    @bp.post("/api/product/<product_id>/delete")
+    def api_product_delete(product_id: str):
+        if delete_product_fn is None:
+            return jsonify({"error": "product delete not configured"}), 501
+        if not product_id or "/" in product_id or ".." in product_id:
+            return jsonify({"error": "invalid product_id"}), 400
+        try:
+            summary = delete_product_fn(product_id)
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except Exception as exc:  # defensive — host side-effects can fail
+            log.exception("product delete failed")
+            return jsonify({"error": f"delete failed: {exc}"}), 500
+        log.warning("product delete: %s", summary)
+        return jsonify({"ok": True, "summary": summary})
+
+    # ----- /api/lot/<lot_id>/delete ----------------------------------------
+    #
+    # Per-row delete from the on-shelf inventory table on /registry. Only
+    # drops the lot; the underlying product stays in the catalog so the
+    # user can re-place a new instance later.
+
+    @bp.post("/api/lot/<lot_id>/delete")
+    def api_lot_delete(lot_id: str):
+        if delete_lot_fn is None:
+            return jsonify({"error": "lot delete not configured"}), 501
+        if not lot_id or "/" in lot_id or ".." in lot_id:
+            return jsonify({"error": "invalid lot_id"}), 400
+        try:
+            summary = delete_lot_fn(lot_id)
+        except LookupError as exc:
+            return jsonify({"error": str(exc)}), 404
+        except Exception as exc:  # defensive
+            log.exception("lot delete failed")
+            return jsonify({"error": f"delete failed: {exc}"}), 500
+        log.warning("lot delete: %s", summary)
+        return jsonify({"ok": True, "summary": summary})
+
+    # ----- /api/events -----------------------------------------------------
+
+    @bp.get("/api/events")
+    def api_events():
+        try:
+            page = int(request.args.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = max(page, 1)
+        try:
+            per_page = int(request.args.get("per_page", EVENTS_PER_PAGE))
+        except (TypeError, ValueError):
+            per_page = EVENTS_PER_PAGE
+        per_page = max(1, min(per_page, 100))
+        total = repo.count_events()
+        offset = (page - 1) * per_page
+        items = repo.list_events(limit=per_page, offset=offset)
+        return jsonify(
+            {
+                "page": page,
+                "per_page": per_page,
+                "total": total,
+                "total_pages": max(1, (total + per_page - 1) // per_page),
+                "events": items,
+            }
+        )
+
+    # ----- /api/usage (USAGE_LOG_PLAN.md §5.3) ---------------------------
+
+    @bp.get("/api/usage")
+    def api_usage():
+        try:
+            page = int(request.args.get("page", 1))
+        except (TypeError, ValueError):
+            page = 1
+        page = max(page, 1)
+        try:
+            per_page = int(request.args.get("per_page", 50))
+        except (TypeError, ValueError):
+            per_page = 50
+        per_page = max(1, min(per_page, 500))
+
+        product_id = request.args.get("product") or None
+        kind = request.args.get("kind") or None
+        since = request.args.get("since") or None
+        until = request.args.get("until") or None
+        kinds = [kind] if kind else None
+
+        list_usage = getattr(repo, "list_usage", None)
+        if list_usage is None:
+            return jsonify({
+                "page": 1, "per_page": per_page,
+                "total": 0, "total_pages": 1, "items": [],
+            })
+
+        total = repo.count_usage(
+            product_id=product_id, kinds=kinds, since=since, until=until,
+        )
+        offset = (page - 1) * per_page
+        items = list_usage(
+            product_id=product_id, kinds=kinds, since=since, until=until,
+            limit=per_page, offset=offset,
+        )
+        return jsonify({
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": max(1, (total + per_page - 1) // per_page),
+            "items": items,
+        })
+
+    @bp.post("/api/usage/<usage_id>/delete")
+    def api_usage_delete(usage_id: str):
+        if delete_usage_fn is None:
+            return jsonify({"error": "usage delete not configured"}), 501
+        if not usage_id or "/" in usage_id or ".." in usage_id:
+            return jsonify({"error": "invalid usage_id"}), 400
+        try:
+            summary = delete_usage_fn(usage_id)
+        except Exception as exc:  # pragma: no cover - defensive
+            log.exception("usage delete failed")
+            return jsonify({"error": f"delete failed: {exc}"}), 500
+        try:
+            deleted = int(summary["deleted"])
+        except (KeyError, TypeError, ValueError):
+            log.error("usage delete returned malformed summary: %r", summary)
+            return jsonify({"error": "delete summary malformed", "summary": summary}), 500
+        if deleted == 0:
+            return jsonify({"error": "usage row not found", "summary": summary}), 404
+        log.info("usage delete: %s", summary)
+        return jsonify({"ok": True, "summary": summary})
+
+    @bp.get("/api/usage/summary")
+    def api_usage_summary():
+        since = request.args.get("since") or None
+        until = request.args.get("until") or None
+        summary_fn = getattr(repo, "usage_summary_by_product", None)
+        if summary_fn is None:
+            return jsonify({"since": since, "until": until, "items": []})
+        items = summary_fn(since=since, until=until)
+        return jsonify({"since": since, "until": until, "items": items})
+
+    # ----- /review/<id>/resolve -------------------------------------------
+
+    @bp.post("/review/<review_id>/resolve")
+    def api_review_resolve(review_id: str):
+        if repo.get_review_item(review_id) is None:
+            abort(404)
+
+        # Accept either form-encoded (from a plain <form>) or JSON body.
+        payload: dict[str, Any]
+        if request.is_json:
+            body = request.get_json(silent=True)
+            payload = body if isinstance(body, dict) else {}
+        else:
+            payload = {k: v for k, v in request.form.items()}
+
+        # Normalize keys that tests + the default review form use.
+        candidate_id = payload.get("candidate_id") or payload.get("item_id")
+        resolution_body: dict[str, Any] = {
+            "candidate_id": candidate_id,
+            "note": payload.get("note") or payload.get("free_text") or None,
+            "action": payload.get("action"),
+            "dismiss": str(payload.get("dismiss", "")).lower() in {"1", "true", "yes", "on"},
+        }
+        # Anything else the caller sent — pass through for kind-specific logic.
+        for k, v in payload.items():
+            resolution_body.setdefault(k, v)
+
+        try:
+            updated = repo.resolve_review_item(review_id, resolution=resolution_body)
+        except ValueError as exc:
+            return jsonify({"error": str(exc)}), 400
+
+        # If the caller looks like a browser form submit, redirect back to
+        # the review list; JSON clients get the updated row.
+        wants_json = request.is_json or "application/json" in (
+            request.headers.get("Accept", "")
+        )
+        if wants_json:
+            return jsonify(updated)
+        # Simple 303-style redirect — Flask will fall through to redirect().
+        from flask import redirect, url_for
+
+        try:
+            return redirect(url_for("web_html.review_list"))
+        except Exception:
+            return redirect("/review")
+
+    return bp

@@ -1,0 +1,43 @@
+{
+  "barcode": "078742062570",
+  "off_source": {
+    "product_name": "Extra Sharp Cheddar Cheese",
+    "brands": "Great Value",
+    "product_quantity": null,
+    "serving_quantity": 28,
+    "serving_size": "1 ONZ (28 g)",
+    "packaging": null,
+    "image_front_url": "https://images.openfoodfacts.org/images/products/007/874/206/2570/front_en.5.400.jpg",
+    "categories_tags": [
+      "en:dairies",
+      "en:fermented-foods",
+      "en:cheeses",
+      "en:cheddar-cheese"
+    ],
+    "raw_response_fetched_at": "2026-04-15T15:42:41Z"
+  },
+  "form_suggested": {
+    "name": "Extra Sharp Cheddar Cheese",
+    "brand": "Great Value",
+    "variant": null,
+    "net_weight_g": 226.8,
+    "serving_weight_g": 28,
+    "servings_per_container": 8.1,
+    "unit_type": "solid",
+    "container_type": "bag",
+    "density_g_per_ml": null
+  },
+  "_notes": {
+    "name_source": "OFF",
+    "brand_source": "OFF",
+    "net_weight_g_source": "guess:standard Great Value cheddar block is 8 oz (226.8 g); OFF omits product_quantity",
+    "serving_weight_g_source": "OFF",
+    "servings_per_container_source": "derived from net/serving",
+    "unit_type_source": "inferred from product category (cheese block)",
+    "container_type_source": "guess:vacuum-sealed plastic pouch/bag — no OFF packaging data",
+    "confidence": "medium",
+    "needs_manual_review": true,
+    "review_fields": ["net_weight_g", "container_type"]
+  },
+  "_generated": true
+}

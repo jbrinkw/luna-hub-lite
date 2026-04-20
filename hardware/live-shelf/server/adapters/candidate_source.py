@@ -1,0 +1,209 @@
+"""`CandidateSource` protocol → Bundle A repo adapter.
+
+Produces `LotCandidate` / `ProductCandidate` tuples for the classifier's
+pool assembly. Reference image file paths are absolute filesystem paths
+so the classifier's prompt module (which does base64 loads) can open
+them directly.
+"""
+
+from __future__ import annotations
+
+import sqlite3
+import threading
+from pathlib import Path
+from typing import Any, Optional, Sequence
+
+from ..classifier.models import LotCandidate, ProductCandidate
+from ..storage import repo as storage_repo
+from ..tools.locks import NullLock as _NullLock
+
+
+class RepoCandidateSource:
+    """Concrete :class:`classifier.models.CandidateSource` implementation.
+
+    The classifier invokes this from within one classify_event() call, so
+    every method returns a freshly-queried snapshot — no caching at this
+    layer.
+
+    Parameters
+    ----------
+    conn:
+        Open ``sqlite3.Connection`` used for read-side queries.
+    refs_root:
+        Absolute path under which reference images live. File paths stored
+        in ``product_reference_images`` are relative to this root.
+    db_lock:
+        Shared lock protecting the single sqlite3 connection from
+        concurrent use across threads. The classifier dispatches on a
+        background thread while heartbeats, sweepers, and Flask request
+        handlers can all hit the same connection — without this lock
+        reads here race with concurrent writes and SQLite surfaces the
+        cryptic ``InterfaceError: bad parameter or other API misuse``.
+    """
+
+    def __init__(
+        self,
+        conn: sqlite3.Connection,
+        refs_root: Path,
+        db_lock: Optional[threading.Lock] = None,
+    ) -> None:
+        self._conn = conn
+        self._refs_root = Path(refs_root)
+        self._db_lock: Any = db_lock if db_lock is not None else _NullLock()
+
+    # ---------------------------------------------------------------- helpers
+
+    def _absolute_refs(self, product_id: str) -> tuple[str, ...]:
+        """Resolve every reference image path for a product to absolute disk.
+
+        Caller MUST hold ``self._db_lock`` — this is a helper for the
+        query methods below, not a public entrypoint.
+        """
+        rows = storage_repo.list_reference_images(self._conn, product_id)
+        paths: list[str] = []
+        for row in rows:
+            rel = row.file_path or ""
+            if not rel:
+                continue
+            p = self._refs_root / rel
+            paths.append(str(p))
+        return tuple(paths)
+
+    # -------------------------------------------------------- protocol surface
+
+    def get_on_shelf_lots(
+        self, shelf_id: str | None = None
+    ) -> Sequence[LotCandidate]:
+        with self._db_lock:
+            registry = storage_repo.get_shelf_registry(
+                self._conn, shelf_id=shelf_id
+            )
+            out: list[LotCandidate] = []
+            for item in registry:
+                lot = item.lot
+                product = item.product
+                out.append(
+                    LotCandidate(
+                        lot_id=lot.lot_id,
+                        product_id=product.product_id,
+                        name=product.name,
+                        brand=product.brand,
+                        expected_weight_g=lot.current_weight_g,
+                        container_type=product.container_type,
+                        status="on_shelf",
+                        reference_image_paths=self._absolute_refs(product.product_id),
+                    )
+                )
+            return out
+
+    def get_recently_out_lots(
+        self, window_seconds: int, shelf_id: str | None = None
+    ) -> Sequence[LotCandidate]:
+        with self._db_lock:
+            rows = storage_repo.get_recently_out_lots(
+                self._conn, window_seconds, shelf_id=shelf_id
+            )
+            out: list[LotCandidate] = []
+            for item in rows:
+                lot = item.lot
+                product = item.product
+                out.append(
+                    LotCandidate(
+                        lot_id=lot.lot_id,
+                        product_id=product.product_id,
+                        name=product.name,
+                        brand=product.brand,
+                        # Last known weight for out-lots (container still full
+                        # from last placement until we know otherwise).
+                        expected_weight_g=lot.current_weight_g
+                        or product.gross_weight_g,
+                        container_type=product.container_type,
+                        status="out",
+                        reference_image_paths=self._absolute_refs(product.product_id),
+                    )
+                )
+            return out
+
+    def get_in_flight_lots(
+        self,
+        max_age_seconds: int | None = None,
+        shelf_id: str | None = None,
+    ) -> Sequence[LotCandidate]:
+        """Return lots with status='in_flight'.
+
+        expected_weight_g is set to ``pickup_weight_g`` so the classifier
+        scores against the weight the user took, not the stale shelf reading.
+        See IN_FLIGHT_TRACKER_PLAN.md §5.3. ``shelf_id`` optionally scopes
+        the query to one physical shelf (CATCH_ALL_SCALE_PLAN.md §5.2).
+        """
+        with self._db_lock:
+            lots = storage_repo.list_in_flight_lots(
+                self._conn,
+                younger_than_seconds=max_age_seconds,
+                shelf_id=shelf_id,
+            )
+            # Batch-fetch the joined products in ONE SELECT rather than
+            # one-per-lot under the held DB lock. For N in-flight lots this
+            # collapses N+1 round-trips down to 2 (list_in_flight_lots +
+            # get_products_by_ids), regardless of batch size.
+            products_by_id = storage_repo.get_products_by_ids(
+                self._conn, [lot.product_id for lot in lots]
+            )
+            out: list[LotCandidate] = []
+            for lot in lots:
+                product = products_by_id.get(lot.product_id)
+                if product is None:
+                    continue
+                out.append(
+                    LotCandidate(
+                        lot_id=lot.lot_id,
+                        product_id=product.product_id,
+                        name=product.name,
+                        brand=product.brand,
+                        # Pickup weight is what the user is holding — the
+                        # weight we expect the ADD delta to match (minus
+                        # consumption).
+                        expected_weight_g=(
+                            lot.pickup_weight_g
+                            if lot.pickup_weight_g is not None
+                            else lot.current_weight_g
+                        ),
+                        container_type=product.container_type,
+                        status="in_flight",
+                        reference_image_paths=self._absolute_refs(product.product_id),
+                    )
+                )
+            return out
+
+    def get_certified_not_on_shelf(self) -> Sequence[ProductCandidate]:
+        # Fix: query ALL certified products, not just those lacking an
+        # on-shelf lot. The method name is kept for protocol compatibility,
+        # but the semantic is now "certified products eligible as ADD
+        # catalog candidates" — which includes products that already have
+        # an on-shelf lot so the classifier can still match a second-unit
+        # placement of the same SKU. Dedupe in candidate_pool.py keys on
+        # candidate_id (lot_id vs product_id), so a product appearing as
+        # both a top-up target and a catalog entry is preserved in both
+        # roles without collision. See get_all_certified_products in
+        # storage/repo.py for the full rationale.
+        with self._db_lock:
+            rows = storage_repo.get_all_certified_products(self._conn)
+            out: list[ProductCandidate] = []
+            for product in rows:
+                out.append(
+                    ProductCandidate(
+                        product_id=product.product_id,
+                        name=product.name,
+                        brand=product.brand,
+                        # Prefer gross weight for "how heavy is a full container";
+                        # net_weight alone omits the packaging.
+                        expected_weight_g=product.gross_weight_g
+                        or product.net_weight_g,
+                        container_type=product.container_type,
+                        reference_image_paths=self._absolute_refs(product.product_id),
+                    )
+                )
+            return out
+
+
+__all__ = ["RepoCandidateSource"]

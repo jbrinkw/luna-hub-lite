@@ -1,0 +1,6 @@
+# Storage-layer runtime + test dependencies for the Live Shelf demo (Bundle A).
+# Python 3.13 stdlib supplies sqlite3 / uuid / datetime — nothing else needed
+# at runtime beyond Pydantic v2 for typed dataclasses.
+
+pydantic>=2.6,<3
+pytest>=8.0

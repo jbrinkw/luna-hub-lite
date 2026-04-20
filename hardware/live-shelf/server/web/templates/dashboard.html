@@ -1,0 +1,538 @@
+{% extends "_base.html" %}
+{% block title %}dashboard - live shelf{% endblock %}
+{% block content %}
+<h1>dashboard</h1>
+
+<div class="row">
+  <div class="col" style="flex: 2; min-width: 420px;">
+    <div class="panel">
+      <h3>live preview{% if catch_all_enabled %} &mdash; live shelf{% endif %}</h3>
+      <div class="preview-wrap">
+        <img src="/live.mjpg" alt="live camera preview" />
+      </div>
+      <div style="margin-top: 8px;">
+        <span class="stat"><span class="label">door:</span>
+          <span class="dot" id="door-dot"></span>
+          <span class="value" id="door-label">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">weight:</span>
+          <span class="value mono" id="weight">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">stable:</span>
+          <span class="dot" id="stable-dot"></span>
+          <span class="value" id="stable-label">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">session:</span>
+          <span class="value mono" id="session">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">last event:</span>
+          <span class="value" id="last-event-ts">&mdash;</span>
+        </span>
+        <span class="stat" id="offline-badge" hidden
+              style="background: var(--warn, #d79b00); color: #000; padding: 2px 8px; border-radius: 3px; font-weight: bold;">
+          offline
+        </span>
+      </div>
+    </div>
+
+    {# Second preview tile — catch-all scale. Gated on the config
+       flag so single-shelf deployments don't render an unused tile.
+       Uses /live.mjpg?shelf=catch_all so the camera daemon can route
+       to the catch-all's /dev/video device. State polled from
+       /api/state?shelf=catch_all (handled by refreshCatchAll below). #}
+    {% if catch_all_enabled %}
+    <div class="panel" id="catch-all-preview">
+      <h3>live preview &mdash; catch-all</h3>
+      <div class="preview-wrap">
+        <img src="/live.mjpg?shelf=catch_all" alt="catch-all camera preview" />
+      </div>
+      <div style="margin-top: 8px;">
+        <span class="stat"><span class="label">weight:</span>
+          <span class="value mono" id="catch-weight">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">stable:</span>
+          <span class="dot" id="catch-stable-dot"></span>
+          <span class="value" id="catch-stable-label">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">session:</span>
+          <span class="value mono" id="catch-session">&mdash;</span>
+        </span>
+        <span class="stat"><span class="label">on shelf:</span>
+          <span class="value" id="catch-on-shelf-count">{{ catch_all_state.on_shelf_count|default(0) }}</span>
+        </span>
+        <span class="stat"><span class="label">in flight:</span>
+          <span class="value" id="catch-in-flight-count">{{ catch_all_state.in_flight_count|default(0) }}</span>
+        </span>
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="panel">
+      <h3>shelf</h3>
+      <div>
+        <span class="stat"><span class="label">name:</span>
+          <span class="value mono">{{ state.shelf_name|default('demo shelf') }}</span>
+        </span>
+        <span class="stat"><span class="label">events total:</span>
+          <span class="value">{{ state.total_events|default(0) }}</span>
+        </span>
+        <span class="stat"><span class="label">pending review:</span>
+          <span class="value">{{ state.pending_reviews|default(pending_reviews|default(0)) }}</span>
+        </span>
+      </div>
+    </div>
+
+    {# In-flight tracker section (IN_FLIGHT_TRACKER_PLAN.md §10.1).
+       Lots currently lifted off the scale but expected to return. #}
+    {% if in_flight %}
+    <div class="panel">
+      <h3>in flight ({{ in_flight|length }})</h3>
+      <p class="muted" style="margin-top: 0; font-size: 0.9em;">
+        off the shelf, expected back.
+      </p>
+      <table style="width: 100%;">
+        <thead>
+          <tr>
+            <th style="text-align: left;">item</th>
+            <th style="text-align: right;">pickup</th>
+            <th style="text-align: right;">since</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in in_flight %}
+          <tr>
+            <td>
+              <span class="value">{{ row.product.name }}</span>
+              {% if row.product.brand %}
+                <span class="muted mono" style="font-size: 0.85em;">
+                  ({{ row.product.brand }})
+                </span>
+              {% endif %}
+            </td>
+            <td class="mono" style="text-align: right;">
+              {{ '%.1f g'|format(row.lot.pickup_weight_g) if row.lot.pickup_weight_g is not none else '—' }}
+            </td>
+            <td class="mono" style="text-align: right;">
+              {{ row.lot.in_flight_since or '—' }}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% endif %}
+  </div>
+
+  <div class="col" style="flex: 1; min-width: 280px;">
+    <div class="panel">
+      <h3>quick links</h3>
+      <p style="margin: 6px 0;"><a href="/inventory">inventory &rarr;</a></p>
+      <p style="margin: 6px 0;"><a href="/sessions">session history &rarr;</a></p>
+      <p style="margin: 6px 0;"><a href="/review">review queue{% if pending_reviews %} ({{ pending_reviews }} pending){% endif %} &rarr;</a></p>
+      <p style="margin: 6px 0;"><a href="/intake">new intake &rarr;</a></p>
+    </div>
+
+    <div class="panel">
+      <h3>tuning</h3>
+      <p class="muted" style="margin-top: 0;">
+        Runtime knobs — live-updated via <code>/api/config</code>.
+      </p>
+      <table>
+        <tbody>
+          <tr>
+            <th style="padding-right: 10px;">
+              <label for="cfg-event-delta-threshold">
+                min event threshold
+              </label>
+            </th>
+            <td>
+              <input type="number"
+                     id="cfg-event-delta-threshold"
+                     min="1" step="0.5"
+                     style="width: 70px;"
+                     value="" />
+              <span class="muted mono" style="font-size: 11px;">g</span>
+              <span id="cfg-event-delta-threshold-status"
+                    class="muted mono"
+                    style="font-size: 11px; margin-left: 6px;"></span>
+              <div class="muted" style="font-size: 11px;">
+                minimum |delta_g| for a scale event to register.
+                Smaller = more sensitive; larger = ignore small noise.
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="panel">
+      <h3>bench controls</h3>
+      <p class="muted" style="margin-top: 0;">Manual toggles for testing without a real fridge door.</p>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 8px;">
+        <button type="button" id="btn-session-start">open session</button>
+        <button type="button" id="btn-session-end">close session</button>
+      </div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+        <button type="button" id="btn-auto-exposure-on">auto exposure</button>
+        <button type="button" id="btn-auto-exposure-off">locked exposure</button>
+      </div>
+      <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 8px;">
+        <button type="button" id="btn-diag-dump"
+                style="background:#1e1028;color:#d1b3ff;border-color:#3d2155;">
+          dump diagnostic session
+        </button>
+      </div>
+      <div id="bench-status" class="muted" style="margin-top: 8px; font-size: 0.9em;"></div>
+    </div>
+
+    <div class="panel">
+      <h3>state snapshot</h3>
+      <table>
+        <tbody>
+          <tr><th>door</th><td><span id="snap-door" class="mono">{{ 'open' if state.door_open else 'closed' }}</span></td></tr>
+          <tr><th>session</th><td><span class="mono">{{ state.current_session_id or '—' }}</span></td></tr>
+          <tr><th>last weight</th><td><span class="mono">{{ '%.1f g'|format(state.last_scale_weight_g) if state.last_scale_weight_g is not none else '—' }}</span></td></tr>
+          <tr><th>last event</th><td><span class="mono">{{ state.last_scale_event_ts or '—' }}</span></td></tr>
+          <tr><th>updated</th><td><span class="mono">{{ state.updated_at or '—' }}</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<h2>recent events</h2>
+<div class="panel">
+  {% if recent_events %}
+    <div class="thumb-grid">
+      {% for ev in recent_events %}
+        <a class="thumb-card" href="/event/{{ ev.event_id }}">
+          <div class="thumbs">
+            <img src="/event/{{ ev.event_id }}/before.jpg" alt="before"
+                 onerror="this.style.background='#151d20';this.removeAttribute('src');" />
+            <img src="/event/{{ ev.event_id }}/after.jpg" alt="after"
+                 onerror="this.style.background='#151d20';this.removeAttribute('src');" />
+          </div>
+          <div class="caption">
+            <span class="id">{{ ev.event_id[:8] }}</span>
+            <span class="delta {% if ev.delta_g and ev.delta_g > 0 %}pos{% elif ev.delta_g and ev.delta_g < 0 %}neg{% endif %}">
+              {% if ev.delta_g is not none %}{{ '%+.1fg'|format(ev.delta_g) }}{% else %}&mdash;{% endif %}
+            </span>
+          </div>
+          <div class="caption" style="padding-top: 0;">
+            <span class="dur">{{ ev.direction or '—' }}</span>
+            <span class="dur">{{ (ev.ts or '')[11:19] }}</span>
+          </div>
+        </a>
+      {% endfor %}
+    </div>
+    <div style="margin-top: 10px;"><a href="/events">all events &rarr;</a></div>
+  {% else %}
+    <p class="muted">no events yet. open the door and place or remove an item to trigger one.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  (function () {
+    // Poll rate ladder: baseline 300ms, then back off after consecutive
+    // failures so we don't hammer a dead/flaky endpoint.
+    //   <3 failures  -> 300ms  (normal)
+    //   3-4 failures -> 1000ms
+    //   >=5 failures -> 3000ms
+    // Reset to 300ms on the first success after an error streak.
+    const BASE_MS = 300;
+    const BACKOFF_THRESHOLD_1 = 3;
+    const BACKOFF_MS_1 = 1000;
+    const BACKOFF_THRESHOLD_2 = 5;
+    const BACKOFF_MS_2 = 3000;
+
+    let consecutiveFailures = 0;
+    let pollTimer = null;
+    const statPanel = document.querySelector('.panel'); // first panel = live preview
+
+    function currentInterval() {
+      if (consecutiveFailures >= BACKOFF_THRESHOLD_2) return BACKOFF_MS_2;
+      if (consecutiveFailures >= BACKOFF_THRESHOLD_1) return BACKOFF_MS_1;
+      return BASE_MS;
+    }
+
+    function setOfflineUI(offline) {
+      const badge = document.getElementById('offline-badge');
+      if (badge) {
+        if (offline) badge.removeAttribute('hidden');
+        else badge.setAttribute('hidden', '');
+      }
+      if (statPanel) {
+        statPanel.style.opacity = offline ? '0.55' : '';
+      }
+    }
+
+    async function refreshDashboard() {
+      try {
+        const s = await fetchJSON('/api/state');
+        const dot = document.getElementById('door-dot');
+        const lbl = document.getElementById('door-label');
+        dot.className = 'dot ' + (s.door_open ? 'on' : 'off');
+        lbl.textContent = s.door_open ? 'OPEN' : 'closed';
+        lbl.style.color = s.door_open ? 'var(--accent)' : 'var(--muted)';
+        document.getElementById('weight').textContent = fmtGrams(s.last_scale_weight_g);
+        // Stable indicator
+        const stableDot = document.getElementById('stable-dot');
+        const stableLabel = document.getElementById('stable-label');
+        if (stableDot && stableLabel) {
+          if (s.scale_stable === true) {
+            stableDot.className = 'dot on';
+            stableLabel.textContent = 'STABLE';
+            stableLabel.style.color = 'var(--accent)';
+          } else if (s.scale_stable === false) {
+            stableDot.className = 'dot off';
+            stableLabel.textContent = 'settling';
+            stableLabel.style.color = '#d79b00';
+          } else {
+            stableDot.className = 'dot';
+            stableLabel.textContent = '—';
+            stableLabel.style.color = 'var(--muted)';
+          }
+        }
+        document.getElementById('session').textContent =
+          s.current_session_id ? s.current_session_id.slice(0, 8) : '—';
+        document.getElementById('last-event-ts').textContent =
+          s.last_scale_event_ts ? s.last_scale_event_ts.slice(11, 19) : '—';
+        const snapDoor = document.getElementById('snap-door');
+        if (snapDoor) snapDoor.textContent = s.door_open ? 'open' : 'closed';
+
+        // Success: reset streak + clear offline UI (only transition once).
+        if (consecutiveFailures > 0) {
+          consecutiveFailures = 0;
+          setOfflineUI(false);
+        }
+      } catch (_) {
+        consecutiveFailures += 1;
+        // Only surface "offline" once we've crossed the first threshold;
+        // a single blip shouldn't flash the badge.
+        if (consecutiveFailures >= BACKOFF_THRESHOLD_1) {
+          setOfflineUI(true);
+        }
+      } finally {
+        // Reschedule ourselves on an adaptive cadence so the interval tracks
+        // the current failure count (setInterval can't change its period).
+        pollTimer = setTimeout(refreshDashboard, currentInterval());
+      }
+    }
+
+    refreshDashboard();
+
+    // Catch-all tile poller. Mirrors refreshDashboard() but reads
+    // /api/state?shelf=catch_all and updates the second tile's DOM.
+    // Guarded by the presence of the catch-all panel so a dashboard
+    // rendered with catch_all_enabled=false incurs zero polling traffic.
+    //
+    // Uses the same consecutive-failure backoff ladder as
+    // refreshDashboard() so an absent catch-all (503 every call) doesn't
+    // hammer the endpoint at 2 req/s forever.
+    const catchPanel = document.getElementById('catch-all-preview');
+    if (catchPanel) {
+      const CA_BASE_MS = 500;
+      const CA_BACKOFF_THRESHOLD_1 = 3;
+      const CA_BACKOFF_MS_1 = 1000;
+      const CA_BACKOFF_THRESHOLD_2 = 5;
+      const CA_BACKOFF_MS_2 = 3000;
+
+      let caFailures = 0;
+
+      function caInterval() {
+        if (caFailures >= CA_BACKOFF_THRESHOLD_2) return CA_BACKOFF_MS_2;
+        if (caFailures >= CA_BACKOFF_THRESHOLD_1) return CA_BACKOFF_MS_1;
+        return CA_BASE_MS;
+      }
+
+      async function refreshCatchAll() {
+        try {
+          const s = await fetchJSON('/api/state?shelf=catch_all');
+          const w = document.getElementById('catch-weight');
+          if (w) w.textContent = fmtGrams(s.last_scale_weight_g);
+          const sd = document.getElementById('catch-stable-dot');
+          const sl = document.getElementById('catch-stable-label');
+          if (sd && sl) {
+            if (s.scale_stable === true) {
+              sd.className = 'dot on';
+              sl.textContent = 'STABLE';
+              sl.style.color = 'var(--accent)';
+            } else if (s.scale_stable === false) {
+              sd.className = 'dot off';
+              sl.textContent = 'settling';
+              sl.style.color = '#d79b00';
+            } else {
+              sd.className = 'dot';
+              sl.textContent = '—';
+              sl.style.color = 'var(--muted)';
+            }
+          }
+          const sess = document.getElementById('catch-session');
+          if (sess) {
+            sess.textContent = s.current_session_id
+              ? s.current_session_id.slice(0, 8) : '—';
+          }
+          const on = document.getElementById('catch-on-shelf-count');
+          if (on && typeof s.on_shelf_count === 'number') {
+            on.textContent = s.on_shelf_count;
+          }
+          const inFl = document.getElementById('catch-in-flight-count');
+          if (inFl && typeof s.in_flight_count === 'number') {
+            inFl.textContent = s.in_flight_count;
+          }
+          // Success — reset the streak so we drop back to the fast cadence.
+          caFailures = 0;
+        } catch (_) {
+          // Fail quiet — a single blip shouldn't flash any badge, but
+          // bump the failure counter so the cadence backs off if the
+          // catch-all endpoint is persistently down (e.g. hardware absent,
+          // 503 every call).
+          caFailures += 1;
+        } finally {
+          setTimeout(refreshCatchAll, caInterval());
+        }
+      }
+      refreshCatchAll();
+    }
+
+    // Tuning: min event delta threshold. Loaded from /api/config on page
+    // load, saved via POST /api/config on blur/change. `change` fires when
+    // the user commits a new value (Enter / tab / blur), keeping us out
+    // of the "typing mid-number" state where every keystroke would hit
+    // the API.
+    (function initTuning() {
+      const input = document.getElementById('cfg-event-delta-threshold');
+      const status = document.getElementById('cfg-event-delta-threshold-status');
+      if (!input) return;
+      function setStatus(msg, isErr) {
+        if (!status) return;
+        status.textContent = msg || '';
+        status.style.color = isErr ? '#d44' : 'var(--muted)';
+        if (msg) {
+          setTimeout(function () {
+            if (status.textContent === msg) status.textContent = '';
+          }, 2500);
+        }
+      }
+      fetch('/api/config').then(function (r) { return r.json(); })
+        .then(function (cfg) {
+          if (cfg && typeof cfg.event_delta_threshold_g === 'number'
+              && document.activeElement !== input) {
+            input.value = cfg.event_delta_threshold_g;
+          }
+        })
+        .catch(function () { /* ignore — field stays blank */ });
+      input.addEventListener('change', async function () {
+        const raw = parseFloat(input.value);
+        if (!isFinite(raw) || raw <= 0) {
+          setStatus('must be > 0', true);
+          return;
+        }
+        try {
+          const payload = await postJSON('/api/config', {
+            event_delta_threshold_g: raw,
+          });
+          if (payload && typeof payload.event_delta_threshold_g === 'number') {
+            input.value = payload.event_delta_threshold_g;
+          }
+          setStatus('saved');
+        } catch (e) {
+          setStatus('save failed: ' + e.message, true);
+        }
+      });
+    })();
+
+    // Bench controls: session + exposure.
+    const benchStatus = document.getElementById('bench-status');
+    function showStatus(msg, isError) {
+      if (!benchStatus) return;
+      benchStatus.textContent = msg;
+      benchStatus.style.color = isError ? '#d44' : 'var(--muted)';
+      setTimeout(function () {
+        if (benchStatus.textContent === msg) benchStatus.textContent = '';
+      }, 4000);
+    }
+    async function postJSON(url, body) {
+      const res = await fetch(url, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body || {}),
+      });
+      // Parse body defensively: a 503 HTML error page (e.g., daemon not
+      // registered) will make res.json() throw, which masked the real
+      // HTTP status. Try JSON first, fall back to a minimal shape using
+      // res.statusText so callers can surface a useful message.
+      let payload;
+      try {
+        payload = await res.json();
+      } catch (_) {
+        payload = { error: res.statusText || ('HTTP ' + res.status) };
+      }
+      if (!res.ok) {
+        const msg = (payload && payload.error) || ('HTTP ' + res.status);
+        throw new Error(msg);
+      }
+      return payload;
+    }
+    const btnOpen = document.getElementById('btn-session-start');
+    if (btnOpen) btnOpen.addEventListener('click', async function () {
+      try {
+        const r = await postJSON('/api/session/start', {});
+        if (r.already_open) {
+          showStatus('session already open: ' + r.session_id.slice(0, 8));
+        } else {
+          showStatus('session opened: ' + (r.session_id || '').slice(0, 8));
+        }
+      } catch (e) { showStatus('open failed: ' + e.message, true); }
+    });
+    const btnClose = document.getElementById('btn-session-end');
+    if (btnClose) btnClose.addEventListener('click', async function () {
+      try {
+        const r = await postJSON('/api/session/end', {});
+        if (r.no_session) {
+          showStatus('no open session');
+        } else {
+          showStatus('session closed: ' + (r.session_id || '').slice(0, 8) + ' (reconciler running)');
+        }
+      } catch (e) { showStatus('close failed: ' + e.message, true); }
+    });
+    const btnAutoOn = document.getElementById('btn-auto-exposure-on');
+    if (btnAutoOn) btnAutoOn.addEventListener('click', async function () {
+      try {
+        const r = await postJSON('/api/camera/auto-exposure', { enabled: true });
+        showStatus(r.ok ? 'auto exposure ON' : 'auto exposure failed', !r.ok);
+      } catch (e) { showStatus('auto-exp failed: ' + e.message, true); }
+    });
+    const btnAutoOff = document.getElementById('btn-auto-exposure-off');
+    if (btnAutoOff) btnAutoOff.addEventListener('click', async function () {
+      try {
+        const r = await postJSON('/api/camera/auto-exposure', { enabled: false });
+        showStatus(r.ok ? 'locked exposure restored' : 'lock failed', !r.ok);
+      } catch (e) { showStatus('lock failed: ' + e.message, true); }
+    });
+    const btnDiag = document.getElementById('btn-diag-dump');
+    if (btnDiag) btnDiag.addEventListener('click', async function () {
+      try {
+        showStatus('capturing ring buffer...');
+        btnDiag.disabled = true;
+        const r = await postJSON('/api/diag/dump-session', {});
+        if (r.ok) {
+          const parts = [r.frame_count + ' frames', r.event_count + ' events'];
+          if (typeof r.trace_count === 'number') parts.push(r.trace_count + ' samples');
+          showStatus('dumped ' + parts.join(', ') + ' → ' + r.diag_id);
+          window.prompt('Copy this SCP command to pull the dump:', r.scp_cmd);
+        } else {
+          showStatus('dump failed: ' + (r.error || 'unknown'), true);
+        }
+      } catch (e) {
+        showStatus('dump failed: ' + e.message, true);
+      } finally {
+        btnDiag.disabled = false;
+      }
+    });
+  })();
+</script>
+{% endblock %}

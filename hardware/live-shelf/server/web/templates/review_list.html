@@ -1,0 +1,63 @@
+{% extends "_base.html" %}
+{% block title %}review queue - live shelf{% endblock %}
+{% block content %}
+<h1>review queue</h1>
+
+<div class="panel">
+  <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+    <strong>filter:</strong>
+    <a class="btn {% if status == 'pending' %}primary{% endif %}" href="?status=pending">pending</a>
+    <a class="btn {% if status == 'resolved' %}primary{% endif %}" href="?status=resolved">resolved</a>
+    <a class="btn {% if status == 'dismissed' %}primary{% endif %}" href="?status=dismissed">dismissed</a>
+    <a class="btn {% if status == 'all' %}primary{% endif %}" href="?status=all">all</a>
+    <span class="muted" style="margin-left: 12px;">showing {{ reviews|length }}</span>
+  </div>
+
+  {% if reviews %}
+    <table>
+      <thead>
+        <tr>
+          <th>id</th>
+          <th>kind</th>
+          <th>status</th>
+          <th>session</th>
+          <th>event</th>
+          <th>created</th>
+          <th>resolved</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in reviews %}
+          <tr>
+            <td class="mono"><a href="/review/{{ r.review_id }}">{{ r.review_id[:8] }}</a></td>
+            <td>
+              <span class="pill {% if r.kind in ('unknown_item_add','low_confidence','multi_match') %}warn{% elif r.kind in ('weight_mismatch','unpaired_remove','sensor_anomaly') %}bad{% else %}muted{% endif %}">
+                {{ r.kind }}
+              </span>
+            </td>
+            <td>
+              {% if r.status == 'pending' %}
+                <span class="pill warn">pending</span>
+              {% elif r.status == 'resolved' %}
+                <span class="pill ok">resolved</span>
+              {% else %}
+                <span class="pill muted">{{ r.status }}</span>
+              {% endif %}
+            </td>
+            <td class="mono">
+              {% if r.session_id %}<a href="/session/{{ r.session_id }}">{{ r.session_id[:8] }}</a>{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono">
+              {% if r.event_id %}<a href="/event/{{ r.event_id }}">{{ r.event_id[:8] }}</a>{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono muted" style="font-size: 11px;">{{ (r.created_at or '')[:19]|replace('T', ' ') }}</td>
+            <td class="mono muted" style="font-size: 11px;">{{ (r.resolved_at or '')[:19]|replace('T', ' ') or '—' }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">nothing in the queue for this filter. nice.</p>
+  {% endif %}
+</div>
+{% endblock %}

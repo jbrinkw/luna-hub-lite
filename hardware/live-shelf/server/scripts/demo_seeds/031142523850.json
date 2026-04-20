@@ -1,0 +1,45 @@
+{
+  "barcode": "031142523850",
+  "off_source": {
+    "product_name": "PARMESAN",
+    "brands": "BELGIOIOSO",
+    "product_quantity": 28,
+    "product_quantity_unit": "g",
+    "quantity_label": "28 g",
+    "serving_quantity": 28,
+    "serving_size": "1 portion (28 g)",
+    "packaging": null,
+    "image_front_url": "https://images.openfoodfacts.org/images/products/003/114/252/3850/front_en.66.400.jpg",
+    "categories_tags": [
+      "en:dairies",
+      "en:cheeses",
+      "en:italian-cheeses",
+      "en:parmigiano-reggiano"
+    ],
+    "raw_response_fetched_at": "2026-04-15T15:42:41Z"
+  },
+  "form_suggested": {
+    "name": "Parmesan Wedge",
+    "brand": "BelGioioso",
+    "variant": null,
+    "net_weight_g": 141.7,
+    "serving_weight_g": 28,
+    "servings_per_container": 5.1,
+    "unit_type": "solid",
+    "container_type": "bag",
+    "density_g_per_ml": null
+  },
+  "_notes": {
+    "name_source": "OFF (title-cased)",
+    "brand_source": "OFF (title-cased)",
+    "net_weight_g_source": "guess:standard BelGioioso parmesan wedge is 5 oz (141.7 g); OFF reports 28 g which is the serving size, not package size",
+    "serving_weight_g_source": "OFF",
+    "servings_per_container_source": "derived from net/serving",
+    "unit_type_source": "inferred from product category (hard cheese wedge)",
+    "container_type_source": "guess:plastic shrink-wrap bag — no OFF packaging data",
+    "confidence": "medium",
+    "needs_manual_review": true,
+    "review_fields": ["net_weight_g", "container_type", "name"]
+  },
+  "_generated": true
+}

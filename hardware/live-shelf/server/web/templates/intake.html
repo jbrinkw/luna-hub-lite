@@ -1,0 +1,978 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>intake - live-shelf</title>
+  <style>
+    :root {
+      --bg:       #0b0f0d;
+      --panel:    #11171a;
+      --panel-2:  #151d20;
+      --border:   #1f2a2d;
+      --text:     #d8e2dc;
+      --muted:    #7f8c87;
+      --accent:   #39ff88;
+      --accent-d: #2ecf6c;
+      --warn:     #ffb347;
+      --danger:   #ff5c6c;
+    }
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0; padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+      font-size: 13px;
+      line-height: 1.45;
+    }
+    a { color: var(--accent); text-decoration: none; }
+    header.nav {
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 18px;
+    }
+    header.nav .brand {
+      color: var(--accent); font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+    }
+    header.nav a.nlink { color: var(--muted); }
+    header.nav a.nlink:hover { color: var(--text); }
+    header.nav .spacer { flex: 1; }
+    main { padding: 16px; max-width: 1100px; margin: 0 auto; }
+    h1 {
+      font-size: 18px; color: var(--accent); letter-spacing: 0.06em;
+      text-transform: uppercase; margin: 0 0 14px 0;
+    }
+    h2 {
+      font-size: 14px; color: var(--text); margin: 0 0 8px 0;
+      text-transform: uppercase; letter-spacing: 0.06em;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 14px;
+      margin-bottom: 14px;
+    }
+    .panel.inactive { opacity: 0.35; pointer-events: none; }
+    .step-label {
+      display: inline-block;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      color: var(--muted);
+      padding: 2px 8px;
+      margin-right: 8px;
+      border-radius: 3px;
+      font-size: 11px;
+      letter-spacing: 0.1em;
+    }
+    .panel.done .step-label { color: var(--accent); border-color: var(--accent-d); }
+    .panel.active .step-label { color: var(--warn); border-color: var(--warn); }
+    button {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 6px 12px;
+      font-family: inherit;
+      font-size: 12px;
+      cursor: pointer;
+      border-radius: 3px;
+    }
+    button:hover { border-color: var(--accent); color: var(--accent); }
+    button.primary { border-color: var(--accent-d); color: var(--accent); }
+    button.primary:hover { background: var(--accent); color: #041108; }
+    button:disabled { opacity: 0.4; cursor: not-allowed; }
+    input[type=text], input[type=number], select {
+      background: var(--panel-2);
+      color: var(--text);
+      border: 1px solid var(--border);
+      padding: 4px 6px;
+      font-family: inherit;
+      font-size: 12px;
+      border-radius: 3px;
+    }
+    input[type=number] { width: 110px; }
+    input[type=text] { width: 220px; }
+    select { width: 140px; }
+    .form-grid {
+      display: grid;
+      grid-template-columns: max-content 1fr;
+      gap: 6px 10px;
+      align-items: center;
+      margin-top: 8px;
+    }
+    .form-grid label { color: var(--muted); }
+    .muted { color: var(--muted); }
+    .error { color: var(--danger); margin-top: 6px; min-height: 16px; }
+    .preview-wrap {
+      background: #000;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      overflow: hidden;
+      max-width: 480px;
+    }
+    .preview-wrap img { display: block; width: 100%; height: auto; }
+    .thumb-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .thumb-grid .thumb {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      padding: 6px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .thumb-grid .thumb .id { color: var(--accent); }
+    .weight {
+      font-size: 28px;
+      color: var(--accent);
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+    .stability {
+      display: inline-block;
+      margin-left: 10px;
+      padding: 2px 8px;
+      border: 1px solid var(--border);
+      border-radius: 3px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--muted);
+    }
+    .stability.stable { color: var(--accent); border-color: var(--accent-d); }
+    .stability.unstable { color: var(--warn); border-color: var(--warn); }
+    .toast {
+      position: fixed; right: 16px; bottom: 16px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      padding: 8px 12px;
+      border-radius: 3px;
+      font-size: 12px;
+      color: var(--text);
+      display: none;
+      z-index: 10;
+    }
+    .toast.err { border-left-color: var(--danger); }
+    /* AI tare result panel + badges ------------------------------------ */
+    .ai-tare-box {
+      display: none;
+      margin-top: 12px;
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      padding: 12px;
+      border-radius: 3px;
+    }
+    .ai-tare-box.err { border-left-color: var(--danger); }
+    .ai-tare-row {
+      display: flex; gap: 16px; align-items: baseline; flex-wrap: wrap;
+    }
+    .ai-tare-num {
+      font-size: 28px;
+      color: var(--accent);
+      font-weight: 600;
+      letter-spacing: 0.05em;
+    }
+    .ai-tare-derived {
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .ai-tare-derived code { color: var(--text); }
+    .ai-tare-reason {
+      margin-top: 10px;
+      color: var(--muted);
+      border-top: 1px dashed var(--border);
+      padding-top: 8px;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .ai-tare-meta {
+      margin-top: 8px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      border: 1px solid var(--border);
+      color: var(--muted);
+    }
+    .badge.conf-high    { color: #041108; background: var(--accent); border-color: var(--accent-d); }
+    .badge.conf-medium  { color: var(--warn); border-color: var(--warn); }
+    .badge.conf-low     { color: var(--danger); border-color: var(--danger); }
+    .badge.sealed-yes   { color: var(--accent); border-color: var(--accent-d); }
+    .badge.sealed-no    { color: var(--warn); border-color: var(--warn); }
+    .ai-tare-warn {
+      color: var(--warn); font-size: 11px; margin-top: 6px;
+    }
+    .ai-tare-spinner {
+      display: inline-block;
+      color: var(--warn);
+      margin-left: 8px;
+      font-size: 12px;
+    }
+    .partial-row {
+      margin-top: 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+    }
+    .partial-row input[type=checkbox] { accent-color: var(--accent); }
+    footer.foot {
+      padding: 10px 16px;
+      color: var(--muted);
+      font-size: 11px;
+      border-top: 1px solid var(--border);
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <header class="nav">
+    <span class="brand">&gt; live-shelf</span>
+    <a class="nlink" href="/">dashboard</a>
+    <a class="nlink" href="/inventory">inventory</a>
+    <a class="nlink" href="/intake">intake</a>
+    <span class="spacer"></span>
+    <span class="muted">temp_id: <code id="temp-id">{{ temp_id }}</code></span>
+  </header>
+  <main>
+    <h1>product intake</h1>
+
+    <!-- Step 1 — barcode lookup ---------------------------------------->
+    <section id="step1" class="panel active">
+      <h2><span class="step-label">step 1</span>scan barcode</h2>
+      <p class="muted">
+        Scan or type the barcode on the product label. OpenFoodFacts will
+        pre-populate what it knows; you can edit everything in step 2.
+      </p>
+      <input type="text" id="barcode" placeholder="e.g. 0041196461078" autocomplete="off">
+      <button class="primary" id="lookup-btn" onclick="doLookup()">lookup</button>
+      <button onclick="skipLookup()">skip (custom item)</button>
+      <div id="lookup-err" class="error"></div>
+
+      <div class="seed-picker" style="margin-top: 18px; padding-top: 14px; border-top: 1px dashed var(--muted);">
+        <p class="muted" style="margin: 0 0 6px 0;">
+          Or load a pre-baked demo seed (skips OpenFoodFacts — uses the cached profile with our manual corrections):
+        </p>
+        <select id="seed-select" style="min-width: 320px;">
+          <option value="">— pick a demo product —</option>
+        </select>
+        <button id="seed-load-btn" onclick="loadSeed()" disabled>load seed</button>
+        <span id="seed-status" class="muted" style="margin-left: 10px;"></span>
+      </div>
+    </section>
+
+    <!-- Step 2 — review + edit profile -------------------------------->
+    <section id="step2" class="panel inactive">
+      <h2><span class="step-label">step 2</span>review profile</h2>
+      <p class="muted" id="off-status">waiting for lookup&hellip;</p>
+      <div class="form-grid">
+        <label for="f-name">name</label>
+        <input type="text" id="f-name" required>
+
+        <label for="f-brand">brand</label>
+        <input type="text" id="f-brand">
+
+        <label for="f-variant">variant</label>
+        <input type="text" id="f-variant" placeholder="e.g. strawberry">
+
+        <label for="f-net">net weight (g)</label>
+        <div>
+          <input type="number" id="f-net" step="0.1" min="0">
+          <div class="muted" id="f-net-hint" style="font-size: 0.85em; margin-top: 2px;">
+            leave blank to auto-compute as serving &times; servings/container
+          </div>
+        </div>
+
+        <label for="f-serving">serving size (g)</label>
+        <input type="number" id="f-serving" step="0.1" min="0">
+
+        <label for="f-spc">servings/container</label>
+        <input type="number" id="f-spc" step="0.1" min="0">
+
+        <label for="f-unit">unit type</label>
+        <select id="f-unit">
+          <option value="">(none)</option>
+          <option value="solid">solid</option>
+          <option value="liquid">liquid</option>
+          <option value="count">count</option>
+          <option value="mixed">mixed</option>
+        </select>
+
+        <label for="f-container">container</label>
+        <select id="f-container">
+          <option value="">(none)</option>
+          <option value="bottle">bottle</option>
+          <option value="jar">jar</option>
+          <option value="can">can</option>
+          <option value="carton">carton</option>
+          <option value="box">box</option>
+          <option value="bag">bag</option>
+          <option value="tray">tray</option>
+          <option value="other">other</option>
+        </select>
+      </div>
+      <div style="margin-top: 12px;">
+        <button class="primary" id="confirm-profile-btn" onclick="confirmProfile()">
+          confirm &rarr;
+        </button>
+      </div>
+      <div id="profile-err" class="error"></div>
+    </section>
+
+    <!-- Step 3 — reference captures ------------------------------------->
+    <section id="step3" class="panel inactive">
+      <h2><span class="step-label">step 3</span>capture references</h2>
+      <p class="muted">
+        Hold the product in front of the shelf camera and tap
+        <em>Capture reference image</em> 2-3 times, rotating slightly between
+        shots. The product doesn't need to stay on the shelf — these are
+        catalog images the classifier will match against later.
+      </p>
+      <div class="preview-wrap">
+        <img src="/live.mjpg" alt="live shelf camera" />
+      </div>
+      <div style="margin-top: 10px;">
+        <button class="primary" id="capture-btn" onclick="captureRef()">
+          capture reference image
+        </button>
+        <span class="muted" id="capture-count">0 captured</span>
+      </div>
+      <div class="thumb-grid" id="captures"></div>
+      <div id="capture-err" class="error"></div>
+      <div style="margin-top: 12px;">
+        <button class="primary" id="to-finalize-btn" onclick="gotoFinalize()" disabled>
+          continue to finalize &rarr;
+        </button>
+      </div>
+    </section>
+
+    <!-- Step 4 — tare + finalize --------------------------------------->
+    <section id="step4" class="panel inactive">
+      <h2><span class="step-label">step 4</span>tare &amp; finalize</h2>
+      <p class="muted">
+        The only remaining input is the empty container weight (tare). Easiest
+        path: click <em>Estimate with AI</em> — it reads the reference image(s)
+        plus label metadata and returns a number. You can also type a tare
+        manually, or skip it (consumption tracking still works; only
+        "grams remaining" and auto-empty detection are affected).
+      </p>
+
+      <div style="margin-top: 10px;">
+        <button class="primary" id="ai-tare-btn" onclick="doAiTare()" disabled>
+          estimate tare with AI
+        </button>
+        <span class="muted" id="ai-tare-hint">
+          capture at least 1 reference image first
+        </span>
+        <span class="ai-tare-spinner" id="ai-tare-spinner" style="display:none;">
+          thinking&hellip; (2-8s)
+        </span>
+      </div>
+      <div class="ai-tare-box" id="ai-tare-box"></div>
+
+      <div class="form-grid" style="margin-top: 14px;">
+        <label for="f-tare" id="f-tare-label">tare (g) — empty container</label>
+        <input type="number" id="f-tare" step="0.1" min="0">
+        <span></span>
+        <span class="muted" id="f-tare-hint">
+          leave blank to skip — you can always add it later
+        </span>
+      </div>
+
+      <!-- Gross weight is optional and mostly hidden now. A collapsed
+           "advanced" section keeps the field available for users who want
+           to measure on a scale instead of using AI estimation. -->
+      <details style="margin-top: 14px;">
+        <summary class="muted" style="cursor: pointer;">advanced: measured gross weight</summary>
+        <div class="form-grid" style="margin-top: 8px;">
+          <label for="f-gross">gross weight (g)</label>
+          <input type="number" id="f-gross" step="0.1" min="0">
+          <span></span>
+          <span class="muted">
+            optional — if you've placed the sealed unit on a scale, enter
+            the total weight; server will derive tare as <code>gross − net</code>
+          </span>
+          <span></span>
+          <span id="f-gross-warn" class="error" style="display: none;"></span>
+        </div>
+        <div>
+          <span class="weight" id="scale-weight">&mdash;</span>
+          <span class="stability" id="scale-stability">unknown</span>
+        </div>
+      </details>
+
+      <div class="partial-row" style="margin-top: 10px;">
+        <input type="checkbox" id="f-partial">
+        <label for="f-partial">partially used at intake (ignore measured gross)</label>
+      </div>
+
+      <div style="margin-top: 14px;">
+        <button class="primary" id="finalize-btn" onclick="finalize()">
+          finalize intake
+        </button>
+      </div>
+      <div id="finalize-err" class="error"></div>
+      <div id="finalize-ok" style="margin-top: 10px;"></div>
+    </section>
+  </main>
+
+  <footer class="foot">live-shelf demo &middot; intake wizard</footer>
+  <div class="toast" id="toast"></div>
+
+  <script>
+    let TEMP_ID = {{ temp_id | tojson }};
+    let capturedPaths = [];
+
+    function showToast(msg, isErr) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.className = 'toast' + (isErr ? ' err' : '');
+      t.style.display = 'block';
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2500);
+    }
+
+    async function fetchJSON(url, opts) {
+      const r = await fetch(url, opts);
+      const text = await r.text();
+      let body;
+      try { body = text ? JSON.parse(text) : null; } catch (_) { body = null; }
+      if (!r.ok) throw new Error((body && body.error) || ('http ' + r.status));
+      return body;
+    }
+
+    function showError(id, msg) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = msg || '';
+    }
+
+    function activate(stepId) {
+      for (const id of ['step1','step2','step3','step4']) {
+        const el = document.getElementById(id);
+        el.classList.remove('active');
+        if (id === stepId) {
+          el.classList.remove('inactive');
+          el.classList.add('active');
+        }
+      }
+    }
+
+    function markDone(stepId) {
+      const el = document.getElementById(stepId);
+      el.classList.remove('active');
+      el.classList.add('done');
+    }
+
+    async function doLookup() {
+      showError('lookup-err');
+      const bc = document.getElementById('barcode').value.trim();
+      if (!bc) { showError('lookup-err', 'enter a barcode'); return; }
+      try {
+        const body = await fetchJSON('/api/intake/lookup', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({barcode: bc}),
+        });
+        const off = (body && body.off) || {};
+        applyOff(off, bc);
+        markDone('step1');
+        activate('step2');
+      } catch (e) {
+        showError('lookup-err', 'lookup failed: ' + e.message);
+      }
+    }
+
+    function skipLookup() {
+      applyOff({found: false}, '');
+      markDone('step1');
+      activate('step2');
+      document.getElementById('off-status').textContent = 'skipped lookup — enter product details manually.';
+    }
+
+    function applyOff(off, barcode) {
+      const stat = document.getElementById('off-status');
+      if (off.found) {
+        stat.textContent = 'OFF hit: ' + (off.product_name || '(no name)') +
+                           (off.brands ? ' / ' + off.brands : '');
+      } else if (barcode) {
+        stat.textContent = 'OFF 404 for ' + barcode + ' — enter manually.';
+      }
+      if (off.product_name) document.getElementById('f-name').value = off.product_name;
+      if (off.brands) document.getElementById('f-brand').value = off.brands;
+      if (off.product_quantity_g != null) document.getElementById('f-net').value = off.product_quantity_g;
+      if (off.serving_quantity_g != null) document.getElementById('f-serving').value = off.serving_quantity_g;
+      document.getElementById('barcode').dataset.confirmed = barcode || '';
+    }
+
+    function confirmProfile() {
+      showError('profile-err');
+      const name = document.getElementById('f-name').value.trim();
+      if (!name) { showError('profile-err', 'name is required'); return; }
+      markDone('step2');
+      activate('step3');
+    }
+
+    async function captureRef() {
+      showError('capture-err');
+      const btn = document.getElementById('capture-btn');
+      btn.disabled = true;
+      try {
+        const body = await fetchJSON('/api/intake/capture-ref', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({temp_id: TEMP_ID}),
+        });
+        capturedPaths.push(body.file_path);
+        document.getElementById('capture-count').textContent =
+          capturedPaths.length + ' captured';
+        const grid = document.getElementById('captures');
+        const card = document.createElement('div');
+        card.className = 'thumb';
+        card.innerHTML = '<span class="id">' + body.image_id + '</span><br>' +
+                         '<span>' + body.file_path + '</span>';
+        grid.appendChild(card);
+        if (capturedPaths.length >= 1) {
+          document.getElementById('to-finalize-btn').disabled = false;
+          // AI tare needs at least 1 captured reference image.
+          const aiBtn = document.getElementById('ai-tare-btn');
+          if (aiBtn) aiBtn.disabled = false;
+          const hint = document.getElementById('ai-tare-hint');
+          if (hint) hint.textContent = capturedPaths.length + ' ref image(s) ready';
+        }
+        showToast('captured ' + body.image_id);
+      } catch (e) {
+        showError('capture-err', 'capture failed: ' + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    // Sanity check on gross vs net. Warns (not blocks) when the math
+    // would produce a negative tare — usually means the user typed the
+    // wrong gross, or the item is partially used.
+    function checkGrossVsNet() {
+      const warn = document.getElementById('f-gross-warn');
+      const grossV = parseFloat(document.getElementById('f-gross').value);
+      const netV = parseFloat(document.getElementById('f-net').value);
+      if (!warn) return;
+      if (isFinite(grossV) && grossV > 0 && isFinite(netV) && netV > 0
+          && grossV < netV) {
+        const diff = (netV - grossV).toFixed(1);
+        warn.textContent = 'gross (' + grossV + 'g) is LESS than net (' +
+          netV + 'g) — derived tare would be ' + (grossV - netV).toFixed(1) +
+          'g (impossible for a sealed container, short by ' + diff + 'g). ' +
+          'check the numbers, or flag the item as partially used below.';
+        warn.style.display = '';
+      } else {
+        warn.textContent = '';
+        warn.style.display = 'none';
+      }
+    }
+
+    // Net-weight auto-calc: net = serving_size × servings_per_container
+    // when the user hasn't manually entered a net value. We track whether
+    // the current net field was last written by us (auto) vs by the user
+    // so that manual overrides stick.
+    window._netAutoFilled = false;
+    function maybeAutoFillNet() {
+      const net = document.getElementById('f-net');
+      const hint = document.getElementById('f-net-hint');
+      if (!net) return;
+      // Respect manual edits: if the user typed a value, leave it alone.
+      if (!window._netAutoFilled && net.value !== '') return;
+      const serving = parseFloat(document.getElementById('f-serving').value);
+      const spc = parseFloat(document.getElementById('f-spc').value);
+      if (isFinite(serving) && serving > 0 && isFinite(spc) && spc > 0) {
+        const computed = +(serving * spc).toFixed(1);
+        net.value = computed;
+        window._netAutoFilled = true;
+        if (hint) hint.textContent =
+          `auto: ${serving} × ${spc} = ${computed} g (override by typing)`;
+      } else if (window._netAutoFilled) {
+        net.value = '';
+        if (hint) hint.textContent =
+          'leave blank to auto-compute as serving × servings/container';
+      }
+    }
+
+    // "Partially used" toggle changes the tare label to emphasize AI use.
+    document.addEventListener('DOMContentLoaded', () => {
+      const cb = document.getElementById('f-partial');
+      if (cb) {
+        cb.addEventListener('change', () => {
+          const label = document.getElementById('f-tare-label');
+          const hint = document.getElementById('f-tare-hint');
+          if (cb.checked) {
+            label.textContent = 'tare (measurement not reliable — use AI estimate)';
+            if (hint) hint.textContent = 'partially-used flag ON — (gross − net) would give the wrong tare';
+          } else {
+            label.textContent = 'tare (auto-derived)';
+            if (hint) hint.textContent = 'computed as gross − net on save; override here for partially-used items';
+          }
+        });
+      }
+      // Wire the net-weight auto-calc.
+      const serving = document.getElementById('f-serving');
+      const spc = document.getElementById('f-spc');
+      const net = document.getElementById('f-net');
+      const netHint = document.getElementById('f-net-hint');
+      if (serving) serving.addEventListener('input', maybeAutoFillNet);
+      if (spc) spc.addEventListener('input', maybeAutoFillNet);
+      if (net) {
+        net.addEventListener('input', () => {
+          // Any user keystroke disarms the auto-fill — respect the override.
+          window._netAutoFilled = false;
+          if (netHint) netHint.textContent =
+            'manual override (auto-fill disabled for this item)';
+          checkGrossVsNet();
+        });
+      }
+      // Wire gross-vs-net sanity check. A sealed container ALWAYS has
+      // gross >= net (container can't weigh negative). If the user
+      // enters gross < net, something's off: wrong number, partially-
+      // used item, or label net is wrong for this specific unit.
+      const gross = document.getElementById('f-gross');
+      if (gross) gross.addEventListener('input', checkGrossVsNet);
+      // Populate the demo-seed dropdown.
+      fetchSeeds();
+      const sel = document.getElementById('seed-select');
+      if (sel) {
+        sel.addEventListener('change', () => {
+          document.getElementById('seed-load-btn').disabled = !sel.value;
+        });
+      }
+    });
+
+    async function fetchSeeds() {
+      const sel = document.getElementById('seed-select');
+      if (!sel) return;
+      try {
+        const body = await fetchJSON('/api/intake/seeds');
+        (body.seeds || []).forEach(s => {
+          const opt = document.createElement('option');
+          opt.value = s.barcode || '';
+          const label = (s.name || '(unnamed)') +
+                        (s.brand ? ' — ' + s.brand : '') +
+                        '  (' + (s.barcode || '?') + ')';
+          opt.textContent = label;
+          opt.dataset.form = JSON.stringify(s.form_suggested || {});
+          sel.appendChild(opt);
+        });
+      } catch (e) {
+        const status = document.getElementById('seed-status');
+        if (status) status.textContent = 'could not load seeds';
+      }
+    }
+
+    function loadSeed() {
+      const sel = document.getElementById('seed-select');
+      const status = document.getElementById('seed-status');
+      if (!sel || !sel.value) return;
+      const opt = sel.options[sel.selectedIndex];
+      let form = {};
+      try { form = JSON.parse(opt.dataset.form || '{}'); } catch (e) {}
+      document.getElementById('barcode').value = opt.value;
+      document.getElementById('barcode').dataset.confirmed = opt.value;
+      document.getElementById('f-name').value = form.name || '';
+      document.getElementById('f-brand').value = form.brand || '';
+      document.getElementById('f-variant').value = form.variant || '';
+      document.getElementById('f-net').value = form.net_weight_g != null ? form.net_weight_g : '';
+      document.getElementById('f-serving').value = form.serving_weight_g != null ? form.serving_weight_g : '';
+      document.getElementById('f-spc').value = form.servings_per_container != null ? form.servings_per_container : '';
+      document.getElementById('f-unit').value = form.unit_type || '';
+      const container = document.getElementById('f-container');
+      if (container) container.value = form.container_type || '';
+      const offStatus = document.getElementById('off-status');
+      if (offStatus) offStatus.textContent = 'loaded demo seed for barcode ' + opt.value +
+                                              ' — review fields and continue to step 3';
+      if (status) status.textContent = 'loaded ✓';
+      markDone('step1');
+      activate('step2');
+    }
+
+    async function doAiTare() {
+      const box = document.getElementById('ai-tare-box');
+      const spinner = document.getElementById('ai-tare-spinner');
+      const btn = document.getElementById('ai-tare-btn');
+      if (!box || !btn) return;
+      if (capturedPaths.length === 0) {
+        renderAiTareError(box, 'capture at least one reference image first');
+        return;
+      }
+      box.style.display = 'none';
+      spinner.style.display = 'inline';
+      btn.disabled = true;
+
+      const grossRaw = parseFloat(document.getElementById('f-gross').value);
+      const gross = isNaN(grossRaw) ? null : grossRaw;
+      const partial = document.getElementById('f-partial').checked;
+
+      const payload = {
+        temp_id: TEMP_ID,
+        ref_image_paths: capturedPaths.slice(),
+        product_form: {
+          name: document.getElementById('f-name').value.trim() || null,
+          brand: document.getElementById('f-brand').value.trim() || null,
+          variant: document.getElementById('f-variant').value.trim() || null,
+          net_weight_g: parseNum('f-net'),
+          serving_weight_g: parseNum('f-serving'),
+          servings_per_container: parseNum('f-spc'),
+          unit_type: document.getElementById('f-unit').value || null,
+          container_type: document.getElementById('f-container').value || null,
+        },
+        measured_gross_g: gross,
+        is_partial: partial,
+      };
+
+      try {
+        const body = await fetchJSON('/api/intake/ai-tare', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(payload),
+        });
+        renderAiTareResult(box, body);
+      } catch (e) {
+        renderAiTareError(box, e.message);
+      } finally {
+        spinner.style.display = 'none';
+        btn.disabled = false;
+      }
+    }
+
+    function renderAiTareError(box, msg) {
+      box.className = 'ai-tare-box err';
+      box.style.display = 'block';
+      box.innerHTML = '<strong>AI tare failed:</strong> ' + escapeHtml(msg);
+    }
+
+    function renderAiTareResult(box, body) {
+      const conf = (body.confidence || 'low').toLowerCase();
+      const sealed = !!body.appears_sealed;
+      const derived = (body.derived_tare_g != null) ? body.derived_tare_g : null;
+      const tare = body.tare_weight_g;
+
+      // Highlight divergence between AI estimate and (gross - net).
+      let warn = '';
+      if (derived != null) {
+        const diff = Math.abs(tare - derived);
+        const pct = diff / Math.max(1, Math.abs(tare));
+        if (pct > 0.25) {
+          warn = '<div class="ai-tare-warn">' +
+                 'note: AI estimate diverges from (gross − net) by ' +
+                 diff.toFixed(1) + ' g (' + (pct * 100).toFixed(0) + '%). ' +
+                 'likely a partially-used container.' +
+                 '</div>';
+        }
+      }
+
+      box.className = 'ai-tare-box';
+      box.style.display = 'block';
+      box.innerHTML =
+        '<div class="ai-tare-row">' +
+          '<span class="ai-tare-num">' + tare.toFixed(0) + ' g</span>' +
+          '<span class="badge conf-' + conf + '">conf: ' + conf + '</span>' +
+          '<span class="badge sealed-' + (sealed ? 'yes' : 'no') + '">' +
+            (sealed ? 'appears sealed' : 'appears opened') +
+          '</span>' +
+        '</div>' +
+        (derived != null
+          ? '<div class="ai-tare-derived" style="margin-top:6px;">' +
+              'derived (gross − net): <code>' + derived.toFixed(1) + ' g</code>' +
+            '</div>'
+          : '') +
+        warn +
+        '<div class="ai-tare-reason">' + escapeHtml(body.reasoning || '') + '</div>' +
+        '<div class="ai-tare-meta">' +
+          'model: <code>' + escapeHtml(body.model || '') + '</code> · ' +
+          'thinking budget: ' + (body.thinking_budget_tokens || 0) + ' tokens' +
+        '</div>' +
+        '<div style="margin-top: 10px;">' +
+          '<button class="primary" onclick="applyAiTare(' + tare + ')">' +
+            'apply to form' +
+          '</button>' +
+        '</div>';
+    }
+
+    function applyAiTare(tareG) {
+      const field = document.getElementById('f-tare');
+      if (field) {
+        field.value = tareG.toFixed(1);
+        showToast('tare updated to ' + tareG.toFixed(1) + ' g');
+      }
+    }
+
+    function escapeHtml(s) {
+      return String(s || '')
+        .replaceAll('&', '&amp;')
+        .replaceAll('<', '&lt;')
+        .replaceAll('>', '&gt;')
+        .replaceAll('"', '&quot;')
+        .replaceAll("'", '&#39;');
+    }
+
+    function gotoFinalize() {
+      markDone('step3');
+      activate('step4');
+      refreshScale();
+    }
+
+    async function refreshScale() {
+      try {
+        const s = await fetchJSON('/api/state');
+        const w = (s && s.last_scale_weight_g != null) ? s.last_scale_weight_g : null;
+        const stableFlag = (s && s.scale_stable);
+        const wEl = document.getElementById('scale-weight');
+        const sEl = document.getElementById('scale-stability');
+        if (w != null) {
+          wEl.textContent = w.toFixed(1) + ' g';
+          const g = document.getElementById('f-gross');
+          if (!g.value) g.value = w.toFixed(1);
+        } else {
+          wEl.textContent = '—';
+        }
+        sEl.className = 'stability ' + (stableFlag ? 'stable' : 'unstable');
+        sEl.textContent = stableFlag ? 'stable' : 'settling';
+      } catch (_) {
+        // Dashboard API may not exist in every bundle; fail silently.
+      }
+    }
+    // Poll scale state while step 4 is active.
+    setInterval(() => {
+      const st4 = document.getElementById('step4');
+      if (st4 && st4.classList.contains('active')) refreshScale();
+    }, 1500);
+
+    async function finalize() {
+      showError('finalize-err');
+      document.getElementById('finalize-ok').textContent = '';
+      // name is the only hard-required field — gross and tare are optional.
+      const name = document.getElementById('f-name').value.trim();
+      if (!name) {
+        showError('finalize-err', 'name is required');
+        return;
+      }
+      const form = {
+        name: name,
+        barcode: document.getElementById('barcode').dataset.confirmed || null,
+        brand: document.getElementById('f-brand').value.trim() || null,
+        variant: document.getElementById('f-variant').value.trim() || null,
+        net_weight_g: parseNum('f-net'),
+        gross_weight_g: parseNum('f-gross'),
+        tare_weight_g: parseNum('f-tare'),
+        serving_weight_g: parseNum('f-serving'),
+        servings_per_container: parseNum('f-spc'),
+        unit_type: document.getElementById('f-unit').value || null,
+        container_type: document.getElementById('f-container').value || null,
+        temp_id: TEMP_ID,
+        image_paths: capturedPaths,
+      };
+      const btn = document.getElementById('finalize-btn');
+      btn.disabled = true;
+      try {
+        const body = await fetchJSON('/api/intake/save', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(form),
+        });
+        markDone('step4');
+        document.getElementById('finalize-ok').innerHTML =
+          'product registered. id=<code>' + body.product_id + '</code> ' +
+          '— <a href="/inventory">view inventory</a>. ' +
+          'place a unit on the shelf when you want to start tracking it. ' +
+          '<button class="primary" style="margin-left:8px" onclick="resetIntakeForm()">register another item</button>';
+        showToast('product saved');
+      } catch (e) {
+        showError('finalize-err', 'save failed: ' + e.message);
+      } finally {
+        btn.disabled = false;
+      }
+    }
+
+    function parseNum(id) {
+      const v = document.getElementById(id).value;
+      if (v === '' || v == null) return null;
+      const n = parseFloat(v);
+      return isNaN(n) ? null : n;
+    }
+
+    // Reset the intake form so the user can register another product
+    // without a page reload. Clears captured ref images, form fields,
+    // step-panel state, and any AI-tare/estimate UI. Generates a fresh
+    // TEMP_ID so staged files go to a new temp dir on the server.
+    function resetIntakeForm() {
+      // Ref images (this was the bug: they persisted across intakes).
+      capturedPaths = [];
+      const grid = document.getElementById('captures');
+      if (grid) grid.innerHTML = '';
+      const cap = document.getElementById('capture-count');
+      if (cap) cap.textContent = '0 captured';
+      const capHint = document.getElementById('capture-hint');
+      if (capHint) capHint.textContent = '';
+      const toFinalize = document.getElementById('to-finalize-btn');
+      if (toFinalize) toFinalize.disabled = true;
+
+      // Fresh temp id so server-side staging doesn't mingle with the
+      // prior item's files.
+      TEMP_ID = crypto.randomUUID ? crypto.randomUUID() :
+        String(Date.now()) + '-' + Math.random().toString(36).slice(2, 10);
+
+      // Clear all form inputs.
+      const textIds = ['barcode', 'f-name', 'f-brand', 'f-variant',
+        'f-net', 'f-serving', 'f-spc', 'f-gross', 'f-tare'];
+      for (const id of textIds) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      }
+      // Reset any dataset flags on the barcode input.
+      const bc = document.getElementById('barcode');
+      if (bc) delete bc.dataset.confirmed;
+      // Selects back to empty.
+      for (const id of ['f-unit', 'f-container']) {
+        const el = document.getElementById(id);
+        if (el) el.value = '';
+      }
+      // Checkboxes off.
+      const partial = document.getElementById('f-partial');
+      if (partial) partial.checked = false;
+      // Reset auto-fill state so net will auto-compute again for the
+      // next item.
+      window._netAutoFilled = false;
+      const netHint = document.getElementById('f-net-hint');
+      if (netHint) netHint.textContent =
+        'leave blank to auto-compute as serving × servings/container';
+      // Clear warnings + result areas.
+      for (const id of ['lookup-err', 'profile-err', 'capture-err',
+                        'finalize-err', 'finalize-ok', 'f-gross-warn',
+                        'ai-tare-result', 'off-status']) {
+        const el = document.getElementById(id);
+        if (el) {
+          el.textContent = '';
+          if (id === 'f-gross-warn') el.style.display = 'none';
+        }
+      }
+      // Step panels: back to step1 active, rest inactive.
+      activate('step1');
+      // Scroll to top so the user sees step 1.
+      window.scrollTo({top: 0, behavior: 'smooth'});
+      // Focus the barcode field to start the next scan.
+      const bcFocus = document.getElementById('barcode');
+      if (bcFocus) bcFocus.focus();
+    }
+  </script>
+</body>
+</html>

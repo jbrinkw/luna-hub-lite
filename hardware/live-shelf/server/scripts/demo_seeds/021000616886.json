@@ -1,0 +1,45 @@
+{
+  "barcode": "021000616886",
+  "off_source": {
+    "product_name": "Philadelphia Cream Cheese",
+    "brands": "Kraft Heinz",
+    "product_quantity": 31,
+    "product_quantity_unit": "g",
+    "quantity_label": "31 g",
+    "serving_quantity": 31,
+    "serving_size": "2 thsp (31 g)",
+    "packaging": "",
+    "image_front_url": "https://images.openfoodfacts.org/images/products/002/100/061/6886/front_en.40.400.jpg",
+    "categories_tags": [
+      "en:dairies",
+      "en:fermented-foods",
+      "en:cheeses"
+    ],
+    "raw_response_fetched_at": "2026-04-15T15:42:41Z"
+  },
+  "form_suggested": {
+    "name": "Philadelphia Cream Cheese (12 oz Tub)",
+    "brand": "Philadelphia",
+    "variant": "Original",
+    "net_weight_g": 340.2,
+    "serving_weight_g": 31,
+    "servings_per_container": 11,
+    "unit_type": "solid",
+    "container_type": "tray",
+    "density_g_per_ml": null
+  },
+  "_notes": {
+    "name_source": "manual override — user confirmed 12 oz tub (OFF mislabeled as 31 g single-serve cup)",
+    "brand_source": "OFF lists parent (Kraft Heinz); consumer brand is Philadelphia",
+    "net_weight_g_source": "override — 12 oz = 340.2 g; OFF conflated serving_size into product_quantity",
+    "serving_weight_g_source": "OFF serving_size (2 tbsp = 31 g) is the per-serving weight, verified against Kraft Nutrition Facts",
+    "servings_per_container_source": "derived (340.2 / 31 ≈ 11)",
+    "unit_type_source": "spreadable cheese — solid",
+    "container_type_source": "plastic tub with foil seal + lid; 'tray' is the closest canonical enum",
+    "confidence": "high",
+    "needs_manual_review": false,
+    "off_data_wrong": true,
+    "review_fields": ["container_type"]
+  },
+  "_generated": true
+}

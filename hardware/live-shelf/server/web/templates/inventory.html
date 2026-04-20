@@ -1,0 +1,566 @@
+{% extends "_base.html" %}
+{% block title %}inventory - live shelf{% endblock %}
+{% block content %}
+<h1>inventory</h1>
+
+{# Top summary tile — instantly readable snapshot of the shelves + 7-day consumption. #}
+<div class="panel">
+  <div style="display: flex; gap: 24px; flex-wrap: wrap;">
+    {# When the catch-all is disabled the split is meaningless; fall
+       through to a single "on shelf" counter. When enabled, surface
+       a per-shelf breakdown so the user can instantly see where
+       each lot lives. #}
+    {% if catch_all_enabled %}
+      <div>
+        <span class="label">live shelf:</span>
+        <span class="value">{{ live_on_shelf|length }}</span>
+        {% if live_in_flight %}
+          <span class="muted" style="font-size: 11px;">
+            (+{{ live_in_flight|length }} in flight)
+          </span>
+        {% endif %}
+      </div>
+      <div>
+        <span class="label">catch-all:</span>
+        <span class="value">{{ catch_all_on_shelf|length }}</span>
+        {% if catch_all_in_flight %}
+          <span class="muted" style="font-size: 11px;">
+            (+{{ catch_all_in_flight|length }} in flight)
+          </span>
+        {% endif %}
+      </div>
+    {% else %}
+      <div>
+        <span class="label">on shelf:</span>
+        <span class="value">{{ on_shelf|length }}</span>
+      </div>
+      {% if in_flight %}
+      <div>
+        <span class="label">in flight:</span>
+        <span class="value">{{ in_flight|length }}</span>
+      </div>
+      {% endif %}
+    {% endif %}
+    <div>
+      <span class="label">catalog:</span>
+      <span class="value">{{ catalog|length }}</span>
+    </div>
+    {% if summary %}
+    <div>
+      <span class="label">last 7 days:</span>
+      <span class="value mono">
+        {{ '%.1f g'|format(summary | sum(attribute='total_consumed_g')) }}
+      </span>
+      <span class="muted">
+        across {{ summary|length }} item{{ '' if summary|length == 1 else 's' }}
+      </span>
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+{# Reusable macros for the per-shelf sections. Declared once so the
+   Live Shelf + Catch-all blocks share identical rendering — anything
+   that diverges in the future should get a dedicated macro, not an
+   inline fork. #}
+{% macro render_on_shelf_table(rows) %}
+  {% if rows %}
+    <table>
+      <thead>
+        <tr>
+          <th>product</th>
+          <th>brand / variant</th>
+          <th>on scale</th>
+          <th>content left</th>
+          <th>servings left</th>
+          <th>% full</th>
+          <th>consumed</th>
+          <th>last seen</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          {% set lot = row.lot %}
+          {% set product = row.product %}
+          {% set cur = lot.current_weight_g %}
+          {% set tare = product.tare_weight_g %}
+          {% set net = product.net_weight_g %}
+          {% set srv = product.serving_weight_g %}
+          {% set content = (cur - tare) if (cur is not none and tare is not none) else none %}
+          {% set servings_left = (content / srv) if (content is not none and srv and srv > 0) else none %}
+          {% set pct_full = (content / net * 100) if (content is not none and net and net > 0) else none %}
+          <tr data-lot-id="{{ lot.lot_id }}">
+            <td>
+              <strong>{{ product.name }}</strong>
+              {% if product.barcode %}<div class="muted" style="font-size: 11px;">{{ product.barcode }}</div>{% endif %}
+            </td>
+            <td>
+              <span>{{ product.brand or '&mdash;' }}</span>
+              {% if product.variant %}<div class="muted" style="font-size: 11px;">{{ product.variant }}</div>{% endif %}
+            </td>
+            <td class="mono">
+              {% if cur is not none %}{{ '%.1f g'|format(cur) }}{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono">
+              {% if content is not none %}
+                <strong>{{ '%.1f g'|format(content if content > 0 else 0) }}</strong>
+                {% if net %}<div class="muted" style="font-size: 11px;">of {{ '%.0f g'|format(net) }} full</div>{% endif %}
+              {% else %}
+                <span class="muted">&mdash;</span>
+                <div class="muted" style="font-size: 11px;">
+                  {% if tare is none %}no tare{% elif cur is none %}no weight{% endif %}
+                </div>
+              {% endif %}
+            </td>
+            <td class="mono">
+              {% if servings_left is not none %}
+                <strong>{{ '%.1f'|format(servings_left if servings_left > 0 else 0) }}</strong>
+                {% if product.servings_per_container %}<div class="muted" style="font-size: 11px;">of {{ '%g'|format(product.servings_per_container) }}</div>{% endif %}
+              {% else %}
+                <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td class="mono">
+              {% if pct_full is not none %}
+                {% set pct_shown = pct_full if pct_full > 0 else 0 %}
+                {% if pct_shown >= 50 %}<span style="color: var(--accent)">{% elif pct_shown >= 20 %}<span style="color: #d79b00">{% else %}<span style="color: #ff6b6b">{% endif %}{{ '%.0f%%'|format(pct_shown) }}</span>
+              {% else %}
+                <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td class="mono muted">
+              {{ '%.1f g'|format(lot.total_consumed_g or 0) }}
+            </td>
+            <td class="muted mono" style="font-size: 11px;">
+              {{ (lot.last_seen_at or '—')[:19]|replace('T', ' ') }}
+            </td>
+            <td style="text-align: right; width: 32px;">
+              <button
+                class="del-lot"
+                data-lot-id="{{ lot.lot_id }}"
+                data-lot-label="{{ product.name }}{% if product.variant %} — {{ product.variant }}{% endif %}"
+                title="remove this lot from the shelf (product stays in catalog)"
+                style="background: transparent; border: 1px solid var(--border); color: var(--muted); width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 3px; cursor: pointer; font-size: 13px;"
+                onmouseover="this.style.borderColor='var(--danger)';this.style.color='var(--danger)';"
+                onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)';"
+              >&times;</button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">no lots currently here.</p>
+  {% endif %}
+{% endmacro %}
+
+{% macro render_in_flight_table(rows) %}
+  <table>
+    <thead>
+      <tr>
+        <th>item</th>
+        <th>pickup</th>
+        <th>since</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in rows %}
+      <tr>
+        <td>
+          <strong>{{ row.product.name }}</strong>
+          {% if row.product.brand %}
+            <span class="muted" style="font-size: 0.85em;">
+              ({{ row.product.brand }})
+            </span>
+          {% endif %}
+        </td>
+        <td class="mono">
+          {{ '%.1f g'|format(row.lot.pickup_weight_g) if row.lot.pickup_weight_g is not none else '—' }}
+        </td>
+        <td class="mono">
+          {{ row.lot.in_flight_since or '—' }}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+{% endmacro %}
+
+{# -- Live Shelf section --------------------------------------------- #}
+{# Heading only appears when the catch-all is enabled (so the user can
+   tell the two sections apart). Single-shelf deployments keep the
+   familiar unnamed sections. #}
+{% if catch_all_enabled %}
+<h2 style="margin-top: 24px;">Live Shelf</h2>
+{% endif %}
+
+<div class="panel">
+  <h3>on shelf <span class="muted">({{ live_on_shelf|length }})</span></h3>
+  {% if live_on_shelf %}
+    {{ render_on_shelf_table(live_on_shelf) }}
+  {% else %}
+    <p class="muted">no lots currently on the live shelf. complete an intake from <a href="/intake">/intake</a>.</p>
+  {% endif %}
+</div>
+
+{% if live_in_flight %}
+<div class="panel">
+  <h3>in flight <span class="muted">({{ live_in_flight|length }})</span></h3>
+  <p class="muted" style="margin-top: 0; font-size: 0.9em;">
+    off the live shelf, expected back.
+  </p>
+  {{ render_in_flight_table(live_in_flight) }}
+</div>
+{% endif %}
+
+{# -- Catch-all section ---------------------------------------------- #}
+{# Only rendered when the catch-all is physically attached + flag on.
+   Single-shelf deployments skip the block entirely to keep the page
+   uncluttered. #}
+{% if catch_all_enabled %}
+<h2 style="margin-top: 24px;">Catch-all</h2>
+
+<div class="panel">
+  <h3>on shelf <span class="muted">({{ catch_all_on_shelf|length }})</span></h3>
+  {% if catch_all_on_shelf %}
+    {{ render_on_shelf_table(catch_all_on_shelf) }}
+  {% else %}
+    <p class="muted">nothing currently on the catch-all scale.</p>
+  {% endif %}
+</div>
+
+{% if catch_all_in_flight %}
+<div class="panel">
+  <h3>in flight <span class="muted">({{ catch_all_in_flight|length }})</span></h3>
+  <p class="muted" style="margin-top: 0; font-size: 0.9em;">
+    off the catch-all, expected back.
+  </p>
+  {{ render_in_flight_table(catch_all_in_flight) }}
+</div>
+{% endif %}
+{% endif %}
+
+{# -- Usage log ------------------------------------------------------ #}
+<div class="panel">
+  <h3>usage log <span class="muted">({{ usage_total }})</span></h3>
+  <p class="muted" style="margin-top: 0; font-size: 0.9em;">
+    Consumption recorded whenever an item returns lighter, never comes
+    back (TTL expired), or is replaced by a heavier item.
+  </p>
+
+  <form method="get" action="/inventory"
+        style="display: flex; flex-wrap: wrap; gap: 8px; align-items: end; margin-bottom: 10px;">
+    <label>
+      <span class="label">kind</span><br />
+      <select name="kind">
+        <option value="" {% if not filters.kind %}selected{% endif %}>all</option>
+        <option value="in_flight_return"
+                {% if filters.kind == 'in_flight_return' %}selected{% endif %}>return</option>
+        <option value="in_flight_ttl_expired"
+                {% if filters.kind == 'in_flight_ttl_expired' %}selected{% endif %}>ttl expired</option>
+        <option value="in_flight_replaced_new_item"
+                {% if filters.kind == 'in_flight_replaced_new_item' %}selected{% endif %}>replaced</option>
+        <option value="reconciler_use_return"
+                {% if filters.kind == 'reconciler_use_return' %}selected{% endif %}>reconciler</option>
+      </select>
+    </label>
+    <label>
+      <span class="label">since</span><br />
+      <input type="date" name="since" value="{{ filters.since }}" />
+    </label>
+    <label>
+      <span class="label">until</span><br />
+      <input type="date" name="until" value="{{ filters.until }}" />
+    </label>
+    {% if filters.product %}
+      <input type="hidden" name="product" value="{{ filters.product }}" />
+    {% endif %}
+    <button type="submit">filter</button>
+    <a href="/inventory" class="muted" style="align-self: center;">reset</a>
+  </form>
+
+  {% if usage_items %}
+    <table style="width: 100%;">
+      <thead>
+        <tr>
+          <th style="text-align: left;">when</th>
+          <th style="text-align: left;">item</th>
+          <th style="text-align: right;">consumed</th>
+          <th style="text-align: left;">kind</th>
+          <th style="text-align: left;">session</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in usage_items %}
+          <tr data-usage-id="{{ r.usage_id }}">
+            <td class="mono" style="white-space: nowrap;">
+              {{ r.occurred_at }}
+            </td>
+            <td>
+              <span class="value">{{ r.product_name }}</span>
+              {% if r.product_brand %}
+                <span class="muted" style="font-size: 0.85em;">
+                  ({{ r.product_brand }})
+                </span>
+              {% endif %}
+            </td>
+            <td class="mono" style="text-align: right;">
+              {% if r.consumed_g is not none %}
+                {% if r.consumed_g > 0 %}
+                  <span class="pill warn">{{ '%.1f g'|format(r.consumed_g) }}</span>
+                {% elif r.consumed_g < 0 %}
+                  <span class="pill ok">+{{ '%.1f g'|format(-r.consumed_g) }}</span>
+                {% else %}
+                  <span class="pill muted">0 g</span>
+                {% endif %}
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
+            <td>
+              {% if r.kind == 'in_flight_return' %}
+                {% if r.consumed_g and r.consumed_g < 0 %}
+                  <span class="pill ok">topup</span>
+                {% else %}
+                  <span class="pill ok">return</span>
+                {% endif %}
+              {% elif r.kind == 'in_flight_ttl_expired' %}
+                <span class="pill warn">ttl expired</span>
+              {% elif r.kind == 'in_flight_replaced_new_item' %}
+                <span class="pill warn">replaced</span>
+              {% elif r.kind == 'reconciler_use_return' %}
+                <span class="pill muted">reconciler</span>
+              {% else %}
+                <span class="pill muted">{{ r.kind }}</span>
+              {% endif %}
+            </td>
+            <td class="mono" style="font-size: 0.85em;">
+              {% if r.session_id %}
+                <a href="/session/{{ r.session_id }}">{{ r.session_id[:8] }}</a>
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
+            <td style="text-align: right; width: 32px;">
+              <button
+                class="del-usage"
+                data-usage-id="{{ r.usage_id }}"
+                data-usage-label="{{ r.product_name }} — {{ '%.1f g'|format(r.consumed_g or 0) }}"
+                title="delete this usage entry (reverts its consumption on the lot)"
+                style="background: transparent; border: 1px solid var(--border); color: var(--muted); width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 3px; cursor: pointer; font-size: 13px;"
+                onmouseover="this.style.borderColor='var(--danger)';this.style.color='var(--danger)';"
+                onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)';"
+              >&times;</button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if usage_total_pages > 1 %}
+      <div style="display: flex; gap: 8px; margin-top: 12px; align-items: center;">
+        {% set qs %}{% if filters.product %}&amp;product={{ filters.product }}{% endif %}{% if filters.kind %}&amp;kind={{ filters.kind }}{% endif %}{% if filters.since %}&amp;since={{ filters.since }}{% endif %}{% if filters.until %}&amp;until={{ filters.until }}{% endif %}{% endset %}
+        {% if usage_page > 1 %}
+          <a href="/inventory?page={{ usage_page - 1 }}{{ qs }}">&larr; prev</a>
+        {% endif %}
+        <span class="muted">page {{ usage_page }} / {{ usage_total_pages }}</span>
+        {% if usage_page < usage_total_pages %}
+          <a href="/inventory?page={{ usage_page + 1 }}{{ qs }}">next &rarr;</a>
+        {% endif %}
+      </div>
+    {% endif %}
+  {% else %}
+    <p class="muted">no usage rows match the current filters.</p>
+  {% endif %}
+</div>
+
+{# -- Per-product summary ------------------------------------------- #}
+{% if summary %}
+<div class="panel">
+  <h3>usage by product <span class="muted">(last 7 days)</span></h3>
+  <table style="width: 100%;">
+    <thead>
+      <tr>
+        <th style="text-align: left;">product</th>
+        <th style="text-align: right;">total</th>
+        <th style="text-align: right;">events</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for s in summary %}
+        <tr>
+          <td>
+            <a href="/inventory?product={{ s.product_id }}">{{ s.product_name }}</a>
+          </td>
+          <td class="mono" style="text-align: right;">
+            {{ '%.1f g'|format(s.total_consumed_g) }}
+          </td>
+          <td class="mono" style="text-align: right;">
+            {{ s.row_count }}
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
+
+{# -- Catalog (products certified but not on shelf) ------------------ #}
+<div class="panel">
+  <h3>catalog <span class="muted">(certified products not on shelf — {{ catalog|length }})</span></h3>
+  {% if catalog %}
+    <table>
+      <thead>
+        <tr>
+          <th>product</th>
+          <th>brand</th>
+          <th>barcode</th>
+          <th>net</th>
+          <th>tare</th>
+          <th>serving</th>
+          <th>per ctnr</th>
+          <th>container</th>
+          <th>unit</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for p in catalog %}
+          <tr data-product-id="{{ p.product_id }}">
+            <td>
+              <strong>{{ p.name }}</strong>
+              {% if p.variant %}<div class="muted" style="font-size: 11px;">{{ p.variant }}</div>{% endif %}
+            </td>
+            <td>{{ p.brand or '&mdash;' }}</td>
+            <td class="mono">{{ p.barcode or '&mdash;' }}</td>
+            <td class="mono">
+              {% if p.net_weight_g is not none %}{{ '%.1f g'|format(p.net_weight_g) }}{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono">
+              {% if p.tare_weight_g is not none %}{{ '%.1f g'|format(p.tare_weight_g) }}{% else %}<span class="muted">&mdash;</span>{% endif %}
+            </td>
+            <td class="mono">
+              {% if p.serving_weight_g is not none %}{{ '%.1f g'|format(p.serving_weight_g) }}{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono">
+              {% if p.servings_per_container is not none %}{{ '%g'|format(p.servings_per_container) }}{% else %}&mdash;{% endif %}
+            </td>
+            <td><span class="pill muted">{{ p.container_type or '&mdash;' }}</span></td>
+            <td><span class="pill muted">{{ p.unit_type or '&mdash;' }}</span></td>
+            <td style="text-align: right; width: 32px;">
+              <button
+                class="del-product"
+                data-product-id="{{ p.product_id }}"
+                data-product-name="{{ p.name }}"
+                title="delete this product (removes any lots + reference images)"
+                style="background: transparent; border: 1px solid var(--border); color: var(--muted); width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 3px; cursor: pointer; font-size: 13px;"
+                onmouseover="this.style.borderColor='var(--danger)';this.style.color='var(--danger)';"
+                onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)';"
+              >&times;</button>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">no certified products in catalog yet.</p>
+  {% endif %}
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Per-row catalog delete.
+  document.querySelectorAll('button.del-product').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      const pid = btn.getAttribute('data-product-id');
+      const pname = btn.getAttribute('data-product-name') || pid;
+      if (!pid) return;
+      if (!confirm('delete this product?\n\n' + pname +
+                   '\n\nthis removes the product, any lots, and its reference images. cannot be undone.')) {
+        return;
+      }
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = '…';
+      try {
+        await fetchJSON('/api/product/' + encodeURIComponent(pid) + '/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: '{}',
+        });
+        showToast('deleted ' + pname);
+        const row = document.querySelector('tr[data-product-id="' + pid + '"]');
+        if (row && row.parentNode) row.parentNode.removeChild(row);
+      } catch (e) {
+        showToast('delete failed: ' + e.message, true);
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+  });
+
+  // Per-row usage_log delete. Reverts consumption on the lot + drops the row.
+  document.querySelectorAll('button.del-usage').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      const uid = btn.getAttribute('data-usage-id');
+      const label = btn.getAttribute('data-usage-label') || uid;
+      if (!uid) return;
+      if (!confirm('delete this usage entry?\n\n' + label +
+                   '\n\nreverts the consumption on the lot and removes the log row. cannot be undone.')) {
+        return;
+      }
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = '…';
+      try {
+        await fetchJSON('/api/usage/' + encodeURIComponent(uid) + '/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: '{}',
+        });
+        showToast('deleted usage entry');
+        const row = document.querySelector('tr[data-usage-id="' + uid + '"]');
+        if (row && row.parentNode) row.parentNode.removeChild(row);
+      } catch (e) {
+        showToast('delete failed: ' + e.message, true);
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+  });
+
+  // Per-row on-shelf lot delete.
+  document.querySelectorAll('button.del-lot').forEach(function (btn) {
+    btn.addEventListener('click', async function () {
+      const lid = btn.getAttribute('data-lot-id');
+      const label = btn.getAttribute('data-lot-label') || lid;
+      if (!lid) return;
+      if (!confirm('remove this lot from the shelf?\n\n' + label +
+                   '\n\nthe product stays in the catalog. cannot be undone.')) {
+        return;
+      }
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = '…';
+      try {
+        await fetchJSON('/api/lot/' + encodeURIComponent(lid) + '/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: '{}',
+        });
+        showToast('removed ' + label);
+        const row = document.querySelector('tr[data-lot-id="' + lid + '"]');
+        if (row && row.parentNode) row.parentNode.removeChild(row);
+      } catch (e) {
+        showToast('delete failed: ' + e.message, true);
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+  });
+</script>
+{% endblock %}

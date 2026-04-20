@@ -1,0 +1,8 @@
+# Live-shelf camera module (Bundle C) local dependencies.
+#
+# Installed alongside the top-level live-shelf requirements. Pinned conservatively
+# so the Pi can resolve wheels from PyPI (opencv-python-headless has prebuilt
+# aarch64 wheels for Pi OS 64-bit).
+opencv-python-headless>=4.8,<5
+numpy>=1.24,<3
+Flask>=3.0,<4

@@ -1,0 +1,212 @@
+{% extends "_base.html" %}
+{% block title %}review {{ review.review_id[:8] }} - live shelf{% endblock %}
+{% block content %}
+<h1>review <span class="mono" style="color: var(--text);">{{ review.review_id[:8] }}</span></h1>
+<p><a href="/review">&larr; queue</a></p>
+
+<div class="row">
+  <div class="col">
+    <div class="panel">
+      <h3>context</h3>
+      <table>
+        <tbody>
+          <tr>
+            <th>kind</th>
+            <td>
+              <span class="pill {% if review.kind in ('unknown_item_add','low_confidence','multi_match') %}warn{% elif review.kind in ('weight_mismatch','unpaired_remove','sensor_anomaly') %}bad{% else %}muted{% endif %}">
+                {{ review.kind }}
+              </span>
+            </td>
+          </tr>
+          <tr>
+            <th>status</th>
+            <td>
+              {% if review.status == 'pending' %}
+                <span class="pill warn">pending</span>
+              {% elif review.status == 'resolved' %}
+                <span class="pill ok">resolved</span>
+              {% else %}
+                <span class="pill muted">{{ review.status }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr><th>created</th><td class="mono muted">{{ review.created_at or '—' }}</td></tr>
+          {% if review.resolved_at %}
+            <tr><th>resolved</th><td class="mono muted">{{ review.resolved_at }}</td></tr>
+          {% endif %}
+          <tr><th>session</th><td class="mono">
+            {% if session %}<a href="/session/{{ session.session_id }}">{{ session.session_id[:8] }}</a>{% else %}&mdash;{% endif %}
+          </td></tr>
+          <tr><th>event</th><td class="mono">
+            {% if event %}<a href="/event/{{ event.event_id }}">{{ event.event_id[:8] }}</a>{% else %}&mdash;{% endif %}
+          </td></tr>
+          {% if event and event.delta_g is not none %}
+            <tr><th>weight change</th><td class="mono">{{ '%+.1f g'|format(event.delta_g) }}</td></tr>
+          {% endif %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {% if event %}
+    <div class="col" style="flex: 2; min-width: 520px;">
+      <div class="panel">
+        <h3>before / after</h3>
+        <div class="side-by-side">
+          <div>
+            <div class="label">before</div>
+            <img src="/event/{{ event.event_id }}/before.jpg" alt="before"
+                 onerror="this.style.background='#151d20';this.alt='(no image)';" />
+          </div>
+          <div>
+            <div class="label">after</div>
+            <img src="/event/{{ event.event_id }}/after.jpg" alt="after"
+                 onerror="this.style.background='#151d20';this.alt='(no image)';" />
+          </div>
+        </div>
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+{% if review.proposed %}
+  <div class="panel">
+    <h3>classifier proposal</h3>
+    {% set p = review.proposed %}
+    <table>
+      <tbody>
+        {% if p is mapping %}
+          {# Defence-in-depth: these fields come from the LLM classifier
+             output. Autoescape is on project-wide, but be explicit so a
+             future templating tweak (|safe, tojson in the wrong spot)
+             can't silently open an XSS sink. #}
+          {% if p.item_id is defined %}<tr><th>item id</th><td class="mono">{{ p.item_id|e }}</td></tr>{% endif %}
+          {% if p.action is defined %}<tr><th>action</th><td><span class="pill info">{{ p.action|e }}</span></td></tr>{% endif %}
+          {% if p.confidence is defined %}<tr><th>confidence</th><td class="mono">{{ '%.2f'|format(p.confidence or 0) }}</td></tr>{% endif %}
+          {% if p.reasoning is defined %}<tr><th>reasoning</th><td>{{ p.reasoning|e }}</td></tr>{% endif %}
+          {% if p.expected_delta_g is defined %}<tr><th>expected &Delta;</th><td class="mono">{{ '%+.1f g'|format(p.expected_delta_g or 0) }}</td></tr>{% endif %}
+          {% if p.actual_delta_g is defined %}<tr><th>actual &Delta;</th><td class="mono">{{ '%+.1f g'|format(p.actual_delta_g or 0) }}</td></tr>{% endif %}
+          {% if p.tolerance_g is defined %}<tr><th>tolerance</th><td class="mono">&plusmn;{{ '%.1f g'|format(p.tolerance_g or 0) }}</td></tr>{% endif %}
+        {% endif %}
+      </tbody>
+    </table>
+    {# Weight-mismatch review rows carry the list of events that contributed
+       to the discrepancy so the operator can see which specific add/remove
+       rows need a closer look. Guarded on the key so this doesn't render
+       for unknown_item_add / multi_match / other kinds. #}
+    {% if p is mapping and p.events %}
+      <h4 style="margin-top: 10px;">contributing events</h4>
+      <table>
+        <thead>
+          <tr><th>event</th><th>direction</th><th>&Delta; g</th></tr>
+        </thead>
+        <tbody>
+          {% for ev in p.events %}
+            <tr>
+              <td class="mono">
+                {% if ev.event_id %}<a href="/event/{{ ev.event_id|e }}">{{ ev.event_id[:8]|e }}</a>{% else %}&mdash;{% endif %}
+              </td>
+              <td>
+                <span class="pill {% if ev.direction == 'add' %}ok{% elif ev.direction == 'remove' %}warn{% else %}muted{% endif %}">{{ (ev.direction or '')|e }}</span>
+              </td>
+              <td class="mono">{{ '%+.1f'|format(ev.delta_g or 0) }}</td>
+            </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+    <details style="margin-top: 8px;">
+      <summary class="muted" style="cursor: pointer;">raw proposed JSON</summary>
+      <pre style="background: var(--panel-2); padding: 8px; border: 1px solid var(--border); border-radius: 3px; overflow: auto; font-size: 11px;">{{ p | tojson(indent=2) }}</pre>
+    </details>
+  </div>
+{% endif %}
+
+<h2>resolve</h2>
+<div class="panel">
+  {% if review.status == 'pending' %}
+    <form method="post" action="/review/{{ review.review_id }}/resolve">
+      <p class="muted" style="margin-top: 0;">
+        Pick the correct candidate, or mark as unknown, or dismiss the review.
+      </p>
+
+      <div style="margin-bottom: 10px;">
+        {% if candidates %}
+          {% for c in candidates %}
+            <label class="candidate">
+              <input type="radio" name="candidate_id" value="{{ c.candidate_id }}"
+                     {% if loop.first %}checked{% endif %}>
+              <div class="thumbs">
+                {% for img in c.reference_image_paths or [] %}
+                  {# candidate source stores absolute filesystem paths so
+                     the classifier can read bytes. The browser can't fetch
+                     them directly — rewrite to the /refs/ URL served by
+                     the reference_image route. #}
+                  {% set _img_url = '/refs/' + img.split('/data/refs/')[-1] if '/data/refs/' in img else img %}
+                  <img src="{{ _img_url }}" alt="ref">
+                {% else %}
+                  <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='56' height='56'><rect width='100%25' height='100%25' fill='%23151d20'/><text x='50%25' y='55%25' text-anchor='middle' fill='%237f8c87' font-family='monospace' font-size='9'>(no ref)</text></svg>" alt="no ref">
+                {% endfor %}
+              </div>
+              <div class="info">
+                <div class="name">
+                  {{ c.name or '(unnamed)' }}
+                  {% if c.brand %}<span class="muted" style="font-weight: normal;">&middot; {{ c.brand }}</span>{% endif %}
+                </div>
+                <div class="why">
+                  {% if c.expected_weight_g is not none %}expected {{ '%.1f g'|format(c.expected_weight_g) }} &middot; {% endif %}
+                  {% if c.why_candidate %}<span class="mono">{{ c.why_candidate }}</span>{% endif %}
+                  {% if c.confidence is not none %} &middot; classifier conf {{ '%.2f'|format(c.confidence) }}{% endif %}
+                </div>
+              </div>
+            </label>
+          {% endfor %}
+        {% else %}
+          <p class="muted">No candidates supplied by the classifier. Pick UNKNOWN below or provide a free-text override.</p>
+        {% endif %}
+
+        {# UNKNOWN must always be selectable, even when candidates is empty. #}
+        <label class="candidate">
+          <input type="radio" name="candidate_id" value="UNKNOWN"
+                 {% if not candidates %}checked{% endif %}>
+          <div class="info">
+            <div class="name">Unknown / none of the above</div>
+            <div class="why">Treat this as an unidentified item.</div>
+          </div>
+        </label>
+      </div>
+
+      <div class="form-grid" style="max-width: 640px;">
+        <label for="f-override">free text override</label>
+        <input type="text" id="f-override" name="free_text" placeholder="e.g. 'milk carton, 2L'" style="width: 100%;">
+
+        <label for="f-note">note</label>
+        <textarea id="f-note" name="note" placeholder="optional context"></textarea>
+
+        <label for="f-action">action</label>
+        <select id="f-action" name="action">
+          <option value="">(default for kind)</option>
+          <option value="confirm">confirm candidate</option>
+          <option value="reject">reject all candidates</option>
+          <option value="intake">start intake (unknown item)</option>
+          <option value="accept_anyway">accept anyway (weight mismatch)</option>
+        </select>
+
+        <label for="f-dismiss">dismiss</label>
+        <input type="checkbox" id="f-dismiss" name="dismiss" value="true">
+      </div>
+
+      <div style="margin-top: 12px;">
+        <button class="primary" type="submit">save resolution</button>
+        <a class="btn" href="/review">cancel</a>
+      </div>
+    </form>
+  {% else %}
+    <p class="muted">This review was already <strong>{{ review.status }}</strong>. Read-only view.</p>
+    {% if review.user_response %}
+      <h3 style="margin-top: 12px;">user response</h3>
+      <pre style="background: var(--panel-2); padding: 8px; border: 1px solid var(--border); border-radius: 3px; overflow: auto; font-size: 11px;">{{ review.user_response | tojson(indent=2) if review.user_response is mapping else review.user_response }}</pre>
+    {% endif %}
+  {% endif %}
+</div>
+{% endblock %}

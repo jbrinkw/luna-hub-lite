@@ -1,0 +1,81 @@
+{% extends "_base.html" %}
+{% block title %}events - live shelf{% endblock %}
+{% block content %}
+<h1>events</h1>
+
+<div class="panel">
+  <p class="muted" style="margin-top: 0;">
+    {{ total }} scale event{{ '' if total == 1 else 's' }} total
+    &middot; page {{ page }} of {{ total_pages }}
+  </p>
+
+  {% if events %}
+    <div class="thumb-grid">
+      {% for ev in events %}
+        <a class="thumb-card" href="/event/{{ ev.event_id }}">
+          <div class="thumbs">
+            <img src="/event/{{ ev.event_id }}/before.jpg" alt="before"
+                 onerror="this.style.background='#151d20';this.removeAttribute('src');" />
+            <img src="/event/{{ ev.event_id }}/after.jpg" alt="after"
+                 onerror="this.style.background='#151d20';this.removeAttribute('src');" />
+          </div>
+          <div class="caption">
+            <span class="id">{{ ev.event_id[:8] }}</span>
+            <span class="delta {% if ev.delta_g and ev.delta_g > 0 %}pos{% elif ev.delta_g and ev.delta_g < 0 %}neg{% endif %}">
+              {% if ev.delta_g is not none %}{{ '%+.1fg'|format(ev.delta_g) }}{% else %}&mdash;{% endif %}
+            </span>
+          </div>
+          <div class="caption" style="padding-top: 0;">
+            <span class="dur">
+              {% if ev.direction == 'add' %}
+                <span class="pill ok">add</span>
+              {% elif ev.direction == 'remove' %}
+                <span class="pill warn">remove</span>
+              {% else %}
+                <span class="pill muted">{{ ev.direction or '—' }}</span>
+              {% endif %}
+            </span>
+            <span class="dur">{{ (ev.ts or '')[11:19] }}</span>
+          </div>
+          {% if ev.classifier_status %}
+            <div class="caption" style="padding-top: 0;">
+              <span class="dur">
+                {% if ev.classifier_status == 'classified' %}
+                  <span class="pill ok">classified</span>
+                {% elif ev.classifier_status == 'review' %}
+                  <span class="pill warn">review</span>
+                {% elif ev.classifier_status == 'failed' %}
+                  <span class="pill bad">failed</span>
+                {% else %}
+                  <span class="pill muted">{{ ev.classifier_status }}</span>
+                {% endif %}
+              </span>
+              <span class="dur" style="font-size: 10px;">
+                {% if ev.matched_product %}
+                  {{ ev.matched_product.name|truncate(22, True) }}
+                {% endif %}
+              </span>
+            </div>
+          {% endif %}
+        </a>
+      {% endfor %}
+    </div>
+
+    <div class="pager">
+      {% if page > 1 %}
+        <a href="?page={{ page - 1 }}">&larr; prev</a>
+      {% else %}
+        <span class="page disabled">&larr; prev</span>
+      {% endif %}
+      <span class="page current">page {{ page }} / {{ total_pages }}</span>
+      {% if page < total_pages %}
+        <a href="?page={{ page + 1 }}">next &rarr;</a>
+      {% else %}
+        <span class="page disabled">next &rarr;</span>
+      {% endif %}
+    </div>
+  {% else %}
+    <p class="muted">no events recorded yet.</p>
+  {% endif %}
+</div>
+{% endblock %}

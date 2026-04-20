@@ -1,0 +1,76 @@
+{% extends "_base.html" %}
+{% block title %}sessions - live shelf{% endblock %}
+{% block content %}
+<h1>sessions</h1>
+
+<div class="panel">
+  <p class="muted" style="margin-top: 0;">
+    {{ sessions|length }} session{{ '' if sessions|length == 1 else 's' }}.
+    Each session is a single door-open &rarr; door-close window.
+  </p>
+
+  {% if sessions %}
+    <table>
+      <thead>
+        <tr>
+          <th>id</th>
+          <th>started</th>
+          <th>ended</th>
+          <th>duration</th>
+          <th>events</th>
+          <th>resolutions</th>
+          <th>initial</th>
+          <th>final</th>
+          <th>delta</th>
+          <th>reconciled</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in sessions %}
+          <tr onclick="window.location='/session/{{ s.session_id }}'" style="cursor: pointer;">
+            <td class="mono">
+              <a href="/session/{{ s.session_id }}">{{ s.session_id[:8] }}</a>
+            </td>
+            <td class="mono muted" style="font-size: 11px;">{{ (s.started_at or '')[:19]|replace('T', ' ') }}</td>
+            <td class="mono muted" style="font-size: 11px;">
+              {% if s.ended_at %}{{ s.ended_at[:19]|replace('T', ' ') }}{% else %}<span class="pill info">live</span>{% endif %}
+            </td>
+            <td class="mono">
+              {% if s.duration_seconds is defined and s.duration_seconds is not none %}
+                {{ '%.1fs'|format(s.duration_seconds) }}
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
+            <td class="mono">{{ s.event_count|default(0) }}</td>
+            <td class="mono">{{ s.resolution_count|default(0) }}</td>
+            <td class="mono">
+              {% if s.initial_shelf_weight_g is not none %}{{ '%.1f g'|format(s.initial_shelf_weight_g) }}{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono">
+              {% if s.final_shelf_weight_g is not none %}{{ '%.1f g'|format(s.final_shelf_weight_g) }}{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono">
+              {% if s.final_shelf_weight_g is not none and s.initial_shelf_weight_g is not none %}
+                {% set d = s.final_shelf_weight_g - s.initial_shelf_weight_g %}
+                <span class="{% if d > 0 %}mono{% elif d < 0 %}mono{% endif %}" style="color: {% if d > 0 %}var(--accent){% elif d < 0 %}var(--warn){% else %}var(--muted){% endif %};">
+                  {{ '%+.1f g'|format(d) }}
+                </span>
+              {% else %}&mdash;{% endif %}
+            </td>
+            <td>
+              {% if s.reconciled %}
+                <span class="pill ok">yes</span>
+              {% else %}
+                <span class="pill muted">no</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">no sessions yet. open the door to start one.</p>
+  {% endif %}
+</div>
+{% endblock %}

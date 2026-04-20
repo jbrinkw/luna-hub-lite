@@ -1,0 +1,42 @@
+{
+  "barcode": "073410003435",
+  "off_source": {
+    "product_name": "Country Style Sourdough Bread",
+    "brands": "Arnold",
+    "product_quantity": null,
+    "serving_quantity": 49,
+    "serving_size": "1 portion (49 g)",
+    "packaging": null,
+    "image_front_url": "https://images.openfoodfacts.org/images/products/007/341/000/3435/front_en.6.400.jpg",
+    "categories_tags": [
+      "en:plant-based-foods",
+      "en:cereals-and-potatoes",
+      "en:breads"
+    ],
+    "raw_response_fetched_at": "2026-04-15T15:42:41Z"
+  },
+  "form_suggested": {
+    "name": "Country Style Sourdough Bread",
+    "brand": "Arnold",
+    "variant": "Country Sourdough",
+    "net_weight_g": 680,
+    "serving_weight_g": 49,
+    "servings_per_container": 13.9,
+    "unit_type": "solid",
+    "container_type": "bag",
+    "density_g_per_ml": null
+  },
+  "_notes": {
+    "name_source": "OFF",
+    "brand_source": "OFF",
+    "net_weight_g_source": "guess:Arnold Country sourdough standard size is 24 oz (680 g); OFF omits product_quantity",
+    "serving_weight_g_source": "OFF (49 g per slice)",
+    "servings_per_container_source": "derived from net/serving",
+    "unit_type_source": "inferred from product category (bread loaf)",
+    "container_type_source": "guess:standard plastic bread bag with twist tie — no OFF packaging data",
+    "confidence": "medium",
+    "needs_manual_review": true,
+    "review_fields": ["net_weight_g"]
+  },
+  "_generated": true
+}

@@ -1,0 +1,44 @@
+{
+  "barcode": "078742363127",
+  "off_source": {
+    "product_name": "Pulled Rotisserie Seasoned Chicken",
+    "brands": "Walmart",
+    "product_quantity": 453.59237,
+    "product_quantity_unit": "g",
+    "quantity_label": "16 oz",
+    "serving_quantity": 85,
+    "serving_size": "1 portion (85 g)",
+    "packaging": "",
+    "image_front_url": "https://images.openfoodfacts.org/images/products/007/874/236/3127/front_en.61.400.jpg",
+    "categories_tags": [
+      "en:meats",
+      "en:chicken-and-its-products",
+      "en:cooked-chicken"
+    ],
+    "raw_response_fetched_at": "2026-04-15T15:42:41Z"
+  },
+  "form_suggested": {
+    "name": "Pulled Rotisserie Seasoned Chicken",
+    "brand": "Great Value",
+    "variant": null,
+    "net_weight_g": 453.6,
+    "serving_weight_g": 85,
+    "servings_per_container": 5.3,
+    "unit_type": "solid",
+    "container_type": "tray",
+    "density_g_per_ml": null
+  },
+  "_notes": {
+    "name_source": "OFF",
+    "brand_source": "OFF (listed as Walmart; Walmart in-house brand for this SKU is Great Value)",
+    "net_weight_g_source": "OFF (product_quantity)",
+    "serving_weight_g_source": "OFF",
+    "servings_per_container_source": "derived from net/serving",
+    "unit_type_source": "inferred from product category (cooked meat)",
+    "container_type_source": "guess:typical pulled chicken SKU ships in sealed plastic tray with film lid",
+    "confidence": "medium",
+    "needs_manual_review": true,
+    "review_fields": ["brand", "container_type"]
+  },
+  "_generated": true
+}

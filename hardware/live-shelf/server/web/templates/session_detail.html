@@ -1,0 +1,155 @@
+{% extends "_base.html" %}
+{% block title %}session {{ session.session_id[:8] }} - live shelf{% endblock %}
+{% block content %}
+<h1>session <span class="mono" style="color: var(--text);">{{ session.session_id[:8] }}</span></h1>
+<p><a href="/sessions">&larr; all sessions</a> &middot; <a href="/session/{{ session.session_id }}/timeline">timeline</a></p>
+
+<div class="row">
+  <div class="col">
+    <div class="panel">
+      <h3>window</h3>
+      <table>
+        <tbody>
+          <tr><th>id</th><td class="mono">{{ session.session_id }}</td></tr>
+          <tr><th>started</th><td class="mono">{{ session.started_at or '—' }}</td></tr>
+          <tr><th>ended</th><td class="mono">
+            {% if session.ended_at %}{{ session.ended_at }}{% else %}<span class="pill info">live</span>{% endif %}
+          </td></tr>
+          <tr><th>initial weight</th><td class="mono">
+            {% if session.initial_shelf_weight_g is not none %}{{ '%.1f g'|format(session.initial_shelf_weight_g) }}{% else %}&mdash;{% endif %}
+          </td></tr>
+          <tr><th>final weight</th><td class="mono">
+            {% if session.final_shelf_weight_g is not none %}{{ '%.1f g'|format(session.final_shelf_weight_g) }}{% else %}&mdash;{% endif %}
+          </td></tr>
+          <tr>
+            <th>reconciled</th>
+            <td>
+              {% if session.reconciled %}
+                <span class="pill ok">yes</span>
+                <span class="muted mono" style="font-size: 11px;">{{ session.reconciled_at or '' }}</span>
+              {% else %}
+                <span class="pill muted">no</span>
+              {% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<h2>event timeline <span class="muted" style="font-size: 13px;">({{ timeline|length }})</span></h2>
+<div class="panel">
+  {% if timeline %}
+    <ul class="timeline">
+      {% for entry in timeline %}
+        {% set ev = entry.data %}
+        <li class="{{ ev.direction or 'noise' }}">
+          <div style="display: flex; gap: 12px; align-items: flex-start;">
+            <div style="flex: 1; min-width: 0;">
+              <div>
+                <a class="mono" href="/event/{{ ev.event_id }}">{{ ev.event_id[:8] }}</a>
+                &middot;
+                {% if ev.direction == 'add' %}
+                  <span class="pill ok">add</span>
+                {% elif ev.direction == 'remove' %}
+                  <span class="pill warn">remove</span>
+                {% else %}
+                  <span class="pill muted">{{ ev.direction or '—' }}</span>
+                {% endif %}
+                &middot;
+                <span class="mono {% if ev.delta_g and ev.delta_g > 0 %}{% elif ev.delta_g and ev.delta_g < 0 %}{% endif %}"
+                      style="color: {% if ev.delta_g and ev.delta_g > 0 %}var(--accent){% elif ev.delta_g and ev.delta_g < 0 %}var(--warn){% else %}var(--muted){% endif %};">
+                  {% if ev.delta_g is not none %}{{ '%+.1f g'|format(ev.delta_g) }}{% else %}&mdash;{% endif %}
+                </span>
+                <span class="muted mono" style="font-size: 11px; margin-left: 6px;">{{ (ev.ts or '')[11:23] }}</span>
+              </div>
+              <div class="muted" style="font-size: 11px; margin-top: 2px;">
+                {% if ev.classification %}
+                  {% set cls = ev.classification %}
+                  {% if ev.matched_product %}{{ ev.matched_product.name }} &middot; {% endif %}
+                  {{ cls.action or '—' }}
+                  {% set _conf = cls.get('confidence') if cls is mapping else (cls.confidence|default(none)) %}
+                  {% if _conf is not none %}({{ '%.2f'|format(_conf) }}){% endif %}
+                  {% if cls.reasoning %} &middot; <em>{{ cls.reasoning|truncate(120, True)|e }}</em>{% endif %}
+                {% else %}
+                  (unclassified)
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </li>
+      {% endfor %}
+    </ul>
+  {% else %}
+    <p class="muted">no events recorded for this session.</p>
+  {% endif %}
+</div>
+
+<h2>resolutions <span class="muted" style="font-size: 13px;">({{ resolutions|length }})</span></h2>
+<div class="panel">
+  {% if resolutions %}
+    <table>
+      <thead>
+        <tr>
+          <th>id</th>
+          <th>pattern</th>
+          <th>lot</th>
+          <th>consumed</th>
+          <th>confidence</th>
+          <th>add event</th>
+          <th>remove event</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in resolutions %}
+          <tr>
+            <td class="mono">{{ r.resolution_id[:8] }}</td>
+            <td>
+              <span class="pill {% if r.pattern in ('use_return_no_consumption','use_return_consumed','topped_up','new_arrival') %}ok{% elif r.pattern in ('consumed_or_removed','swap_out','swap_in','relocation') %}info{% elif r.pattern == 'unknown' %}warn{% else %}muted{% endif %}">
+                {{ r.pattern }}
+              </span>
+            </td>
+            <td class="mono">
+              {% if r.lot_id %}
+                {{ r.lot_id[:8] }}
+                {% if r.product_name %}<div class="muted" style="font-size: 11px;">{{ r.product_name }}</div>{% endif %}
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
+            <td class="mono">
+              {% if r.consumed_g is not none %}{{ '%+.1f g'|format(r.consumed_g) }}{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono">
+              {% if r.confidence is not none %}{{ '%.2f'|format(r.confidence) }}{% else %}&mdash;{% endif %}
+            </td>
+            <td class="mono">
+              {% if r.add_event_id %}
+                <a href="/event/{{ r.add_event_id }}">{{ r.add_event_id[:8] }}</a>
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
+            <td class="mono">
+              {% if r.remove_event_id %}
+                <a href="/event/{{ r.remove_event_id }}">{{ r.remove_event_id[:8] }}</a>
+              {% else %}
+                &mdash;
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">
+      {% if session.reconciled %}
+        reconciler produced no resolutions (empty session?)
+      {% else %}
+        not reconciled yet. resolutions appear after the door closes.
+      {% endif %}
+    </p>
+  {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,293 @@
+"""Tests for prompt assembly (plan §7.1)."""
+
+from __future__ import annotations
+
+import base64
+import json
+from pathlib import Path
+
+import pytest
+
+from server.classifier.models import Candidate, ScaleEvent, UNKNOWN_CANDIDATE_ID
+from server.classifier.prompt import (
+    INSTRUCTION_TEXT,
+    SYSTEM_PROMPT,
+    build_messages_payload,
+    build_system_prompt,
+)
+
+
+# --- Fixtures --------------------------------------------------------------
+
+# A minimal valid JPEG header + single FFD9 end marker. The classifier
+# prompt just needs *some* bytes to base64-encode; it doesn't decode them.
+_TINY_JPEG = bytes.fromhex("FFD8FFE000104A4649460001010000480048000000FFD9")
+
+
+@pytest.fixture
+def image_paths(tmp_path: Path) -> dict[str, str]:
+    """Create disposable before/after/reference JPEG files."""
+
+    paths: dict[str, str] = {}
+    for key in ("before", "after", "ref1", "ref2"):
+        p = tmp_path / f"{key}.jpg"
+        p.write_bytes(_TINY_JPEG)
+        paths[key] = str(p)
+    return paths
+
+
+def _event(before: str, after: str, *, direction="remove", delta=-340.0) -> ScaleEvent:
+    return ScaleEvent(
+        event_id="evt_1",
+        session_id="sesn_1",
+        ts="2026-04-15T12:00:00.000Z",
+        delta_g=delta,
+        before_weight_g=2000.0,
+        after_weight_g=2000.0 + delta,
+        direction=direction,  # type: ignore[arg-type]
+        before_frame_path=before,
+        after_frame_path=after,
+    )
+
+
+def _candidate(
+    cid: str,
+    *,
+    name: str,
+    weight: float | None = 340,
+    why: str = "currently_on_shelf",
+    refs: tuple[str, ...] = (),
+) -> Candidate:
+    return Candidate(
+        candidate_id=cid,
+        name=name,
+        brand=None,
+        expected_weight_g=weight,
+        container_type="bottle",
+        why_candidate=why,  # type: ignore[arg-type]
+        reference_image_paths=refs,
+    )
+
+
+# --- System prompt ---------------------------------------------------------
+
+
+class TestSystemPrompt:
+    def test_system_prompt_mentions_valid_actions(self):
+        prompt = build_system_prompt()
+        assert prompt == SYSTEM_PROMPT
+        for action in ("removed", "added", "added_to_existing", "unknown"):
+            assert f'"{action}"' in prompt
+
+    def test_system_prompt_demands_strict_json(self):
+        assert "STRICT JSON" in SYSTEM_PROMPT
+        assert "Do not include any text outside the JSON object." in SYSTEM_PROMPT
+
+
+# --- Payload structure -----------------------------------------------------
+
+
+class TestPayloadStructure:
+    def test_minimal_payload_has_system_and_messages(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"])
+        candidates = [_candidate("L1", name="Ketchup")]
+        payload = build_messages_payload(event, candidates)
+        assert "system" in payload
+        assert "messages" in payload
+        assert isinstance(payload["messages"], list)
+        assert payload["messages"][0]["role"] == "user"
+
+    def test_system_has_cache_control(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"])
+        payload = build_messages_payload(event, [_candidate("L1", name="A")])
+        system = payload["system"]
+        assert isinstance(system, list)
+        assert system[0]["type"] == "text"
+        assert system[0]["cache_control"] == {"type": "ephemeral"}
+
+    def test_system_cache_disabled_when_requested(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"])
+        payload = build_messages_payload(
+            event, [_candidate("L1", name="A")], enable_system_cache=False
+        )
+        assert isinstance(payload["system"], str)
+        assert payload["system"] == SYSTEM_PROMPT
+
+
+class TestUserContentOrdering:
+    def test_ordering_candidates_then_weight_then_frames_then_instruction(
+        self, image_paths
+    ):
+        event = _event(image_paths["before"], image_paths["after"])
+        cand = _candidate("L1", name="Ketchup")
+        payload = build_messages_payload(event, [cand])
+        blocks = payload["messages"][0]["content"]
+
+        # New ordering: cache-stable prefix (candidate JSON + reference
+        # images + cache breakpoint) comes FIRST, then fresh per-event
+        # content (weight text + before/after frames + instruction).
+        types = [b["type"] for b in blocks]
+
+        # First block: candidate JSON header (cache-stable).
+        assert types[0] == "text"
+        assert "Candidates (ranked by likelihood)" in blocks[0]["text"]
+
+        # Next: weight change text (after cache breakpoint — fresh).
+        assert types[1] == "text"
+        assert "Weight change" in blocks[1]["text"]
+        assert "Event direction" in blocks[1]["text"]
+
+        # Then: before frame image + caption.
+        assert types[2] == "image"
+        assert types[3] == "text"
+        assert blocks[3]["text"] == "[above: before frame]"
+
+        # Then: after frame image + caption.
+        assert types[4] == "image"
+        assert types[5] == "text"
+        assert blocks[5]["text"] == "[above: after frame]"
+
+        # Final block: instruction.
+        assert blocks[-1]["type"] == "text"
+        assert blocks[-1]["text"] == INSTRUCTION_TEXT
+
+    def test_reference_images_inlined_per_candidate(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"])
+        candidates = [
+            _candidate(
+                "L1",
+                name="Ketchup",
+                refs=(image_paths["ref1"], image_paths["ref2"]),
+            ),
+            _candidate("L2", name="Mustard", refs=(image_paths["ref1"],)),
+        ]
+        payload = build_messages_payload(event, candidates)
+        blocks = payload["messages"][0]["content"]
+
+        # Two images before+after, one weight text, one candidate JSON text,
+        # then per-candidate (header + 2 refs) + (header + 1 ref), then instruction.
+        image_count = sum(1 for b in blocks if b["type"] == "image")
+        # 2 event frames + 2 refs for L1 + 1 ref for L2 = 5
+        assert image_count == 5
+
+        # Expect candidate-header markers for each candidate. Headers use
+        # numeric indexes only — name/id interpolation was removed as a
+        # prompt-injection hardening measure (the model reads name + id
+        # from the structured JSON candidate block above).
+        header_texts = [
+            b["text"] for b in blocks if b["type"] == "text" and b["text"].startswith("[candidate #")
+        ]
+        assert any("#1" in t for t in header_texts)
+        assert any("#2" in t for t in header_texts)
+
+
+# --- Candidate JSON shape --------------------------------------------------
+
+
+class TestCandidateJson:
+    def test_candidate_json_is_valid_and_ordered(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"])
+        candidates = [
+            _candidate("L1", name="Ketchup", why="recently_out"),
+            _candidate("L2", name="Mustard", why="currently_on_shelf"),
+            _candidate(
+                UNKNOWN_CANDIDATE_ID,
+                name="Unknown / new item",
+                weight=None,
+                why="sentinel",
+            ),
+        ]
+        payload = build_messages_payload(event, candidates)
+        blocks = payload["messages"][0]["content"]
+        json_block = next(
+            b for b in blocks
+            if b["type"] == "text" and "Candidates (ranked by likelihood)" in b["text"]
+        )
+        # Extract the JSON substring — we know it follows the header line.
+        json_text = json_block["text"].split("\n", 1)[1]
+        parsed = json.loads(json_text)
+        assert isinstance(parsed, list)
+        # Order matches the input order.
+        assert [c["candidate_id"] for c in parsed] == ["L1", "L2", UNKNOWN_CANDIDATE_ID]
+        # Every entry has the keys required by §4.5 plus our reference count.
+        for entry in parsed:
+            for key in (
+                "candidate_id",
+                "name",
+                "brand",
+                "expected_weight_g",
+                "container_type",
+                "why_candidate",
+                "reference_image_count",
+            ):
+                assert key in entry
+
+    def test_candidate_reference_images_are_base64_encoded(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"])
+        candidates = [_candidate("L1", name="Ketchup", refs=(image_paths["ref1"],))]
+        payload = build_messages_payload(event, candidates)
+        blocks = payload["messages"][0]["content"]
+        image_blocks = [b for b in blocks if b["type"] == "image"]
+        # At least one image block must be the reference image.
+        for block in image_blocks:
+            assert block["source"]["type"] == "base64"
+            assert block["source"]["media_type"].startswith("image/")
+            # Verify it's decodable — don't care about the content.
+            decoded = base64.b64decode(block["source"]["data"])
+            assert decoded == _TINY_JPEG
+
+
+# --- Cache control ---------------------------------------------------------
+
+
+class TestCacheControl:
+    def test_candidate_metadata_cached_by_default(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"])
+        payload = build_messages_payload(
+            event,
+            [_candidate("L1", name="A")],
+        )
+        blocks = payload["messages"][0]["content"]
+        # Find the block with cache_control on the user content. It should
+        # be the last block BEFORE the instruction (the candidate JSON or
+        # the last reference image).
+        cached_indices = [
+            i for i, b in enumerate(blocks) if "cache_control" in b
+        ]
+        assert cached_indices, "Expected at least one cached user block"
+        # Instruction block is the final block and must not be cached.
+        assert "cache_control" not in blocks[-1]
+
+    def test_candidate_cache_can_be_disabled(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"])
+        payload = build_messages_payload(
+            event,
+            [_candidate("L1", name="A")],
+            enable_candidate_cache=False,
+        )
+        blocks = payload["messages"][0]["content"]
+        cached_indices = [
+            i for i, b in enumerate(blocks) if "cache_control" in b
+        ]
+        assert cached_indices == [], "Expected no cache_control on user blocks"
+
+
+# --- Weight text ----------------------------------------------------------
+
+
+class TestWeightText:
+    def test_add_direction_reads_as_gained(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"], direction="add", delta=120.0)
+        payload = build_messages_payload(event, [_candidate("L1", name="A")])
+        blocks = payload["messages"][0]["content"]
+        text_block = next(b for b in blocks if b["type"] == "text" and "Weight change" in b["text"])
+        assert "shelf gained" in text_block["text"]
+        assert "Event direction: add" in text_block["text"]
+
+    def test_remove_direction_reads_as_dropped(self, image_paths):
+        event = _event(image_paths["before"], image_paths["after"], direction="remove", delta=-340.0)
+        payload = build_messages_payload(event, [_candidate("L1", name="A")])
+        blocks = payload["messages"][0]["content"]
+        text_block = next(b for b in blocks if b["type"] == "text" and "Weight change" in b["text"])
+        assert "shelf dropped" in text_block["text"]
+        assert "Event direction: remove" in text_block["text"]

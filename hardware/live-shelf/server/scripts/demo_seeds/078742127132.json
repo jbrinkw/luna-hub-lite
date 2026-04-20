@@ -1,0 +1,45 @@
+{
+  "barcode": "078742127132",
+  "off_source": {
+    "product_name": "EXTRA LARGE WHITE EGGS",
+    "brands": "Great Value",
+    "product_quantity": null,
+    "product_quantity_unit": null,
+    "quantity_label": "1.5 dozen",
+    "serving_quantity": 56,
+    "serving_size": "1 egg (56 g)",
+    "packaging": "Container,Styrofoam",
+    "image_front_url": "https://images.openfoodfacts.org/images/products/007/874/212/7132/front_en.40.400.jpg",
+    "categories_tags": [
+      "en:farming-products",
+      "en:eggs",
+      "en:chicken-eggs"
+    ],
+    "raw_response_fetched_at": "2026-04-15T15:42:41Z"
+  },
+  "form_suggested": {
+    "name": "Extra Large White Eggs",
+    "brand": "Great Value",
+    "variant": "1.5 dozen",
+    "net_weight_g": 1008,
+    "serving_weight_g": 56,
+    "servings_per_container": 18,
+    "unit_type": "count",
+    "container_type": "carton",
+    "density_g_per_ml": null
+  },
+  "_notes": {
+    "name_source": "OFF (title-cased)",
+    "brand_source": "OFF",
+    "net_weight_g_source": "derived from count (1.5 dozen = 18 eggs) * serving_weight_g (56 g/egg) = 1008 g; OFF omits product_quantity",
+    "serving_weight_g_source": "OFF (1 egg = 56 g)",
+    "servings_per_container_source": "derived from quantity label (1.5 dozen = 18 eggs, each egg = 1 serving)",
+    "unit_type_source": "inferred from product category (eggs are sold and consumed by count)",
+    "container_type_source": "OFF packaging tags (en:container, en:styrofoam) — closest schema match is carton",
+    "variant_source": "derived from OFF quantity label (1.5 dozen distinguishes this from 12/24-count SKUs)",
+    "confidence": "high",
+    "needs_manual_review": false,
+    "review_fields": ["container_type"]
+  },
+  "_generated": true
+}

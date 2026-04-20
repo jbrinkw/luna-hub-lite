@@ -1,0 +1,45 @@
+{
+  "barcode": "022655306306",
+  "off_source": {
+    "product_name": "Turkey Breakfast Sausage Patties",
+    "brands": "Butterball",
+    "product_quantity": 226.796185,
+    "product_quantity_unit": "g",
+    "quantity_label": "8 oz",
+    "serving_quantity": 57,
+    "serving_size": "2 patties (57 g)",
+    "packaging": null,
+    "image_front_url": "https://images.openfoodfacts.org/images/products/002/265/530/6306/front_en.51.400.jpg",
+    "categories_tags": [
+      "en:meats",
+      "en:sausages",
+      "en:frozen-meats",
+      "en:turkey-sausages"
+    ],
+    "raw_response_fetched_at": "2026-04-15T15:42:41Z"
+  },
+  "form_suggested": {
+    "name": "Turkey Breakfast Sausage Patties",
+    "brand": "Butterball",
+    "variant": null,
+    "net_weight_g": 226.8,
+    "serving_weight_g": 57,
+    "servings_per_container": 4,
+    "unit_type": "solid",
+    "container_type": "tray",
+    "density_g_per_ml": null
+  },
+  "_notes": {
+    "name_source": "OFF",
+    "brand_source": "OFF",
+    "net_weight_g_source": "OFF (product_quantity)",
+    "serving_weight_g_source": "OFF (2 patties = 57 g)",
+    "servings_per_container_source": "label-derived (8 patties per 8 oz pack = 4 servings)",
+    "unit_type_source": "inferred from product category (frozen meat patties)",
+    "container_type_source": "guess:Butterball turkey patties ship in a plastic tray with sealed film; no OFF packaging data",
+    "confidence": "high",
+    "needs_manual_review": false,
+    "review_fields": ["container_type"]
+  },
+  "_generated": true
+}
