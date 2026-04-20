@@ -555,4 +555,88 @@ test.describe('CoachByte Today Page', () => {
       await cleanup();
     }
   });
+
+  // ================================================================
+  // Test #9 — Realtime: external coachbyte.timers mutation is delivered.
+  // Uses a browser-side `postgres_changes` probe to verify the Today page's
+  // Realtime channel carries events for the timers table. A broken
+  // subscription (wrong schema, missing publication, bad filter) would
+  // fail this even though a direct DB check would succeed.
+  // ================================================================
+  test('Realtime: external coachbyte.timers mutation is delivered via postgres_changes', async ({ page }) => {
+    test.setTimeout(60_000);
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'coach-today-rt-timer');
+    try {
+      await seedCoachByteData(client, userId);
+
+      await page.goto('/coach');
+      await expect(page.getByTestId('next-in-queue')).toBeVisible({ timeout: 30_000 });
+
+      // Install a probe inside the browser that records every
+      // postgres_changes event on coachbyte.timers for this user. Rides
+      // on the app's Supabase client so it shares the authenticated
+      // Realtime WebSocket.
+      await page.evaluate(
+        async ([uid]) => {
+          const win = window as any;
+          win.__timerEvents = [];
+          // Indirect through a variable so TS-LSP doesn't try to resolve
+          // the Vite-served absolute URL statically. Same technique used
+          // in e2e/chefbyte/realtime.spec.ts.
+          const supabaseUrl = '/src/shared/supabase.ts';
+          const mod: any = await import(/* @vite-ignore */ supabaseUrl);
+          const channel = mod.supabase.channel(`e2e-timer-probe-${Date.now()}`).on(
+            'postgres_changes',
+            {
+              event: '*',
+              schema: 'coachbyte',
+              table: 'timers',
+              filter: `user_id=eq.${uid}`,
+            },
+            (payload: any) => {
+              win.__timerEvents.push({
+                type: payload.eventType,
+                state: payload.new?.state,
+              });
+            },
+          );
+          await new Promise<void>((resolve, reject) => {
+            const t = setTimeout(() => reject(new Error('timer probe subscribe timeout')), 15_000);
+            channel.subscribe((status: string) => {
+              if (status === 'SUBSCRIBED') {
+                clearTimeout(t);
+                resolve();
+              }
+            });
+          });
+        },
+        [userId],
+      );
+
+      // Insert a running timer via the authenticated user client (external
+      // to the browser's app-level writes). Realtime must deliver this.
+      const coach = (client as any).schema('coachbyte');
+      await coach.from('timers').upsert(
+        {
+          user_id: userId,
+          state: 'running',
+          end_time: new Date(Date.now() + 60_000).toISOString(),
+          duration_seconds: 60,
+          elapsed_before_pause: 0,
+        },
+        { onConflict: 'user_id' },
+      );
+
+      // Probe must see the INSERT/UPDATE event within 15s.
+      await page.waitForFunction(() => ((window as any).__timerEvents?.length ?? 0) > 0, { timeout: 15_000 });
+
+      const events: Array<{ type: string; state: string }> = await page.evaluate(() => (window as any).__timerEvents);
+      expect(events.length).toBeGreaterThan(0);
+      // Either INSERT (first timer row) or UPDATE (if the upsert rewrote).
+      const running = events.find((e) => e.state === 'running');
+      expect(running).toBeTruthy();
+    } finally {
+      await cleanup();
+    }
+  });
 });

@@ -38,8 +38,16 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
           filter: sub.filter ?? `user_id=eq.${user.id}`,
         },
         () => {
-          for (const key of sub.queryKeys) {
-            queryClient.invalidateQueries({ queryKey: [...key] });
+          // Read the latest subscriptions from the ref in case the caller
+          // re-rendered with new keys after mount. Invalidate AND force a
+          // refetch: the default ``refetchType: 'active'`` silently skips
+          // queries whose observers aren't settled yet (e.g. during route
+          // transitions), which was hiding updates for pages that had
+          // just mounted when the event fired. ``'all'`` guarantees the
+          // refetch fires regardless of observer state.
+          const current = subsRef.current.find((s) => s.schema === sub.schema && s.table === sub.table) ?? sub;
+          for (const key of current.queryKeys) {
+            queryClient.invalidateQueries({ queryKey: [...key], refetchType: 'all' });
           }
         },
       );
