@@ -1,0 +1,4378 @@
+[
+  {
+    "file": "apps/web/e2e/chefbyte/home.spec.ts",
+    "test_name": "import shopping to inventory flow",
+    "line": 197,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "      expect(beforeItems!.length).toBe(2);"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "scanning barcode in shopping mode adds to shopping list",
+    "line": 252,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "        expect(shoppingItems!.length).toBeGreaterThanOrEqual(1);"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "SCN5 \u2014 analyze-product 503 bad_key surfaces actionable error (not silent placeholder)",
+    "line": 1462,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "      expect(data!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/shopping.spec.ts",
+    "test_name": "clear purchased button removes all purchased items",
+    "line": 129,
+    "pattern": "empty-test-body",
+    "severity": "HIGH",
+    "excerpt": "  test.skip('clear purchased button removes all purchased items', async () => {"
+  },
+  {
+    "file": "apps/web/e2e/contracts/validation.spec.ts",
+    "test_name": "SQL wildcard % in search does not return all results",
+    "line": 15,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "      expect(productKeys.length).toBe(5);"
+  },
+  {
+    "file": "apps/web/e2e/hub/password-reset.spec.ts",
+    "test_name": "recovery link lands on /hub/reset-password and new password takes effect",
+    "line": 82,
+    "pattern": "catch-swallows-error",
+    "severity": "HIGH",
+    "excerpt": "          } catch {"
+  },
+  {
+    "file": "apps/web/e2e/hub/password-reset.spec.ts",
+    "test_name": "recovery link lands on /hub/reset-password and new password takes effect",
+    "line": 104,
+    "pattern": "catch-swallows-error",
+    "severity": "HIGH",
+    "excerpt": "            } catch {"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "login with empty email returns validation error",
+    "line": 244,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "HIGH",
+    "excerpt": "    expect(error).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "login with empty password returns validation error",
+    "line": 252,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "HIGH",
+    "excerpt": "    expect(error).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "reset_demo_dates RPC exists and executes successfully for demo user",
+    "line": 330,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(meals.length).toBeGreaterThanOrEqual(1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/reset-password.test.ts",
+    "test_name": "short password returns validation error",
+    "line": 71,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(shortPassword.length).toBeLessThan(MIN_PASSWORD_LENGTH);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/reset-password.test.ts",
+    "test_name": "short password returns validation error",
+    "line": 73,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect('1234567'.length).toBeLessThan(MIN_PASSWORD_LENGTH);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/reset-password.test.ts",
+    "test_name": "short password returns validation error",
+    "line": 75,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect('12345678'.length).toBeGreaterThanOrEqual(MIN_PASSWORD_LENGTH);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "products missing prices query returns rows where price is null",
+    "line": 40,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.length).toBe(5);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "products placeholders query succeeds (initially none)",
+    "line": 57,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "shopping_list with product price join succeeds (initially empty)",
+    "line": 114,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "delete food_logs by meal_id removes all logs for that meal",
+    "line": 571,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(logsBefore!.length).toBeGreaterThanOrEqual(1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "delete food_log by log_id",
+    "line": 683,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(logs!.length).toBeGreaterThanOrEqual(1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "stock_lots query for all user products returns qty_containers for badge computation",
+    "line": 791,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.length).toBeGreaterThanOrEqual(3); // At least Chicken, Rice, Eggs have stock"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "food_logs delete by log_id removes the entry",
+    "line": 401,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(logs!.length).toBeGreaterThan(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "food_logs delete by log_id removes the entry",
+    "line": 409,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(after!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "temp_items delete by temp_id removes the entry",
+    "line": 449,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(after!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "inserts a new meal plan entry (recipe type)",
+    "line": 199,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(verify!.length).toBe(1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "delete food_log from meal plan page",
+    "line": 608,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(logs!.length).toBeGreaterThanOrEqual(1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-scanner.test.ts",
+    "test_name": "undo purchase deletes the stock lot created during scan",
+    "line": 367,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(after!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-scanner.test.ts",
+    "test_name": "undo consume re-adds stock lot and deletes food_log",
+    "line": 398,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(logs!.length).toBeGreaterThan(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-scanner.test.ts",
+    "test_name": "undo consume re-adds stock lot and deletes food_log",
+    "line": 417,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(afterLog!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-scanner.test.ts",
+    "test_name": "undo shopping add deletes the shopping list item",
+    "line": 791,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(after!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-settings.test.ts",
+    "test_name": "liquidtrack_events query matches page pattern",
+    "line": 430,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(devices!.length).toBeGreaterThanOrEqual(1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-shopping.test.ts",
+    "test_name": "delete item by cart_item_id matches page pattern",
+    "line": 153,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(items!.length).toBe(1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "keyset pagination with past cursor returns empty",
+    "line": 103,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "expanded day detail with zero completed sets returns empty array",
+    "line": 211,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-settings.test.ts",
+    "test_name": "custom exercise delete removes user-owned exercise",
+    "line": 158,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(verifyData.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "completed_sets query with exercises join succeeds (initially empty)",
+    "line": 94,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "planned_sets insert adds a new set to the plan",
+    "line": 389,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(exercises!.length).toBeGreaterThan(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "daily_plans delete resets entire plan (cascade)",
+    "line": 549,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(after!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "daily_plans delete resets entire plan (cascade)",
+    "line": 556,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(setsAfter!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "first ever completed set for exercise triggers first-record branch",
+    "line": 694,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(prevSets!.length).toBe(1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "delete completed set by completed_set_id removes exactly that set",
+    "line": 766,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(after!.length).toBe(countBefore - 1);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "delete completed set by completed_set_id removes exactly that set",
+    "line": 773,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(check!.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/hub-app-provider.test.ts",
+    "test_name": "user_tool_config query succeeds (initially empty)",
+    "line": 132,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.length).toBe(0);"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/SkeletonScreen.test.tsx",
+    "test_name": "CardSkeleton renders skeleton elements in a bordered container",
+    "line": 29,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(pulses.length).toBeGreaterThanOrEqual(3);"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/SkeletonScreen.test.tsx",
+    "test_name": "MacroBarSkeleton renders 4 groups with skeleton elements",
+    "line": 38,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(pulses.length).toBeGreaterThanOrEqual(8);"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "cleanup \u2014 clear shopping list",
+    "line": 1380,
+    "pattern": "no-assertion",
+    "severity": "HIGH",
+    "excerpt": "    it('cleanup \u2014 clear shopping list', async () => {"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getHistory with default days works",
+    "line": 300,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(data.days.length).toBeGreaterThanOrEqual(1);"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should list tasks with filter expression",
+    "line": 217,
+    "pattern": "count-only-assertion",
+    "severity": "HIGH",
+    "excerpt": "    expect(tasks.length).toBeGreaterThanOrEqual(1);"
+  },
+  {
+    "file": "supabase/tests/00000-test-helpers.sql",
+    "test_name": "(file-level)",
+    "line": 183,
+    "pattern": "pgtap-plan-mismatch:plan=1/asserts=0",
+    "severity": "HIGH",
+    "excerpt": "SELECT plan(1);"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/home.spec.ts",
+    "test_name": "status card click navigates to relevant page",
+    "line": 156,
+    "pattern": "disabled-test",
+    "severity": "MEDIUM",
+    "excerpt": "  test.skip('status card click navigates to relevant page', async ({ page }) => {"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/recipes.spec.ts",
+    "test_name": "recipe search filters results",
+    "line": 66,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "MEDIUM",
+    "excerpt": "      expect(noRecipesVisible || cardGone).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "SCN6 \u2014 hardware scanner fast-type keystrokes outside input are captured",
+    "line": 1492,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "MEDIUM",
+    "excerpt": "      expect(seeded).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/shopping.spec.ts",
+    "test_name": "clear purchased button removes all purchased items",
+    "line": 129,
+    "pattern": "disabled-test",
+    "severity": "MEDIUM",
+    "excerpt": "  test.skip('clear purchased button removes all purchased items', async () => {"
+  },
+  {
+    "file": "apps/web/e2e/hub/extensions.spec.ts",
+    "test_name": "disable enabled extension clears credentials",
+    "line": 93,
+    "pattern": "disabled-test",
+    "severity": "MEDIUM",
+    "excerpt": "  test.skip('disable enabled extension clears credentials', async ({ page }) => {"
+  },
+  {
+    "file": "hardware/live-shelf/server/camera/tests/test_extract.py",
+    "test_name": "test_apply_locked_settings_invokes_v4l2_ctl_when_present",
+    "line": 614,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert auto_exposure_calls"
+  },
+  {
+    "file": "hardware/live-shelf/server/camera/tests/test_extract.py",
+    "test_name": "test_apply_locked_settings_reads_overrides_from_json",
+    "line": 638,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert exposure_calls"
+  },
+  {
+    "file": "hardware/live-shelf/server/camera/tests/test_extract.py",
+    "test_name": "test_apply_locked_settings_reads_overrides_from_json",
+    "line": 642,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert focus_calls"
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_classify.py",
+    "test_name": "TestClassifyEvent::test_valid_response_returns_parsed_result",
+    "line": 280,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert client.calls, \"FakeClient should have been called at least once\""
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_classify.py",
+    "test_name": "TestClassifyEvent::test_valid_response_returns_parsed_result",
+    "line": 281,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert result.candidate_pool_used  # populated for audit"
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_classify.py",
+    "test_name": "test_live_anthropic_smoke",
+    "line": 582,
+    "pattern": "disabled-test",
+    "severity": "MEDIUM",
+    "excerpt": "decorator: pytest.mark.skipif(not __import__('os').environ.get('ANTHROPIC_API_KEY'), reason='No ANTHROPIC_API_KEY \u2014 skipping live-API smoke test')"
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_prompt.py",
+    "test_name": "TestCacheControl::test_candidate_metadata_cached_by_default",
+    "line": 257,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert cached_indices, \"Expected at least one cached user block\""
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_prompt_injection.py",
+    "test_name": "test_prompt_does_not_interpolate_candidate_names",
+    "line": 95,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert header_blocks, \"expected at least one [candidate #N ...] header\""
+  },
+  {
+    "file": "hardware/live-shelf/server/cloud/tests/test_integration_hooks.py",
+    "test_name": "TestBackfillWindowHours::test_window_is_threaded_through_to_sql",
+    "line": 839,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert captured, \"expected a query against session_resolutions\""
+  },
+  {
+    "file": "hardware/live-shelf/server/cloud/tests/test_outbox.py",
+    "test_name": "test_enqueue_event_does_not_mutate_caller_dict",
+    "line": 88,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert returned_id  # sanity"
+  },
+  {
+    "file": "hardware/live-shelf/server/cloud/tests/test_scenarios.py",
+    "test_name": "TestScenario1PreNtpDropped::test_pre_ntp_reconciler_resolution_dropped",
+    "line": 151,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert warn_records, \"expected a WARN log about pre-NTP drop\""
+  },
+  {
+    "file": "hardware/live-shelf/server/cloud/tests/test_scenarios.py",
+    "test_name": "TestScenario6DeviceRevokedMidDrain::test_401_surfaces_as_error_with_pending_count_and_keeps_row_live",
+    "line": 520,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert errors, \"expected at least one ERROR-level log for 401\""
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_repo.py",
+    "test_name": "TestProducts::test_create_and_get",
+    "line": 186,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert p.product_id"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_repo.py",
+    "test_name": "TestLots::test_create_and_get",
+    "line": 273,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert lot.lot_id"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_repo.py",
+    "test_name": "TestLots::test_create_and_get",
+    "line": 277,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert lot.placed_at  # default-populated"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_repo.py",
+    "test_name": "TestSessions::test_open_session_updates_app_state",
+    "line": 472,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert s.session_id"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_repo.py",
+    "test_name": "TestScaleEvents::test_record_and_get",
+    "line": 550,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert evt.event_id"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_repo.py",
+    "test_name": "TestSessionResolutions::test_write_and_get",
+    "line": 671,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert r.resolution_id"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_repo.py",
+    "test_name": "TestReviewQueue::test_enqueue_and_get",
+    "line": 744,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert item.review_id"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_repo.py",
+    "test_name": "TestCloseSessionRace::test_close_session_logs_warning_on_app_state_mismatch",
+    "line": 918,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert warnings, \"expected a warning about app_state mismatch\""
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_usage_log.py",
+    "test_name": "test_write_usage_log_returns_row_with_id",
+    "line": 132,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert row.usage_id"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_usage_log.py",
+    "test_name": "test_write_usage_log_returns_row_with_id",
+    "line": 137,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert row.created_at  # auto-stamped"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_integration.py",
+    "test_name": "test_full_flow_remove_then_reconcile",
+    "line": 428,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert reconciled, \"session should be reconciled after close\""
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_integration.py",
+    "test_name": "test_full_flow_remove_then_reconcile",
+    "line": 468,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert resolutions, \"fast-path should have written at least one resolution\""
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_integration.py",
+    "test_name": "test_reconciler_handles_catalog_product_id_from_classifier",
+    "line": 747,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert reconciled, \"reconciler should complete without errors\""
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_integration.py",
+    "test_name": "test_reconciler_handles_catalog_product_id_from_classifier",
+    "line": 774,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert resolutions"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_integration.py",
+    "test_name": "test_reconciler_handles_catalog_product_id_from_classifier",
+    "line": 783,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "        assert target, \"expected a resolution with both add_event_id and lot_id\""
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_lifecycle.py",
+    "test_name": "test_session_open_and_close_lifecycle",
+    "line": 461,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert session_id"
+  },
+  {
+    "file": "scripts/e2e_shelf_ingest_prod.py",
+    "test_name": "test_event_cross_user",
+    "line": 1180,
+    "pattern": "weak-matcher:truthy-only",
+    "severity": "MEDIUM",
+    "excerpt": "    assert before, \"setup: other user's lot should exist\""
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/chat-streaming.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "chat-streaming.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-streamable.test.ts",
+    "test_name": "initialize returns protocol version, capabilities, and server info",
+    "line": 125,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(client.currentSessionId).toBeTruthy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+    "test_name": "SSE connection with valid key establishes session",
+    "line": 132,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(client.currentSessionId).toBeTruthy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+    "test_name": "tools/call CHEFBYTE_create_product works end-to-end",
+    "line": 224,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(parsed.product).toBeDefined();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+    "test_name": "tools/call CHEFBYTE_create_product works end-to-end",
+    "line": 225,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(parsed.product.product_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+    "test_name": "tools/call COACHBYTE_get_today_plan works end-to-end",
+    "line": 267,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(parsed.plan_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+    "test_name": "tools/call COACHBYTE_get_today_plan works end-to-end",
+    "line": 268,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(parsed.logical_date).toBeTruthy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+    "test_name": "POST /auth with valid API key returns sessionId and sseUrl",
+    "line": 282,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.sessionId).toBeTruthy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+    "test_name": "POST /auth \u2192 GET /sse?sessionId \u2192 initialize works end-to-end",
+    "line": 366,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(messageSessionId).toBeTruthy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+    "test_name": "serves OAuth protected resource metadata at well-known endpoint",
+    "line": 445,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.resource).toBeDefined();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/obsidian-parser.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "obsidian-parser.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/obsidian-parser.test.ts",
+    "test_name": "detects a flat root project from FolderName/FolderName.md pattern",
+    "line": 15,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(proj).toBeDefined();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/obsidian-parser.test.ts",
+    "test_name": "matches folder and file case-insensitively",
+    "line": 40,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(proj).toBeDefined();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/obsidian-parser.test.ts",
+    "test_name": "returns the project for an exact canonical id",
+    "line": 155,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(project).toBeDefined();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/obsidian-parser.test.ts",
+    "test_name": "returns the project for a unique case-insensitive displayName",
+    "line": 162,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(project).toBeDefined();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/sse.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "sse.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/tool-executor.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "tool-executor.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/tool-logger.test.ts",
+    "test_name": "logs status=ok when tool returns a successful ToolResult",
+    "line": 123,
+    "pattern": "weak-matcher:toBeFalsy",
+    "severity": "LOW",
+    "excerpt": "    expect(result.isError).toBeFalsy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/tool-logger.test.ts",
+    "test_name": "does not break the tool call when the insert rejects with an error",
+    "line": 201,
+    "pattern": "weak-matcher:toBeFalsy",
+    "severity": "LOW",
+    "excerpt": "    expect(result.isError).toBeFalsy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/tool-logger.test.ts",
+    "test_name": "does not break the tool call when the insert throws",
+    "line": 216,
+    "pattern": "weak-matcher:toBeFalsy",
+    "severity": "LOW",
+    "excerpt": "    expect(result.isError).toBeFalsy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/tool-logger.test.ts",
+    "test_name": "works without ctx.waitUntil (test/node environment)",
+    "line": 246,
+    "pattern": "weak-matcher:toBeFalsy",
+    "severity": "LOW",
+    "excerpt": "    expect(result.isError).toBeFalsy();"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/validate.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "validate.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/mcp-worker/src/__tests__/voice-ack.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "voice-ack.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/home.spec.ts",
+    "test_name": "meal plan to cart sync adds recipe ingredients to shopping list",
+    "line": 329,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "        expect(shopItems).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/home.spec.ts",
+    "test_name": "meal plan to cart sync adds recipe ingredients to shopping list",
+    "line": 339,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "        expect(chickenItem).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/home.spec.ts",
+    "test_name": "meal plan to cart sync adds recipe ingredients to shopping list",
+    "line": 344,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "        expect(riceItem).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/inventory.spec.ts",
+    "test_name": "verify DB state after consume operation",
+    "line": 431,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "        expect(foodLogs).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/realtime.spec.ts",
+    "test_name": "external stock_lots mutation is delivered via postgres_changes to the browser",
+    "line": 103,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(update).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/realtime.spec.ts",
+    "test_name": "external products mutation is delivered via postgres_changes to the browser",
+    "line": 140,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(update).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "scanning barcode in shopping mode adds to shopping list",
+    "line": 251,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "        expect(shoppingItems).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "verify DB state after scan in purchase mode",
+    "line": 614,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "        expect(lots).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "scanner calls analyze-product edge function and creates real product (CORS regression guard)",
+    "line": 986,
+    "pattern": "big-timeout:45000ms",
+    "severity": "LOW",
+    "excerpt": "      // falls through to creating `Unknown (073731004197)` placeholder."
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "scanner calls analyze-product edge function and creates real product (CORS regression guard)",
+    "line": 1002,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "        .single();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "scanning same barcode twice in purchase mode increments stock quantity",
+    "line": 1131,
+    "pattern": "big-timeout:60000ms",
+    "severity": "LOW",
+    "excerpt": "      }).toPass({ timeout: 60000 });"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "SCN1 \u2014 clean user scans known-OFF barcode, full nutrition lands",
+    "line": 1228,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "        expect(data).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "SCN2 \u2014 scanning barcode with prior placeholder row UPDATES to real product",
+    "line": 1260,
+    "pattern": "weak-matcher:toBeFalsy",
+    "severity": "LOW",
+    "excerpt": "      expect(seedErr).toBeFalsy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "SCN2 \u2014 scanning barcode with prior placeholder row UPDATES to real product",
+    "line": 1301,
+    "pattern": "weak-matcher:toBeFalsy",
+    "severity": "LOW",
+    "excerpt": "        expect(error).toBeFalsy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "SCN2 \u2014 scanning barcode with prior placeholder row UPDATES to real product",
+    "line": 1302,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "        expect(data).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "SCN4 \u2014 analyze-product ai_degraded triggers OFF fallback product",
+    "line": 1412,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "        expect(data).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/scanner.spec.ts",
+    "test_name": "SCN5 \u2014 analyze-product 503 bad_key surfaces actionable error (not silent placeholder)",
+    "line": 1461,
+    "pattern": "weak-matcher:toBeFalsy",
+    "severity": "LOW",
+    "excerpt": "      expect(error).toBeFalsy();"
+  },
+  {
+    "file": "apps/web/e2e/chefbyte/shopping.spec.ts",
+    "test_name": "adding non-existent product name creates placeholder product",
+    "line": 308,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "        expect(placeholderProducts).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/coachbyte/today.spec.ts",
+    "test_name": "can submit ad-hoc set with exercise, reps, and load \u2014 verified in DB",
+    "line": 192,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(dbSets).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/coachbyte/today.spec.ts",
+    "test_name": "Realtime: external coachbyte.timers mutation is delivered via postgres_changes",
+    "line": 637,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(running).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/contracts/seed-smoke.spec.ts",
+    "test_name": "module activation seeds default locations (Fridge, Pantry, Freezer)",
+    "line": 29,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "      expect(locations).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/e2e/contracts/seed-smoke.spec.ts",
+    "test_name": "module activation seeds default rest_seconds for coachbyte",
+    "line": 65,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "      expect(data).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/e2e/contracts/seed-smoke.spec.ts",
+    "test_name": "split template_sets JSONB has required fields",
+    "line": 83,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(squat).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/contracts/seed-smoke.spec.ts",
+    "test_name": "split template_sets JSONB has required fields",
+    "line": 84,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(bench).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/contracts/seed-smoke.spec.ts",
+    "test_name": "split template_sets JSONB has required fields",
+    "line": 106,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "      expect(split).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/e2e/contracts/validation.spec.ts",
+    "test_name": "HTML in display name rendered as text, not XSS executed",
+    "line": 55,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(pageTitle).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/contracts/validation.spec.ts",
+    "test_name": "very long product name (200+ chars) handled gracefully",
+    "line": 87,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "      expect(product).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/e2e/hub/password-reset.spec.ts",
+    "test_name": "recovery link lands on /hub/reset-password and new password takes effect",
+    "line": 146,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(adminUser?.user?.updated_at).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.prod.spec.ts",
+    "test_name": "COACHBYTE_get_timer returns idle against prod mcp.lunahub.dev",
+    "line": 70,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(initResp.result?.protocolVersion).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.prod.spec.ts",
+    "test_name": "COACHBYTE_get_timer returns idle against prod mcp.lunahub.dev",
+    "line": 80,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(result).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.prod.spec.ts",
+    "test_name": "COACHBYTE_get_timer returns idle against prod mcp.lunahub.dev",
+    "line": 84,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(text).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_consume reduces stock and logs macros",
+    "line": 130,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_consume reduces stock and logs macros",
+    "line": 150,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenLog).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_create_recipe with ingredients",
+    "line": 206,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.recipe.recipe_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_meal_plan returns week with seeded entries",
+    "line": 243,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(entry).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_recipes returns recipes with ingredients",
+    "line": 565,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(recipe).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_recipes returns recipes with ingredients",
+    "line": 566,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(recipe.recipe_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_recipes returns recipes with ingredients",
+    "line": 574,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenIngredient).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_recipes returns recipes with ingredients",
+    "line": 577,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenIngredient.macros_per_container).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_cookable identifies recipes with sufficient stock",
+    "line": 600,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenRice).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_add_meal creates a meal plan entry",
+    "line": 625,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.meal.meal_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_inventory returns inventory grouped by product",
+    "line": 664,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(chicken).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_inventory returns inventory grouped by product",
+    "line": 666,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(chicken.nearest_expiry).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_inventory returns inventory grouped by product",
+    "line": 670,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(rice).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_product_lots returns lots for a specific product",
+    "line": 697,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(lot.lot_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_product_lots returns lots for a specific product",
+    "line": 699,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(lot.expires_on).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_get_product_lots returns lots for a specific product",
+    "line": 700,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(lot.location).toBeTruthy(); // Should be \"Fridge\""
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "CHEFBYTE_mark_done completes meal and deducts stock",
+    "line": 739,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(meal.completed_at).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_get_split returns weekly split",
+    "line": 805,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(todaySplit).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE timer lifecycle: set -> get -> pause -> resume -> reset",
+    "line": 835,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(setData.timer_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_get_history returns completed sets",
+    "line": 886,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(todayPlan).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_get_prs returns personal records",
+    "line": 915,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(pr.exercise_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_get_prs returns personal records",
+    "line": 919,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(pr.rm_table).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_update_summary persists text",
+    "line": 937,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(planId).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_log_set logs an ad-hoc completed set",
+    "line": 977,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.completed_set_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_log_set logs an ad-hoc completed set",
+    "line": 978,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.completed_at).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_update_split updates template sets for a weekday",
+    "line": 1020,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.split_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_update_plan replaces planned sets for a day",
+    "line": 1059,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(planId).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_complete_next_set completes the next queued set",
+    "line": 1109,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(planId).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_complete_next_set completes the next queued set",
+    "line": 1119,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.message).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/mcp-tools.spec.ts",
+    "test_name": "COACHBYTE_complete_next_set completes the next queued set",
+    "line": 1139,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data2.message).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/parity.spec.ts",
+    "test_name": "create product: UI vs MCP produce equivalent DB rows",
+    "line": 207,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(uiProductRow).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/parity.spec.ts",
+    "test_name": "log temp item: UI vs MCP produce equivalent temp_items rows",
+    "line": 645,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.item.temp_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/e2e/mcp/parity.spec.ts",
+    "test_name": "log temp item: UI vs MCP produce equivalent temp_items rows",
+    "line": 688,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(uiTempRow).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "auth-activation-data.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+    "test_name": "activating CoachByte seeds user_settings and allows plan creation",
+    "line": 39,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(afterSettings).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+    "test_name": "activating CoachByte seeds user_settings and allows plan creation",
+    "line": 49,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(planResult).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+    "test_name": "activating CoachByte seeds user_settings and allows plan creation",
+    "line": 51,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect((planResult as any).plan_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+    "test_name": "activating ChefByte seeds default location",
+    "line": 69,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(locations).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+    "test_name": "full lifecycle: activate -> use -> deactivate -> reactivate",
+    "line": 150,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(inserted).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+    "test_name": "full lifecycle: activate -> use -> deactivate -> reactivate",
+    "line": 151,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(inserted!.product_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+    "test_name": "full lifecycle: activate -> use -> deactivate -> reactivate",
+    "line": 187,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(locations).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+    "test_name": "mark_meal_done consumes ingredients and logs macros",
+    "line": 170,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(result).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+    "test_name": "mark_meal_done consumes ingredients and logs macros",
+    "line": 200,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(logs).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+    "test_name": "mark_meal_done consumes ingredients and logs macros",
+    "line": 205,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(chickenLog).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+    "test_name": "mark_meal_done consumes ingredients and logs macros",
+    "line": 219,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(riceLog).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+    "test_name": "get_daily_macros aggregates food_logs + temp_items",
+    "line": 279,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(macros).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+    "test_name": "mark_meal_done with meal_prep creates [MEAL] product + stock lot",
+    "line": 325,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(result).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+    "test_name": "mark_meal_done with meal_prep creates [MEAL] product + stock lot",
+    "line": 340,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(mealProducts).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+    "test_name": "mark_meal_done with meal_prep creates [MEAL] product + stock lot",
+    "line": 362,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(mealLots).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/coachbyte/workout-flow.test.ts",
+    "test_name": "ensure_daily_plan bootstraps from split template",
+    "line": 81,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(planResult).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/coachbyte/workout-flow.test.ts",
+    "test_name": "completed_sets have correct logical_date matching plan",
+    "line": 223,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(plan).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "returns existing product without quota hit",
+    "line": 111,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.product).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "looks up a real barcode from OpenFoodFacts",
+    "line": 230,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "looks up a real barcode from OpenFoodFacts",
+    "line": 231,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off.product_name).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "Coca-Cola Zero (049000042566) returns correct OFF data",
+    "line": 250,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "Coca-Cola Zero (049000042566) returns correct OFF data",
+    "line": 253,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off.product_name).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "Nutella (3017620422003) returns correct OFF data with nutriments",
+    "line": 273,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "Nutella (3017620422003) returns correct OFF data with nutriments",
+    "line": 280,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off.image_url).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "Coca-Cola Original EU (5449000000996) returns correct OFF data",
+    "line": 296,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "Coca-Cola Original EU (5449000000996) returns correct OFF data",
+    "line": 301,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off.categories).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "real barcode returns suggestion=null and valid OFF data when no API key",
+    "line": 324,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "real barcode returns suggestion=null and valid OFF data when no API key",
+    "line": 325,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off.product_name).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "real barcode returns suggestion=null and valid OFF data when no API key",
+    "line": 326,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off.nutriments).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "OFF response includes serving_size and nutriments fields",
+    "line": 350,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "OFF response includes serving_size and nutriments fields",
+    "line": 365,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.off.product_name).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "OFF API returns correct nutriment data for Nutella (3017620422003)",
+    "line": 421,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(n).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+    "test_name": "OFF API returns correct nutriment data for Nutella (3017620422003)",
+    "line": 426,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(p.serving_size).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/encryption-roundtrip.test.ts",
+    "test_name": "credentials are encrypted in storage (not plaintext)",
+    "line": 83,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(row).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/encryption-roundtrip.test.ts",
+    "test_name": "get_extension_credentials_admin works for service_role",
+    "line": 119,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(retrieved).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /event live_scale without product_id but with pairing resolves from pairing",
+    "line": 313,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.resolved_lot_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /heartbeat creates scale_pairings rows on first sight",
+    "line": 604,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(p.last_heartbeat_ts).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /heartbeat creates scale_pairings rows on first sight",
+    "line": 614,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(dev.last_heartbeat_ts).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /intake creates a new product",
+    "line": 670,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.product_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /intake with null barcode creates a new product (does not upsert)",
+    "line": 689,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(b1.product_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /intake with null barcode creates a new product (does not upsert)",
+    "line": 701,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(b2.product_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /intake returns the full inserted row (not just product_id)",
+    "line": 764,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.product_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /intake persists previously-dropped fields (brand, variant, serving_weight_g, unit_type, density_g_per_ml, certified)",
+    "line": 793,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.product_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /event dedup replay returns cached applied=true with same resolved_lot_id",
+    "line": 1107,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(b1.resolved_lot_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+    "test_name": "POST /intake persists ALL supported fields into the products row",
+    "line": 1194,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(body.product_id).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/account-page.test.ts",
+    "test_name": "loads profile with display_name, timezone, day_start_hour",
+    "line": 48,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/api-key-lifecycle.test.ts",
+    "test_name": "round-trip auth: plaintext key hashes to match stored hash",
+    "line": 76,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(matchedKey).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/app-activation.test.ts",
+    "test_name": "hub profile remains intact after deactivation",
+    "line": 68,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(profile).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "login with correct credentials returns valid session",
+    "line": 112,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.session).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "login with wrong password returns error",
+    "line": 126,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(error).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "logout clears session, subsequent calls rejected",
+    "line": 144,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(before.session).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "duplicate email signup returns error",
+    "line": 172,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(firstUser.user).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "session token refresh works",
+    "line": 201,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.session).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "password update via admin: can login with new password",
+    "line": 271,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.session).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "password update via admin: can login with new password",
+    "line": 278,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(oldError).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "demo login succeeds with correct credentials",
+    "line": 291,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.session).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "demo login with wrong password returns error (Demo account unavailable branch)",
+    "line": 299,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(error).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "demo login with wrong password returns error (Demo account unavailable branch)",
+    "line": 300,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(error!.message).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "reset_demo_dates RPC exists and executes successfully for demo user",
+    "line": 314,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(session.session).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/auth-lifecycle.test.ts",
+    "test_name": "reset_demo_dates RPC exists and executes successfully for demo user",
+    "line": 329,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meals).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/profile-crud.test.ts",
+    "test_name": "rejects day_start_hour = 25 (CHECK constraint: BETWEEN 0 AND 23)",
+    "line": 147,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(error).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/profile-crud.test.ts",
+    "test_name": "rejects day_start_hour = -1 (CHECK constraint: BETWEEN 0 AND 23)",
+    "line": 158,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(error).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/profile-crud.test.ts",
+    "test_name": "RLS: user B cannot read user A profile",
+    "line": 195,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(ownProfile).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/reset-password.test.ts",
+    "test_name": "successful password update calls auth.updateUser",
+    "line": 124,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(oldErr).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/hub/reset-password.test.ts",
+    "test_name": "server error from updateUser returns error message",
+    "line": 139,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(error).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "get_daily_macros RPC returns macro breakdown for today",
+    "line": 165,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.calories).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "get_daily_macros RPC returns macro breakdown for today",
+    "line": 166,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.protein).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "get_daily_macros RPC returns macro breakdown for today",
+    "line": 167,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.carbs).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "get_daily_macros RPC returns macro breakdown for today",
+    "line": 168,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.fat).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "meal_plan_entries meal-prep query with recipe/product joins succeeds",
+    "line": 222,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(entry.recipes).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "unmark_meal_done RPC reverses a completed meal from dashboard",
+    "line": 248,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "unmark_meal_done RPC reverses a completed meal from dashboard",
+    "line": 262,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(logsAfterMark).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "unmark_meal_done RPC reverses a completed meal from dashboard",
+    "line": 271,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(undoResult).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "food_logs query returns consumed items with meal_id and meal info joins",
+    "line": 461,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(entry.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "food_logs from mark_meal_done have meal_id and meal_plan_entries join data",
+    "line": 503,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "food_logs from mark_meal_done have meal_id and meal_plan_entries join data",
+    "line": 527,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "      expect(entry.meal_plan_entries).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "food_logs from mark_meal_done have meal_id and meal_plan_entries join data",
+    "line": 529,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "      expect(entry.meal_plan_entries.recipes).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "delete food_logs by meal_id removes all logs for that meal",
+    "line": 560,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "delete food_log by log_id",
+    "line": 682,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(logs).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "delete temp_item by temp_id",
+    "line": 731,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(inserted).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-home.test.ts",
+    "test_name": "delete meal_plan_entry by meal_id",
+    "line": 763,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock_lots query with location join matches page pattern",
+    "line": 74,
+    "pattern": "weak-matcher:not.toBeUndefined",
+    "severity": "LOW",
+    "excerpt": "    expect(first.expires_on).not.toBeUndefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock_lots query with location join matches page pattern",
+    "line": 78,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(withLocation).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock lots can be aggregated per product for grouped view",
+    "line": 128,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(prods).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock lots can be aggregated per product for grouped view",
+    "line": 130,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(stockLots).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock lots can be aggregated per product for grouped view",
+    "line": 158,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(chicken).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock lots can be aggregated per product for grouped view",
+    "line": 164,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(rice).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock lots can be aggregated per product for grouped view",
+    "line": 170,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(eggs).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock lots can be aggregated per product for grouped view",
+    "line": 176,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(bananas).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock lots can be aggregated per product for grouped view",
+    "line": 183,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(protein).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "grouped view filters out zero-stock products",
+    "line": 257,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(prods).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "grouped view filters out zero-stock products",
+    "line": 258,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(stockLots).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "stock lot merge on same product/location/expiry",
+    "line": 375,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(found).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "addStock insert matches page pattern",
+    "line": 426,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(lots).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-inventory.test.ts",
+    "test_name": "consume all stock \u2014 depletes product to zero lots",
+    "line": 518,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(pid).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "get_daily_macros RPC returns aggregated macro totals",
+    "line": 105,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.calories).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "get_daily_macros RPC returns aggregated macro totals",
+    "line": 106,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.protein).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "get_daily_macros RPC returns aggregated macro totals",
+    "line": 107,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.carbs).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "get_daily_macros RPC returns aggregated macro totals",
+    "line": 108,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(data.fat).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "food_logs query with EXACT select columns from MacroPage",
+    "line": 161,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(log.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "meal_plan_entries planned items query with deep recipe ingredients join",
+    "line": 263,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(recipeEntry).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "meal_plan_entries planned items query with deep recipe ingredients join",
+    "line": 273,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(chickenIngr).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "food_logs delete by log_id removes the entry",
+    "line": 391,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-macros.test.ts",
+    "test_name": "temp_items delete by temp_id removes the entry",
+    "line": 438,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(inserted).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "meal plan query with recipe + product joins and date range filter",
+    "line": 77,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "meal plan query with recipe + product joins and date range filter",
+    "line": 95,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(entry).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "meal plan query with recipe + product joins and date range filter",
+    "line": 109,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(entry.recipes).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "product-based meal entry returns product join correctly",
+    "line": 160,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(entry).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "product-based meal entry returns product join correctly",
+    "line": 164,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(entry.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "inserts a new meal plan entry (recipe type)",
+    "line": 198,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(verify).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "inserts a new meal plan entry (product type, meal prep)",
+    "line": 232,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(verify).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "marks a meal as done via RPC",
+    "line": 266,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "marks a meal as done via RPC",
+    "line": 274,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(result).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "marks a meal as done via RPC",
+    "line": 284,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(verify).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "unmarks a done meal via RPC (reverses completion)",
+    "line": 312,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "unmarks a done meal via RPC (reverses completion)",
+    "line": 325,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(before!.completed_at).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "unmarks a done meal via RPC (reverses completion)",
+    "line": 332,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(undoResult).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "unmark_meal_done on uncompleted meal returns success=false",
+    "line": 371,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "deletes a meal plan entry",
+    "line": 404,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "date range filter excludes meals from other weeks",
+    "line": 441,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(oldMeal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "date range filter excludes meals from other weeks",
+    "line": 458,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(currentMeal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "date range filter excludes meals from other weeks",
+    "line": 474,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(found).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "food_logs query for selected day",
+    "line": 528,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(entry.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "delete food_log from meal plan page",
+    "line": 607,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(logs).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "delete temp_item from meal plan page",
+    "line": 645,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(inserted).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "day total macros aggregation",
+    "line": 678,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(recipeMeal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "day total macros aggregation",
+    "line": 692,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(productMeal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "recipe search query for add meal dropdown",
+    "line": 789,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(seeded).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-mealplan.test.ts",
+    "test_name": "toggles meal_prep flag on a meal plan entry",
+    "line": 841,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(meal).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "fetches single recipe by ID with ingredients + products join",
+    "line": 59,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(recipe.recipe_ingredients).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "fetches single recipe by ID with ingredients + products join",
+    "line": 66,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(chickenIng).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "fetches single recipe by ID with ingredients + products join",
+    "line": 81,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(riceIng).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "products list query for ingredient search dropdown",
+    "line": 125,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(chicken).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "updates an existing recipe",
+    "line": 207,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(created).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "updates an existing recipe",
+    "line": 227,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(fetched).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "replaces recipe ingredients on update (delete + insert)",
+    "line": 254,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(r).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "replaces recipe ingredients on update (delete + insert)",
+    "line": 300,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(banana).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "replaces recipe ingredients on update (delete + insert)",
+    "line": 306,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(protein).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "deletes a recipe and its ingredients",
+    "line": 330,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(r).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipe-form.test.ts",
+    "test_name": "creates recipe with null optional fields (description, active_time, total_time, instructions)",
+    "line": 386,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(fetched).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipes list query with recipe_ingredients + products join",
+    "line": 52,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(recipe).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipes list query with recipe_ingredients + products join",
+    "line": 60,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(recipe.recipe_ingredients).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipes list query with recipe_ingredients + products join",
+    "line": 68,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(chickenIng).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipes list query with recipe_ingredients + products join",
+    "line": 69,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(chickenIng.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipes list query with recipe_ingredients + products join",
+    "line": 83,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(riceIng).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipes list query with recipe_ingredients + products join",
+    "line": 84,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(riceIng.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipe with no ingredients returns empty recipe_ingredients array",
+    "line": 162,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(emptyRecipe).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipe row shape includes all fields used by the page",
+    "line": 183,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(recipe).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-recipes.test.ts",
+    "test_name": "recipe row shape includes all fields used by the page",
+    "line": 202,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(ing.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-scanner.test.ts",
+    "test_name": "undo purchase deletes the stock lot created during scan",
+    "line": 359,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(lot).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-scanner.test.ts",
+    "test_name": "undo consume re-adds stock lot and deletes food_log",
+    "line": 397,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(logs).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-scanner.test.ts",
+    "test_name": "undo shopping add deletes the shopping list item",
+    "line": 777,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(item).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-settings.test.ts",
+    "test_name": "location delete blocked when stock_lots exist at location",
+    "line": 250,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(loc).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-settings.test.ts",
+    "test_name": "location delete succeeds when no stock_lots at location",
+    "line": 294,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(loc).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-settings.test.ts",
+    "test_name": "liquidtrack device insert matches page pattern",
+    "line": 352,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(device).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-settings.test.ts",
+    "test_name": "liquidtrack device insert matches page pattern",
+    "line": 358,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(device.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-shopping.test.ts",
+    "test_name": "add item to shopping list matches page pattern",
+    "line": 89,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(item).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-shopping.test.ts",
+    "test_name": "add item to shopping list matches page pattern",
+    "line": 94,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(item.products).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-shopping.test.ts",
+    "test_name": "toggle purchased matches page pattern",
+    "line": 110,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(items).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-shopping.test.ts",
+    "test_name": "delete item by cart_item_id matches page pattern",
+    "line": 152,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(items).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-shopping.test.ts",
+    "test_name": "importToInventory creates stock lots and removes purchased items",
+    "line": 310,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(item).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-shopping.test.ts",
+    "test_name": "shopping list qty increment updates existing item",
+    "line": 382,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(initial).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/chef-walmart.test.ts",
+    "test_name": "product with walmart_link but no price appears in missing prices",
+    "line": 118,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(chicken).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "completed_sets detail query returns joined exercise name",
+    "line": 182,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(first.exercises).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "expanded day detail with zero completed sets returns empty array",
+    "line": 200,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(emptyPlan).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "history days filtered by exercise_id returns only matching plans",
+    "line": 233,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(completedSets).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "history days filtered by exercise_id returns only matching plans",
+    "line": 244,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(matchingPlanIds).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "history days filtered by exercise_id returns only matching plans",
+    "line": 264,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(differentEx).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "completed_sets filter by exercise_id returns plan_ids",
+    "line": 306,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(completedSets).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "completed_sets filter by exercise_id returns plan_ids",
+    "line": 318,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(planIds).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "plan detail query returns completed_sets for expand/collapse",
+    "line": 336,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(detail).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "plan detail query returns completed_sets for expand/collapse",
+    "line": 341,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(detail![0].completed_set_id).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-history.test.ts",
+    "test_name": "plan detail query returns completed_sets for expand/collapse",
+    "line": 342,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(detail![0].actual_reps).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "completed_sets query returns exercise_id, actual_reps, actual_load, exercises(name)",
+    "line": 89,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(first.exercises).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "PR data groups correctly by exercise with rep bests",
+    "line": 133,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(squatData).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "PR data groups correctly by exercise with rep bests",
+    "line": 140,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(benchData).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "user_settings pr_tracked_exercise_ids save and load round-trip",
+    "line": 238,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(loaded).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "search excludes already-tracked exercise_ids",
+    "line": 296,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(allExercises).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "removing all tracked exercises returns empty PR list",
+    "line": 326,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(completedSets).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "completed_sets query with date range gte filter",
+    "line": 390,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(sets).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "completed_sets query with date range gte filter",
+    "line": 400,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "      expect(s.exercises).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-prs.test.ts",
+    "test_name": "filtering completed_sets by tracked exercise_ids works",
+    "line": 417,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(allSets).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-settings.test.ts",
+    "test_name": "custom exercise insert creates a user-owned exercise",
+    "line": 124,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(custom).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-settings.test.ts",
+    "test_name": "add exercise with empty name \u2014 DB allows empty string (UI prevents this)",
+    "line": 275,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(insertResult.data).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-settings.test.ts",
+    "test_name": "add + reload exercises list shows new custom exercise",
+    "line": 331,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(hipThrust).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "planned_sets query with exercises join returns correct columns",
+    "line": 72,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(first.exercises).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "completed_sets query returns the newly completed set with exercise join",
+    "line": 135,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(cs.exercises).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "planned_sets insert adds a new set to the plan",
+    "line": 415,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(insertResult.data).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "planned_sets delete removes a set from the plan",
+    "line": 450,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(tempSet).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "completed_sets delete removes a completed set",
+    "line": 493,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(inserted).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "daily_plans delete resets entire plan (cascade)",
+    "line": 522,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(newPlan).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "complete_next_set with zero actual_load (bodyweight exercise)",
+    "line": 568,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(freshPlan).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "complete_next_set with zero actual_load (bodyweight exercise)",
+    "line": 596,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(completed).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "complete_next_set returns data enabling PR detection when new record set",
+    "line": 631,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(prevSets).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "first ever completed set for exercise triggers first-record branch",
+    "line": 692,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(prevSets).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "delete completed set by completed_set_id removes exactly that set",
+    "line": 747,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(inserted).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/pages/coach-today.test.ts",
+    "test_name": "PR detection: queries previous completed_sets for same exercise",
+    "line": 814,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(allSetsForExercise).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/integration/realtime/subscriptions.test.ts",
+    "test_name": "tracks presence state across users",
+    "line": 119,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(joinEvent.newPresences).toBeDefined();"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/chefbyte/ScannerKeypad.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "ScannerKeypad.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/chefbyte/ScannerNameEdit.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "ScannerNameEdit.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/coachbyte/AdHocSetForm.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "AdHocSetForm.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/coachbyte/RestTimer.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "RestTimer.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/coachbyte/SetQueue.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "SetQueue.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hooks/useScannerDetection.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "useScannerDetection.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/ApiKeyGenerator.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "ApiKeyGenerator.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/AppActivationCard.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "AppActivationCard.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/ErrorBoundary.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "ErrorBoundary.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/ExtensionCard.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "ExtensionCard.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/HubHomePage.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "HubHomePage.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/OfflineIndicator.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "OfflineIndicator.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/SkeletonScreen.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "SkeletonScreen.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/SkeletonScreen.test.tsx",
+    "test_name": "CardSkeleton renders skeleton elements in a bordered container",
+    "line": 32,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(card).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/hub/ToolToggle.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "ToolToggle.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/auto-scale.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "auto-scale.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/compute-meal-entry-macros.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "compute-meal-entry-macros.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/date-utils.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "date-utils.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/epley.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "epley.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/inventory-review-state.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "inventory-review-state.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/isValidLanIp.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "isValidLanIp.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/keypad-logic.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "keypad-logic.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/macro-calc.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "macro-calc.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/pct-of.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "pct-of.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/recipe-macros.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "recipe-macros.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/recipe-stock-status.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "recipe-stock-status.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/shared-constants.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "shared-constants.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/shared-dates.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "shared-dates.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/pure/stock-badge.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "stock-badge.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/shared/MacroProgressBar.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "MacroProgressBar.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/shared/MacroProgressBar.test.tsx",
+    "test_name": "renders fill bar with correct width style",
+    "line": 43,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(fillBar).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/shared/MacroProgressBar.test.tsx",
+    "test_name": "applies the color to the fill bar",
+    "line": 53,
+    "pattern": "weak-matcher:not.toBeNull",
+    "severity": "LOW",
+    "excerpt": "    expect(fillBar).not.toBeNull();"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/shared/ModalOverlay.test.tsx",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "ModalOverlay.test.tsx \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/shared/ModalOverlay.test.tsx",
+    "test_name": "applies custom maxWidth to card container",
+    "line": 57,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(cardEl).toBeTruthy();"
+  },
+  {
+    "file": "apps/web/src/__tests__/unit/shared/ModalOverlay.test.tsx",
+    "test_name": "uses default maxWidth of 500px",
+    "line": 68,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(cardEl).toBeTruthy();"
+  },
+  {
+    "file": "hardware/live-shelf/server/adapters/tests/test_candidate_source_batching.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_candidate_source_batching.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/adapters/tests/test_reconciler_repo_cloud.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_reconciler_repo_cloud.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/adapters/tests/test_reconciler_repo_filter.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_reconciler_repo_filter.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/camera/tests/test_locked_settings_pin.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_locked_settings_pin.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/camera/tests/test_session_capture.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_session_capture.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/camera/tests/test_session_capture_extra.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_session_capture_extra.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_candidate_pool.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_candidate_pool.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_candidate_pool_shelf_scoping.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_candidate_pool_shelf_scoping.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_in_flight_pool.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_in_flight_pool.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_prompt.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_prompt.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/classifier/tests/test_prompt_injection.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_prompt_injection.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/cloud/tests/test_integration_hooks.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_integration_hooks.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/cloud/tests/test_scenarios.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_scenarios.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/cloud/tests/test_worker.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_worker.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/handlers/tests/test_brightness_extra.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_brightness_extra.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/handlers/tests/test_runtime_state.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_runtime_state.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/handlers/tests/test_validators.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_validators.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/handlers/tests/test_validators_extra.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_validators_extra.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/intake/tests/test_off_lookup.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_off_lookup.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/reconciler/tests/test_reconcile.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_reconcile.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/reconciler/tests/test_weight_mismatch_events.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_weight_mismatch_events.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_migrations.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_migrations.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_usage_log.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_usage_log.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/storage/tests/test_wal_concurrency.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_wal_concurrency.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_app_startup.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_app_startup.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_candidate_pool_validation.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_candidate_pool_validation.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_catch_all_scale_routing.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_catch_all_scale_routing.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_catch_all_startup.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_catch_all_startup.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_concurrency.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_concurrency.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_dedup_reboot.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_dedup_reboot.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_heartbeat_regression.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_heartbeat_regression.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_in_flight_apply.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_in_flight_apply.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_in_flight_sweeper_reconciler.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_in_flight_sweeper_reconciler.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_integration.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_integration.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_lifecycle.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_lifecycle.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_pi_received_ts.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_pi_received_ts.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_process_session_events.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_process_session_events.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_session_lot_dedup.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_session_lot_dedup.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_shelves.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_shelves.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_sweep_orphans.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_sweep_orphans.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_unknown_weight_fit_promotion.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_unknown_weight_fit_promotion.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tests/test_usage_log_emission.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_usage_log_emission.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/tools/tests/test_locks.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_locks.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/web/tests/test_api_extra.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_api_extra.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "hardware/live-shelf/server/web/tests/test_routes.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "test_routes.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/extensions.test.ts",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "extensions.test.ts \u2014 no error-case assertion detected"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/extensions.test.ts",
+    "test_name": "returns hierarchy string on success",
+    "line": 163,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(parsed.hierarchy).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/extensions.test.ts",
+    "test_name": "returns entries within the date range",
+    "line": 262,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(parsed.entries).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/extensions.test.ts",
+    "test_name": "returns formatted devices list on success",
+    "line": 1678,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(parsed.formatted).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/extensions.test.ts",
+    "test_name": "returns formatted entity status on success",
+    "line": 1734,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(parsed.formatted).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "creates a product with only a name",
+    "line": 82,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.product).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "creates a product with full nutritional info",
+    "line": 109,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.product.product_id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "adds stock for a product with location",
+    "line": 206,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.lot).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "adds a second lot for the same product (different expiry)",
+    "line": 225,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.lot.lot_id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns inventory grouped by product",
+    "line": 318,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenItem).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "includes lot details when include_lots is true",
+    "line": 331,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenItem).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "includes lot details when include_lots is true",
+    "line": 337,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "        expect(lot.lot_id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "does not include lots by default",
+    "line": 347,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenItem).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "consumes with macros logged",
+    "line": 441,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.macros).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "adds an item to the shopping list",
+    "line": 523,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.item).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns the current shopping list with product details",
+    "line": 570,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(yogurtItem).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "detects products below minimum stock",
+    "line": 618,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(yogurtItem).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "auto-adds deficit to shopping list when auto_add is true",
+    "line": 638,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(yogurtItem).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "logs a temporary food item with full macros",
+    "line": 695,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.item).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "logs a temporary food item with full macros",
+    "line": 696,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.item.temp_id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "logs a temporary food item with full macros",
+    "line": 702,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.item.logical_date).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns daily macro summary for today",
+    "line": 730,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns daily macro summary for today",
+    "line": 731,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.calories).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns daily macro summary for today",
+    "line": 736,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.protein).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns daily macro summary for today",
+    "line": 737,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.carbs).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns daily macro summary for today",
+    "line": 738,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data.fat).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "creates a recipe with ingredients referencing existing products",
+    "line": 789,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.recipe.recipe_id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "the created recipe is retrievable with ingredients and macros",
+    "line": 820,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenIng).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "the created recipe is retrievable with ingredients and macros",
+    "line": 825,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(yogurtIng).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns cookable recipes based on current stock levels",
+    "line": 882,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(chickenBowl).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "adds a meal plan entry with a product",
+    "line": 948,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.meal.meal_id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns meal plan entries with resolved names",
+    "line": 1010,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(productEntry).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "returns meal plan entries with resolved names",
+    "line": 1016,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(recipeEntry).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "marks a meal plan entry as completed and verifies state change",
+    "line": 1041,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(productEntry).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "marks a meal plan entry as completed and verifies state change",
+    "line": 1049,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(data).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "marks a meal plan entry as completed and verifies state change",
+    "line": 1055,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(updatedEntry).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "marks a meal plan entry as completed and verifies state change",
+    "line": 1057,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(updatedEntry.completed_at).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "deletes a shopping item successfully",
+    "line": 1312,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(item).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "toggles item to purchased=true",
+    "line": 1350,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(item).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "imports purchased shopping items into inventory and removes them",
+    "line": 1422,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(lot1).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+    "test_name": "imports purchased shopping items into inventory and removes them",
+    "line": 1426,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(lot2).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getTodayPlan creates a plan from the seeded split and returns sets",
+    "line": 107,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.plan_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getTodayPlan creates a plan from the seeded split and returns sets",
+    "line": 109,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.plan_date).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getTodayPlan creates a plan from the seeded split and returns sets",
+    "line": 110,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.logical_date).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getTodayPlan creates a plan from the seeded split and returns sets",
+    "line": 129,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(squatSets[0].planned_set_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "logSet logs an ad-hoc set and returns completed_set_id",
+    "line": 236,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.completed_set_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "logSet logs an ad-hoc set and returns completed_set_id",
+    "line": 238,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.completed_at).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "after logSet, getTodayPlan shows the ad-hoc set",
+    "line": 254,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(adHoc.completed_at).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getHistory returns today's plan with completed sets",
+    "line": 265,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.days).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getHistory returns today's plan with completed sets",
+    "line": 271,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(todayPlan).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getHistory with default days works",
+    "line": 299,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.days).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getSplit with no weekday returns all splits",
+    "line": 311,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.splits).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getSplit with no weekday returns all splits",
+    "line": 317,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(todaySplit).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getSplit with no weekday returns all splits",
+    "line": 319,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(todaySplit.split_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getSplit with no weekday returns all splits",
+    "line": 324,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(squatTemplate).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getSplit for a weekday with no split returns empty array",
+    "line": 342,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.message).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "updateSplit creates a split for a new weekday",
+    "line": 360,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.split_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "after updateSplit, getSplit confirms both splits exist",
+    "line": 409,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(other).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "setTimer starts a timer with the specified duration",
+    "line": 422,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.timer_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "setTimer starts a timer with the specified duration",
+    "line": 425,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.end_time).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getTimer returns running timer with remaining_seconds > 0",
+    "line": 457,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.timer_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getTimer returns running timer with remaining_seconds > 0",
+    "line": 461,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.end_time).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getPrs returns PRs after completing sets",
+    "line": 490,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.prs).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getPrs returns PRs after completing sets",
+    "line": 498,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(benchPr).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getPrs returns PRs after completing sets",
+    "line": 501,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(benchPr.best_set).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getPrs returns PRs after completing sets",
+    "line": 504,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(benchPr.best_set.date).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getPrs returns PRs after completing sets",
+    "line": 511,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(benchPr.rm_table).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getPrs returns PRs after completing sets",
+    "line": 512,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(benchPr.rm_table['1RM']).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getPrs returns PRs after completing sets",
+    "line": 513,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(benchPr.rm_table['10RM']).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "updatePlan replaces all planned sets with new ones",
+    "line": 574,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "      expect(s.planned_set_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "getHistory after additional sets shows updated totals",
+    "line": 682,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(todayHistory).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "pauseTimer pauses a running timer and returns remaining seconds",
+    "line": 716,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.timer_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "pauseTimer pauses a running timer and returns remaining seconds",
+    "line": 718,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.elapsed_seconds).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "resumeTimer resumes a paused timer and returns running state",
+    "line": 756,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.timer_id).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+    "test_name": "resumeTimer resumes a paused timer and returns running state",
+    "line": 759,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(data.end_time).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/ha-live.test.ts",
+    "test_name": "get_devices lists real devices with domain grouping",
+    "line": 103,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(lightDev).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/ha-live.test.ts",
+    "test_name": "get_devices lists real devices with domain grouping",
+    "line": 106,
+    "pattern": "weak-matcher:expect.any",
+    "severity": "LOW",
+    "excerpt": "    expect(lightDev.state).toEqual(expect.any(String));"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/ha-live.test.ts",
+    "test_name": "get_devices lists real devices with domain grouping",
+    "line": 109,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(switchDev).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/ha-live.test.ts",
+    "test_name": "get_devices lists real devices with domain grouping",
+    "line": 112,
+    "pattern": "weak-matcher:expect.any",
+    "severity": "LOW",
+    "excerpt": "    expect(switchDev.state).toEqual(expect.any(String));"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/obsidian-live.test.ts",
+    "test_name": "should resolve by display name with exact case (Research)",
+    "line": 109,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.root_page_text).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/obsidian-live.test.ts",
+    "test_name": "should resolve by display name case-insensitively (research)",
+    "line": 118,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.root_page_text).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/obsidian-live.test.ts",
+    "test_name": "should return root_page_text but no notes for parent without Notes.md (luna-development)",
+    "line": 127,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "      expect(data.root_page_text).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/obsidian-live.test.ts",
+    "test_name": "should return 0 entries for a range with no matches (no error)",
+    "line": 191,
+    "pattern": "weak-matcher:toBeFalsy",
+    "severity": "LOW",
+    "excerpt": "      expect(result.isError).toBeFalsy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should list projects and find the inbox",
+    "line": 66,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(inbox).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should list projects and find the inbox",
+    "line": 67,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(inbox.id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should list projects and find the inbox",
+    "line": 68,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(inbox.name).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should create a task with content only",
+    "line": 101,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(task.id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should create a task with section_id",
+    "line": 130,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(task.id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should create a task with all fields",
+    "line": 158,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(task.id).toBeTruthy();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should create a task with all fields",
+    "line": 162,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(task.due).toBeTruthy(); // due date format may differ from input"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should list tasks and find the created task",
+    "line": 190,
+    "pattern": "weak-matcher:toBeDefined",
+    "severity": "LOW",
+    "excerpt": "    expect(found).toBeDefined();"
+  },
+  {
+    "file": "packages/app-tools/src/__tests__/integration/todoist-live.test.ts",
+    "test_name": "should update task due_string",
+    "line": 290,
+    "pattern": "weak-matcher:toBeTruthy",
+    "severity": "LOW",
+    "excerpt": "    expect(updated.due).toBeTruthy();"
+  },
+  {
+    "file": "scripts/e2e_shelf_ingest_prod.py",
+    "test_name": "(file-level)",
+    "line": 1,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "e2e_shelf_ingest_prod.py \u2014 no pytest.raises / assertRaises"
+  },
+  {
+    "file": "supabase/tests/00000-test-helpers.sql",
+    "test_name": "(file-level)",
+    "line": 183,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "pgTAP file has no throws_ok / isnt assertions"
+  },
+  {
+    "file": "supabase/tests/chefbyte/daily_macros.test.sql",
+    "test_name": "(file-level)",
+    "line": 2,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "pgTAP file has no throws_ok / isnt assertions"
+  },
+  {
+    "file": "supabase/tests/chefbyte/rls_extras.test.sql",
+    "test_name": "(file-level)",
+    "line": 4,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "pgTAP file has no throws_ok / isnt assertions"
+  },
+  {
+    "file": "supabase/tests/coachbyte/rls_tables.test.sql",
+    "test_name": "(file-level)",
+    "line": 4,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "pgTAP file has no throws_ok / isnt assertions"
+  },
+  {
+    "file": "supabase/tests/hub/activation.test.sql",
+    "test_name": "(file-level)",
+    "line": 2,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "pgTAP file has no throws_ok / isnt assertions"
+  },
+  {
+    "file": "supabase/tests/hub/activation_coachbyte.test.sql",
+    "test_name": "(file-level)",
+    "line": 2,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "pgTAP file has no throws_ok / isnt assertions"
+  },
+  {
+    "file": "supabase/tests/hub/logical_date.test.sql",
+    "test_name": "(file-level)",
+    "line": 2,
+    "pattern": "happy-path-only-file",
+    "severity": "LOW",
+    "excerpt": "pgTAP file has no throws_ok / isnt assertions"
+  }
+]
