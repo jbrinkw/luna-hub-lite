@@ -1055,6 +1055,16 @@ def test_save_cloud_mode_forwards_macro_fields_to_cloud(
     assert sent_body.get("protein_per_serving") == 7.0
     assert sent_body.get("fat_per_serving") == 16.0
     assert sent_body.get("description") == "Creamy peanut butter."
+    # Mutation-testing gap: ``certified`` was previously un-asserted in
+    # the cloud POST body. Dropping it silently would ship every
+    # user-captured intake with certified=NULL on the cloud — losing
+    # the "user confirmed this" signal that the intake flow was
+    # designed to produce (profile_builder sets certified=1).
+    assert sent_body.get("certified") is True, (
+        "intake flow sets certified=1 in profile_builder; the POST "
+        "body must forward that flag (as bool True) or the cloud "
+        "stores a null-certified row"
+    )
 
 
 def test_save_cloud_mode_returns_503_on_cloud_error_5xx(
