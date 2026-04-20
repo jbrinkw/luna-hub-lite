@@ -631,6 +631,48 @@ class TestBacklogLogging:
         assert backlog_records[0].levelname == "INFO"
         assert "pending=5" in backlog_records[0].message
 
+    def test_backlog_exactly_at_threshold_stays_at_info(
+        self, fake_client, conn, caplog, monkeypatch,
+    ):
+        """Mutation-testing gap: ``pending_before > WARN_THRESHOLD`` vs
+        ``>=``. The comment on ``OUTBOX_BACKLOG_WARN_THRESHOLD`` says
+        "above this" — so a backlog EQUAL to the threshold must still
+        be INFO, not WARNING. Pin this inclusivity so the threshold
+        ``> N`` can't silently become ``>= N`` (one-too-many-WARN line
+        in the nightly log).
+        """
+        import logging
+        monkeypatch.setattr(
+            "server.cloud.worker.OUTBOX_BACKLOG_WARN_THRESHOLD", 5
+        )
+        for i in range(5):  # pending == threshold exactly
+            outbox.enqueue_event(conn, {"n": i})
+        fake_client.post.side_effect = [
+            {},  # heartbeat
+            *[CloudError(503, "down")] * 5,
+        ]
+        w = _mk_worker(fake_client, conn)
+        with caplog.at_level(logging.DEBUG, logger="server.cloud.worker"):
+            w.tick()
+        warn_records = [
+            r for r in caplog.records
+            if r.name == "server.cloud.worker"
+            and "outbox pending=" in r.message
+            and "exceeds" in r.message
+        ]
+        info_records = [
+            r for r in caplog.records
+            if r.name == "server.cloud.worker"
+            and "outbox pending=" in r.message
+            and "exceeds" not in r.message
+        ]
+        assert warn_records == [], (
+            "pending == threshold must NOT log WARN (threshold is "
+            "strictly >, not >=)"
+        )
+        assert len(info_records) == 1
+        assert info_records[0].levelname == "INFO"
+
     def test_large_backlog_logs_at_warning(
         self, fake_client, conn, caplog, monkeypatch
     ):
