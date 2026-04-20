@@ -48,6 +48,13 @@ describe('isValidLanIp — deny-list and shape gates', () => {
     expect(isValidLanIp('a'.repeat(254))).toBe(false);
   });
 
+  it('accepts the exact length boundary (253 chars) — catches > vs >= mutation', () => {
+    // 253 is INCLUSIVE — the check is `length > 253`. A mutation to `>= 253`
+    // would reject this legal hostname silently. 253 chars of `a` is a valid
+    // hostname under the regex (starts alphanumeric, only [A-Za-z0-9.-]).
+    expect(isValidLanIp('a'.repeat(253))).toBe(true);
+  });
+
   it('rejects scheme-injection (javascript://evil.com)', () => {
     // This is the load-bearing reason the function exists — a false-positive
     // here would ship as XSS on Inventory → Review.
