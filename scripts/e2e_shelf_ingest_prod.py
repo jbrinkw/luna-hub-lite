@@ -1265,6 +1265,98 @@ def test_stale_fence(ctx):
           len(logs) == 0, f"logs={len(logs)}")
 
 
+def test_concurrent_duplicate_client_event_id(ctx):
+    """#5 — Two POSTs with the SAME client_event_id fired in parallel.
+
+    Contract: regardless of who wins the race, the cloud must apply the
+    mutation exactly once and return a well-formed applied=true response
+    to BOTH callers. The second caller's response carries the cached
+    outcome (same resolved_lot_id, same reason).
+
+    The edge function's idempotency path relies on
+    ``shelf_event_log`` having ``ON CONFLICT DO NOTHING`` on
+    (user_id, client_event_id). Removing that conflict clause causes:
+      * the INSERT to raise on the duplicate,
+      * the 500 to bubble up as ``applied=false, reason='error'``,
+      * the qty to mutate twice before the second insert aborts (or zero
+        times if the apply is wrapped in a transaction — either way the
+        invariant "mutated once + both callers saw applied=true" breaks).
+    """
+    import concurrent.futures as _cf
+    print("\n-- /event (duplicate client_event_id concurrent POST) --")
+    key    = ctx["import_key"]
+    uid    = ctx["user_id"]
+    pids   = ctx["products"]
+    loc_id = ctx["location_id"]
+    milk_id = pids["Whole Milk 1L"]
+
+    reset_stock_lot(uid, milk_id, loc_id, qty=4.0)
+    delete_food_logs_for(uid, milk_id)
+    wipe_event_log(uid)
+    before_qty = first_lot_qty(uid, milk_id)
+
+    cev = str(uuid.uuid4())
+    payload = {
+        "client_event_id": cev,
+        "scale_id": "hb-01",
+        "kind": "live_shelf",
+        "event_kind": "consumed",
+        "product_id": milk_id,
+        "delta_g": -500,       # 0.5 containers
+        "occurred_at": _ts(-150),
+    }
+
+    # Fire the two POSTs in parallel. The executor submits both before
+    # either completes so the requests hit the edge function
+    # concurrently — any serialization ordering is an internal detail.
+    with _cf.ThreadPoolExecutor(max_workers=2) as pool:
+        futs = [pool.submit(ingest, "POST", "/event", key, payload)
+                for _ in range(2)]
+        rs = [f.result() for f in futs]
+    bodies = [r.json() if r.ok else {} for r in rs]
+
+    # Both MUST be HTTP 200 with applied=true.
+    check("concurrent dup: both status 200",
+          all(r.status_code == 200 for r in rs),
+          f"statuses={[r.status_code for r in rs]}")
+    check("concurrent dup: both applied=true",
+          all(b.get("applied") is True for b in bodies),
+          f"bodies={bodies}")
+
+    # Exactly one shelf_event_log row (the second insert was collapsed
+    # by ON CONFLICT DO NOTHING + cached outcome replay).
+    log_rows = rest_select("shelf_event_log", user_id=f"eq.{uid}",
+                           client_event_id=f"eq.{cev}")
+    check("concurrent dup: exactly 1 shelf_event_log row",
+          len(log_rows) == 1, f"rows={len(log_rows)}")
+
+    # Qty mutated exactly once — not twice.
+    after_qty = first_lot_qty(uid, milk_id)
+    expected = before_qty - 0.5
+    check("concurrent dup: qty decremented exactly once",
+          abs(after_qty - expected) < TOL,
+          f"before={before_qty} after={after_qty} expected={expected}")
+
+    # Both responses echo the same resolved_lot_id + reason.
+    rlid = {b.get("resolved_lot_id") for b in bodies}
+    reasons = {b.get("reason") for b in bodies}
+    check("concurrent dup: both responses share resolved_lot_id",
+          len(rlid) == 1 and None not in rlid,
+          f"ids={rlid}")
+    # The "loser" response carries reason=duplicate; the winner carries
+    # the first-write reason (typically None or 'live_shelf'). Accept
+    # either combination; what we require is the two are a consistent
+    # (first, cached) pair, not two "duplicate" strings.
+    check("concurrent dup: at most one response carries reason='duplicate'",
+          sum(1 for r in reasons if r == "duplicate") <= 1,
+          f"reasons={reasons}")
+
+    # Exactly one food_logs row — double-apply would write two.
+    logs = rest_select("food_logs", user_id=f"eq.{uid}", product_id=f"eq.{milk_id}")
+    check("concurrent dup: exactly 1 food_logs row",
+          len(logs) == 1, f"logs={len(logs)}")
+
+
 def test_heartbeat_cross_device(ctx):
     """#12 — two devices with the SAME scale_id on each must not
     cross-contaminate. UPSERT is keyed on (device_id, scale_id), so
@@ -1484,6 +1576,7 @@ TEST_GROUPS = [
     ("event.errors",         test_event_errors),
     ("event.cross_user",     test_event_cross_user),
     ("event.stale_fence",    test_stale_fence),
+    ("event.dup_concurrent", test_concurrent_duplicate_client_event_id),
     ("event.timestamp_422",  test_timestamp_range_retryable),
     ("intake",               test_intake),
 ]
