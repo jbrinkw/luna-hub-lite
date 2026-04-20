@@ -45,6 +45,37 @@ interface QueueItem {
   undoInfo?: UndoInfo;
 }
 
+/**
+ * Compute a stock lot's `expires_on` from a product's suggested shelf life.
+ *
+ * Rules:
+ *   - `default_shelf_life_days` null / 0 / negative / non-finite / NaN → null
+ *     (non-perishable or unknown; scanner leaves expires_on unset).
+ *   - Otherwise: `purchaseDate + days`, emitted as an ISO date string
+ *     (YYYY-MM-DD) in the local timezone so the date the user sees in the
+ *     UI matches the day they scanned on, not UTC-shifted by a day.
+ *
+ * Exported because the lot-insert logic in `executeAction` calls this twice
+ * (for the merge-key lookup AND the insert row) and we want one mutation-
+ * tested implementation instead of two inline copies that can drift.
+ */
+export function computeExpiresOn(
+  shelfLifeDays: number | null | undefined,
+  purchaseDate: Date,
+): string | null {
+  if (shelfLifeDays == null) return null;
+  const n = Number(shelfLifeDays);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  const d = new Date(purchaseDate);
+  d.setDate(d.getDate() + Math.floor(n));
+  // Local-date ISO (YYYY-MM-DD), not UTC — matches how Postgres DATE is
+  // stored/displayed and how the user thinks about the date.
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 interface NutritionData {
   servingsPerContainer: string;
   calories: string;
@@ -317,6 +348,14 @@ export function ScannerPage() {
               }
 
               if (productName !== `Product (${barcode})` || hasNutrition) {
+                // default_shelf_life_days is only present on AI-normalized
+                // suggestions; the OFF fallback path doesn't suggest one.
+                // null means "non-perishable / unknown" → scanner leaves
+                // expires_on unset for lots of this product.
+                const shelfLife =
+                  s?.default_shelf_life_days != null
+                    ? Number(s.default_shelf_life_days) || null
+                    : null;
                 const productFields = {
                   barcode,
                   name: productName,
@@ -327,7 +366,10 @@ export function ScannerPage() {
                   carbs_per_serving: carb,
                   fat_per_serving: fatVal,
                   servings_per_container: spc,
+                  default_shelf_life_days: shelfLife,
                 };
+                const returning =
+                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container, default_shelf_life_days';
 
                 let resultRow: any = null;
                 if (existingPlaceholderId) {
@@ -338,18 +380,14 @@ export function ScannerPage() {
                     .from('products')
                     .update(productFields)
                     .eq('product_id', existingPlaceholderId)
-                    .select(
-                      'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
-                    )
+                    .select(returning)
                     .single();
                   resultRow = updated;
                 } else {
                   const { data: created } = await chefbyte()
                     .from('products')
                     .insert({ user_id: user.id, ...productFields })
-                    .select(
-                      'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
-                    )
+                    .select(returning)
                     .single();
                   resultRow = created;
                 }
@@ -485,16 +523,28 @@ export function ScannerPage() {
         const locId = defaultLocationId;
         if (!locId) break; // No locations — can't add stock
 
-        // Check for existing lot with same merge key (product + location + no expiry)
-        // If found, increment qty; otherwise insert new lot
-        const { data: existingLot } = await chefbyte()
+        // Auto-populate expires_on from product.default_shelf_life_days
+        // (LLM-suggested on first import). Non-perishable / unknown
+        // products leave default_shelf_life_days NULL → lot gets NULL
+        // expires_on and sorts last in consumption order.
+        const computedExpiresOn = computeExpiresOn(
+          product.default_shelf_life_days,
+          new Date(),
+        );
+
+        // Check for existing lot with matching merge key
+        // (product + location + same expires_on). Different expires_on
+        // values split into separate lots per the DB docs.
+        let existingQuery = chefbyte()
           .from('stock_lots')
           .select('lot_id, qty_containers')
           .eq('user_id', user.id)
           .eq('product_id', product.product_id)
-          .eq('location_id', locId)
-          .is('expires_on', null)
-          .single();
+          .eq('location_id', locId);
+        existingQuery = computedExpiresOn
+          ? existingQuery.eq('expires_on', computedExpiresOn)
+          : existingQuery.is('expires_on', null);
+        const { data: existingLot } = await existingQuery.single();
 
         let newLot: { lot_id: string } | null = null;
         if (existingLot) {
@@ -506,14 +556,16 @@ export function ScannerPage() {
             .single();
           newLot = updated as any;
         } else {
+          const insertRow: Record<string, unknown> = {
+            user_id: user.id,
+            product_id: product.product_id,
+            qty_containers: qty,
+            location_id: locId,
+          };
+          if (computedExpiresOn) insertRow.expires_on = computedExpiresOn;
           const { data: inserted } = await chefbyte()
             .from('stock_lots')
-            .insert({
-              user_id: user.id,
-              product_id: product.product_id,
-              qty_containers: qty,
-              location_id: locId,
-            })
+            .insert(insertRow)
             .select('lot_id')
             .single();
           newLot = inserted as any;

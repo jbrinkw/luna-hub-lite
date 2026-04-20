@@ -177,6 +177,8 @@ export type Database = {
           is_active: boolean
           lan_ip: string | null
           last_heartbeat_ts: string | null
+          outbox_pending_count: number
+          outbox_permanent_failures: number
           pending_review_count: number
           user_id: string
         }
@@ -188,6 +190,8 @@ export type Database = {
           is_active?: boolean
           lan_ip?: string | null
           last_heartbeat_ts?: string | null
+          outbox_pending_count?: number
+          outbox_permanent_failures?: number
           pending_review_count?: number
           user_id: string
         }
@@ -199,6 +203,8 @@ export type Database = {
           is_active?: boolean
           lan_ip?: string | null
           last_heartbeat_ts?: string | null
+          outbox_pending_count?: number
+          outbox_permanent_failures?: number
           pending_review_count?: number
           user_id?: string
         }
@@ -288,6 +294,7 @@ export type Database = {
           certified: boolean | null
           container_type: string | null
           created_at: string
+          default_shelf_life_days: number | null
           density_g_per_ml: number | null
           description: string | null
           fat_per_serving: number
@@ -315,6 +322,7 @@ export type Database = {
           certified?: boolean | null
           container_type?: string | null
           created_at?: string
+          default_shelf_life_days?: number | null
           density_g_per_ml?: number | null
           description?: string | null
           fat_per_serving?: number
@@ -342,6 +350,7 @@ export type Database = {
           certified?: boolean | null
           container_type?: string | null
           created_at?: string
+          default_shelf_life_days?: number | null
           density_g_per_ml?: number | null
           description?: string | null
           fat_per_serving?: number
@@ -735,6 +744,10 @@ export type Database = {
       get_daily_macros_admin: {
         Args: { p_logical_date: string; p_user_id: string }
         Returns: Json
+      }
+      heartbeat_upsert_pairings_admin: {
+        Args: { p_device_id: string; p_scales: Json; p_user_id: string }
+        Returns: undefined
       }
       mark_meal_done: { Args: { p_meal_id: string }; Returns: Json }
       mark_meal_done_admin: {

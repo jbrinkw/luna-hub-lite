@@ -98,7 +98,8 @@ async function normalizeWithAI(offProduct: any): Promise<any> {
       '  "carbs_per_serving": <number>,',
       '  "protein_per_serving": <number>,',
       '  "fat_per_serving": <number>,',
-      '  "description": "<brief 1-line description>"',
+      '  "description": "<brief 1-line description>",',
+      '  "default_shelf_life_days": <integer 1-3650, or null>',
       '}',
       '',
       'Rules:',
@@ -108,6 +109,15 @@ async function normalizeWithAI(offProduct: any): Promise<any> {
       '- Apply 4-4-9 validation: carbs×4 + protein×4 + fat×9 should ≈ calories. If >10% off, adjust calories to match.',
       '- servings_per_container: product_quantity / serving_size, or 1 if unknown.',
       '- All numeric values rounded to 1 decimal.',
+      '- default_shelf_life_days: typical unopened pantry/fridge life from purchase, one integer.',
+      '  Rough guide (use judgment based on categories):',
+      '    fresh produce, bakery bread, deli meat, soft cheese: 5–10',
+      '    packaged bread/tortillas/wraps, yogurt, cold cuts: 10–21',
+      '    eggs, hard cheese, butter: 30–60',
+      '    frozen foods: 180',
+      '    condiments, jarred sauces (unopened): 365',
+      '    canned goods, dried pasta/rice, spices, shelf-stable snacks: null',
+      '  Use null when genuinely uncertain OR shelf-stable. Never guess wildly.',
     ].join('\n');
 
     // Slim nutriments to only the 4 macros + energy (per-serving + per-100g
@@ -307,6 +317,17 @@ Deno.serve(async (req) => {
       }
       if (!suggestion.servings_per_container || suggestion.servings_per_container < 1) {
         suggestion.servings_per_container = 1;
+      }
+      // default_shelf_life_days: integer in [1, 3650] or null.
+      // Coerce, clamp, and drop any non-integer / out-of-range value to null
+      // rather than surfacing a 422 — the rest of the suggestion is still
+      // useful, we just skip auto-expiry on malformed suggestions.
+      if (suggestion.default_shelf_life_days != null) {
+        const n = Math.round(Number(suggestion.default_shelf_life_days));
+        suggestion.default_shelf_life_days =
+          Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
+      } else {
+        suggestion.default_shelf_life_days = null;
       }
     }
 
