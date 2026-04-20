@@ -1,0 +1,27 @@
+# Python venv
+.venv/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Runtime data (sensor captures, SQLite DBs, event photos grow over time)
+live-shelf/data/
+**/events/
+*.db
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
+
+# Secrets — only .env.example is tracked
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Editor / OS junk
+.DS_Store
+.vscode/
+.idea/
