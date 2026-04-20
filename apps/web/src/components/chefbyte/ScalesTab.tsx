@@ -81,11 +81,15 @@ async function sha256Hex(input: string): Promise<string> {
 
 /**
  * Validate a LAN IP or hostname. Accepts:
- *   - IPv4 dotted quad: "192.168.0.181"
+ *   - IPv4 dotted quad with per-octet range 0–255: "192.168.0.181"
  *   - Simple hostname (no scheme, no port, no slash): "my-pi.local"
- * Rejects anything containing a scheme, colon, slash, whitespace, or control chars.
+ * Rejects anything containing a scheme, colon, slash, whitespace, or control chars,
+ * AND rejects out-of-range IPv4 octets like "999.999.999.999".
  * This shields the inventory "Review" deep-link from protocol injection (e.g.
  * "javascript://evil.com") since the stored value is interpolated into an href.
+ *
+ * The DB CHECK constraint on chefbyte.live_shelf_devices.lan_ip is being
+ * tightened by a cloud agent to match this regex exactly — keep them aligned.
  */
 export function isValidLanIp(value: string): boolean {
   if (!value) return false;
@@ -93,8 +97,18 @@ export function isValidLanIp(value: string): boolean {
   if (trimmed.length === 0 || trimmed.length > 253) return false;
   // Explicit deny-list: no schemes, ports, slashes, whitespace, or angle brackets.
   if (/[:/\s<>\\?#@]/.test(trimmed)) return false;
-  // Allow: IPv4 dotted quad OR alphanumeric hostname with dots and hyphens.
-  return /^(?:\d{1,3}\.){3}\d{1,3}$|^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(trimmed);
+  // IPv4-shape gate: if the value looks like four dot-separated numeric octets
+  // (i.e. only digits + dots, 3 dots total) then it MUST satisfy per-octet
+  // range 0–255. This closes the "999.999.999.999 slips through as a hostname"
+  // gap — the plain hostname regex below is permissive about all-digit labels.
+  if (/^\d+(\.\d+){3}$/.test(trimmed)) {
+    return /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(
+      trimmed,
+    );
+  }
+  // Otherwise: alphanumeric hostname with dots and hyphens (no leading dash).
+  // The DB CHECK constraint uses the matching regex so client + server agree.
+  return /^[a-zA-Z0-9][a-zA-Z0-9.-]{0,252}$/.test(trimmed);
 }
 
 /** Generate a URL-safe 32-byte random key (64 hex chars). */
@@ -135,6 +149,21 @@ export function ScalesTab() {
   const [regenTarget, setRegenTarget] = useState<string | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Per-device LAN IP error map — keyed by device_id so that with multiple
+  // devices the failure message appears inline below the specific input that
+  // triggered it instead of in the global banner at the top.
+  const [ipError, setIpError] = useState<Record<string, string>>({});
+
+  // Reset any open confirm-dialog targets if the component unmounts mid-prompt
+  // (e.g. user navigates away via React Router while a dialog is open). This
+  // keeps next-mount state clean even though React will discard it anyway.
+  useEffect(() => {
+    return () => {
+      setRegenTarget(null);
+      setRevokeTarget(null);
+      setDeleteTarget(null);
+    };
+  }, []);
 
   const copyToClipboard = async (text: string, key: string) => {
     try {
@@ -266,10 +295,13 @@ export function ScalesTab() {
     mutationFn: async (deviceId: string) => {
       const rawKey = generateImportKey();
       const keyHash = await sha256Hex(rawKey);
+      // Double-pin on user_id even though RLS enforces it — keeps this call
+      // consistent with every other mutation in this file (defense in depth).
       const { error: err } = await chefbyte()
         .from('live_shelf_devices')
         .update({ import_key_hash: keyHash })
-        .eq('device_id', deviceId);
+        .eq('device_id', deviceId)
+        .eq('user_id', user!.id);
       if (err) throw err;
       return { device_id: deviceId, raw_key: rawKey };
     },
@@ -284,10 +316,13 @@ export function ScalesTab() {
 
   const toggleActiveMutation = useMutation({
     mutationFn: async ({ deviceId, isActive }: { deviceId: string; isActive: boolean }) => {
+      // Double-pin on user_id even though RLS enforces it — matches every
+      // other mutation in this file (defense in depth).
       const { error: err } = await chefbyte()
         .from('live_shelf_devices')
         .update({ is_active: isActive })
-        .eq('device_id', deviceId);
+        .eq('device_id', deviceId)
+        .eq('user_id', user!.id);
       if (err) throw err;
     },
     onError: (err: any) => setError(err.message ?? String(err)),
@@ -325,16 +360,41 @@ export function ScalesTab() {
       const { error: err } = await chefbyte()
         .from('live_shelf_devices')
         .update({ lan_ip: lanIp })
-        .eq('device_id', deviceId);
+        .eq('device_id', deviceId)
+        .eq('user_id', user!.id);
       if (err) throw err;
+      return { deviceId };
     },
-    onError: (err: any) => setError(err.message ?? String(err)),
-    onSuccess: () => {
+    // Scope the error to the specific device's inline field instead of the
+    // global banner — with multiple devices a top-level banner is ambiguous.
+    onError: (err: any, variables) => {
+      setIpError((prev) => ({
+        ...prev,
+        [variables.deviceId]: err?.message ?? String(err),
+      }));
+    },
+    onSuccess: (_data, variables) => {
       setEditingIpId(null);
       setEditingIpValue('');
+      setIpError((prev) => {
+        if (!(variables.deviceId in prev)) return prev;
+        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+        const { [variables.deviceId]: _removed, ...rest } = prev;
+        return rest;
+      });
       invalidateDevices();
     },
   });
+
+  /** Clear the inline IP error for one device (called on input change / Cancel). */
+  const clearIpError = (deviceId: string) => {
+    setIpError((prev) => {
+      if (!(deviceId in prev)) return prev;
+      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+      const { [deviceId]: _removed, ...rest } = prev;
+      return rest;
+    });
+  };
 
   const deleteDeviceMutation = useMutation({
     mutationFn: async (deviceId: string) => {
@@ -582,53 +642,69 @@ export function ScalesTab() {
                         )}
                       </div>
                       {/* LAN IP */}
-                      <div className="flex items-center gap-2 mt-1.5 text-[0.85em] text-text-secondary">
-                        <span>LAN IP:</span>
-                        {editingIpId === d.device_id ? (
-                          <>
-                            <input
-                              value={editingIpValue}
-                              onChange={(e) => setEditingIpValue(e.target.value)}
-                              className={`${inputCls} max-w-[180px] py-1 text-[13px]`}
-                              placeholder="192.168.0.181"
-                              data-testid={`shelf-lan-ip-edit-${d.device_id}`}
-                            />
-                            <button
-                              className="bg-emerald-600 text-white border-none px-2 py-1 rounded text-xs font-semibold hover:bg-emerald-700"
-                              onClick={() =>
-                                updateLanIpMutation.mutate({
-                                  deviceId: d.device_id,
-                                  lanIp: editingIpValue.trim() || null,
-                                })
-                              }
-                            >
-                              Save
-                            </button>
-                            <button
-                              className="bg-surface border border-border text-text-secondary px-2 py-1 rounded text-xs font-semibold hover:bg-surface-hover"
-                              onClick={() => {
-                                setEditingIpId(null);
-                                setEditingIpValue('');
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </>
-                        ) : (
-                          <>
-                            <span className="font-mono">{d.lan_ip || '—'}</span>
-                            <button
-                              className="bg-transparent border-none text-text-tertiary hover:text-text cursor-pointer p-1"
-                              onClick={() => {
-                                setEditingIpId(d.device_id);
-                                setEditingIpValue(d.lan_ip ?? '');
-                              }}
-                              data-testid={`edit-shelf-lan-ip-${d.device_id}`}
-                              aria-label="Edit LAN IP"
-                            >
-                              <Pencil className="w-3 h-3" />
-                            </button>
-                          </>
+                      <div className="mt-1.5 text-[0.85em] text-text-secondary">
+                        <div className="flex items-center gap-2">
+                          <span>LAN IP:</span>
+                          {editingIpId === d.device_id ? (
+                            <>
+                              <input
+                                value={editingIpValue}
+                                onChange={(e) => {
+                                  setEditingIpValue(e.target.value);
+                                  // Clear any prior error for this device as soon as the user edits.
+                                  clearIpError(d.device_id);
+                                }}
+                                className={`${inputCls} max-w-[180px] py-1 text-[13px]`}
+                                placeholder="192.168.0.181"
+                                data-testid={`shelf-lan-ip-edit-${d.device_id}`}
+                              />
+                              <button
+                                className="bg-emerald-600 text-white border-none px-2 py-1 rounded text-xs font-semibold hover:bg-emerald-700"
+                                onClick={() =>
+                                  updateLanIpMutation.mutate({
+                                    deviceId: d.device_id,
+                                    lanIp: editingIpValue.trim() || null,
+                                  })
+                                }
+                              >
+                                Save
+                              </button>
+                              <button
+                                className="bg-surface border border-border text-text-secondary px-2 py-1 rounded text-xs font-semibold hover:bg-surface-hover"
+                                onClick={() => {
+                                  setEditingIpId(null);
+                                  setEditingIpValue('');
+                                  clearIpError(d.device_id);
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              <span className="font-mono">{d.lan_ip || '—'}</span>
+                              <button
+                                className="bg-transparent border-none text-text-tertiary hover:text-text cursor-pointer p-1"
+                                onClick={() => {
+                                  setEditingIpId(d.device_id);
+                                  setEditingIpValue(d.lan_ip ?? '');
+                                  clearIpError(d.device_id);
+                                }}
+                                data-testid={`edit-shelf-lan-ip-${d.device_id}`}
+                                aria-label="Edit LAN IP"
+                              >
+                                <Pencil className="w-3 h-3" />
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        {ipError[d.device_id] && (
+                          <p
+                            className="text-danger-text text-xs mt-1 m-0"
+                            data-testid={`shelf-lan-ip-error-${d.device_id}`}
+                          >
+                            {ipError[d.device_id]}
+                          </p>
                         )}
                       </div>
                     </div>

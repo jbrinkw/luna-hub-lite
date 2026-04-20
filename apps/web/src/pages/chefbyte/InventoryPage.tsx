@@ -39,7 +39,10 @@ interface StockLot {
 interface LiveShelfDeviceLite {
   device_id: string;
   lan_ip: string | null;
-  pending_review_count: number;
+  // Column is NOT NULL DEFAULT 0 in the DB, but we type it as nullable for
+  // defense in depth so the `?? 0` coalesce below stays correct if schema
+  // changes or a partial projection ever drops the default.
+  pending_review_count: number | null;
   last_heartbeat_ts: string | null;
 }
 

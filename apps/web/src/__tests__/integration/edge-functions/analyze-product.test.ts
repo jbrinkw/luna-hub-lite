@@ -376,10 +376,17 @@ describe('Analyze-Product Edge Function', () => {
     const text = await res.text();
     expect(text).toBe('ok');
 
-    // Verify CORS headers
+    // Verify CORS headers. supabase-js sends Authorization + x-client-info +
+    // apikey + content-type on every browser call — ALL four must appear in
+    // Access-Control-Allow-Headers or the preflight fails silently and the
+    // scanner falls back to an "Unknown (barcode)" placeholder.
     expect(res.headers.get('Access-Control-Allow-Origin')).toBe('*');
     expect(res.headers.get('Access-Control-Allow-Methods')).toContain('POST');
-    expect(res.headers.get('Access-Control-Allow-Headers')).toContain('Authorization');
+    const allowed = res.headers.get('Access-Control-Allow-Headers')!.toLowerCase();
+    expect(allowed).toContain('authorization');
+    expect(allowed).toContain('x-client-info');
+    expect(allowed).toContain('apikey');
+    expect(allowed).toContain('content-type');
   });
 
   it('non-POST method returns 405', async () => {
