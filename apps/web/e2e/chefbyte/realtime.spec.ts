@@ -224,25 +224,24 @@ test.describe('ChefByte Realtime — UI refreshes without page.reload', () => {
   });
 
   /**
-   * SCOPE NOTE — `chefbyte.live_shelf_devices` is not currently in the
-   * `supabase_realtime` publication on production (confirmed via server-
-   * side `status: error` reply with the precise message
-   * "Unable to subscribe to changes with given parameters ... table:
-   * live_shelf_devices"). Adding it requires a migration in `supabase/`,
-   * which is out of scope for this spec. So this test is expected to
-   * fail against prod until the publication is updated — when that
-   * happens, remove the `test.fail` marker and it becomes a regression
-   * guard for the Scales tab heartbeat refresh.
+   * SCOPE NOTE — `chefbyte.live_shelf_devices` was added to the
+   * `supabase_realtime` publication by migration
+   * `20260419080000_live_shelf_realtime_publication.sql`. Before that the
+   * subscription failed with server-side `status: error` ("Unable to
+   * subscribe to changes with given parameters ... table:
+   * live_shelf_devices"), which — combined with the (now-fixed) shared
+   * `inventory-changes` channel — silently poisoned stock_lots and
+   * products subscriptions too.
    *
-   * Finding also motivated the `channel-per-table` fix in
-   * `useRealtimeInvalidation.ts`: previously ONE unpublished table
-   * silenced ALL subscriptions on the shared `inventory-changes`
-   * channel (including stock_lots and products). That's fixed now, so
-   * scenarios 1 and 2 pass even while this one continues to fail.
+   * This test is now a positive regression guard: heartbeat updates on
+   * `live_shelf_devices` must reach the Scales tab within 10s without
+   * a page reload. If the publication ever loses the table, or the
+   * channel-per-table fix in `useRealtimeInvalidation` regresses back
+   * to a shared channel, this test fails first.
    */
-  test.fail('external live_shelf_devices heartbeat → Scales tab timestamp freshens within 10s', async ({ page }) => {
+  test('external live_shelf_devices heartbeat → Scales tab timestamp freshens within 10s', async ({ page }) => {
     test.setTimeout(60_000);
-    const { userId, cleanup, client } = await seedFullAndLogin(page, 'rt-ui-heartbeat');
+    const { userId, cleanup } = await seedFullAndLogin(page, 'rt-ui-heartbeat');
     try {
       // Seed a shelf device with a heartbeat far enough in the past that the
       // rendered `relativeTime` will be something clearly non-"now" (minutes,

@@ -43,7 +43,11 @@ test.describe('Realtime resilience — WebSocket reconnect', () => {
       // if our handler regresses, the socket stays dead and the UI never
       // catches up.
       await page.evaluate(async () => {
-        const mod = await import(/* @vite-ignore */ '/src/shared/supabase.ts');
+        // Indirect through a variable so the TS-LSP stops trying to
+        // statically resolve the Vite-served absolute URL. Runtime Vite
+        // resolves this correctly; the LSP otherwise flags it as missing.
+        const supabaseUrl = '/src/shared/supabase.ts';
+        const mod = await import(/* @vite-ignore */ supabaseUrl);
         const client = mod.supabase;
         const rt: any = client.realtime;
         // Kill the built-in reconnect timer by nulling it out; any
