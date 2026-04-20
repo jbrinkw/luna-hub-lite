@@ -121,6 +121,16 @@ export function ScannerPage() {
   /* ---- Keypad screen ---- */
   const [screenValue, setScreenValue] = useState('1');
   const [overwriteNext, setOverwriteNext] = useState(true);
+  // Which surface the numeric keypad routes into. `'screen'` = the big
+  // quantity display (default, always valid). Any nutrition key targets
+  // that field; typing the first digit replaces the existing value so
+  // users can overwrite without backspacing.
+  type ActiveField = 'screen' | keyof NutritionData;
+  const [activeField, setActiveField] = useState<ActiveField>('screen');
+  const focusField = (f: ActiveField) => {
+    setActiveField(f);
+    setOverwriteNext(true);
+  };
 
   /* ---- Unit toggle (consume modes) ---- */
   const [unit, setUnit] = useState<'serving' | 'container'>('serving');
@@ -531,22 +541,32 @@ export function ScannerPage() {
   /* ---------------------------------------------------------------- */
 
   const handleKeypadClick = (key: string) => {
+    // Pick the appropriate reader/writer based on the active field.
+    const current = activeField === 'screen' ? screenValue : (nutrition[activeField] ?? '');
+    const commit = (next: string) => {
+      if (activeField === 'screen') {
+        setScreenValue(next);
+      } else {
+        handleNutritionChange(activeField, next);
+      }
+    };
+
     if (key === '\u2190') {
-      setScreenValue((prev) => prev.slice(0, -1) || '0');
+      commit(current.slice(0, -1) || '0');
       setOverwriteNext(false);
     } else if (key === '.') {
       if (overwriteNext) {
-        setScreenValue('0.');
+        commit('0.');
         setOverwriteNext(false);
-      } else if (!screenValue.includes('.')) {
-        setScreenValue((prev) => prev + '.');
+      } else if (!current.includes('.')) {
+        commit(current + '.');
       }
     } else {
       if (overwriteNext) {
-        setScreenValue(key);
+        commit(key);
         setOverwriteNext(false);
       } else {
-        setScreenValue((prev) => (prev === '0' ? key : prev + key));
+        commit(current === '0' ? key : current + key);
       }
     }
   };
@@ -733,7 +753,12 @@ export function ScannerPage() {
               <div
                 key={item.id}
                 data-testid={`queue-item-${item.id}`}
-                onClick={() => setActiveItemId(item.id)}
+                onClick={() => {
+                  setActiveItemId(item.id);
+                  // Opening a queue row pops focus to Srv/Ctn so the user
+                  // can immediately type a replacement value on the keypad.
+                  focusField('servingsPerContainer');
+                }}
                 className={`px-2.5 py-2 border-2 rounded-md cursor-pointer ${queueItemBorderColor(item)} ${
                   activeItemId === item.id ? 'bg-success-subtle' : item.isNew ? 'bg-danger-subtle' : 'bg-surface'
                 }`}
@@ -789,7 +814,13 @@ export function ScannerPage() {
                     ? 'bg-text text-text-inverse border-text font-extrabold text-base ring-2 ring-text/30 ring-offset-1'
                     : 'bg-surface text-text border-border-strong font-semibold text-[15px]'
                 }`}
-                onClick={() => setMode(m.key)}
+                onClick={() => {
+                  setMode(m.key);
+                  // Nutrition editor only renders in 'purchase' mode; fall
+                  // back to the main screen so the keypad still targets
+                  // something meaningful when the user switches away.
+                  if (m.key !== 'purchase') focusField('screen');
+                }}
                 data-testid={`mode-${m.key}`}
               >
                 {m.label}
@@ -829,7 +860,10 @@ export function ScannerPage() {
           {/* Screen value */}
           <div
             data-testid="screen-value"
-            className="px-3 py-3 bg-surface border-2 border-border rounded-md text-right text-2xl font-bold font-mono"
+            onClick={() => focusField('screen')}
+            className={`px-3 py-3 bg-surface border-2 rounded-md text-right text-2xl font-bold font-mono cursor-pointer transition-all ${
+              activeField === 'screen' ? 'border-primary ring-2 ring-primary/40' : 'border-border'
+            }`}
           >
             {screenValue}
           </div>
@@ -845,7 +879,13 @@ export function ScannerPage() {
                 { key: 'protein' as const, label: 'Protein' },
               ].map((f) => (
                 <div key={f.key} className="text-center">
-                  <label className="text-[0.7em] text-text-tertiary block">{f.label}</label>
+                  <label
+                    className={`text-[0.7em] block transition-colors ${
+                      activeField === f.key ? 'text-primary font-semibold' : 'text-text-tertiary'
+                    }`}
+                  >
+                    {f.label}
+                  </label>
                   <input
                     data-testid={`nut-${f.key}`}
                     type="text"
@@ -853,7 +893,11 @@ export function ScannerPage() {
                     aria-label={f.label}
                     value={nutrition[f.key]}
                     onChange={(e) => handleNutritionChange(f.key, e.target.value)}
-                    className="w-full px-1.5 py-2 text-center border border-border rounded text-sm min-h-[36px]"
+                    onFocus={() => focusField(f.key)}
+                    onClick={() => focusField(f.key)}
+                    className={`w-full px-1.5 py-2 text-center border rounded text-sm min-h-[36px] transition-all ${
+                      activeField === f.key ? 'border-primary ring-2 ring-primary/40 bg-primary/5' : 'border-border'
+                    }`}
                   />
                 </div>
               ))}
