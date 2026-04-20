@@ -847,3 +847,96 @@ class TestBackfillWindowHours:
         cfg = AppConfig()
         assert cfg.cloud_backfill_window_hours == 168
         assert DEFAULTS["CLOUD_BACKFILL_WINDOW_HOURS"] == 168
+
+
+class TestBackfillPatternCoverage:
+    """Mutation-testing gap: the backfill scan's ``WHERE pattern IN (...)``
+    clause hard-codes the list of cloud-emitting patterns. Dropping any
+    one of them silently leaves orphan resolutions of that pattern
+    un-backfilled on boot — the cloud permanently misses the event
+    after a Pi crash between the local commit and the outbox insert.
+
+    These tests seed one resolution per pattern via the low-level
+    repo (simulating the crash window) and assert the backfill scan
+    emits an outbox row. Parametrized so removing ANY pattern from the
+    SQL filter fails at least one case.
+    """
+
+    @pytest.mark.parametrize("pattern,seed_direction,consumed_g,expected_kind,expected_delta", [
+        ("use_return_consumed", "remove", 42.5, "consumed", -42.5),
+        ("topped_up",           "add",    -60.0, "refilled", 60.0),
+        ("consumed_or_removed", "remove", 120.0, "consumed", -120.0),
+        ("new_arrival",         "add",    None,  "added",    175.0),
+        ("in_flight_return",    "remove", 80.0,  "consumed", -80.0),
+        ("in_flight_replaced_new_item", "remove", 90.0, "consumed", -90.0),
+        ("in_flight_ttl_expired",       "remove", 100.0, "consumed", -100.0),
+    ])
+    def test_every_emitting_pattern_is_backfilled(
+        self, conn, seed_session, seed_product, seed_lot,
+        pattern, seed_direction, consumed_g, expected_kind, expected_delta,
+    ):
+        from server.cloud.integration import backfill_missing_outbox_events
+        from server.storage.models import SessionResolutionIn
+
+        # Seed the scale event the adapter needs for delta derivation
+        # (new_arrival reads add delta; consumed_or_removed falls back
+        # to remove delta). Use a consistent 175g add magnitude so the
+        # new_arrival case has a non-zero delta_g.
+        delta_g_for_event = 175.0 if seed_direction == "add" else -120.0
+        event = storage_repo.record_scale_event(
+            conn,
+            ScaleEventIn(
+                session_id=seed_session,
+                ts="2026-04-19T15:00:00.000Z",
+                delta_g=delta_g_for_event,
+                before_weight_g=0.0,
+                after_weight_g=max(0.0, delta_g_for_event),
+                direction=seed_direction,
+                classification=None,
+                classifier_status="classified",
+            ),
+        )
+        res_in_kwargs: dict[str, Any] = {
+            "session_id": seed_session,
+            "pattern": pattern,
+            "lot_id": seed_lot,
+        }
+        if consumed_g is not None:
+            res_in_kwargs["consumed_g"] = consumed_g
+        if seed_direction == "add":
+            res_in_kwargs["add_event_id"] = event.event_id
+        else:
+            res_in_kwargs["remove_event_id"] = event.event_id
+        res = storage_repo.write_resolution(
+            conn, SessionResolutionIn(**res_in_kwargs),
+        )
+
+        # Outbox is empty before backfill — simulates a crash between
+        # the local commit and the outbox insert.
+        assert conn.execute(
+            "SELECT COUNT(*) FROM cloud_outbox"
+        ).fetchone()[0] == 0
+
+        emitter = CloudEventEmitter(conn, enabled=True)
+        count = backfill_missing_outbox_events(
+            conn, emitter, scale_id="scale-01",
+            shelf_kind="live_shelf", window_hours=168,
+        )
+
+        assert count == 1, (
+            f"pattern {pattern!r} must be included in the backfill "
+            f"scan's WHERE filter — otherwise a crashed-commit for "
+            f"this pattern silently orphans the resolution"
+        )
+        rows = conn.execute(
+            "SELECT payload_json FROM cloud_outbox WHERE sent_at IS NULL"
+        ).fetchall()
+        assert len(rows) == 1
+        payload = json.loads(rows[0]["payload_json"])
+        assert payload.get("_pi_resolution_id") == res.resolution_id
+        assert payload["event_kind"] == expected_kind
+        # new_arrival uses the add event's abs delta; others use consumed_g
+        if pattern == "new_arrival":
+            assert payload["delta_g"] == pytest.approx(abs(delta_g_for_event))
+        else:
+            assert payload["delta_g"] == pytest.approx(expected_delta)
