@@ -26,6 +26,7 @@ from server.cloud.worker import (  # noqa: E402
     MAX_POLL_INTERVAL_S,
     NON_RETRYABLE_EVENT_STATUS_CODES,
     OUTBOX_BACKLOG_WARN_THRESHOLD,
+    RETRY_WARN_ATTEMPT_THRESHOLD,
 )
 from server.storage import init_db  # noqa: E402
 
@@ -295,6 +296,55 @@ class TestBackoff:
         fake_client.post.return_value = {}
         w.tick()
         assert w.current_poll_interval_s == 5.0
+
+    def test_retry_warn_fires_at_threshold_not_one_over(
+        self, fake_client, conn, caplog,
+    ):
+        """Mutation-testing gap: ``attempts >= RETRY_WARN_ATTEMPT_THRESHOLD``
+        is the docstring contract ("after 3 failed attempts ... WARNING").
+        Flipping to ``>`` delays the WARN by one full tick — a row that
+        has already failed 3 times stays silently INFO until the 4th
+        failure, which hides the "this row is stuck" signal from
+        nightly log review.
+
+        Pre-seed attempts=2 on the row. The worker's mark_failed bumps
+        it to 3 (== threshold); the row must log the "failed N times"
+        WARNING record on THIS tick.
+        """
+        import logging
+        outbox.enqueue_event(conn, {"n": 1})
+        # Pre-seed attempts=2 so this tick's mark_failed lands on 3.
+        conn.execute(
+            "UPDATE cloud_outbox SET attempts = 2 WHERE outbox_id = 1"
+        )
+        conn.commit()
+
+        def post_side_effect(path, body):
+            if path == "/event":
+                # Use 500 (retryable, not auth) so the WARN branch is
+                # reached rather than the EVENT_AUTH_FAILURE_CODES
+                # branch or the non-retryable branch.
+                raise CloudError(500, "server error")
+            return {}
+        fake_client.post.side_effect = post_side_effect
+
+        w = _mk_worker(fake_client, conn)
+        with caplog.at_level(logging.DEBUG, logger="server.cloud.worker"):
+            w.tick()
+
+        warn_records = [
+            r for r in caplog.records
+            if r.name == "server.cloud.worker"
+            and "failed" in r.message
+            and "times" in r.message
+        ]
+        assert len(warn_records) == 1, (
+            f"expected exactly one 'failed N times' WARN record at "
+            f"attempts=={RETRY_WARN_ATTEMPT_THRESHOLD}; got "
+            f"{[r.message for r in warn_records]}"
+        )
+        assert warn_records[0].levelname == "WARNING"
+        assert str(RETRY_WARN_ATTEMPT_THRESHOLD) in warn_records[0].message
 
     def test_backoff_caps_at_ceiling(self, fake_client, conn):
         fake_client.post.side_effect = CloudError(503, "down")
