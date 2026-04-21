@@ -23,6 +23,7 @@ import { queryKeys } from '@/shared/queryKeys';
 import { useScannerDetection } from '@/hooks/useScannerDetection';
 import { useLiveTrackSession } from '@/hooks/useLiveTrackSession';
 import {
+  computeQtyContainersFromScale,
   createLiveTrackSession,
   isDeviceFresh,
   loadFreshLiveShelfDevice,
@@ -526,29 +527,21 @@ export function LiveTrackImportPage() {
       if (prodUpdErr) throw new Error(prodUpdErr.message);
 
       // Stock-lot insert. Quantity is derived from the measured net
-      // product weight rather than hardcoded to 1:
-      //
-      //   net_product_g = scaleG - tareG
-      //   qty_containers = max(0, net_product_g / product.net_weight_g)
+      // product weight rather than hardcoded to 1. The arithmetic lives
+      // in ``computeQtyContainersFromScale`` (livetrackSession.ts) so
+      // ``__tests__/unit/pure/livetrack-qty.test.ts`` can pin it. See
+      // commit 91550dd for the regression this guards against.
       //
       // Full + sealed:  scaleG - tareG == net_weight_g → qty = 1.0
       // Partial + AI:    fractional qty reflecting actual remaining product
       // Manual w/ scale: same fraction as AI branch
       // Manual w/o scale reading (user typed tare, no Pi reading posted):
       //                  fall back to qty = 1 so the lot still lands.
-      let qtyContainers = 1;
-      const netWeight = Number(product.net_weight_g ?? 0);
-      if (
-        state.scaleG != null
-        && Number.isFinite(state.scaleG)
-        && Number.isFinite(tareG)
-        && netWeight > 0
-      ) {
-        const netProductG = Math.max(0, state.scaleG - tareG);
-        qtyContainers = Math.max(0, netProductG / netWeight);
-      }
-      // Round to 3 decimals (matches schema NUMERIC(10,3)).
-      qtyContainers = Math.round(qtyContainers * 1000) / 1000;
+      const qtyContainers = computeQtyContainersFromScale({
+        scaleG: state.scaleG,
+        tareG,
+        netWeightG: product.net_weight_g,
+      });
       if (defaultLocationId) {
         await chefbyte()
           .from('stock_lots')

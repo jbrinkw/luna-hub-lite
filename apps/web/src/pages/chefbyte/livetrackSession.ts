@@ -173,3 +173,44 @@ export function isDeviceFresh(lastHeartbeatTs: string | null | undefined): boole
   if (!Number.isFinite(age)) return false;
   return age >= 0 && age <= 60_000;
 }
+
+/**
+ * LiveTrack qty_containers derivation — fixed by commit 91550dd.
+ *
+ * Before the fix the wizard save-path hardcoded qty_containers: 1 for
+ * every tare path, so partial-container imports (half-used jar + AI or
+ * manual tare) landed as a full 1-container lot. The arithmetic:
+ *
+ *   net_product_g  = scaleG − tareG  (clamped to ≥ 0)
+ *   qty_containers = net_product_g / net_weight_g  (clamped to ≥ 0)
+ *
+ * Rounds to 3 decimals to match the NUMERIC(10,3) column.
+ *
+ * Fallback: when scaleG is missing (manual tare without a Pi reading),
+ * net_weight_g is missing/0, or either input is non-finite, return 1 so
+ * the lot still lands (indistinguishable from the pre-fix legacy path).
+ *
+ * Exported so ``__tests__/unit/pure/livetrack-qty.test.ts`` can pin the
+ * exact arithmetic — see that file for the regression cases.
+ */
+export function computeQtyContainersFromScale(args: {
+  scaleG: number | null | undefined;
+  tareG: number | null | undefined;
+  netWeightG: number | null | undefined;
+}): number {
+  const { scaleG, tareG, netWeightG } = args;
+  const netWeight = Number(netWeightG ?? 0);
+  let qty = 1;
+  if (
+    scaleG != null
+    && Number.isFinite(scaleG)
+    && tareG != null
+    && Number.isFinite(tareG)
+    && netWeight > 0
+  ) {
+    const netProductG = Math.max(0, (scaleG as number) - (tareG as number));
+    qty = Math.max(0, netProductG / netWeight);
+  }
+  // Round to 3 decimals (matches schema NUMERIC(10,3)).
+  return Math.round(qty * 1000) / 1000;
+}
