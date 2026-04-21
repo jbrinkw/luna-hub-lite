@@ -386,6 +386,12 @@ verify_jwt = false
 [functions.shelf-ingest]
 verify_jwt = false
 
+# livetrack-session dispatches on URL path: /create is browser-JWT, /pi-update
+# and /active are x-api-key. Manual auth per route — same workaround reason as
+# analyze-product (ES256 relay-verify bug).
+[functions.livetrack-session]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327
