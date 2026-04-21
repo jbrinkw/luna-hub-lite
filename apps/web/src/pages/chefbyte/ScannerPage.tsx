@@ -189,9 +189,33 @@ export function ScannerPage() {
     protein: '',
   });
 
+  // Keep nutritionRef pointing at the latest state — declared below.
+  // Sync happens via a direct assignment on every render right after the
+  // ref is declared (see the line following its declaration).
+
   /* ---------------------------------------------------------------- */
   /*  Hardware barcode scanner detection                               */
   /* ---------------------------------------------------------------- */
+
+  // Tracks which nutrition fields the user manually edited since the last
+  // scan. analyze-product completes seconds after scan; without this set
+  // the AI response blows away whatever the user keyed in during the wait.
+  // Ref (not state) because the keypad-batch fix already uses refs for
+  // rapid-fire safety, and the scan handler reads this synchronously.
+  const userEditedFieldsRef = useRef<Set<keyof NutritionData>>(new Set());
+  // Ref-mirror of `nutrition` so the long-running handleBarcodeSubmit can
+  // read the LATEST keypad edits at the moment analyze-product resolves,
+  // not the stale render-time closure.
+  const nutritionRef = useRef<NutritionData>({
+    servingsPerContainer: '1',
+    calories: '',
+    carbs: '',
+    fat: '',
+    protein: '',
+  });
+  // Sync on every render. Writing to a ref during render is allowed in
+  // React and runs before any effects / event handlers fire.
+  nutritionRef.current = nutrition;
 
   // handleBarcodeSubmit is defined below but referenced here via ref
   const barcodeSubmitRef = useRef<(barcode: string) => void>(() => {});
@@ -235,6 +259,10 @@ export function ScannerPage() {
       }
       setScreenValue('1');
       overwriteNextRef.current = true;
+      // New scan = new edit session. Clear the edited-fields set so AI
+      // response for this barcode can populate all fields; only NEW
+      // keypresses during the AI wait count as user edits for this item.
+      userEditedFieldsRef.current = new Set();
 
       // Auto-focus the servings-per-container field on scan (purchase mode
       // only — the nutrition editor renders only then). OFF/LLM data for this
@@ -432,18 +460,38 @@ export function ScannerPage() {
               ),
             );
           } else if (analyzedProduct) {
-            // AI-analyzed product created/updated successfully
-            const freshNut: NutritionData = {
+            // AI-analyzed product created/updated successfully.
+            // Merge with user edits: analyze-product takes 5–25s and during
+            // that wait the user may have keyed in corrections. Preserving
+            // those is the whole point of scanning-then-typing as a UX —
+            // users know the OFF data is often wrong for servings_per_container
+            // and start correcting it before the AI even responds.
+            const aiNut: NutritionData = {
               servingsPerContainer: String(analyzedProduct.servings_per_container ?? 1),
               calories: String(analyzedProduct.calories_per_serving ?? ''),
               carbs: String(analyzedProduct.carbs_per_serving ?? ''),
               fat: String(analyzedProduct.fat_per_serving ?? ''),
               protein: String(analyzedProduct.protein_per_serving ?? ''),
             };
-            setNutrition(freshNut);
-            setOriginalNutrition(freshNut);
+            const edited = userEditedFieldsRef.current;
+            // Read from the ref, NOT the closure-captured `nutrition`. The
+            // async call stack has a stale snapshot from when the scan
+            // fired; the ref has whatever the user keyed in while we were
+            // awaiting analyze-product.
+            const currentNutrition = nutritionRef.current;
+            const mergedNut: NutritionData = {
+              servingsPerContainer: edited.has('servingsPerContainer')
+                ? currentNutrition.servingsPerContainer
+                : aiNut.servingsPerContainer,
+              calories: edited.has('calories') ? currentNutrition.calories : aiNut.calories,
+              carbs: edited.has('carbs') ? currentNutrition.carbs : aiNut.carbs,
+              fat: edited.has('fat') ? currentNutrition.fat : aiNut.fat,
+              protein: edited.has('protein') ? currentNutrition.protein : aiNut.protein,
+            };
+            setNutrition(mergedNut);
+            setOriginalNutrition(aiNut); // AI values are the "reset" baseline for 4-4-9 scaling
 
-            const undoInfo = await executeAction(mode, analyzedProduct, qty, unit, freshNut);
+            const undoInfo = await executeAction(mode, analyzedProduct, qty, unit, mergedNut);
 
             setQueue((prev) =>
               prev.map((item) =>
@@ -720,6 +768,9 @@ export function ScannerPage() {
       });
     } else {
       const field = activeField;
+      // Mark as user-edited so the pending analyze-product response can't
+      // blow this value away when it arrives seconds later.
+      userEditedFieldsRef.current.add(field);
       setNutrition((prev) => {
         const current = prev[field] ?? '';
         const next = computeNext(current);
@@ -734,6 +785,7 @@ export function ScannerPage() {
   /* ---------------------------------------------------------------- */
 
   const handleNutritionChange = (field: keyof NutritionData, value: string) => {
+    userEditedFieldsRef.current.add(field);
     setNutrition((prev) => autoScaleNutrition(field, value, prev, originalNutrition));
   };
 
