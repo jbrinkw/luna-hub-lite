@@ -379,6 +379,29 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
             "ON system_health(ts)"
         )
 
+    # Tare-arm singleton (CATCH_ALL_TARE_CAPTURE_PLAN.md §3). One-row
+    # table keyed id=1: at most one product is armed for tare capture
+    # at any time. Re-arming on a different product is an
+    # INSERT OR REPLACE at id=1. Rows past ``expires_at`` stay in place
+    # until the next arm overwrites them or ``clear_stale_tare_arm``
+    # runs on startup — the scale-event interceptor consults
+    # ``expires_at > now`` so stale rows don't fire.
+    with conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS tare_arm (
+              id                 INTEGER PRIMARY KEY CHECK(id = 1),
+              product_id         TEXT NOT NULL REFERENCES products(product_id) ON DELETE CASCADE,
+              device_id          TEXT NOT NULL DEFAULT 'scale-02',
+              armed_at           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+              expires_at         TEXT NOT NULL,
+              min_weight_g       REAL NOT NULL DEFAULT 5.0,
+              max_weight_g       REAL NOT NULL DEFAULT 5000.0,
+              last_error         TEXT
+            )
+            """
+        )
+
     # Cloud outbox (PROD_MIGRATION_PLAN.md §Phase 2). Long-lived DBs
     # predate this table — guard with IF NOT EXISTS so we land the
     # table + partial index on existing installs.
