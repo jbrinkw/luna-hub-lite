@@ -39,6 +39,7 @@ from .models import (
     Session,
     SessionResolution,
     SessionResolutionIn,
+    TareArm,
     UsageLog,
     UsageLogIn,
     coerce_ts,
@@ -317,6 +318,27 @@ def set_product_certified(
              WHERE product_id = ?
             """,
             (1 if certified else 0, product_id),
+        )
+    return get_product(conn, product_id)
+
+
+def set_product_tare(
+    conn: sqlite3.Connection, product_id: str, tare_g: float
+) -> Optional[Product]:
+    """Overwrite ``products.tare_weight_g`` for a single product row.
+
+    Isolated from :func:`consume_tare_arm` so the api-route arm-status
+    endpoint (and future manual tare edits) can reuse the same helper
+    without coupling to the arm-row delete.
+    """
+    with conn:
+        conn.execute(
+            """
+            UPDATE products
+               SET tare_weight_g = ?, updated_at = datetime('now')
+             WHERE product_id = ?
+            """,
+            (float(tare_g), product_id),
         )
     return get_product(conn, product_id)
 
@@ -1856,3 +1878,182 @@ def update_app_state(
             values,
         )
     return get_app_state(conn)
+
+
+# ---------------------------------------------------------------------------
+# tare_arm (CATCH_ALL_TARE_CAPTURE_PLAN.md §4.2)
+# ---------------------------------------------------------------------------
+#
+# One-row table keyed on id=1. Armed → tare_arm row present AND
+# ``expires_at > now``. Re-arming on a different product is an
+# INSERT OR REPLACE at id=1. The scale-event interceptor in
+# ``handlers/scale_events.py`` reads ``get_active_tare_arm`` under the
+# shared ``_db_lock`` so concurrent ingress events can't double-consume
+# a single arm. A successful capture goes through ``consume_tare_arm``,
+# which writes ``products.tare_weight_g`` and deletes the arm row in
+# the same transaction.
+
+
+def _row_to_tare_arm(row: sqlite3.Row) -> TareArm:
+    keys = set(row.keys()) if hasattr(row, "keys") else set()
+    return TareArm(
+        id=row["id"],
+        product_id=row["product_id"],
+        device_id=row["device_id"],
+        armed_at=row["armed_at"],
+        expires_at=row["expires_at"],
+        min_weight_g=row["min_weight_g"],
+        max_weight_g=row["max_weight_g"],
+        last_error=row["last_error"] if "last_error" in keys else None,
+    )
+
+
+def arm_tare(
+    conn: sqlite3.Connection,
+    product_id: str,
+    *,
+    device_id: str = "scale-02",
+    ttl_s: int = 60,
+    min_weight_g: float = 5.0,
+    max_weight_g: float = 5000.0,
+) -> TareArm:
+    """Arm the tare-capture interceptor for ``product_id``.
+
+    Overwrites any existing arm (owner UX: always one target at a time;
+    re-arming on product B cancels an outstanding arm on product A via
+    ``INSERT OR REPLACE id=1``). ``ttl_s`` extends the TTL from now in
+    seconds; ``min_weight_g`` / ``max_weight_g`` bound plausibility for
+    the captured reading.
+
+    ``armed_at`` / ``expires_at`` are computed in SQL so every arm's
+    clock is the DB's wall-clock (matches the read-path comparison in
+    :func:`get_active_tare_arm`).
+    """
+    ttl = max(1, int(ttl_s))
+    with conn:
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO tare_arm (
+                id, product_id, device_id, armed_at, expires_at,
+                min_weight_g, max_weight_g, last_error
+            ) VALUES (
+                1, ?, ?,
+                strftime('%Y-%m-%dT%H:%M:%fZ','now'),
+                strftime('%Y-%m-%dT%H:%M:%fZ','now', ?),
+                ?, ?, NULL
+            )
+            """,
+            (
+                product_id,
+                device_id,
+                f"+{ttl} seconds",
+                float(min_weight_g),
+                float(max_weight_g),
+            ),
+        )
+    row = conn.execute(
+        "SELECT * FROM tare_arm WHERE id = 1"
+    ).fetchone()
+    assert row is not None
+    return _row_to_tare_arm(row)
+
+
+def get_active_tare_arm(
+    conn: sqlite3.Connection,
+    *,
+    device_id: str = "scale-02",
+) -> Optional[TareArm]:
+    """Return the tare-arm row if armed for ``device_id`` and not expired.
+
+    Returns None when no row exists, the row's ``device_id`` doesn't
+    match, or the row's ``expires_at`` is in the past relative to the
+    DB's wall-clock. Rows past expiry are left in the table on purpose
+    — the next arm overwrites them via ``INSERT OR REPLACE``, or the
+    startup housekeeping pass clears them.
+    """
+    row = conn.execute(
+        """
+        SELECT * FROM tare_arm
+         WHERE id = 1
+           AND device_id = ?
+           AND expires_at > strftime('%Y-%m-%dT%H:%M:%fZ','now')
+        """,
+        (device_id,),
+    ).fetchone()
+    return _row_to_tare_arm(row) if row is not None else None
+
+
+def consume_tare_arm(
+    conn: sqlite3.Connection,
+    *,
+    product_id: str,
+    tare_g: float,
+) -> bool:
+    """Write the captured tare + delete the arm row in one transaction.
+
+    Returns True if the products row was updated (i.e. the product still
+    exists). The arm row is unconditionally deleted — even if the
+    product was deleted between arm and capture, we don't want the next
+    catch-all event to be intercepted by a ghost arm pointing at a
+    missing id.
+    """
+    with conn:
+        cur = conn.execute(
+            """
+            UPDATE products
+               SET tare_weight_g = ?, updated_at = datetime('now')
+             WHERE product_id = ?
+            """,
+            (float(tare_g), product_id),
+        )
+        updated = (cur.rowcount or 0) > 0
+        conn.execute("DELETE FROM tare_arm WHERE id = 1")
+    return updated
+
+
+def cancel_tare_arm(conn: sqlite3.Connection) -> int:
+    """Drop the arm row if present. Idempotent. Returns rows deleted."""
+    with conn:
+        cur = conn.execute("DELETE FROM tare_arm WHERE id = 1")
+    return int(cur.rowcount or 0)
+
+
+def set_tare_arm_error(
+    conn: sqlite3.Connection, error: Optional[str]
+) -> None:
+    """Stamp ``last_error`` on the arm row. No-op if no row exists.
+
+    Used by the interceptor to record a bounds failure (implausible
+    weight) without consuming the arm — the operator can read the
+    error, re-place the container, and the next event tries again.
+    """
+    with conn:
+        conn.execute(
+            "UPDATE tare_arm SET last_error = ? WHERE id = 1",
+            (error,),
+        )
+
+
+def clear_stale_tare_arm(
+    conn: sqlite3.Connection,
+    *,
+    older_than_s: int = 600,
+) -> int:
+    """Startup housekeeping: drop arm rows older than ``older_than_s``.
+
+    The interceptor already ignores arms whose ``expires_at`` is past,
+    so the main function of this sweep is preventing the admin-wipe
+    path and the ``/inventory`` banner from rendering an arm row that
+    hasn't been touched in 10+ minutes. Returns the rows deleted.
+    """
+    cutoff = max(1, int(older_than_s))
+    with conn:
+        cur = conn.execute(
+            """
+            DELETE FROM tare_arm
+             WHERE id = 1
+               AND (julianday('now') - julianday(armed_at)) * 86400.0 > ?
+            """,
+            (cutoff,),
+        )
+    return int(cur.rowcount or 0)

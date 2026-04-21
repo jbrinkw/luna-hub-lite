@@ -432,6 +432,28 @@ class AppState:
 
 
 @dataclass
+class TareArm:
+    """Single-row ``tare_arm`` snapshot.
+
+    One row (id=1) exists when the operator has armed the catch-all
+    scale for tare capture. Rows past ``expires_at`` are left in-place
+    until the next arm overwrites them or ``clear_stale_tare_arm``
+    runs on startup — the scale-event interceptor gates on
+    ``expires_at > now`` so stale rows don't intercept legit events.
+    See CATCH_ALL_TARE_CAPTURE_PLAN.md §3.
+    """
+
+    product_id: str
+    device_id: str
+    armed_at: str
+    expires_at: str
+    min_weight_g: float
+    max_weight_g: float
+    id: int = 1
+    last_error: Optional[str] = None
+
+
+@dataclass
 class AppStatePatch:
     """Partial patch. Only fields set (non-None) are written. Note that
     door_open/shelf_name do accept their type's zero value — use keyword
