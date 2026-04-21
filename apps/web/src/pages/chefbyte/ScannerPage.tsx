@@ -878,6 +878,8 @@ export function ScannerPage() {
     prevActiveForConfirmRef.current = activeItemId;
   }, [activeItemId]);
 
+  const activeProductId = activeItem?.productId ?? null;
+
   // When the selected productId changes (queue click or fresh scan finalising
   // its productId), load that product's nutrition from the DB into the
   // editor so the inputs show THIS item's values — not the last-edited
@@ -921,7 +923,6 @@ export function ScannerPage() {
   // `activeItem?.productId` so the write also fires when productId
   // transitions from null → set (covers the rare race where the user
   // hits a key before the scan's DB lookup resolves).
-  const activeProductId = activeItem?.productId ?? null;
   useEffect(() => {
     if (!activeProductId) return;
     const edited = userEditedFieldsRef.current;
