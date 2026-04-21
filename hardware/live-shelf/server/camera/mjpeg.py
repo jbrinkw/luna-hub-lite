@@ -239,7 +239,7 @@ def stream(
 #: + the left edge of the scale board); crop to the scale region so the
 #: classifier later sees only the item on the plate.
 SHELF_CROPS: dict[str, tuple[float, float, float, float]] = {
-    "catch_all": (0.20, 1.0, 0.40, 1.0),  # crop top 20% + left 40%
+    "catch_all": (0.20, 1.0, 0.40, 0.90),  # crop top 20% + left 40% + right 10%
 }
 
 
