@@ -67,14 +67,35 @@ def _as_list(raw: Any) -> list[dict]:
     )
 
 
-def fetch_catalog(client: CloudClient) -> Catalog:
-    """Fetch the full catalog via ``GET /catalog``.
+def fetch_catalog(
+    client: CloudClient,
+    *,
+    updated_since: str | None = None,
+) -> Catalog:
+    """Fetch the catalog via ``GET /catalog``.
+
+    Parameters
+    ----------
+    client:
+        Authenticated :class:`CloudClient`.
+    updated_since:
+        Optional ISO-8601 timestamp. When supplied, the cloud narrows
+        the ``products`` list to rows whose ``updated_at`` is strictly
+        greater than this value — used by the 30s background poller to
+        pull deltas only. ``stock``/``pairings``/``locations`` are never
+        filtered (they churn continuously and are small).
 
     Propagates :class:`~server.cloud.client.CloudError` on any non-2xx
     response so the caller can decide whether to fall back to the last
     successful catalog.
     """
-    payload = client.get("/catalog")
+    # Only pass ``params`` when we actually have a filter — keeps the
+    # call signature backwards-compatible with existing callers (and
+    # their ``assert_called_once_with('/catalog')`` test expectations).
+    if updated_since:
+        payload = client.get("/catalog", params={"updated_since": updated_since})
+    else:
+        payload = client.get("/catalog")
     return Catalog(
         products=_as_list(payload.get("products")),
         stock=_as_list(payload.get("stock")),

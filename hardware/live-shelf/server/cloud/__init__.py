@@ -19,6 +19,7 @@ from .client import CloudClient, CloudError
 from .integration import CloudEventEmitter, null_emitter
 from .livetrack_poller import LiveTrackPoller
 from .outbox import enqueue_event
+from .product_sync_poller import ProductSyncPoller
 from .worker import CloudWorker
 
 __all__ = [
@@ -28,6 +29,7 @@ __all__ = [
     "CloudEventEmitter",
     "CloudWorker",
     "LiveTrackPoller",
+    "ProductSyncPoller",
     "enqueue_event",
     "fetch_catalog",
     "null_emitter",

@@ -1,0 +1,155 @@
+/**
+ * End-to-end test: cloud product INSERT → Pi local catalog visibility.
+ *
+ * Validates the 30s product-sync poller by:
+ *   1. Inserting a fresh product into ``chefbyte.products`` via the
+ *      service-role client (bypassing any UI — mirrors what the wizard
+ *      writes on save).
+ *   2. Polling the Pi's local SQLite via ssh + sqlite3 until the product
+ *      shows up, or a hard timeout fires.
+ *   3. Recording the elapsed seconds from insert → Pi visibility.
+ *   4. Cleaning up the cloud row so repeat runs don't accumulate test
+ *      junk.
+ *
+ * Assumes:
+ *   * ``.env`` at the repo root has SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
+ *   * The Pi at 192.168.0.181 is reachable + has the poller running.
+ *   * ``PI_USER_ID`` env var OR the first active ``live_shelf_devices`` row
+ *     identifies which cloud user owns the Pi we're testing against.
+ *
+ * Run with:
+ *   pnpm dlx tsx scripts/test_product_sync_to_pi.ts
+ */
+import { createClient } from '@supabase/supabase-js';
+import { execSync } from 'child_process';
+import { readFileSync } from 'fs';
+import { join } from 'path';
+
+const REPO_ROOT = process.cwd();
+const PI_HOST = process.env.PI_HOST || '192.168.0.181';
+const PI_USER = process.env.PI_USER || 'jeremy';
+const PI_DB_PATH = process.env.PI_DB_PATH || '/home/jeremy/live-shelf/data/shelf.sqlite3';
+
+// Hard ceiling — the poller runs every 30s, so 45s covers one missed
+// tick plus a little slack. Bigger numbers would just delay failure.
+const VISIBILITY_TIMEOUT_MS = 45_000;
+const POLL_INTERVAL_MS = 2_000;
+
+function loadEnv(file: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  try {
+    const content = readFileSync(join(REPO_ROOT, file), 'utf-8');
+    for (const line of content.split('\n')) {
+      const m = line.match(/^([A-Z_]+)=(.*)$/);
+      if (m) out[m[1]] = m[2];
+    }
+  } catch {
+    /* ignore */
+  }
+  return out;
+}
+
+const env = { ...loadEnv('.env'), ...process.env };
+const SUPABASE_URL = env.SUPABASE_URL;
+const SERVICE_ROLE_KEY = env.SUPABASE_SERVICE_ROLE_KEY;
+
+if (!SUPABASE_URL || !SERVICE_ROLE_KEY) {
+  console.error('ERR: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set');
+  process.exit(1);
+}
+
+const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});
+
+/** Resolve which cloud user the Pi is currently authenticated as. */
+async function resolvePiUserId(): Promise<string> {
+  if (env.PI_USER_ID) return env.PI_USER_ID;
+  const { data, error } = await admin
+    .schema('chefbyte')
+    .from('live_shelf_devices')
+    .select('user_id')
+    .eq('is_active', true)
+    .order('last_heartbeat_ts', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw new Error(`live_shelf_devices lookup: ${error.message}`);
+  if (!data?.user_id) {
+    throw new Error('no active live_shelf_devices row — set PI_USER_ID env var');
+  }
+  return data.user_id;
+}
+
+/** Return stdout of a sqlite3 query executed on the Pi via ssh. */
+function piQuery(sql: string): string {
+  // BatchMode=yes prevents interactive password prompts; StrictHostKeyChecking
+  // is left default so a fresh Pi still prompts once on first connect.
+  // The Pi has sqlite3 installed (verified via live-shelf-deploy skill).
+  const cmd = `ssh -o BatchMode=yes ${PI_USER}@${PI_HOST} "sqlite3 ${PI_DB_PATH} \\"${sql.replace(/"/g, '\\"')}\\""`;
+  return execSync(cmd, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+}
+
+async function main() {
+  console.log('[1] resolve Pi user_id');
+  const userId = await resolvePiUserId();
+  console.log(`    user_id=${userId}`);
+
+  const marker = `sync-test-${Date.now()}`;
+  const productId = `00000000-0000-0000-0000-${Date.now().toString(16).padStart(12, '0')}`;
+  console.log(`[2] insert product ${marker} (id=${productId})`);
+  const insertStartMs = Date.now();
+  const { error: insErr } = await admin
+    .schema('chefbyte')
+    .from('products')
+    .insert({
+      product_id: productId,
+      user_id: userId,
+      name: marker,
+      unit_type: 'solid',
+      certified: true,
+    });
+  if (insErr) throw new Error(`insert: ${insErr.message}`);
+
+  try {
+    console.log('[3] poll Pi SQLite for the row');
+    const deadline = insertStartMs + VISIBILITY_TIMEOUT_MS;
+    let piHitMs = 0;
+    while (Date.now() < deadline) {
+      const stdout = piQuery(
+        `SELECT product_id FROM products WHERE product_id='${productId}'`,
+      );
+      if (stdout.trim() === productId) {
+        piHitMs = Date.now();
+        break;
+      }
+      await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
+    }
+    if (piHitMs === 0) {
+      throw new Error(
+        `Pi did not see product within ${VISIBILITY_TIMEOUT_MS / 1000}s`,
+      );
+    }
+    const elapsedS = ((piHitMs - insertStartMs) / 1000).toFixed(1);
+    console.log(`[4] PASS — product visible on Pi in ${elapsedS}s`);
+  } finally {
+    console.log('[5] cleanup — delete cloud product');
+    const { error: delErr } = await admin
+      .schema('chefbyte')
+      .from('products')
+      .delete()
+      .eq('product_id', productId);
+    if (delErr) console.warn(`cleanup warning: ${delErr.message}`);
+    // Best-effort local cleanup — the next poll tick won't delete it
+    // automatically (the sync is additive-only), so we tidy by hand.
+    try {
+      piQuery(`DELETE FROM products WHERE product_id='${productId}'`);
+    } catch {
+      /* cleanup best-effort */
+    }
+  }
+}
+
+main().catch((err) => {
+  console.error('FAIL:', err);
+  process.exit(1);
+});

@@ -36,7 +36,7 @@ from .camera import mjpeg
 from .camera.daemon import CameraDaemon, DaemonConfig, now_iso_utc_ms
 from .camera import session_capture
 from .camera.locked_settings import apply_locked_settings
-from .cloud import CloudClient, CloudWorker, LiveTrackPoller
+from .cloud import CloudClient, CloudWorker, LiveTrackPoller, ProductSyncPoller
 from .cloud.integration import (
     CloudEventEmitter,
     backfill_missing_outbox_events,
@@ -1562,6 +1562,28 @@ def create_app(
                 log.exception(
                     "failed to start livetrack import poller; "
                     "import-arm interception disabled",
+                )
+
+            # Product catalog delta-sync poller. Pulls rows touched in
+            # cloud ``chefbyte.products`` since the last high-watermark
+            # every 30s, so new products imported via the LiveTrack
+            # wizard (or Settings → Products) appear in the Pi's local
+            # catalog without waiting for a reboot. Failures are
+            # logged-and-forgotten: the existing ``sync_products_from_cloud``
+            # boot-sync remains the safety net.
+            try:
+                product_sync_poller = ProductSyncPoller(
+                    cloud_client,
+                    conn,
+                    state_path=cfg.data_root / "last_product_sync.json",
+                    db_lock=db_lock,
+                )
+                product_sync_poller.start()
+                log.info("product-sync poller started (interval=30s)")
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "failed to start product-sync poller; "
+                    "cloud product edits will only reach the Pi on reboot",
                 )
         except Exception:  # pragma: no cover - defensive
             log.exception(
