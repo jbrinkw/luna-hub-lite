@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError, getLogicalDate } from '../shared';
+import { loadSpecFromDb } from './load-spec';
 
 export const getTodayPlan: ToolDefinition = {
   name: 'COACHBYTE_get_today_plan',
@@ -36,7 +37,9 @@ export const getTodayPlan: ToolDefinition = {
     const { data: plannedSets, error: psError } = await ctx.supabase
       .schema('coachbyte')
       .from('planned_sets')
-      .select('planned_set_id, exercise_id, target_reps, target_load, rest_seconds, order, exercises(name)')
+      .select(
+        'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, order, exercises(name)',
+      )
       .eq('plan_id', planId)
       .order('order', { ascending: true });
 
@@ -61,7 +64,10 @@ export const getTodayPlan: ToolDefinition = {
       exercise_id: ps.exercise_id,
       exercise_name: ps.exercises?.name ?? null,
       target_reps: ps.target_reps,
-      target_load: ps.target_load,
+      ...loadSpecFromDb({
+        target_load: ps.target_load,
+        target_load_percentage: ps.target_load_percentage,
+      }),
       rest_seconds: ps.rest_seconds,
       order: ps.order,
       completed: completedPlannedIds.has(ps.planned_set_id),

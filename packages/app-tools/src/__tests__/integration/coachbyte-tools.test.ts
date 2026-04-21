@@ -124,7 +124,8 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(squatSets).toHaveLength(2);
     expect(squatSets[0].exercise_name).toBe('Squat');
     expect(squatSets[0].target_reps).toBe(5);
-    expect(squatSets[0].target_load).toBe(225);
+    expect(squatSets[0].load).toBe(225);
+    expect(squatSets[0].relative).toBe(false);
     expect(squatSets[0].completed).toBe(false);
     expect(squatSets[0].planned_set_id).toBeDefined();
 
@@ -132,7 +133,8 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(benchSets).toHaveLength(1);
     expect(benchSets[0].exercise_name).toBe('Bench Press');
     expect(benchSets[0].target_reps).toBe(5);
-    expect(benchSets[0].target_load).toBe(185);
+    expect(benchSets[0].load).toBe(185);
+    expect(benchSets[0].relative).toBe(false);
     expect(benchSets[0].completed).toBe(false);
 
     // Order should be ascending (1, 2, 3)
@@ -348,9 +350,9 @@ describe('CoachByte Tool Integration Tests', () => {
 
   it('updateSplit creates a split for a new weekday', async () => {
     const newTemplateSets = [
-      { exercise_id: benchId, target_reps: 8, target_load: 155, rest_seconds: 90 },
-      { exercise_id: benchId, target_reps: 8, target_load: 155, rest_seconds: 90 },
-      { exercise_id: squatId, target_reps: 3, target_load: 275, rest_seconds: 180 },
+      { exercise_id: benchId, target_reps: 8, load: 155, rest_seconds: 90 },
+      { exercise_id: benchId, target_reps: 8, load: 155, rest_seconds: 90 },
+      { exercise_id: squatId, target_reps: 3, load: 275, rest_seconds: 180 },
     ];
 
     const result = await updateSplit.handler({ weekday: otherWeekday, template_sets: newTemplateSets }, ctx);
@@ -361,10 +363,12 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(data.weekday).toBe(otherWeekday);
     expect(data.day_name).toBe(dayNames[otherWeekday]);
     expect(data.template_sets).toHaveLength(3);
+    // Default relative=false when omitted
+    expect(data.template_sets.every((t: any) => t.relative === false)).toBe(true);
   });
 
   it('updateSplit overwrites existing split for the same weekday (upsert)', async () => {
-    const updatedTemplateSets = [{ exercise_id: squatId, target_reps: 10, target_load: 135, rest_seconds: 60 }];
+    const updatedTemplateSets = [{ exercise_id: squatId, target_reps: 10, load: 135, rest_seconds: 60 }];
 
     const result = await updateSplit.handler({ weekday: otherWeekday, template_sets: updatedTemplateSets }, ctx);
     const data = parseToolResult(result);
@@ -372,9 +376,11 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(data.template_sets).toHaveLength(1);
     expect(data.template_sets[0].exercise_id).toBe(squatId);
     expect(data.template_sets[0].target_reps).toBe(10);
-    expect(data.template_sets[0].target_load).toBe(135);
+    expect(data.template_sets[0].load).toBe(135);
+    expect(data.template_sets[0].relative).toBe(false);
 
-    // L12 fix: Re-read DB to confirm old template_sets were replaced, not appended
+    // L12 fix: Re-read DB to confirm old template_sets were replaced, not appended.
+    // DB schema is unchanged — still uses target_load / target_load_percentage keys.
     const { data: row, error } = await admin
       .schema('coachbyte')
       .from('splits')
@@ -388,6 +394,7 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(dbSets[0].exercise_id).toBe(squatId);
     expect(dbSets[0].target_reps).toBe(10);
     expect(dbSets[0].target_load).toBe(135);
+    expect(dbSets[0].target_load_percentage).toBeNull();
     expect(dbSets[0].rest_seconds).toBe(60);
   });
 
@@ -551,10 +558,10 @@ describe('CoachByte Tool Integration Tests', () => {
 
   it('updatePlan replaces all planned sets with new ones', async () => {
     const newSets = [
-      { exercise_id: benchId, target_reps: 10, target_load: 135, rest_seconds: 60, order: 1 },
-      { exercise_id: benchId, target_reps: 10, target_load: 135, rest_seconds: 60, order: 2 },
-      { exercise_id: squatId, target_reps: 3, target_load: 315, rest_seconds: 180, order: 3 },
-      { exercise_id: squatId, target_reps: 3, target_load: 315, rest_seconds: 180, order: 4 },
+      { exercise_id: benchId, target_reps: 10, load: 135, rest_seconds: 60, order: 1 },
+      { exercise_id: benchId, target_reps: 10, load: 135, rest_seconds: 60, order: 2 },
+      { exercise_id: squatId, target_reps: 3, load: 315, rest_seconds: 180, order: 3 },
+      { exercise_id: squatId, target_reps: 3, load: 315, rest_seconds: 180, order: 4 },
     ];
 
     const result = await updatePlan.handler({ plan_id: planId, sets: newSets }, ctx);
@@ -569,7 +576,8 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(benchSets).toHaveLength(2);
     for (const s of benchSets) {
       expect(s.target_reps).toBe(10);
-      expect(s.target_load).toBe(135);
+      expect(s.load).toBe(135);
+      expect(s.relative).toBe(false);
       expect(s.rest_seconds).toBe(60);
       expect(s.planned_set_id).toBeDefined();
     }
@@ -578,7 +586,8 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(squatSets).toHaveLength(2);
     for (const s of squatSets) {
       expect(s.target_reps).toBe(3);
-      expect(s.target_load).toBe(315);
+      expect(s.load).toBe(315);
+      expect(s.relative).toBe(false);
       expect(s.rest_seconds).toBe(180);
     }
   });
@@ -604,7 +613,7 @@ describe('CoachByte Tool Integration Tests', () => {
     const result = await updatePlan.handler(
       {
         plan_id: '00000000-0000-0000-0000-000000000000',
-        sets: [{ exercise_id: squatId, target_reps: 5, target_load: 225, rest_seconds: 90, order: 1 }],
+        sets: [{ exercise_id: squatId, target_reps: 5, load: 225, rest_seconds: 90, order: 1 }],
       },
       ctx,
     );
@@ -808,25 +817,26 @@ describe('CoachByte Tool Integration Tests', () => {
   });
 
   // -------------------------------------------------------------------------
-  // 15. getExercises — list exercises for the user
+  // 15. getExercises — list exercises (globals + user custom)
   // -------------------------------------------------------------------------
 
   describe('getExercises', () => {
     let userExerciseId: string;
 
-    it('returns empty when user has no custom exercises', async () => {
-      // The handler filters by user_id, so global (seeded) exercises won't appear
+    it('returns the seeded global exercises even when the user has no custom exercises', async () => {
       const result = await getExercises.handler({}, ctx);
       const data = parseToolResult(result);
 
       expect(data.exercises).toBeInstanceOf(Array);
-      // Global exercises have user_id=NULL, so they won't match .eq('user_id', ctx.userId)
-      // User has not created any custom exercises yet
-      expect(data.total).toBe(0);
+      // 20 globals seeded in migration 20260303030035_coachbyte_tables.sql
+      expect(data.total).toBeGreaterThanOrEqual(20);
+      const names = data.exercises.map((e: any) => e.name);
+      expect(names).toContain('Squat');
+      expect(names).toContain('Bench Press');
+      expect(names).toContain('Deadlift');
     });
 
-    it('returns user-created exercises after inserting one', async () => {
-      // Create a user-specific exercise
+    it('returns user-created exercises alongside globals', async () => {
       const { data: inserted, error } = await admin
         .schema('coachbyte')
         .from('exercises')
@@ -840,31 +850,32 @@ describe('CoachByte Tool Integration Tests', () => {
       const result = await getExercises.handler({}, ctx);
       const data = parseToolResult(result);
 
-      expect(data.total).toBe(1);
-      expect(data.exercises[0].name).toBe('Bulgarian Split Squat');
-      expect(data.exercises[0].exercise_id).toBe(userExerciseId);
+      expect(data.total).toBeGreaterThanOrEqual(21);
+      const bulgarian = data.exercises.find((e: any) => e.name === 'Bulgarian Split Squat');
+      expect(bulgarian).toBeDefined();
+      expect(bulgarian.exercise_id).toBe(userExerciseId);
+      // Confirm a global is still present too
+      expect(data.exercises.some((e: any) => e.name === 'Squat')).toBe(true);
     });
 
-    it('filters exercises by search term', async () => {
-      // Add another exercise
-      await admin.schema('coachbyte').from('exercises').insert({ user_id: userId, name: 'Romanian Deadlift' });
+    it('search matches both globals and user-custom exercises', async () => {
+      const result = await getExercises.handler({ search: 'squat' }, ctx);
+      const data = parseToolResult(result);
 
-      // Search for "Bulgarian"
+      const names = data.exercises.map((e: any) => e.name);
+      // Global "Squat" + global "Front Squat" + user "Bulgarian Split Squat"
+      expect(names).toContain('Squat');
+      expect(names).toContain('Front Squat');
+      expect(names).toContain('Bulgarian Split Squat');
+      expect(data.total).toBeGreaterThanOrEqual(3);
+    });
+
+    it('search term only matching user exercise returns just that row', async () => {
       const result = await getExercises.handler({ search: 'Bulgarian' }, ctx);
       const data = parseToolResult(result);
 
       expect(data.total).toBe(1);
       expect(data.exercises[0].name).toBe('Bulgarian Split Squat');
-    });
-
-    it('returns all user exercises without search filter', async () => {
-      const result = await getExercises.handler({}, ctx);
-      const data = parseToolResult(result);
-
-      expect(data.total).toBe(2);
-      // Ordered alphabetically
-      expect(data.exercises[0].name).toBe('Bulgarian Split Squat');
-      expect(data.exercises[1].name).toBe('Romanian Deadlift');
     });
 
     it('returns empty for non-matching search', async () => {
@@ -873,6 +884,117 @@ describe('CoachByte Tool Integration Tests', () => {
 
       expect(data.total).toBe(0);
       expect(data.exercises).toEqual([]);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 16. {load, relative} tool surface — regression coverage for bugs found
+  //     2026-04-21 (update_split / update_plan / get_today_plan did not
+  //     surface relative-load planning to the agent).
+  //
+  //     DB storage is unchanged: target_load + target_load_percentage columns.
+  //     Tool I/O is `{load, relative}`; `resolved_load` surfaces on output only
+  //     when a percentage-based set has been materialized to an absolute load.
+  // -------------------------------------------------------------------------
+
+  describe('{load, relative} load spec', () => {
+    // Use a weekday not touched by earlier tests (otherWeekday = +1, this = +3)
+    const pctWeekday = (todayWeekday + 3) % 7;
+
+    it('updateSplit accepts relative=true and stores as target_load_percentage in DB JSONB', async () => {
+      const template_sets = [
+        { exercise_id: squatId, target_reps: 5, load: 80, relative: true, rest_seconds: 120 },
+        { exercise_id: benchId, target_reps: 8, load: 135, rest_seconds: 90 },
+      ];
+
+      const result = await updateSplit.handler({ weekday: pctWeekday, template_sets }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.template_sets).toHaveLength(2);
+      const pctSet = data.template_sets.find((t: any) => t.exercise_id === squatId);
+      expect(pctSet.load).toBe(80);
+      expect(pctSet.relative).toBe(true);
+      expect(pctSet.resolved_load).toBeNull();
+
+      const absSet = data.template_sets.find((t: any) => t.exercise_id === benchId);
+      expect(absSet.load).toBe(135);
+      expect(absSet.relative).toBe(false);
+      expect(absSet.resolved_load).toBeUndefined();
+
+      // Confirm DB round-trip uses the existing two-column JSONB shape.
+      const { data: row, error } = await admin
+        .schema('coachbyte')
+        .from('splits')
+        .select('template_sets')
+        .eq('user_id', userId)
+        .eq('weekday', pctWeekday)
+        .single();
+      expect(error).toBeNull();
+      const dbSets = row!.template_sets as any[];
+      const dbPct = dbSets.find((d: any) => d.exercise_id === squatId);
+      expect(dbPct.target_load_percentage).toBe(80);
+      expect(dbPct.target_load).toBeNull();
+      const dbAbs = dbSets.find((d: any) => d.exercise_id === benchId);
+      expect(dbAbs.target_load).toBe(135);
+      expect(dbAbs.target_load_percentage).toBeNull();
+    });
+
+    it('updatePlan writes relative=true sets to planned_sets.target_load_percentage', async () => {
+      const sets = [
+        { exercise_id: squatId, target_reps: 5, load: 85, relative: true, rest_seconds: 150, order: 1 },
+        { exercise_id: benchId, target_reps: 5, load: 185, rest_seconds: 90, order: 2 },
+      ];
+
+      const result = await updatePlan.handler({ plan_id: planId, sets }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.sets).toHaveLength(2);
+      const squatRow = data.sets.find((s: any) => s.exercise_id === squatId);
+      expect(squatRow.load).toBe(85);
+      expect(squatRow.relative).toBe(true);
+      expect(squatRow.resolved_load).toBeNull();
+
+      const benchRow = data.sets.find((s: any) => s.exercise_id === benchId);
+      expect(benchRow.load).toBe(185);
+      expect(benchRow.relative).toBe(false);
+
+      // DB storage: still two columns.
+      const { data: dbSets, error } = await admin
+        .schema('coachbyte')
+        .from('planned_sets')
+        .select('exercise_id, target_load, target_load_percentage, "order"')
+        .eq('plan_id', planId)
+        .order('order', { ascending: true });
+      expect(error).toBeNull();
+      expect(dbSets!).toHaveLength(2);
+      expect(Number(dbSets![0].target_load_percentage)).toBe(85);
+      expect(dbSets![0].target_load).toBeNull();
+      expect(Number(dbSets![1].target_load)).toBe(185);
+      expect(dbSets![1].target_load_percentage).toBeNull();
+    });
+
+    it('getTodayPlan surfaces {load, relative, resolved_load?} on each set', async () => {
+      // Prior test left an 85% squat + 185 lb bench plan on planId.
+      const result = await getTodayPlan.handler({}, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.sets.length).toBeGreaterThanOrEqual(2);
+      for (const s of data.sets) {
+        expect(s).toHaveProperty('load');
+        expect(s).toHaveProperty('relative');
+      }
+
+      const pctSet = data.sets.find((s: any) => s.exercise_id === squatId);
+      expect(pctSet.relative).toBe(true);
+      expect(Number(pctSet.load)).toBe(85);
+      // No PR for squat in this user's history, so resolved_load stays null
+      expect(pctSet.resolved_load).toBeNull();
+
+      const absSet = data.sets.find((s: any) => s.exercise_id === benchId);
+      expect(absSet.relative).toBe(false);
+      expect(Number(absSet.load)).toBe(185);
+      // Absolute sets omit resolved_load entirely (key not present)
+      expect(absSet).not.toHaveProperty('resolved_load');
     });
   });
 });

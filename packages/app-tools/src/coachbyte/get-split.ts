@@ -1,9 +1,11 @@
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError } from '../shared';
+import { loadSpecFromDb } from './load-spec';
 
 export const getSplit: ToolDefinition = {
   name: 'COACHBYTE_get_split',
-  description: 'Get weekly split configuration (all 7 days or a specific weekday).',
+  description:
+    "Get weekly split configuration (all 7 days or a specific weekday). Each template set carries `load` and `relative`: when relative=false, `load` is absolute lbs; when relative=true, `load` is a percentage of the user's estimated 1RM.",
   inputSchema: {
     type: 'object',
     properties: {
@@ -61,8 +63,14 @@ export const getSplit: ToolDefinition = {
       weekday: s.weekday,
       day_name: dayNames[s.weekday],
       template_sets: (s.template_sets || []).map((ts: any) => ({
-        ...ts,
+        exercise_id: ts.exercise_id,
         exercise_name: exerciseMap.get(ts.exercise_id) ?? null,
+        target_reps: ts.target_reps,
+        ...loadSpecFromDb({
+          target_load: ts.target_load ?? null,
+          target_load_percentage: ts.target_load_percentage ?? null,
+        }),
+        rest_seconds: ts.rest_seconds,
       })),
     }));
 
