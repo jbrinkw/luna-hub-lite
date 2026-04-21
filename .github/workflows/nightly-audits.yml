@@ -1,0 +1,125 @@
+# Nightly audits — closes audit recommendations #36 and #37.
+#
+# Two independent jobs run on the same cron:
+#
+#   1. schema-drift — runs scripts/audit_schema_drift.py across the repo's
+#      data-flow hops (Pi ↔ edge fn ↔ migrations ↔ generated types). The
+#      script is self-contained and reads repo files only (no prod creds
+#      required). It exits non-zero on any critical/high finding, which
+#      fails the job. The Supabase prod secrets below are plumbed through
+#      for forward-compat in case the script is extended to diff against a
+#      live `pg_dump`.
+#
+#   2. extension-live — runs the HA / Todoist / Obsidian (Gitea) live
+#      integration suites in `packages/app-tools/src/__tests__/integration/
+#      *-live.test.ts`. These use `describe.skipIf` and are a no-op unless
+#      env vars are present, so they only actually execute here with the
+#      real credentials in GitHub Secrets. Catches upstream response-shape
+#      drift before users do.
+#
+# Required secrets (set in GitHub → Settings → Secrets and variables → Actions):
+#
+#   Schema drift (forward-compat, optional today):
+#     SUPABASE_URL_PROD                  — https://<ref>.supabase.co
+#     SUPABASE_SERVICE_ROLE_KEY_PROD     — service_role JWT
+#
+#   Extension live tests (required for extension-live job):
+#     TODOIST_API_KEY   — Todoist REST API token
+#     HA_TOKEN          — Home Assistant long-lived access token
+#     HA_URL            — HA base URL reachable from GitHub runners (or a
+#                         tunneled/public test instance)
+#     GITEA_TOKEN       — Gitea access token with repo scope
+#     GITEA_REPO        — e.g. "testuser/obsidian-vault" (optional; has default)
+#     GITEA_URL         — e.g. "https://gitea.example.com/api/v1" (optional;
+#                         defaults to localhost which will not work on GH runners)
+#
+# Cron is "0 8 * * *" → 08:00 UTC, approximately 03:00 America/New_York
+# (04:00 during EDT). Schedule is disabled until the user flips it on by
+# setting the secrets above and enabling the workflow.
+
+name: Nightly Audits
+
+on:
+  schedule:
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+jobs:
+  schema-drift:
+    name: Schema Drift
+    runs-on: ubuntu-latest
+    env:
+      SUPABASE_URL_PROD: ${{ secrets.SUPABASE_URL_PROD }}
+      SUPABASE_SERVICE_ROLE_KEY_PROD: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY_PROD }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Run schema drift audit
+        run: python scripts/audit_schema_drift.py
+
+      - name: Upload audit log on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: schema-drift-log
+          path: |
+            scripts/audit_schema_drift.py
+          retention-days: 14
+
+  extension-live:
+    name: Extension Live Tests
+    runs-on: ubuntu-latest
+    env:
+      # App-tools integration harness needs a local Supabase for the
+      # non-live suites that share the config; live suites themselves
+      # only hit the upstream APIs. The Supabase bits stay pointed at
+      # localhost because only `*-live.test.ts` specs run here.
+      SUPABASE_URL: http://127.0.0.1:54321
+      SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder
+      SUPABASE_SERVICE_ROLE_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder
+      # Upstream-API credentials — read by the *-live test files directly.
+      TODOIST_API_KEY: ${{ secrets.TODOIST_API_KEY }}
+      HA_TOKEN: ${{ secrets.HA_TOKEN }}
+      HA_URL: ${{ secrets.HA_URL }}
+      GITEA_TOKEN: ${{ secrets.GITEA_TOKEN }}
+      GITEA_REPO: ${{ secrets.GITEA_REPO }}
+      GITEA_URL: ${{ secrets.GITEA_URL }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install deps
+        run: pnpm install --frozen-lockfile
+
+      - name: Run live extension tests
+        # Pass the live-test glob through vitest's CLI file filter. Vitest
+        # treats trailing positional args as testPathPattern, so only specs
+        # whose path matches `-live.test.ts` run. Everything else in the
+        # integration config is skipped.
+        run: pnpm --filter @luna-hub/app-tools test:integration -- -live.test.ts
+
+      - name: Upload vitest report on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: extension-live-report
+          path: |
+            packages/app-tools/.vitest-reports/
+            packages/app-tools/coverage/
+          if-no-files-found: ignore
+          retention-days: 14
