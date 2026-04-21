@@ -645,4 +645,108 @@ class RepoWebAdapter:
         return out
 
 
+    # ------------------------------------------------------- tare arm
+    # Catch-all tare-capture plumbing (CATCH_ALL_TARE_CAPTURE_PLAN.md
+    # §4.4 + §4.5). These wrap the storage-level helpers under the
+    # shared db_lock so the HTTP handler path matches every other DB
+    # access in the adapter.
+
+    def get_product(self, product_id: str) -> Optional[dict[str, Any]]:
+        with self._db_lock:
+            product = storage_repo.get_product(self._conn, product_id)
+        return _to_dict(product) if product is not None else None
+
+    def arm_tare(
+        self,
+        product_id: str,
+        *,
+        device_id: Optional[str] = None,
+        ttl_s: int = 60,
+    ) -> dict[str, Any]:
+        """Arm the catch-all tare interceptor for ``product_id``.
+
+        Re-arming on a different product overwrites any existing arm
+        (id=1 singleton) — matches the owner's "always one target at a
+        time" mental model. ``device_id`` defaults to whatever the
+        adapter was constructed with so the catch-all override wired
+        via AppConfig is honored.
+        """
+        dev = device_id if device_id is not None else self._catch_all_device_id
+        with self._db_lock:
+            arm = storage_repo.arm_tare(
+                self._conn,
+                product_id,
+                device_id=dev,
+                ttl_s=ttl_s,
+            )
+        return _to_dict(arm)
+
+    def cancel_tare_arm(self) -> int:
+        with self._db_lock:
+            return storage_repo.cancel_tare_arm(self._conn)
+
+    def get_tare_arm_status(self) -> dict[str, Any]:
+        """Return the UI-facing status payload for ``GET /api/tare/status``.
+
+        Shape mirrors the plan §4.4: ``armed`` bool, the armed product's
+        id + name if any, ``expires_at`` ISO string, computed
+        ``seconds_remaining`` (float, clamped at 0), and ``last_error``
+        carried through from the arm row.
+        """
+        with self._db_lock:
+            arm = storage_repo.get_active_tare_arm(
+                self._conn, device_id=self._catch_all_device_id,
+            )
+            if arm is None:
+                return {
+                    "armed": False,
+                    "product_id": None,
+                    "product_name": None,
+                    "device_id": self._catch_all_device_id,
+                    "expires_at": None,
+                    "seconds_remaining": None,
+                    "last_error": None,
+                }
+            product = storage_repo.get_product(self._conn, arm.product_id)
+            # Compute seconds_remaining under the lock too so the value
+            # reflects the same wall-clock SQLite used when the arm was
+            # selected. Don't raise on parse failure — UI tolerates null.
+            remaining_row = self._conn.execute(
+                """
+                SELECT CAST(
+                    (julianday(?) - julianday('now')) * 86400.0
+                    AS REAL
+                ) AS remaining
+                """,
+                (arm.expires_at,),
+            ).fetchone()
+        seconds_remaining: Optional[float] = None
+        if remaining_row is not None:
+            try:
+                seconds_remaining = max(0.0, float(remaining_row["remaining"]))
+            except (TypeError, ValueError):  # pragma: no cover - defensive
+                seconds_remaining = None
+        return {
+            "armed": True,
+            "product_id": arm.product_id,
+            "product_name": (
+                product.name if product is not None else None
+            ),
+            "device_id": arm.device_id,
+            "expires_at": arm.expires_at,
+            "seconds_remaining": seconds_remaining,
+            "last_error": arm.last_error,
+        }
+
+    def get_active_tare_arm(self) -> Optional[dict[str, Any]]:
+        """Dict-form active arm (or None). Used by ``inventory()`` to
+        render the sticky banner + highlight the armed button without a
+        second round-trip to /api/tare/status."""
+        with self._db_lock:
+            arm = storage_repo.get_active_tare_arm(
+                self._conn, device_id=self._catch_all_device_id,
+            )
+        return _to_dict(arm) if arm is not None else None
+
+
 __all__ = ["RepoWebAdapter"]

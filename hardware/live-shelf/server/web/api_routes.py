@@ -401,6 +401,72 @@ def make_api_bp(
         log.warning("admin wipe executed: %s", summary)
         return jsonify({"ok": True, "summary": summary})
 
+    # ----- /api/product/<product_id>/tare/arm ------------------------------
+    #
+    # Tare-capture arm/status/cancel trio (CATCH_ALL_TARE_CAPTURE_PLAN.md
+    # §4.4). POST arm writes a singleton arm row; the next non-noise
+    # catch-all event whose reading lies within the product's plausible
+    # bounds is intercepted by ``ScaleHandler.handle_scale_event`` and
+    # its settled weight is written to ``products.tare_weight_g``.
+    # Rejects non-existent and non-certified products (owner resolution
+    # #5 — only certified rows get tared).
+
+    @bp.post("/api/product/<product_id>/tare/arm")
+    def api_product_tare_arm(product_id: str):
+        if not product_id or "/" in product_id or ".." in product_id:
+            return jsonify({"error": "invalid product_id"}), 400
+        get_product = getattr(repo, "get_product", None)
+        if not callable(get_product):
+            return jsonify({"error": "tare arm not configured"}), 501
+        product = get_product(product_id)
+        if product is None:
+            return jsonify({"error": "product not found"}), 404
+        # Certified gate: non-certified products aren't shown the Tare
+        # button in the UI, so a POST here means the client is out of
+        # sync (stale page) or hand-crafted. Reject with 400 rather
+        # than silently arming.
+        if isinstance(product, dict):
+            is_certified = bool(product.get("certified"))
+        else:
+            is_certified = bool(getattr(product, "certified", None))
+        if not is_certified:
+            return jsonify({"error": "product is not certified"}), 400
+        arm_fn = getattr(repo, "arm_tare", None)
+        if not callable(arm_fn):
+            return jsonify({"error": "tare arm not configured"}), 501
+        arm = arm_fn(product_id)
+        if not isinstance(arm, dict):
+            arm = dict(arm)  # pragma: no cover - defensive
+        return jsonify({
+            "ok": True,
+            "product_id": arm.get("product_id"),
+            "device_id": arm.get("device_id"),
+            "armed_at": arm.get("armed_at"),
+            "expires_at": arm.get("expires_at"),
+        })
+
+    @bp.post("/api/tare/cancel")
+    def api_tare_cancel():
+        cancel_fn = getattr(repo, "cancel_tare_arm", None)
+        if not callable(cancel_fn):
+            return jsonify({"error": "tare cancel not configured"}), 501
+        deleted = int(cancel_fn() or 0)
+        return jsonify({"ok": True, "deleted": deleted})
+
+    @bp.get("/api/tare/status")
+    def api_tare_status():
+        status_fn = getattr(repo, "get_tare_arm_status", None)
+        if not callable(status_fn):
+            return jsonify({
+                "armed": False,
+                "product_id": None,
+                "product_name": None,
+                "expires_at": None,
+                "seconds_remaining": None,
+                "last_error": None,
+            })
+        return jsonify(status_fn())
+
     # ----- /api/product/<product_id>/delete --------------------------------
     #
     # Per-row delete from the registry catalog table. Removes the product,

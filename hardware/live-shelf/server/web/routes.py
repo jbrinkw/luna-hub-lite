@@ -325,6 +325,19 @@ def make_html_bp(
         in_flight = live_in_flight + catch_all_in_flight
         catalog = repo.get_products_certified_not_on_shelf()
 
+        # Tare-capture arm — present when the operator clicked Tare on
+        # a catalog row and the 60s TTL hasn't elapsed yet. Template
+        # uses this to highlight the armed row's button + render a
+        # sticky banner. Defensive getattr so test fakes that predate
+        # the tare feature still render.
+        get_arm = getattr(repo, "get_active_tare_arm", None)
+        tare_arm: Optional[dict[str, Any]] = None
+        if callable(get_arm):
+            try:
+                tare_arm = get_arm()
+            except Exception:  # pragma: no cover — UI must never crash on this
+                tare_arm = None
+
         # Usage side.
         try:
             page = int(request.args.get("page", 1))
@@ -371,6 +384,7 @@ def make_html_bp(
             catch_all_on_shelf=catch_all_on_shelf,
             catch_all_in_flight=catch_all_in_flight,
             catch_all_enabled=ca_on,
+            tare_arm=tare_arm,
             usage_items=usage_items,
             usage_total=usage_total,
             usage_page=page,
