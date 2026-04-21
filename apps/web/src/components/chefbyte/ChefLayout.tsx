@@ -36,6 +36,9 @@ export function ChefLayout({ children }: ChefLayoutProps) {
   const navigate = useNavigate();
   const [drawerOpen, setDrawerOpen] = useState(false);
   const isScanner = location.pathname === '/chef/scanner';
+  // Note: `isScanner` is retained only to style the header's Scanner button as
+  // "active" (pressed-in shade). The desktop tab bar below always renders —
+  // hiding it on the scanner page stranded users with no visible module nav.
 
   const activeTab = getActiveTab(location.pathname);
 
@@ -85,16 +88,14 @@ export function ChefLayout({ children }: ChefLayoutProps) {
         </div>
       </header>
 
-      {/* Tab bar — desktop, hidden on scanner page */}
-      {!isScanner && (
-        <nav
-          className="hidden md:flex items-center bg-surface border-b border-border px-4 shrink-0"
-          data-testid="chef-tabs"
-        >
-          <Tabs items={tabItems} activeValue={activeTab} />
-          <SettingsDot />
-        </nav>
-      )}
+      {/* Tab bar — desktop, always visible so users can navigate away from any page */}
+      <nav
+        className="hidden md:flex items-center bg-surface border-b border-border px-4 shrink-0"
+        data-testid="chef-tabs"
+      >
+        <Tabs items={tabItems} activeValue={activeTab} />
+        <SettingsDot />
+      </nav>
 
       {/* Mobile drawer */}
       <div
