@@ -35,8 +35,8 @@ describe('livetrack-session Edge Function', () => {
   let importKeyB: string;
 
   // Device with a STALE heartbeat (older than DEVICE_FRESH_WINDOW_MS) so
-  // /create returns 409 even though auth passes.
-  let staleDeviceId: string;
+  // /create returns 409 even though auth passes. device_id captured
+  // implicitly via the import_key_hash lookup in the edge fn.
   let staleImportKey: string;
 
   // Disabled device — auth must reject.
@@ -88,7 +88,7 @@ describe('livetrack-session Edge Function', () => {
 
     // ─── Stale-heartbeat device (for /create 409) ────────────
     staleImportKey = 'lts_' + randomBytes(16).toString('hex');
-    const { data: staleDev } = await (adminClient as any)
+    await (adminClient as any)
       .schema('chefbyte')
       .from('live_shelf_devices')
       .insert({
@@ -98,10 +98,7 @@ describe('livetrack-session Edge Function', () => {
         import_key_hash: createHash('sha256').update(staleImportKey).digest('hex'),
         is_active: true,
         last_heartbeat_ts: new Date(Date.now() - 5 * 60_000).toISOString(), // 5 min old
-      })
-      .select('device_id')
-      .single();
-    staleDeviceId = staleDev.device_id;
+      });
 
     // ─── Disabled device ────────────────────────────────────
     disabledImportKey = 'lts_' + randomBytes(16).toString('hex');
