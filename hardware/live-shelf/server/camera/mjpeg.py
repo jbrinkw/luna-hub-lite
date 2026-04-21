@@ -150,12 +150,37 @@ def _frame_packet(jpeg: bytes) -> bytes:
     )
 
 
+def _apply_crop(
+    frame: np.ndarray,
+    crop: Optional[tuple[float, float, float, float]],
+) -> np.ndarray:
+    """Return a (possibly same) view of ``frame`` cropped by fractional bounds.
+
+    ``crop`` is ``(y0, y1, x0, x1)`` in [0.0, 1.0]. For example,
+    ``(0.20, 1.0, 0.40, 1.0)`` keeps rows [20% ... 100%] and cols
+    [40% ... 100%] — i.e. crop 20% off the top and 40% off the left.
+    Invalid / out-of-order / empty crops fall back to the full frame.
+    """
+    if crop is None:
+        return frame
+    y0, y1, x0, x1 = crop
+    h, w = frame.shape[:2]
+    y0p = max(0, min(h, int(round(h * y0))))
+    y1p = max(0, min(h, int(round(h * y1))))
+    x0p = max(0, min(w, int(round(w * x0))))
+    x1p = max(0, min(w, int(round(w * x1))))
+    if y0p >= y1p or x0p >= x1p:
+        return frame  # degenerate — safer to send full frame
+    return frame[y0p:y1p, x0p:x1p]
+
+
 def stream(
     daemon: CameraDaemon,
     *,
     stream_fps: float = DEFAULT_STREAM_FPS,
     quality: int = DEFAULT_JPEG_QUALITY,
     overlay_hud: bool = True,
+    crop: Optional[tuple[float, float, float, float]] = None,
 ) -> Generator[bytes, None, None]:
     """Yield multipart/x-mixed-replace chunks for the `/live.mjpg` endpoint.
 
@@ -164,6 +189,11 @@ def stream(
 
     `stream_fps` is capped to `daemon.config.capture_fps` — there's no point
     in streaming faster than we capture. Sub-1 fps is allowed.
+
+    ``crop`` is applied BEFORE the HUD overlay and JPEG encode, so the
+    HUD sits on the cropped framing and downstream consumers never see
+    pixels outside the region of interest. See :func:`_apply_crop` for
+    the coordinate convention.
     """
     target_fps = min(max(0.5, float(stream_fps)), float(daemon.config.capture_fps))
     period = 1.0 / target_fps
@@ -178,9 +208,17 @@ def stream(
         if frame is None:
             jpeg = _encode_placeholder("waiting for camera")
         else:
+            cropped = _apply_crop(frame, crop)
+            # Copy the crop view so the HUD overlay doesn't mutate the
+            # daemon's ring-buffer-owned frame (numpy slices share
+            # memory).
+            if cropped is frame:
+                work = frame
+            else:
+                work = np.ascontiguousarray(cropped)
             if overlay_hud:
-                _overlay_hud(frame, brightness, door_open, ts_iso)
-            ok, buf = cv2.imencode(".jpg", frame, [cv2.IMWRITE_JPEG_QUALITY, quality])
+                _overlay_hud(work, brightness, door_open, ts_iso)
+            ok, buf = cv2.imencode(".jpg", work, [cv2.IMWRITE_JPEG_QUALITY, quality])
             jpeg = buf.tobytes() if ok else b""
 
         if jpeg:
@@ -194,10 +232,22 @@ def stream(
                 break
 
 
+#: Per-shelf crop overrides for the live MJPEG feed. Each entry is
+#: ``(y0, y1, x0, x1)`` in [0, 1]. The live-shelf feed is never cropped —
+#: its frames ARE the session archives. The catch-all rig has a wider
+#: field of view than we care about (camera sees the counter + some wall
+#: + the left edge of the scale board); crop to the scale region so the
+#: classifier later sees only the item on the plate.
+SHELF_CROPS: dict[str, tuple[float, float, float, float]] = {
+    "catch_all": (0.20, 1.0, 0.40, 1.0),  # crop top 20% + left 40%
+}
+
+
 __all__ = [
     "DEFAULT_JPEG_QUALITY",
     "DEFAULT_SHELF_KEY",
     "DEFAULT_STREAM_FPS",
+    "SHELF_CROPS",
     "resolve_daemon",
     "stream",
 ]

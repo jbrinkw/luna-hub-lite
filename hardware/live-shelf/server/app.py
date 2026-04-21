@@ -1274,8 +1274,12 @@ def create_app(
                 {"error": f"no camera registered for shelf={shelf!r}"},
                 503,
             )
+        # Per-shelf fractional crop (e.g. catch_all crops top 20% + left
+        # 40% so the UI only sees the scale region). Unlisted shelves
+        # stream uncropped.
+        shelf_crop = mjpeg.SHELF_CROPS.get(shelf)
         return Response(
-            mjpeg.stream(daemon),
+            mjpeg.stream(daemon, crop=shelf_crop),
             mimetype="multipart/x-mixed-replace; boundary=frame",
         )
 
