@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -857,6 +857,39 @@ export function ScannerPage() {
 
   const activeItem = queue.find((q) => q.id === activeItemId) ?? null;
   const filteredQueue = filter === 'new' ? queue.filter((q) => q.isNew) : queue;
+
+  // Push user-edited nutrition fields back to products on every change.
+  // Without this, corrections typed AFTER the initial auto-save (fast path
+  // for already-known barcodes, which commits within ~100 ms of scan)
+  // would live only in local state and never reach the DB — so the product
+  // settings page keeps showing stale values. Effect deps include
+  // `activeItem?.productId` so the write also fires when productId
+  // transitions from null → set (covers the rare race where the user
+  // hits a key before the scan's DB lookup resolves).
+  const activeProductId = activeItem?.productId ?? null;
+  useEffect(() => {
+    if (!activeProductId) return;
+    const edited = userEditedFieldsRef.current;
+    if (edited.size === 0) return;
+    const patch: Record<string, number | null> = {};
+    for (const f of edited) {
+      const raw = nutrition[f] ?? '';
+      if (f === 'servingsPerContainer') patch.servings_per_container = parseFloat(raw) || 1;
+      else if (f === 'calories') patch.calories_per_serving = parseFloat(raw) || null;
+      else if (f === 'protein') patch.protein_per_serving = parseFloat(raw) || null;
+      else if (f === 'carbs') patch.carbs_per_serving = parseFloat(raw) || null;
+      else if (f === 'fat') patch.fat_per_serving = parseFloat(raw) || null;
+    }
+    if (Object.keys(patch).length === 0) return;
+    // Fire-and-forget; log errors but don't block the UI.
+    chefbyte()
+      .from('products')
+      .update(patch)
+      .eq('product_id', activeProductId)
+      .then((res: { error: unknown }) => {
+        if (res.error) console.error('scanner: nutrition push-back failed', res.error);
+      });
+  }, [nutrition, activeProductId]);
 
   /* ---- Inline name editing ---- */
   const [editingName, setEditingName] = useState('');
