@@ -93,6 +93,17 @@ class LiveTrackPoller:
         self._ai_tare_inflight: set[str] = set()
         self._ai_tare_lock = threading.Lock()
 
+        # Baseline for heartbeat-driven LiveTrack scale posting. Captured
+        # the first time a heartbeat arrives while a session is in
+        # waiting_scale. Cleared when the session transitions out of
+        # waiting_scale (or disappears). The scale-event handler reads
+        # this via :meth:`maybe_set_baseline` and skips the post when
+        # the current heartbeat weight hasn't moved enough from baseline —
+        # stops empty-scale drift from being treated as a container placement.
+        self._baseline_lock = threading.Lock()
+        self._livetrack_baseline_g: Optional[float] = None
+        self._livetrack_baseline_session: Optional[str] = None
+
     # ------------------------------------------------------------------
     # Public API (called by scale_events handler + app.py startup)
     # ------------------------------------------------------------------
@@ -108,6 +119,61 @@ class LiveTrackPoller:
             if self._snapshot is None:
                 return None
             return dict(self._snapshot)
+
+    def maybe_set_baseline(self, weight_g: float) -> float:
+        """Return the baseline weight for the current waiting_scale session.
+
+        First call after a session transitions to ``waiting_scale`` records
+        ``weight_g`` as the baseline. Subsequent calls return the already-
+        recorded baseline. Used by ``handle_heartbeat`` to determine
+        whether the current reading represents a real container-placement
+        vs. baseline drift.
+
+        Thread-safe. Scoped per session — ``_maybe_clear_baseline`` wipes
+        the recorded value whenever the session's state leaves
+        ``waiting_scale`` or the session disappears entirely (so a fresh
+        arm starts a fresh baseline).
+        """
+        with self._baseline_lock:
+            if self._livetrack_baseline_g is None:
+                self._livetrack_baseline_g = float(weight_g)
+                # Capture the session_id for scoping (paired with the
+                # snapshot below — reads under _snapshot_lock are fine
+                # because this lock is independent).
+                with self._snapshot_lock:
+                    snap = self._snapshot
+                self._livetrack_baseline_session = (
+                    str(snap.get("session_id", "")) if snap else None
+                )
+                log.info(
+                    "livetrack: captured baseline=%.2fg for session=%s",
+                    weight_g, self._livetrack_baseline_session,
+                )
+            return self._livetrack_baseline_g
+
+    def _maybe_clear_baseline(self, session: Optional[dict[str, Any]]) -> None:
+        """Clear the waiting_scale baseline when the session has moved on.
+
+        Called from the poll loop before updating _snapshot. If the
+        new session is None, or its state is not waiting_scale, or its
+        session_id differs from the one we baselined for, drop the
+        cached baseline so the next waiting_scale arm captures fresh.
+        """
+        with self._baseline_lock:
+            if self._livetrack_baseline_g is None:
+                return
+            should_clear = (
+                session is None
+                or session.get("state") != "waiting_scale"
+                or str(session.get("session_id", "")) != self._livetrack_baseline_session
+            )
+            if should_clear:
+                log.debug(
+                    "livetrack: clearing baseline=%.2fg (session transitioned)",
+                    self._livetrack_baseline_g,
+                )
+                self._livetrack_baseline_g = None
+                self._livetrack_baseline_session = None
 
     def start(self) -> None:
         """Start the polling thread. Idempotent."""
@@ -148,6 +214,7 @@ class LiveTrackPoller:
         except Exception:  # pragma: no cover - defensive
             log.exception("livetrack poller: seed poll failed; snapshot left empty")
             return
+        self._maybe_clear_baseline(session)
         with self._snapshot_lock:
             self._snapshot = session
 
@@ -186,6 +253,10 @@ class LiveTrackPoller:
         the loop to pick the next sleep interval).
         """
         session = self._client.get_active_livetrack_session()
+        # Clear any stale baseline before swapping the snapshot — the
+        # heartbeat handler's baseline cache is scoped to one waiting_scale
+        # session, so transitions out of that state must reset it.
+        self._maybe_clear_baseline(session)
         with self._snapshot_lock:
             self._snapshot = session
         if session is None:

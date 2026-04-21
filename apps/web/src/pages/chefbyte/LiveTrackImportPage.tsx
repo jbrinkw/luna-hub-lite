@@ -260,13 +260,13 @@ export function LiveTrackImportPage() {
     ) {
       lastScaleReadingTs.current = session.scale_reading_ts;
       setAriaAnnouncement(`scale reading received: ${Math.round(session.scale_reading_g)} grams`);
-      if (state.kind === 'product_loaded' && state.isFullContainer) {
-        dispatch({
-          type: 'scale_reading',
-          scaleG: session.scale_reading_g,
-          netG: state.product.net_weight_g,
-        });
-      }
+      // DON'T auto-transition to review — even in the full+sealed default.
+      // The user needs the chance to: (a) review the reading, (b) choose
+      // between auto / AI / manual tare paths, (c) re-place the container
+      // if the first reading came in before they meant to trigger. The
+      // reading itself is stored via the session row and shown in the
+      // product_loaded UI; the user presses an explicit "confirm" action
+      // (auto-tare, AI-tare, or manual entry) to advance.
     }
     // AI tare arrived.
     if (
@@ -632,6 +632,17 @@ export function LiveTrackImportPage() {
             onManualTareChange={setManualTareInput}
             onApplyManualTare={applyManualTare}
             piOnline={deviceOnline}
+            currentScaleReadingG={session?.scale_reading_g ?? null}
+            onConfirmAutoTare={() => {
+              if (state.kind !== 'product_loaded') return;
+              const r = session?.scale_reading_g;
+              if (r == null) return;
+              dispatch({
+                type: 'scale_reading',
+                scaleG: Number(r),
+                netG: state.product.net_weight_g,
+              });
+            }}
           />
         )}
 
@@ -682,6 +693,8 @@ interface ProductEditorProps {
   onManualTareChange: (v: string) => void;
   onApplyManualTare: () => void;
   piOnline: boolean;
+  currentScaleReadingG: number | null;
+  onConfirmAutoTare: () => void;
 }
 
 function ProductEditor({
@@ -694,6 +707,8 @@ function ProductEditor({
   onManualTareChange,
   onApplyManualTare,
   piOnline,
+  currentScaleReadingG,
+  onConfirmAutoTare,
 }: ProductEditorProps) {
   const { product, nutrition, isFullContainer } = state;
   const hasNet = (product.net_weight_g ?? null) != null;
@@ -746,11 +761,42 @@ function ProductEditor({
       </fieldset>
 
       {isFullContainer && hasNet ? (
-        <p className="rounded bg-slate-50 p-3 text-sm text-slate-700" data-testid="livetrack-waiting-scale-hint">
-          Place container on the catch-all scale. Tare will auto-compute from
-          {' '}
-          {product.net_weight_g}g net.
-        </p>
+        <div className="space-y-2" data-testid="livetrack-auto-tare-block">
+          {currentScaleReadingG == null ? (
+            <p className="rounded bg-slate-50 p-3 text-sm text-slate-700" data-testid="livetrack-waiting-scale-hint">
+              Place container on the catch-all scale. Tare will auto-compute
+              from {product.net_weight_g}g net.
+            </p>
+          ) : (
+            <>
+              <div className="rounded bg-slate-50 p-3 text-sm text-slate-700" data-testid="livetrack-scale-reading">
+                <div>
+                  Current reading:{' '}
+                  <span className="font-mono">{Number(currentScaleReadingG).toFixed(1)}g</span>
+                </div>
+                <div className="text-xs text-slate-500 mt-1">
+                  If the container isn't settled yet, wait — the reading refreshes
+                  as the scale sends heartbeats.
+                </div>
+                <div className="text-xs text-slate-500">
+                  Auto tare ={' '}
+                  <span className="font-mono">
+                    {Math.max(0, Number(currentScaleReadingG) - Number(product.net_weight_g ?? 0)).toFixed(1)}g
+                  </span>
+                  {' '}(reading − {product.net_weight_g}g net)
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={onConfirmAutoTare}
+                className="rounded bg-emerald-600 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-700"
+                data-testid="livetrack-confirm-auto-tare"
+              >
+                Use this reading for auto tare
+              </button>
+            </>
+          )}
+        </div>
       ) : (
         <div className="space-y-2">
           <button
