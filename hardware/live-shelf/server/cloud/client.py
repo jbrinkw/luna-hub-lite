@@ -85,6 +85,22 @@ class CloudClient:
             path = "/" + path
         return f"{self._base_url}{path}"
 
+    @property
+    def _functions_root_url(self) -> str:
+        """Return the `/functions/v1` prefix (no trailing function name).
+
+        The ``base_url`` is pinned to ``<project>.supabase.co/functions/v1/shelf-ingest``
+        in the Pi's env. Most callers stay inside shelf-ingest, but the
+        LiveTrack session methods target a different function under the
+        same ``/functions/v1`` prefix. Strip the last path segment so we
+        can build sibling-function URLs.
+        """
+        base = self._base_url
+        # Strip trailing /<function-name>. The base always ends with a
+        # function name (no trailing slash by __init__ normalization).
+        last_slash = base.rfind("/")
+        return base[:last_slash] if last_slash != -1 else base
+
     @staticmethod
     def _parse_or_raise(resp: requests.Response) -> dict[str, Any]:
         """Return parsed JSON on success, raise :class:`CloudError` otherwise.
@@ -147,6 +163,58 @@ class CloudClient:
             headers={"content-type": "application/json"},
         )
         return self._parse_or_raise(resp)
+
+    def get_active_livetrack_session(self) -> dict | None:
+        """Poll for the active LiveTrack Import session for this device.
+
+        Targets the ``livetrack-session`` edge function (sibling to the
+        ``shelf-ingest`` base_url) — intentional separation so the
+        session-polling path's logs/failures stay distinct from the
+        event-drain path's.
+
+        Returns the session row on success, or ``None`` when the cloud
+        reports no active session. Raises :class:`CloudError` for any
+        non-2xx response so the poller can decide whether to backoff.
+        """
+        url = f"{self._functions_root_url}/livetrack-session/active"
+        resp = self._session.get(url, timeout=self._timeout_s)
+        parsed = self._parse_or_raise(resp)
+        session = parsed.get("session") if isinstance(parsed, dict) else None
+        if not isinstance(session, dict):
+            return None
+        return session
+
+    def post_livetrack_session_update(
+        self, session_id: str, **fields: Any,
+    ) -> dict:
+        """Patch a LiveTrack session with Pi-originated fields.
+
+        Used by the scale-event interceptor (scale reading arrives) and
+        by the poller when it completes an AI-tare run. ``fields`` is
+        passed through as-is; the edge function filters to an allow-list
+        server-side so a misbehaving Pi can't stomp barcode/product_id.
+
+        Returns the updated session row. Raises :class:`CloudError` on
+        any non-2xx — callers (scale_events interceptor, poller) are
+        expected to swallow and log so a transient cloud outage never
+        blocks the HTTP response to the ESP.
+        """
+        body: dict[str, Any] = {"session_id": session_id}
+        body.update(fields)
+        url = f"{self._functions_root_url}/livetrack-session/pi-update"
+        resp = self._session.post(
+            url,
+            json=body,
+            timeout=self._timeout_s,
+            headers={"content-type": "application/json"},
+        )
+        parsed = self._parse_or_raise(resp)
+        session = parsed.get("session") if isinstance(parsed, dict) else None
+        if not isinstance(session, dict):
+            # Defensive — the edge function always returns a session on
+            # 2xx, but don't crash the poller if the contract drifts.
+            return parsed if isinstance(parsed, dict) else {}
+        return session
 
     def post_product_tare(
         self, *, product_id: str, tare_g: float,

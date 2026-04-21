@@ -17,6 +17,7 @@ from __future__ import annotations
 from .catalog import Catalog, fetch_catalog
 from .client import CloudClient, CloudError
 from .integration import CloudEventEmitter, null_emitter
+from .livetrack_poller import LiveTrackPoller
 from .outbox import enqueue_event
 from .worker import CloudWorker
 
@@ -26,6 +27,7 @@ __all__ = [
     "CloudError",
     "CloudEventEmitter",
     "CloudWorker",
+    "LiveTrackPoller",
     "enqueue_event",
     "fetch_catalog",
     "null_emitter",
