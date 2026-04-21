@@ -115,21 +115,21 @@ describe('ExtensionCard', () => {
 
   it('URL fields use text type, API key fields use password type', () => {
     const fields = [
-      { key: 'obsidian_url', label: 'Obsidian URL' },
-      { key: 'obsidian_api_key', label: 'API Key' },
+      { key: 'ha_url', label: 'Home Assistant URL' },
+      { key: 'ha_api_key', label: 'API Key' },
     ];
     render(<ExtensionCard {...defaultProps} enabled credentialFields={fields} />);
 
-    const urlInput = screen.getByLabelText('Obsidian URL');
+    const urlInput = screen.getByLabelText('Home Assistant URL');
     const apiKeyInput = screen.getByLabelText('API Key');
     expect(urlInput).toHaveAttribute('type', 'text');
     expect(apiKeyInput).toHaveAttribute('type', 'password');
   });
 
-  it('enabled card has green left border', () => {
+  it('enabled card has success semantic-token left border', () => {
     const { container } = render(<ExtensionCard {...defaultProps} enabled />);
     const card = container.firstChild as HTMLElement;
-    expect(card.className).toContain('border-l-emerald-500');
+    expect(card.className).toContain('border-l-success');
   });
 
   it('disabled card has reduced opacity', () => {

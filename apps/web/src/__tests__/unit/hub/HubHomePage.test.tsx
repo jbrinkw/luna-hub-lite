@@ -3,6 +3,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { useAppContext } from '@/shared/AppProvider';
+import { ThemeProvider } from '@/shared/ThemeProvider';
 import { HubHomePage } from '@/pages/hub/HubHomePage';
 
 // The global setup.ts already mocks @/shared/AppProvider, so we cast the
@@ -23,9 +24,11 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
 
 function renderPage() {
   return render(
-    <MemoryRouter initialEntries={['/hub']}>
-      <HubHomePage />
-    </MemoryRouter>,
+    <ThemeProvider>
+      <MemoryRouter initialEntries={['/hub']}>
+        <HubHomePage />
+      </MemoryRouter>
+    </ThemeProvider>,
   );
 }
 
