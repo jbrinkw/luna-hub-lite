@@ -13,7 +13,8 @@
  *
  * Assumes:
  *   * ``.env`` at the repo root has SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.
- *   * The Pi at 192.168.0.181 is reachable + has the poller running.
+ *   * The Pi at ``fridgecam`` (or whatever ``PI_HOST`` is set to) is
+ *     reachable + has the poller running.
  *   * ``PI_USER_ID`` env var OR the first active ``live_shelf_devices`` row
  *     identifies which cloud user owns the Pi we're testing against.
  *
@@ -26,7 +27,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 
 const REPO_ROOT = process.cwd();
-const PI_HOST = process.env.PI_HOST || '192.168.0.181';
+const PI_HOST = process.env.PI_HOST || 'fridgecam';
 const PI_USER = process.env.PI_USER || 'jeremy';
 const PI_DB_PATH = process.env.PI_DB_PATH || '/home/jeremy/live-shelf/data/shelf.sqlite3';
 
