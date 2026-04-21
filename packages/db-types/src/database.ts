@@ -14,6 +14,54 @@ export type Database = {
   }
   chefbyte: {
     Tables: {
+      event_overrides: {
+        Row: {
+          calories_override: number | null
+          carbs_override: number | null
+          client_event_id: string
+          created_at: string
+          fat_override: number | null
+          is_voided: boolean
+          macro_logging_enabled: boolean
+          macros_servings_override: number | null
+          override_id: string
+          protein_override: number | null
+          stock_qty_override: number | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          calories_override?: number | null
+          carbs_override?: number | null
+          client_event_id: string
+          created_at?: string
+          fat_override?: number | null
+          is_voided?: boolean
+          macro_logging_enabled?: boolean
+          macros_servings_override?: number | null
+          override_id?: string
+          protein_override?: number | null
+          stock_qty_override?: number | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          calories_override?: number | null
+          carbs_override?: number | null
+          client_event_id?: string
+          created_at?: string
+          fat_override?: number | null
+          is_voided?: boolean
+          macro_logging_enabled?: boolean
+          macros_servings_override?: number | null
+          override_id?: string
+          protein_override?: number | null
+          stock_qty_override?: number | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       food_logs: {
         Row: {
           calories: number
@@ -26,6 +74,7 @@ export type Database = {
           product_id: string
           protein: number
           qty_consumed: number
+          source_client_event_id: string | null
           unit: string
           user_id: string
         }
@@ -40,6 +89,7 @@ export type Database = {
           product_id: string
           protein: number
           qty_consumed: number
+          source_client_event_id?: string | null
           unit: string
           user_id: string
         }
@@ -54,6 +104,7 @@ export type Database = {
           product_id?: string
           protein?: number
           qty_consumed?: number
+          source_client_event_id?: string | null
           unit?: string
           user_id?: string
         }
@@ -382,6 +433,7 @@ export type Database = {
           servings_per_container: number
           tare_weight_g: number | null
           unit_type: string | null
+          updated_at: string
           user_id: string
           variant: string | null
           walmart_link: string | null
@@ -410,6 +462,7 @@ export type Database = {
           servings_per_container?: number
           tare_weight_g?: number | null
           unit_type?: string | null
+          updated_at?: string
           user_id: string
           variant?: string | null
           walmart_link?: string | null
@@ -438,6 +491,7 @@ export type Database = {
           servings_per_container?: number
           tare_weight_g?: number | null
           unit_type?: string | null
+          updated_at?: string
           user_id?: string
           variant?: string | null
           walmart_link?: string | null
@@ -584,6 +638,7 @@ export type Database = {
           device_id: string
           event_id: string
           payload: Json
+          pi_event_id: string | null
           reason: string | null
           resolved_lot_id: string | null
           user_id: string
@@ -595,6 +650,7 @@ export type Database = {
           device_id: string
           event_id?: string
           payload: Json
+          pi_event_id?: string | null
           reason?: string | null
           resolved_lot_id?: string | null
           user_id: string
@@ -606,6 +662,7 @@ export type Database = {
           device_id?: string
           event_id?: string
           payload?: Json
+          pi_event_id?: string | null
           reason?: string | null
           resolved_lot_id?: string | null
           user_id?: string
@@ -771,26 +828,62 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      apply_shelf_event_admin: {
+      apply_event_override: {
         Args: {
+          p_calories_override?: number
+          p_carbs_override?: number
           p_client_event_id: string
-          p_delta_g: number
-          p_device_id: string
-          p_event_kind: string
-          p_kind: string
-          p_occurred_at: string
-          p_product_id: string
-          p_scale_id: string
-          p_user_id: string
+          p_fat_override?: number
+          p_is_voided?: boolean
+          p_macro_logging_enabled?: boolean
+          p_macros_servings_override?: number
+          p_protein_override?: number
+          p_stock_qty_override?: number
         }
-        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
-        SetofOptions: {
-          from: "*"
-          to: "shelf_event_result"
-          isOneToOne: true
-          isSetofReturn: false
-        }
+        Returns: string
       }
+      apply_shelf_event_admin:
+        | {
+            Args: {
+              p_client_event_id: string
+              p_delta_g: number
+              p_device_id: string
+              p_event_kind: string
+              p_kind: string
+              p_occurred_at: string
+              p_product_id: string
+              p_scale_id: string
+              p_user_id: string
+            }
+            Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+            SetofOptions: {
+              from: "*"
+              to: "shelf_event_result"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+        | {
+            Args: {
+              p_client_event_id: string
+              p_delta_g: number
+              p_device_id: string
+              p_event_kind: string
+              p_kind: string
+              p_occurred_at: string
+              p_pi_event_id?: string
+              p_product_id: string
+              p_scale_id: string
+              p_user_id: string
+            }
+            Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+            SetofOptions: {
+              from: "*"
+              to: "shelf_event_result"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
       consume_product: {
         Args: {
           p_log_macros: boolean
@@ -1383,26 +1476,62 @@ export type Database = {
         Args: { p_app_name: string; p_user_id: string }
         Returns: undefined
       }
-      apply_shelf_event: {
+      apply_event_override: {
         Args: {
+          p_calories_override?: number
+          p_carbs_override?: number
           p_client_event_id: string
-          p_delta_g: number
-          p_device_id: string
-          p_event_kind: string
-          p_kind: string
-          p_occurred_at: string
-          p_product_id: string
-          p_scale_id: string
-          p_user_id: string
+          p_fat_override?: number
+          p_is_voided?: boolean
+          p_macro_logging_enabled?: boolean
+          p_macros_servings_override?: number
+          p_protein_override?: number
+          p_stock_qty_override?: number
         }
-        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
-        SetofOptions: {
-          from: "*"
-          to: "shelf_event_result"
-          isOneToOne: true
-          isSetofReturn: false
-        }
+        Returns: string
       }
+      apply_shelf_event:
+        | {
+            Args: {
+              p_client_event_id: string
+              p_delta_g: number
+              p_device_id: string
+              p_event_kind: string
+              p_kind: string
+              p_occurred_at: string
+              p_product_id: string
+              p_scale_id: string
+              p_user_id: string
+            }
+            Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+            SetofOptions: {
+              from: "*"
+              to: "shelf_event_result"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+        | {
+            Args: {
+              p_client_event_id: string
+              p_delta_g: number
+              p_device_id: string
+              p_event_kind: string
+              p_kind: string
+              p_occurred_at: string
+              p_pi_event_id?: string
+              p_product_id: string
+              p_scale_id: string
+              p_user_id: string
+            }
+            Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+            SetofOptions: {
+              from: "*"
+              to: "shelf_event_result"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
       complete_next_set: {
         Args: {
           p_actual_load: number
