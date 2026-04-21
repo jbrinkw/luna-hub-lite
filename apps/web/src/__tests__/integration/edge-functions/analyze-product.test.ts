@@ -160,18 +160,22 @@ describe('Analyze-Product Edge Function', () => {
         { onConflict: 'user_id,key' },
       );
 
-    // This should NOT return 429 — the old date means the quota resets
+    // Use the canned OFF response so the request gets PAST the OFF stage
+    // (which is where quota is now consumed — see 2026-04-21 failure-path
+    // guards). Without the canned header, a fresh barcode 404s before
+    // quota is charged, which is the new (correct) behavior but defeats
+    // this test's yesterday→today reset assertion.
     const res = await fetch(EDGE_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${userJwt}`,
+        'x-test-off-mode': 'canned',
       },
-      body: JSON.stringify({ barcode: '0000000000000' }),
+      body: JSON.stringify({ barcode: 'TESTQUOTARESET' }),
     });
 
-    // The request passes quota check; it may 404 (barcode not in OFF) or 200,
-    // but crucially it must NOT be 429 (rate limited).
+    // Must NOT be 429 (quota was stale so the counter resets to 0).
     expect(res.status).not.toBe(429);
 
     // Verify the quota record was reset to today with count=1
@@ -424,5 +428,285 @@ describe('Analyze-Product Edge Function', () => {
     expect(n['proteins_100g']).toBeGreaterThan(4); // ~6.3g
     expect(n['sugars_100g']).toBeGreaterThan(50);
     expect(p.serving_size).toBeTruthy();
+  }, 15_000);
+});
+
+/**
+ * ─── Failure-path regression guards ───────────────────────────────────
+ *
+ * These tests exercise the upstream-failure branches added after the
+ * 2026-04-21 E2E audit (#1 HIGH risk: "analyze-product failure paths are
+ * not exercised"). Failures are injected via the `x-test-force-failure`
+ * request header, which the edge fn only honors when
+ * SUPABASE_URL points at local (see isLocalDev() in the fn source).
+ *
+ * Production requests that send the header are silently ignored.
+ */
+describe('Analyze-Product Edge Function — failure paths', () => {
+  let userId: string;
+  let userJwt: string;
+
+  async function getQuotaCount(): Promise<number> {
+    const { data } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('user_config')
+      .select('value')
+      .eq('user_id', userId)
+      .eq('key', 'analyze_quota')
+      .maybeSingle();
+    if (!data?.value) return 0;
+    try {
+      const parsed = JSON.parse(data.value);
+      const today = new Date().toISOString().slice(0, 10);
+      return parsed.date === today ? (parsed.count ?? 0) : 0;
+    } catch {
+      return 0;
+    }
+  }
+
+  async function resetQuota(): Promise<void> {
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('user_config')
+      .delete()
+      .eq('user_id', userId)
+      .eq('key', 'analyze_quota');
+  }
+
+  beforeAll(async () => {
+    const user = await createTestUser('ap-fail');
+    userId = user.userId;
+    const { error: actErr } = await (user.client as any).schema('hub').rpc('activate_app', { p_app_name: 'chefbyte' });
+    if (actErr) throw new Error(`activate_app failed: ${actErr.message}`);
+    const { data: session } = await user.client.auth.getSession();
+    userJwt = session.session!.access_token;
+  });
+
+  afterAll(async () => {
+    await (adminClient as any).schema('chefbyte').from('products').delete().eq('user_id', userId);
+    await (adminClient as any).schema('chefbyte').from('user_config').delete().eq('user_id', userId);
+    await cleanupUser(userId);
+  });
+
+  // ─── OFF 503 — upstream OpenFoodFacts outage ──────────────
+  it('OFF 503: returns structured 503 with ai_degraded=true, quota NOT consumed', async () => {
+    await resetQuota();
+    const quotaBefore = await getQuotaCount();
+
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+        'x-test-force-failure': 'off_503',
+      },
+      // Use a fresh barcode not in OFF so we're not hitting the existing-
+      // product short-circuit. Failure fires before OFF is actually called.
+      body: JSON.stringify({ barcode: 'TESTFAIL503A' }),
+    });
+
+    expect(res.status).toBe(503);
+    expect(res.status).not.toBe(500); // explicit: not a generic server error
+    const body = await res.json();
+    expect(body.ai_degraded).toBe(true);
+    expect(body.ai_reason).toBe('off_unavailable');
+    expect(body.error).toMatch(/openfoodfacts|unavailable/i);
+
+    // Quota invariant: not consumed on upstream failure.
+    const quotaAfter = await getQuotaCount();
+    expect(quotaAfter).toBe(quotaBefore);
+  }, 15_000);
+
+  // ─── OFF malformed body ──────────────────────────────────
+  it('OFF malformed body: returns structured 503 (not 500), quota NOT consumed', async () => {
+    await resetQuota();
+    const quotaBefore = await getQuotaCount();
+
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+        'x-test-force-failure': 'off_malformed',
+      },
+      body: JSON.stringify({ barcode: 'TESTFAILPARSEA' }),
+    });
+
+    expect(res.status).toBe(503);
+    const body = await res.json();
+    expect(body.ai_reason).toBe('off_unavailable');
+
+    const quotaAfter = await getQuotaCount();
+    expect(quotaAfter).toBe(quotaBefore);
+  }, 15_000);
+
+  // ─── Anthropic timeout — SOFT failure, OFF still present ────
+  //
+  // Uses `x-test-off-mode: canned` so the OFF lookup returns a
+  // deterministic shape regardless of OFF uptime (the real OFF API
+  // rate-limits aggressively under test traffic). The
+  // `x-test-force-failure: anthropic_timeout` header triggers the
+  // simulated timeout in normalizeWithAI(). Together these exercise the
+  // exact soft-degrade branch the production scanner falls through to.
+  it(
+    'Anthropic timeout: returns 200 with ai_degraded=true + OFF data; quota consumed once',
+    async () => {
+      await resetQuota();
+      const quotaBefore = await getQuotaCount();
+
+      const res = await fetch(EDGE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userJwt}`,
+          'x-test-force-failure': 'anthropic_timeout',
+          'x-test-off-mode': 'canned',
+        },
+        body: JSON.stringify({ barcode: 'TESTTIMEOUT0001' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.status).not.toBe(500);
+      const body = await res.json();
+      expect(body.source).toBe('ai');
+      expect(body.ai_degraded).toBe(true);
+      expect(body.ai_reason).toBe('timeout');
+      expect(body.suggestion).toBeNull();
+
+      // OFF fallback data must be present so the scanner can still
+      // build a product from nutriments. Canned shape matches Nutella.
+      expect(body.off).toBeDefined();
+      expect(body.off.product_name).toMatch(/nutella/i);
+      expect(body.off.nutriments).toBeDefined();
+
+      // Quota consumed exactly once (OFF succeeded → quota charged).
+      const quotaAfter = await getQuotaCount();
+      expect(quotaAfter).toBe(quotaBefore + 1);
+    },
+    // 25s Anthropic timeout + buffer. We short-circuit so this resolves
+    // immediately in practice.
+    15_000,
+  );
+
+  // ─── Anthropic returns malformed JSON — SOFT failure ─────
+  it(
+    'Anthropic malformed JSON: does not 500, returns degraded state with OFF fallback',
+    async () => {
+      await resetQuota();
+      const quotaBefore = await getQuotaCount();
+
+      const res = await fetch(EDGE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userJwt}`,
+          'x-test-force-failure': 'anthropic_malformed',
+          'x-test-off-mode': 'canned',
+        },
+        body: JSON.stringify({ barcode: 'TESTMALFORM0001' }),
+      });
+
+      expect(res.status).toBe(200);
+      expect(res.status).not.toBe(500);
+      const body = await res.json();
+      expect(body.source).toBe('ai');
+      // `anthropic_malformed` mirrors the real JSON.parse-failure branch
+      // which returns null suggestion. The main handler only sets
+      // ai_degraded when the function THREW; a returned null counts as
+      // a successful (but useless) suggestion. Either way the shape
+      // must include valid OFF data so the scanner keeps working.
+      expect(body.suggestion).toBeNull();
+      expect(body.off).toBeDefined();
+      expect(body.off.nutriments).toBeDefined();
+
+      // Quota consumed (OFF succeeded).
+      const quotaAfter = await getQuotaCount();
+      expect(quotaAfter).toBe(quotaBefore + 1);
+    },
+    15_000,
+  );
+
+  // ─── Placeholder resurrection (audit item #31) ───────────
+  // A placeholder row from an earlier FAILED analyze call must be UPDATED
+  // (not duplicated) when the retry succeeds. Guards the
+  // `UNIQUE(user_id, barcode) WHERE barcode IS NOT NULL` invariant.
+  it('ai_degraded placeholder resurrection: retry UPDATES existing row, no duplicate', async () => {
+    await resetQuota();
+    const barcode = 'TESTRESURRECT001';
+
+    // Seed a placeholder row as if a prior analyze failed. Matches the
+    // scanner's `is_placeholder = true` path documented in
+    // docs/apps/chefbyte.md.
+    const { data: seed, error: seedErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Unknown Product',
+        barcode,
+        servings_per_container: 1,
+        calories_per_serving: 0,
+        protein_per_serving: 0,
+        carbs_per_serving: 0,
+        fat_per_serving: 0,
+        min_stock_amount: 0,
+        is_placeholder: true,
+      })
+      .select('product_id')
+      .single();
+    if (seedErr) throw new Error(`seed placeholder: ${seedErr.message}`);
+    const placeholderId = seed.product_id;
+
+    // Assert exactly one row before retry.
+    const { data: beforeRows } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .select('product_id')
+      .eq('user_id', userId)
+      .eq('barcode', barcode);
+    expect(beforeRows).toHaveLength(1);
+
+    // Retry scan. The edge fn's existing-product short-circuit returns
+    // the placeholder row (source=existing). That is the exact behavior
+    // the scanner relies on to UPDATE in place — the placeholder's
+    // product_id is reused, never duplicated.
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+      },
+      body: JSON.stringify({ barcode }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe('existing');
+    expect(body.product.product_id).toBe(placeholderId);
+
+    // Simulate the scanner's completion step — update the same row to
+    // real values (the app uses `supabase.from('products').update(...)
+    // .eq('product_id', placeholderId)`, never another insert).
+    const { error: updateErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .update({
+        name: 'Resurrected Product',
+        calories_per_serving: 150,
+        is_placeholder: false,
+      })
+      .eq('product_id', placeholderId);
+    expect(updateErr).toBeNull();
+
+    // Assert still exactly one row after retry — no duplicate.
+    const { data: afterRows } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .select('product_id, is_placeholder, name')
+      .eq('user_id', userId)
+      .eq('barcode', barcode);
+    expect(afterRows).toHaveLength(1);
+    expect(afterRows![0].product_id).toBe(placeholderId);
+    expect(afterRows![0].is_placeholder).toBe(false);
+    expect(afterRows![0].name).toBe('Resurrected Product');
   }, 15_000);
 });

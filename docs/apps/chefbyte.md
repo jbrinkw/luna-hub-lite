@@ -25,7 +25,7 @@ AI-powered nutrition system: meal planning, inventory management, macro tracking
 - OpenFoodFacts: 100 req/min rate limit. Products not found or with null/zero macros fall through to Claude analysis.
 - If any step in the pipeline fails after local product check (OFF down, Claude error), a placeholder product is automatically created with `is_placeholder = true`. The user can edit the product details later.
 - The barcode pipeline handles general product data only (identity, nutrition, naming). Walmart is a separate system for pricing and ordering.
-- Per-user daily quota on `analyze-product` calls (100/day). When exceeded, the scan falls through to placeholder creation. BYOK option is a future feature.
+- Per-user daily quota on `analyze-product` calls (100/day). When exceeded, the scan falls through to placeholder creation. BYOK option is a future feature. Quota is charged only AFTER OFF returns successfully — transient upstream failures (OFF 5xx, malformed body) return `503 { ai_degraded: true, ai_reason: 'off_unavailable' }` and do NOT consume the user's daily budget.
 - Barcode is nullable — products can exist without barcodes (manual creation, bulk items, homemade products). Unique constraint: `UNIQUE(user_id, barcode) WHERE barcode IS NOT NULL`.
 - Keypad with context-aware units: Containers for purchase, Servings for consume (toggleable). Unit conversion applies when toggling between servings and containers — values recalculate using `servings_per_container`.
 - **Undo/rollback per scan:** Each scan mode provides an undo button that reverses the DB operations (stock additions, stock removals, macro logs, shopping list additions) for the most recent scan.

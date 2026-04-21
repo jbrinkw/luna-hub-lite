@@ -7,10 +7,101 @@ const corsHeaders = {
   // supabase-js always sends `x-client-info` + `apikey`; both must be
   // listed here or the browser's preflight fails and the scanner silently
   // falls through to an "Unknown (barcode)" placeholder.
-  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
+  // `x-test-force-failure` is LOCAL-ONLY (see isLocalDev()) — ignored in
+  // production. Required for integration tests that exercise upstream
+  // failure paths (OFF 503, Anthropic timeout, Anthropic malformed JSON)
+  // without sacrificing the fidelity of hitting the real fn over HTTP.
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-test-force-failure, x-test-off-mode',
 };
 
 const DAILY_QUOTA = 100;
+
+/**
+ * Local-dev detector. The edge runtime container injects
+ * SUPABASE_URL=http://kong:8000 when served by `supabase start`. In
+ * production the URL is `https://<ref>.supabase.co`. We use this to gate
+ * the `x-test-force-failure` header — a production request that sent the
+ * header would silently bypass it.
+ *
+ * This is a testability hook, not a feature. DO NOT rely on it at
+ * runtime for anything other than simulating upstream failures.
+ */
+function isLocalDev(): boolean {
+  const url = Deno.env.get('SUPABASE_URL') ?? '';
+  return url.includes('kong:8000') || url.includes('127.0.0.1') || url.includes('localhost');
+}
+
+/**
+ * Read the `x-test-force-failure` request header, but only if the
+ * function is running in local dev. Supported values:
+ *   - off_503              — `fetchOpenFoodFacts` throws an upstream-5xx error
+ *   - off_malformed        — OFF returns a non-JSON body (parse fails)
+ *   - anthropic_timeout    — `normalizeWithAI` throws a timeout error (SOFT)
+ *   - anthropic_malformed  — Anthropic returns non-JSON in content (SOFT)
+ *   - off_success_canned   — `fetchOpenFoodFacts` returns a canned Nutella-
+ *                            shaped product WITHOUT hitting the real OFF
+ *                            API. Pair with an `anthropic_*` value on a
+ *                            later test or call alone to deterministically
+ *                            reach the normalize stage when CI rate-limits
+ *                            OFF. See the failure-path describe block in
+ *                            the integration test.
+ *
+ * Returns null (no-op) when not in local dev or when the header is absent.
+ */
+function testForceFailure(req: Request): string | null {
+  if (!isLocalDev()) return null;
+  const h = req.headers.get('x-test-force-failure');
+  if (!h) return null;
+  const allowed = new Set([
+    'off_503',
+    'off_malformed',
+    'anthropic_timeout',
+    'anthropic_malformed',
+  ]);
+  return allowed.has(h) ? h : null;
+}
+
+/**
+ * Orthogonal to `x-test-force-failure`: when `x-test-off-mode=canned` is
+ * set (local dev only), the OFF lookup is bypassed in favor of a
+ * deterministic canned response. Lets CI exercise the Anthropic failure
+ * paths without depending on OFF uptime / rate limits. Read by the main
+ * handler and passed through to `fetchOpenFoodFacts`.
+ */
+function testOffMode(req: Request): string | null {
+  if (!isLocalDev()) return null;
+  const h = req.headers.get('x-test-off-mode');
+  if (h === 'canned') return 'off_success_canned';
+  return null;
+}
+
+/**
+ * Canned OFF-shape product used when `x-test-force-failure=off_success_canned`.
+ * Lets us deterministically reach the normalize stage without depending on
+ * real OFF availability. Values mirror the Nutella nutriment shape so the
+ * AI-path assertions (product_name, nutriments populated) still pass.
+ */
+const CANNED_OFF_PRODUCT = {
+  product_name: 'Test Canned Nutella',
+  generic_name: 'Hazelnut Spread',
+  brands: 'Nutella',
+  categories: 'Spreads, Chocolate spreads',
+  serving_size: '15 g',
+  serving_quantity: 15,
+  product_quantity: 400,
+  image_url: 'https://example.com/canned.jpg',
+  nutriments: {
+    'energy-kcal_100g': 539,
+    'energy-kcal_serving': 80.8,
+    'carbohydrates_100g': 57.5,
+    'carbohydrates_serving': 8.62,
+    'proteins_100g': 6.3,
+    'proteins_serving': 0.95,
+    'fat_100g': 30.9,
+    'fat_serving': 4.64,
+  },
+};
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
@@ -56,20 +147,71 @@ async function checkQuota(supabase: any, userId: string): Promise<boolean> {
   return true;
 }
 
-/** Fetch product data from OpenFoodFacts */
-async function fetchOpenFoodFacts(barcode: string) {
+/**
+ * Fetch product data from OpenFoodFacts.
+ *
+ * Returns:
+ *   - the OFF `product` object on success,
+ *   - `null` when OFF responded 404 / status !== 1 (product truly not found),
+ *   - throws an `Error` with `.offReason = 'off_unavailable'` on 5xx or
+ *     JSON-parse failure. The caller translates this to a 503 response so
+ *     the UI can distinguish "upstream down" from "not found" and the
+ *     scanner preserves the user's quota.
+ */
+async function fetchOpenFoodFacts(barcode: string, forceFailure: string | null = null) {
+  // Test-only: short-circuit to simulate an upstream failure before making
+  // any real OFF call. Never triggered in production (see isLocalDev()).
+  if (forceFailure === 'off_503') {
+    throw Object.assign(new Error('Simulated OFF 503'), { offReason: 'off_unavailable' });
+  }
+  if (forceFailure === 'off_malformed') {
+    throw Object.assign(new Error('Simulated OFF malformed JSON'), { offReason: 'off_unavailable' });
+  }
+  if (forceFailure === 'off_success_canned') {
+    // Bypass real OFF — return a deterministic shape. Lets CI exercise
+    // the normalize-stage failure paths without depending on OFF uptime
+    // or rate limits.
+    return CANNED_OFF_PRODUCT;
+  }
+
   const resp = await fetch(`https://world.openfoodfacts.org/api/v0/product/${encodeURIComponent(barcode)}.json`, {
     headers: { 'User-Agent': 'LunaHub/1.0 (contact@lunahub.dev)' },
     signal: AbortSignal.timeout(10_000),
   });
+  if (resp.status >= 500) {
+    throw Object.assign(new Error(`OFF HTTP ${resp.status}`), { offReason: 'off_unavailable' });
+  }
   if (!resp.ok) return null;
-  const json = await resp.json();
+  let json: any;
+  try {
+    json = await resp.json();
+  } catch (err) {
+    // OFF returned a 2xx with a body we can't parse — treat as upstream
+    // unavailable, not as "product not found". Preserves the user's
+    // quota and lets the UI retry.
+    throw Object.assign(new Error('OFF returned unparseable body'), { offReason: 'off_unavailable' });
+  }
   if (json.status !== 1 || !json.product) return null;
   return json.product;
 }
 
 /** Call Claude Haiku 4.5 to normalize OFF product data */
-async function normalizeWithAI(offProduct: any): Promise<any> {
+async function normalizeWithAI(offProduct: any, forceFailure: string | null = null): Promise<any> {
+  // Test-only simulated failures. `anthropic_timeout` is a SOFT failure —
+  // the caller falls through to `ai_degraded:true`. `anthropic_malformed`
+  // mirrors the real code path where Claude returns text that won't
+  // JSON.parse: log + return null (also SOFT). Never fires in prod
+  // because the main handler only passes `forceFailure` when isLocalDev().
+  if (forceFailure === 'anthropic_timeout') {
+    throw Object.assign(new Error('Simulated Anthropic timeout'), {
+      aiReason: 'timeout',
+    });
+  }
+  if (forceFailure === 'anthropic_malformed') {
+    console.error('Simulated Anthropic malformed JSON — returning null');
+    return null;
+  }
+
   const apiKey = Deno.env.get('ANTHROPIC_API_KEY');
   if (!apiKey) {
     console.error('ANTHROPIC_API_KEY not configured — returning raw OFF data');
@@ -251,16 +393,51 @@ Deno.serve(async (req) => {
       return jsonResponse({ source: 'existing', product: existing });
     }
 
-    // Check daily quota (100/user/day)
+    // Test-only failure injection (see testForceFailure() / testOffMode()).
+    // Both return null in production — the real upstream code paths run
+    // unchanged.
+    const forced = testForceFailure(req);
+    const offMode = testOffMode(req);
+
+    // Fetch from OpenFoodFacts FIRST, then quota. Prior ordering consumed
+    // quota even when OFF was down, which burned the user's daily budget
+    // on transient upstream failures. Only charge quota once we know we
+    // have OFF data to normalize.
+    //
+    // OFF lookup is short-circuited when:
+    //   - forced is an `off_*` failure (for 503 / malformed tests), OR
+    //   - offMode is `off_success_canned` (for Anthropic-path tests that
+    //     need a deterministic OFF response regardless of OFF uptime).
+    const offOverride = forced?.startsWith('off_') ? forced : offMode;
+    let offProduct: any;
+    try {
+      offProduct = await fetchOpenFoodFacts(barcodeStr, offOverride);
+    } catch (err: any) {
+      // OFF 5xx or malformed body — distinct from "not found". Return 503
+      // with `ai_degraded:true` so the UI surfaces "try again" rather
+      // than creating a corrupt placeholder. Quota NOT consumed.
+      if (err?.offReason === 'off_unavailable') {
+        console.error('analyze-product: OFF unavailable', err?.message ?? err);
+        return jsonResponse(
+          {
+            error: 'OpenFoodFacts is temporarily unavailable — please try again',
+            ai_degraded: true,
+            ai_reason: 'off_unavailable',
+          },
+          503,
+        );
+      }
+      throw err; // unexpected — let the outer catch return a 500
+    }
+    if (!offProduct) {
+      return jsonResponse({ error: 'Product not found in OpenFoodFacts' }, 404);
+    }
+
+    // Check daily quota (100/user/day). OFF call succeeded, so any
+    // subsequent work genuinely reflects a quota-consumed analysis.
     const withinQuota = await checkQuota(supabase, user.id);
     if (!withinQuota) {
       return jsonResponse({ error: 'Limit reached — enter product manually' }, 429);
-    }
-
-    // Fetch from OpenFoodFacts
-    const offProduct = await fetchOpenFoodFacts(barcodeStr);
-    if (!offProduct) {
-      return jsonResponse({ error: 'Product not found in OpenFoodFacts' }, 404);
     }
 
     // Normalize with Claude Haiku 4.5. Failures are classified into two
@@ -277,7 +454,7 @@ Deno.serve(async (req) => {
     let suggestion: any = null;
     let aiDegradedReason: string | null = null;
     try {
-      suggestion = await normalizeWithAI(offProduct);
+      suggestion = await normalizeWithAI(offProduct, forced);
     } catch (err: any) {
       const reason: string = err?.aiReason ?? 'transient';
       if (HARD_FAILURES.has(reason)) {
