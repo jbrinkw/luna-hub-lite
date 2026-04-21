@@ -1965,3 +1965,123 @@ describe('HOMEASSISTANT_tv_remote', () => {
     expect(result.content[0].text).toContain('Network failure');
   });
 });
+
+// ---------------------------------------------------------------------------
+// HA SSRF Blocklist Protection
+// ---------------------------------------------------------------------------
+// Regression guard pinning the fixes in commits 12fee23 and d9752e9. If either
+// is reverted, a malicious user-supplied ha_url could reach AWS metadata
+// (169.254.169.254), internal-only services (::1, fe80::, fc00::/fd00::), or
+// RFC1918 private ranges. Tests must block EVERY URL in BLOCKED_URLS (handler
+// returns isError with "Missing Home Assistant credentials" because
+// getHACredentials returns null, stopping the request before fetch is called)
+// and must allow ALLOWED_URLS (which proceed to fetch — asserted by verifying
+// mockFetch was invoked).
+// ---------------------------------------------------------------------------
+
+describe('HA SSRF protection', () => {
+  const BLOCKED_URLS: Array<[label: string, url: string]> = [
+    ['AWS metadata IPv4 (link-local)', 'http://169.254.169.254/'],
+    ['AWS metadata with explicit port + path', 'http://169.254.169.254:80/latest/meta-data/'],
+    ['link-local IPv4 range', 'http://169.254.1.2/'],
+    ['localhost hostname', 'http://localhost/'],
+    ['IPv4 loopback', 'http://127.0.0.1/'],
+    ['INADDR_ANY', 'http://0.0.0.0/'],
+    ['RFC1918 10/8', 'http://10.0.0.1/'],
+    ['RFC1918 192.168/16', 'http://192.168.1.1/'],
+    ['RFC1918 172.16/12', 'http://172.16.0.1/'],
+    ['RFC1918 172.31/12 upper bound', 'http://172.31.255.254/'],
+    ['IPv6 loopback [::1]', 'http://[::1]/'],
+    ['IPv6 link-local [fe80::1]', 'http://[fe80::1]/'],
+    ['IPv6 ULA [fc00::1]', 'http://[fc00::1]/'],
+    ['IPv6 ULA [fd00::1]', 'http://[fd00::1]/'],
+    ['IPv4-mapped IPv6 [::ffff:10.0.0.1]', 'http://[::ffff:10.0.0.1]/'],
+    ['GCE metadata hostname', 'http://metadata.google.internal/'],
+    ['internal TLD', 'http://foo.internal/'],
+  ];
+
+  // Tools that should reject blocked URLs up-front (getHACredentials returns
+  // null → toolError). Representative coverage across read + mutate tools.
+  const HA_TOOLS_TO_TEST: Array<[string, Record<string, unknown>]> = [
+    ['HOMEASSISTANT_get_devices', {}],
+    ['HOMEASSISTANT_get_entity_status', { entity_id: 'light.foo' }],
+    ['HOMEASSISTANT_turn_on', { entity_id: 'light.foo' }],
+    ['HOMEASSISTANT_turn_off', { entity_id: 'light.foo' }],
+    ['HOMEASSISTANT_tv_remote', { button: 'up' }],
+  ];
+
+  beforeEach(() => {
+    mockFetch.mockReset();
+  });
+
+  for (const [label, url] of BLOCKED_URLS) {
+    describe(`blocks ${label} (${url})`, () => {
+      for (const [toolName, args] of HA_TOOLS_TO_TEST) {
+        it(`${toolName} returns isError and never calls fetch`, async () => {
+          const tools = homeassistantTools as unknown as Record<
+            string,
+            { handler: (args: any, ctx: any) => Promise<any> }
+          >;
+          const handler = tools[toolName].handler;
+          const result = await handler(args, haCtx({ ha_url: url }));
+
+          // Blocked URL → getHACredentials returns null → toolError with the
+          // missing-credentials message (matches the existing handler
+          // contract). The critical property is isError + no network call.
+          expect(result.isError).toBe(true);
+          expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
+          expect(mockFetch).not.toHaveBeenCalled();
+        });
+      }
+    });
+  }
+
+  describe('allows benign public HA URLs', () => {
+    const ALLOWED_URLS: Array<[label: string, url: string]> = [
+      ['public hostname http', 'http://ha.example.com/'],
+      ['public hostname https + port', 'https://homeassistant.example.com:8123/'],
+    ];
+
+    for (const [label, url] of ALLOWED_URLS) {
+      it(`${label} (${url}): get_devices proceeds to fetch`, async () => {
+        // When allowed, the handler should call the HA API. Mock an empty
+        // states response so the tool returns successfully.
+        mockFetch.mockReturnValueOnce(mockFetchResponse([]));
+        const handler = homeassistantTools.HOMEASSISTANT_get_devices.handler;
+        const result = await handler({}, haCtx({ ha_url: url }));
+
+        // The result should NOT be a credentials error. It may be isError
+        // for other reasons, but "Missing Home Assistant credentials" would
+        // indicate the SSRF guard wrongly rejected an allowed URL.
+        if (result.isError) {
+          expect(result.content[0].text).not.toMatch(/Missing Home Assistant credentials/i);
+        }
+        // Most importantly: fetch was actually called, proving the URL
+        // cleared the SSRF guard.
+        expect(mockFetch).toHaveBeenCalled();
+        const [calledUrl] = mockFetch.mock.calls[0];
+        // URL origin should match the allowed input (URL class normalizes)
+        expect(calledUrl.startsWith(new URL(url).origin)).toBe(true);
+      });
+    }
+  });
+
+  it('blocks non-http(s) protocols (e.g. file://, ftp://)', async () => {
+    const handler = homeassistantTools.HOMEASSISTANT_get_devices.handler;
+    for (const ha_url of ['file:///etc/passwd', 'ftp://ftp.example.com/', 'gopher://example.com/']) {
+      mockFetch.mockReset();
+      const result = await handler({}, haCtx({ ha_url }));
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
+      expect(mockFetch).not.toHaveBeenCalled();
+    }
+  });
+
+  it('blocks malformed URLs', async () => {
+    const handler = homeassistantTools.HOMEASSISTANT_get_devices.handler;
+    const result = await handler({}, haCtx({ ha_url: 'not a url' }));
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
+    expect(mockFetch).not.toHaveBeenCalled();
+  });
+});

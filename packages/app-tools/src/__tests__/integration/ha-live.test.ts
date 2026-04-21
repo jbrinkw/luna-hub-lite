@@ -405,4 +405,61 @@ describe.skipIf(skip)('Home Assistant Live Integration Tests', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toMatch(/Missing Home Assistant credentials/i);
   });
+
+  // =========================================================================
+  // Upstream CONTRACT — HA REST /api/states response shape
+  // =========================================================================
+  // Regression guard for upstream API drift. If HA rearranges `/api/states`
+  // entries so a downstream consumer reads `undefined`, this test fails
+  // LOUDLY instead of letting a broken payload reach the UI.
+  //
+  // Fields asserted here are the ones the extension handlers actually read:
+  //   - ha-api.ts fetchStates / getEntityState consumers read
+  //     { entity_id, state, attributes }
+  //   - nl-formatters.ts media_player handler reads attributes.friendly_name,
+  //     attributes.media_title, attributes.media_artist, attributes.app_name,
+  //     attributes.volume_level
+  //   - resolveEntityId uses attributes.friendly_name for name lookups
+  it('state response matches the handler-consumed contract', async () => {
+    const result = await homeassistantTools.HOMEASSISTANT_get_devices.handler({}, ctx());
+    const data = parse(result);
+
+    // Find the seeded light (known to exist from beforeAll setup).
+    const light = data.devices.find((d: any) => d.entity_id === 'light.luna_test_light');
+    expect(light).toBeDefined();
+
+    // Fetch the raw state via get_entity_status — this surfaces the raw
+    // attributes object, which is where downstream drift bites.
+    const statusResult = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { entity_id: 'light.luna_test_light' },
+      ctx(),
+    );
+    const status = parse(statusResult);
+
+    // Top-level shape every HA tool handler depends on.
+    expect(typeof status.entity_id).toBe('string');
+    expect(status.entity_id).toBe('light.luna_test_light');
+    expect(typeof status.state).toBe('string');
+    expect(['on', 'off', 'unavailable', 'unknown']).toContain(status.state);
+
+    // `formatted` is the NL-rendered string the Voice Assist UI reads.
+    expect(typeof status.formatted).toBe('string');
+    expect(status.formatted.length).toBeGreaterThan(0);
+
+    // Verify attributes shape on the richer media_player seeded in test 8b
+    // (stays around in shared state across tests). This is the most
+    // contract-sensitive path because media_player formatting reads five
+    // attribute keys.
+    const mediaResult = await homeassistantTools.HOMEASSISTANT_get_entity_status.handler(
+      { entity_id: 'media_player.luna_test_tv' },
+      ctx(),
+    );
+    const media = parse(mediaResult);
+    expect(typeof media.entity_id).toBe('string');
+    expect(typeof media.state).toBe('string');
+    // Formatter reads these — if HA renames friendly_name, app_name, or
+    // volume_level, the UI breaks silently without this assertion.
+    expect(media.formatted).toContain('Luna Test TV');
+    expect(media.formatted).toMatch(/playing/i);
+  });
 });

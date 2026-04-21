@@ -337,4 +337,86 @@ describe.skipIf(skip)('Todoist Live Integration Tests', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Missing Todoist credentials');
   });
+
+  // -----------------------------------------------------------------------
+  // 16. Upstream CONTRACT — Todoist REST v1 response shape
+  // -----------------------------------------------------------------------
+  // This is the canary: if Todoist ships a breaking change to the fields we
+  // destructure downstream (id, content, project_id, is_completed on tasks;
+  // id, inbox_project on projects), this test fails LOUDLY instead of
+  // silently returning `undefined` inside a TODOIST_get_tasks consumer.
+  //
+  // Fields asserted here match the ones the handlers actually read:
+  //   - get_projects.ts: inbox lookup checks { id, inbox_project|is_inbox_project }
+  //   - get_completed_tasks.ts: needs { id } and inbox_project flag
+  //   - get_tasks / get_task: returns raw rows — consumers read { id, content,
+  //     project_id, is_completed } (confirmed against UI + handler downstream)
+  it('projects and tasks match the handler-consumed contract', async () => {
+    // --- Projects contract ---
+    const projectsResult = await todoistTools.TODOIST_get_projects.handler({}, ctx());
+    const projects = parse(projectsResult);
+    expect(Array.isArray(projects)).toBe(true);
+    expect(projects.length).toBeGreaterThanOrEqual(1);
+
+    for (const p of projects) {
+      // Required by get_completed_tasks.ts inbox resolution and by any MCP
+      // consumer that needs to reference a project by id.
+      expect(typeof p.id === 'string' || typeof p.id === 'number').toBe(true);
+      expect(typeof p.name).toBe('string');
+      expect(p.name.length).toBeGreaterThan(0);
+    }
+    // Exactly one inbox across all projects — inbox lookup uses either flag.
+    const inboxes = projects.filter(
+      (p: any) => p.inbox_project === true || p.is_inbox_project === true,
+    );
+    expect(inboxes.length).toBe(1);
+
+    // --- Tasks contract ---
+    // Create a task we can reliably assert against (returns a known shape).
+    const createRes = await todoistTools.TODOIST_create_task.handler(
+      { content: `Contract probe ${Date.now()}`, priority: 2 },
+      ctx(),
+    );
+    const createdTask = parse(createRes);
+    createdTaskIds.push(createdTask.id);
+
+    // Assert on the create response directly (must have the same shape as
+    // list / get responses — same REST object).
+    expect(typeof createdTask.id).toBe('string');
+    expect(typeof createdTask.content).toBe('string');
+    expect(typeof createdTask.project_id).toBe('string');
+    expect(typeof createdTask.is_completed).toBe('boolean');
+    expect(createdTask.is_completed).toBe(false);
+
+    // Assert the same fields appear on list + single-get responses. This is
+    // the real "would a Todoist API drift break our UI" check.
+    const listRes = await todoistTools.TODOIST_get_tasks.handler({ project_id: createdTask.project_id }, ctx());
+    const tasks = parse(listRes);
+    expect(Array.isArray(tasks)).toBe(true);
+    const found = tasks.find((t: any) => t.id === createdTask.id);
+    expect(found).toBeDefined();
+    expect(typeof found.id).toBe('string');
+    expect(typeof found.content).toBe('string');
+    expect(typeof found.project_id).toBe('string');
+    expect(typeof found.is_completed).toBe('boolean');
+    // Priority is an enum 1..4 — guard the exact type we render in UI.
+    expect(Number.isInteger(found.priority)).toBe(true);
+    expect(found.priority).toBeGreaterThanOrEqual(1);
+    expect(found.priority).toBeLessThanOrEqual(4);
+
+    // Single-get response
+    const getRes = await todoistTools.TODOIST_get_task.handler({ task_id: createdTask.id }, ctx());
+    const singleTask = parse(getRes);
+    expect(typeof singleTask.id).toBe('string');
+    expect(typeof singleTask.content).toBe('string');
+    expect(typeof singleTask.project_id).toBe('string');
+    expect(typeof singleTask.is_completed).toBe('boolean');
+    // `due` is nullable — when present must have a `date` string (used by
+    // formatters and get_completed_tasks downstream).
+    if (singleTask.due != null) {
+      expect(typeof singleTask.due).toBe('object');
+      expect(typeof singleTask.due.date).toBe('string');
+      expect(Number.isNaN(Date.parse(singleTask.due.date))).toBe(false);
+    }
+  });
 });

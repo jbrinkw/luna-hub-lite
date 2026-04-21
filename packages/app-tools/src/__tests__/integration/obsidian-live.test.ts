@@ -364,4 +364,69 @@ describe.skipIf(skip)('Obsidian (Gitea) Live Integration Tests', () => {
       expect(result.content[0].text.toLowerCase()).toContain('not found');
     });
   });
+
+  // =========================================================================
+  // Upstream CONTRACT — Git trees + blob response shape
+  // =========================================================================
+  // Regression guard against Gitea/GitHub API drift. Every Obsidian tool
+  // ultimately flows through git-api.ts::getTree → getMultipleBlobs, and the
+  // handler reads `{ path, type, sha }` off each tree node and `{ content,
+  // encoding }` off each blob. If the upstream rearranges those fields, the
+  // hierarchy/notes tools fail silently (empty vaults). This canary catches
+  // the shape break.
+  describe('git API contract', () => {
+    it('tree + blob responses match the handler-consumed contract', async () => {
+      // Directly hit the same API endpoints the handlers use. If we asserted
+      // only on the tool wrappers we'd miss shape drift on fields the
+      // wrappers don't surface.
+      const headers = {
+        Authorization: `token ${GITEA_TOKEN}`,
+        Accept: 'application/json',
+        'User-Agent': 'luna-hub-mcp/test',
+      };
+      const treeResp = await fetch(`${GITEA_URL}/repos/${GITEA_REPO}/git/trees/main?recursive=1`, { headers });
+      expect(treeResp.ok).toBe(true);
+      const treeData: any = await treeResp.json();
+
+      // Top-level shape — git-api.ts reads data.tree[] and filters by type.
+      expect(Array.isArray(treeData.tree)).toBe(true);
+      expect(treeData.tree.length).toBeGreaterThan(0);
+
+      let sawBlob = false;
+      let sawTree = false;
+      let blobSha: string | null = null;
+      for (const entry of treeData.tree) {
+        // Fields git-api.ts::getTree destructures off each node.
+        expect(typeof entry.path).toBe('string');
+        expect(entry.path.length).toBeGreaterThan(0);
+        expect(typeof entry.type).toBe('string');
+        expect(['blob', 'tree']).toContain(entry.type);
+        expect(typeof entry.sha).toBe('string');
+        expect(entry.sha.length).toBeGreaterThan(0);
+
+        if (entry.type === 'blob') {
+          sawBlob = true;
+          // Save a .md file's sha to assert blob-response contract below.
+          if (!blobSha && entry.path.endsWith('.md')) blobSha = entry.sha;
+        }
+        if (entry.type === 'tree') sawTree = true;
+      }
+      // Vault should have at least one blob and one subdirectory.
+      expect(sawBlob).toBe(true);
+      expect(sawTree).toBe(true);
+
+      // --- Blob contract ---
+      expect(blobSha).toBeTruthy();
+      const blobResp = await fetch(`${GITEA_URL}/repos/${GITEA_REPO}/git/blobs/${blobSha}`, { headers });
+      expect(blobResp.ok).toBe(true);
+      const blob: any = await blobResp.json();
+      // Fields git-api.ts::getBlobContent destructures.
+      expect(typeof blob.content).toBe('string');
+      expect(blob.content.length).toBeGreaterThan(0);
+      expect(typeof blob.encoding).toBe('string');
+      // base64 is the only encoding the decoder handles correctly (and it's
+      // what GitHub + Gitea both return for blob endpoints).
+      expect(blob.encoding).toBe('base64');
+    });
+  });
 });

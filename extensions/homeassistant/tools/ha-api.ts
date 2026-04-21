@@ -16,7 +16,27 @@ export function getHACredentials(ctx: ExtensionToolContext): HACredentials | nul
     return null;
   }
   if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
-  const host = parsed.hostname;
+  // WHATWG URL preserves the brackets on IPv6 hostnames (e.g. "[::1]"). Strip
+  // them so downstream IPv6 range checks match the raw address.
+  const rawHost = parsed.hostname;
+  const ipv6 = rawHost.startsWith('[') && rawHost.endsWith(']') ? rawHost.slice(1, -1) : null;
+  const host = ipv6 ?? rawHost;
+  // IPv4-mapped IPv6 address (e.g. ::ffff:10.0.0.1 / ::ffff:a00:1) — extract
+  // the embedded IPv4 so the RFC1918 / loopback regexes below can match.
+  let mappedV4: string | null = null;
+  if (ipv6) {
+    const mapped = ipv6.match(/^::ffff:(?:([0-9a-f]{1,4}):([0-9a-f]{1,4})|(\d{1,3}(?:\.\d{1,3}){3}))$/i);
+    if (mapped) {
+      if (mapped[3]) {
+        mappedV4 = mapped[3];
+      } else {
+        const hi = parseInt(mapped[1]!, 16);
+        const lo = parseInt(mapped[2]!, 16);
+        mappedV4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+      }
+    }
+  }
+  const v4Candidates = [host, mappedV4].filter((h): h is string => !!h);
   const isBlocked =
     host === 'localhost' ||
     host === '169.254.169.254' ||
@@ -24,14 +44,15 @@ export function getHACredentials(ctx: ExtensionToolContext): HACredentials | nul
     host.endsWith('.internal') ||
     host === '0.0.0.0' ||
     host === '::1' ||
-    host === '[::1]' ||
-    host.startsWith('fe80:') ||
-    /^fd/i.test(host) ||
-    /^fc/i.test(host) ||
-    /^127\./.test(host) ||
-    /^10\./.test(host) ||
-    /^192\.168\./.test(host) ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(host);
+    host === '::' ||
+    /^fe80:/i.test(host) ||
+    /^fd[0-9a-f]{0,2}:/i.test(host) ||
+    /^fc[0-9a-f]{0,2}:/i.test(host) ||
+    v4Candidates.some((h) => /^127\./.test(h)) ||
+    v4Candidates.some((h) => /^10\./.test(h)) ||
+    v4Candidates.some((h) => /^192\.168\./.test(h)) ||
+    v4Candidates.some((h) => /^169\.254\./.test(h)) ||
+    v4Candidates.some((h) => /^172\.(1[6-9]|2\d|3[01])\./.test(h));
   if (isBlocked) return null;
   return { token: ha_api_key, url: parsed.origin };
 }
