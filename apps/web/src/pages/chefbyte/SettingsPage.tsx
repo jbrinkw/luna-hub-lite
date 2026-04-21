@@ -8,6 +8,7 @@ import { ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { Copy, Check } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -185,6 +186,28 @@ export function SettingsPage() {
     },
     enabled: !!user,
   });
+
+  // Realtime: pick up changes the scanner (or other sessions) write to
+  // chefbyte.products / chefbyte.locations / chefbyte.live_shelf_devices
+  // without requiring a manual reload. Channel-per-table per the hook's
+  // contract.
+  useRealtimeInvalidation('chef-settings', [
+    {
+      schema: 'chefbyte',
+      table: 'products',
+      queryKeys: [queryKeys.chefSettings(user!.id), queryKeys.products(user!.id)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'locations',
+      queryKeys: [queryKeys.locations(user!.id)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'live_shelf_devices',
+      queryKeys: [queryKeys.devices(user!.id)],
+    },
+  ]);
 
   const loading = productsLoading || devicesLoading || locationsLoading;
 
