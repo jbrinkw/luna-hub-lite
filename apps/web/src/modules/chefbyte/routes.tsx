@@ -12,6 +12,9 @@ const RecipeFormPage = lazy(() =>
 );
 const MacroPage = lazy(() => import('@/pages/chefbyte/MacroPage').then((m) => ({ default: m.MacroPage })));
 const SettingsPage = lazy(() => import('@/pages/chefbyte/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const LiveTrackImportPage = lazy(() =>
+  import('@/pages/chefbyte/LiveTrackImportPage').then((m) => ({ default: m.LiveTrackImportPage })),
+);
 
 function PageSpinner() {
   return (
@@ -36,6 +39,7 @@ export function ChefRoutes() {
         <Route path="recipes/:id" element={<RecipeFormPage />} />
         <Route path="macros" element={<MacroPage />} />
         <Route path="walmart" element={<Navigate to="/chef/settings?tab=walmart" replace />} />
+        <Route path="livetrack-import" element={<LiveTrackImportPage />} />
         <Route path="settings" element={<SettingsPage />} />
         <Route
           path="*"
