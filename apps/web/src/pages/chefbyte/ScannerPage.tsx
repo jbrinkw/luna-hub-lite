@@ -236,6 +236,14 @@ export function ScannerPage() {
       setScreenValue('1');
       overwriteNextRef.current = true;
 
+      // Auto-focus the servings-per-container field on scan (purchase mode
+      // only — the nutrition editor renders only then). OFF/LLM data for this
+      // field is wrong far more often than the macros, so the keypad should
+      // target it by default. Matches the queue-click auto-focus behavior.
+      if (mode === 'purchase') {
+        focusField('servingsPerContainer');
+      }
+
       try {
         // Look up product by barcode
         const { data: product } = await chefbyte()
