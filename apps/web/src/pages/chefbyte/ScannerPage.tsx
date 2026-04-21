@@ -865,19 +865,6 @@ export function ScannerPage() {
   const activeItem = queue.find((q) => q.id === activeItemId) ?? null;
   const filteredQueue = filter === 'new' ? queue.filter((q) => q.isNew) : queue;
 
-  // Flip the previously-active item to confirmed=true whenever activeItemId
-  // moves to something else (another queue row click OR a new scan). Red
-  // rows mean "still being edited / never touched"; green means "you moved
-  // on, which we treat as commit."
-  const prevActiveForConfirmRef = useRef<string | null>(null);
-  useEffect(() => {
-    const prev = prevActiveForConfirmRef.current;
-    if (prev && prev !== activeItemId) {
-      setQueue((q) => q.map((i) => (i.id === prev ? { ...i, confirmed: true } : i)));
-    }
-    prevActiveForConfirmRef.current = activeItemId;
-  }, [activeItemId]);
-
   const activeProductId = activeItem?.productId ?? null;
 
   // When the selected productId changes (queue click or fresh scan finalising
@@ -1056,6 +1043,14 @@ export function ScannerPage() {
                 key={item.id}
                 data-testid={`queue-item-${item.id}`}
                 onClick={() => {
+                  // Mark the previously-active item confirmed (green). This
+                  // ONLY happens on click-away — scanning a new barcode
+                  // leaves the prior item red so the user can come back and
+                  // fix it without the scan itself signaling "commit."
+                  if (activeItemId && activeItemId !== item.id) {
+                    const prev = activeItemId;
+                    setQueue((q) => q.map((i) => (i.id === prev ? { ...i, confirmed: true } : i)));
+                  }
                   // Clear edit-tracking BEFORE activeItemId changes.
                   // Without this the push-back effect would fire with the
                   // previous item's nutrition state and write it to the
