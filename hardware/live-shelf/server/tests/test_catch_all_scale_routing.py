@@ -122,17 +122,25 @@ def test_scale_event_ingress_routes_scale_01_to_live_shelf_shelf_id(tmp_path):
     assert row[0] == "live_shelf"
 
 
-def test_scale_event_ingress_translates_scale_03_live_scale_to_single_item(tmp_path):
-    """Type-literal drift guard (regression for the Pi-log Pydantic error).
+def test_scale_event_ingress_routes_scale_03_to_single_item_short_circuit(tmp_path):
+    """Single-item rig: events short-circuit to cloud emit, no local scale_events.
 
-    The shelf registry returns ``shelf_id='live_scale'`` for the single-item
-    rig (scale-03), but the storage-side ScaleEventIn Literal + SQLite CHECK
-    constraints still use ``'single_item'``. The handler translates at the
-    ingress boundary so downstream storage types see the storage-native name.
+    Two things are being asserted in this one integration test:
 
-    Without the translation, this payload 500s with a pydantic ValidationError
-    before the event ever reaches the DB — matching the stack trace captured
-    in the Pi's server.log during normal live_scale operation.
+      1. Type-literal translation happens: shelf_id='live_scale' (from the
+         registry) gets mapped to 'single_item' before any storage-type
+         comparison. Before this fix, the handler 500'd on the first
+         ScaleEventIn() construction because the Pydantic Literal didn't
+         accept 'live_scale'. Verified by the handler not raising.
+
+      2. Single-item events take the dedicated short-circuit path: no
+         scale_events row, no classifier, no session. They emit directly
+         to the cloud (CloudEventEmitter.emit_single_item_event) and
+         return a 200 with shelf_id='single_item'. We assert both sides.
+
+    If these two behaviors ever diverge — e.g. someone adds a scale_events
+    insert into the single-item branch — stock math would double-count and
+    the classifier would pick a random candidate.
     """
     conn = init_db(":memory:")
     handler = _make_handler(conn, tmp_path, catch_all_enabled=True)
@@ -147,15 +155,15 @@ def test_scale_event_ingress_translates_scale_03_live_scale_to_single_item(tmp_p
     })
 
     assert status == 200, (resp, status)
-    row = conn.execute(
-        "SELECT shelf_id FROM scale_events WHERE event_id = ?",
-        (resp["event_id"],),
-    ).fetchone()
-    assert row is not None
-    # Storage-native name — CHECK constraint + Literal both require this.
-    assert row[0] == "single_item", (
-        f"scale-03 ingress must translate 'live_scale' -> 'single_item' "
-        f"before the DB write; got {row[0]!r}"
+    assert resp.get("shelf_id") == "single_item", resp
+    assert resp.get("event_kind") == "consumed", resp
+    # No local scale_events row — single-item skips the delta pipeline.
+    count = conn.execute(
+        "SELECT COUNT(*) FROM scale_events",
+    ).fetchone()[0]
+    assert count == 0, (
+        f"single-item events must NOT write a local scale_events row; "
+        f"found {count}"
     )
 
 

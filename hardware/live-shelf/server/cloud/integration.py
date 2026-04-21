@@ -329,7 +329,7 @@ class CloudEventEmitter:
         self,
         *,
         scale_id: str,
-        product_id: str,
+        product_id: Optional[str],
         delta_g: float,
         noise_floor_g: float,
         refill_threshold_g: float,
@@ -371,10 +371,13 @@ class CloudEventEmitter:
             "scale_id": scale_id,
             "kind": "live_scale",
             "event_kind": event_kind,
-            "product_id": product_id,
             "delta_g": emit_delta,
             "occurred_at": occurred_at or _iso_utc_ms(),
         }
+        # Pi can omit product_id — cloud's shelf-ingest /event resolves it
+        # via scale_pairings. Only include when the caller already knows.
+        if product_id is not None:
+            payload["product_id"] = product_id
         return self._enqueue(payload)
 
     def emit_in_flight_reap(

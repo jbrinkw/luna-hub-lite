@@ -441,7 +441,7 @@ class ScaleHandler:
         self,
         *,
         scale_id: str,
-        product_id: str,
+        product_id: Optional[str],
         delta_g: float,
         occurred_at: Optional[str] = None,
         depleted: bool = False,
@@ -1781,6 +1781,39 @@ class ScaleHandler:
                     "product_id": tare_product_id,
                 }, 200
             # No arm active → fall through to the normal pipeline.
+
+        # Single-item (live_scale) rig: direct-consumption hardware where
+        # the scale is permanently paired to one product (see
+        # chefbyte.scale_pairings). Skip the whole live_shelf / catch_all
+        # pipeline — no sessions, no classifier, no lots. Just emit the
+        # cloud consumption event and move on. Cloud's shelf-ingest /event
+        # resolves the paired product_id from scale_pairings when Pi
+        # doesn't supply one (we don't today — saves a Pi-side sync of
+        # the pairings table).
+        if shelf_id == "single_item" and direction != "noise":
+            scale_id = str(payload.get("scale_id") or device_id)
+            depleted = abs(after_weight_g) <= self._consumption_noise_floor_g
+            try:
+                self.emit_single_item_event(
+                    scale_id=scale_id,
+                    product_id=None,
+                    delta_g=float(delta_g),
+                    occurred_at=ts,
+                    depleted=depleted,
+                )
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "single-item cloud emit failed for scale_id=%s delta_g=%s",
+                    scale_id, delta_g,
+                )
+            return {
+                "ok": True,
+                "shelf_id": "single_item",
+                "scale_id": scale_id,
+                "event_kind": "consumed" if delta_g < 0 else "refilled",
+                "delta_g": delta_g,
+                "depleted": depleted,
+            }, 200
 
         # Append an "event" marker to the weight trace so diag dumps show
         # events inline with the heartbeat trace. Kept here (before dedup)
