@@ -340,7 +340,7 @@ export async function seedAllChefByte(ctx: PageTestContext): Promise<ChefByteSee
 // ---------------------------------------------------------------------------
 
 /** Assert a Supabase query succeeded with data */
-export function assertQuerySucceeds<T>(result: { data: T | null; error: any }, label?: string): T {
+export function assertQuerySucceeds<T = any>(result: { data: T | null; error: any }, label?: string): T {
   const prefix = label ? `[${label}] ` : '';
   if (result.error) throw new Error(`${prefix}Query failed: ${result.error.message}`);
   if (result.data === null || result.data === undefined) throw new Error(`${prefix}Query returned null data`);
