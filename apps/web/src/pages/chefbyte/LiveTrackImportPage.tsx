@@ -329,16 +329,20 @@ export function LiveTrackImportPage() {
           const s = efData?.suggestion;
           const off = efData?.off;
           const name = s?.name || off?.product_name || `Product (${barcode})`;
+          // chefbyte.products declares macros as NUMERIC NOT NULL DEFAULT 0,
+          // so we must NOT pass explicit nulls here — they override the
+          // DEFAULT and fail the NOT NULL check. When AI has no value we
+          // default to 0 (user can correct in the keypad form).
           const productFields = {
             barcode,
             name,
             description: s?.description ?? null,
             is_placeholder: false,
             servings_per_container: s?.servings_per_container ?? 1,
-            calories_per_serving: s?.calories_per_serving ?? null,
-            carbs_per_serving: s?.carbs_per_serving ?? null,
-            fat_per_serving: s?.fat_per_serving ?? null,
-            protein_per_serving: s?.protein_per_serving ?? null,
+            calories_per_serving: s?.calories_per_serving ?? 0,
+            carbs_per_serving: s?.carbs_per_serving ?? 0,
+            fat_per_serving: s?.fat_per_serving ?? 0,
+            protein_per_serving: s?.protein_per_serving ?? 0,
             default_shelf_life_days: s?.default_shelf_life_days ?? null,
             net_weight_g: off?.product_quantity ?? null,
             container_type: null,
@@ -431,15 +435,19 @@ export function LiveTrackImportPage() {
       // Net-new: write tare_weight_g + refreshed macros to products. This
       // column is NOT updated by ScannerPage.executeAction, so the wizard
       // is additive (plan §0 note 11).
+      // chefbyte.products declares macros NUMERIC NOT NULL DEFAULT 0 — passing
+      // an explicit null overrides the DEFAULT and fails the NOT NULL check.
+      // Fall back to 0 if the keypad input doesn't parse; tare_weight_g is
+      // genuinely nullable (no weight captured = leave blank).
       const { error: prodUpdErr } = await chefbyte()
         .from('products')
         .update({
           tare_weight_g: Number.isFinite(tareG) ? tareG : null,
           servings_per_container: parseFloat(nutrition.servingsPerContainer) || 1,
-          calories_per_serving: parseFloat(nutrition.calories) || null,
-          carbs_per_serving: parseFloat(nutrition.carbs) || null,
-          fat_per_serving: parseFloat(nutrition.fat) || null,
-          protein_per_serving: parseFloat(nutrition.protein) || null,
+          calories_per_serving: parseFloat(nutrition.calories) || 0,
+          carbs_per_serving: parseFloat(nutrition.carbs) || 0,
+          fat_per_serving: parseFloat(nutrition.fat) || 0,
+          protein_per_serving: parseFloat(nutrition.protein) || 0,
         })
         .eq('product_id', product.product_id)
         .eq('user_id', user.id);
