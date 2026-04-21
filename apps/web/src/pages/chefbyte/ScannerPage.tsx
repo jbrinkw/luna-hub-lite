@@ -982,8 +982,11 @@ export function ScannerPage() {
   const queueItemBorderColor = (item: QueueItem) => {
     if (item.status === 'error') return 'border-red-600';
     if (item.status === 'pending') return 'border-amber-500';
-    if (item.isNew) return 'border-red-600';
-    return 'border-green-600';
+    // Border follows the confirmed state so it matches the bg color pair:
+    // unconfirmed (still being edited / never touched) = red border + red bg,
+    // confirmed (user moved on) = green border + green bg. Old isNew flag no
+    // longer drives color — see confirmed logic + the [!NEW] label below.
+    return item.confirmed ? 'border-green-600' : 'border-red-600';
   };
 
   return (
