@@ -24,6 +24,11 @@ interface Product {
   barcode: string | null;
   servings_per_container: number;
   min_stock_amount: number;
+  /**
+   * Non-null when the product has been through LiveTrack Import — drives
+   * the small ✓ LiveTrack badge next to the product name.
+   */
+  tare_weight_g: number | null;
 }
 
 interface StockLot {
@@ -190,7 +195,7 @@ export function InventoryPage() {
     queryFn: async () => {
       const { data, error } = await chefbyte()
         .from('products')
-        .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount')
+        .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount,tare_weight_g')
         .eq('user_id', user!.id)
         .order('name');
       if (error) throw error;
@@ -676,6 +681,16 @@ export function InventoryPage() {
                         <span className="font-semibold sm:whitespace-nowrap sm:overflow-hidden sm:text-ellipsis">
                           {product.name}
                         </span>
+                        {product.tare_weight_g != null && (
+                          <span
+                            data-testid={`livetrack-enrolled-${product.product_id}`}
+                            title={`LiveTrack enrolled (container tare ${Number(product.tare_weight_g).toFixed(1)} g)`}
+                            className="inline-flex items-center shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200"
+                            aria-label="LiveTrack enrolled"
+                          >
+                            ✓
+                          </span>
+                        )}
                         {latestSource && (
                           <span
                             data-testid={`source-pill-${product.product_id}`}

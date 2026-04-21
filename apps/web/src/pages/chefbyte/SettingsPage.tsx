@@ -30,6 +30,13 @@ interface Product {
   is_placeholder: boolean;
   walmart_link: string | null;
   price: number | null;
+  /**
+   * When non-null, this product has been through the LiveTrack Import
+   * wizard and has a captured container tare — used for auto-deducting
+   * container weight from live-scale readings. Presence drives the
+   * "LiveTrack enrolled" badge in this page and the Inventory list.
+   */
+  tare_weight_g: number | null;
 }
 
 interface LiquidTrackDevice {
@@ -93,6 +100,7 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
   is_placeholder: false,
   walmart_link: null,
   price: null,
+  tare_weight_g: null,
 });
 
 /* ================================================================== */
@@ -695,7 +703,19 @@ export function SettingsPage() {
                   ) : (
                     /* Display mode */
                     <div className="flex flex-col flex-1">
-                      <h4 className="m-0 mb-2 text-base font-semibold">{p.name}</h4>
+                      <div className="flex items-start justify-between gap-2 mb-2">
+                        <h4 className="m-0 text-base font-semibold">{p.name}</h4>
+                        {p.tare_weight_g != null && (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
+                            title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
+                            data-testid={`livetrack-enrolled-${p.product_id}`}
+                          >
+                            <span aria-hidden="true">✓</span>
+                            LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
+                          </span>
+                        )}
+                      </div>
                       {p.barcode && (
                         <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>
                       )}
