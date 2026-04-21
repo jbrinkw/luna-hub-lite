@@ -64,7 +64,22 @@ type WizardState =
   | { kind: 'waiting_barcode' }
   | { kind: 'analyzing'; barcode: string }
   | { kind: 'product_loaded'; product: ProductRow; nutrition: NutritionData; isFullContainer: boolean }
-  | { kind: 'review'; product: ProductRow; nutrition: NutritionData; tareG: number; tareSource: 'scale' | 'ai' | 'manual' }
+  | {
+      kind: 'review';
+      product: ProductRow;
+      nutrition: NutritionData;
+      tareG: number;
+      tareSource: 'scale' | 'ai' | 'manual';
+      /**
+       * Last scale reading seen for this session, if any. The save path
+       * uses it to compute a partial-container quantity:
+       *   qty_containers = (scaleG - tareG) / product.net_weight_g
+       * Null when tareSource is 'manual' AND the user entered a tare
+       * before the Pi posted any scale reading — in that case we fall
+       * back to qty_containers = 1 (indistinguishable from legacy path).
+       */
+      scaleG: number | null;
+    }
   | { kind: 'saving' }
   | { kind: 'error'; message: string };
 
@@ -77,8 +92,8 @@ type WizardAction =
   | { type: 'set_nutrition'; patch: Partial<NutritionData> }
   | { type: 'toggle_full'; isFull: boolean }
   | { type: 'scale_reading'; scaleG: number; netG: number | null }
-  | { type: 'ai_ready'; aiG: number }
-  | { type: 'manual_tare'; tareG: number; product: ProductRow; nutrition: NutritionData }
+  | { type: 'ai_ready'; aiG: number; scaleG: number | null }
+  | { type: 'manual_tare'; tareG: number; product: ProductRow; nutrition: NutritionData; scaleG: number | null }
   | { type: 'saving' }
   | { type: 'saved_reset' }
   | { type: 'error'; message: string };
@@ -126,6 +141,7 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
         nutrition: state.nutrition,
         tareG,
         tareSource: 'scale',
+        scaleG: action.scaleG,
       };
     }
     case 'ai_ready': {
@@ -136,6 +152,7 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
         nutrition: state.nutrition,
         tareG: action.aiG,
         tareSource: 'ai',
+        scaleG: action.scaleG,
       };
     }
     case 'manual_tare':
@@ -145,6 +162,7 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
         nutrition: action.nutrition,
         tareG: action.tareG,
         tareSource: 'manual',
+        scaleG: action.scaleG,
       };
     case 'saving':
       return { kind: 'saving' };
@@ -277,7 +295,15 @@ export function LiveTrackImportPage() {
       lastAiTareTs.current = session.updated_at;
       setAriaAnnouncement(`AI tare ready: ${Math.round(session.ai_tare_g)} grams`);
       if (state.kind === 'product_loaded') {
-        dispatch({ type: 'ai_ready', aiG: session.ai_tare_g });
+        dispatch({
+          type: 'ai_ready',
+          aiG: session.ai_tare_g,
+          // Pair the AI tare with the measured gross (partial branch:
+          // user placed the container, Pi posted scale_reading_g, user
+          // clicked "Request AI tare"). If no reading was posted the
+          // save path falls back to qty=1.
+          scaleG: session.scale_reading_g != null ? Number(session.scale_reading_g) : null,
+        });
       }
     }
     // Session expired server-side.
@@ -453,9 +479,20 @@ export function LiveTrackImportPage() {
     if (state.kind !== 'product_loaded') return;
     const tareG = Number(manualTareInput);
     if (!Number.isFinite(tareG) || tareG < 0) return;
-    dispatch({ type: 'manual_tare', tareG, product: state.product, nutrition: state.nutrition });
+    // Pass the last-seen scale reading so the save path can compute a
+    // partial-container quantity. Null when the user hasn't placed the
+    // container on the scale (or Pi is offline) — save then falls back
+    // to qty=1.
+    const scaleG = session?.scale_reading_g != null ? Number(session.scale_reading_g) : null;
+    dispatch({
+      type: 'manual_tare',
+      tareG,
+      product: state.product,
+      nutrition: state.nutrition,
+      scaleG,
+    });
     setManualTareInput('');
-  }, [manualTareInput, state]);
+  }, [manualTareInput, state, session]);
 
   /* ---------------------------------------------------------------- */
   /*  Save + re-arm                                                    */
@@ -488,8 +525,30 @@ export function LiveTrackImportPage() {
         .eq('user_id', user.id);
       if (prodUpdErr) throw new Error(prodUpdErr.message);
 
-      // Optional stock_lot insert — only when we have a location. The lot
-      // represents one freshly-placed container on the shelf.
+      // Stock-lot insert. Quantity is derived from the measured net
+      // product weight rather than hardcoded to 1:
+      //
+      //   net_product_g = scaleG - tareG
+      //   qty_containers = max(0, net_product_g / product.net_weight_g)
+      //
+      // Full + sealed:  scaleG - tareG == net_weight_g → qty = 1.0
+      // Partial + AI:    fractional qty reflecting actual remaining product
+      // Manual w/ scale: same fraction as AI branch
+      // Manual w/o scale reading (user typed tare, no Pi reading posted):
+      //                  fall back to qty = 1 so the lot still lands.
+      let qtyContainers = 1;
+      const netWeight = Number(product.net_weight_g ?? 0);
+      if (
+        state.scaleG != null
+        && Number.isFinite(state.scaleG)
+        && Number.isFinite(tareG)
+        && netWeight > 0
+      ) {
+        const netProductG = Math.max(0, state.scaleG - tareG);
+        qtyContainers = Math.max(0, netProductG / netWeight);
+      }
+      // Round to 3 decimals (matches schema NUMERIC(10,3)).
+      qtyContainers = Math.round(qtyContainers * 1000) / 1000;
       if (defaultLocationId) {
         await chefbyte()
           .from('stock_lots')
@@ -497,7 +556,7 @@ export function LiveTrackImportPage() {
             user_id: user.id,
             product_id: product.product_id,
             location_id: defaultLocationId,
-            qty_containers: 1,
+            qty_containers: qtyContainers,
             last_update_source: 'manual',
             last_update_ts: new Date().toISOString(),
           });
