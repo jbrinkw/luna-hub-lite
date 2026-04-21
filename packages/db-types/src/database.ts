@@ -210,6 +210,78 @@ export type Database = {
         }
         Relationships: []
       }
+      livetrack_import_sessions: {
+        Row: {
+          ai_tare_confidence: string | null
+          ai_tare_g: number | null
+          ai_tare_product_form: Json | null
+          ai_tare_reasoning: string | null
+          created_at: string
+          current_barcode: string | null
+          current_product_id: string | null
+          device_id: string
+          expires_at: string
+          last_error: string | null
+          scale_reading_g: number | null
+          scale_reading_ts: string | null
+          session_id: string
+          state: string
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          ai_tare_confidence?: string | null
+          ai_tare_g?: number | null
+          ai_tare_product_form?: Json | null
+          ai_tare_reasoning?: string | null
+          created_at?: string
+          current_barcode?: string | null
+          current_product_id?: string | null
+          device_id: string
+          expires_at?: string
+          last_error?: string | null
+          scale_reading_g?: number | null
+          scale_reading_ts?: string | null
+          session_id?: string
+          state: string
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          ai_tare_confidence?: string | null
+          ai_tare_g?: number | null
+          ai_tare_product_form?: Json | null
+          ai_tare_reasoning?: string | null
+          created_at?: string
+          current_barcode?: string | null
+          current_product_id?: string | null
+          device_id?: string
+          expires_at?: string
+          last_error?: string | null
+          scale_reading_g?: number | null
+          scale_reading_ts?: string | null
+          session_id?: string
+          state?: string
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "livetrack_import_sessions_current_product_id_fkey"
+            columns: ["current_product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "livetrack_import_sessions_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_devices"
+            referencedColumns: ["device_id"]
+          },
+        ]
+      }
       locations: {
         Row: {
           created_at: string
