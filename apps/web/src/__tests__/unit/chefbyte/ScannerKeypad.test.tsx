@@ -11,7 +11,7 @@
  * buttons, asserting the DOM's `screen-value` display state.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -138,6 +138,53 @@ describe('ScannerPage keypad — double-decimal guard', () => {
     // `!current.includes('.')` guard would append and produce '3.5.'.
     await clickKey(user, '.');
     expect(screenValue()).toBe('3.5');
+  });
+});
+
+describe('ScannerPage keypad — commits on every press into nutrition field', () => {
+  it('each digit press appends to the active nutrition field (no Enter required)', async () => {
+    // Regression guard for the "keypad should auto update without an enter
+    // key or moving to a new field" complaint. Before the fix, rapid-fire
+    // presses in the same React batch all read the stale render-time
+    // `overwriteNext=true` closure, so each press replaced the prior digit
+    // and 3 presses of 5-0-0 collapsed to '0' instead of appending to '500'.
+    // The functional-setter + ref rewrite makes each press read the latest
+    // committed value. Assert 3 distinct intermediate snapshots.
+    const user = userEvent.setup();
+    renderScanner();
+
+    // Focus the calories field (a nutrition field, not the screen).
+    const calories = screen.getByTestId('nut-calories') as HTMLInputElement;
+    await user.click(calories);
+    expect(calories.value).toBe('');
+
+    await user.click(screen.getByTestId('key-5'));
+    expect(calories.value).toBe('5'); // snapshot 1
+
+    await user.click(screen.getByTestId('key-0'));
+    expect(calories.value).toBe('50'); // snapshot 2
+
+    await user.click(screen.getByTestId('key-0'));
+    expect(calories.value).toBe('500'); // snapshot 3
+  });
+
+  it('rapid-fire presses batched in the same tick each append (no stale-closure collapse)', async () => {
+    // Stress version: fire 3 clicks synchronously inside a single `act()` so
+    // React batches them and no re-render runs between clicks. The fix uses
+    // functional state updaters + a ref for overwriteNext, so each click
+    // still sees the previous click's output. A regression (reverting to
+    // closure reads) would collapse this to '0' or '5'.
+    renderScanner();
+    const calories = screen.getByTestId('nut-calories') as HTMLInputElement;
+    act(() => {
+      fireEvent.click(calories);
+    });
+    act(() => {
+      fireEvent.click(screen.getByTestId('key-5'));
+      fireEvent.click(screen.getByTestId('key-0'));
+      fireEvent.click(screen.getByTestId('key-0'));
+    });
+    expect(calories.value).toBe('500');
   });
 });
 

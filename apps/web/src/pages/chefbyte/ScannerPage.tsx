@@ -151,7 +151,14 @@ export function ScannerPage() {
 
   /* ---- Keypad screen ---- */
   const [screenValue, setScreenValue] = useState('1');
-  const [overwriteNext, setOverwriteNext] = useState(true);
+  // `overwriteNext` lives in a ref, not state: the UI never reads it (no
+  // re-render needed), and rapid-fire keypad presses queued within the same
+  // React batch must each read the latest flag. If we stored it in state,
+  // three synchronous presses of 5-0-0 would all see the stale render-time
+  // `overwriteNext=true` closure and each press would overwrite — making
+  // the first-digit-replaces-default behavior swallow every subsequent
+  // digit instead of appending.
+  const overwriteNextRef = useRef(true);
   // Which surface the numeric keypad routes into. `'screen'` = the big
   // quantity display (default, always valid). Any nutrition key targets
   // that field; typing the first digit replaces the existing value so
@@ -160,7 +167,7 @@ export function ScannerPage() {
   const [activeField, setActiveField] = useState<ActiveField>('screen');
   const focusField = (f: ActiveField) => {
     setActiveField(f);
-    setOverwriteNext(true);
+    overwriteNextRef.current = true;
   };
 
   /* ---- Unit toggle (consume modes) ---- */
@@ -227,7 +234,7 @@ export function ScannerPage() {
         barcodeRef.current.focus();
       }
       setScreenValue('1');
-      setOverwriteNext(true);
+      overwriteNextRef.current = true;
 
       try {
         // Look up product by barcode
@@ -671,33 +678,46 @@ export function ScannerPage() {
   /* ---------------------------------------------------------------- */
 
   const handleKeypadClick = (key: string) => {
-    // Pick the appropriate reader/writer based on the active field.
-    const current = activeField === 'screen' ? screenValue : (nutrition[activeField] ?? '');
-    const commit = (next: string) => {
-      if (activeField === 'screen') {
-        setScreenValue(next);
-      } else {
-        handleNutritionChange(activeField, next);
+    // Compute next value from the latest state via functional setters so that
+    // rapid-fire presses queued in the same React batch each see the PREVIOUS
+    // press's output (not the stale render-time closure). Same for the
+    // overwriteNext flag — read/write through the ref, not the state closure.
+    const computeNext = (current: string): string | null => {
+      const prevOverwrite = overwriteNextRef.current;
+      if (key === '\u2190') {
+        overwriteNextRef.current = false;
+        return current.slice(0, -1) || '0';
       }
+      if (key === '.') {
+        if (prevOverwrite) {
+          overwriteNextRef.current = false;
+          return '0.';
+        }
+        if (!current.includes('.')) {
+          return current + '.';
+        }
+        return null; // no change
+      }
+      if (prevOverwrite) {
+        overwriteNextRef.current = false;
+        return key;
+      }
+      return current === '0' ? key : current + key;
     };
 
-    if (key === '\u2190') {
-      commit(current.slice(0, -1) || '0');
-      setOverwriteNext(false);
-    } else if (key === '.') {
-      if (overwriteNext) {
-        commit('0.');
-        setOverwriteNext(false);
-      } else if (!current.includes('.')) {
-        commit(current + '.');
-      }
+    if (activeField === 'screen') {
+      setScreenValue((prev) => {
+        const next = computeNext(prev);
+        return next ?? prev;
+      });
     } else {
-      if (overwriteNext) {
-        commit(key);
-        setOverwriteNext(false);
-      } else {
-        commit(current === '0' ? key : current + key);
-      }
+      const field = activeField;
+      setNutrition((prev) => {
+        const current = prev[field] ?? '';
+        const next = computeNext(current);
+        if (next === null) return prev;
+        return autoScaleNutrition(field, next, prev, originalNutrition);
+      });
     }
   };
 
@@ -1075,7 +1095,7 @@ export function ScannerPage() {
                     return 'serving';
                   }
                 });
-                setOverwriteNext(true);
+                overwriteNextRef.current = true;
               }}
             >
               {unit === 'serving' ? 'Serving' : 'Container'}
