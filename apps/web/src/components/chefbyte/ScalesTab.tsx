@@ -354,7 +354,7 @@ export function ScalesTab() {
       // (e.g. "javascript://evil.com"). Empty/null clears the field and is OK.
       if (lanIp !== null && !isValidLanIp(lanIp)) {
         throw new Error(
-          'Invalid LAN IP. Use an IPv4 address (e.g. 192.168.0.181) or a hostname — no scheme, port, or slashes.',
+          'Invalid LAN IP. Use a hostname (e.g. fridgecam) or an IPv4 address (e.g. 192.168.0.181) — no scheme, port, or slashes.',
         );
       }
       const { error: err } = await chefbyte()
@@ -655,7 +655,7 @@ export function ScalesTab() {
                                   clearIpError(d.device_id);
                                 }}
                                 className={`${inputCls} max-w-[180px] py-1 text-[13px]`}
-                                placeholder="192.168.0.181"
+                                placeholder="fridgecam"
                                 data-testid={`shelf-lan-ip-edit-${d.device_id}`}
                               />
                               <button
