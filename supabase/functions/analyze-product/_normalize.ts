@@ -1,0 +1,197 @@
+// Response-normalization helpers for analyze-product.
+//
+// Extracted from index.ts so they're unit-testable in Deno isolation
+// (supabase/functions/analyze-product/test.ts). The runtime HTTP entry
+// point still lives in index.ts.
+
+export interface Suggestion {
+  name: string;
+  servings_per_container: number;
+  calories_per_serving: number;
+  carbs_per_serving: number;
+  protein_per_serving: number;
+  fat_per_serving: number;
+  description?: string;
+  default_shelf_life_days: number | null;
+}
+
+/** Result of validateSuggestion: ok | a list of missing required fields. */
+export type SuggestionValidation =
+  | { ok: true; suggestion: Suggestion }
+  | { ok: false; missing: string[] };
+
+/**
+ * Parse a Claude Haiku response into a structured suggestion.
+ *
+ * Claude is told to return STRICT JSON, but in practice the text can
+ * arrive as:
+ *   - clean JSON object: `{...}`
+ *   - markdown-fenced: ` ```json\n{...}\n``` `
+ *   - clean JSON preceded/followed by prose explanation
+ *   - truncated (max_tokens hit) — JSON.parse throws
+ *
+ * Returns the parsed object, or null if no parseable JSON object could
+ * be extracted. Mirrors the old inline try/catch + "return null" that
+ * caused the `ai_degraded:true` fallback.
+ */
+export function parseAIResponse(text: string): Record<string, unknown> | null {
+  if (!text || typeof text !== 'string') return null;
+  const trimmed = text.trim();
+  if (!trimmed) return null;
+
+  // Fast path: clean JSON.
+  try {
+    const parsed = JSON.parse(trimmed);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    /* fall through to recovery paths */
+  }
+
+  // Recovery 1: strip markdown fences and retry. Matches ```json ... ```
+  // and plain ``` ... ``` blocks.
+  const fenceMatch = trimmed.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fenceMatch?.[1]) {
+    try {
+      const parsed = JSON.parse(fenceMatch[1].trim());
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* fall through */
+    }
+  }
+
+  // Recovery 2: extract the first balanced `{...}` substring. Handles
+  // "Here is the JSON: {...}" and truncated-tail cases where the model
+  // wrote prose after a well-formed object.
+  const firstBrace = trimmed.indexOf('{');
+  if (firstBrace !== -1) {
+    let depth = 0;
+    let inString = false;
+    let escape = false;
+    for (let i = firstBrace; i < trimmed.length; i++) {
+      const ch = trimmed[i];
+      if (escape) {
+        escape = false;
+        continue;
+      }
+      if (ch === '\\') {
+        escape = true;
+        continue;
+      }
+      if (ch === '"') {
+        inString = !inString;
+        continue;
+      }
+      if (inString) continue;
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          const candidate = trimmed.slice(firstBrace, i + 1);
+          try {
+            const parsed = JSON.parse(candidate);
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              return parsed as Record<string, unknown>;
+            }
+          } catch {
+            /* give up */
+          }
+          break;
+        }
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
+ * Validate + coerce a raw parsed suggestion. Returns
+ *   { ok: false, missing: [...] }  when a required field is null/missing,
+ *   { ok: true, suggestion }       with coerced numeric + clamped shelf-life.
+ *
+ * Extracted from the inline block in index.ts so the scanner-path assertion
+ * ("required fields present" → 422 otherwise) is testable without HTTP.
+ */
+export function validateSuggestion(raw: Record<string, unknown> | null): SuggestionValidation {
+  if (!raw || typeof raw !== 'object') {
+    return { ok: false, missing: ['*'] };
+  }
+
+  const required = [
+    'name',
+    'calories_per_serving',
+    'protein_per_serving',
+    'carbs_per_serving',
+    'fat_per_serving',
+  ];
+  const missing = required.filter((k) => raw[k] == null);
+  if (missing.length > 0) return { ok: false, missing };
+
+  // Coerce numeric fields to numbers; non-numeric → 0 (matches old
+  // `Number(x) || 0` semantics).
+  const numericFields = [
+    'calories_per_serving',
+    'protein_per_serving',
+    'carbs_per_serving',
+    'fat_per_serving',
+    'servings_per_container',
+  ] as const;
+  const coerced: Record<string, unknown> = { ...raw };
+  for (const k of numericFields) {
+    if (coerced[k] != null) coerced[k] = Number(coerced[k]) || 0;
+  }
+
+  // servings_per_container: default to 1 when missing / < 1
+  const spc = coerced.servings_per_container as number | undefined;
+  if (!spc || spc < 1) coerced.servings_per_container = 1;
+
+  // default_shelf_life_days: integer in [1, 3650] or null. Coerce, clamp,
+  // or nullify — never surface a 422 for this field.
+  if (coerced.default_shelf_life_days != null) {
+    const n = Math.round(Number(coerced.default_shelf_life_days));
+    coerced.default_shelf_life_days =
+      Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
+  } else {
+    coerced.default_shelf_life_days = null;
+  }
+
+  return { ok: true, suggestion: coerced as unknown as Suggestion };
+}
+
+/**
+ * 4-4-9 calorie validator. Returns the percent drift between the declared
+ * calories and (protein*4 + carbs*4 + fat*9). Negative means calories are
+ * under-stated; positive means over-stated.
+ *
+ * Returns `null` when the macros all round to zero — there's nothing to
+ * validate against.
+ *
+ * The real AI is told to adjust calories to match when >10% off; this
+ * helper is the yardstick the test uses to assert the prompt rule is
+ * correctly applied.
+ */
+export function calorieDrift(macros: {
+  protein: number;
+  carbs: number;
+  fat: number;
+  calories: number;
+}): number | null {
+  const derived = macros.protein * 4 + macros.carbs * 4 + macros.fat * 9;
+  if (derived <= 0) return null;
+  if (!Number.isFinite(macros.calories)) return null;
+  return ((macros.calories - derived) / derived) * 100;
+}
+
+/** True when the calorie drift exceeds `thresholdPct` (default 10). */
+export function isCalorieDriftImplausible(
+  macros: { protein: number; carbs: number; fat: number; calories: number },
+  thresholdPct = 10,
+): boolean {
+  const drift = calorieDrift(macros);
+  if (drift === null) return false;
+  return Math.abs(drift) > thresholdPct;
+}

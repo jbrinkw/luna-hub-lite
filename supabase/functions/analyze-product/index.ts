@@ -1,5 +1,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import Anthropic from 'npm:@anthropic-ai/sdk';
+import { buildSystemPrompt, buildUserPrompt } from './_prompt.ts';
+import { parseAIResponse, validateSuggestion } from './_normalize.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -226,78 +228,8 @@ async function normalizeWithAI(offProduct: any, forceFailure: string | null = nu
   try {
     const anthropic = new Anthropic({ apiKey });
 
-    const brand = (offProduct.brands || '').toString().trim();
-    const food = (offProduct.product_name || offProduct.generic_name || '').toString().trim();
-    const proposed = brand && food ? `${brand} ${food}` : food || brand || 'Unknown Product';
-
-    const systemPrompt = [
-      'You normalize Open Food Facts product data into a structured JSON format.',
-      'Return STRICT JSON only, no markdown, no explanation:',
-      '{',
-      '  "name": "<final product name>",',
-      '  "servings_per_container": <number, default 1>,',
-      '  "calories_per_serving": <number>,',
-      '  "carbs_per_serving": <number>,',
-      '  "protein_per_serving": <number>,',
-      '  "fat_per_serving": <number>,',
-      '  "description": "<brief 1-line description>",',
-      '  "default_shelf_life_days": <integer 1-3650, or null>',
-      '}',
-      '',
-      'Rules:',
-      `- Base name: "${proposed}". Fix formatting (spacing, casing, punctuation) only.`,
-      '- Nutrition must be PER SERVING. If OFF data only has per-100g, calculate using serving_size.',
-      '- If serving info missing, treat 100g as one serving.',
-      '- Apply 4-4-9 validation: carbs×4 + protein×4 + fat×9 should ≈ calories. If >10% off, adjust calories to match.',
-      '- servings_per_container: product_quantity / serving_size, or 1 if unknown.',
-      '- All numeric values rounded to 1 decimal.',
-      '- default_shelf_life_days: typical unopened pantry/fridge life from purchase, one integer.',
-      '  Rough guide (use judgment based on categories):',
-      '    fresh produce, bakery bread, deli meat, soft cheese: 5–10',
-      '    packaged bread/tortillas/wraps, yogurt, cold cuts: 10–21',
-      '    eggs, hard cheese, butter: 30–60',
-      '    frozen foods: 180',
-      '    condiments, jarred sauces (unopened): 365',
-      '    canned goods, dried pasta/rice, spices, shelf-stable snacks: null',
-      '  Use null when genuinely uncertain OR shelf-stable. Never guess wildly.',
-    ].join('\n');
-
-    // Slim nutriments to only the 4 macros + energy (per-serving + per-100g
-    // variants). The raw OFF nutriments object for a typical product is
-    // 10–20 KB (dozens of vitamins/minerals, variant suffixes for each)
-    // which causes Claude to spend tokens reading irrelevant data and
-    // often hit the timeout. Keep only what the 4-4-9 validation needs.
-    const n = offProduct.nutriments ?? {};
-    const slim_nutriments: Record<string, unknown> = {};
-    for (const key of [
-      'energy-kcal',
-      'energy-kcal_serving',
-      'energy-kcal_100g',
-      'carbohydrates',
-      'carbohydrates_serving',
-      'carbohydrates_100g',
-      'proteins',
-      'proteins_serving',
-      'proteins_100g',
-      'fat',
-      'fat_serving',
-      'fat_100g',
-    ]) {
-      if (n[key] != null) slim_nutriments[key] = n[key];
-    }
-
-    const userPrompt =
-      'Normalize this Open Food Facts product:\n' +
-      JSON.stringify({
-        product_name: offProduct.product_name,
-        generic_name: offProduct.generic_name,
-        brands: offProduct.brands,
-        categories: offProduct.categories,
-        serving_size: offProduct.serving_size,
-        serving_quantity: offProduct.serving_quantity,
-        product_quantity: offProduct.product_quantity,
-        nutriments: slim_nutriments,
-      });
+    const systemPrompt = buildSystemPrompt(offProduct);
+    const userPrompt = buildUserPrompt(offProduct);
 
     const message = await anthropic.messages.create({
       model: 'claude-haiku-4-5-20251001',
@@ -308,12 +240,12 @@ async function normalizeWithAI(offProduct: any, forceFailure: string | null = nu
     });
 
     const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
-    try {
-      return JSON.parse(text);
-    } catch {
+    const parsed = parseAIResponse(text);
+    if (!parsed) {
       console.error('Failed to parse AI response:', text);
       return null;
     }
+    return parsed;
   } catch (err: any) {
     // Classify Anthropic SDK errors so the edge function can surface a
     // specific actionable message instead of silently returning null
@@ -476,36 +408,12 @@ Deno.serve(async (req) => {
 
     // Validate required fields in AI response before returning
     if (suggestion) {
-      const required = ['name', 'calories_per_serving', 'protein_per_serving', 'carbs_per_serving', 'fat_per_serving'];
-      const missing = required.filter((k) => suggestion[k] == null);
-      if (missing.length > 0) {
-        console.warn('AI response missing fields:', missing, suggestion);
+      const validation = validateSuggestion(suggestion);
+      if (!validation.ok) {
+        console.warn('AI response missing fields:', validation.missing, suggestion);
         return jsonResponse({ error: 'AI could not parse product data — enter manually' }, 422);
       }
-      // Ensure numeric fields are numbers
-      for (const k of [
-        'calories_per_serving',
-        'protein_per_serving',
-        'carbs_per_serving',
-        'fat_per_serving',
-        'servings_per_container',
-      ]) {
-        if (suggestion[k] != null) suggestion[k] = Number(suggestion[k]) || 0;
-      }
-      if (!suggestion.servings_per_container || suggestion.servings_per_container < 1) {
-        suggestion.servings_per_container = 1;
-      }
-      // default_shelf_life_days: integer in [1, 3650] or null.
-      // Coerce, clamp, and drop any non-integer / out-of-range value to null
-      // rather than surfacing a 422 — the rest of the suggestion is still
-      // useful, we just skip auto-expiry on malformed suggestions.
-      if (suggestion.default_shelf_life_days != null) {
-        const n = Math.round(Number(suggestion.default_shelf_life_days));
-        suggestion.default_shelf_life_days =
-          Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
-      } else {
-        suggestion.default_shelf_life_days = null;
-      }
+      suggestion = validation.suggestion;
     }
 
     return jsonResponse({

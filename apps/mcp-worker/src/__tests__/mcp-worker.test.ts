@@ -496,6 +496,203 @@ describe('MCP Worker E2E', () => {
     }
   });
 
+  // ─── Test 20a: Session resumption behavior pin (audit rec #27) ────────
+  //
+  // The MCP spec (2025-03-26 Streamable HTTP) lets a client reuse a
+  // sessionId on reconnect. The Worker currently runs STATELESS — POST
+  // /mcp authenticates + rebuilds the tool registry on every request;
+  // the `Mcp-Session-Id` header is echoed back but carries no server-
+  // side state. Commits `b98fb3f` and `c265c4e` deliberately gutted the
+  // stateful Durable Object path to stop DO duration billing.
+  //
+  // These tests pin the current behavior so a future "accidental" return
+  // to stateful sessions (or a regression where sessionId-less requests
+  // stop working) fails loudly.
+
+  it('reconnect with same sessionId: tool call succeeds against current stateless transport', async () => {
+    // 1. Initialize and capture sessionId.
+    const first = await fetch(`${WORKER_BASE}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'session-resume', version: '1.0' },
+        },
+      }),
+    });
+    expect(first.status).toBe(200);
+    const firstSessionId = first.headers.get('mcp-session-id');
+    expect(firstSessionId).toBeTruthy();
+
+    // 2. Make a tool call on that sessionId.
+    const firstCall = await fetch(`${WORKER_BASE}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'Mcp-Session-Id': firstSessionId!,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+    });
+    expect(firstCall.status).toBe(200);
+    const firstList = (await firstCall.json()) as any;
+    expect(Array.isArray(firstList.result?.tools)).toBe(true);
+    const firstToolCount = firstList.result.tools.length;
+
+    // 3. "Reconnect" — simulate client dropping the connection and coming
+    //    back with the same sessionId. In stateless mode this is just a
+    //    fresh HTTP request, which must succeed.
+    const reconnect = await fetch(`${WORKER_BASE}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'Mcp-Session-Id': firstSessionId!,
+      },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }),
+    });
+    expect(reconnect.status).toBe(200);
+    const reconnectedSessionId = reconnect.headers.get('mcp-session-id');
+    // Server echoes the client-supplied sessionId rather than issuing a new one.
+    expect(reconnectedSessionId).toBe(firstSessionId);
+
+    const reconnectList = (await reconnect.json()) as any;
+    expect(Array.isArray(reconnectList.result?.tools)).toBe(true);
+    // Tool set is user-scoped + stable across requests for the same user.
+    expect(reconnectList.result.tools.length).toBe(firstToolCount);
+  });
+
+  it('cross-session isolation: different sessionId still authenticates the same user, tool set unchanged', async () => {
+    // Open "session A".
+    const a1 = await fetch(`${WORKER_BASE}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'session-A', version: '1.0' },
+        },
+      }),
+    });
+    expect(a1.status).toBe(200);
+    const sessionA = a1.headers.get('mcp-session-id')!;
+
+    // Open "session B" — brand new initialize, server assigns a different id.
+    const b1 = await fetch(`${WORKER_BASE}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'session-B', version: '1.0' },
+        },
+      }),
+    });
+    expect(b1.status).toBe(200);
+    const sessionB = b1.headers.get('mcp-session-id')!;
+    expect(sessionB).not.toBe(sessionA);
+
+    // Both sessionIds authenticate the same user (same Bearer) and return
+    // the identical tool set. Stateless mode — no session-specific state.
+    const [listA, listB] = await Promise.all([
+      fetch(`${WORKER_BASE}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'Mcp-Session-Id': sessionA,
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+      }).then((r) => r.json() as Promise<any>),
+      fetch(`${WORKER_BASE}/mcp`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+          'Mcp-Session-Id': sessionB,
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+      }).then((r) => r.json() as Promise<any>),
+    ]);
+    const aNames = listA.result.tools.map((t: any) => t.name).sort();
+    const bNames = listB.result.tools.map((t: any) => t.name).sort();
+    expect(aNames).toEqual(bNames);
+  });
+
+  it('resumed sessionId without Authorization header → 401 (per-request auth, not session-scoped)', async () => {
+    // Initialize to get a real sessionId…
+    const init = await fetch(`${WORKER_BASE}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${apiKey}` },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'session-auth', version: '1.0' },
+        },
+      }),
+    });
+    expect(init.status).toBe(200);
+    const sessionId = init.headers.get('mcp-session-id')!;
+
+    // …now "reconnect" with that sessionId but NO Authorization. In a
+    // stateful server the sessionId alone would suffice; the stateless
+    // Worker must still 401 because every request re-authenticates.
+    const res = await fetch(`${WORKER_BASE}/mcp`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Mcp-Session-Id': sessionId },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 2, method: 'tools/list', params: {} }),
+    });
+    expect(res.status).toBe(401);
+    const wwwAuth = res.headers.get('www-authenticate');
+    expect(wwwAuth).toContain('Bearer');
+    expect(wwwAuth).toContain('resource_metadata=');
+  });
+
+  it('server-supplied sessionId is honored when client sends Mcp-Session-Id (echo guarantee)', async () => {
+    // Client picks a fresh UUID. Current implementation honors the client
+    // value and echoes it back (see src/index.ts: `sessionId = incomingSessionId || crypto.randomUUID()`).
+    // This is a behavior pin — if we ever switch to server-generated-only
+    // session ids, this test fails and forces a conscious contract change.
+    const clientChosen = crypto.randomUUID();
+    const res = await fetch(`${WORKER_BASE}/mcp`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${apiKey}`,
+        'Mcp-Session-Id': clientChosen,
+      },
+      body: JSON.stringify({
+        jsonrpc: '2.0',
+        id: 1,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'client-chosen-id', version: '1.0' },
+        },
+      }),
+    });
+    expect(res.status).toBe(200);
+    expect(res.headers.get('mcp-session-id')).toBe(clientChosen);
+  });
+
   // ─── Test 20: Tool filtering — disabled tool ──────────────────────────
 
   it('tool filtering respects disabled tool in user_tool_config', async () => {

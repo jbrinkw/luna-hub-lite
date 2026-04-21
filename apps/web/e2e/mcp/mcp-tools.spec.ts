@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { createHash } from 'node:crypto';
 import {
   seedUser,
   seedChefByteData,
@@ -11,7 +12,9 @@ import {
   signInWithRetry,
 } from '../helpers/seed';
 import { generateTestApiKey, McpE2EClient } from '../helpers/mcp-client';
-import { SUPABASE_URL, ANON_KEY } from '../helpers/constants';
+import { SUPABASE_URL, ANON_KEY, admin } from '../helpers/constants';
+
+const MCP_WORKER_URL = process.env.MCP_WORKER_URL ?? 'http://localhost:8787';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -1198,6 +1201,217 @@ test.describe('MCP Tools — Error Handling', () => {
     } finally {
       await ctx?.mcp.disconnect();
       await ctx?.cleanup();
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Key rotation mid-flight — audit §6 rec #20 (MEDIUM).
+//
+// Scenario: an MCP client is mid-conversation when the user revokes the API
+// key (e.g., via Hub → Settings → API Keys). The worker must reject the
+// NEXT tool call cleanly with 401 — not hang, not 500, not bleed through
+// a stale auth context. This guards commits like
+// `d9752e9 fix(hub): prevent encrypted key leak` and prevents future
+// regressions of the `revoked_at IS NULL` check in auth.ts.
+//
+// The current worker transport is stateless Streamable HTTP (POST /mcp):
+// each tool call re-authenticates via the Bearer token, so "mid-flight"
+// here means "between two back-to-back requests on what the client sees
+// as the same session" (identified by the `Mcp-Session-Id` header, which
+// the worker echoes back).
+// ---------------------------------------------------------------------------
+
+test.describe('MCP Tools — Key Rotation', () => {
+  /** Call an MCP tool via the stateless Streamable HTTP transport. Returns
+   * { status, body } — does NOT throw on non-200. Used to assert clean
+   * HTTP-level error responses without an implicit client abstraction. */
+  async function callToolRaw(opts: {
+    apiKey: string;
+    sessionId?: string;
+    method: string;
+    params?: any;
+    id?: number;
+    timeoutMs?: number;
+  }): Promise<{ status: number; headers: Headers; body: any; elapsedMs: number }> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${opts.apiKey}`,
+    };
+    if (opts.sessionId) headers['Mcp-Session-Id'] = opts.sessionId;
+    const ac = new AbortController();
+    const timeout = setTimeout(() => ac.abort(), opts.timeoutMs ?? 5_000);
+    const t0 = Date.now();
+    try {
+      const res = await fetch(`${MCP_WORKER_URL}/mcp`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          jsonrpc: '2.0',
+          id: opts.id ?? 1,
+          method: opts.method,
+          params: opts.params ?? {},
+        }),
+        signal: ac.signal,
+      });
+      const elapsedMs = Date.now() - t0;
+      const text = await res.text();
+      let body: any = null;
+      try {
+        body = text ? JSON.parse(text) : null;
+      } catch {
+        body = text;
+      }
+      return { status: res.status, headers: res.headers, body, elapsedMs };
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  test('revoke mid-flight: next tool call on same session returns clean 401, not hang', async () => {
+    const { userId, cleanup } = await seedUser('mcp-rotate-midflight');
+    try {
+      const apiKey = await generateTestApiKey(userId);
+
+      // 1. Initialize + capture sessionId.
+      const init = await callToolRaw({
+        apiKey,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'rotation-e2e', version: '1.0' },
+        },
+      });
+      expect(init.status).toBe(200);
+      const sessionId = init.headers.get('mcp-session-id') ?? '';
+      expect(sessionId.length).toBeGreaterThan(0);
+
+      // 2. First tool call succeeds — tools/list is a cheap, user-scoped probe.
+      const firstList = await callToolRaw({
+        apiKey,
+        sessionId,
+        method: 'tools/list',
+        id: 2,
+      });
+      expect(firstList.status).toBe(200);
+      expect(Array.isArray(firstList.body?.result?.tools)).toBe(true);
+
+      // 3. Service-role revokes the key. Emulates the user clicking "Revoke"
+      //    in the Hub while the client is still sending requests.
+      const keyHash = createHash('sha256').update(apiKey).digest('hex');
+      const { error: revokeErr } = await (admin as any)
+        .schema('hub')
+        .from('api_keys')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('api_key_hash', keyHash);
+      expect(revokeErr).toBeNull();
+
+      // 4. Next tool call on the SAME sessionId must be rejected cleanly.
+      //    Hard timeout of 5s: a hang (missing revoked_at filter) would
+      //    either time out or produce a stale 200 — both fail the test.
+      const afterRevoke = await callToolRaw({
+        apiKey,
+        sessionId,
+        method: 'tools/list',
+        id: 3,
+        timeoutMs: 5_000,
+      });
+      expect(afterRevoke.status).toBe(401);
+      expect(afterRevoke.elapsedMs).toBeLessThan(5_000);
+      // RFC 9728 WWW-Authenticate challenge so the client knows to re-auth
+      const wwwAuth = afterRevoke.headers.get('www-authenticate') ?? '';
+      expect(wwwAuth.toLowerCase()).toContain('bearer');
+      expect(wwwAuth).toContain('resource_metadata=');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('fresh connection with revoked key is rejected immediately', async () => {
+    const { userId, cleanup } = await seedUser('mcp-rotate-fresh-revoked');
+    try {
+      const apiKey = await generateTestApiKey(userId);
+
+      // Revoke BEFORE any connection attempt
+      const keyHash = createHash('sha256').update(apiKey).digest('hex');
+      await (admin as any)
+        .schema('hub')
+        .from('api_keys')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('api_key_hash', keyHash);
+
+      const init = await callToolRaw({
+        apiKey,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'rotation-e2e', version: '1.0' },
+        },
+        timeoutMs: 5_000,
+      });
+      expect(init.status).toBe(401);
+      expect(init.elapsedMs).toBeLessThan(5_000);
+      const wwwAuth = init.headers.get('www-authenticate') ?? '';
+      expect(wwwAuth.toLowerCase()).toContain('bearer');
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('new key after rotation works — user remains usable (regression guard)', async () => {
+    const { userId, cleanup } = await seedUser('mcp-rotate-newkey');
+    try {
+      // 1. First key — revoke right away.
+      const oldKey = await generateTestApiKey(userId);
+      const oldHash = createHash('sha256').update(oldKey).digest('hex');
+      await (admin as any)
+        .schema('hub')
+        .from('api_keys')
+        .update({ revoked_at: new Date().toISOString() })
+        .eq('api_key_hash', oldHash);
+
+      // Sanity: the old key is dead.
+      const deadRes = await callToolRaw({ apiKey: oldKey, method: 'initialize' });
+      expect(deadRes.status).toBe(401);
+
+      // 2. Second key for the SAME user.
+      const newKey = await generateTestApiKey(userId);
+      expect(newKey).not.toBe(oldKey);
+
+      // 3. Fresh initialize + tools/list on the new key must succeed. This
+      //    guards against a regression where revoking the first key
+      //    accidentally poisons the user's auth (e.g., via an overly-broad
+      //    WHERE user_id = X update).
+      const init = await callToolRaw({
+        apiKey: newKey,
+        method: 'initialize',
+        params: {
+          protocolVersion: '2024-11-05',
+          capabilities: {},
+          clientInfo: { name: 'rotation-e2e', version: '1.0' },
+        },
+      });
+      expect(init.status).toBe(200);
+      const sessionId = init.headers.get('mcp-session-id') ?? '';
+      expect(sessionId.length).toBeGreaterThan(0);
+
+      const list = await callToolRaw({
+        apiKey: newKey,
+        sessionId,
+        method: 'tools/list',
+        id: 2,
+      });
+      expect(list.status).toBe(200);
+      expect(Array.isArray(list.body?.result?.tools)).toBe(true);
+
+      // Confirm the revoked key is STILL dead, even though the user has a
+      // valid replacement. Catches a bad OR / IS NULL composition.
+      const stillDead = await callToolRaw({ apiKey: oldKey, method: 'initialize', id: 99 });
+      expect(stillDead.status).toBe(401);
+    } finally {
+      await cleanup();
     }
   });
 });

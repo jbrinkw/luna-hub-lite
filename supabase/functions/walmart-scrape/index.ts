@@ -1,4 +1,5 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
+import { buildSerpApiUrl, normalizeSerpApiResponse } from './_normalize.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -69,17 +70,8 @@ async function searchWalmart(query: string, storeId?: string, forceFailure: stri
   const serpApiKey = Deno.env.get('SERPAPI_KEY');
   if (!serpApiKey) throw new Error('SERPAPI_KEY not configured');
 
-  const params = new URLSearchParams({
-    api_key: serpApiKey,
-    engine: 'walmart',
-    query,
-    sort: 'best_match',
-  });
-  if (storeId) params.set('store_id', storeId);
-
-  const resp = await fetch(`https://serpapi.com/search.json?${params}`, {
-    signal: AbortSignal.timeout(15_000),
-  });
+  const url = buildSerpApiUrl({ apiKey: serpApiKey, query, storeId });
+  const resp = await fetch(url, { signal: AbortSignal.timeout(15_000) });
   if (resp.status >= 500) {
     throw Object.assign(new Error(`SerpApi HTTP ${resp.status}`), {
       upstreamReason: 'serpapi_unavailable',
@@ -101,17 +93,7 @@ async function searchWalmart(query: string, storeId?: string, forceFailure: stri
       upstreamReason: 'serpapi_unavailable',
     });
   }
-  return (json.organic_results || []).slice(0, 6).map((item: any) => {
-    const offer = item.primary_offer || {};
-    const pricePerUnit = item.price_per_unit;
-    return {
-      url: item.product_page_url || item.link || '',
-      title: item.title || item.name || null,
-      price: offer.offer_price ? parseFloat(offer.offer_price) : item.price ? parseFloat(item.price) : null,
-      price_per_unit: typeof pricePerUnit === 'object' ? pricePerUnit.amount : null,
-      image_url: item.thumbnail || null,
-    };
-  });
+  return normalizeSerpApiResponse(json);
 }
 
 Deno.serve(async (req) => {
