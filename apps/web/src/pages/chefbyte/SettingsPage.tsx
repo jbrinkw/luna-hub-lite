@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useSearchParams } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
@@ -9,7 +9,6 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
-import { Copy, Check } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -39,38 +38,10 @@ interface Product {
   tare_weight_g: number | null;
 }
 
-// LiquidTrack tab hidden from the UI (2026-04-21). 0 rows in
-// chefbyte.liquidtrack_devices per audit; liquidtrack_readings table
-// already dropped. Feature replaced by live_scale kind under Scales
-// tab + LiveTrack Import wizard. Back-end code + types left dormant
-// so follow-up full-purge PR can delete in one sweep.
-type Tab = 'products' | 'walmart' | 'liquidtrack' | 'scales' | 'locations';
-
-// Back-end types for the dormant code paths below. Kept so the file
-// typechecks while the full purge is pending.
-interface LiquidTrackDevice {
-  device_id: string;
-  user_id: string;
-  device_name: string;
-  product_id: string | null;
-  import_key_hash: string;
-  is_active: boolean;
-  created_at: string;
-  products: { name: string } | null;
-}
-
-interface LiquidTrackEvent {
-  event_id: string;
-  created_at: string;
-  weight_before: number;
-  weight_after: number;
-  consumption: number;
-  calories: number | null;
-  carbs: number | null;
-  protein: number | null;
-  fat: number | null;
-  is_refill: boolean;
-}
+// LiquidTrack retired 2026-04-21 — replaced by LiveTrack (live_scale kind
+// under Scales tab + LiveTrack Import wizard). See
+// supabase/migrations/20260421060000_retire_liquidtrack.sql for the DB drop.
+type Tab = 'products' | 'walmart' | 'scales' | 'locations';
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'products', label: 'Products', icon: '\uD83D\uDCE6' },
@@ -128,28 +99,7 @@ export function SettingsPage() {
   const [addForm, setAddForm] = useState(blankProduct());
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
 
-  /* ---- LiquidTrack state ---- */
-  const [showAddDevice, setShowAddDevice] = useState(false);
-  const [newDeviceName, setNewDeviceName] = useState('');
-  const [newDeviceProductId, setNewDeviceProductId] = useState('');
-  const [generatedDevice, setGeneratedDevice] = useState<{ device_id: string; raw_key: string } | null>(null);
-  const [expandedDeviceId, setExpandedDeviceId] = useState<string | null>(null);
-  const [deviceEvents, setDeviceEvents] = useState<LiquidTrackEvent[]>([]);
-  const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-
-  /* ---- Clipboard copy feedback ---- */
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-
-  const copyToClipboard = async (text: string, key: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey(null), 2000);
-    } catch {
-      // Fallback: no-op
-    }
-  };
 
   /* ---- Locations state ---- */
   const [newLocationName, setNewLocationName] = useState('');
@@ -174,19 +124,6 @@ export function SettingsPage() {
     enabled: !!user,
   });
 
-  const { data: devices = [], isLoading: devicesLoading } = useQuery({
-    queryKey: queryKeys.devices(user!.id),
-    queryFn: async () => {
-      const { data, error: loadErr } = await chefbyte()
-        .from('liquidtrack_devices')
-        .select('*, products:product_id(name)')
-        .eq('user_id', user!.id);
-      if (loadErr) throw loadErr;
-      return (data ?? []) as LiquidTrackDevice[];
-    },
-    enabled: !!user,
-  });
-
   const { data: locations = [], isLoading: locationsLoading } = useQuery({
     queryKey: queryKeys.locations(user!.id),
     queryFn: async () => {
@@ -202,9 +139,9 @@ export function SettingsPage() {
   });
 
   // Realtime: pick up changes the scanner (or other sessions) write to
-  // chefbyte.products / chefbyte.locations / chefbyte.live_shelf_devices
-  // without requiring a manual reload. Channel-per-table per the hook's
-  // contract.
+  // chefbyte.products / chefbyte.locations without requiring a manual
+  // reload. Channel-per-table per the hook's contract. ScalesTab owns
+  // its own realtime subscription for live_shelf_devices.
   useRealtimeInvalidation('chef-settings', [
     {
       schema: 'chefbyte',
@@ -216,14 +153,9 @@ export function SettingsPage() {
       table: 'locations',
       queryKeys: [queryKeys.locations(user!.id)],
     },
-    {
-      schema: 'chefbyte',
-      table: 'live_shelf_devices',
-      queryKeys: [queryKeys.devices(user!.id)],
-    },
   ]);
 
-  const loading = productsLoading || devicesLoading || locationsLoading;
+  const loading = productsLoading || locationsLoading;
 
   /* ---------------------------------------------------------------- */
   /*  Product CRUD mutations                                           */
@@ -293,86 +225,6 @@ export function SettingsPage() {
   });
 
   /* ---------------------------------------------------------------- */
-  /*  LiquidTrack mutations                                            */
-  /* ---------------------------------------------------------------- */
-
-  const generateDeviceMutation = useMutation({
-    mutationFn: async () => {
-      if (!user || !newDeviceName.trim()) throw new Error('Missing device name');
-
-      const deviceId = crypto.randomUUID();
-      const rawKey = crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '');
-
-      // Hash the key with SHA-256
-      const encoder = new TextEncoder();
-      const hashBuffer = await crypto.subtle.digest('SHA-256', encoder.encode(rawKey));
-      const hashArray = Array.from(new Uint8Array(hashBuffer));
-      const keyHash = hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
-
-      const { error: insertErr } = await chefbyte()
-        .from('liquidtrack_devices')
-        .insert({
-          device_id: deviceId,
-          user_id: user.id,
-          device_name: newDeviceName.trim(),
-          product_id: newDeviceProductId || null,
-          import_key_hash: keyHash,
-        });
-      if (insertErr) throw insertErr;
-
-      return { device_id: deviceId, raw_key: rawKey };
-    },
-    onError: (err: any) => {
-      setError(err.message ?? String(err));
-    },
-    onSuccess: (result) => {
-      setGeneratedDevice(result);
-      setNewDeviceName('');
-      setNewDeviceProductId('');
-      setShowAddDevice(false);
-      queryClient.invalidateQueries({ queryKey: queryKeys.devices(user!.id) });
-    },
-  });
-
-  const revokeDeviceMutation = useMutation({
-    mutationFn: async (deviceId: string) => {
-      const { error: revokeErr } = await chefbyte()
-        .from('liquidtrack_devices')
-        .update({ is_active: false })
-        .eq('device_id', deviceId);
-      if (revokeErr) throw revokeErr;
-    },
-    onError: (err: any) => {
-      setError(err.message ?? String(err));
-    },
-    onSuccess: () => {
-      setRevokeTarget(null);
-      queryClient.invalidateQueries({ queryKey: queryKeys.devices(user!.id) });
-    },
-  });
-
-  const loadDeviceEvents = useCallback(
-    async (deviceId: string) => {
-      if (!user) return;
-      if (expandedDeviceId === deviceId) {
-        setExpandedDeviceId(null);
-        setDeviceEvents([]);
-        return;
-      }
-      const { data } = await chefbyte()
-        .from('liquidtrack_events')
-        .select('*')
-        .eq('device_id', deviceId)
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-        .limit(50);
-      setDeviceEvents((data ?? []) as LiquidTrackEvent[]);
-      setExpandedDeviceId(deviceId);
-    },
-    [user, expandedDeviceId],
-  );
-
-  /* ---------------------------------------------------------------- */
   /*  Location mutations                                               */
   /* ---------------------------------------------------------------- */
 
@@ -431,11 +283,6 @@ export function SettingsPage() {
   const cancelEdit = () => {
     setEditingId(null);
     setEditForm({});
-  };
-
-  const formatDate = (iso: string) => {
-    const d = new Date(iso);
-    return d.toLocaleString();
   };
 
   /* ---------------------------------------------------------------- */
@@ -802,250 +649,6 @@ export function SettingsPage() {
               <p className="m-0 mt-1 text-sm text-text-secondary">Track and update Walmart prices for your products</p>
             </div>
             <WalmartTab />
-          </div>
-        )}
-
-        {/* ========================================================== */}
-        {/*  LIQUIDTRACK TAB                                             */}
-        {/* ========================================================== */}
-        {activeTab === 'liquidtrack' && (
-          <div data-testid="liquidtrack-tab" className="p-5">
-            {/* Section Header */}
-            <div className="mb-4 pb-3 border-b border-border">
-              <h2 className="m-0 text-lg font-bold text-text">LiquidTrack Devices</h2>
-              <p className="m-0 mt-1 text-sm text-text-secondary">Manage IoT scale devices and view event history</p>
-            </div>
-
-            {/* Add Device */}
-            <div data-testid="add-device-section" className={cardCls}>
-              <div className={`flex justify-between items-center ${showAddDevice ? 'mb-4' : ''}`}>
-                <h3 className="m-0 text-base font-bold text-text">Add Device</h3>
-                <button
-                  className={`text-white border-none rounded-md cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 ${
-                    showAddDevice ? 'bg-text-secondary' : 'bg-emerald-600 hover:bg-emerald-700'
-                  }`}
-                  onClick={() => setShowAddDevice(!showAddDevice)}
-                  data-testid="toggle-add-device"
-                >
-                  {showAddDevice ? 'Cancel' : '+ New'}
-                </button>
-              </div>
-              {showAddDevice && (
-                <div data-testid="add-device-form" className="flex flex-col gap-3">
-                  <div>
-                    <label className={labelCls}>Device Name</label>
-                    <input
-                      value={newDeviceName}
-                      onChange={(e) => setNewDeviceName(e.target.value)}
-                      data-testid="device-name-input"
-                      className={inputCls}
-                      placeholder="e.g. Kitchen Scale"
-                    />
-                  </div>
-                  <div>
-                    <label className={labelCls}>Product</label>
-                    <select
-                      value={newDeviceProductId}
-                      onChange={(e) => setNewDeviceProductId(e.target.value)}
-                      data-testid="device-product-select"
-                      className={inputCls}
-                    >
-                      <option value="">Select product (optional)</option>
-                      {products.map((p) => (
-                        <option key={p.product_id} value={p.product_id}>
-                          {p.name}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <button
-                    className="bg-emerald-600 text-white border-none w-full py-3 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                    onClick={() => generateDeviceMutation.mutate()}
-                    disabled={!newDeviceName.trim()}
-                    data-testid="generate-device-btn"
-                  >
-                    Generate Device
-                  </button>
-                </div>
-              )}
-            </div>
-
-            {/* Generated device info */}
-            {generatedDevice && (
-              <div
-                data-testid="generated-device-info"
-                className="border-2 border-success rounded-lg p-3 mb-2 bg-success-subtle"
-              >
-                <h3 className="m-0 mb-3 text-base font-bold text-success-text">Device Created!</h3>
-                <div className="flex items-center gap-2 mb-2">
-                  <strong>Device ID:</strong>
-                  <code className="bg-border px-1.5 py-0.5 rounded text-[13px]">{generatedDevice.device_id}</code>
-                  <button
-                    onClick={() => copyToClipboard(generatedDevice.device_id, 'device-id')}
-                    data-testid="copy-device-id-btn"
-                    className="inline-flex items-center gap-1 px-2 py-1 bg-surface border border-border-strong rounded text-xs cursor-pointer hover:bg-surface-hover transition-colors"
-                  >
-                    {copiedKey === 'device-id' ? (
-                      <>
-                        <Check className="w-3 h-3 text-success-text" />{' '}
-                        <span className="text-success-text">Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3 h-3" /> Copy
-                      </>
-                    )}
-                  </button>
-                </div>
-                <div className="flex items-center gap-2 mb-2">
-                  <strong>Import Key:</strong>
-                  <code className="bg-border px-1.5 py-0.5 rounded text-[13px] break-all">
-                    {generatedDevice.raw_key}
-                  </code>
-                  <button
-                    onClick={() => copyToClipboard(generatedDevice.raw_key, 'import-key')}
-                    data-testid="copy-import-key-btn"
-                    className="inline-flex items-center gap-1 px-2 py-1 bg-surface border border-border-strong rounded text-xs cursor-pointer hover:bg-surface-hover transition-colors shrink-0"
-                  >
-                    {copiedKey === 'import-key' ? (
-                      <>
-                        <Check className="w-3 h-3 text-success-text" />{' '}
-                        <span className="text-success-text">Copied!</span>
-                      </>
-                    ) : (
-                      <>
-                        <Copy className="w-3 h-3" /> Copy
-                      </>
-                    )}
-                  </button>
-                </div>
-                <p className="text-danger-text m-0 mb-3 text-sm font-semibold">
-                  Save this key now -- you will not be able to see it again!
-                </p>
-                <button
-                  className="bg-text-secondary text-white border-none rounded-md cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:bg-text-tertiary"
-                  onClick={() => setGeneratedDevice(null)}
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
-
-            {/* Device list */}
-            {devices.length > 0 && (
-              <div className="mb-3 mt-4 pb-2 border-b border-border-light">
-                <span className="text-sm font-semibold text-text-secondary">
-                  {devices.length} device{devices.length !== 1 ? 's' : ''}
-                </span>
-              </div>
-            )}
-            <div data-testid="device-list">
-              {devices.map((d) => (
-                <div key={d.device_id} data-testid={`device-${d.device_id}`} className={cardCls}>
-                  <h4 className="m-0 mb-2 text-base font-semibold">{d.device_name}</h4>
-                  <div className="grid grid-cols-3 gap-1 text-[0.9em] text-text-secondary">
-                    <span>Product: {d.products?.name ?? 'None'}</span>
-                    <span>
-                      Status:{' '}
-                      <span className={`font-semibold ${d.is_active ? 'text-success-text' : 'text-danger-text'}`}>
-                        {d.is_active ? 'Active' : 'Revoked'}
-                      </span>
-                    </span>
-                    <span>Created: {formatDate(d.created_at)}</span>
-                  </div>
-                  <div className="flex gap-2 mt-3">
-                    {d.is_active && (
-                      <button
-                        onClick={() => setRevokeTarget(d.device_id)}
-                        data-testid={`revoke-device-${d.device_id}`}
-                        className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-2 py-1 hover:text-red-700"
-                      >
-                        Revoke
-                      </button>
-                    )}
-                    <button
-                      onClick={() => loadDeviceEvents(d.device_id)}
-                      data-testid={`toggle-events-${d.device_id}`}
-                      className="bg-transparent border-none text-chef-accent cursor-pointer font-semibold text-[13px] px-2 py-1 hover:text-emerald-700"
-                    >
-                      {expandedDeviceId === d.device_id ? 'Hide Events' : 'Show Events'}
-                    </button>
-                  </div>
-
-                  {/* Event log for expanded device */}
-                  {expandedDeviceId === d.device_id && (
-                    <div data-testid={`events-${d.device_id}`} className="mt-3">
-                      {deviceEvents.length === 0 ? (
-                        <p className="text-text-tertiary italic">No events recorded.</p>
-                      ) : (
-                        <div className="overflow-x-auto rounded-lg border border-border">
-                          <table className="w-full text-[0.85em] border-collapse">
-                            <thead>
-                              <tr className="bg-surface-sunken border-b-2 border-border">
-                                <th className="text-left p-2">Time</th>
-                                <th className="text-right p-2">Before</th>
-                                <th className="text-right p-2">After</th>
-                                <th className="text-right p-2">Consumed</th>
-                                <th className="text-right p-2">Macros</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {deviceEvents.map((ev) => (
-                                <tr key={ev.event_id} className="border-b border-border-light">
-                                  <td className="px-2 py-1.5">{formatDate(ev.created_at)}</td>
-                                  <td className="text-right px-2 py-1.5">{Number(ev.weight_before).toFixed(1)}</td>
-                                  <td className="text-right px-2 py-1.5">{Number(ev.weight_after).toFixed(1)}</td>
-                                  <td className="text-right px-2 py-1.5">{Number(ev.consumption).toFixed(1)}</td>
-                                  <td className="text-right px-2 py-1.5">
-                                    {ev.calories != null
-                                      ? `${Number(ev.calories).toFixed(0)}cal ${Number(ev.protein).toFixed(0)}p ${Number(ev.carbs).toFixed(0)}c ${Number(ev.fat).toFixed(0)}f`
-                                      : '-'}
-                                  </td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Revoke confirmation dialog */}
-            {revokeTarget !== null && (
-              <div
-                className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000]"
-                onClick={() => setRevokeTarget(null)}
-              >
-                <div
-                  className="bg-surface rounded-xl shadow-xl p-5 max-w-sm w-full mx-4"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  <h3 className="m-0 mb-3 text-lg font-bold">Revoke Device</h3>
-                  <p className="text-text-secondary m-0 mb-5">
-                    Are you sure you want to revoke this device? It will stop working immediately.
-                  </p>
-                  <div className="flex gap-2 justify-end">
-                    <button
-                      className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
-                      onClick={() => setRevokeTarget(null)}
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      className="bg-red-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-red-700"
-                      onClick={() => {
-                        if (revokeTarget) revokeDeviceMutation.mutate(revokeTarget);
-                      }}
-                    >
-                      Revoke
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 

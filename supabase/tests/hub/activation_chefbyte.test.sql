@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(26);
+SELECT plan(24);
 
 -- Setup: create user
 SELECT tests.create_supabase_user('cf_activator');
@@ -127,18 +127,6 @@ VALUES (
 INSERT INTO chefbyte.user_config (user_id, key, value)
 VALUES (tests.get_supabase_uid('cf_activator'), 'goal_calories', '2000');
 
--- Add a liquidtrack_device + event
-INSERT INTO chefbyte.liquidtrack_devices (user_id, device_name, import_key_hash)
-VALUES (tests.get_supabase_uid('cf_activator'), 'Water Bottle', 'hash_test_123');
-
-INSERT INTO chefbyte.liquidtrack_events (user_id, device_id, weight_before, weight_after, consumption, logical_date)
-VALUES (
-  tests.get_supabase_uid('cf_activator'),
-  (SELECT device_id FROM chefbyte.liquidtrack_devices
-    WHERE user_id = tests.get_supabase_uid('cf_activator') AND device_name = 'Water Bottle'),
-  500, 400, 100, '2026-03-01'
-);
-
 ------------------------------------------------------------
 -- Deactivation
 ------------------------------------------------------------
@@ -209,16 +197,6 @@ SELECT is(
   (SELECT count(*)::integer FROM chefbyte.user_config
     WHERE user_id = tests.get_supabase_uid('cf_activator')),
   0, 'user_config deleted after deactivation'
-);
-SELECT is(
-  (SELECT count(*)::integer FROM chefbyte.liquidtrack_devices
-    WHERE user_id = tests.get_supabase_uid('cf_activator')),
-  0, 'liquidtrack_devices deleted after deactivation'
-);
-SELECT is(
-  (SELECT count(*)::integer FROM chefbyte.liquidtrack_events
-    WHERE user_id = tests.get_supabase_uid('cf_activator')),
-  0, 'liquidtrack_events deleted after deactivation'
 );
 
 ------------------------------------------------------------

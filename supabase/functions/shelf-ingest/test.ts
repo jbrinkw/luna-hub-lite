@@ -5,7 +5,7 @@
 // (apps/web/vitest.integration.config.ts) only discovers tests under
 // `src/__tests__/integration/**` and relies on shared setup
 // (adminClient, createTestUser, etc) colocated with the other edge-function
-// tests (liquidtrack.test.ts, analyze-product.test.ts).
+// tests (analyze-product.test.ts, walmart.test.ts).
 //
 // Run them from the repo root with:
 //   pnpm --filter @luna-hub/web test:integration -- shelf-ingest

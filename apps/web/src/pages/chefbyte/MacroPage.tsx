@@ -98,7 +98,7 @@ export function MacroPage() {
     queryKey: [...queryKeys.dailyMacros(userId!, currentDate), 'full'],
     queryFn: async (): Promise<MacroPageData> => {
       // Fire all independent queries in parallel
-      const [macroRes, foodLogsRes, tempItemsRes, ltEventsRes, plannedRes] = await Promise.all([
+      const [macroRes, foodLogsRes, tempItemsRes, plannedRes] = await Promise.all([
         (chefbyte() as any).rpc('get_daily_macros', { p_logical_date: currentDate }),
         chefbyte()
           .from('food_logs')
@@ -109,12 +109,6 @@ export function MacroPage() {
         chefbyte()
           .from('temp_items')
           .select('temp_id, name, calories, protein, carbs, fat')
-          .eq('user_id', userId!)
-          .eq('logical_date', currentDate)
-          .order('created_at'),
-        chefbyte()
-          .from('liquidtrack_events')
-          .select('event_id, calories, protein, carbs, fat')
           .eq('user_id', userId!)
           .eq('logical_date', currentDate)
           .order('created_at'),
@@ -175,18 +169,6 @@ export function MacroPage() {
           protein: Number(ti.protein) || 0,
           carbs: Number(ti.carbs) || 0,
           fat: Number(ti.fat) || 0,
-        });
-      }
-
-      for (const ev of (ltEventsRes.data ?? []) as any[]) {
-        items.push({
-          id: ev.event_id,
-          source: 'LiquidTrack',
-          name: 'Liquid intake',
-          calories: Number(ev.calories) || 0,
-          protein: Number(ev.protein) || 0,
-          carbs: Number(ev.carbs) || 0,
-          fat: Number(ev.fat) || 0,
         });
       }
 
@@ -275,8 +257,6 @@ export function MacroPage() {
 
   const deleteMutation = useMutation({
     mutationFn: async (item: ConsumedItem) => {
-      if (item.source === 'LiquidTrack') return;
-
       let error;
       if (item.source === 'Meal Plan') {
         ({ error } = await chefbyte().from('food_logs').delete().eq('log_id', item.id));
@@ -544,9 +524,7 @@ export function MacroPage() {
               const badgeColor =
                 item.source === 'Meal Plan'
                   ? 'bg-success-subtle text-chef-accent'
-                  : item.source === 'Temp Item'
-                    ? 'bg-violet-100 text-violet-700'
-                    : 'bg-sky-100 text-sky-700';
+                  : 'bg-violet-100 text-violet-700';
               return (
                 <div
                   key={item.id}
@@ -570,16 +548,14 @@ export function MacroPage() {
                         <span>{item.fat}g F</span>
                       </div>
                     </div>
-                    {item.source !== 'LiquidTrack' && (
-                      <button
-                        className="text-danger-text hover:text-danger-text font-bold text-base bg-transparent border-none cursor-pointer shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center"
-                        data-testid={`delete-consumed-${item.id}`}
-                        onClick={() => deleteMutation.mutate(item)}
-                        aria-label={`Remove ${item.name}`}
-                      >
-                        x
-                      </button>
-                    )}
+                    <button
+                      className="text-danger-text hover:text-danger-text font-bold text-base bg-transparent border-none cursor-pointer shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center"
+                      data-testid={`delete-consumed-${item.id}`}
+                      onClick={() => deleteMutation.mutate(item)}
+                      aria-label={`Remove ${item.name}`}
+                    >
+                      x
+                    </button>
                   </div>
                 </div>
               );

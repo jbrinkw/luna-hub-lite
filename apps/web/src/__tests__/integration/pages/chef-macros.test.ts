@@ -5,7 +5,6 @@ import {
   seedAllChefByte,
   assertQuerySucceeds,
   todayDate,
-  adminClient,
   type PageTestContext,
   type ChefByteSeeds,
 } from './helpers';
@@ -13,7 +12,6 @@ import {
 describe('ChefByte MacroPage queries', () => {
   let ctx: PageTestContext;
   let seeds: ChefByteSeeds;
-  let deviceId: string;
 
   beforeAll(async () => {
     ctx = await createPageTestContext('chef-macros');
@@ -43,35 +41,6 @@ describe('ChefByte MacroPage queries', () => {
       protein: 1,
       carbs: 5,
       fat: 2,
-    });
-
-    // Seed a liquidtrack_device + event for today
-    // Use admin client to insert device since import_key_hash may need bypass
-    const { data: deviceData, error: devErr } = await (adminClient as any)
-      .schema('chefbyte')
-      .from('liquidtrack_devices')
-      .insert({
-        user_id: ctx.userId,
-        device_name: 'Test Scale',
-        import_key_hash: `test-hash-${Date.now()}`,
-        is_active: true,
-      })
-      .select('device_id')
-      .single();
-    if (devErr) throw new Error(`Failed to seed liquidtrack device: ${devErr.message}`);
-    deviceId = deviceData.device_id;
-
-    await (adminClient as any).schema('chefbyte').from('liquidtrack_events').insert({
-      user_id: ctx.userId,
-      device_id: deviceId,
-      weight_before: 500,
-      weight_after: 350,
-      consumption: 150,
-      calories: 30,
-      protein: 0,
-      carbs: 8,
-      fat: 0,
-      logical_date: today,
     });
 
     // Seed a meal plan entry (non-prep, not completed) for planned section
@@ -113,13 +82,13 @@ describe('ChefByte MacroPage queries', () => {
       expect(typeof Number(data[key].remaining)).toBe('number');
     }
 
-    // Consumed should include food_log (165cal) + temp_item (50cal) + lt_event (30cal) = 245
-    expect(Number(data.calories.consumed)).toBeCloseTo(245, 0);
-    // Protein: food_log (31) + temp_item (1) + lt_event (0) = 32
+    // Consumed should include food_log (165cal) + temp_item (50cal) = 215
+    expect(Number(data.calories.consumed)).toBeCloseTo(215, 0);
+    // Protein: food_log (31) + temp_item (1) = 32
     expect(Number(data.protein.consumed)).toBeCloseTo(32, 0);
-    // Carbs: food_log (0) + temp_item (5) + lt_event (8) = 13
-    expect(Number(data.carbs.consumed)).toBeCloseTo(13, 0);
-    // Fat: food_log (3.6) + temp_item (2) + lt_event (0) = 5.6
+    // Carbs: food_log (0) + temp_item (5) = 5
+    expect(Number(data.carbs.consumed)).toBeCloseTo(5, 0);
+    // Fat: food_log (3.6) + temp_item (2) = 5.6
     expect(Number(data.fat.consumed)).toBeCloseTo(5.6, 1);
 
     // Goals from seedMacroGoals
@@ -129,7 +98,7 @@ describe('ChefByte MacroPage queries', () => {
     expect(Number(data.fat.goal)).toBe(73);
 
     // Remaining = goal - consumed
-    expect(Number(data.calories.remaining)).toBeCloseTo(2200 - 245, 0);
+    expect(Number(data.calories.remaining)).toBeCloseTo(2200 - 215, 0);
     expect(Number(data.protein.remaining)).toBeCloseTo(180 - 32, 0);
   });
 
@@ -196,37 +165,6 @@ describe('ChefByte MacroPage queries', () => {
     expect(Number(item.protein)).toBe(1);
     expect(Number(item.carbs)).toBe(5);
     expect(Number(item.fat)).toBe(2);
-  });
-
-  // -------------------------------------------------------------------
-  // MacroPage: liquidtrack_events query
-  // Source: MacroPage.tsx line 174-179
-  //   .from('liquidtrack_events')
-  //     .select('event_id, calories, protein, carbs, fat')
-  //     .eq('user_id', userId).eq('logical_date', currentDate)
-  //     .order('created_at')
-  // NOTE: uses created_at (NOT logged_at)
-  // -------------------------------------------------------------------
-  it('liquidtrack_events query with EXACT select columns from MacroPage', async () => {
-    const today = todayDate();
-    const result = await chefbyte(ctx.client)
-      .from('liquidtrack_events')
-      .select('event_id, calories, protein, carbs, fat')
-      .eq('user_id', ctx.userId)
-      .eq('logical_date', today)
-      .order('created_at');
-
-    const data = assertQuerySucceeds(result, 'liquidtrack_events');
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThanOrEqual(1);
-
-    const event = data[0];
-    expect(typeof event.event_id).toBe('string');
-    // Verify exact values from seed
-    expect(Number(event.calories)).toBe(30);
-    expect(Number(event.protein)).toBe(0);
-    expect(Number(event.carbs)).toBe(8);
-    expect(Number(event.fat)).toBe(0);
   });
 
   // -------------------------------------------------------------------

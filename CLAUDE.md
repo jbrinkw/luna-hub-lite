@@ -42,7 +42,7 @@ legacy/                # Old repos for reference (see below)
 
 - **Hub** (`/hub`): Auth (email/password via Supabase), profile (timezone, day_start_hour), app activation/deactivation, MCP key management, tool toggles, extension settings UI
 - **CoachByte** (`/coach`): Workout plans, sequential set completion, rest timer (DB state machine), weekly split planner, PR tracker (Epley 1RM), history with keyset pagination, exercise library
-- **ChefByte** (`/chef`): Barcode scanner (4 modes), lot-based inventory (grouped-by-product default with nearest expiration), recipes (dynamic macro calc, integrated filters, single create/edit page), meal plan (regular + meal prep with `[MEAL]` lots), macro tracking, shopping list, Walmart price manager, LiquidTrack IoT
+- **ChefByte** (`/chef`): Barcode scanner (4 modes), lot-based inventory (grouped-by-product default with nearest expiration), recipes (dynamic macro calc, integrated filters, single create/edit page), meal plan (regular + meal prep with `[MEAL]` lots), macro tracking, shopping list, Walmart price manager, LiveTrack IoT scales (live_shelf + live_scale)
 
 ## Key Architecture Decisions
 
@@ -70,14 +70,15 @@ The `legacy/` folder contains the old repos. Use these as reference — copy wha
 | ----------- | --------------------------------------------------------------------------------------------------------------------------------- |
 | `hub`       | User profiles (day_start_hour, timezone), app activation, MCP API keys (SHA-256 hashed), tool toggles, extension settings (Vault) |
 | `coachbyte` | Exercises, daily logs, planned/completed sets, splits, PRs, timers                                                                |
-| `chefbyte`  | Products, stock, recipes, meal plans, shopping lists, macros, LiquidTrack device IDs/import keys                                  |
+| `chefbyte`  | Products, stock, recipes, meal plans, shopping lists, macros, LiveTrack scale devices + pairings                                  |
 | `private`   | All SECURITY DEFINER functions, not exposed via PostgREST API                                                                     |
 
 ## Edge Functions (Supabase, Deno/TypeScript)
 
 - `analyze-product` — OpenFoodFacts lookup + Claude Haiku 4.5 normalization + 4-4-9 calorie validation. 100/user/day quota. Platform-paid LLM.
 - `walmart-scrape` — Third-party scraper API for Walmart product data. Per-user rate limiting.
-- `liquidtrack` — IoT scale ingestion. No JWT (`verify_jwt = false`), runtime lookup by device ID (one-time import key validated during provisioning).
+- `shelf-ingest` — LiveTrack IoT scale ingestion (replaces retired `liquidtrack`). No JWT, x-api-key header hashed to `chefbyte.live_shelf_devices.import_key_hash`.
+- `livetrack-session` — LiveTrack pairing session lifecycle (browser JWT on /create, Pi x-api-key on /pi-update).
 
 ## Documentation Rule
 

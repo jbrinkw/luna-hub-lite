@@ -368,10 +368,6 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
-# LiquidTrack uses API key auth (x-api-key header), not Supabase JWT
-[functions.liquidtrack]
-verify_jwt = false
-
 # analyze-product verifies JWT internally via supabase.auth.getUser().
 # Relay JWT check disabled to work around Supabase CLI 2.75 ES256 bug
 # (edge runtime passes HS256 secret as Uint8Array to ES256 verifier).

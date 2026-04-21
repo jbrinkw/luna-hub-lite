@@ -53,6 +53,5 @@ jobs:
       - run: |
           supabase functions deploy analyze-product --no-verify-jwt
           supabase functions deploy walmart-scrape --no-verify-jwt
-          supabase functions deploy liquidtrack --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}

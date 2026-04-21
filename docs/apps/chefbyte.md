@@ -81,7 +81,7 @@ AI-powered nutrition system: meal planning, inventory management, macro tracking
 
 ### Macro Tracking
 
-- Centralized function: `private.get_daily_macros(p_user_id, p_logical_date)` aggregates food_logs + temp_items + liquidtrack_events. Single source of truth. (Consumed meal_plan_items are captured via food_logs when `mark_meal_done` executes.)
+- Centralized function: `private.get_daily_macros(p_user_id, p_logical_date)` aggregates food_logs + temp_items. Single source of truth. (Consumed meal_plan_items are captured via food_logs when `mark_meal_done` executes; LiveTrack scale events write through `shelf-ingest` → `food_logs` and are included automatically.)
 - Day summary with progress bars (Calories, Protein, Carbs, Fats)
 - Consumed items list: regular meal plan completions, Consume+Macros events (including `[MEAL]` lot consumption), and temp items. Includes a **TOTAL row** showing aggregate macros across all consumed items.
 - **Delete consumed items:** Individual food logs and temp items can be deleted from the consumed items table.
@@ -113,17 +113,23 @@ AI-powered nutrition system: meal planning, inventory management, macro tracking
 - Manual price refresh (no parallel workers, no auto-scheduling)
 - Per-user rate limiting with request queuing
 
-### LiquidTrack (IoT Scale Integration)
+### LiveTrack (IoT Scale Integration)
 
-- User adds a scale device in the ChefByte UI: sets name, links a product, configures macros
-- UI generates a **device ID** and one-time import key associated with that configuration
-- Device ID is programmed into the ESP8266 firmware
-- Import/provision flow validates the one-time import key (stored hashed) and activates the device record.
-- On each weight event, ESP8266 sends: device ID + weight data to the Edge Function endpoint.
-- Edge Function resolves device by ID, then resolves owning `user_id` and linked product, calculates macros from weight delta, and inserts the event.
-- JWT verification disabled on the IoT endpoint (`verify_jwt = false` in Edge Function config). Runtime auth is the device ID lookup (MVP simplicity).
-- Events log: weight before/after, consumption amount, auto-calculated macros
-- Device management in ChefByte settings: generate ID/import key, name, revoke
+LiquidTrack (the original single-device ESP8266 edge function) was retired
+on 2026-04-21 after zero prod rows in `chefbyte.liquidtrack_devices`. It was
+replaced by the LiveTrack system:
+
+- **`chefbyte.live_shelf_devices`** — Raspberry Pi rigs (kind=`live_shelf` or
+  `catch_all`) plus single-item scales (kind=`live_scale`). Provisioned via
+  one-time import key (`import_key_hash`), device-ID-based runtime lookup.
+- **`chefbyte.scale_pairings`** — binds a physical scale to a ChefByte product,
+  enabling per-shelf or per-scale deduction.
+- **Edge function `shelf-ingest`** — accepts weight-delta events via `x-api-key`
+  header (SHA-256 → `live_shelf_devices.import_key_hash`), writes `food_logs`
+  through `apply_shelf_event`.
+- **Edge function `livetrack-session`** — pairing session lifecycle between
+  the browser (JWT on `/create`) and the Pi (x-api-key on `/pi-update`).
+- Managed in ChefByte Settings → Scales tab.
 
 ## ChefByte UX
 
@@ -134,13 +140,13 @@ Desktop-first with responsive design. Matching the legacy ChefByte layout.
 **Pages:**
 
 - **Scanner** (`/chef/scanner`): Two-column layout. Left panel (narrower): barcode text input (auto-focuses after each scan) + filter buttons (All / New) + scrollable queue of recent transactions. Right panel (wider): mode selector buttons (Purchase / Consume+Macros / Consume-NoMacros / Add to Shopping) + active item display + quantity screen + number keypad (calculator layout with backspace; unit toggle available in consume modes with conversion via servings_per_container). Hardware barcode scanner detection via `useScannerDetection` hook for USB/Bluetooth HID scanners. Unknown barcodes trigger the `analyze-product` edge function for auto-lookup and nutrition extraction. In Purchase mode: nutrition editor row appears (servings/container, calories, carbs, fats, protein inputs with auto-scaling). Queue items are color-coded: red border for newly created products, green for success, orange for pending. Each queue item shows product name, transaction details, stock levels, and undo button (reverses DB operations for that scan). Product name is inline-editable (saves to DB on blur).
-- **Home (Dashboard)** (default landing page at `/chef/home`): **SkeletonScreen loading** state while data fetches. Macro summary for today showing consumed / planned / goal for each macro (calories, protein, carbs, fats). **Today's Meals section** showing planned meals for the current logical date. Status row with badge counts: Missing Walmart Links, Missing Prices, Placeholder Items, Below Min Stock, Shopping Cart Value. Action buttons: Import Shopping List (imports checked purchased rows), **Meal Plan → Cart** sync button (syncs next 7 days of meal plan ingredients to shopping list), Taste Profile, Target Macros. Today's meal prep items list. Modals for: Target Macros editor (protein/carbs/fats inputs, calories auto-calculated), Taste Profile (freeform textarea), Liquid Log (deferred — currently only available via LiquidTrack IoT devices).
+- **Home (Dashboard)** (default landing page at `/chef/home`): **SkeletonScreen loading** state while data fetches. Macro summary for today showing consumed / planned / goal for each macro (calories, protein, carbs, fats). **Today's Meals section** showing planned meals for the current logical date. Status row with badge counts: Missing Walmart Links, Missing Prices, Placeholder Items, Below Min Stock, Shopping Cart Value. Action buttons: Import Shopping List (imports checked purchased rows), **Meal Plan → Cart** sync button (syncs next 7 days of meal plan ingredients to shopping list), Taste Profile, Target Macros. Today's meal prep items list. Modals for: Target Macros editor (protein/carbs/fats inputs, calories auto-calculated), Taste Profile (freeform textarea).
 - **Inventory**: **Search/filter input** at the top with `ilike` pattern escaping. Desktop defaults to grouped-by-product table with columns: Product (name + barcode + servings/container), Stock Total (with **servings equivalent**), Nearest Expiration, Lots, Min, Actions (+1/-1 container, +S/-S serving, Consume All with confirmation). **Stock color coding:** red (zero/critical), orange (below minimum), green (at or above minimum). Consume actions pass `p_log_macros: true` to log macros. Stock add includes **expiry date input** with date-aware lot merging. Toggle switches to lot view showing per-lot quantity, location, and expiration. **Realtime subscriptions** to `stock_lots` and `products` for live updates. Responsive layout uses the same expandable-row structure for all screen sizes.
 - **Shopping List**: Add item form (name + amount + add button) with additive upsert (increments qty if product already on list) and auto-add deduplication. Two sections: "To Buy" (unchecked items with remove button) and "Purchased" (checked items, struck-through, with "Add Checked to Inventory" bulk action). **Clear All button** removes all items. "Import Shopping List" in Dashboard triggers this same checked-item import action. Header button: Auto-Add Below Min Stock. **Realtime subscription** to `shopping_list` for live updates.
 - **Meal Plan**: 7-day week grid. Each day card shows meal entries with recipe/product name, servings, **meal_type labels** (breakfast/lunch/dinner/snack), and **macros per entry** (calories, protein, carbs, fats). Navigation: Previous Week / Today / Next Week. Add Meal modal with recipe/product search. Day detail table showing entry, mode (regular/prep), meal type, status, **macros total row**, and actions. **Meal prep toggle on existing entries** allows switching between regular and prep modes. `[PREP]` opens the execute-confirmation flow and runs meal-prep execution.
 - **Recipes**: Card grid with recipe name, **description**, **servings**, times, per-serving macros, and **stock status badges** (`CAN MAKE` green / `PARTIAL` orange / `NO STOCK` red). Integrated filters (Can Be Made, carbs/protein density percentiles, active/total time sliders) and search live on this page. Cards open detail/edit mode from the same page.
 - **Recipe Create/Edit**: Single page supports both create and edit mode. Form includes name, description, base servings, active time, total time, instructions. Ingredient section: product search dropdown, amount, unit (Serving/Container), note, add button. Ingredient cards below with **inline editing** (quantity, unit, note fields editable in-place). **Zero-ingredient validation** prevents saving recipes without at least one ingredient. Live macro preview (per-serving and total) updates as ingredients are added or modified.
-- **Settings**: Tab interface with four sub-tabs: **Products** (product CRUD), **Walmart** (missing Walmart links with custom URL input and "Not on Walmart" marking; missing prices with manual entry; Refresh All Prices via `walmart-scrape` edge function), **LiquidTrack** (device management and event logs), and **Locations** (storage location CRUD — add new locations, delete locations with protection if stock exists in that location). Supports `?tab=` query param for deep linking (e.g., `/chef/settings?tab=walmart`).
+- **Settings**: Tab interface with four sub-tabs: **Products** (product CRUD), **Walmart** (missing Walmart links with custom URL input and "Not on Walmart" marking; missing prices with manual entry; Refresh All Prices via `walmart-scrape` edge function), **Scales** (LiveTrack device management — live_shelf / catch_all / live_scale — with pairings, pending review count, and heartbeat metrics), and **Locations** (storage location CRUD — add new locations, delete locations with protection if stock exists in that location). Supports `?tab=` query param for deep linking (e.g., `/chef/settings?tab=walmart`).
 
 **Shared across layouts:**
 
@@ -187,10 +193,11 @@ Desktop-first with responsive design. Matching the legacy ChefByte layout.
 
 ## ChefByte Edge Functions
 
-All three Edge Functions are implemented as Supabase Edge Functions (Deno/TypeScript) in `supabase/functions/`.
+Edge Functions are implemented as Supabase Edge Functions (Deno/TypeScript) in `supabase/functions/`.
 
-| Function          | Purpose                                                                          | Auth Method                                                                                                                                                            | Env Vars                           |
-| ----------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
-| `walmart-scrape`  | SerpApi Walmart search — returns up to 6 results with price/URL/image            | Internal JWT validation (`verify_jwt = false` workaround for Supabase CLI ES256 bug; validates via `supabase.auth.getUser()` at runtime)                               | `SERPAPI_KEY`                      |
-| `liquidtrack`     | Ingest ESP8266 scale events with server-side macro calculation                   | `verify_jwt = false`, API key auth (`x-api-key` header, SHA-256 hashed, lookup in `liquidtrack_devices.import_key_hash`)                                               | `SUPABASE_SERVICE_ROLE_KEY` (auto) |
-| `analyze-product` | OpenFoodFacts lookup + Claude Haiku 4.5 normalization + 4-4-9 calorie validation | Internal JWT validation (`verify_jwt = false` workaround; validates via `supabase.auth.getUser()` at runtime), per-user daily quota (100/day) tracked in `user_config` | `ANTHROPIC_API_KEY`                |
+| Function            | Purpose                                                                          | Auth Method                                                                                                                                                            | Env Vars                           |
+| ------------------- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------- |
+| `walmart-scrape`    | SerpApi Walmart search — returns up to 6 results with price/URL/image            | Internal JWT validation (`verify_jwt = false` workaround for Supabase CLI ES256 bug; validates via `supabase.auth.getUser()` at runtime)                               | `SERPAPI_KEY`                      |
+| `shelf-ingest`      | Ingest LiveTrack scale weight-delta events with server-side macro calculation    | `verify_jwt = false`, API key auth (`x-api-key` header, SHA-256 hashed, lookup in `live_shelf_devices.import_key_hash`)                                                | `SUPABASE_SERVICE_ROLE_KEY` (auto) |
+| `livetrack-session` | LiveTrack pairing session lifecycle (browser-initiated create; Pi-initiated update) | `/create` validates browser JWT via `supabase.auth.getUser()`; `/pi-update` uses `x-api-key` hashed against `live_shelf_devices.import_key_hash`                     | `SUPABASE_SERVICE_ROLE_KEY` (auto) |
+| `analyze-product`   | OpenFoodFacts lookup + Claude Haiku 4.5 normalization + 4-4-9 calorie validation | Internal JWT validation (`verify_jwt = false` workaround; validates via `supabase.auth.getUser()` at runtime), per-user daily quota (100/day) tracked in `user_config` | `ANTHROPIC_API_KEY`                |

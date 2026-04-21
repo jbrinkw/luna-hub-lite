@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(31);
+SELECT plan(27);
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -239,76 +239,6 @@ SELECT is(
   (SELECT ((chefbyte.get_daily_macros('2026-03-04'::date))->'calories'->>'consumed')::numeric),
   0::numeric,
   'different date returns calories consumed = 0 (date isolation)'
-);
-
--- ─────────────────────────────────────────────────────────────
--- Test 13: Insert liquidtrack device + event with known macros
--- Device with product, event with 100cal/8p/4f/12c
--- ─────────────────────────────────────────────────────────────
-
-INSERT INTO chefbyte.liquidtrack_devices (
-  device_id, user_id, device_name, product_id, import_key_hash
-) VALUES (
-  '70000000-0000-0000-0000-000000000001',
-  tests.get_supabase_uid('macro_tester'),
-  'Kitchen Scale',
-  '60000000-0000-0000-0000-000000000001',
-  'testhash123'
-);
-
-INSERT INTO chefbyte.liquidtrack_events (
-  user_id, device_id, weight_before, weight_after, consumption,
-  calories, carbs, protein, fat, logical_date
-) VALUES (
-  tests.get_supabase_uid('macro_tester'),
-  '70000000-0000-0000-0000-000000000001',
-  500, 400, 100,
-  100, 12, 8, 4,
-  '2026-03-03'
-);
-
--- ─────────────────────────────────────────────────────────────
--- Test 14: Daily macros now include liquidtrack event
--- Total calories: 250 (food+temp) + 100 (lt) = 350
--- ─────────────────────────────────────────────────────────────
-
-SELECT is(
-  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'calories'->>'consumed')::numeric),
-  350::numeric,
-  'calories consumed = 350 after adding liquidtrack event (250 + 100)'
-);
-
--- ─────────────────────────────────────────────────────────────
--- Test 15: Protein includes liquidtrack contribution
--- Total protein: 30 (food+temp) + 8 (lt) = 38
--- ─────────────────────────────────────────────────────────────
-
-SELECT is(
-  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'protein'->>'consumed')::numeric),
-  38::numeric,
-  'protein consumed = 38 after adding liquidtrack event (30 + 8)'
-);
-
--- ─────────────────────────────────────────────────────────────
--- Test 16: Fat includes liquidtrack contribution
--- Total fat: 7 (food+temp) + 4 (lt) = 11
--- ─────────────────────────────────────────────────────────────
-
-SELECT is(
-  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'fat'->>'consumed')::numeric),
-  11::numeric,
-  'fat consumed = 11 after adding liquidtrack event (7 + 4)'
-);
-
--- ─────────────────────────────────────────────────────────────
--- Test: Carbs includes liquidtrack contribution
--- Total carbs: 15 (food+temp) + 12 (lt) = 27
--- ─────────────────────────────────────────────────────────────
-
-SELECT is(
-  (SELECT ((chefbyte.get_daily_macros('2026-03-03'::date))->'carbs'->>'consumed')::numeric),
-  27::numeric,
-  'carbs consumed = 27 after adding liquidtrack event (15 + 12)'
 );
 
 -- ─────────────────────────────────────────────────────────────
