@@ -39,6 +39,15 @@ interface Product {
   tare_weight_g: number | null;
 }
 
+// LiquidTrack tab hidden from the UI (2026-04-21). 0 rows in
+// chefbyte.liquidtrack_devices per audit; liquidtrack_readings table
+// already dropped. Feature replaced by live_scale kind under Scales
+// tab + LiveTrack Import wizard. Back-end code + types left dormant
+// so follow-up full-purge PR can delete in one sweep.
+type Tab = 'products' | 'walmart' | 'liquidtrack' | 'scales' | 'locations';
+
+// Back-end types for the dormant code paths below. Kept so the file
+// typechecks while the full purge is pending.
 interface LiquidTrackDevice {
   device_id: string;
   user_id: string;
@@ -63,12 +72,9 @@ interface LiquidTrackEvent {
   is_refill: boolean;
 }
 
-type Tab = 'products' | 'walmart' | 'liquidtrack' | 'scales' | 'locations';
-
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'products', label: 'Products', icon: '\uD83D\uDCE6' },
   { id: 'walmart', label: 'Walmart', icon: '\uD83C\uDFEA' },
-  { id: 'liquidtrack', label: 'LiquidTrack', icon: '\uD83E\uDD64' },
   { id: 'scales', label: 'Scales', icon: '\u2696\uFE0F' },
   { id: 'locations', label: 'Locations', icon: '\uD83D\uDCCD' },
 ];
