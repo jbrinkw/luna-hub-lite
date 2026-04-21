@@ -256,3 +256,189 @@ def test_intake_save_rejects_image_path_outside_refs_root(tmp_path: Path):
     )
     body = r.get_json()
     assert "refs_root" in body.get("error", "").lower()
+
+
+# ---------------------------------------------------------------------------
+# Tare-capture API round-trip (CATCH_ALL_TARE_CAPTURE_PLAN.md §7 extra)
+#
+# Arm → status(armed) → synthetic catch-all event → status(unarmed) +
+# product row has new tare. Constructs a real in-memory DB + RepoWebAdapter
+# so the end-to-end routing from HTTP → adapter → storage_repo is exercised.
+# ---------------------------------------------------------------------------
+
+
+def _make_taretest_app(tmp_path: Path, *, catch_all_device_id: str = "scale-02"):
+    """Factory: a Flask app backed by a real SQLite DB + RepoWebAdapter,
+    the api blueprint, and a handler instance sharing the same conn.
+    Returns (app, adapter, handler, conn)."""
+    import threading
+    from server.adapters.web_repo import RepoWebAdapter
+    from server.config import AppConfig
+    from server.handlers.scale_events import ScaleHandler
+    from server.shelves import build_registry_from_config
+    from server.storage import init_db
+    from server.tests.test_tare_capture import _NullCandidateSource
+
+    conn = init_db(":memory:")
+    db_lock = threading.RLock()
+    adapter = RepoWebAdapter(
+        conn, db_lock=db_lock,
+        catch_all_device_id=catch_all_device_id,
+    )
+    cfg = AppConfig()
+    cfg.catch_all_enabled = True
+    registry = build_registry_from_config(cfg)
+    events_root = tmp_path / "events"
+    events_root.mkdir(exist_ok=True)
+    handler = ScaleHandler(
+        conn=conn,
+        db_lock=db_lock,
+        camera=None,
+        candidate_source=_NullCandidateSource(),
+        events_root=events_root,
+        delta_threshold_g=5.0,
+        lookback_seconds=2.0,
+        recently_out_window_seconds=86_400,
+        classifier_client=None,
+        catch_all_enabled=True,
+        shelf_registry_override=registry,
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    api_bp = make_api_bp(adapter)
+    app.register_blueprint(api_bp)
+    return app, adapter, handler, conn
+
+
+def test_tare_arm_status_event_roundtrip(tmp_path):
+    """Full roundtrip: arm via POST /api/product/<id>/tare/arm, confirm
+    /api/tare/status.armed=True, fire a synthetic catch-all event via
+    the handler (simulating the ESP8266), then confirm status armed=False
+    and the product's tare_weight_g reflects the captured reading."""
+    from server.storage import repo as storage_repo
+    from server.storage.models import ProductIn
+
+    app, adapter, handler, conn = _make_taretest_app(tmp_path)
+    client = app.test_client()
+
+    # Seed a certified product.
+    product = storage_repo.create_product(
+        conn,
+        ProductIn(
+            name="Roundtrip Jar",
+            barcode="rt-1",
+            unit_type="solid",
+            container_type="jar",
+            certified=1,
+        ),
+    )
+
+    # 1) Arm.
+    r = client.post(f"/api/product/{product.product_id}/tare/arm")
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["ok"] is True
+    assert body["product_id"] == product.product_id
+
+    # 2) Status shows armed=True.
+    r = client.get("/api/tare/status")
+    assert r.status_code == 200
+    status = r.get_json()
+    assert status["armed"] is True
+    assert status["product_id"] == product.product_id
+    assert status["product_name"] == "Roundtrip Jar"
+    # seconds_remaining positive and <= 60 (default TTL).
+    assert 0 < status["seconds_remaining"] <= 60
+
+    # 3) Fire a catch-all ADD event directly through the handler
+    # (simulates the real ESP8266 push). Same conn + db_lock as the
+    # adapter, so the row the interceptor consumes is visible to the
+    # HTTP status endpoint afterwards.
+    resp, http_status = handler.handle_scale_event({
+        "ts": "2026-04-18T09:00:00.000Z",
+        "device_id": "scale-02",
+        "event_seq": 1,
+        "delta_g": 175.0,
+        "before_weight_g": 0.0,
+        "after_weight_g": 175.0,
+    })
+    assert http_status == 200
+    assert resp.get("tare_captured") is True
+
+    # 4) Status now unarmed.
+    r = client.get("/api/tare/status")
+    assert r.status_code == 200
+    status = r.get_json()
+    assert status["armed"] is False
+    assert status["product_id"] is None
+
+    # 5) Product row has the captured tare.
+    got = storage_repo.get_product(conn, product.product_id)
+    assert got.tare_weight_g == pytest.approx(175.0)
+
+
+def test_tare_arm_rejects_noncertified_product(tmp_path):
+    """POST to /tare/arm for a non-certified product returns 400
+    (UI-side the button isn't rendered for non-certified rows, so this
+    protects against stale-page submits)."""
+    from server.storage import repo as storage_repo
+    from server.storage.models import ProductIn
+
+    app, adapter, handler, conn = _make_taretest_app(tmp_path)
+    client = app.test_client()
+
+    product = storage_repo.create_product(
+        conn,
+        ProductIn(
+            name="Not Certified",
+            barcode="nc-1",
+            unit_type="solid",
+            container_type="jar",
+            certified=0,
+        ),
+    )
+
+    r = client.post(f"/api/product/{product.product_id}/tare/arm")
+    assert r.status_code == 400, r.get_data(as_text=True)
+    body = r.get_json()
+    assert "certified" in body.get("error", "").lower()
+
+    # No arm row created.
+    assert storage_repo.get_active_tare_arm(conn) is None
+
+
+def test_tare_cancel_clears_active_arm(tmp_path):
+    """POST /api/tare/cancel drops the active arm row. Second call is
+    idempotent (returns deleted=0)."""
+    from server.storage import repo as storage_repo
+    from server.storage.models import ProductIn
+
+    app, adapter, handler, conn = _make_taretest_app(tmp_path)
+    client = app.test_client()
+
+    product = storage_repo.create_product(
+        conn,
+        ProductIn(
+            name="Cancel Me",
+            barcode="cm-1",
+            unit_type="solid",
+            container_type="jar",
+            certified=1,
+        ),
+    )
+
+    client.post(f"/api/product/{product.product_id}/tare/arm")
+    assert storage_repo.get_active_tare_arm(conn) is not None
+
+    r = client.post("/api/tare/cancel")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["ok"] is True
+    assert body["deleted"] == 1
+
+    assert storage_repo.get_active_tare_arm(conn) is None
+
+    # Idempotent: second cancel is a no-op.
+    r = client.post("/api/tare/cancel")
+    assert r.status_code == 200
+    assert r.get_json()["deleted"] == 0
