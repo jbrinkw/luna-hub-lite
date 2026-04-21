@@ -43,6 +43,12 @@ interface QueueItem {
   stockLevel: number | null;
   errorMsg?: string;
   undoInfo?: UndoInfo;
+  /**
+   * True once the user has moved on from this item (clicked another queue
+   * row OR scanned a new barcode). Drives the red → green row color:
+   * red = still being edited / never touched, green = committed.
+   */
+  confirmed: boolean;
 }
 
 /**
@@ -248,6 +254,7 @@ export function ScannerPage() {
         unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
         isNew: false,
         stockLevel: null,
+        confirmed: false,
       };
       setQueue((prev) => [newItem, ...prev]);
       setActiveItemId(tempId);
@@ -858,6 +865,19 @@ export function ScannerPage() {
   const activeItem = queue.find((q) => q.id === activeItemId) ?? null;
   const filteredQueue = filter === 'new' ? queue.filter((q) => q.isNew) : queue;
 
+  // Flip the previously-active item to confirmed=true whenever activeItemId
+  // moves to something else (another queue row click OR a new scan). Red
+  // rows mean "still being edited / never touched"; green means "you moved
+  // on, which we treat as commit."
+  const prevActiveForConfirmRef = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevActiveForConfirmRef.current;
+    if (prev && prev !== activeItemId) {
+      setQueue((q) => q.map((i) => (i.id === prev ? { ...i, confirmed: true } : i)));
+    }
+    prevActiveForConfirmRef.current = activeItemId;
+  }, [activeItemId]);
+
   // Push user-edited nutrition fields back to products on every change.
   // Without this, corrections typed AFTER the initial auto-save (fast path
   // for already-known barcodes, which commits within ~100 ms of scan)
@@ -1003,8 +1023,8 @@ export function ScannerPage() {
                   focusField('servingsPerContainer');
                 }}
                 className={`px-2.5 py-2 border-2 rounded-md cursor-pointer ${queueItemBorderColor(item)} ${
-                  activeItemId === item.id ? 'bg-success-subtle' : item.isNew ? 'bg-danger-subtle' : 'bg-surface'
-                }`}
+                  item.confirmed ? 'bg-success-subtle' : 'bg-danger-subtle'
+                } ${activeItemId === item.id ? 'ring-2 ring-primary/40' : ''}`}
               >
                 <div className="flex justify-between items-center">
                   <span className="font-semibold text-[0.9em]">
