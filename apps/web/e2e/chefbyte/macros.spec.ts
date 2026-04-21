@@ -225,6 +225,94 @@ test.describe('ChefByte Macros page', () => {
     }
   });
 
+  // ===================================================================
+  // Audit recommendation #24 (LOW): DST boundary at macros page render.
+  //
+  // Fall-back DST transition in America/New_York occurred at 2025-11-02
+  // 02:00 local — the wall-clock hour 01:00-01:59 happened twice (once
+  // EDT, once EST). The MacroPage builds its initial `currentDate` from
+  // `toDateStr(new Date())` which internally uses `toLocaleDateString('sv-SE')`
+  // in the browser's effective timezone. If a refactor ever drops the
+  // locale-aware formatter for UTC-based slicing, the date label at the
+  // DST boundary drifts by a day relative to the user's wall clock.
+  //
+  // We freeze the wall clock to a known instant in America/New_York,
+  // set the test user's timezone + day_start_hour accordingly, render
+  // the macros page, then assert the displayed date label matches the
+  // expected logical_date. We then advance across the DST boundary and
+  // re-render to confirm the label doesn't offset by an extra hour.
+  //
+  // Playwright 1.58 supports `page.clock.setFixedTime` — see docs:
+  // https://playwright.dev/docs/clock
+  // ===================================================================
+  test.describe('DST fall-back boundary at 2025-11-02 01:30 America/New_York', () => {
+    // `timezoneId` on the browser context pins the JS TZ-sensitive
+    // APIs (`Intl.DateTimeFormat`, `toLocaleDateString`) to ET so the
+    // frozen instants below are interpreted the same in CI and locally.
+    test.use({ timezoneId: 'America/New_York' });
+
+    test('macros date label at 01:30 EDT (before fall-back) + after the 02:00 snap to EST', async ({
+      page,
+    }) => {
+      test.setTimeout(90_000);
+      const { userId, cleanup, client } = await seedFullAndLogin(page, 'macro-dst');
+      try {
+        await seedChefByteData(client, userId);
+
+        // Set the user's profile timezone + day_start_hour so the
+        // server-side logical-date math matches the client wall clock.
+        const { error: profErr } = await client
+          .schema('hub')
+          .from('profiles')
+          .update({ timezone: 'America/New_York', day_start_hour: 4 })
+          .eq('user_id', userId);
+        expect(profErr).toBeNull();
+
+        // Freeze the clock at 2025-11-02 01:30 America/New_York (still
+        // EDT — fall-back happens at 02:00 → 01:00). Instant: because
+        // America/New_York is UTC-4 at 01:30 EDT, 01:30-04:00 is the
+        // correct ISO instant. Use page.clock.install so pre-existing
+        // timers don't drift independently.
+        await page.clock.install({ time: new Date('2025-11-02T01:30:00-04:00') });
+
+        await page.goto('/chef/macros');
+        await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30_000 });
+
+        // MacroPage formats currentDate via `formatDateDisplay`:
+        //   new Date(dateStr + 'T00:00:00').toLocaleDateString('en-US',
+        //     { weekday:'short', month:'short', day:'numeric' })
+        // At 01:30 EDT on 2025-11-02, `toDateStr(new Date())` yields
+        // "2025-11-02", so the label should read "Sun, Nov 2".
+        const labelBefore = page.getByTestId('current-date');
+        await expect(labelBefore).toHaveText('Sun, Nov 2', { timeout: 30_000 });
+
+        // ─── Advance past the DST boundary ───
+        // 02:30-05:00 is the SAME wall-clock day (2025-11-02) but now
+        // in EST (UTC-5). Logical_date must STILL be 2025-11-02 — the
+        // bug we're guarding against would offset the label by a day
+        // due to TZ-math regression.
+        await page.clock.setFixedTime(new Date('2025-11-02T02:30:00-05:00'));
+
+        // Force a refetch by navigating to a different route and back.
+        // The macros query key is ['daily-macros', userId, currentDate]
+        // so the same-date refetch would be a cache hit; the round-trip
+        // through another route + remount guarantees fresh renders that
+        // re-read `new Date()` with the advanced clock.
+        await page.goto('/chef/inventory');
+        await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30_000 });
+        await page.goto('/chef/macros');
+        await expect(page.getByTestId('macro-summary')).toBeVisible({ timeout: 30_000 });
+
+        const labelAfter = page.getByTestId('current-date');
+        // Still "Sun, Nov 2" — the DST offset change from EDT → EST did
+        // NOT shift the displayed logical date by a day.
+        await expect(labelAfter).toHaveText('Sun, Nov 2', { timeout: 30_000 });
+      } finally {
+        await cleanup();
+      }
+    });
+  });
+
   test('goal editing via modal saves new macro goals', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'macro-editgoals');
     try {

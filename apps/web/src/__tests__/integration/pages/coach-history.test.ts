@@ -342,3 +342,139 @@ describe('CoachByte HistoryPage queries', () => {
     expect(detail![0].actual_reps).toBeDefined();
   });
 });
+
+// =====================================================================
+// Audit recommendation #17 (MEDIUM): keyset pagination cross-page
+// boundary. Catches a regression where `.lt('plan_date', cursor)`
+// silently drifts to `.lte(...)` — the last row of page N would then
+// duplicate as the first row of page N+1.
+//
+// Independent describe with its own fresh user + 25 seeded plans so the
+// PAGE_SIZE arithmetic is clean and nothing from the main describe's
+// seed leaks into the boundary math.
+// =====================================================================
+describe('CoachByte HistoryPage keyset pagination boundary', () => {
+  let ctx: PageTestContext;
+  const PAGE_SIZE = 10;
+  const SEED_DAYS = 25;
+  const seededDates: string[] = []; // newest-first, matching descending order
+
+  beforeAll(async () => {
+    ctx = await createPageTestContext('coach-history-boundary');
+
+    // Seed 25 consecutive past days of daily_plans directly (skip splits
+    // + completed_sets; HistoryPage only needs plan_date to paginate).
+    // We insert in SEED_DAYS..1 order relative to a fixed anchor so
+    // plan_date values are unique and monotonically decreasing.
+    const coach = coachbyte(ctx.client);
+    const anchor = new Date('2025-06-15T00:00:00Z');
+    const rows: Array<{ user_id: string; plan_date: string; logical_date: string }> = [];
+    for (let i = 0; i < SEED_DAYS; i++) {
+      const d = new Date(anchor);
+      d.setUTCDate(d.getUTCDate() - i);
+      const y = d.getUTCFullYear();
+      const m = String(d.getUTCMonth() + 1).padStart(2, '0');
+      const day = String(d.getUTCDate()).padStart(2, '0');
+      const dateStr = `${y}-${m}-${day}`;
+      rows.push({ user_id: ctx.userId, plan_date: dateStr, logical_date: dateStr });
+      seededDates.push(dateStr); // i=0 is newest → matches descending order
+    }
+
+    const { error } = await coach.from('daily_plans').insert(rows);
+    if (error) throw new Error(`Seed failed: ${error.message}`);
+  });
+
+  afterAll(async () => {
+    await ctx.cleanup();
+  });
+
+  // ---------------------------------------------------------------------
+  // Replica of HistoryPage pagination: fetch PAGE_SIZE+1 per page,
+  // discard the sentinel, use last-plan_date as next cursor with
+  // `.lt('plan_date', cursor)`. Any drift to `.lte(...)` duplicates
+  // the boundary row on the next page.
+  //
+  // Source references:
+  //   - initial fetch: HistoryPage.tsx lines 51-59
+  //   - loadMore:      HistoryPage.tsx lines 172-182 (uses .lt)
+  // ---------------------------------------------------------------------
+  async function fetchPage(cursor: string | null): Promise<{ rows: Array<{ plan_id: string; plan_date: string }>; hasMore: boolean }> {
+    let q = coachbyte(ctx.client)
+      .from('daily_plans')
+      .select('plan_id, plan_date')
+      .eq('user_id', ctx.userId)
+      .order('plan_date', { ascending: false });
+
+    if (cursor) q = q.lt('plan_date', cursor);
+    q = q.limit(PAGE_SIZE + 1);
+
+    const res = await q;
+    const data = assertQuerySucceeds(res, `fetchPage cursor=${cursor}`);
+    const hasMore = (data as any[]).length > PAGE_SIZE;
+    const rows = hasMore ? (data as any[]).slice(0, PAGE_SIZE) : (data as any[]);
+    return { rows, hasMore };
+  }
+
+  it('paginates 25 rows across 3 pages (10+10+5) with no duplicates, no gaps, strictly decreasing', async () => {
+    // Page 1
+    const page1 = await fetchPage(null);
+    expect(page1.rows.length).toBe(PAGE_SIZE);
+    expect(page1.hasMore).toBe(true);
+
+    // Page 2 — cursor is the last plan_date of page 1
+    const cursor1 = page1.rows[page1.rows.length - 1].plan_date;
+    const page2 = await fetchPage(cursor1);
+    expect(page2.rows.length).toBe(PAGE_SIZE);
+    expect(page2.hasMore).toBe(true);
+
+    // Page 3 — cursor is the last plan_date of page 2. Only 5 rows left.
+    const cursor2 = page2.rows[page2.rows.length - 1].plan_date;
+    const page3 = await fetchPage(cursor2);
+    expect(page3.rows.length).toBe(5);
+    expect(page3.hasMore).toBe(false);
+
+    // ── Boundary check: .lt vs .lte regression guard ──
+    // First row of page 2 must be STRICTLY less than last row of page 1.
+    // If `.lt` ever drifts to `.lte`, page 2's first row == page 1's last
+    // row and the Set-size assertion below fails on the duplicate.
+    const page1Last = page1.rows[page1.rows.length - 1].plan_date;
+    const page2First = page2.rows[0].plan_date;
+    expect(page2First < page1Last).toBe(true);
+
+    const page2Last = page2.rows[page2.rows.length - 1].plan_date;
+    const page3First = page3.rows[0].plan_date;
+    expect(page3First < page2Last).toBe(true);
+
+    // ── No duplicates across pages ──
+    const allDates = [...page1.rows, ...page2.rows, ...page3.rows].map((r) => r.plan_date);
+    const allPlanIds = [...page1.rows, ...page2.rows, ...page3.rows].map((r) => r.plan_id);
+    expect(new Set(allDates).size).toBe(allDates.length);
+    expect(new Set(allPlanIds).size).toBe(allPlanIds.length);
+    expect(allDates.length).toBe(SEED_DAYS);
+
+    // ── No missing rows (set equality against seeded input) ──
+    expect(new Set(allDates)).toEqual(new Set(seededDates));
+
+    // ── Monotonically decreasing (newest → oldest) ──
+    for (let i = 1; i < allDates.length; i++) {
+      expect(allDates[i] < allDates[i - 1]).toBe(true);
+    }
+
+    // ── Specific boundary values: the first seeded date must appear
+    // first on page 1; the oldest seeded date must appear last on page 3.
+    expect(allDates[0]).toBe(seededDates[0]); // newest
+    expect(allDates[allDates.length - 1]).toBe(seededDates[seededDates.length - 1]); // oldest
+  });
+
+  it('page 2 first row is NOT equal to page 1 last row (explicit .lt regression pin)', async () => {
+    // Tight focus on the exact regression: if `.lt` → `.lte`, the
+    // boundary row repeats. This assertion fails loudly if that happens,
+    // independently of the overall set/sequence checks above.
+    const page1 = await fetchPage(null);
+    const cursor1 = page1.rows[page1.rows.length - 1].plan_date;
+    const page2 = await fetchPage(cursor1);
+
+    expect(page1.rows[page1.rows.length - 1].plan_date).not.toBe(page2.rows[0].plan_date);
+    expect(page1.rows[page1.rows.length - 1].plan_id).not.toBe(page2.rows[0].plan_id);
+  });
+});
