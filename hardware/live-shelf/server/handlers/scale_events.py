@@ -311,6 +311,12 @@ class ScaleHandler:
         # unchanged; ``app.py`` injects a real emitter when
         # CLOUD_ENABLED=true.
         cloud_emitter: Optional[CloudEventEmitter] = None,
+        # Optional CloudClient — used ONLY for fire-and-forget tare-
+        # capture push-back (CATCH_ALL_TARE_CAPTURE_PLAN.md §4.2 cloud
+        # resolution). When None, tare captures still land locally; the
+        # cloud never hears about them. Duck-typed so tests can pass a
+        # stub with a single ``post_product_tare`` method.
+        cloud_client: Any | None = None,
     ) -> None:
         self._conn = conn
         self._db_lock = db_lock
@@ -369,6 +375,34 @@ class ScaleHandler:
         self._cloud_emitter: CloudEventEmitter = (
             cloud_emitter if cloud_emitter is not None else null_emitter()
         )
+        # Cloud client — used only by the tare-capture push-back. No-op
+        # when None; the tare capture still lands locally.
+        self._cloud_client = cloud_client
+
+    def _push_tare_to_cloud(self, product_id: str, tare_g: float) -> None:
+        """Fire-and-forget cloud push of a captured tare value.
+
+        Per the CATCH_ALL_TARE_CAPTURE_PLAN cloud resolution: local write
+        is authoritative and synchronous; cloud push is best-effort and
+        must never raise / block the HTTP response. Any exception is
+        swallowed + logged at WARNING. When ``cloud_client`` is None (or
+        the client lacks ``post_product_tare``), the call is a silent
+        no-op — useful for the legacy / tests / cloud-disabled paths.
+        """
+        client = self._cloud_client
+        if client is None:
+            return
+        push = getattr(client, "post_product_tare", None)
+        if not callable(push):
+            return
+        try:
+            push(product_id=product_id, tare_g=float(tare_g))
+        except Exception:  # noqa: BLE001 — must never raise
+            log.warning(
+                "cloud: post_product_tare failed for product_id=%s (non-fatal)",
+                product_id,
+                exc_info=True,
+            )
 
     def _scale_id_for_shelf(self, shelf_id: Optional[str]) -> str:
         """Map a shelf_id to the physical device_id cloud expects.
@@ -1562,6 +1596,117 @@ class ScaleHandler:
         else:
             shelf_id = "live_shelf"
 
+        # Classify direction ahead of the tare-arm branch so we can gate
+        # on direction != 'noise' — noise events are sub-threshold and
+        # meaningless as tare values. The dedup + session pipeline below
+        # re-uses this same value (previously computed after dedup; the
+        # classification is deterministic on ``delta_g`` so hoisting is
+        # side-effect-free).
+        direction = self._direction(delta_g)
+
+        # Tare-arm interception (CATCH_ALL_TARE_CAPTURE_PLAN.md §4.3).
+        # Must run BEFORE dedup so a duplicate retry doesn't fire the
+        # tare twice, and BEFORE the normal session/classifier pipeline
+        # so an armed-active event doesn't also leak into reconciliation.
+        #
+        # Gating:
+        #   * only the catch-all scale is armable (shelf_id == 'catch_all'
+        #     is load-bearing — live-shelf events never trigger tare).
+        #   * direction != 'noise' — sub-threshold readings are not
+        #     credible tare values.
+        #   * arm row must be present AND not expired (read helper filters).
+        #
+        # Direction handling:
+        #   * 'add' events: the container was just placed on the scale,
+        #     so ``after_weight_g`` is the new settled reading — use it.
+        #   * 'remove' events: the container was just lifted OFF, so the
+        #     ``before_weight_g`` is the settled reading from when it
+        #     was sitting there — use that. This lets the operator pick
+        #     up the already-on-scale container after clicking Tare
+        #     without an "arm then place" dance.
+        #   * 'noise' never intercepts (skipped above).
+        #
+        # Bounds: ``tare_g`` must be within [min_weight_g, max_weight_g]
+        # (defaults 5..5000). Out-of-bounds stamps ``last_error`` on the
+        # arm row and returns without consuming — operator re-places or
+        # cancels. A successful capture writes the tare to the products
+        # row, deletes the arm, and short-circuits the event (no
+        # scale_events row, no classifier, no session correlation).
+        if shelf_id == "catch_all" and direction != "noise":
+            tare_captured = False
+            tare_product_id: Optional[str] = None
+            tare_g: Optional[float] = None
+            tare_reason: Optional[str] = None
+            with self._db_lock:
+                arm = storage_repo.get_active_tare_arm(
+                    self._conn, device_id=device_id,
+                )
+                if arm is not None:
+                    # 'add' → settled weight is after; 'remove' → before.
+                    reading = (
+                        after_weight_g if direction == "add"
+                        else before_weight_g
+                    )
+                    reading_g = float(reading)
+                    if (
+                        reading_g < arm.min_weight_g
+                        or reading_g > arm.max_weight_g
+                    ):
+                        storage_repo.set_tare_arm_error(
+                            self._conn,
+                            f"implausible reading {reading_g:.1f}g "
+                            f"(bounds {arm.min_weight_g:.0f}..{arm.max_weight_g:.0f}g)",
+                        )
+                        tare_product_id = arm.product_id
+                        tare_g = reading_g
+                        tare_reason = "implausible_weight"
+                    else:
+                        storage_repo.consume_tare_arm(
+                            self._conn,
+                            product_id=arm.product_id,
+                            tare_g=reading_g,
+                        )
+                        tare_captured = True
+                        tare_product_id = arm.product_id
+                        tare_g = reading_g
+            # Short-circuit outside the lock so we can log lifecycle +
+            # kick the cloud push without holding the db_lock longer
+            # than needed.
+            if tare_captured and tare_product_id is not None and tare_g is not None:
+                self._lc_event(
+                    None,
+                    actor="tare_capture",
+                    reason_code="TARE_CAPTURE",
+                    payload={
+                        "product_id": tare_product_id,
+                        "device_id": device_id,
+                        "weight_g": tare_g,
+                        "direction": direction,
+                        "esp_ts": ts, "pi_ts": pi_received_ts,
+                    },
+                )
+                # Fire-and-forget cloud push. Must NOT throw / block — a
+                # local tare is authoritative even if the cloud is down.
+                self._push_tare_to_cloud(tare_product_id, tare_g)
+                return {
+                    "ok": True,
+                    "tare_captured": True,
+                    "product_id": tare_product_id,
+                    "tare_g": tare_g,
+                    "direction": direction,
+                }, 200
+            if tare_reason is not None:
+                # Arm stays active; operator sees last_error via
+                # /api/tare/status and can re-place or cancel.
+                return {
+                    "ok": True,
+                    "tare_captured": False,
+                    "reason": tare_reason,
+                    "weight_g": tare_g,
+                    "product_id": tare_product_id,
+                }, 200
+            # No arm active → fall through to the normal pipeline.
+
         # Append an "event" marker to the weight trace so diag dumps show
         # events inline with the heartbeat trace. Kept here (before dedup)
         # so even duplicate retries show up for visibility.
@@ -1595,9 +1740,8 @@ class ScaleHandler:
             )
             return {"ok": True, "event_id": existing, "duplicate": True}, 200
 
-        direction = self._direction(delta_g)
-
-        # Fix 3: fetch current_session_id and insert the scale_events
+        # ``direction`` hoisted above the tare-arm branch. Fix 3: fetch
+        # current_session_id and insert the scale_events
         # row in ONE lock-held critical section. Previously this was
         # split across two ``with self._db_lock:`` blocks, letting a
         # brightness close slip in between and stamp the event with a
