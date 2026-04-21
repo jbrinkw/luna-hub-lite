@@ -1610,6 +1610,17 @@ class ScaleHandler:
         else:
             shelf_id = "live_shelf"
 
+        # Type-literal drift: the shelf registry (shelves.py) + ESP firmware
+        # + cloud `chefbyte.scale_pairings.kind` CHECK all use "live_scale"
+        # for the single-item kind. The Pi's storage-side Literal (models.py)
+        # + SQLite CHECK constraints still use "single_item". Translate at
+        # the ingress boundary so everything downstream (ScaleEventIn, DB
+        # writes, reconciler) sees the storage-native name. Changing the
+        # storage literal would require a migration on every deployed Pi
+        # DB — translation is the less-invasive fix.
+        if shelf_id == "live_scale":
+            shelf_id = "single_item"
+
         # Classify direction ahead of the tare-arm branch so we can gate
         # on direction != 'noise' — noise events are sub-threshold and
         # meaningless as tare values. The dedup + session pipeline below

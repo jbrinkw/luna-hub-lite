@@ -122,6 +122,43 @@ def test_scale_event_ingress_routes_scale_01_to_live_shelf_shelf_id(tmp_path):
     assert row[0] == "live_shelf"
 
 
+def test_scale_event_ingress_translates_scale_03_live_scale_to_single_item(tmp_path):
+    """Type-literal drift guard (regression for the Pi-log Pydantic error).
+
+    The shelf registry returns ``shelf_id='live_scale'`` for the single-item
+    rig (scale-03), but the storage-side ScaleEventIn Literal + SQLite CHECK
+    constraints still use ``'single_item'``. The handler translates at the
+    ingress boundary so downstream storage types see the storage-native name.
+
+    Without the translation, this payload 500s with a pydantic ValidationError
+    before the event ever reaches the DB — matching the stack trace captured
+    in the Pi's server.log during normal live_scale operation.
+    """
+    conn = init_db(":memory:")
+    handler = _make_handler(conn, tmp_path, catch_all_enabled=True)
+
+    resp, status = handler.handle_scale_event({
+        "ts": "2026-04-18T08:00:00.100Z",
+        "device_id": "scale-03",
+        "event_seq": 1,
+        "delta_g": -15.0,
+        "before_weight_g": 200.0,
+        "after_weight_g": 185.0,
+    })
+
+    assert status == 200, (resp, status)
+    row = conn.execute(
+        "SELECT shelf_id FROM scale_events WHERE event_id = ?",
+        (resp["event_id"],),
+    ).fetchone()
+    assert row is not None
+    # Storage-native name — CHECK constraint + Literal both require this.
+    assert row[0] == "single_item", (
+        f"scale-03 ingress must translate 'live_scale' -> 'single_item' "
+        f"before the DB write; got {row[0]!r}"
+    )
+
+
 def test_scale_event_ingress_unknown_device_with_catch_all_enabled_rejects(tmp_path):
     conn = init_db(":memory:")
     handler = _make_handler(conn, tmp_path, catch_all_enabled=True)
