@@ -409,6 +409,13 @@ export function LiveTrackImportPage() {
             net_weight_g: off?.product_quantity ?? null,
             container_type: null,
             unit_type: null,
+            // Running a product through the LiveTrack Import wizard is
+            // semantically certifying it (tare captured, nutrition
+            // verified, barcode confirmed). certified=1 makes it
+            // visible to the Pi's classifier candidate pool via
+            // ProductSyncPoller — without this the Pi never sees the
+            // product in its certified catalog.
+            certified: 1,
           };
           const { data: created, error: insErr } = await chefbyte()
             .from('products')
@@ -521,6 +528,10 @@ export function LiveTrackImportPage() {
           carbs_per_serving: parseFloat(nutrition.carbs) || 0,
           fat_per_serving: parseFloat(nutrition.fat) || 0,
           protein_per_serving: parseFloat(nutrition.protein) || 0,
+          // Re-importing an existing product through the wizard also
+          // certifies it — user verified tare + nutrition. Safe to
+          // always set to 1 (leaves already-certified rows unchanged).
+          certified: 1,
         })
         .eq('product_id', product.product_id)
         .eq('user_id', user.id);
