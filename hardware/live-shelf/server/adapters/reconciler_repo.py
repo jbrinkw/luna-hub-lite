@@ -348,6 +348,22 @@ class RepoReconcilerAdapter:
             # analytics use the wall-clock moment the user acted.
             occurred_at = self._pick_occurred_at(resolution)
 
+            # pi_event_id: the Pi's scale_events.event_id that the cloud
+            # event viewer will use to fetch before/after images. Mirrors
+            # _pick_occurred_at's side-selection: REMOVE-side patterns
+            # (consumption) key on remove_event_id; ADD-side patterns
+            # (restock) key on add_event_id. This matches the on-disk
+            # ``data/events/<event_id>/`` path convention.
+            pi_event_id: Optional[str] = None
+            if resolution.pattern in REMOVE_SIDE_PATTERNS:
+                pi_event_id = (
+                    resolution.remove_event_id or resolution.add_event_id
+                )
+            elif resolution.pattern in ADD_SIDE_PATTERNS:
+                pi_event_id = (
+                    resolution.add_event_id or resolution.remove_event_id
+                )
+
             self._cloud_emitter.emit_reconciler_resolution(
                 pattern=resolution.pattern,
                 product_id=product_id,
@@ -356,6 +372,7 @@ class RepoReconcilerAdapter:
                 delta_g=delta_g,
                 occurred_at=occurred_at,
                 resolution_id=resolution_id,
+                pi_event_id=pi_event_id,
             )
         except Exception:  # noqa: BLE001 - cloud mirror must not fail callers
             log.warning(

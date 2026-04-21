@@ -277,6 +277,7 @@ class CloudEventEmitter:
         delta_g: float,
         occurred_at: Optional[str] = None,
         resolution_id: Optional[str] = None,
+        pi_event_id: Optional[str] = None,
     ) -> Optional[str]:
         """Emit a cloud event for a reconciler-written session_resolution.
 
@@ -323,6 +324,14 @@ class CloudEventEmitter:
         # /event handler ignores unknown fields.
         if resolution_id:
             payload["_pi_resolution_id"] = resolution_id
+        # Cloud event-viewer support: include the Pi's scale_events.event_id
+        # so the browser can LAN-fetch images via
+        #   http://<lan_ip>:8000/event/<pi_event_id>/before.jpg
+        # Backward-compatible: older edge-function versions ignore this
+        # field. See migration 20260421040000_event_overrides.sql for the
+        # cloud-side storage of shelf_event_log.pi_event_id.
+        if pi_event_id:
+            payload["pi_event_id"] = pi_event_id
         return self._enqueue(payload)
 
     def emit_single_item_event(
@@ -335,6 +344,7 @@ class CloudEventEmitter:
         refill_threshold_g: float,
         depleted: bool,
         occurred_at: Optional[str] = None,
+        pi_event_id: Optional[str] = None,
     ) -> Optional[str]:
         """Emit a cloud event for a single-item scale delta commit.
 
@@ -378,6 +388,8 @@ class CloudEventEmitter:
         # via scale_pairings. Only include when the caller already knows.
         if product_id is not None:
             payload["product_id"] = product_id
+        if pi_event_id:
+            payload["pi_event_id"] = pi_event_id
         return self._enqueue(payload)
 
     def emit_in_flight_reap(
@@ -387,6 +399,7 @@ class CloudEventEmitter:
         product_id: str,
         consumed_g: float,
         occurred_at: Optional[str] = None,
+        pi_event_id: Optional[str] = None,
     ) -> Optional[str]:
         """Emit a ``consumed`` event for a TTL-expired in-flight lot.
 
@@ -404,6 +417,8 @@ class CloudEventEmitter:
             "delta_g": -abs(float(consumed_g)),
             "occurred_at": occurred_at or _iso_utc_ms(),
         }
+        if pi_event_id:
+            payload["pi_event_id"] = pi_event_id
         return self._enqueue(payload)
 
 
@@ -520,6 +535,18 @@ def backfill_missing_outbox_events(
         if delta_g == 0.0:
             continue
 
+        # Backfill pi_event_id for cloud event viewer — pick
+        # remove_event_id for REMOVE-side patterns, add_event_id for
+        # ADD-side. Backward-compatible: cloud edge fn ignores if older.
+        backfill_pi_event_id: Optional[str] = None
+        if row["pattern"] in REMOVE_SIDE_PATTERNS:
+            backfill_pi_event_id = (
+                row["remove_event_id"] or row["add_event_id"]
+            )
+        elif row["pattern"] in ADD_SIDE_PATTERNS:
+            backfill_pi_event_id = (
+                row["add_event_id"] or row["remove_event_id"]
+            )
         try:
             emitter.emit_reconciler_resolution(
                 pattern=row["pattern"],
@@ -529,6 +556,7 @@ def backfill_missing_outbox_events(
                 delta_g=delta_g,
                 occurred_at=occurred_at,
                 resolution_id=resolution_id,
+                pi_event_id=backfill_pi_event_id,
             )
             re_emitted += 1
             log.warning(

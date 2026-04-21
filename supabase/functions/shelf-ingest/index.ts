@@ -167,6 +167,13 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
   const occurredAt: string | undefined = body?.occurred_at;
   const clientEventId: string | undefined =
     typeof body?.client_event_id === 'string' && body.client_event_id.length > 0 ? body.client_event_id : undefined;
+  // Pi's scale_events.event_id — optional. Stored on shelf_event_log.pi_event_id
+  // so the cloud event viewer can LAN-fetch the Pi's per-event images.
+  // Backward-compatible: Pi versions predating this field omit it.
+  const piEventId: string | null =
+    typeof body?.pi_event_id === 'string' && body.pi_event_id.length > 0 && body.pi_event_id.length <= 128
+      ? body.pi_event_id
+      : null;
   let productId: string | null = body?.product_id ?? null;
 
   if (!scaleId || !kind || !eventKind || deltaG === undefined || !occurredAt) {
@@ -269,6 +276,7 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     p_delta_g: deltaG,
     p_occurred_at: occurredAt,
     p_client_event_id: clientEventId,
+    p_pi_event_id: piEventId,
   });
 
   if (error) {

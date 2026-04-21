@@ -940,3 +940,82 @@ class TestBackfillPatternCoverage:
             assert payload["delta_g"] == pytest.approx(abs(delta_g_for_event))
         else:
             assert payload["delta_g"] == pytest.approx(expected_delta)
+
+
+# ---------------------------------------------------------------------------
+# pi_event_id pass-through — cloud event-viewer image lookup support
+# ---------------------------------------------------------------------------
+
+
+class TestPiEventIdPassThrough:
+    """pi_event_id lands in the outbox payload verbatim so the cloud's
+    shelf_event_log.pi_event_id column can be populated. The browser event
+    viewer relies on that to construct LAN image URLs pointing back at the
+    Pi at http://<lan_ip>:8000/event/<pi_event_id>/before.jpg.
+    """
+
+    def test_reconciler_resolution_includes_pi_event_id(self, conn):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_reconciler_resolution(
+            pattern="use_return_consumed",
+            product_id="p-1",
+            scale_id="scale-01",
+            kind="live_shelf",
+            delta_g=-100.0,
+            occurred_at="2026-04-21T12:00:00.000Z",
+            pi_event_id="evt-abc-123",
+        )
+        assert cid is not None
+        payload = json.loads(
+            conn.execute("SELECT payload_json FROM cloud_outbox").fetchone()["payload_json"]
+        )
+        assert payload["pi_event_id"] == "evt-abc-123"
+
+    def test_reconciler_resolution_omits_pi_event_id_when_none(self, conn):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_reconciler_resolution(
+            pattern="use_return_consumed",
+            product_id="p-1",
+            scale_id="scale-01",
+            kind="live_shelf",
+            delta_g=-100.0,
+            occurred_at="2026-04-21T12:00:00.000Z",
+        )
+        assert cid is not None
+        payload = json.loads(
+            conn.execute("SELECT payload_json FROM cloud_outbox").fetchone()["payload_json"]
+        )
+        assert "pi_event_id" not in payload
+
+    def test_in_flight_reap_includes_pi_event_id(self, conn):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_in_flight_reap(
+            scale_id="scale-01",
+            product_id="p-1",
+            consumed_g=250.0,
+            occurred_at="2026-04-21T12:00:00.000Z",
+            pi_event_id="pickup-evt-xyz",
+        )
+        assert cid is not None
+        payload = json.loads(
+            conn.execute("SELECT payload_json FROM cloud_outbox").fetchone()["payload_json"]
+        )
+        assert payload["pi_event_id"] == "pickup-evt-xyz"
+
+    def test_single_item_event_includes_pi_event_id(self, conn):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_single_item_event(
+            scale_id="scale-single",
+            product_id="p-1",
+            delta_g=-50.0,
+            noise_floor_g=2.0,
+            refill_threshold_g=15.0,
+            depleted=False,
+            occurred_at="2026-04-21T12:00:00.000Z",
+            pi_event_id="single-evt-42",
+        )
+        assert cid is not None
+        payload = json.loads(
+            conn.execute("SELECT payload_json FROM cloud_outbox").fetchone()["payload_json"]
+        )
+        assert payload["pi_event_id"] == "single-evt-42"

@@ -967,6 +967,7 @@ class ScaleHandler:
                     product_id=getattr(lot, "product_id", "") or "",
                     consumed_g=float(pickup_weight_g),
                     occurred_at=event_ts,
+                    pi_event_id=event_id,
                 )
             except Exception:  # pragma: no cover - defensive
                 log.warning(
@@ -1072,6 +1073,7 @@ class ScaleHandler:
                         kind="live_shelf",
                         delta_g=refill_g,
                         occurred_at=event_ts,
+                        pi_event_id=event_id,
                     )
             elif product_id and consumption_g > 0:
                 self._cloud_emitter.emit_reconciler_resolution(
@@ -1083,6 +1085,7 @@ class ScaleHandler:
                     kind="live_shelf",
                     delta_g=-float(consumption_g),
                     occurred_at=event_ts,
+                    pi_event_id=event_id,
                 )
         except Exception:  # pragma: no cover - defensive
             log.warning(
@@ -2674,6 +2677,10 @@ class ScaleHandler:
                             product_id=lot.product_id,
                             consumed_g=presumed_consumed,
                             occurred_at=now_ts,
+                            # Attribute the reap to the pickup event so the
+                            # cloud viewer can still fetch before/after
+                            # images for the lot that never came back.
+                            pi_event_id=getattr(lot, "pickup_event_id", None),
                         )
                     except Exception:  # pragma: no cover - defensive
                         log.warning(
