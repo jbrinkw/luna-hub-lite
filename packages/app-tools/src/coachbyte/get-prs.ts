@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError } from '../shared';
+import { EXERCISE_REF_DESCRIPTION, resolveExerciseRef } from './exercise-ref';
 
 export const getPrs: ToolDefinition = {
   name: 'COACHBYTE_get_prs',
@@ -9,11 +10,20 @@ export const getPrs: ToolDefinition = {
     properties: {
       exercise_id: {
         type: 'string',
-        description: 'Optional exercise UUID to filter to a specific exercise',
+        description: `Optional filter. ${EXERCISE_REF_DESCRIPTION}`,
       },
     },
   },
   handler: async (args, ctx) => {
+    let filterExerciseId: string | null = null;
+    if (args.exercise_id) {
+      const { id, unresolved } = await resolveExerciseRef(ctx.supabase, ctx.userId, args.exercise_id);
+      if (unresolved.length > 0 || !id) {
+        return toolError(`Unknown exercise: "${args.exercise_id}"`);
+      }
+      filterExerciseId = id;
+    }
+
     // Schema cast needed: coachbyte tables aren't in generated Database types
     const coachbyte = ctx.supabase.schema('coachbyte') as any;
     let query = coachbyte
@@ -21,8 +31,8 @@ export const getPrs: ToolDefinition = {
       .select('completed_set_id, exercise_id, actual_reps, actual_load, completed_at, exercises(name)')
       .eq('user_id', ctx.userId);
 
-    if (args.exercise_id) {
-      query = query.eq('exercise_id', args.exercise_id);
+    if (filterExerciseId) {
+      query = query.eq('exercise_id', filterExerciseId);
     }
 
     const { data: sets, error } = await query;

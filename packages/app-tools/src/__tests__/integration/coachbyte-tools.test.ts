@@ -997,4 +997,114 @@ describe('CoachByte Tool Integration Tests', () => {
       expect(absSet).not.toHaveProperty('resolved_load');
     });
   });
+
+  // -------------------------------------------------------------------------
+  // 17. Exercise refs by name — UUID or case-insensitive name is accepted
+  //     on update_split, update_plan, log_set, get_prs.
+  // -------------------------------------------------------------------------
+
+  describe('exercise ref (UUID or name)', () => {
+    const nameWeekday = (todayWeekday + 5) % 7;
+
+    it('updateSplit accepts case-insensitive exercise names and resolves to UUID in DB', async () => {
+      const template_sets = [
+        { exercise_id: 'Squat', target_reps: 5, load: 225, rest_seconds: 120 },
+        { exercise_id: 'bench press', target_reps: 5, load: 185, rest_seconds: 90 },
+      ];
+
+      const result = await updateSplit.handler({ weekday: nameWeekday, template_sets }, ctx);
+      const data = parseToolResult(result);
+      expect(data.template_sets).toHaveLength(2);
+
+      // The DB JSONB carries UUIDs after resolution, not the names we passed in
+      const { data: row } = await admin
+        .schema('coachbyte')
+        .from('splits')
+        .select('template_sets')
+        .eq('user_id', userId)
+        .eq('weekday', nameWeekday)
+        .single();
+      const dbSets = row!.template_sets as any[];
+      expect(dbSets.map((d: any) => d.exercise_id).sort()).toEqual([squatId, benchId].sort());
+    });
+
+    it('updatePlan resolves exercise names alongside UUIDs in the same call', async () => {
+      const sets = [
+        { exercise_id: squatId, target_reps: 5, load: 135, rest_seconds: 60, order: 1 },
+        { exercise_id: 'Bench Press', target_reps: 8, load: 95, rest_seconds: 60, order: 2 },
+      ];
+
+      const result = await updatePlan.handler({ plan_id: planId, sets }, ctx);
+      const data = parseToolResult(result);
+      expect(data.sets).toHaveLength(2);
+      // Both rows come back with UUID exercise_ids, never the name string
+      expect(data.sets.every((s: any) => /^[0-9a-f-]{36}$/i.test(s.exercise_id))).toBe(true);
+      const byOrder = [...data.sets].sort((a: any, b: any) => a.order - b.order);
+      expect(byOrder[0].exercise_id).toBe(squatId);
+      expect(byOrder[1].exercise_id).toBe(benchId);
+    });
+
+    it('logSet accepts an exercise name', async () => {
+      const result = await logSet.handler({ exercise_id: 'deadlift', reps: 5, load: 225 }, ctx);
+      const data = parseToolResult(result);
+      expect(data.completed_set_id).toBeDefined();
+
+      const { data: row } = await admin
+        .schema('coachbyte')
+        .from('completed_sets')
+        .select('exercise_id')
+        .eq('completed_set_id', data.completed_set_id)
+        .single();
+      expect(row!.exercise_id).toBe(exerciseMap['Deadlift']);
+    });
+
+    it('getPrs filter accepts an exercise name', async () => {
+      const result = await getPrs.handler({ exercise_id: 'Deadlift' }, ctx);
+      const data = parseToolResult(result);
+      expect(data.prs).toHaveLength(1);
+      expect(data.prs[0].exercise_id).toBe(exerciseMap['Deadlift']);
+      expect(data.prs[0].exercise_name).toBe('Deadlift');
+    });
+
+    it('prefers a user-owned exercise over a global when the name collides', async () => {
+      // Bulgarian Split Squat was inserted earlier as a user-custom exercise.
+      // Add a same-name global to force a collision.
+      await admin.schema('coachbyte').from('exercises').insert({
+        exercise_id: '00000000-0000-0000-0000-00000000b501',
+        user_id: null,
+        name: 'Bulgarian Split Squat',
+      });
+
+      const result = await logSet.handler(
+        { exercise_id: 'Bulgarian Split Squat', reps: 5, load: 40 },
+        ctx,
+      );
+      const data = parseToolResult(result);
+
+      const { data: row } = await admin
+        .schema('coachbyte')
+        .from('completed_sets')
+        .select('exercise_id, exercises(user_id)')
+        .eq('completed_set_id', data.completed_set_id)
+        .single();
+      // Resolver should have picked the user-owned row, not the global
+      expect((row!.exercises as any).user_id).toBe(userId);
+
+      // Cleanup to avoid polluting later tests
+      await admin
+        .schema('coachbyte')
+        .from('exercises')
+        .delete()
+        .eq('exercise_id', '00000000-0000-0000-0000-00000000b501');
+    });
+
+    it('returns a toolError for an unknown exercise name', async () => {
+      const result = await logSet.handler(
+        { exercise_id: 'Frog Jumps Supreme', reps: 10, load: 0 },
+        ctx,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('Unknown exercise');
+    });
+  });
 });

@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError } from '../shared';
 import { loadSpecFromDb, loadSpecInputSchema, loadSpecToDb } from './load-spec';
+import { EXERCISE_REF_DESCRIPTION, resolveExerciseRefs } from './exercise-ref';
 
 export const updateSplit: ToolDefinition = {
   name: 'COACHBYTE_update_split',
@@ -19,7 +20,7 @@ export const updateSplit: ToolDefinition = {
         items: {
           type: 'object',
           properties: {
-            exercise_id: { type: 'string' },
+            exercise_id: { type: 'string', description: EXERCISE_REF_DESCRIPTION },
             target_reps: { type: 'integer' },
             load: loadSpecInputSchema.load,
             relative: loadSpecInputSchema.relative,
@@ -38,15 +39,22 @@ export const updateSplit: ToolDefinition = {
       return toolError('weekday must be between 0 (Sunday) and 6 (Saturday)');
     }
 
+    // Resolve exercise refs (UUID passthrough, names looked up case-insensitive)
+    const refs = (template_sets as any[]).map((ts: any) => ts.exercise_id);
+    const { ids, unresolved } = await resolveExerciseRefs(ctx.supabase, ctx.userId, refs);
+    if (unresolved.length > 0) {
+      return toolError(`Unknown exercise${unresolved.length === 1 ? '' : 's'}: ${unresolved.map((u) => `"${u}"`).join(', ')}`);
+    }
+
     // Translate {load, relative} → DB JSONB shape
     // (ensure_daily_plan reads target_load / target_load_percentage keys)
-    const jsonbTemplateSets = (template_sets as any[]).map((ts) => {
+    const jsonbTemplateSets = (template_sets as any[]).map((ts, i) => {
       const { target_load, target_load_percentage } = loadSpecToDb({
         load: ts.load,
         relative: ts.relative,
       });
       return {
-        exercise_id: ts.exercise_id,
+        exercise_id: ids[i],
         target_reps: ts.target_reps,
         target_load,
         target_load_percentage,

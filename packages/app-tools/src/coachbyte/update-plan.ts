@@ -1,6 +1,7 @@
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError } from '../shared';
 import { loadSpecFromDb, loadSpecInputSchema, loadSpecToDb } from './load-spec';
+import { EXERCISE_REF_DESCRIPTION, resolveExerciseRefs } from './exercise-ref';
 
 export const updatePlan: ToolDefinition = {
   name: 'COACHBYTE_update_plan',
@@ -16,7 +17,7 @@ export const updatePlan: ToolDefinition = {
         items: {
           type: 'object',
           properties: {
-            exercise_id: { type: 'string' },
+            exercise_id: { type: 'string', description: EXERCISE_REF_DESCRIPTION },
             target_reps: { type: 'integer' },
             load: loadSpecInputSchema.load,
             relative: loadSpecInputSchema.relative,
@@ -43,8 +44,15 @@ export const updatePlan: ToolDefinition = {
 
     if (planError || !plan) return toolError('Plan not found or not owned by user');
 
+    // Resolve exercise refs (UUID passthrough, names looked up case-insensitive)
+    const refs = (sets as any[]).map((s: any) => s.exercise_id);
+    const { ids, unresolved } = await resolveExerciseRefs(ctx.supabase, ctx.userId, refs);
+    if (unresolved.length > 0) {
+      return toolError(`Unknown exercise${unresolved.length === 1 ? '' : 's'}: ${unresolved.map((u) => `"${u}"`).join(', ')}`);
+    }
+
     // Translate {load, relative} → {target_load, target_load_percentage}
-    const rows = (sets as any[]).map((s) => {
+    const rows = (sets as any[]).map((s, i) => {
       const { target_load, target_load_percentage } = loadSpecToDb({
         load: s.load,
         relative: s.relative,
@@ -52,7 +60,7 @@ export const updatePlan: ToolDefinition = {
       return {
         plan_id,
         user_id: ctx.userId,
-        exercise_id: s.exercise_id,
+        exercise_id: ids[i],
         target_reps: s.target_reps,
         target_load,
         target_load_percentage,

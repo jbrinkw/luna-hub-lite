@@ -1,5 +1,6 @@
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError, getLogicalDate } from '../shared';
+import { EXERCISE_REF_DESCRIPTION, resolveExerciseRef } from './exercise-ref';
 
 export const logSet: ToolDefinition = {
   name: 'COACHBYTE_log_set',
@@ -7,7 +8,7 @@ export const logSet: ToolDefinition = {
   inputSchema: {
     type: 'object',
     properties: {
-      exercise_id: { type: 'string', description: 'Exercise UUID' },
+      exercise_id: { type: 'string', description: EXERCISE_REF_DESCRIPTION },
       reps: { type: 'integer', description: 'Reps performed' },
       load: { type: 'number', description: 'Load used (lbs)' },
     },
@@ -15,6 +16,14 @@ export const logSet: ToolDefinition = {
   },
   handler: async (args, ctx) => {
     const { exercise_id, reps, load } = args;
+    const { id: resolvedExerciseId, unresolved } = await resolveExerciseRef(
+      ctx.supabase,
+      ctx.userId,
+      exercise_id,
+    );
+    if (unresolved.length > 0 || !resolvedExerciseId) {
+      return toolError(`Unknown exercise: "${exercise_id}"`);
+    }
     const logicalDate = await getLogicalDate(ctx.supabase, ctx.userId);
 
     // Ensure a plan exists for today (need plan_id as FK)
@@ -34,7 +43,7 @@ export const logSet: ToolDefinition = {
       .insert({
         plan_id: planId,
         planned_set_id: null,
-        exercise_id,
+        exercise_id: resolvedExerciseId,
         user_id: ctx.userId,
         actual_reps: reps,
         actual_load: load,

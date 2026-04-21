@@ -90,7 +90,7 @@ After all implementation tasks in a test layer batch (pgTAP, unit, integration, 
 ## Conventions
 
 - Tool namespacing: `COACHBYTE_*`, `CHEFBYTE_*`, `OBSIDIAN_*`, `TODOIST_*`, `HOMEASSISTANT_*`
-- All MCP tools reference entities by UUID, never by name
+- Default to UUID refs on MCP tools. Exception: CoachByte exercise refs (`COACHBYTE_update_split`, `update_plan`, `log_set`, `get_prs`) also accept a case-insensitive exercise name — handler resolves name → UUID before writing, preferring user-owned rows over globals when both match.
 - Tool errors: `isError: true` with descriptive message
 - DB functions: `private` schema, SECURITY DEFINER, `SET search_path = ''`
 - Auth: Supabase Auth (email/password), MCP auth via API key (SHA-256) or OAuth 2.1
