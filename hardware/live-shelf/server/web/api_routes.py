@@ -29,10 +29,17 @@ log = logging.getLogger(__name__)
 
 # Allowlist for the /api/camera/auto-exposure `device` field. The value is
 # passed to v4l2-ctl via subprocess argv, so a permissive value would let a
-# LAN client substitute arbitrary argv tokens. Keep this strict:
-# /dev/video0..9999 and cap the overall length.
-_V4L2_DEVICE_RE = re.compile(r"^/dev/video\d+$")
-_V4L2_DEVICE_MAX_LEN = 32
+# LAN client substitute arbitrary argv tokens. Accept either /dev/videoN
+# (legacy form, max 4 digits — /dev/video9999 is the practical ceiling)
+# or a /dev/v4l/by-id/... symlink (stable across replug — what app.py's
+# resolved ``camera_device`` actually holds when an .env points at the
+# Sunplus rig). By-id names are alphanum + ``_.-`` and driver-generated
+# names cap around ~80 chars; allow up to 128 to be safe.
+_V4L2_DEVICE_RE = re.compile(
+    r"^/dev/video\d{1,4}$"
+    r"|^/dev/v4l/by-id/[A-Za-z0-9_.-]{1,128}$"
+)
+_V4L2_DEVICE_MAX_LEN = 160
 
 
 # Type alias: a config patcher that the host app supplies.
@@ -84,6 +91,7 @@ def make_api_bp(
     delete_product_fn: Optional[DeleteProductFn] = None,
     delete_lot_fn: Optional[DeleteLotFn] = None,
     delete_usage_fn: Optional[DeleteUsageFn] = None,
+    default_camera_device: str = "/dev/video0",
 ) -> Blueprint:
     """Build the JSON API blueprint.
 
@@ -183,7 +191,13 @@ def make_api_bp(
         from ..camera.locked_settings import set_auto_exposure
         body = request.get_json(silent=True) or {}
         enabled = bool(body.get("enabled", True))
-        device = str(body.get("device", "/dev/video0"))
+        # The dashboard button sends no ``device``; fall back to the
+        # live-shelf camera that the host app actually opened (was
+        # hardcoded to ``/dev/video0``, which on this rig is the HD Web
+        # Camera that has NO auto_exposure control — so the toggle
+        # silently no-op'd). ``default_camera_device`` reflects the
+        # resolved ``cfg.camera_device`` passed in from ``create_app``.
+        device = str(body.get("device", default_camera_device))
         # Defence-in-depth: the `device` field is forwarded to v4l2-ctl
         # subprocess argv. Allowlist to /dev/videoN so a LAN client can't
         # smuggle shell metacharacters or argv-splitting spaces through.

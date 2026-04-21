@@ -1208,6 +1208,12 @@ def create_app(
         delete_product_fn=_delete_product,
         delete_lot_fn=_delete_lot,
         delete_usage_fn=_delete_usage,
+        # Default target for the dashboard's auto-exposure toggle. The
+        # button sends no ``device`` field, and the old hardcoded
+        # /dev/video0 default targets the HD Web Camera (no exposure
+        # controls). Pass the resolved live-shelf camera so the button
+        # actually drives the camera that's producing session frames.
+        default_camera_device=cfg.camera_device,
     )
     app.register_blueprint(html_bp)
     app.register_blueprint(api_bp)

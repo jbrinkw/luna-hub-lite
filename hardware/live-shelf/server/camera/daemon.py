@@ -151,6 +151,32 @@ def default_camera_factory(cfg: DaemonConfig) -> _CameraLike:
     cap.set(cv2.CAP_PROP_FRAME_WIDTH, int(w))
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, int(h))
     cap.set(cv2.CAP_PROP_FPS, float(cfg.capture_fps))
+    # Re-apply v4l2 locked settings AFTER cv2.VideoCapture has opened the
+    # device. Some UVC drivers (observed on the SunplusIT USB 2.0 Camera
+    # shipping on this rig) reset ``auto_exposure`` back to Aperture
+    # Priority when the v4l2 capture fd is opened — so the apply-once
+    # call that app.py makes at startup has no effect by the time frames
+    # are actually flowing. Reapplying here (and on every reopen after a
+    # grab-failure cycle) keeps the Manual/166 lock active for the full
+    # life of the capture. Best-effort: failures are logged but don't
+    # stop the capture path. Tests using a fake factory skip this
+    # entirely because they never call the default factory.
+    if cfg.camera_path or cfg.camera_index is not None:
+        device_for_v4l2 = (
+            cfg.camera_path if cfg.camera_path else f"/dev/video{cfg.camera_index}"
+        )
+        try:
+            # Import here (not at module top) to avoid a circular import at
+            # package load time — `locked_settings` is a sibling module.
+            from .locked_settings import apply_locked_settings
+
+            apply_locked_settings(device_for_v4l2)
+        except Exception:  # pragma: no cover - best-effort
+            log.exception(
+                "post-open apply_locked_settings(%s) failed; capture continues "
+                "with whatever the driver defaulted to",
+                device_for_v4l2,
+            )
     return cap
 
 
