@@ -342,6 +342,11 @@ Deno.serve(async (req) => {
         image_url: offProduct.image_url,
         categories: offProduct.categories,
         serving_size: offProduct.serving_size,
+        // Needed by the LiveTrack wizard to compute servings-per-container
+        // when the AI step degrades (suggestion=null). OFF stores this as
+        // a number in grams (total net content), e.g. 566.99 for a 20-oz
+        // pack of tortillas.
+        product_quantity: offProduct.product_quantity,
         nutriments: offProduct.nutriments,
       },
     });

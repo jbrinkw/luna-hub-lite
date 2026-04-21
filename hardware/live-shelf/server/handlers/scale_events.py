@@ -3407,6 +3407,47 @@ class ScaleHandler:
             "stable": stable,
             "uptime_s": uptime_s,
         })
+        # LiveTrack Import: when the container is already sitting stable on
+        # the catch-all scale (no delta event will fire), use the heartbeat
+        # to post the current reading so the wizard unblocks. Gated to the
+        # exact state the wizard waits on — after a successful post the
+        # session flips to 'scale_reading_received' and subsequent heartbeats
+        # see a different snapshot, so we won't double-post.
+        if (
+            stable
+            and self._catch_all_enabled
+            and self._livetrack_poller is not None
+            and 5.0 < weight_g < 5000.0
+        ):
+            shelf = shelf_registry.get_shelf_for_device(
+                device_id, self._shelf_registry
+            )
+            shelf_id = shelf.shelf_id if shelf is not None else None
+            if shelf_id == "catch_all":
+                arm = self._livetrack_poller.snapshot()
+                if arm is not None and arm.get("state") == "waiting_scale":
+                    session_id = str(arm.get("session_id", ""))
+                    client = self._cloud_client
+                    fn = getattr(client, "post_livetrack_session_update", None)
+                    if session_id and callable(fn):
+                        try:
+                            fn(
+                                session_id,
+                                scale_reading_g=weight_g,
+                                scale_reading_ts=now_iso_utc_ms(),
+                                state="scale_reading_received",
+                            )
+                            log.info(
+                                "livetrack: heartbeat-driven scale reading posted "
+                                "for session=%s (weight=%.2fg)",
+                                session_id, weight_g,
+                            )
+                        except Exception:  # pragma: no cover - defensive
+                            log.exception(
+                                "livetrack: failed to post heartbeat-driven scale "
+                                "reading for session=%s",
+                                session_id,
+                            )
         return {"ok": True}, 200
 
 

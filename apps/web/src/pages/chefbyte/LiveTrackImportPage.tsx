@@ -94,11 +94,17 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
     case 'scan':
       return { kind: 'analyzing', barcode: action.barcode };
     case 'product_loaded':
+      // Default to "full + sealed" — the wizard is optimized for new-item
+      // imports where the container hasn't been opened yet. User can
+      // uncheck if they're importing a partial container. Applies even
+      // when net_weight_g is null — the UI still shows the radio as
+      // selected but the auto-tare button stays disabled (see hasNet
+      // guard on the render side).
       return {
         kind: 'product_loaded',
         product: action.product,
         nutrition: action.nutrition,
-        isFullContainer: (action.product.net_weight_g ?? null) != null,
+        isFullContainer: true,
       };
     case 'set_nutrition':
       if (state.kind !== 'product_loaded' && state.kind !== 'review') return state;
@@ -329,20 +335,49 @@ export function LiveTrackImportPage() {
           const s = efData?.suggestion;
           const off = efData?.off;
           const name = s?.name || off?.product_name || `Product (${barcode})`;
+          // Fallback layer: when analyze-product's AI step fails (timeout,
+          // rate limit, transient), `suggestion` is null but OFF itself
+          // often has the nutrition we need. Read per-serving values from
+          // `off.nutriments` — OFF publishes calories as `energy-kcal_*`.
+          // Per-serving preferred, per-100g as a last resort (produces a
+          // reasonable-ish number the user can correct in the keypad).
+          const n = off?.nutriments ?? {};
+          const num = (v: unknown): number | null => {
+            if (v == null) return null;
+            const x = Number(v);
+            return Number.isFinite(x) ? x : null;
+          };
+          const offCals = num(n['energy-kcal_serving']) ?? num(n['energy-kcal_100g']);
+          const offProt = num(n['proteins_serving']) ?? num(n['proteins_100g']);
+          const offCarb = num(n['carbohydrates_serving']) ?? num(n['carbohydrates_100g']);
+          const offFat = num(n['fat_serving']) ?? num(n['fat_100g']);
+          // Derive servings_per_container from OFF when possible:
+          //   product_quantity (g) / serving_size_g (parsed from "1 tortilla (71 g)")
+          // Round, clamp to [1, 999]. Fall back to 1 if nothing parseable.
+          let offSpc: number | null = null;
+          const servingSize = off?.serving_size;
+          const q = num(off?.product_quantity);
+          if (servingSize && q) {
+            const m = String(servingSize).match(/\((\d+(?:\.\d+)?)\s*g\)/i);
+            const gPerServing = m ? Number(m[1]) : num(n['serving_size_value']);
+            if (gPerServing && gPerServing > 0) {
+              const spc = Math.round(q / gPerServing);
+              if (Number.isFinite(spc) && spc >= 1 && spc <= 999) offSpc = spc;
+            }
+          }
           // chefbyte.products declares macros as NUMERIC NOT NULL DEFAULT 0,
           // so we must NOT pass explicit nulls here — they override the
-          // DEFAULT and fail the NOT NULL check. When AI has no value we
-          // default to 0 (user can correct in the keypad form).
+          // DEFAULT and fail the NOT NULL check. Use AI → OFF → 0 in order.
           const productFields = {
             barcode,
             name,
             description: s?.description ?? null,
             is_placeholder: false,
-            servings_per_container: s?.servings_per_container ?? 1,
-            calories_per_serving: s?.calories_per_serving ?? 0,
-            carbs_per_serving: s?.carbs_per_serving ?? 0,
-            fat_per_serving: s?.fat_per_serving ?? 0,
-            protein_per_serving: s?.protein_per_serving ?? 0,
+            servings_per_container: s?.servings_per_container ?? offSpc ?? 1,
+            calories_per_serving: s?.calories_per_serving ?? offCals ?? 0,
+            carbs_per_serving: s?.carbs_per_serving ?? offCarb ?? 0,
+            fat_per_serving: s?.fat_per_serving ?? offFat ?? 0,
+            protein_per_serving: s?.protein_per_serving ?? offProt ?? 0,
             default_shelf_life_days: s?.default_shelf_life_days ?? null,
             net_weight_g: off?.product_quantity ?? null,
             container_type: null,
