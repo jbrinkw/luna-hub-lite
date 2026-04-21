@@ -1,0 +1,817 @@
+/**
+ * EventViewerPage (`/chef/events`)
+ *
+ * Lists Pi-emitted classifier events (from ``chefbyte.shelf_event_log``)
+ * LEFT JOIN'd to ``chefbyte.event_overrides`` so the UI can render the
+ * current override state. Each row:
+ *   - product name + event time (from shelf_event_log.payload.occurred_at)
+ *   - before/after thumbnails streamed directly from the Pi on the LAN
+ *   - stock + macro delta
+ *   - toggle macro logging on/off
+ *   - void button (soft delete; row stays, backs out stock + macros)
+ *   - expand to edit: servings-primary form with custom macros disclosure
+ *
+ * Images are loaded from http://<lan_ip>:8000/event/<pi_event_id>/before.jpg
+ * — zero cloud storage cost. If any image 404s or times out we flip a
+ * banner to "Pi offline — images unavailable". On-LAN only; out-of-LAN
+ * users get the same banner.
+ *
+ * Realtime: subscribes to chefbyte.event_overrides postgres_changes and
+ * invalidates the events query key so edits in another tab show up
+ * immediately.
+ */
+
+import { useState, useMemo, Fragment } from 'react';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import {
+  ChevronDown,
+  ChevronUp,
+  Ban,
+  Check,
+  ImageOff,
+  RotateCcw,
+} from 'lucide-react';
+import { ChefLayout } from '@/components/chefbyte/ChefLayout';
+import { ListSkeleton } from '@/components/ui/Skeleton';
+import { Alert } from '@/components/ui/Alert';
+import { useAuth } from '@/shared/auth/AuthProvider';
+import { chefbyte, supabase } from '@/shared/supabase';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+
+/* ------------------------------------------------------------------ */
+/*  Types                                                              */
+/* ------------------------------------------------------------------ */
+
+interface EventRow {
+  event_id: string;
+  client_event_id: string;
+  pi_event_id: string | null;
+  applied: boolean;
+  reason: string | null;
+  created_at: string;
+  payload: {
+    scale_id?: string;
+    kind?: string;
+    event_kind?: string;
+    product_id?: string;
+    delta_g?: number;
+    occurred_at?: string;
+  } | null;
+}
+
+interface OverrideRow {
+  override_id: string;
+  client_event_id: string;
+  stock_qty_override: number | null;
+  macros_servings_override: number | null;
+  calories_override: number | null;
+  protein_override: number | null;
+  carbs_override: number | null;
+  fat_override: number | null;
+  macro_logging_enabled: boolean;
+  is_voided: boolean;
+  updated_at: string;
+}
+
+interface ProductLite {
+  product_id: string;
+  name: string;
+  net_weight_g: number | null;
+  servings_per_container: number | null;
+  calories_per_serving: number | null;
+  carbs_per_serving: number | null;
+  protein_per_serving: number | null;
+  fat_per_serving: number | null;
+}
+
+interface DeviceLite {
+  device_id: string;
+  lan_ip: string | null;
+  last_heartbeat_ts: string | null;
+}
+
+type RangeFilter = 'today' | 'week' | 'all';
+
+/* ------------------------------------------------------------------ */
+/*  Range helpers (exported for tests)                                 */
+/* ------------------------------------------------------------------ */
+
+export function rangeCutoff(range: RangeFilter, now: Date = new Date()): string | null {
+  if (range === 'all') return null;
+  const d = new Date(now);
+  if (range === 'today') {
+    d.setHours(0, 0, 0, 0);
+  } else {
+    d.setDate(d.getDate() - 7);
+  }
+  return d.toISOString();
+}
+
+/* ------------------------------------------------------------------ */
+/*  Derived row view model                                              */
+/* ------------------------------------------------------------------ */
+
+interface EventView {
+  event: EventRow;
+  override: OverrideRow | null;
+  product: ProductLite | null;
+  // Effective values after applying override (if any) — what the UI shows.
+  effectiveServings: number;
+  effectiveCalories: number;
+  effectiveProtein: number;
+  effectiveCarbs: number;
+  effectiveFat: number;
+  effectiveStockDeltaContainers: number;
+  isVoided: boolean;
+  macroLoggingEnabled: boolean;
+}
+
+function deriveEventView(
+  event: EventRow,
+  override: OverrideRow | null,
+  product: ProductLite | null,
+): EventView {
+  const payload = event.payload ?? {};
+  const deltaG = Number(payload.delta_g ?? 0);
+  const netG = product?.net_weight_g ?? null;
+  const svgPer = product?.servings_per_container ?? 0;
+  const baseDeltaC = netG && netG > 0 ? deltaG / netG : 0;
+
+  const overrideServings = override?.macros_servings_override ?? null;
+  const overrideStockC = override?.stock_qty_override ?? null;
+  const isVoided = Boolean(override?.is_voided);
+  const macroLoggingEnabled = override?.macro_logging_enabled ?? true;
+
+  const effectiveStockDeltaContainers = isVoided ? 0 : overrideStockC ?? baseDeltaC;
+  const effectiveServings =
+    isVoided || !macroLoggingEnabled
+      ? 0
+      : overrideServings ?? Math.abs(effectiveStockDeltaContainers) * svgPer;
+  const perServingCal = product?.calories_per_serving ?? 0;
+  const perServingP = product?.protein_per_serving ?? 0;
+  const perServingC = product?.carbs_per_serving ?? 0;
+  const perServingF = product?.fat_per_serving ?? 0;
+
+  const effectiveCalories = override?.calories_override ?? effectiveServings * perServingCal;
+  const effectiveProtein = override?.protein_override ?? effectiveServings * perServingP;
+  const effectiveCarbs = override?.carbs_override ?? effectiveServings * perServingC;
+  const effectiveFat = override?.fat_override ?? effectiveServings * perServingF;
+
+  return {
+    event,
+    override,
+    product,
+    effectiveServings,
+    effectiveCalories,
+    effectiveProtein,
+    effectiveCarbs,
+    effectiveFat,
+    effectiveStockDeltaContainers,
+    isVoided,
+    macroLoggingEnabled,
+  };
+}
+
+/* ================================================================== */
+/*  EventViewerPage                                                    */
+/* ================================================================== */
+
+export function EventViewerPage() {
+  const { user } = useAuth();
+  const queryClient = useQueryClient();
+
+  const [range, setRange] = useState<RangeFilter>('week');
+  const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
+  const [piOffline, setPiOffline] = useState(false);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const eventsKey = ['event-viewer-events', user!.id, range] as const;
+  const overridesKey = ['event-viewer-overrides', user!.id] as const;
+  const productsKey = ['event-viewer-products', user!.id] as const;
+  const devicesKey = ['event-viewer-devices', user!.id] as const;
+
+  /* ---- Events (filtered classifier events) ---- */
+  const {
+    data: events = [],
+    isLoading: eventsLoading,
+    error: eventsErr,
+  } = useQuery({
+    queryKey: eventsKey,
+    queryFn: async () => {
+      let q = chefbyte()
+        .from('shelf_event_log')
+        .select('event_id,client_event_id,pi_event_id,applied,reason,created_at,payload')
+        .eq('user_id', user!.id)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      const cutoff = rangeCutoff(range);
+      if (cutoff) q = q.gte('created_at', cutoff);
+      const { data, error } = await q;
+      if (error) throw error;
+      // Only classifier events: payload.product_id present.
+      return (data ?? []).filter((r: EventRow) => !!r.payload?.product_id);
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+  });
+
+  /* ---- Overrides ---- */
+  const { data: overrides = [] } = useQuery({
+    queryKey: overridesKey,
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
+        .from('event_overrides')
+        .select(
+          'override_id,client_event_id,stock_qty_override,macros_servings_override,calories_override,protein_override,carbs_override,fat_override,macro_logging_enabled,is_voided,updated_at',
+        )
+        .eq('user_id', user!.id);
+      if (error) throw error;
+      return (data ?? []) as OverrideRow[];
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+  });
+
+  /* ---- Products (for name + macros) ---- */
+  const { data: products = [] } = useQuery({
+    queryKey: productsKey,
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
+        .from('products')
+        .select(
+          'product_id,name,net_weight_g,servings_per_container,calories_per_serving,carbs_per_serving,protein_per_serving,fat_per_serving',
+        )
+        .eq('user_id', user!.id);
+      if (error) throw error;
+      return (data ?? []) as ProductLite[];
+    },
+    enabled: !!user,
+    staleTime: 5 * 60_000,
+  });
+
+  /* ---- Pi device LAN IP (first fresh-heartbeat device) ---- */
+  const { data: devices = [] } = useQuery({
+    queryKey: devicesKey,
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
+        .from('live_shelf_devices')
+        .select('device_id,lan_ip,last_heartbeat_ts')
+        .eq('user_id', user!.id);
+      if (error) throw error;
+      return (data ?? []) as DeviceLite[];
+    },
+    enabled: !!user,
+    staleTime: 60_000,
+  });
+
+  /* ---- Realtime: react to override changes ---- */
+  useRealtimeInvalidation('event-viewer', [
+    { schema: 'chefbyte', table: 'event_overrides', queryKeys: [overridesKey] },
+    { schema: 'chefbyte', table: 'shelf_event_log', queryKeys: [eventsKey] },
+  ]);
+
+  /* ---- Merge events + overrides + products into view rows ---- */
+  const overridesByClient = useMemo(() => {
+    const map: Record<string, OverrideRow> = {};
+    for (const o of overrides) map[o.client_event_id] = o;
+    return map;
+  }, [overrides]);
+
+  const productsById = useMemo(() => {
+    const map: Record<string, ProductLite> = {};
+    for (const p of products) map[p.product_id] = p;
+    return map;
+  }, [products]);
+
+  const rows: EventView[] = useMemo(
+    () =>
+      events.map((ev: EventRow) =>
+        deriveEventView(
+          ev,
+          overridesByClient[ev.client_event_id] ?? null,
+          ev.payload?.product_id ? productsById[ev.payload.product_id] ?? null : null,
+        ),
+      ),
+    [events, overridesByClient, productsById],
+  );
+
+  /* ---- Pi LAN IP (most recently heartbeated device with a valid IP) ---- */
+  const lanIp = useMemo(() => {
+    const fresh = [...devices]
+      .filter((d) => d.lan_ip && d.lan_ip.trim() !== '')
+      .sort((a, b) => {
+        const ta = a.last_heartbeat_ts ? new Date(a.last_heartbeat_ts).getTime() : 0;
+        const tb = b.last_heartbeat_ts ? new Date(b.last_heartbeat_ts).getTime() : 0;
+        return tb - ta;
+      });
+    return fresh[0]?.lan_ip ?? null;
+  }, [devices]);
+
+  /* ---- Apply-override mutation ---- */
+  const applyOverride = useMutation({
+    mutationFn: async (args: {
+      clientEventId: string;
+      stockQty?: number | null;
+      servings?: number | null;
+      calories?: number | null;
+      protein?: number | null;
+      carbs?: number | null;
+      fat?: number | null;
+      macroLoggingEnabled?: boolean;
+      isVoided?: boolean;
+    }) => {
+      const { data, error } = await (supabase as any).schema('chefbyte').rpc('apply_event_override', {
+        p_client_event_id: args.clientEventId,
+        p_stock_qty_override: args.stockQty ?? null,
+        p_macros_servings_override: args.servings ?? null,
+        p_calories_override: args.calories ?? null,
+        p_protein_override: args.protein ?? null,
+        p_carbs_override: args.carbs ?? null,
+        p_fat_override: args.fat ?? null,
+        p_macro_logging_enabled: args.macroLoggingEnabled ?? true,
+        p_is_voided: args.isVoided ?? false,
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: overridesKey });
+      queryClient.invalidateQueries({ queryKey: eventsKey });
+      // Cascade: macro totals + inventory will want to re-render.
+      queryClient.invalidateQueries({ queryKey: ['daily-macros', user!.id] });
+      queryClient.invalidateQueries({ queryKey: ['stock-lots', user!.id] });
+    },
+    onError: (e: any) => {
+      setErrorMsg(e?.message ?? 'Failed to save override');
+    },
+  });
+
+  /* ---------------------------------------------------------------- */
+  /*  Render                                                          */
+  /* ---------------------------------------------------------------- */
+
+  return (
+    <ChefLayout title="Events">
+      <div className="space-y-4" data-testid="event-viewer-page">
+        <header className="flex items-center justify-between flex-wrap gap-3">
+          <h1 className="text-2xl font-bold text-text">Event Viewer</h1>
+          <div className="flex items-center gap-2" role="tablist" aria-label="Range filter">
+            {(['today', 'week', 'all'] as RangeFilter[]).map((r) => (
+              <button
+                key={r}
+                data-testid={`range-${r}`}
+                onClick={() => setRange(r)}
+                className={[
+                  'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                  range === r
+                    ? 'bg-chef-accent text-white shadow-inner'
+                    : 'bg-surface text-text-secondary border border-border hover:bg-surface-hover',
+                ].join(' ')}
+                aria-pressed={range === r}
+              >
+                {r === 'today' ? 'Today' : r === 'week' ? 'This week' : 'All time'}
+              </button>
+            ))}
+          </div>
+        </header>
+
+        {piOffline && (
+          <Alert variant="warning" data-testid="pi-offline-banner">
+            Pi offline — images unavailable. Classifier events still editable.
+          </Alert>
+        )}
+        {!lanIp && !piOffline && (
+          <Alert variant="info" data-testid="no-lan-ip-banner">
+            No Pi LAN IP on file — set one in Settings → Scales to see event images.
+          </Alert>
+        )}
+        {errorMsg && (
+          <Alert variant="error" data-testid="error-banner" onDismiss={() => setErrorMsg(null)}>
+            {errorMsg}
+          </Alert>
+        )}
+        {eventsErr && (
+          <Alert variant="error" data-testid="events-load-error">
+            Failed to load events: {(eventsErr as Error).message}
+          </Alert>
+        )}
+
+        {eventsLoading ? (
+          <ListSkeleton count={6} />
+        ) : rows.length === 0 ? (
+          <div className="text-center py-16 text-text-tertiary" data-testid="no-events">
+            No classifier events in this range yet.
+          </div>
+        ) : (
+          <ul className="space-y-3" data-testid="event-list">
+            {rows.map((row) => (
+              <EventCard
+                key={row.event.event_id}
+                row={row}
+                lanIp={lanIp}
+                onImageError={() => setPiOffline(true)}
+                expanded={expandedEventId === row.event.event_id}
+                onToggleExpanded={() =>
+                  setExpandedEventId((id) => (id === row.event.event_id ? null : row.event.event_id))
+                }
+                onSave={(args) =>
+                  applyOverride.mutate({
+                    clientEventId: row.event.client_event_id,
+                    ...args,
+                  })
+                }
+                onToggleMacroLogging={() =>
+                  applyOverride.mutate({
+                    clientEventId: row.event.client_event_id,
+                    macroLoggingEnabled: !row.macroLoggingEnabled,
+                    isVoided: row.isVoided,
+                  })
+                }
+                onVoid={() =>
+                  applyOverride.mutate({
+                    clientEventId: row.event.client_event_id,
+                    isVoided: true,
+                  })
+                }
+                onUnvoid={() =>
+                  applyOverride.mutate({
+                    clientEventId: row.event.client_event_id,
+                    isVoided: false,
+                    macroLoggingEnabled: row.macroLoggingEnabled,
+                  })
+                }
+                saving={applyOverride.isPending}
+              />
+            ))}
+          </ul>
+        )}
+      </div>
+    </ChefLayout>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  EventCard                                                          */
+/* ------------------------------------------------------------------ */
+
+interface EventCardProps {
+  row: EventView;
+  lanIp: string | null;
+  onImageError: () => void;
+  expanded: boolean;
+  onToggleExpanded: () => void;
+  onSave: (args: {
+    stockQty?: number | null;
+    servings?: number | null;
+    calories?: number | null;
+    protein?: number | null;
+    carbs?: number | null;
+    fat?: number | null;
+    macroLoggingEnabled?: boolean;
+    isVoided?: boolean;
+  }) => void;
+  onToggleMacroLogging: () => void;
+  onVoid: () => void;
+  onUnvoid: () => void;
+  saving: boolean;
+}
+
+function EventCard(props: EventCardProps) {
+  const { row, lanIp, onImageError, expanded, onToggleExpanded, onSave, onToggleMacroLogging, onVoid, onUnvoid, saving } = props;
+  const { event, product, isVoided, macroLoggingEnabled } = row;
+  const occurredAt = event.payload?.occurred_at ?? event.created_at;
+  const piEventId = event.pi_event_id;
+  const imgBase =
+    lanIp && piEventId ? `http://${lanIp}:8000/event/${encodeURIComponent(piEventId)}` : null;
+
+  return (
+    <li
+      className={[
+        'bg-surface border rounded-xl overflow-hidden transition-colors',
+        isVoided ? 'border-border opacity-60' : 'border-border',
+      ].join(' ')}
+      data-testid={`event-row-${event.client_event_id}`}
+    >
+      {/* Header row */}
+      <div className="flex items-start gap-3 p-4">
+        {/* Images */}
+        <div className="flex gap-2 shrink-0">
+          {imgBase ? (
+            <Fragment>
+              <img
+                src={`${imgBase}/before.jpg`}
+                alt="Before"
+                loading="lazy"
+                className="w-16 h-16 rounded-lg object-cover border border-border bg-surface-sunken"
+                onError={onImageError}
+                data-testid="event-image-before"
+              />
+              <img
+                src={`${imgBase}/after.jpg`}
+                alt="After"
+                loading="lazy"
+                className="w-16 h-16 rounded-lg object-cover border border-border bg-surface-sunken"
+                onError={onImageError}
+                data-testid="event-image-after"
+              />
+            </Fragment>
+          ) : (
+            <div
+              className="w-16 h-16 rounded-lg border border-border bg-surface-sunken flex items-center justify-center text-text-tertiary"
+              data-testid="event-image-placeholder"
+            >
+              <ImageOff className="h-5 w-5" />
+            </div>
+          )}
+        </div>
+
+        {/* Summary */}
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="font-semibold text-text truncate" data-testid="event-product-name">
+              {product?.name ?? 'Unknown product'}
+            </span>
+            {isVoided && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full bg-danger-subtle text-danger-text"
+                data-testid="voided-badge"
+              >
+                Voided
+              </span>
+            )}
+            {!macroLoggingEnabled && !isVoided && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full bg-warning-subtle text-warning-text"
+                data-testid="macros-off-badge"
+              >
+                Macros off
+              </span>
+            )}
+          </div>
+          <div className="text-xs text-text-tertiary mt-0.5">
+            {new Date(occurredAt).toLocaleString()} · {event.payload?.event_kind ?? '?'}
+          </div>
+          <div className="text-sm text-text-secondary mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
+            <span data-testid="event-stock-delta">
+              Stock: {row.effectiveStockDeltaContainers.toFixed(1)} ctn
+            </span>
+            <span data-testid="event-cal">
+              {row.effectiveCalories.toFixed(0)} cal
+            </span>
+            <span data-testid="event-pcf">
+              P {row.effectiveProtein.toFixed(0)}g · C {row.effectiveCarbs.toFixed(0)}g · F{' '}
+              {row.effectiveFat.toFixed(0)}g
+            </span>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex flex-col items-end gap-1.5 shrink-0">
+          <button
+            onClick={onToggleMacroLogging}
+            disabled={saving || isVoided}
+            data-testid="toggle-macro-logging-btn"
+            className={[
+              'px-3 py-1 rounded-lg text-xs font-medium border transition-colors',
+              macroLoggingEnabled
+                ? 'bg-success-subtle text-success-text border-success-subtle'
+                : 'bg-surface-sunken text-text-tertiary border-border',
+              saving || isVoided ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-80',
+            ].join(' ')}
+            aria-pressed={macroLoggingEnabled}
+          >
+            <Check className="inline h-3 w-3 mr-1" />
+            {macroLoggingEnabled ? 'Macros on' : 'Macros off'}
+          </button>
+          {isVoided ? (
+            <button
+              onClick={onUnvoid}
+              disabled={saving}
+              data-testid="unvoid-btn"
+              className="px-3 py-1 rounded-lg text-xs font-medium bg-surface text-text-secondary border border-border hover:bg-surface-hover disabled:opacity-50 flex items-center gap-1"
+            >
+              <RotateCcw className="h-3 w-3" /> Un-void
+            </button>
+          ) : (
+            <button
+              onClick={onVoid}
+              disabled={saving}
+              data-testid="void-btn"
+              className="px-3 py-1 rounded-lg text-xs font-medium bg-danger-subtle text-danger-text border border-danger-subtle hover:opacity-80 disabled:opacity-50 flex items-center gap-1"
+            >
+              <Ban className="h-3 w-3" /> Void
+            </button>
+          )}
+          <button
+            onClick={onToggleExpanded}
+            data-testid="toggle-edit-btn"
+            className="px-3 py-1 rounded-lg text-xs font-medium bg-surface text-text-secondary border border-border hover:bg-surface-hover flex items-center gap-1"
+            aria-expanded={expanded}
+          >
+            {expanded ? (
+              <Fragment>
+                Hide <ChevronUp className="h-3 w-3" />
+              </Fragment>
+            ) : (
+              <Fragment>
+                Edit <ChevronDown className="h-3 w-3" />
+              </Fragment>
+            )}
+          </button>
+        </div>
+      </div>
+
+      {/* Edit drawer */}
+      {expanded && !isVoided && (
+        <EditorPanel row={row} onSave={onSave} saving={saving} />
+      )}
+    </li>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  EditorPanel — servings-primary + custom-macros disclosure          */
+/* ------------------------------------------------------------------ */
+
+interface EditorPanelProps {
+  row: EventView;
+  onSave: (args: {
+    stockQty?: number | null;
+    servings?: number | null;
+    calories?: number | null;
+    protein?: number | null;
+    carbs?: number | null;
+    fat?: number | null;
+    macroLoggingEnabled?: boolean;
+    isVoided?: boolean;
+  }) => void;
+  saving: boolean;
+}
+
+function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
+  const [servings, setServings] = useState<string>(
+    row.effectiveServings.toFixed(2).replace(/\.?0+$/, ''),
+  );
+  const [stockQty, setStockQty] = useState<string>(
+    row.effectiveStockDeltaContainers.toFixed(3).replace(/\.?0+$/, ''),
+  );
+  const [customOpen, setCustomOpen] = useState(false);
+  const [cal, setCal] = useState<string>('');
+  const [prot, setProt] = useState<string>('');
+  const [carb, setCarb] = useState<string>('');
+  const [fat, setFat] = useState<string>('');
+
+  const svgPer = row.product?.servings_per_container ?? 0;
+  const perCal = row.product?.calories_per_serving ?? 0;
+  const perP = row.product?.protein_per_serving ?? 0;
+  const perC = row.product?.carbs_per_serving ?? 0;
+  const perF = row.product?.fat_per_serving ?? 0;
+
+  // Auto-derived macros from servings input (only if customOpen is false).
+  const servingsNum = Number(servings) || 0;
+  const derivedCal = servingsNum * perCal;
+  const derivedP = servingsNum * perP;
+  const derivedC = servingsNum * perC;
+  const derivedF = servingsNum * perF;
+
+  const parseNum = (s: string): number | null => {
+    if (s.trim() === '') return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  };
+
+  const handleSave = () => {
+    onSave({
+      stockQty: parseNum(stockQty),
+      servings: parseNum(servings),
+      calories: customOpen ? parseNum(cal) : null,
+      protein: customOpen ? parseNum(prot) : null,
+      carbs: customOpen ? parseNum(carb) : null,
+      fat: customOpen ? parseNum(fat) : null,
+      macroLoggingEnabled: row.macroLoggingEnabled,
+      isVoided: false,
+    });
+  };
+
+  return (
+    <div
+      className="border-t border-border p-4 bg-surface-sunken space-y-4"
+      data-testid="edit-panel"
+    >
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Servings */}
+        <label className="block text-sm font-medium text-text-secondary">
+          Servings consumed
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={servings}
+            onChange={(e) => setServings(e.target.value)}
+            data-testid="servings-input"
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text"
+          />
+          <div className="text-xs text-text-tertiary mt-1">
+            Product: {svgPer || 0} svg/ctn
+          </div>
+        </label>
+        {/* Stock override */}
+        <label className="block text-sm font-medium text-text-secondary">
+          Stock delta (containers)
+          <input
+            type="number"
+            step="0.001"
+            value={stockQty}
+            onChange={(e) => setStockQty(e.target.value)}
+            data-testid="stock-qty-input"
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text"
+          />
+          <div className="text-xs text-text-tertiary mt-1">
+            Negative = consumed, positive = added
+          </div>
+        </label>
+      </div>
+
+      {/* Derived macros summary */}
+      <div className="text-sm text-text-secondary">
+        Derived macros: <span data-testid="derived-cal">{derivedCal.toFixed(0)}</span> cal · P{' '}
+        {derivedP.toFixed(0)}g · C {derivedC.toFixed(0)}g · F {derivedF.toFixed(0)}g
+      </div>
+
+      {/* Custom macros disclosure */}
+      <details
+        className="rounded-lg border border-border bg-surface"
+        open={customOpen}
+        onToggle={(e) => setCustomOpen((e.target as HTMLDetailsElement).open)}
+      >
+        <summary
+          className="px-3 py-2 text-sm font-medium cursor-pointer select-none text-text-secondary"
+          data-testid="custom-macros-disclosure"
+        >
+          Custom macros (override derived values)
+        </summary>
+        <div className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 border-t border-border">
+          <label className="text-xs text-text-tertiary">
+            Calories
+            <input
+              type="number"
+              step="0.01"
+              value={cal}
+              onChange={(e) => setCal(e.target.value)}
+              placeholder={derivedCal.toFixed(1)}
+              data-testid="cal-input"
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+            />
+          </label>
+          <label className="text-xs text-text-tertiary">
+            Protein (g)
+            <input
+              type="number"
+              step="0.01"
+              value={prot}
+              onChange={(e) => setProt(e.target.value)}
+              placeholder={derivedP.toFixed(1)}
+              data-testid="prot-input"
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+            />
+          </label>
+          <label className="text-xs text-text-tertiary">
+            Carbs (g)
+            <input
+              type="number"
+              step="0.01"
+              value={carb}
+              onChange={(e) => setCarb(e.target.value)}
+              placeholder={derivedC.toFixed(1)}
+              data-testid="carb-input"
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+            />
+          </label>
+          <label className="text-xs text-text-tertiary">
+            Fat (g)
+            <input
+              type="number"
+              step="0.01"
+              value={fat}
+              onChange={(e) => setFat(e.target.value)}
+              placeholder={derivedF.toFixed(1)}
+              data-testid="fat-input"
+              className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+            />
+          </label>
+        </div>
+      </details>
+
+      <div className="flex justify-end">
+        <button
+          onClick={handleSave}
+          disabled={saving}
+          data-testid="save-override-btn"
+          className="px-4 py-2 rounded-lg text-sm font-semibold bg-chef-accent text-white hover:opacity-90 disabled:opacity-50 transition-opacity"
+        >
+          {saving ? 'Saving…' : 'Save override'}
+        </button>
+      </div>
+    </div>
+  );
+}

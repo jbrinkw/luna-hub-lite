@@ -18,6 +18,7 @@ const tabItems: TabItem[] = [
   { label: 'Recipes', value: '/chef/recipes', href: '/chef/recipes' },
   { label: 'Shopping', value: '/chef/shopping', href: '/chef/shopping' },
   { label: 'Inventory', value: '/chef/inventory', href: '/chef/inventory' },
+  { label: 'Events', value: '/chef/events', href: '/chef/events' },
   { label: 'Settings', value: '/chef/settings', href: '/chef/settings' },
 ];
 
