@@ -90,17 +90,46 @@ async function authenticate(supabase: SupabaseClient, apiKey: string | null): Pr
 
 // ─── Route handlers ──────────────────────────────────────────────────
 
-async function handleCatalog(supabase: SupabaseClient, device: Device): Promise<Response> {
+async function handleCatalog(
+  supabase: SupabaseClient,
+  device: Device,
+  url: URL,
+): Promise<Response> {
   const userId = device.user_id;
 
+  // Delta-sync support: when the Pi's product_sync_poller sends
+  // ?updated_since=<iso8601>, narrow the products query to rows touched
+  // since that timestamp. The other three lists (stock/pairings/locations)
+  // are small + change constantly via scale events — no delta filter.
+  // An invalid timestamp silently falls back to a full pull rather than
+  // 400'ing; a stuck poller re-establishing its watermark is less painful
+  // than a hard error at startup.
+  const updatedSinceRaw = url.searchParams.get('updated_since');
+  const updatedSince =
+    updatedSinceRaw && isValidIsoTimestamp(updatedSinceRaw) ? updatedSinceRaw : null;
+  if (updatedSinceRaw && !updatedSince) {
+    console.warn('shelf-ingest: /catalog ignoring invalid updated_since', {
+      value: updatedSinceRaw,
+      device_id: device.device_id,
+    });
+  }
+
+  // Projection includes updated_at so the Pi advances its high-watermark
+  // to the max(updated_at) it just received — no reliance on the Pi's
+  // own wall-clock (which may drift vs cloud).
+  let productsQuery = supabase
+    .schema('chefbyte')
+    .from('products')
+    .select(
+      'product_id, name, barcode, brand, variant, net_weight_g, gross_weight_g, tare_weight_g, serving_weight_g, container_type, unit_type, density_g_per_ml, certified, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, updated_at',
+    )
+    .eq('user_id', userId);
+  if (updatedSince) {
+    productsQuery = productsQuery.gt('updated_at', updatedSince);
+  }
+
   const [productsRes, stockRes, pairingsRes, locationsRes] = await Promise.all([
-    supabase
-      .schema('chefbyte')
-      .from('products')
-      .select(
-        'product_id, name, barcode, brand, variant, net_weight_g, gross_weight_g, tare_weight_g, serving_weight_g, container_type, unit_type, density_g_per_ml, certified, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving',
-      )
-      .eq('user_id', userId),
+    productsQuery,
     supabase
       .schema('chefbyte')
       .from('stock_lots')
@@ -504,7 +533,7 @@ Deno.serve(async (req) => {
     const device = authRes.device;
 
     if (req.method === 'GET' && leaf === 'catalog') {
-      return await handleCatalog(supabase, device);
+      return await handleCatalog(supabase, device, url);
     }
 
     if (req.method === 'POST') {
