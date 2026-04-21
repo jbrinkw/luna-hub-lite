@@ -1015,15 +1015,25 @@ export function ScannerPage() {
             </div>
           )}
 
-          {/* Screen value */}
+          {/* Screen value — mirrors whichever keypad target is active.
+               When a nutrition field is focused the big display shows that
+               field's value so users can see what they're typing at read-
+               able size instead of squinting at the tiny inline input.
+               Click to snap back to the quantity ('screen') target. */}
           <div
             data-testid="screen-value"
             onClick={() => focusField('screen')}
-            className={`px-3 py-3 bg-surface border-2 rounded-md text-right text-2xl font-bold font-mono cursor-pointer transition-all ${
-              activeField === 'screen' ? 'border-primary ring-2 ring-primary/40' : 'border-border'
-            }`}
+            className={`relative px-3 py-3 bg-surface border-2 rounded-md text-right text-2xl font-bold font-mono cursor-pointer transition-all border-primary ring-2 ring-primary/40`}
           >
-            {screenValue}
+            {activeField !== 'screen' && (
+              <span
+                data-testid="screen-field-label"
+                className="absolute top-1 left-2 text-[0.65rem] font-semibold uppercase tracking-wider text-primary"
+              >
+                {activeField === 'servingsPerContainer' ? 'Srv/Ctn' : activeField}
+              </span>
+            )}
+            {activeField === 'screen' ? screenValue : nutrition[activeField] || '0'}
           </div>
 
           {/* Nutrition editor (purchase mode only) */}
