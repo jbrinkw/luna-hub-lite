@@ -18,11 +18,15 @@
  *     silently skips the refetch.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { seedFullAndLogin, seedChefByteData } from '../helpers/seed';
+import { seedFullAndLogin, seedChefByteData, seedUser } from '../helpers/seed';
 import { admin } from '../helpers/constants';
 
 /** Install a browser-side probe that records postgres_changes events. */
-async function installProbe(page: Page, userId: string, table: 'stock_lots' | 'products') {
+async function installProbe(
+  page: Page,
+  userId: string,
+  table: 'stock_lots' | 'products' | 'scale_pairings',
+) {
   await page.evaluate(
     async ([uid, tbl]) => {
       const win = window as any;
@@ -284,6 +288,222 @@ test.describe('ChefByte Realtime — UI refreshes without page.reload', () => {
       // this can only be satisfied by realtime invalidation.
       await expect(heartbeat).toContainText(/\b\d+s ago\b/, { timeout: 10_000 });
     } finally {
+      await cleanup();
+    }
+  });
+});
+
+/**
+ * ================================================================
+ * scale_pairings PROBE + UI REFRESH
+ * ================================================================
+ * Pins commit `9011487 fix(realtime): add live_shelf_devices +
+ * scale_pairings to realtime publication`. Before that fix, scale_pairings
+ * was missing from the `supabase_realtime` publication — the subscription
+ * returned `status: error` from the server, and — because the hook used a
+ * shared `inventory-changes` channel at the time — poisoned unrelated
+ * subscriptions on the same page.
+ *
+ * The audit's regression retrospective (§5) flagged this as a "NO" verdict:
+ * no existing test subscribed to scale_pairings externally and asserted
+ * delivery. The three tests below close that gap:
+ *
+ *   1. Probe layer — install a browser-side `postgres_changes` channel on
+ *      scale_pairings, mutate via service-role, assert INSERT/UPDATE/DELETE
+ *      all arrive within 10s.
+ *   2. UI-refresh layer — assert the Scales tab's "Show Scales (N)" counter
+ *      changes without `page.reload()`.
+ *   3. Cross-user RLS gate — insert a scale_pairings row for a DIFFERENT
+ *      user; the browser's probe must NOT receive it.
+ */
+test.describe('ChefByte Realtime — scale_pairings publication', () => {
+  /**
+   * Seed a shelf device for a given user via service-role admin. The caller
+   * gets the device_id back so it can insert pairings scoped to it.
+   * Mirrors the pattern used by `live-shelf.spec.ts::seedDeviceAdmin`.
+   */
+  async function seedShelfDeviceAdmin(userId: string, deviceName: string): Promise<string> {
+    const chefAdmin = (admin as any).schema('chefbyte');
+    const importKeyHash = 'b'.repeat(64);
+    const { data, error } = await chefAdmin
+      .from('live_shelf_devices')
+      .insert({
+        user_id: userId,
+        device_name: deviceName,
+        import_key_hash: importKeyHash,
+        pending_review_count: 0,
+        is_active: true,
+      })
+      .select('device_id')
+      .single();
+    if (error) throw new Error(`Failed to seed shelf device: ${error.message}`);
+    return (data as any).device_id as string;
+  }
+
+  test('external scale_pairings INSERT/UPDATE/DELETE deliver via postgres_changes within 10s', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const { userId, cleanup } = await seedFullAndLogin(page, 'rt-pair-probe');
+    try {
+      // Seed a shelf device so foreign-key constraints let us insert a pairing.
+      const deviceId = await seedShelfDeviceAdmin(userId, 'Probe Pi');
+
+      // Navigate to the Scales tab — this is the page that subscribes to
+      // `scale_pairings` via `useRealtimeInvalidation` (see ScalesTab.tsx).
+      // Installing our probe AFTER the page subscribes proves coexistence
+      // (channel-per-table — one subscription must not poison another).
+      await page.goto('/chef/settings?tab=scales');
+      await expect(page.getByTestId(`shelf-device-${deviceId}`)).toBeVisible({ timeout: 30_000 });
+
+      await installProbe(page, userId, 'scale_pairings');
+
+      // --- INSERT -----------------------------------------------------
+      // Service-role insert of a live_scale pairing. The kind CHECK
+      // constraint allows 'live_shelf', 'live_scale', 'catch_all' — pick
+      // 'live_scale' so we also have a shape matching the production
+      // "user will pair a product" path.
+      const chef = (admin as any).schema('chefbyte');
+      const SCALE_ID = `probe-scale-${Date.now()}`;
+      const { data: inserted, error: insErr } = await chef
+        .from('scale_pairings')
+        .insert({
+          user_id: userId,
+          device_id: deviceId,
+          scale_id: SCALE_ID,
+          kind: 'live_scale',
+        })
+        .select('pairing_id')
+        .single();
+      expect(insErr).toBeNull();
+      const pairingId: string = (inserted as any).pairing_id;
+
+      // Probe must deliver the INSERT event within 10s. A failure here is
+      // precisely the scale_pairings publication regression.
+      await page.waitForFunction(
+        () => ((window as any).__rtEvents?.scale_pairings ?? []).some((e: any) => e.type === 'INSERT'),
+        { timeout: 10_000 },
+      );
+
+      // --- UPDATE -----------------------------------------------------
+      const { error: updErr } = await chef
+        .from('scale_pairings')
+        .update({ last_heartbeat_ts: new Date().toISOString() })
+        .eq('pairing_id', pairingId);
+      expect(updErr).toBeNull();
+
+      await page.waitForFunction(
+        () => ((window as any).__rtEvents?.scale_pairings ?? []).some((e: any) => e.type === 'UPDATE'),
+        { timeout: 10_000 },
+      );
+
+      // --- DELETE -----------------------------------------------------
+      const { error: delErr } = await chef.from('scale_pairings').delete().eq('pairing_id', pairingId);
+      expect(delErr).toBeNull();
+
+      await page.waitForFunction(
+        () => ((window as any).__rtEvents?.scale_pairings ?? []).some((e: any) => e.type === 'DELETE'),
+        { timeout: 10_000 },
+      );
+
+      // Final sanity check — all three event types present.
+      const events: Array<{ type: string }> = await page.evaluate(
+        () => (window as any).__rtEvents.scale_pairings,
+      );
+      const types = new Set(events.map((e) => e.type));
+      expect(types.has('INSERT')).toBe(true);
+      expect(types.has('UPDATE')).toBe(true);
+      expect(types.has('DELETE')).toBe(true);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('external scale_pairings INSERT → Show Scales counter updates without page.reload', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    const { userId, cleanup } = await seedFullAndLogin(page, 'rt-pair-ui');
+    try {
+      const deviceId = await seedShelfDeviceAdmin(userId, 'UI Refresh Pi');
+
+      await page.goto('/chef/settings?tab=scales');
+      const deviceCard = page.getByTestId(`shelf-device-${deviceId}`);
+      await expect(deviceCard).toBeVisible({ timeout: 30_000 });
+
+      // Baseline: "Show Scales (0)" — no pairings yet. The scale_pairings
+      // query has a 15s refetchInterval safety net, so a <10s deadline on
+      // the follow-up assertion guarantees the freshened count was driven
+      // by realtime invalidation rather than the fallback poll.
+      const toggleBtn = deviceCard.getByTestId(`toggle-shelf-scales-${deviceId}`);
+      await expect(toggleBtn).toContainText(/Scales \(0\)/, { timeout: 15_000 });
+
+      // External insert of a pairing for this user/device.
+      const chef = (admin as any).schema('chefbyte');
+      const { error: insErr } = await chef.from('scale_pairings').insert({
+        user_id: userId,
+        device_id: deviceId,
+        scale_id: `ui-refresh-${Date.now()}`,
+        kind: 'live_shelf',
+      });
+      expect(insErr).toBeNull();
+
+      // UI must reflect the new pairing count within 10s via realtime path.
+      await expect(toggleBtn).toContainText(/Scales \(1\)/, { timeout: 10_000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('scale_pairings INSERT for a DIFFERENT user is blocked by RLS — probe receives nothing', async ({
+    page,
+  }) => {
+    test.setTimeout(90_000);
+    // Probe-owning user signs into the browser — our filter is scoped to
+    // this user_id.
+    const { userId: probeUserId, cleanup } = await seedFullAndLogin(page, 'rt-pair-rls-a');
+    // Second user (never logs into the browser) — we'll insert a pairing
+    // for THIS user via service-role and assert the browser's probe does
+    // NOT receive it.
+    const other = await seedUser('rt-pair-rls-b');
+    try {
+      // Seed a shelf device owned by user B, needed for the FK on the
+      // pairing row we'll insert.
+      const otherDeviceId = await seedShelfDeviceAdmin(other.userId, 'Other User Pi');
+
+      // Navigate user A's browser to the Scales tab so the scale_pairings
+      // subscription is active on user A's authenticated WebSocket.
+      await page.goto('/chef/settings?tab=scales');
+      // user A has no devices → the "no-shelf-devices" empty-state renders.
+      await expect(page.getByTestId('no-shelf-devices')).toBeVisible({ timeout: 30_000 });
+
+      await installProbe(page, probeUserId, 'scale_pairings');
+
+      // Insert a pairing for user B (NOT user A). The probe's filter is
+      // `user_id=eq.${probeUserId}` — combined with RLS, the event for
+      // user B must never reach user A's WebSocket. If the publication
+      // RLS ever regresses to "public read" this assertion fails.
+      const chef = (admin as any).schema('chefbyte');
+      const { error: insErr } = await chef.from('scale_pairings').insert({
+        user_id: other.userId,
+        device_id: otherDeviceId,
+        scale_id: `cross-user-${Date.now()}`,
+        kind: 'live_shelf',
+      });
+      expect(insErr).toBeNull();
+
+      // Wait well past the realtime bus's typical delivery window. 5s is
+      // ~5x longer than every delivery observed in the other probe tests
+      // above — if the event were going to reach user A, it would already
+      // be in `__rtEvents.scale_pairings` by now.
+      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+      await page.waitForTimeout(5_000);
+      const events: Array<{ type: string }> = await page.evaluate(
+        () => (window as any).__rtEvents?.scale_pairings ?? [],
+      );
+      expect(events).toEqual([]);
+    } finally {
+      await other.cleanup();
       await cleanup();
     }
   });

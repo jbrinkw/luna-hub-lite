@@ -1465,6 +1465,219 @@ test.describe('ChefByte Scanner', () => {
     }
   });
 
+  // ----- Scenario 4b — Real analyze-product fn, OFF upstream forced down --
+  // Audit recommendation #22. SCN4 above stubs the edge function with
+  // page.route — if the real fn's degraded-response shape ever drifts
+  // (e.g. rename `ai_reason` → `reason`, change status 503 → 502), the
+  // route-mock keeps passing while the scanner silently breaks in prod.
+  //
+  // This test hits the REAL locally-deployed analyze-product function and
+  // injects the `x-test-force-failure: off_503` header into the
+  // browser-side invoke so the fn's OFF call throws and it returns the
+  // actual degraded 503. The header hook is gated on isLocalDev() inside
+  // the edge function (see supabase/functions/analyze-product/index.ts:30)
+  // so it cannot be used against production.
+  //
+  // Consumes the `x-test-force-failure` hook added by the edge-function
+  // failure-path audit batch; this test was authored after the hook
+  // landed on disk.
+  test('SCN4b — real analyze-product returns 503 OFF unavailable → scanner falls back to placeholder + keypad still commits', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scn4b-real-503');
+    try {
+      const BARCODE = '049000050110';
+
+      // Inject x-test-force-failure into every browser-side call to
+      // analyze-product. We do NOT fulfill — the request continues to the
+      // real edge function, which now throws on OFF fetch and returns the
+      // genuine 503 response. This is the "real failure path" that SCN4's
+      // route-stub cannot reach.
+      await page.route('**/functions/v1/analyze-product**', async (route) => {
+        const req = route.request();
+        const headers = { ...req.headers(), 'x-test-force-failure': 'off_503' };
+        await route.continue({ headers });
+      });
+
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 30_000 });
+
+      await page.getByTestId('barcode-input').fill(BARCODE);
+      await page.getByTestId('barcode-input').press('Enter');
+
+      // With the real fn returning 503 (off_unavailable), the scanner's
+      // handleBarcodeSubmit flow (ScannerPage.tsx:346–559) falls through:
+      // - efError is set (5xx → FunctionsHttpError)
+      // - payload.ai_reason='off_unavailable' is NOT in HARD set
+      // - analyzedProduct stays null
+      // - no existing placeholder → INSERT new placeholder row with
+      //   name='Unknown (barcode)' and is_placeholder=true.
+      // The queue row must show the placeholder copy + the [!NEW] badge.
+      const queueList = page.getByTestId('queue-list');
+      await expect(queueList).toContainText(`Unknown (${BARCODE})`, { timeout: 45_000 });
+      await expect(queueList).toContainText('[!NEW]', { timeout: 10_000 });
+
+      // DB assertion: placeholder row, no macros, is_placeholder=true.
+      // `is_placeholder` is the column that tracks the AI-degraded state —
+      // there is no separate ai_degraded column; callers use this flag to
+      // decide whether to retry analysis on a later scan (see SCN2).
+      const chef = (client as any).schema('chefbyte');
+      await expect(async () => {
+        const { data, error } = await chef
+          .from('products')
+          .select('product_id, name, is_placeholder, calories_per_serving')
+          .eq('user_id', userId)
+          .eq('barcode', BARCODE)
+          .single();
+        expect(error).toBeFalsy();
+        expect(data).toBeTruthy();
+        expect(data.is_placeholder).toBe(true);
+        expect(data.name).toBe(`Unknown (${BARCODE})`);
+        // A degraded-path placeholder must NOT poison macros — any non-null
+        // calorie value here means the OFF fallback leaked into the
+        // placeholder path, which would show garbage macros in the UI.
+        expect(data.calories_per_serving).toBeNull();
+      }).toPass({ timeout: 30_000 });
+
+      // User can still complete the scan with manual edits: the nutrition
+      // editor is visible in purchase mode (default), the keypad is live,
+      // and edits push to the DB via the scanner's per-press commit. Pin
+      // that the degraded state does not disable input.
+      const caloriesInput = page.getByTestId('nut-calories');
+      await expect(caloriesInput).toBeVisible({ timeout: 10_000 });
+      await expect(caloriesInput).toBeEditable();
+
+      // Type a calorie value and assert it flushed to the placeholder row.
+      // This proves the keypad/nutrition editor still commits when the
+      // scan landed via the degraded path.
+      await caloriesInput.fill('240');
+      // Blur pushes the change (focus-change triggers the push-back effect).
+      await page.getByTestId('screen-value').click();
+
+      await expect(async () => {
+        const { data } = await chef
+          .from('products')
+          .select('calories_per_serving')
+          .eq('user_id', userId)
+          .eq('barcode', BARCODE)
+          .single();
+        expect(Number(data?.calories_per_serving)).toBe(240);
+      }).toPass({ timeout: 20_000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // ----- Scenario 7 — Click-away confirms; scan does NOT auto-confirm -----
+  // Audit recommendation #29. Pins commit `f369bb3` ("confirm (red→green)
+  // only on click-away, not on scan"). Prior to that fix, scanning barcode
+  // B would auto-confirm barcode A's row (turning it green); users lost
+  // the visual signal that A was still being edited. A regression that
+  // flips the onClick handler back to firing on scan would pass the
+  // existing red/green tests silently.
+  //
+  // The confirm logic lives in ScannerPage.tsx:1045–1053: only the row's
+  // onClick handler marks the previously-active item `confirmed:true`.
+  // handleBarcodeSubmit does NOT touch the confirmed flag of prior items.
+  // CSS class pairs (from queueItemBorderColor + the inline bg class):
+  //   - unconfirmed → `border-red-600` + `bg-danger-subtle`
+  //   - confirmed   → `border-green-600` + `bg-success-subtle`
+  test('SCN7 — scanning a second barcode does NOT auto-confirm the first (click-away-only confirm)', async ({
+    page,
+  }) => {
+    test.setTimeout(120_000);
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scn7-clickaway');
+    try {
+      // Seed three real products with distinct barcodes so each scan
+      // follows the fast "existing product" path — avoids OFF/Anthropic
+      // flake and isolates the test to the confirm-state logic.
+      const chef = (client as any).schema('chefbyte');
+      const { productMap } = await seedChefByteData(client, userId);
+      const aId = productMap['Great Value Boneless Skinless Chicken Breasts'];
+      const bId = productMap['Great Value Long Grain Brown Rice'];
+      const cId = productMap['Great Value Large White Eggs'];
+      await chef.from('products').update({ barcode: '111111100001' }).eq('product_id', aId);
+      await chef.from('products').update({ barcode: '111111100002' }).eq('product_id', bId);
+      await chef.from('products').update({ barcode: '111111100003' }).eq('product_id', cId);
+
+      await page.goto('/chef/scanner');
+      await expect(page.getByTestId('barcode-input')).toBeVisible({ timeout: 30_000 });
+
+      // --- Scan A → row A appears, active + red (unconfirmed) ---------
+      await page.getByTestId('barcode-input').fill('111111100001');
+      await page.getByTestId('barcode-input').press('Enter');
+      await expect(page.getByTestId('queue-list')).toContainText(
+        'Great Value Boneless Skinless Chicken Breasts',
+        { timeout: 30_000 },
+      );
+      const rowA = page
+        .locator('[data-testid^="queue-item-"]')
+        .filter({ hasText: 'Great Value Boneless Skinless Chicken Breasts' })
+        .first();
+      await expect(rowA).toHaveClass(/border-red-600/, { timeout: 10_000 });
+      await expect(rowA).toHaveClass(/bg-danger-subtle/);
+
+      // --- Scan B → row B appears red; row A MUST STAY red ------------
+      // This is the specific pin for f369bb3. Before the fix, this scan
+      // would flip row A to green (confirmed:true) via the old auto-confirm
+      // path. Now only click-away should do that.
+      await page.getByTestId('barcode-input').fill('111111100002');
+      await page.getByTestId('barcode-input').press('Enter');
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Long Grain Brown Rice', {
+        timeout: 30_000,
+      });
+      const rowB = page
+        .locator('[data-testid^="queue-item-"]')
+        .filter({ hasText: 'Great Value Long Grain Brown Rice' })
+        .first();
+
+      // Row A must NOT have flipped to green: still red border + red bg,
+      // and explicitly NOT green-600 / success-subtle.
+      await expect(rowA).toHaveClass(/border-red-600/);
+      await expect(rowA).toHaveClass(/bg-danger-subtle/);
+      await expect(rowA).not.toHaveClass(/border-green-600/);
+      await expect(rowA).not.toHaveClass(/bg-success-subtle/);
+      // Row B (newly scanned, active) is also red.
+      await expect(rowB).toHaveClass(/border-red-600/);
+
+      // --- Click away onto row A → row B turns green, row A becomes active
+      // and red. The onClick handler on each row marks the *previously*
+      // active item `confirmed:true`. Clicking row A makes B the prior
+      // active → B flips to confirmed/green; A becomes active/red.
+      await rowA.click();
+      await expect(rowB).toHaveClass(/border-green-600/, { timeout: 10_000 });
+      await expect(rowB).toHaveClass(/bg-success-subtle/);
+      // Row A is now active/selected → still red (unconfirmed).
+      await expect(rowA).toHaveClass(/border-red-600/);
+
+      // --- Scan C → row C appears red; prior rows unchanged (A red, B green)
+      // This is the "no regression" sweep: the scan path leaves existing
+      // confirmed flags alone — does not re-confirm A and does not undo
+      // B's green state.
+      await page.getByTestId('barcode-input').fill('111111100003');
+      await page.getByTestId('barcode-input').press('Enter');
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Large White Eggs', {
+        timeout: 30_000,
+      });
+      const rowC = page
+        .locator('[data-testid^="queue-item-"]')
+        .filter({ hasText: 'Great Value Large White Eggs' })
+        .first();
+
+      // C is red (newly active, unconfirmed).
+      await expect(rowC).toHaveClass(/border-red-600/);
+      // A is STILL red — the scan-of-C did not flip A to green.
+      await expect(rowA).toHaveClass(/border-red-600/);
+      await expect(rowA).not.toHaveClass(/border-green-600/);
+      // B is still green — no regression from the scan.
+      await expect(rowB).toHaveClass(/border-green-600/);
+      await expect(rowB).toHaveClass(/bg-success-subtle/);
+    } finally {
+      await cleanup();
+    }
+  });
+
   // ----- Scenario 6 — Hardware scanner fast-type at document level -------
   test('SCN6 — hardware scanner fast-type keystrokes outside input are captured', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scn6-hwscan');
