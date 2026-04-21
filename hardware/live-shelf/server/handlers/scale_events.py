@@ -378,6 +378,20 @@ class ScaleHandler:
         # Cloud client — used only by the tare-capture push-back. No-op
         # when None; the tare capture still lands locally.
         self._cloud_client = cloud_client
+        # LiveTrack import poller — when attached, its snapshot drives the
+        # import-arm interception branch in handle_scale_event. Duck-typed
+        # so tests can pass a stub with a single ``snapshot()`` method.
+        self._livetrack_poller = None
+
+    def set_livetrack_poller(self, poller: Any) -> None:
+        """Attach a LiveTrack session poller.
+
+        Wired post-construction so ``app.py`` can build the poller with
+        the handler's already-constructed ``_cloud_client``. The handler
+        only reads ``poller.snapshot()``; everything else (poll cadence,
+        AI-tare, reconnect) is the poller's concern.
+        """
+        self._livetrack_poller = poller
 
     def _push_tare_to_cloud(self, product_id: str, tare_g: float) -> None:
         """Fire-and-forget cloud push of a captured tare value.
@@ -1603,6 +1617,56 @@ class ScaleHandler:
         # classification is deterministic on ``delta_g`` so hoisting is
         # side-effect-free).
         direction = self._direction(delta_g)
+
+        # LiveTrack Import interception (2026-04-21-livetrack-import-wizard.md §8).
+        # Runs BEFORE the tare-arm branch because ``waiting_scale`` is the
+        # more specific state — only one of the two branches fires per event,
+        # since the LiveTrack session ownership and the local tare_arm row are
+        # independent pieces of state that the owner could theoretically hold
+        # simultaneously. Guards:
+        #   * catch-all scale only (same invariant as tare-arm).
+        #   * non-noise event (sub-threshold readings aren't credible).
+        #   * poller attached AND its snapshot is state=='waiting_scale'.
+        # On match: POSTs after_weight_g back via the cloud client and short-
+        # circuits the event — no scale_events row, no classifier, no session
+        # correlation. A cloud-POST failure is logged and the event still
+        # short-circuits (the session ownership already moved to the cloud
+        # side, so falling through to delta detection would double-apply).
+        if shelf_id == "catch_all" and direction != "noise":
+            arm = self._livetrack_poller.snapshot() if self._livetrack_poller is not None else None
+            if arm is not None and arm.get("state") == "waiting_scale":
+                session_id = str(arm.get("session_id", ""))
+                client = self._cloud_client
+                posted = False
+                if session_id and client is not None:
+                    fn = getattr(client, "post_livetrack_session_update", None)
+                    if callable(fn):
+                        try:
+                            fn(
+                                session_id,
+                                scale_reading_g=float(after_weight_g),
+                                scale_reading_ts=pi_received_ts,
+                                state="scale_reading_received",
+                            )
+                            posted = True
+                        except Exception:  # noqa: BLE001 — must never raise
+                            log.warning(
+                                "livetrack: post_livetrack_session_update failed "
+                                "(session_id=%s); dropping event",
+                                session_id, exc_info=True,
+                            )
+                log.info(
+                    "livetrack: import arm intercepted event — "
+                    "session_id=%s, reading=%.1fg, posted=%s",
+                    session_id, after_weight_g, posted,
+                )
+                return {
+                    "ok": True,
+                    "intercepted": "livetrack_import",
+                    "session_id": session_id,
+                    "scale_reading_g": float(after_weight_g),
+                    "posted": posted,
+                }, 200
 
         # Tare-arm interception (CATCH_ALL_TARE_CAPTURE_PLAN.md §4.3).
         # Must run BEFORE dedup so a duplicate retry doesn't fire the

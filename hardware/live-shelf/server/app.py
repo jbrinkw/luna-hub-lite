@@ -36,7 +36,7 @@ from .camera import mjpeg
 from .camera.daemon import CameraDaemon, DaemonConfig, now_iso_utc_ms
 from .camera import session_capture
 from .camera.locked_settings import apply_locked_settings
-from .cloud import CloudClient, CloudWorker
+from .cloud import CloudClient, CloudWorker, LiveTrackPoller
 from .cloud.integration import (
     CloudEventEmitter,
     backfill_missing_outbox_events,
@@ -1539,6 +1539,26 @@ def create_app(
                 "cloud worker started (url=%s, heartbeat=%ss)",
                 cfg.cloud_url, cfg.cloud_heartbeat_interval_s,
             )
+
+            # LiveTrack Import poller (2026-04-21-livetrack-import-wizard.md).
+            # Same CloudClient, separate thread. The handler reads its
+            # snapshot to short-circuit catch-all events when the cloud UI
+            # has armed an import session. A failed seed-poll just leaves
+            # the snapshot empty; the background loop will pick it up on
+            # the next tick.
+            try:
+                livetrack_poller = LiveTrackPoller(
+                    cloud_client, camera=camera,
+                )
+                livetrack_poller.seed_snapshot()
+                scale_handler.set_livetrack_poller(livetrack_poller)
+                livetrack_poller.start()
+                log.info("livetrack import poller started")
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "failed to start livetrack import poller; "
+                    "import-arm interception disabled",
+                )
         except Exception:  # pragma: no cover - defensive
             log.exception(
                 "failed to start cloud worker; events will queue locally",
