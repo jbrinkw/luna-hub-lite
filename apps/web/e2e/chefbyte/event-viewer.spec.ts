@@ -293,4 +293,196 @@ test.describe('Event Viewer', () => {
       await cleanup();
     }
   });
+
+  test('5. independent stock + macros fields', async ({ page }) => {
+    const { userId, client, cleanup } = await seedFullAndLogin(page, 'event-viewer-5');
+    try {
+      const { productId, lotId } = await seedProductAndLot(userId, {
+        productName: 'Independent Fields Product',
+      });
+      const clientEventId = `ev-${userId}-5`;
+      await seedShelfEvent(userId, productId, lotId, {
+        clientEventId,
+        piEventId: 'pi-evt-5',
+      });
+
+      await gotoEvents(page);
+
+      const row = page.getByTestId(`event-row-${clientEventId}`);
+      await row.getByTestId('toggle-edit-btn').click();
+      await expect(row.getByTestId('edit-panel')).toBeVisible();
+
+      // Stock field = -2 (consumed 2 containers), macros field = 5 svg.
+      await row.getByTestId('stock-qty-input').fill('-2');
+      await row.getByTestId('servings-input').fill('5');
+      await row.getByTestId('save-override-btn').click();
+
+      // stock_lots should reflect -2 delta (seed lot 3 + prior -1 backed out
+      // → 4 then -2 = 2).
+      await expect
+        .poll(
+          async () => {
+            const { data } = await chef(client)
+              .from('stock_lots')
+              .select('qty_containers')
+              .eq('lot_id', lotId)
+              .maybeSingle();
+            return data?.qty_containers;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(2);
+
+      // food_logs reflects 5 svg × 200 cal = 1000.
+      await expect
+        .poll(
+          async () => {
+            const { data } = await chef(client)
+              .from('food_logs')
+              .select('calories,qty_consumed')
+              .eq('source_client_event_id', clientEventId)
+              .order('created_at', { ascending: false })
+              .limit(1)
+              .maybeSingle();
+            return data;
+          },
+          { timeout: 15_000 },
+        )
+        .toMatchObject({ calories: 1000, qty_consumed: 5 });
+
+      // Edited chip should render now that an override is present.
+      await expect(row.getByTestId('edited-badge')).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('6. toggle macros off → no food_logs, stock still changes', async ({ page }) => {
+    const { userId, client, cleanup } = await seedFullAndLogin(page, 'event-viewer-6');
+    try {
+      const { productId, lotId } = await seedProductAndLot(userId, {
+        productName: 'Spoiled Food Product',
+      });
+      const clientEventId = `ev-${userId}-6`;
+      await seedShelfEvent(userId, productId, lotId, {
+        clientEventId,
+        piEventId: 'pi-evt-6',
+      });
+
+      await gotoEvents(page);
+
+      const row = page.getByTestId(`event-row-${clientEventId}`);
+      await row.getByTestId('toggle-edit-btn').click();
+
+      // Flip the macros toggle off in the editor.
+      await row.getByTestId('edit-macros-toggle').click();
+      await row.getByTestId('save-override-btn').click();
+
+      // food_logs row removed
+      await expect
+        .poll(
+          async () => {
+            const { count } = await chef(client)
+              .from('food_logs')
+              .select('log_id', { count: 'exact', head: true })
+              .eq('source_client_event_id', clientEventId);
+            return count;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(0);
+
+      // Stock still decremented (3 as seeded — back out +1, re-apply -1 → 3).
+      await expect
+        .poll(
+          async () => {
+            const { data } = await chef(client)
+              .from('stock_lots')
+              .select('qty_containers')
+              .eq('lot_id', lotId)
+              .maybeSingle();
+            return data?.qty_containers;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(3);
+
+      // "Macros off" chip rendered in list header.
+      await expect(row.getByTestId('macros-off-badge')).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('7. flip event kind consumed → added reverses stock direction', async ({ page }) => {
+    const { userId, client, cleanup } = await seedFullAndLogin(page, 'event-viewer-7');
+    try {
+      const { productId, lotId } = await seedProductAndLot(userId, {
+        productName: 'Kind Flip Product',
+      });
+      const clientEventId = `ev-${userId}-7`;
+      await seedShelfEvent(userId, productId, lotId, {
+        clientEventId,
+        piEventId: 'pi-evt-7',
+      });
+
+      await gotoEvents(page);
+
+      const row = page.getByTestId(`event-row-${clientEventId}`);
+      await row.getByTestId('toggle-edit-btn').click();
+      await row.getByTestId('event-kind-added').click();
+      await row.getByTestId('save-override-btn').click();
+
+      // Stock: seed 4 → Pi decrement to 3 → back out prior (+1 → 4) →
+      // re-apply as +1 add → 5.
+      await expect
+        .poll(
+          async () => {
+            const { data } = await chef(client)
+              .from('stock_lots')
+              .select('qty_containers')
+              .eq('lot_id', lotId)
+              .maybeSingle();
+            return data?.qty_containers;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(5);
+
+      // No food_logs row for added events.
+      await expect
+        .poll(
+          async () => {
+            const { count } = await chef(client)
+              .from('food_logs')
+              .select('log_id', { count: 'exact', head: true })
+              .eq('source_client_event_id', clientEventId);
+            return count;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe(0);
+
+      // DB override row has event_kind_override='added'.
+      await expect
+        .poll(
+          async () => {
+            const { data } = await chef(client)
+              .from('event_overrides')
+              .select('event_kind_override')
+              .eq('client_event_id', clientEventId)
+              .maybeSingle();
+            return data?.event_kind_override;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe('added');
+
+      // Effective-kind text in the row header reflects the override.
+      await expect(row.getByTestId('event-effective-kind')).toHaveText('added');
+      await expect(row.getByTestId('edited-badge')).toBeVisible();
+    } finally {
+      await cleanup();
+    }
+  });
 });

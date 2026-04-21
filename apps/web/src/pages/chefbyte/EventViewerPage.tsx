@@ -7,9 +7,10 @@
  *   - product name + event time (from shelf_event_log.payload.occurred_at)
  *   - before/after thumbnails streamed directly from the Pi on the LAN
  *   - stock + macro delta
- *   - toggle macro logging on/off
- *   - void button (soft delete; row stays, backs out stock + macros)
- *   - expand to edit: servings-primary form with custom macros disclosure
+ *   - list-level chips: "Edited" (any override present), "Macros off",
+ *     "Voided"
+ *   - expand to edit: independent stock/macros/kind fields + macros
+ *     toggle + custom macros disclosure
  *
  * Images are loaded from http://<lan_ip>:8000/event/<pi_event_id>/before.jpg
  * — zero cloud storage cost. If any image 404s or times out we flip a
@@ -30,6 +31,7 @@ import {
   Check,
   ImageOff,
   RotateCcw,
+  Pencil,
 } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ListSkeleton } from '@/components/ui/Skeleton';
@@ -41,6 +43,9 @@ import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
+
+type EventKind = 'consumed' | 'depleted' | 'added' | 'refilled';
+const EVENT_KINDS: EventKind[] = ['consumed', 'depleted', 'added', 'refilled'];
 
 interface EventRow {
   event_id: string;
@@ -70,6 +75,7 @@ interface OverrideRow {
   fat_override: number | null;
   macro_logging_enabled: boolean;
   is_voided: boolean;
+  event_kind_override: string | null;
   updated_at: string;
 }
 
@@ -116,6 +122,7 @@ interface EventView {
   override: OverrideRow | null;
   product: ProductLite | null;
   // Effective values after applying override (if any) — what the UI shows.
+  effectiveKind: EventKind;
   effectiveServings: number;
   effectiveCalories: number;
   effectiveProtein: number;
@@ -124,6 +131,8 @@ interface EventView {
   effectiveStockDeltaContainers: number;
   isVoided: boolean;
   macroLoggingEnabled: boolean;
+  // True if any override field deviates from Pi-original defaults.
+  hasEdit: boolean;
 }
 
 function deriveEventView(
@@ -133,18 +142,34 @@ function deriveEventView(
 ): EventView {
   const payload = event.payload ?? {};
   const deltaG = Number(payload.delta_g ?? 0);
+  const piKindRaw = payload.event_kind ?? 'consumed';
+  const piKind: EventKind = (EVENT_KINDS as string[]).includes(piKindRaw)
+    ? (piKindRaw as EventKind)
+    : 'consumed';
   const netG = product?.net_weight_g ?? null;
   const svgPer = product?.servings_per_container ?? 0;
-  const baseDeltaC = netG && netG > 0 ? deltaG / netG : 0;
+
+  const effectiveKind: EventKind =
+    (override?.event_kind_override as EventKind | null | undefined) ?? piKind;
+
+  const magnitudeC = netG && netG > 0 ? Math.abs(deltaG / netG) : 0;
+  const signedByKindC =
+    effectiveKind === 'consumed' || effectiveKind === 'depleted'
+      ? -magnitudeC
+      : +magnitudeC;
 
   const overrideServings = override?.macros_servings_override ?? null;
   const overrideStockC = override?.stock_qty_override ?? null;
   const isVoided = Boolean(override?.is_voided);
   const macroLoggingEnabled = override?.macro_logging_enabled ?? true;
 
-  const effectiveStockDeltaContainers = isVoided ? 0 : overrideStockC ?? baseDeltaC;
+  const effectiveStockDeltaContainers = isVoided
+    ? 0
+    : overrideStockC ?? signedByKindC;
+
+  const isConsumptionKind = effectiveKind === 'consumed' || effectiveKind === 'depleted';
   const effectiveServings =
-    isVoided || !macroLoggingEnabled
+    isVoided || !macroLoggingEnabled || !isConsumptionKind
       ? 0
       : overrideServings ?? Math.abs(effectiveStockDeltaContainers) * svgPer;
   const perServingCal = product?.calories_per_serving ?? 0;
@@ -157,10 +182,26 @@ function deriveEventView(
   const effectiveCarbs = override?.carbs_override ?? effectiveServings * perServingC;
   const effectiveFat = override?.fat_override ?? effectiveServings * perServingF;
 
+  // "Edited" chip trigger: any override field or kind override is set.
+  // A bare macro-logging-off or void-only override still counts as edited.
+  const hasEdit = Boolean(
+    override &&
+      (override.stock_qty_override !== null ||
+        override.macros_servings_override !== null ||
+        override.calories_override !== null ||
+        override.protein_override !== null ||
+        override.carbs_override !== null ||
+        override.fat_override !== null ||
+        override.event_kind_override !== null ||
+        override.is_voided ||
+        !override.macro_logging_enabled),
+  );
+
   return {
     event,
     override,
     product,
+    effectiveKind,
     effectiveServings,
     effectiveCalories,
     effectiveProtein,
@@ -169,6 +210,7 @@ function deriveEventView(
     effectiveStockDeltaContainers,
     isVoided,
     macroLoggingEnabled,
+    hasEdit,
   };
 }
 
@@ -222,7 +264,7 @@ export function EventViewerPage() {
       const { data, error } = await chefbyte()
         .from('event_overrides')
         .select(
-          'override_id,client_event_id,stock_qty_override,macros_servings_override,calories_override,protein_override,carbs_override,fat_override,macro_logging_enabled,is_voided,updated_at',
+          'override_id,client_event_id,stock_qty_override,macros_servings_override,calories_override,protein_override,carbs_override,fat_override,macro_logging_enabled,is_voided,event_kind_override,updated_at',
         )
         .eq('user_id', user!.id);
       if (error) throw error;
@@ -319,6 +361,7 @@ export function EventViewerPage() {
       fat?: number | null;
       macroLoggingEnabled?: boolean;
       isVoided?: boolean;
+      eventKind?: EventKind | null;
     }) => {
       const { data, error } = await (supabase as any).schema('chefbyte').rpc('apply_event_override', {
         p_client_event_id: args.clientEventId,
@@ -330,6 +373,7 @@ export function EventViewerPage() {
         p_fat_override: args.fat ?? null,
         p_macro_logging_enabled: args.macroLoggingEnabled ?? true,
         p_is_voided: args.isVoided ?? false,
+        p_event_kind: args.eventKind ?? null,
       });
       if (error) throw error;
       return data;
@@ -425,12 +469,14 @@ export function EventViewerPage() {
                     clientEventId: row.event.client_event_id,
                     macroLoggingEnabled: !row.macroLoggingEnabled,
                     isVoided: row.isVoided,
+                    eventKind: row.effectiveKind,
                   })
                 }
                 onVoid={() =>
                   applyOverride.mutate({
                     clientEventId: row.event.client_event_id,
                     isVoided: true,
+                    eventKind: row.effectiveKind,
                   })
                 }
                 onUnvoid={() =>
@@ -438,6 +484,7 @@ export function EventViewerPage() {
                     clientEventId: row.event.client_event_id,
                     isVoided: false,
                     macroLoggingEnabled: row.macroLoggingEnabled,
+                    eventKind: row.effectiveKind,
                   })
                 }
                 saving={applyOverride.isPending}
@@ -469,6 +516,7 @@ interface EventCardProps {
     fat?: number | null;
     macroLoggingEnabled?: boolean;
     isVoided?: boolean;
+    eventKind?: EventKind | null;
   }) => void;
   onToggleMacroLogging: () => void;
   onVoid: () => void;
@@ -477,8 +525,19 @@ interface EventCardProps {
 }
 
 function EventCard(props: EventCardProps) {
-  const { row, lanIp, onImageError, expanded, onToggleExpanded, onSave, onToggleMacroLogging, onVoid, onUnvoid, saving } = props;
-  const { event, product, isVoided, macroLoggingEnabled } = row;
+  const {
+    row,
+    lanIp,
+    onImageError,
+    expanded,
+    onToggleExpanded,
+    onSave,
+    onToggleMacroLogging,
+    onVoid,
+    onUnvoid,
+    saving,
+  } = props;
+  const { event, product, isVoided, macroLoggingEnabled, hasEdit, effectiveKind } = row;
   const occurredAt = event.payload?.occurred_at ?? event.created_at;
   const piEventId = event.pi_event_id;
   const imgBase =
@@ -539,6 +598,14 @@ function EventCard(props: EventCardProps) {
                 Voided
               </span>
             )}
+            {hasEdit && !isVoided && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full bg-info-subtle text-info-text inline-flex items-center gap-1"
+                data-testid="edited-badge"
+              >
+                <Pencil className="h-3 w-3" /> Edited
+              </span>
+            )}
             {!macroLoggingEnabled && !isVoided && (
               <span
                 className="text-xs font-semibold px-2 py-0.5 rounded-full bg-warning-subtle text-warning-text"
@@ -549,7 +616,8 @@ function EventCard(props: EventCardProps) {
             )}
           </div>
           <div className="text-xs text-text-tertiary mt-0.5">
-            {new Date(occurredAt).toLocaleString()} · {event.payload?.event_kind ?? '?'}
+            {new Date(occurredAt).toLocaleString()} ·{' '}
+            <span data-testid="event-effective-kind">{effectiveKind}</span>
           </div>
           <div className="text-sm text-text-secondary mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
             <span data-testid="event-stock-delta">
@@ -630,7 +698,7 @@ function EventCard(props: EventCardProps) {
 }
 
 /* ------------------------------------------------------------------ */
-/*  EditorPanel — servings-primary + custom-macros disclosure          */
+/*  EditorPanel — independent stock/macros + kind selector             */
 /* ------------------------------------------------------------------ */
 
 interface EditorPanelProps {
@@ -644,17 +712,23 @@ interface EditorPanelProps {
     fat?: number | null;
     macroLoggingEnabled?: boolean;
     isVoided?: boolean;
+    eventKind?: EventKind | null;
   }) => void;
   saving: boolean;
 }
 
 function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
-  const [servings, setServings] = useState<string>(
-    row.effectiveServings.toFixed(2).replace(/\.?0+$/, ''),
-  );
+  // Pre-fill the two independent fields from the effective derived values.
   const [stockQty, setStockQty] = useState<string>(
     row.effectiveStockDeltaContainers.toFixed(3).replace(/\.?0+$/, ''),
   );
+  const [servings, setServings] = useState<string>(
+    row.effectiveServings === 0
+      ? '0'
+      : row.effectiveServings.toFixed(2).replace(/\.?0+$/, ''),
+  );
+  const [macrosEnabled, setMacrosEnabled] = useState<boolean>(row.macroLoggingEnabled);
+  const [eventKind, setEventKind] = useState<EventKind>(row.effectiveKind);
   const [customOpen, setCustomOpen] = useState(false);
   const [cal, setCal] = useState<string>('');
   const [prot, setProt] = useState<string>('');
@@ -680,16 +754,21 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
     return Number.isFinite(n) ? n : null;
   };
 
+  const isConsumption = eventKind === 'consumed' || eventKind === 'depleted';
+
   const handleSave = () => {
     onSave({
       stockQty: parseNum(stockQty),
-      servings: parseNum(servings),
-      calories: customOpen ? parseNum(cal) : null,
-      protein: customOpen ? parseNum(prot) : null,
-      carbs: customOpen ? parseNum(carb) : null,
-      fat: customOpen ? parseNum(fat) : null,
-      macroLoggingEnabled: row.macroLoggingEnabled,
+      // Only send macros servings for consumption kinds; additions have no
+      // food_logs row to write anyway.
+      servings: isConsumption ? parseNum(servings) : null,
+      calories: customOpen && isConsumption ? parseNum(cal) : null,
+      protein: customOpen && isConsumption ? parseNum(prot) : null,
+      carbs: customOpen && isConsumption ? parseNum(carb) : null,
+      fat: customOpen && isConsumption ? parseNum(fat) : null,
+      macroLoggingEnabled: macrosEnabled,
       isVoided: false,
+      eventKind,
     });
   };
 
@@ -698,26 +777,45 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
       className="border-t border-border p-4 bg-surface-sunken space-y-4"
       data-testid="edit-panel"
     >
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Servings */}
-        <label className="block text-sm font-medium text-text-secondary">
-          Servings consumed
-          <input
-            type="number"
-            step="0.01"
-            min="0"
-            value={servings}
-            onChange={(e) => setServings(e.target.value)}
-            data-testid="servings-input"
-            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text"
-          />
-          <div className="text-xs text-text-tertiary mt-1">
-            Product: {svgPer || 0} svg/ctn
-          </div>
+      {/* Event kind selector */}
+      <div>
+        <label className="block text-sm font-medium text-text-secondary mb-1">
+          Event kind
         </label>
-        {/* Stock override */}
+        <div
+          className="flex gap-2 flex-wrap"
+          role="radiogroup"
+          aria-label="Event kind"
+          data-testid="event-kind-group"
+        >
+          {EVENT_KINDS.map((k) => (
+            <button
+              key={k}
+              type="button"
+              role="radio"
+              aria-checked={eventKind === k}
+              onClick={() => setEventKind(k)}
+              data-testid={`event-kind-${k}`}
+              className={[
+                'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors capitalize',
+                eventKind === k
+                  ? 'bg-chef-accent text-white border-chef-accent'
+                  : 'bg-surface text-text-secondary border-border hover:bg-surface-hover',
+              ].join(' ')}
+            >
+              {k}
+            </button>
+          ))}
+        </div>
+        <div className="text-xs text-text-tertiary mt-1">
+          consumed / depleted = stock out & macros log · added / refilled = stock in, no macros
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {/* Stock override — independent */}
         <label className="block text-sm font-medium text-text-secondary">
-          Stock delta (containers)
+          Stock change (containers)
           <input
             type="number"
             step="0.001"
@@ -730,77 +828,120 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
             Negative = consumed, positive = added
           </div>
         </label>
+
+        {/* Macros servings — independent, gated on consumption + toggle */}
+        <label className="block text-sm font-medium text-text-secondary">
+          <span className="flex items-center justify-between gap-2">
+            <span>Macros (servings)</span>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={macrosEnabled}
+              onClick={() => setMacrosEnabled((v) => !v)}
+              data-testid="edit-macros-toggle"
+              className={[
+                'px-2 py-0.5 rounded-full text-[10px] font-semibold border transition-colors',
+                macrosEnabled
+                  ? 'bg-success-subtle text-success-text border-success-subtle'
+                  : 'bg-surface-sunken text-text-tertiary border-border',
+              ].join(' ')}
+            >
+              {macrosEnabled ? 'LOG MACROS' : 'MACROS OFF'}
+            </button>
+          </span>
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={servings}
+            onChange={(e) => setServings(e.target.value)}
+            disabled={!macrosEnabled || !isConsumption}
+            data-testid="servings-input"
+            className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text disabled:opacity-50"
+          />
+          <div className="text-xs text-text-tertiary mt-1">
+            {!isConsumption
+              ? 'No macros for added/refilled events.'
+              : macrosEnabled
+              ? `Product: ${svgPer || 0} svg/ctn`
+              : 'Stock will change but no food log entry will be written.'}
+          </div>
+        </label>
       </div>
 
-      {/* Derived macros summary */}
-      <div className="text-sm text-text-secondary">
-        Derived macros: <span data-testid="derived-cal">{derivedCal.toFixed(0)}</span> cal · P{' '}
-        {derivedP.toFixed(0)}g · C {derivedC.toFixed(0)}g · F {derivedF.toFixed(0)}g
-      </div>
-
-      {/* Custom macros disclosure */}
-      <details
-        className="rounded-lg border border-border bg-surface"
-        open={customOpen}
-        onToggle={(e) => setCustomOpen((e.target as HTMLDetailsElement).open)}
-      >
-        <summary
-          className="px-3 py-2 text-sm font-medium cursor-pointer select-none text-text-secondary"
-          data-testid="custom-macros-disclosure"
-        >
-          Custom macros (override derived values)
-        </summary>
-        <div className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 border-t border-border">
-          <label className="text-xs text-text-tertiary">
-            Calories
-            <input
-              type="number"
-              step="0.01"
-              value={cal}
-              onChange={(e) => setCal(e.target.value)}
-              placeholder={derivedCal.toFixed(1)}
-              data-testid="cal-input"
-              className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
-            />
-          </label>
-          <label className="text-xs text-text-tertiary">
-            Protein (g)
-            <input
-              type="number"
-              step="0.01"
-              value={prot}
-              onChange={(e) => setProt(e.target.value)}
-              placeholder={derivedP.toFixed(1)}
-              data-testid="prot-input"
-              className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
-            />
-          </label>
-          <label className="text-xs text-text-tertiary">
-            Carbs (g)
-            <input
-              type="number"
-              step="0.01"
-              value={carb}
-              onChange={(e) => setCarb(e.target.value)}
-              placeholder={derivedC.toFixed(1)}
-              data-testid="carb-input"
-              className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
-            />
-          </label>
-          <label className="text-xs text-text-tertiary">
-            Fat (g)
-            <input
-              type="number"
-              step="0.01"
-              value={fat}
-              onChange={(e) => setFat(e.target.value)}
-              placeholder={derivedF.toFixed(1)}
-              data-testid="fat-input"
-              className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
-            />
-          </label>
+      {/* Derived macros summary (only meaningful for consumption + macros on) */}
+      {isConsumption && macrosEnabled && (
+        <div className="text-sm text-text-secondary">
+          Derived macros: <span data-testid="derived-cal">{derivedCal.toFixed(0)}</span> cal · P{' '}
+          {derivedP.toFixed(0)}g · C {derivedC.toFixed(0)}g · F {derivedF.toFixed(0)}g
         </div>
-      </details>
+      )}
+
+      {/* Custom macros disclosure — only show for consumption kinds */}
+      {isConsumption && macrosEnabled && (
+        <details
+          className="rounded-lg border border-border bg-surface"
+          open={customOpen}
+          onToggle={(e) => setCustomOpen((e.target as HTMLDetailsElement).open)}
+        >
+          <summary
+            className="px-3 py-2 text-sm font-medium cursor-pointer select-none text-text-secondary"
+            data-testid="custom-macros-disclosure"
+          >
+            Custom macros (override derived values)
+          </summary>
+          <div className="p-3 grid grid-cols-2 sm:grid-cols-4 gap-3 border-t border-border">
+            <label className="text-xs text-text-tertiary">
+              Calories
+              <input
+                type="number"
+                step="0.01"
+                value={cal}
+                onChange={(e) => setCal(e.target.value)}
+                placeholder={derivedCal.toFixed(1)}
+                data-testid="cal-input"
+                className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+              />
+            </label>
+            <label className="text-xs text-text-tertiary">
+              Protein (g)
+              <input
+                type="number"
+                step="0.01"
+                value={prot}
+                onChange={(e) => setProt(e.target.value)}
+                placeholder={derivedP.toFixed(1)}
+                data-testid="prot-input"
+                className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+              />
+            </label>
+            <label className="text-xs text-text-tertiary">
+              Carbs (g)
+              <input
+                type="number"
+                step="0.01"
+                value={carb}
+                onChange={(e) => setCarb(e.target.value)}
+                placeholder={derivedC.toFixed(1)}
+                data-testid="carb-input"
+                className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+              />
+            </label>
+            <label className="text-xs text-text-tertiary">
+              Fat (g)
+              <input
+                type="number"
+                step="0.01"
+                value={fat}
+                onChange={(e) => setFat(e.target.value)}
+                placeholder={derivedF.toFixed(1)}
+                data-testid="fat-input"
+                className="mt-1 w-full rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+              />
+            </label>
+          </div>
+        </details>
+      )}
 
       <div className="flex justify-end">
         <button

@@ -20,6 +20,7 @@ export type Database = {
           carbs_override: number | null
           client_event_id: string
           created_at: string
+          event_kind_override: string | null
           fat_override: number | null
           is_voided: boolean
           macro_logging_enabled: boolean
@@ -35,6 +36,7 @@ export type Database = {
           carbs_override?: number | null
           client_event_id: string
           created_at?: string
+          event_kind_override?: string | null
           fat_override?: number | null
           is_voided?: boolean
           macro_logging_enabled?: boolean
@@ -50,6 +52,7 @@ export type Database = {
           carbs_override?: number | null
           client_event_id?: string
           created_at?: string
+          event_kind_override?: string | null
           fat_override?: number | null
           is_voided?: boolean
           macro_logging_enabled?: boolean
@@ -739,6 +742,7 @@ export type Database = {
           p_calories_override?: number
           p_carbs_override?: number
           p_client_event_id: string
+          p_event_kind?: string
           p_fat_override?: number
           p_is_voided?: boolean
           p_macro_logging_enabled?: boolean
@@ -1387,6 +1391,7 @@ export type Database = {
           p_calories_override?: number
           p_carbs_override?: number
           p_client_event_id: string
+          p_event_kind?: string
           p_fat_override?: number
           p_is_voided?: boolean
           p_macro_logging_enabled?: boolean

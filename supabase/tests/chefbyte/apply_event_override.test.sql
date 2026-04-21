@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(11);
+SELECT plan(24);
 
 -- Scenarios covered for private.apply_event_override:
 --   1. first-time override (macros_servings_override=3) — stock+macros
@@ -8,6 +8,12 @@ SELECT plan(11);
 --   3. void a previously-live event — stock backed out, food_logs gone
 --   4. un-void — stock + macros restored
 --   5. RLS/ownership — cross-user throws 'event not found'
+--   6. invalid p_event_kind → throws 22023
+--   7. p_event_kind=added on a consumed Pi event → stock reverses (no
+--      net food_logs row)
+--   8. p_event_kind=consumed flip-back → stock decrements, food_logs logged
+--   9. macro_logging_enabled=false → stock still changes, no food_logs
+--  10. independent stock + macros overrides (different magnitudes)
 
 -- ─────────────────────────────────────────────────────────────
 -- Setup
@@ -216,6 +222,148 @@ SELECT throws_ok(
   $$,
   'event not found: evt-001',
   'intruder cannot override another user''s event'
+);
+
+-- Switch back to owner for the rest. Starting lot qty after Test 4 = 4.
+SELECT tests.authenticate_as('aeo_owner');
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 6: invalid p_event_kind throws
+-- ─────────────────────────────────────────────────────────────
+
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.apply_event_override(
+      'evt-001', NULL, NULL, NULL, NULL, NULL, NULL, TRUE, FALSE, 'eaten'
+    )
+  $$,
+  '22023',
+  'invalid event_kind: eaten',
+  'invalid event_kind raises 22023'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 7: flip consumed → added
+-- Before: Test 4 left qty_containers = 4, food_log for 2 servings.
+-- After flipping to added: the prior -1 consume backs out (+1 → 5),
+-- the new effect is +1 increment (5 → 6) and NO food_logs row.
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  $$
+    SELECT chefbyte.apply_event_override(
+      'evt-001', NULL, NULL, NULL, NULL, NULL, NULL, TRUE, FALSE, 'added'
+    )
+  $$,
+  'flip consumed→added succeeds'
+);
+
+SELECT is(
+  (SELECT qty_containers FROM chefbyte.stock_lots
+    WHERE lot_id = '80000000-0000-0000-0000-0000000000b1'),
+  6::numeric(10,3),
+  'flip to added: stock = 4 + 1 (back out) + 1 (add) = 6'
+);
+
+SELECT is(
+  (SELECT COUNT(*)::int FROM chefbyte.food_logs
+    WHERE user_id = :'_owner_uid'::uuid
+      AND source_client_event_id = 'evt-001'),
+  0,
+  'flip to added: no food_logs row (added is stock-only)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 8: flip back added → consumed
+-- Before: qty = 6, no food_logs.
+-- After: prior +1 backs out (6 → 5), new -1 consume (5 → 4), food_logs
+-- for 2 servings derived (net_g=100 ÷ 100 = 1 container, svg_per=2).
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  $$
+    SELECT chefbyte.apply_event_override(
+      'evt-001', NULL, NULL, NULL, NULL, NULL, NULL, TRUE, FALSE, 'consumed'
+    )
+  $$,
+  'flip added→consumed succeeds'
+);
+
+SELECT is(
+  (SELECT qty_containers FROM chefbyte.stock_lots
+    WHERE lot_id = '80000000-0000-0000-0000-0000000000b1'),
+  4::numeric(10,3),
+  'flip to consumed: stock = 6 - 1 (back out) - 1 (consume) = 4'
+);
+
+SELECT is(
+  (SELECT calories FROM chefbyte.food_logs
+    WHERE user_id = :'_owner_uid'::uuid
+      AND source_client_event_id = 'evt-001'
+    ORDER BY created_at DESC LIMIT 1),
+  400::numeric(10,3),
+  'flip to consumed: food_log cal = 2 servings * 200 = 400'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 9: macro_logging_enabled=false on consumed
+-- Stock still changes, but no food_logs row is inserted. Use-case:
+-- spoiled food (stock decremented, not counted against daily macros).
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  $$
+    SELECT chefbyte.apply_event_override(
+      'evt-001', NULL, NULL, NULL, NULL, NULL, NULL, FALSE, FALSE, 'consumed'
+    )
+  $$,
+  'macros-off override succeeds'
+);
+
+SELECT is(
+  (SELECT qty_containers FROM chefbyte.stock_lots
+    WHERE lot_id = '80000000-0000-0000-0000-0000000000b1'),
+  4::numeric(10,3),
+  'macros-off: stock still at 4 (prior -1 undone, new -1 applied)'
+);
+
+SELECT is(
+  (SELECT COUNT(*)::int FROM chefbyte.food_logs
+    WHERE user_id = :'_owner_uid'::uuid
+      AND source_client_event_id = 'evt-001'),
+  0,
+  'macros-off: food_logs row not inserted'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- Test 10: independent stock and macros overrides
+-- stock_qty_override = -2 (stock goes 4 → 2), macros_servings = 5
+-- (food_log cal = 5 * 200 = 1000). Re-enable macro logging.
+-- ─────────────────────────────────────────────────────────────
+
+SELECT lives_ok(
+  $$
+    SELECT chefbyte.apply_event_override(
+      'evt-001', -2, 5, NULL, NULL, NULL, NULL, TRUE, FALSE, 'consumed'
+    )
+  $$,
+  'independent stock+macros override succeeds'
+);
+
+SELECT is(
+  (SELECT qty_containers FROM chefbyte.stock_lots
+    WHERE lot_id = '80000000-0000-0000-0000-0000000000b1'),
+  3::numeric(10,3),
+  'independent: stock = 4 (backed out +1) + (-2 override) = 3'
+);
+
+SELECT is(
+  (SELECT calories FROM chefbyte.food_logs
+    WHERE user_id = :'_owner_uid'::uuid
+      AND source_client_event_id = 'evt-001'
+    ORDER BY created_at DESC LIMIT 1),
+  1000::numeric(10,3),
+  'independent: food_log cal = 5 svg * 200 = 1000 (macros field ≠ stock field)'
 );
 
 SELECT finish();
