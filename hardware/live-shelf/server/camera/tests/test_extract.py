@@ -562,9 +562,14 @@ def test_compute_brightness_on_flat_frame():
 
 
 def test_apply_locked_settings_handles_missing_v4l2_ctl():
-    """If `v4l2-ctl` is not on PATH, the function returns cleanly."""
+    """If `v4l2-ctl` is not on PATH, the function returns cleanly.
+
+    Uses a Sunplus-identifying device string so the target-camera gate
+    lets us through to the missing-v4l2-ctl code path.
+    """
+    sunplus_path = "/dev/v4l/by-id/usb-SunplusIT_Inc_USB_2.0_Camera_test-video-index0"
     with mock.patch("server.camera.locked_settings.shutil.which", return_value=None):
-        result = apply_locked_settings(device="/dev/video0")
+        result = apply_locked_settings(device=sunplus_path)
     assert result["ok"] is False
     assert result["tool"] is None
     assert result["applied"] == []
@@ -574,6 +579,21 @@ def test_apply_locked_settings_handles_missing_v4l2_ctl():
     names = {entry[0] for entry in result["skipped"]}
     assert "auto_exposure" in names
     assert "focus_absolute" in names
+
+
+def test_apply_locked_settings_skips_non_target_cameras():
+    """Non-Sunplus cameras (like the catch-all HD Web Camera) are a no-op.
+
+    The locked values are calibrated for Sunplus. Applying them to the
+    HD Web Camera drives brightness below its min=1 floor and attempts
+    gamma values out of its control spec, producing black frames.
+    """
+    result = apply_locked_settings(
+        device="/dev/v4l/by-id/usb-HD_Web_Camera_HD_Web_Camera_Ucamera001-video-index0"
+    )
+    assert result.get("gated_out") is True
+    assert result["applied"] == []
+    assert result["skipped"] == []
 
 
 def test_apply_locked_settings_invokes_v4l2_ctl_when_present(tmp_path: Path):
@@ -586,17 +606,17 @@ def test_apply_locked_settings_invokes_v4l2_ctl_when_present(tmp_path: Path):
     with mock.patch(
         "server.camera.locked_settings.shutil.which", return_value="/usr/bin/v4l2-ctl"
     ), mock.patch("server.camera.locked_settings.subprocess.run", side_effect=fake_run):
-        result = apply_locked_settings(device="/dev/video0")
+        result = apply_locked_settings(device="/dev/v4l/by-id/usb-SunplusIT_Inc_USB_2.0_Camera_test-video-index0")
     assert result["ok"] is True
     assert result["tool"] == "v4l2-ctl"
     # One v4l2-ctl invocation per entry in DEFAULT_LOCKED_SETTINGS. Assert
     # against the live length so this test doesn't go stale when the lock
     # set is tuned per rig.
     assert len(calls) == len(DEFAULT_LOCKED_SETTINGS)
-    # Spot-check: each call targets /dev/video0 with a "name=value" argument.
+    # Spot-check: each call targets the test device with a "name=value" argument.
     for cmd in calls:
         assert cmd[0] == "v4l2-ctl"
-        assert "-d" in cmd and "/dev/video0" in cmd
+        assert "-d" in cmd and any("SunplusIT" in arg for arg in cmd)
         assert any("=" in arg for arg in cmd)
     applied_names = [name for name, _ in result["applied"]]
     assert "auto_exposure" in applied_names
@@ -630,7 +650,7 @@ def test_apply_locked_settings_reads_overrides_from_json(tmp_path: Path):
     with mock.patch(
         "server.camera.locked_settings.shutil.which", return_value="/usr/bin/v4l2-ctl"
     ), mock.patch("server.camera.locked_settings.subprocess.run", side_effect=fake_run):
-        result = apply_locked_settings(device="/dev/video0", config_path=cfg_path)
+        result = apply_locked_settings(device="/dev/v4l/by-id/usb-SunplusIT_Inc_USB_2.0_Camera_test-video-index0", config_path=cfg_path)
 
     assert result["ok"] is True
     # Find the exposure call and verify overridden value.
@@ -663,7 +683,7 @@ def test_apply_locked_settings_handles_v4l2_failure_gracefully():
     with mock.patch(
         "server.camera.locked_settings.shutil.which", return_value="/usr/bin/v4l2-ctl"
     ), mock.patch("server.camera.locked_settings.subprocess.run", side_effect=fake_run):
-        result = apply_locked_settings(device="/dev/video0")
+        result = apply_locked_settings(device="/dev/v4l/by-id/usb-SunplusIT_Inc_USB_2.0_Camera_test-video-index0")
 
     assert result["ok"] is True
     applied = [n for n, _ in result["applied"]]

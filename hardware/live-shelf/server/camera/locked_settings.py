@@ -27,41 +27,46 @@ log = logging.getLogger(__name__)
 # Measured on this rig: in auto mode, first post-open frame is 253.6
 # (whiteout) and takes ~3 seconds to stabilize at ~150.
 #
-# BRIGHT-SCENE SATURATION (2026-04-21, fridge LED sessions blown to
-# mean=249 / 82% pixels at 255 for entire door-open window): an
-# earlier calibration comment claimed that exposure_time_absolute
-# doesn't matter because "internal AGC maintains brightness" — that
-# was only true when tested with DIM ambient (door closed) and the
-# sensor well was never filled. With the fridge's internal LED on,
-# the scene is bright enough that exposure=166 over-saturates the
-# pixels regardless of AGC: once pixels clip at 255 there's nothing
-# the ISP can recover. Direct evidence: session
-# 2026-04-21T15-52-00.525Z archived 38 frames at mean=249 + 1 frame
-# at mean=149 (door closing, scene suddenly dim). v4l2 state during
-# capture was verified Manual Mode + exposure=166.
+# EXPOSURE CALIBRATION (2026-04-21 — owner target: mean luma ≈140):
+# Full in-session sweep of brightness × contrast × gamma on the Sunplus
+# camera at /dev/video0 (after Pi reboot; device index had swapped from
+# /dev/video2 to /dev/video0 — earlier sweeps against /dev/video2 were
+# hitting the HD Web Camera by accident, which led to a spurious
+# "exposure is a no-op" conclusion). Actual data at exposure=3,
+# door-open + fridge LED on:
+#   gamma=100 br=  0 contrast= 0 → 60.3    (too dark)
+#   gamma=200 br=  0 contrast= 0 → 168.4   (too bright)
+#   gamma=200 br=-32 contrast= 0 → 136.7   ← closest to 140, Δ=-3.3
+#   gamma=300 br=-64 contrast= 0 → 166.4   (over + harsh)
+# Pure exposure sweep at default gamma=100 / br=0 ranges 60 (exp=3) to
+# 109 (exp=1000) — exposure alone can't reach 140 without blowing other
+# frames, so the lock combines a short exposure with gamma=200 to lift
+# midtones + brightness=-32 to land at mean≈137. This keeps headroom
+# for slightly brighter scenes (different rack position, door angle,
+# ambient spill) while leaving the bottom of the range usable.
 #
-# Fix: drop exposure_time_absolute to 8 (≈1/125s-equivalent) — low
-# enough to prevent saturation under the LED, still usable in the
-# dim-ambient case because (a) the sensor is sensitive, (b) the
-# BRIGHTNESS_THRESHOLD gate (8) only archives frames where the
-# fridge LED is on, and (c) the session_capture.LIT_BRIGHTNESS_MIN
-# filter rejects anything darker than 8 anyway so a few dropped
-# dim frames during door-close are expected. Also disable
-# backlight_compensation (default 9 / near-max) — it's a post-
-# exposure pixel-lift for "backlit scenes" that pushes bright
-# scenes further toward 255.
+# Previous tries and why they were wrong:
+#   - exposure=166 (original default): sensor pixels clip under LED.
+#   - exposure=8 (2026-04-21 first fix, commit 68b15b2): same as 166 in
+#     practice on this camera. Lock was applied cleanly but at that
+#     exposure the scene still over-exposed because gamma=100 and
+#     brightness=0 default produce a sub-unity response curve that
+#     gets swamped by the LED. Changing exposure alone couldn't fix it.
+#
 # Focus is fixed-focus or has very wide DOF — Laplacian-variance sweep
 # showed ~28 for focus 0-200, dropping to 5.9 at 255. Lock at 0.
 # Order matters: "auto" flags must be off BEFORE setting manual values.
 DEFAULT_LOCKED_SETTINGS: list[tuple[str, int]] = [
     ("auto_exposure", 1),                   # 1 = Manual Mode
-    ("exposure_time_absolute", 8),          # low enough to avoid LED saturation
+    ("exposure_time_absolute", 3),          # minimum — prevents clipping under LED
     ("white_balance_automatic", 0),
     ("white_balance_temperature", 4600),    # default
     ("focus_automatic_continuous", 0),
     ("focus_absolute", 0),                  # fixed-focus lens; 0-200 all sharp
     ("backlight_compensation", 0),          # off: pixel-lift was blowing highlights
-    ("brightness", 0),                      # default gain; tune negative if needed
+    ("brightness", -32),                    # pull mean down 32 to hit ≈137
+    ("contrast", 0),                        # flat response; raises contrast= raised mean
+    ("gamma", 200),                         # lift midtones out of near-black
 ]
 
 # Legacy/alternate control names some UVC drivers expose. We try each group
@@ -76,6 +81,8 @@ _CONTROL_ALIASES: dict[str, list[str]] = {
     "white_balance_automatic": ["white_balance_automatic", "white_balance_temperature_auto"],
     "backlight_compensation": ["backlight_compensation"],
     "brightness": ["brightness"],
+    "contrast": ["contrast"],
+    "gamma": ["gamma"],
 }
 
 
@@ -141,6 +148,45 @@ def _run_v4l2(
     return True, ""
 
 
+def _is_target_camera(device: str) -> bool:
+    """True iff the device path points at the Sunplus fridge camera.
+
+    The calibrated values in DEFAULT_LOCKED_SETTINGS are specific to the
+    Sunplus USB 2.0 Camera in the fridge. Applying them to other cameras
+    on the same Pi (specifically the HD Web Camera used for the catch-all
+    scale) produces broken images — e.g. HD Web Camera's brightness
+    control range is 1..255 (default 128) while Sunplus is -64..64
+    (default 0), so brightness=-32 either clips to the min-1 floor
+    (near-black) or fails, and gamma=200 on a cam that doesn't support
+    this control silently does nothing OR rejects every write.
+
+    We match by the by-id symlink substring. Paths are resolved via
+    :func:`os.path.realpath` so both the by-id (stable across reboots)
+    and the /dev/videoN path (enumeration order, changes on reboot) work.
+    """
+    import os as _os
+    try:
+        real = _os.path.realpath(device)
+    except OSError:
+        real = device
+    # Direct by-id match
+    if "SunplusIT" in device or "SunplusIT" in real:
+        return True
+    # Best-effort: look at all /dev/v4l/by-id/ symlinks and see if any
+    # Sunplus one resolves to the same /dev/videoN target as `device`.
+    try:
+        by_id_dir = "/dev/v4l/by-id"
+        if _os.path.isdir(by_id_dir):
+            for name in _os.listdir(by_id_dir):
+                if "SunplusIT" in name:
+                    target = _os.path.realpath(_os.path.join(by_id_dir, name))
+                    if _os.path.realpath(target) == real:
+                        return True
+    except OSError:
+        pass
+    return False
+
+
 def apply_locked_settings(
     device: str = "/dev/video0",
     config_path: Path | str | None = None,
@@ -163,7 +209,24 @@ def apply_locked_settings(
 
     The function never raises; it logs and returns. The caller can decide
     whether to treat a failure as fatal.
+
+    IMPORTANT: This is gated to the Sunplus fridge camera only (see
+    ``_is_target_camera``). Other cameras on the same Pi (specifically
+    the HD Web Camera wired to the catch-all scale rig) get a no-op +
+    a log line. The DEFAULT_LOCKED_SETTINGS values are calibrated for
+    one specific camera; applying them blindly would break others.
     """
+    # Non-Sunplus cameras: no-op. The catch-all HD Web Camera lives on
+    # the same Pi but has different control ranges — brightness=-32 on
+    # it clamps near black, gamma=200 is out of spec, etc.
+    if not _is_target_camera(device):
+        log.info(
+            "apply_locked_settings(%s): not the target Sunplus camera; "
+            "skipping lock. Other cameras keep driver defaults.",
+            device,
+        )
+        return {"ok": True, "applied": [], "skipped": [], "tool": "v4l2-ctl", "gated_out": True}
+
     if config_path is None:
         config_path = Path(__file__).with_name("camera_locked.json")
     elif isinstance(config_path, str):
