@@ -25,22 +25,43 @@ log = logging.getLogger(__name__)
 
 # Lock everything to manual so door-open has ZERO adaptation delay.
 # Measured on this rig: in auto mode, first post-open frame is 253.6
-# (whiteout) and takes ~3 seconds to stabilize at ~150. In manual mode
-# with exposure=166, the first post-open frame is already at ~190 and
-# stays there — because the camera has internal AGC that maintains
-# brightness regardless of exposure_time_absolute (tested min=3 and
-# max=2047, both yield ~151). So exposure value barely matters; what
-# matters is not running the auto-exposure adaptation loop.
+# (whiteout) and takes ~3 seconds to stabilize at ~150.
+#
+# BRIGHT-SCENE SATURATION (2026-04-21, fridge LED sessions blown to
+# mean=249 / 82% pixels at 255 for entire door-open window): an
+# earlier calibration comment claimed that exposure_time_absolute
+# doesn't matter because "internal AGC maintains brightness" — that
+# was only true when tested with DIM ambient (door closed) and the
+# sensor well was never filled. With the fridge's internal LED on,
+# the scene is bright enough that exposure=166 over-saturates the
+# pixels regardless of AGC: once pixels clip at 255 there's nothing
+# the ISP can recover. Direct evidence: session
+# 2026-04-21T15-52-00.525Z archived 38 frames at mean=249 + 1 frame
+# at mean=149 (door closing, scene suddenly dim). v4l2 state during
+# capture was verified Manual Mode + exposure=166.
+#
+# Fix: drop exposure_time_absolute to 8 (≈1/125s-equivalent) — low
+# enough to prevent saturation under the LED, still usable in the
+# dim-ambient case because (a) the sensor is sensitive, (b) the
+# BRIGHTNESS_THRESHOLD gate (8) only archives frames where the
+# fridge LED is on, and (c) the session_capture.LIT_BRIGHTNESS_MIN
+# filter rejects anything darker than 8 anyway so a few dropped
+# dim frames during door-close are expected. Also disable
+# backlight_compensation (default 9 / near-max) — it's a post-
+# exposure pixel-lift for "backlit scenes" that pushes bright
+# scenes further toward 255.
 # Focus is fixed-focus or has very wide DOF — Laplacian-variance sweep
 # showed ~28 for focus 0-200, dropping to 5.9 at 255. Lock at 0.
 # Order matters: "auto" flags must be off BEFORE setting manual values.
 DEFAULT_LOCKED_SETTINGS: list[tuple[str, int]] = [
     ("auto_exposure", 1),                   # 1 = Manual Mode
-    ("exposure_time_absolute", 166),        # default; AGC handles brightness
+    ("exposure_time_absolute", 8),          # low enough to avoid LED saturation
     ("white_balance_automatic", 0),
     ("white_balance_temperature", 4600),    # default
     ("focus_automatic_continuous", 0),
     ("focus_absolute", 0),                  # fixed-focus lens; 0-200 all sharp
+    ("backlight_compensation", 0),          # off: pixel-lift was blowing highlights
+    ("brightness", 0),                      # default gain; tune negative if needed
 ]
 
 # Legacy/alternate control names some UVC drivers expose. We try each group
@@ -53,6 +74,8 @@ _CONTROL_ALIASES: dict[str, list[str]] = {
     "auto_exposure": ["auto_exposure"],
     "focus_automatic_continuous": ["focus_automatic_continuous", "focus_auto"],
     "white_balance_automatic": ["white_balance_automatic", "white_balance_temperature_auto"],
+    "backlight_compensation": ["backlight_compensation"],
+    "brightness": ["brightness"],
 }
 
 
@@ -204,13 +227,11 @@ AUTO_EXPOSURE_MANUAL: int = 1
 
 
 # Manual exposure value to use when the "locked exposure" button is pressed
-# on the dashboard. The camera has internal AGC (measured: both min=3 and
-# max=2047 yield ~151 mean brightness), so this specific integration time
-# barely affects the scene. What the lock actually buys us is eliminating
-# the auto-exposure adaptation loop — the first post-open frame is usable
-# immediately instead of whited-out for ~3s. Kept aligned with
-# DEFAULT_LOCKED_SETTINGS so the dashboard toggle matches startup state.
-MANUAL_EXPOSURE_TIME_ABSOLUTE: int = 166
+# on the dashboard. Kept aligned with DEFAULT_LOCKED_SETTINGS so the
+# dashboard toggle matches startup state. See the DEFAULT_LOCKED_SETTINGS
+# comment above for why this value was lowered from 166 → 8 in
+# 2026-04-21 (bright-scene sensor saturation).
+MANUAL_EXPOSURE_TIME_ABSOLUTE: int = 8
 
 
 def set_auto_exposure(device: str = "/dev/video0", enabled: bool = True) -> bool:
@@ -252,10 +273,70 @@ def set_auto_exposure(device: str = "/dev/video0", enabled: bool = True) -> bool
     return True
 
 
+# -----------------------------------------------------------------------------
+# Diagnostic readback
+# -----------------------------------------------------------------------------
+
+
+def read_v4l2_controls(
+    device: str,
+    names: list[str] | None = None,
+    *,
+    timeout: float = 3.0,
+) -> dict[str, str]:
+    """Read back the live values of a set of v4l2 controls.
+
+    Returns a dict of ``{control_name: "value (mode)"}`` as reported by
+    ``v4l2-ctl --get-ctrl``. Unknown controls map to ``"?"``. The result
+    is suitable for a single-line log entry at session open so we have
+    positive evidence of what the camera is actually doing, rather than
+    trusting that ``apply_locked_settings`` stuck since the app started.
+
+    This is a read-only diagnostic — it never writes. Safe to call from
+    any thread, though it does spawn a ``v4l2-ctl`` subprocess each
+    invocation so don't call it per-frame.
+    """
+    if names is None:
+        names = [
+            "auto_exposure",
+            "exposure_time_absolute",
+            "backlight_compensation",
+            "brightness",
+            "white_balance_automatic",
+        ]
+    out: dict[str, str] = {name: "?" for name in names}
+    tool = shutil.which("v4l2-ctl")
+    if tool is None:
+        return out
+    cmd = [tool, "-d", device, "--get-ctrl=" + ",".join(names)]
+    try:
+        res = subprocess.run(
+            cmd, check=False, capture_output=True, text=True, timeout=timeout,
+        )
+    except (subprocess.TimeoutExpired, OSError):
+        return out
+    if res.returncode != 0:
+        # Some controls may be unknown on this device — v4l2-ctl still
+        # prints the known ones and writes "unknown control ..." to
+        # stderr. Parse whatever we got on stdout.
+        pass
+    for line in (res.stdout or "").splitlines():
+        # Format: "auto_exposure: 1 (Manual Mode)"  or  "brightness: 0"
+        if ":" not in line:
+            continue
+        k, _, v = line.partition(":")
+        k = k.strip()
+        v = v.strip()
+        if k in out:
+            out[k] = v
+    return out
+
+
 __all__ = [
     "AUTO_EXPOSURE_APERTURE_PRIORITY",
     "AUTO_EXPOSURE_MANUAL",
     "DEFAULT_LOCKED_SETTINGS",
     "apply_locked_settings",
+    "read_v4l2_controls",
     "set_auto_exposure",
 ]

@@ -168,9 +168,19 @@ def default_camera_factory(cfg: DaemonConfig) -> _CameraLike:
         try:
             # Import here (not at module top) to avoid a circular import at
             # package load time — `locked_settings` is a sibling module.
-            from .locked_settings import apply_locked_settings
+            from .locked_settings import apply_locked_settings, read_v4l2_controls
 
             apply_locked_settings(device_for_v4l2)
+            # Read back the actual live values so the log contains proof
+            # of what the camera is running with — not just "apply
+            # returned OK". When sessions come back over-exposed, this
+            # is the first thing to check.
+            live = read_v4l2_controls(device_for_v4l2)
+            log.info(
+                "v4l2 live state (%s): %s",
+                device_for_v4l2,
+                ", ".join(f"{k}={v}" for k, v in live.items()),
+            )
         except Exception:  # pragma: no cover - best-effort
             log.exception(
                 "post-open apply_locked_settings(%s) failed; capture continues "
