@@ -80,12 +80,50 @@ async function resolvePiUserId(): Promise<string> {
   return data.user_id;
 }
 
-/** Return stdout of a sqlite3 query executed on the Pi via ssh. */
+/** Return stdout of a sqlite3 query executed on the Pi via ssh.
+ *
+ * Auth matches the live-shelf-deploy skill: an SSH_ASKPASS helper script
+ * supplies the Pi password on stdin. Assumes the same /tmp/askpass.sh
+ * exists (created by the skill on first run) or is created here inline.
+ */
+const ASKPASS_PATH = '/tmp/askpass.sh';
+function ensureAskpass(): void {
+  try {
+    execSync(`test -x ${ASKPASS_PATH}`, { stdio: 'ignore' });
+    return;
+  } catch {
+    /* needs creation */
+  }
+  const pw = process.env.PI_PASS || 'jeremy';
+  execSync(
+    `bash -c 'cat > ${ASKPASS_PATH} <<EOF
+#!/bin/bash
+echo ${pw}
+EOF
+chmod +x ${ASKPASS_PATH}'`,
+  );
+}
+
 function piQuery(sql: string): string {
-  // BatchMode=yes prevents interactive password prompts; StrictHostKeyChecking
-  // is left default so a fresh Pi still prompts once on first connect.
-  // The Pi has sqlite3 installed (verified via live-shelf-deploy skill).
-  const cmd = `ssh -o BatchMode=yes ${PI_USER}@${PI_HOST} "sqlite3 ${PI_DB_PATH} \\"${sql.replace(/"/g, '\\"')}\\""`;
+  ensureAskpass();
+  // ``setsid -w`` detaches the tty so the SSH_ASKPASS helper is actually
+  // consulted. StrictHostKeyChecking=accept-new keeps CI/bootstrap runs
+  // from hanging on an unknown host prompt.
+  //
+  // The Pi's non-interactive shell doesn't have sqlite3 on PATH, but
+  // python3 is universally available — use stdlib sqlite3 via a small
+  // base64-encoded inline script. Base64 round-tripping avoids the
+  // double-quote / newline escaping headaches that tripped up earlier
+  // iterations.
+  const pyScript = [
+    'import sqlite3,sys,base64',
+    'q=base64.b64decode(sys.argv[2]).decode()',
+    'c=sqlite3.connect(sys.argv[1]).execute(q)',
+    "for r in c: print(' '.join(str(x) for x in r))",
+  ].join('\n');
+  const b64Script = Buffer.from(pyScript, 'utf8').toString('base64');
+  const b64Sql = Buffer.from(sql, 'utf8').toString('base64');
+  const cmd = `SSH_ASKPASS=${ASKPASS_PATH} SSH_ASKPASS_REQUIRE=force DISPLAY=dummy setsid -w ssh -o StrictHostKeyChecking=accept-new -o ConnectTimeout=10 ${PI_USER}@${PI_HOST} 'echo ${b64Script} | base64 -d | python3 - ${PI_DB_PATH} ${b64Sql}'`;
   return execSync(cmd, { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
 }
 
