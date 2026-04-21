@@ -878,6 +878,41 @@ export function ScannerPage() {
     prevActiveForConfirmRef.current = activeItemId;
   }, [activeItemId]);
 
+  // When the selected productId changes (queue click or fresh scan finalising
+  // its productId), load that product's nutrition from the DB into the
+  // editor so the inputs show THIS item's values — not the last-edited
+  // item's. Without this the fields keep whatever the user last typed,
+  // which is confusing AND (combined with the push-back effect) was the
+  // root of cross-item data bleed before userEditedFieldsRef got cleared.
+  useEffect(() => {
+    if (!activeProductId) return;
+    let cancelled = false;
+    (async () => {
+      const { data } = await chefbyte()
+        .from('products')
+        .select('servings_per_container, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving')
+        .eq('product_id', activeProductId)
+        .single();
+      if (cancelled || !data) return;
+      const loaded: NutritionData = {
+        servingsPerContainer: String((data as any).servings_per_container ?? 1),
+        calories: String((data as any).calories_per_serving ?? ''),
+        carbs: String((data as any).carbs_per_serving ?? ''),
+        fat: String((data as any).fat_per_serving ?? ''),
+        protein: String((data as any).protein_per_serving ?? ''),
+      };
+      // Clear the edit-tracking ref too: after a reload, no fields are
+      // "dirty" from the user's perspective on THIS item. The push-back
+      // effect sees no edits and won't re-write.
+      userEditedFieldsRef.current = new Set();
+      setNutrition(loaded);
+      setOriginalNutrition(loaded);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [activeProductId]);
+
   // Push user-edited nutrition fields back to products on every change.
   // Without this, corrections typed AFTER the initial auto-save (fast path
   // for already-known barcodes, which commits within ~100 ms of scan)
@@ -1017,6 +1052,13 @@ export function ScannerPage() {
                 key={item.id}
                 data-testid={`queue-item-${item.id}`}
                 onClick={() => {
+                  // Clear edit-tracking BEFORE activeItemId changes.
+                  // Without this the push-back effect would fire with the
+                  // previous item's nutrition state and write it to the
+                  // new activeProductId — the exact bug where editing s/c
+                  // on one item and clicking 2 more would propagate that
+                  // value to items 2 and 3.
+                  userEditedFieldsRef.current = new Set();
                   setActiveItemId(item.id);
                   // Opening a queue row pops focus to Srv/Ctn so the user
                   // can immediately type a replacement value on the keypad.
