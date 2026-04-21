@@ -352,6 +352,50 @@ async function handleIntake(supabase: SupabaseClient, device: Device, body: any)
   return jsonResponse(inserted!);
 }
 
+/**
+ * Apply a Pi-captured tare-weight to a single products row.
+ *
+ * Called by the Pi after the catch-all scale tare-capture interceptor
+ * fires (see CATCH_ALL_TARE_CAPTURE_PLAN.md §4.2 cloud resolution).
+ * Narrow by design: only bumps tare_weight_g, nothing else. The
+ * product row must already exist + belong to the authenticated
+ * device's user. Missing / cross-user rows return 404 so the Pi's
+ * fire-and-forget caller logs once and moves on.
+ */
+async function handleProductTare(
+  supabase: SupabaseClient,
+  device: Device,
+  body: any,
+): Promise<Response> {
+  const productId: string | undefined = body?.product_id;
+  const tareRaw = body?.tare_weight_g;
+  if (typeof productId !== 'string' || productId.length === 0) {
+    return jsonResponse({ error: 'product_id required' }, 400);
+  }
+  const tare = typeof tareRaw === 'number' ? tareRaw : Number(tareRaw);
+  if (!Number.isFinite(tare) || tare < 0) {
+    return jsonResponse({ error: 'tare_weight_g must be a non-negative number' }, 400);
+  }
+  const userId = device.user_id;
+  const { data: updated, error: updErr } = await supabase
+    .schema('chefbyte')
+    .from('products')
+    .update({ tare_weight_g: tare })
+    .eq('product_id', productId)
+    .eq('user_id', userId)
+    .select('product_id, tare_weight_g')
+    .maybeSingle();
+  if (updErr) throw updErr;
+  if (!updated) {
+    return jsonResponse({ error: 'product not found' }, 404);
+  }
+  return jsonResponse({
+    ok: true,
+    product_id: updated.product_id,
+    tare_weight_g: updated.tare_weight_g,
+  });
+}
+
 async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
   const pendingReviewCount: number = typeof body?.pending_review_count === 'number' ? body.pending_review_count : 0;
   // Scenario 7: the Pi heartbeat_provider includes these two counters so
@@ -469,6 +513,7 @@ Deno.serve(async (req) => {
       if (leaf === 'event') return await handleEvent(supabase, device, body);
       if (leaf === 'intake') return await handleIntake(supabase, device, body);
       if (leaf === 'heartbeat') return await handleHeartbeat(supabase, device, body);
+      if (leaf === 'product-tare') return await handleProductTare(supabase, device, body);
     }
 
     return jsonResponse({ error: 'not found' }, 404);

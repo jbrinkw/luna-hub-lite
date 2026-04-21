@@ -520,6 +520,25 @@ def create_app(
     except Exception:
         log.exception("startup zombie-session cleanup failed (non-fatal)")
 
+    # Clear stale tare-arm rows from a crashed prior session
+    # (CATCH_ALL_TARE_CAPTURE_PLAN.md §4.1 + §7). The scale-event
+    # interceptor already gates on ``expires_at > now`` so a truly
+    # expired row can't intercept, but a long-ago ghost arm would
+    # still render a stale banner on /inventory and confuse the
+    # operator. Idempotent + cheap — drops rows older than 10 min.
+    try:
+        with db_lock:
+            cleared_arms = storage_repo.clear_stale_tare_arm(
+                conn, older_than_s=600,
+            )
+        if cleared_arms:
+            log.warning(
+                "startup: cleared %d stale tare_arm row(s) from prior session",
+                cleared_arms,
+            )
+    except Exception:
+        log.exception("startup stale-tare-arm cleanup failed (non-fatal)")
+
     # Reset any 'classifying' rows back to 'pending' — those are events
     # whose classifier worker was killed mid-run (SIGTERM during deploy,
     # process crash, etc.). Leaving them in 'classifying' would strand
@@ -746,6 +765,13 @@ def create_app(
         catch_all_enabled=cfg.catch_all_enabled,
         shelf_registry_override=_shelf_registry,
         cloud_emitter=cloud_emitter,
+        # Threaded for fire-and-forget tare-capture push-back
+        # (CATCH_ALL_TARE_CAPTURE_PLAN.md §4.2 cloud resolution). May
+        # be None when CLOUD_ENABLED=false — in that case the handler
+        # never calls post_product_tare. When non-None, the handler
+        # calls it inside a broad try/except so cloud errors never
+        # block local writes.
+        cloud_client=cloud_client,
     )
 
     # --- WeightHandler (catch-all session driver) -----------------------

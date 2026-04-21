@@ -147,3 +147,26 @@ class CloudClient:
             headers={"content-type": "application/json"},
         )
         return self._parse_or_raise(resp)
+
+    def post_product_tare(
+        self, *, product_id: str, tare_g: float,
+    ) -> dict:
+        """One-shot push-back for a locally-captured tare value.
+
+        Per CATCH_ALL_TARE_CAPTURE_PLAN.md cloud resolution: when the
+        catch-all tare interceptor fires, the Pi writes
+        ``products.tare_weight_g`` locally AND calls this method to
+        propagate the new tare back to cloud's ``chefbyte.products``
+        row. Callers treat this as fire-and-forget; a :class:`CloudError`
+        means the cloud doesn't know about the new tare (yet) but the
+        local row is authoritative.
+
+        Routes to ``POST /product-tare`` — a narrow endpoint on the
+        shelf-ingest edge function. If the edge function doesn't yet
+        expose that route, the call returns a 404 which propagates as
+        :class:`CloudError` and is logged + swallowed by the handler.
+        """
+        return self.post(
+            "/product-tare",
+            {"product_id": product_id, "tare_weight_g": float(tare_g)},
+        )
