@@ -10,6 +10,7 @@ dist/
 .wrangler/
 .dev.vars
 supabase/.temp/
+supabase/.branches/
 .worktrees/
 coverage/
 playwright-report/
