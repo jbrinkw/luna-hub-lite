@@ -407,6 +407,33 @@
 </div>
 {% endif %}
 
+{# -- Tare-capture sticky banner (CATCH_ALL_TARE_CAPTURE_PLAN.md §5.1) -- #}
+{% if tare_arm %}
+<div
+  id="tare-banner"
+  class="panel"
+  style="position: sticky; top: 0; z-index: 20; border-color: var(--warn);"
+  data-product-id="{{ tare_arm.product_id }}"
+>
+  <div style="display: flex; gap: 12px; align-items: center; flex-wrap: wrap;">
+    <span class="pill warn">ARMED</span>
+    <span>
+      Tare capture armed for <strong id="tare-banner-name">{{ tare_arm.product_id }}</strong>.
+      Place the empty container on the catch-all scale.
+    </span>
+    <span class="muted" style="margin-left: auto;">
+      expires in <span id="tare-countdown" class="mono">…</span>
+    </span>
+    <button id="tare-cancel-btn" class="danger" type="button">cancel</button>
+  </div>
+  <div
+    id="tare-last-error"
+    class="muted"
+    style="font-size: 11px; margin-top: 6px; color: var(--danger); display: none;"
+  ></div>
+</div>
+{% endif %}
+
 {# -- Catalog (products certified but not on shelf) ------------------ #}
 <div class="panel">
   <h3>catalog <span class="muted">(certified products not on shelf — {{ catalog|length }})</span></h3>
@@ -423,11 +450,13 @@
           <th>per ctnr</th>
           <th>container</th>
           <th>unit</th>
+          <th>action</th>
           <th></th>
         </tr>
       </thead>
       <tbody>
         {% for p in catalog %}
+          {% set is_armed = (tare_arm is not none and tare_arm.product_id == p.product_id) %}
           <tr data-product-id="{{ p.product_id }}">
             <td>
               <strong>{{ p.name }}</strong>
@@ -438,7 +467,7 @@
             <td class="mono">
               {% if p.net_weight_g is not none %}{{ '%.1f g'|format(p.net_weight_g) }}{% else %}&mdash;{% endif %}
             </td>
-            <td class="mono">
+            <td class="mono tare-cell">
               {% if p.tare_weight_g is not none %}{{ '%.1f g'|format(p.tare_weight_g) }}{% else %}<span class="muted">&mdash;</span>{% endif %}
             </td>
             <td class="mono">
@@ -449,6 +478,16 @@
             </td>
             <td><span class="pill muted">{{ p.container_type or '&mdash;' }}</span></td>
             <td><span class="pill muted">{{ p.unit_type or '&mdash;' }}</span></td>
+            <td>
+              <button
+                class="arm-tare"
+                data-product-id="{{ p.product_id }}"
+                data-product-name="{{ p.name }}"
+                {% if is_armed %}data-armed="1"{% endif %}
+                title="arm the catch-all scale to capture the empty-container weight as this product's tare"
+                style="font-size: 11px; padding: 2px 8px;{% if is_armed %} border-color: var(--warn); color: var(--warn);{% endif %}"
+              >{% if is_armed %}ARMED…{% else %}tare{% endif %}</button>
+            </td>
             <td style="text-align: right; width: 32px;">
               <button
                 class="del-product"
@@ -532,6 +571,155 @@
       }
     });
   });
+
+  // -----------------------------------------------------------------
+  // Tare-capture arm/status/cancel (CATCH_ALL_TARE_CAPTURE_PLAN.md §5.2)
+  // -----------------------------------------------------------------
+  (function () {
+    let tarePollTimer = null;
+    let tareExpiresAt = null;
+    let tareProductId = null;
+
+    function stopTarePoll() {
+      if (tarePollTimer) {
+        clearInterval(tarePollTimer);
+        tarePollTimer = null;
+      }
+    }
+
+    function formatCountdown(ms) {
+      if (ms === null || ms === undefined || ms < 0) return '—';
+      const s = Math.ceil(ms / 1000);
+      if (s >= 60) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+      return s + 's';
+    }
+
+    function renderBannerFromStatus(st) {
+      const banner = document.getElementById('tare-banner');
+      const countdown = document.getElementById('tare-countdown');
+      const errBox = document.getElementById('tare-last-error');
+      const nameBox = document.getElementById('tare-banner-name');
+      if (!banner) return;
+      if (!st || !st.armed) {
+        banner.style.display = 'none';
+        return;
+      }
+      banner.style.display = '';
+      if (nameBox && st.product_name) nameBox.textContent = st.product_name;
+      tareExpiresAt = st.expires_at ? new Date(st.expires_at) : null;
+      if (countdown && tareExpiresAt) {
+        countdown.textContent = formatCountdown(
+          tareExpiresAt.getTime() - Date.now()
+        );
+      }
+      if (errBox) {
+        if (st.last_error) {
+          errBox.textContent = 'last error: ' + st.last_error;
+          errBox.style.display = '';
+        } else {
+          errBox.style.display = 'none';
+        }
+      }
+    }
+
+    async function pollTareStatus() {
+      try {
+        const st = await fetchJSON('/api/tare/status');
+        renderBannerFromStatus(st);
+        if (!st.armed) {
+          // Transition armed -> unarmed: could be success OR timeout.
+          // If we have a tare product id, refresh that row's tare cell
+          // from /api/state isn't enough (product not in state) — just
+          // show a toast and reload the page so the new tare value
+          // appears in the catalog's "tare" column.
+          stopTarePoll();
+          showToast('tare capture finished — refreshing');
+          setTimeout(() => window.location.reload(), 600);
+          return;
+        }
+        // Timeout detection: if expires_at has passed but status still
+        // says armed, the interceptor didn't fire. Show a hint; leave
+        // the banner alone so the operator can cancel manually.
+        if (tareExpiresAt && tareExpiresAt.getTime() < Date.now()) {
+          const errBox = document.getElementById('tare-last-error');
+          if (errBox) {
+            errBox.textContent = 'arm expired with no catch-all event — place the container or cancel';
+            errBox.style.display = '';
+          }
+        }
+      } catch (e) {
+        // Pi unreachable — keep polling silently.
+      }
+    }
+
+    function startTarePoll(productId, expiresAt) {
+      tareProductId = productId || null;
+      tareExpiresAt = expiresAt ? new Date(expiresAt) : null;
+      stopTarePoll();
+      tarePollTimer = setInterval(pollTareStatus, 1000);
+      pollTareStatus();
+    }
+
+    // If the page was rendered with an active arm, start polling.
+    const initialBanner = document.getElementById('tare-banner');
+    if (initialBanner) {
+      startTarePoll(
+        initialBanner.getAttribute('data-product-id'),
+        null
+      );
+    }
+
+    // Click handler: arm button on a catalog row.
+    document.querySelectorAll('button.arm-tare').forEach(function (btn) {
+      btn.addEventListener('click', async function () {
+        if (btn.getAttribute('data-armed') === '1') {
+          // Already armed — reconfirm is a no-op; user cancels via banner.
+          return;
+        }
+        const pid = btn.getAttribute('data-product-id');
+        const pname = btn.getAttribute('data-product-name') || pid;
+        if (!pid) return;
+        btn.disabled = true;
+        const prev = btn.textContent;
+        btn.textContent = '…';
+        try {
+          const resp = await fetchJSON(
+            '/api/product/' + encodeURIComponent(pid) + '/tare/arm',
+            { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}' }
+          );
+          showToast('armed: place the container on the catch-all scale');
+          // Refresh the page so the sticky banner and ARMED… button
+          // state render authoritatively from server-side data.
+          setTimeout(() => window.location.reload(), 400);
+        } catch (e) {
+          showToast('arm failed: ' + e.message, true);
+          btn.disabled = false;
+          btn.textContent = prev;
+        }
+      });
+    });
+
+    // Banner cancel handler.
+    const cancelBtn = document.getElementById('tare-cancel-btn');
+    if (cancelBtn) {
+      cancelBtn.addEventListener('click', async function () {
+        cancelBtn.disabled = true;
+        try {
+          await fetchJSON('/api/tare/cancel', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+          });
+          showToast('tare cancelled');
+          stopTarePoll();
+          setTimeout(() => window.location.reload(), 300);
+        } catch (e) {
+          showToast('cancel failed: ' + e.message, true);
+          cancelBtn.disabled = false;
+        }
+      });
+    }
+  })();
 
   // Per-row on-shelf lot delete.
   document.querySelectorAll('button.del-lot').forEach(function (btn) {
