@@ -1,6 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Copy, Check, ChevronDown, ChevronRight, Pencil } from 'lucide-react';
+import { Copy, Check, ChevronDown, ChevronRight, Pencil, ScanBarcode } from 'lucide-react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
@@ -438,6 +439,26 @@ export function ScalesTab() {
           Register Raspberry Pi shelf devices and pair their scales to products
         </p>
       </div>
+
+      {/* ---- LiveTrack Import entry point ----
+          Primary CTA that sends users into the barcode → scale → tare wizard
+          at /chef/livetrack-import. The wizard is scale-centric (reads live
+          weight from the Pi to compute tare + qty_containers), so surfacing
+          it alongside the scale devices is the natural place. Without this
+          button the route had zero UI entry points. */}
+      <Link
+        to="/chef/livetrack-import"
+        data-testid="livetrack-import-btn"
+        className="flex items-center gap-3 mb-4 p-4 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white no-underline shadow-sm transition-colors"
+      >
+        <ScanBarcode className="w-6 h-6 shrink-0" aria-hidden="true" />
+        <div className="flex flex-col">
+          <span className="font-bold text-base leading-tight">Start LiveTrack Import</span>
+          <span className="text-xs opacity-90 mt-0.5">
+            Scan a barcode on scale-02 to import a new product with automatic tare capture.
+          </span>
+        </div>
+      </Link>
 
       {error && (
         <p className="text-danger-text bg-danger-subtle px-3.5 py-2.5 rounded-md border border-danger mb-4">{error}</p>

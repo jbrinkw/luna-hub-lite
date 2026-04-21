@@ -248,6 +248,36 @@ test.describe('ChefByte Settings', () => {
     }
   });
 
+  test('scales tab — LiveTrack Import button routes to wizard', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-livetrack-entry');
+    try {
+      await seedChefByteData(client, userId);
+      await page.goto('/chef/settings');
+
+      await page.getByTestId('products-tab').waitFor({ state: 'visible' });
+
+      // Switch to the scales tab
+      await page
+        .getByTestId('settings-tabs')
+        .getByRole('button', { name: /Scales/i })
+        .click();
+      await expect(page.getByTestId('scales-tab')).toBeVisible({ timeout: 30000 });
+
+      // Primary CTA must be visible and prominent
+      const liveTrackBtn = page.getByTestId('livetrack-import-btn');
+      await expect(liveTrackBtn).toBeVisible();
+      await expect(liveTrackBtn).toContainText(/Start LiveTrack Import/i);
+
+      // Click through to the wizard
+      await liveTrackBtn.click();
+
+      await expect(page).toHaveURL(/\/chef\/livetrack-import$/, { timeout: 30000 });
+      await expect(page.getByTestId('livetrack-page')).toBeVisible({ timeout: 30000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('add new location', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'settings-add-loc');
     try {
