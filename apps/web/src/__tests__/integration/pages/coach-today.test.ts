@@ -8,12 +8,7 @@ import {
   type PageTestContext,
   type CoachByteSeeds,
 } from './helpers';
-import {
-  DEFAULT_TIMER,
-  loadDailyPlanData,
-  loadExercisesForToday,
-  loadTimerState,
-} from '@/pages/coachbyte/TodayPage';
+import { DEFAULT_TIMER, loadDailyPlanData, loadExercisesForToday, loadTimerState } from '@/pages/coachbyte/TodayPage';
 import { epley1RM } from '@/pages/coachbyte/PrsPage';
 
 // Legacy-audit issue #3 (2026-04-22): this test previously replicated
@@ -27,12 +22,7 @@ import { epley1RM } from '@/pages/coachbyte/PrsPage';
 // ``complete_next_set`` exists in two signatures during the 2026-04-25
 // migration window (p_reps/p_load vs p_actual_reps/p_actual_load). Adapt
 // at the call-site so either lands.
-async function completeNextSet(
-  ctx: PageTestContext,
-  planId: string,
-  reps: number,
-  load: number,
-): Promise<any> {
+async function completeNextSet(ctx: PageTestContext, planId: string, reps: number, load: number): Promise<any> {
   let r: any = await coachbyte(ctx.client).rpc('complete_next_set', {
     p_plan_id: planId,
     p_reps: reps,
@@ -69,7 +59,7 @@ describe('CoachByte TodayPage loaders + mutations', () => {
   // the old test (ensure_daily_plan RPC + 3 selects fanned out across
   // 4 individual test cases). One loader call covers it all.
   // -------------------------------------------------------------------
-  it('loadDailyPlanData creates + assembles today\'s plan on first call', async () => {
+  it("loadDailyPlanData creates + assembles today's plan on first call", async () => {
     const data = await loadDailyPlanData(todayDate(), ctx.client);
 
     expect(typeof data.planId).toBe('string');
@@ -126,8 +116,8 @@ describe('CoachByte TodayPage loaders + mutations', () => {
   // loadTimerState — no row ⇒ DEFAULT_TIMER, running row ⇒ hydrated state.
   // -------------------------------------------------------------------
   it('loadTimerState returns DEFAULT_TIMER when no row exists', async () => {
-    // Ensure clean state
-    await coachbyte(ctx.client).from('timers').delete().eq('user_id', ctx.userId);
+    // Ensure clean state — routed through reset_timer RPC, same as page.
+    await coachbyte(ctx.client).rpc('reset_timer');
 
     const t = await loadTimerState(ctx.userId, ctx.client);
     expect(t).toEqual(DEFAULT_TIMER);
@@ -138,42 +128,33 @@ describe('CoachByte TodayPage loaders + mutations', () => {
   });
 
   it('loadTimerState hydrates a running timer row', async () => {
-    const endTime = new Date(Date.now() + 90_000).toISOString();
-    const upsert = await coachbyte(ctx.client).from('timers').upsert(
-      {
-        user_id: ctx.userId,
-        state: 'running',
-        end_time: endTime,
-        duration_seconds: 90,
-        elapsed_before_pause: 0,
-      },
-      { onConflict: 'user_id' },
-    );
-    expect(upsert.error).toBeNull();
+    // Start via the state-machine RPC (matches TodayPage startTimer).
+    const start = await coachbyte(ctx.client).rpc('start_timer', {
+      p_duration_seconds: 90,
+    });
+    expect(start.error).toBeNull();
 
     const t = await loadTimerState(ctx.userId, ctx.client);
     expect(t.state).toBe('running');
-    // Postgres serializes TIMESTAMPTZ with '+00:00', JS ISO uses 'Z'.
-    // Normalize before comparing.
-    expect(new Date(t.end_time!).toISOString()).toBe(endTime);
+    expect(t.end_time).not.toBeNull();
+    // end_time must be in the future (RPC used now() + duration)
+    expect(new Date(t.end_time!).getTime()).toBeGreaterThan(Date.now() - 5_000);
     expect(t.duration_seconds).toBe(90);
     expect(t.elapsed_before_pause).toBe(0);
   });
 
   it('loadTimerState reflects a paused-then-reset round-trip', async () => {
-    // Pause the timer we just upserted (EXACT update pattern from the page).
-    const paused = await coachbyte(ctx.client)
-      .from('timers')
-      .update({ state: 'paused', paused_at: new Date().toISOString(), elapsed_before_pause: 10 })
-      .eq('user_id', ctx.userId);
+    // Pause via the RPC (matches TodayPage pauseTimer).
+    const paused = await coachbyte(ctx.client).rpc('pause_timer');
     expect(paused.error).toBeNull();
 
     const afterPause = await loadTimerState(ctx.userId, ctx.client);
     expect(afterPause.state).toBe('paused');
-    expect(afterPause.elapsed_before_pause).toBe(10);
+    expect(afterPause.elapsed_before_pause).toBeGreaterThanOrEqual(0);
+    expect(afterPause.end_time).toBeNull();
 
-    // Reset via delete (same as the page's resetTimer handler).
-    const del = await coachbyte(ctx.client).from('timers').delete().eq('user_id', ctx.userId);
+    // Reset via RPC (matches TodayPage resetTimer).
+    const del = await coachbyte(ctx.client).rpc('reset_timer');
     expect(del.error).toBeNull();
 
     const afterReset = await loadTimerState(ctx.userId, ctx.client);
@@ -332,14 +313,16 @@ describe('CoachByte TodayPage loaders + mutations', () => {
       .is('user_id', null)
       .limit(1);
 
-    await coachbyte(ctx.client).from('planned_sets').insert({
-      plan_id: fresh.plan_id,
-      user_id: ctx.userId,
-      exercise_id: (exercises as any[])[0].exercise_id,
-      target_reps: 5,
-      target_load: 100,
-      order: 1,
-    });
+    await coachbyte(ctx.client)
+      .from('planned_sets')
+      .insert({
+        plan_id: fresh.plan_id,
+        user_id: ctx.userId,
+        exercise_id: (exercises as any[])[0].exercise_id,
+        target_reps: 5,
+        target_load: 100,
+        order: 1,
+      });
 
     const del = await coachbyte(ctx.client).from('daily_plans').delete().eq('plan_id', fresh.plan_id);
     expect(del.error).toBeNull();
@@ -372,10 +355,7 @@ describe('CoachByte TodayPage loaders + mutations', () => {
       .select('actual_reps, actual_load')
       .eq('exercise_id', exerciseId)
       .eq('user_id', ctx.userId);
-    const prevBest = Math.max(
-      0,
-      ...(prev ?? []).map((ps: any) => epley1RM(Number(ps.actual_load), ps.actual_reps)),
-    );
+    const prevBest = Math.max(0, ...(prev ?? []).map((ps: any) => epley1RM(Number(ps.actual_load), ps.actual_reps)));
 
     const newE1RM = epley1RM(500, 1); // 500 lb single — guaranteed PR
     expect(newE1RM).toBe(500);

@@ -74,10 +74,7 @@ function asCoachbyte(client?: SupabaseClient<any>) {
  * each set carries ``completed: boolean`` computed from the completed-set
  * planned_set_id set.
  */
-export async function loadDailyPlanData(
-  day: string,
-  client?: SupabaseClient<any>,
-): Promise<DailyPlanData> {
+export async function loadDailyPlanData(day: string, client?: SupabaseClient<any>): Promise<DailyPlanData> {
   const coach = asCoachbyte(client);
   const { data: planResult, error: planErr } = await coach.rpc('ensure_daily_plan', { p_day: day });
   if (planErr) throw planErr;
@@ -99,9 +96,7 @@ export async function loadDailyPlanData(
     coach.from('daily_plans').select('summary, notes').eq('plan_id', result.plan_id).single(),
   ]);
 
-  const completedPlanIds = new Set(
-    (completedData ?? []).map((cs: any) => cs.planned_set_id).filter(Boolean),
-  );
+  const completedPlanIds = new Set((completedData ?? []).map((cs: any) => cs.planned_set_id).filter(Boolean));
 
   const sets: PlannedSet[] = (plannedData ?? []).map((ps: any) => ({
     planned_set_id: ps.planned_set_id,
@@ -134,10 +129,7 @@ export async function loadDailyPlanData(
 
 /** Load the current timer state for a user. Returns DEFAULT_TIMER when
  * no row exists (the UI treats "no row" as "idle"). */
-export async function loadTimerState(
-  userId: string,
-  client?: SupabaseClient<any>,
-): Promise<TimerState> {
+export async function loadTimerState(userId: string, client?: SupabaseClient<any>): Promise<TimerState> {
   const { data } = await asCoachbyte(client)
     .from('timers')
     .select('state, end_time, duration_seconds, elapsed_before_pause')
@@ -154,10 +146,7 @@ export async function loadTimerState(
 }
 
 /** Load global + user-owned exercises for the AdHocSetForm. */
-export async function loadExercisesForToday(
-  userId: string,
-  client?: SupabaseClient<any>,
-): Promise<Exercise[]> {
+export async function loadExercisesForToday(userId: string, client?: SupabaseClient<any>): Promise<Exercise[]> {
   const { data, error } = await asCoachbyte(client)
     .from('exercises')
     .select('exercise_id, name')
@@ -165,6 +154,67 @@ export async function loadExercisesForToday(
     .order('name');
   if (error) throw error;
   return (data ?? []) as Exercise[];
+}
+
+// ---------------------------------------------------------------------------
+// Timer state-machine dispatchers — hoisted to top-level so unit tests
+// can exercise them directly with a mock Supabase client. Every write
+// goes through the coachbyte.*_timer RPCs introduced in migration
+// 20260425040000_timer_state_machine_rpcs.sql; the RPCs are the single
+// source of truth for (from_state, event) → to_state guards and for
+// computing derived columns (elapsed_before_pause, end_time).
+//
+// Each dispatcher returns `{ error: string | null }` so the caller can
+// flip a local UI error slot when the RPC guard rejects.
+// ---------------------------------------------------------------------------
+
+export type TimerDispatchResult = { error: string | null };
+
+/** Start or replace the caller's timer — running state, fresh end_time.
+ *
+ * RPC guard: duration_seconds must be positive. */
+export async function startTimerRpc(
+  durationSeconds: number,
+  client?: SupabaseClient<any>,
+): Promise<TimerDispatchResult> {
+  const { error } = await asCoachbyte(client).rpc('start_timer', {
+    p_duration_seconds: durationSeconds,
+  });
+  return { error: error ? error.message : null };
+}
+
+/** Pause a running timer (elapsed_before_pause computed server-side).
+ *
+ * RPC guard: state must be 'running'. */
+export async function pauseTimerRpc(client?: SupabaseClient<any>): Promise<TimerDispatchResult> {
+  const { error } = await asCoachbyte(client).rpc('pause_timer');
+  return { error: error ? error.message : null };
+}
+
+/** Resume a paused timer (fresh end_time computed from remaining seconds).
+ *
+ * RPC guards: state must be 'paused'; remaining must be > 0. */
+export async function resumeTimerRpc(client?: SupabaseClient<any>): Promise<TimerDispatchResult> {
+  const { error } = await asCoachbyte(client).rpc('resume_timer');
+  return { error: error ? error.message : null };
+}
+
+/** Delete the caller's timer (any state → (no row); soft-noop when empty). */
+export async function resetTimerRpc(client?: SupabaseClient<any>): Promise<TimerDispatchResult> {
+  const { error } = await asCoachbyte(client).rpc('reset_timer');
+  return { error: error ? error.message : null };
+}
+
+/** Flip state=expired once wall-clock end has passed. Guard rejections
+ * ('cannot expire timer in state ...') are swallowed here — they happen
+ * when the timer raced with pause/reset, and the UI picks up the new
+ * state via the timers-table realtime subscription. */
+export async function expireTimerRpc(client?: SupabaseClient<any>): Promise<TimerDispatchResult> {
+  const { error } = await asCoachbyte(client).rpc('expire_timer');
+  if (error && !error.message.includes('cannot expire')) {
+    return { error: error.message };
+  }
+  return { error: null };
 }
 
 export function TodayPage() {
@@ -365,21 +415,16 @@ export function TodayPage() {
     queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
   };
 
+  // Timer mutations. Every transition dispatches to the DB state-machine
+  // RPC via the exported dispatcher helpers (startTimerRpc,
+  // pauseTimerRpc, etc.). The RPC layer is the single source of truth
+  // for the `(state, event) → state` transitions and for the fields
+  // each transition writes (end_time, paused_at, elapsed_before_pause).
   const startTimer = async (seconds: number) => {
     if (!user) return;
-    const endTime = new Date(Date.now() + seconds * 1000).toISOString();
-    const { error: err } = await coachbyte().from('timers').upsert(
-      {
-        user_id: user.id,
-        state: 'running',
-        end_time: endTime,
-        duration_seconds: seconds,
-        elapsed_before_pause: 0,
-      },
-      { onConflict: 'user_id' },
-    );
+    const { error: err } = await startTimerRpc(seconds);
     if (err) {
-      setError(err.message);
+      setError(err);
       return;
     }
     queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
@@ -387,40 +432,29 @@ export function TodayPage() {
 
   const pauseTimer = async () => {
     if (!user || !timer.end_time) return;
-    const elapsed = Math.floor(
-      (Date.now() - (new Date(timer.end_time).getTime() - timer.duration_seconds * 1000)) / 1000,
-    );
-    const { error: err } = await coachbyte()
-      .from('timers')
-      .update({ state: 'paused', paused_at: new Date().toISOString(), elapsed_before_pause: Math.max(0, elapsed) })
-      .eq('user_id', user.id);
-    if (err) setError(err.message);
+    const { error: err } = await pauseTimerRpc();
+    if (err) setError(err);
     else queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
   };
 
   const resumeTimer = async () => {
     if (!user) return;
-    const remaining = timer.duration_seconds - timer.elapsed_before_pause;
-    const endTime = new Date(Date.now() + remaining * 1000).toISOString();
-    const { error: err } = await coachbyte()
-      .from('timers')
-      .update({ state: 'running', end_time: endTime, paused_at: null })
-      .eq('user_id', user.id);
-    if (err) setError(err.message);
+    const { error: err } = await resumeTimerRpc();
+    if (err) setError(err);
     else queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
   };
 
   const resetTimer = async () => {
     if (!user) return;
-    const { error: err } = await coachbyte().from('timers').delete().eq('user_id', user.id);
-    if (err) setError(err.message);
+    const { error: err } = await resetTimerRpc();
+    if (err) setError(err);
     else queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
   };
 
   const handleTimerExpired = useCallback(async () => {
     if (!user) return;
-    const { error: err } = await coachbyte().from('timers').update({ state: 'expired' }).eq('user_id', user.id);
-    if (err) setError(err instanceof Error ? err.message : 'Failed to mark timer expired');
+    const { error: err } = await expireTimerRpc();
+    if (err) setError(err);
   }, [user]);
 
   // Timer expired detection — runs when timer is running and hits 0

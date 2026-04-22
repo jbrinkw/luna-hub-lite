@@ -31,7 +31,7 @@
 
 BEGIN;
 
-SELECT plan(34);
+SELECT plan(43);
 
 ------------------------------------------------------------
 -- Setup
@@ -369,6 +369,104 @@ SELECT throws_ok(
   NULL,
   'CHECK(state) rejects invalid state values'
 );
+
+------------------------------------------------------------
+-- 16. Service-role overloads — coachbyte.*_timer(p_user_id, ...)
+--     introduced in migration 20260425090000. The MCP worker calls
+--     these (no JWT available) so the same state-machine guards must
+--     apply when the user_id is passed explicitly. We exercise the
+--     full happy-path chain: start → pause → resume → reset.
+------------------------------------------------------------
+
+-- Authenticate so RLS lets us read timer_user's row after each
+-- service-role-grant mutation. (service_role does the write; the
+-- authenticated SELECT is just how we verify.)
+SELECT tests.authenticate_as('timer_user');
+-- Clean slate for the overload walk-through.
+SELECT coachbyte.reset_timer();
+SELECT tests.clear_authentication();
+
+-- Cache timer_user's UID into a session GUC — service_role has no
+-- privileges on the tests schema, so we can't call tests.get_supabase_uid
+-- after SET ROLE. Stashing the UUID in a GUC lets each service-role
+-- block read it back with current_setting().
+SELECT set_config(
+  'tests.timer_user_uid',
+  tests.get_supabase_uid('timer_user')::text,
+  false  -- session-scoped, survives SET ROLE / RESET ROLE
+);
+
+-- The service-role overloads are GRANTed only to service_role. Switch
+-- roles for these calls so the tests exercise the GRANT correctly.
+SET LOCAL ROLE service_role;
+
+SELECT lives_ok(
+  $$ SELECT coachbyte.start_timer(current_setting('tests.timer_user_uid')::uuid, 45) $$,
+  'service-role start_timer(p_user_id, p_duration_seconds) succeeds'
+);
+
+RESET ROLE;
+SELECT tests.authenticate_as('timer_user');
+SELECT is(
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'running',
+  'service-role start_timer writes a running row'
+);
+SELECT tests.clear_authentication();
+SET LOCAL ROLE service_role;
+
+SELECT lives_ok(
+  $$ SELECT coachbyte.pause_timer(current_setting('tests.timer_user_uid')::uuid) $$,
+  'service-role pause_timer(p_user_id) succeeds on a running row'
+);
+
+RESET ROLE;
+SELECT tests.authenticate_as('timer_user');
+SELECT is(
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'paused',
+  'service-role pause_timer transitions running → paused'
+);
+SELECT tests.clear_authentication();
+SET LOCAL ROLE service_role;
+
+-- Pausing a paused timer via the service-role overload must still
+-- reject with the state-machine guard (same error as the no-arg form).
+SELECT throws_like(
+  $$ SELECT coachbyte.pause_timer(current_setting('tests.timer_user_uid')::uuid) $$,
+  '%cannot pause timer in state paused%',
+  'service-role pause_timer rejects when state=paused (guard honored)'
+);
+
+SELECT lives_ok(
+  $$ SELECT coachbyte.resume_timer(current_setting('tests.timer_user_uid')::uuid) $$,
+  'service-role resume_timer(p_user_id) succeeds on a paused row'
+);
+
+RESET ROLE;
+SELECT tests.authenticate_as('timer_user');
+SELECT is(
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'running',
+  'service-role resume_timer transitions paused → running'
+);
+SELECT tests.clear_authentication();
+SET LOCAL ROLE service_role;
+
+SELECT is(
+  coachbyte.reset_timer(current_setting('tests.timer_user_uid')::uuid),
+  1,
+  'service-role reset_timer(p_user_id) returns 1 when row existed'
+);
+
+-- NULL p_user_id must be rejected (the overloads explicitly guard it).
+SELECT throws_like(
+  $$ SELECT coachbyte.pause_timer(NULL::uuid) $$,
+  '%p_user_id is required%',
+  'service-role overloads reject NULL p_user_id'
+);
+
+RESET ROLE;
 
 ------------------------------------------------------------
 -- Cleanup

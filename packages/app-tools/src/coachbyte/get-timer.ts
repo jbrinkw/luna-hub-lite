@@ -1,6 +1,15 @@
 import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError } from '../shared';
 
+// get-timer is a read — no state transition — so it does a direct SELECT
+// against coachbyte.timers (RLS scopes to the caller). The one write
+// this tool used to do (flip state='done' when remaining_seconds==0)
+// is now dispatched through the `coachbyte.expire_timer` RPC so the
+// state-machine guards (state=running AND end_time<=now()) stay
+// centralized. We also fix a longstanding bug: the old handler set
+// state='done', but the CHECK constraint only allows
+// ('running','paused','expired') — the legacy write would have failed
+// on any real DB. The RPC writes 'expired'.
 export const getTimer: ToolDefinition = {
   name: 'COACHBYTE_get_timer',
   description: 'Get current timer state and remaining seconds.',
@@ -34,10 +43,18 @@ export const getTimer: ToolDefinition = {
       const nowMs = Date.now();
       remainingSeconds = Math.max(0, Math.round((endMs - nowMs) / 1000));
 
-      // If timer has expired, write done state to DB and report as done
+      // If the timer's wall-clock end has passed, flip to 'expired' via the
+      // state-machine RPC (which enforces state=running AND end_time<=now()).
+      // Any RPC error (e.g. guard failed because another writer already
+      // expired or mutated the row) is treated non-fatally — the read we
+      // return still reflects 'running' with 0 remaining, letting the
+      // caller refetch.
       if (remainingSeconds === 0) {
-        state = 'done';
-        await ctx.supabase.schema('coachbyte').from('timers').update({ state: 'done' }).eq('timer_id', timer.timer_id);
+        // Service-role overload — see set-timer.ts for rationale.
+        const { error: expErr } = await ctx.supabase.schema('coachbyte').rpc('expire_timer', { p_user_id: ctx.userId });
+        if (!expErr) {
+          state = 'expired';
+        }
       }
     }
 
