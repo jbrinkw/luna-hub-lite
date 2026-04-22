@@ -789,32 +789,47 @@ export function ScalesTab() {
                             </div>
                             <div className="mt-2 text-sm">
                               {s.kind === 'live_scale' ? (
-                                <div className="flex items-center gap-2 flex-wrap">
-                                  <label className="text-text-secondary text-[13px]">Product:</label>
-                                  <select
-                                    value={s.product_id ?? ''}
-                                    onChange={(e) =>
-                                      pairScaleMutation.mutate({
-                                        pairingId: s.pairing_id,
-                                        productId: e.target.value || null,
-                                      })
-                                    }
-                                    className={`${inputCls} flex-1 min-w-[180px] max-w-sm py-1.5 text-[13px]`}
-                                    data-testid={`scale-product-picker-${s.pairing_id}`}
-                                  >
-                                    <option value="">Pair to product →</option>
-                                    {products.map((p) => (
-                                      <option key={p.product_id} value={p.product_id}>
-                                        {p.name}
-                                      </option>
-                                    ))}
-                                  </select>
-                                  {s.product_id && (
-                                    <span className="text-xs text-text-tertiary">
-                                      {productMap.get(s.product_id) ?? 'Unknown product'}
-                                    </span>
+                                <>
+                                  <div className="flex items-center gap-2 flex-wrap">
+                                    <label className="text-text-secondary text-[13px]">Product:</label>
+                                    <select
+                                      value={s.product_id ?? ''}
+                                      onChange={(e) =>
+                                        pairScaleMutation.mutate({
+                                          pairingId: s.pairing_id,
+                                          productId: e.target.value || null,
+                                        })
+                                      }
+                                      className={`${inputCls} flex-1 min-w-[180px] max-w-sm py-1.5 text-[13px]`}
+                                      data-testid={`scale-product-picker-${s.pairing_id}`}
+                                    >
+                                      <option value="">Pair to product →</option>
+                                      {products.map((p) => (
+                                        <option key={p.product_id} value={p.product_id}>
+                                          {p.name}
+                                        </option>
+                                      ))}
+                                    </select>
+                                    {s.product_id && (
+                                      <span className="text-xs text-text-tertiary">
+                                        {productMap.get(s.product_id) ?? 'Unknown product'}
+                                      </span>
+                                    )}
+                                  </div>
+                                  {/* Unpaired-scale warning: an unpaired live_scale will silently
+                                      drop every event from the Pi with a 409 "scale paired but
+                                      product unset". Surface this inline so the user isn't left
+                                      wondering why their weight data isn't landing. */}
+                                  {!s.product_id && (
+                                    <p
+                                      className="mt-1.5 text-xs text-warning-text bg-warning-subtle border border-warning rounded px-2 py-1 m-0"
+                                      data-testid={`unpaired-scale-warning-${s.pairing_id}`}
+                                    >
+                                      Unpaired — weight events from this scale will be ignored until
+                                      a product is selected.
+                                    </p>
                                   )}
-                                </div>
+                                </>
                               ) : (
                                 <span className="text-text-tertiary italic text-[13px]">
                                   Auto-classified via camera

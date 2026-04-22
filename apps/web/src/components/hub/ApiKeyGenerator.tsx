@@ -10,6 +10,13 @@ interface ApiKey {
   id: string;
   label: string | null;
   created_at: string;
+  /**
+   * Timestamp of the last successful auth with this key. Updated by the
+   * MCP worker via hub.bump_api_key_used_admin on every auth. Null means
+   * "never used" (either freshly created or predates the tracking
+   * migration).
+   */
+  last_used_at: string | null;
 }
 
 interface ApiKeyGeneratorProps {
@@ -18,14 +25,44 @@ interface ApiKeyGeneratorProps {
   error?: string | null;
   onGenerate: (label: string) => Promise<string | null>;
   onRevoke: (keyId: string) => void;
+  /**
+   * Revokes EVERY non-revoked key for the current user in one RPC. Distinct
+   * from onRevoke(keyId) — fires the SECURITY DEFINER "revoke all" path so
+   * the UI can expose a one-click button. Gated by a confirm dialog since
+   * it's destructive.
+   */
+  onRevokeAll?: () => void;
 }
 
-export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevoke }: ApiKeyGeneratorProps) {
+/** Format a last_used_at timestamp as a short relative string. */
+function formatLastUsed(iso: string | null): string {
+  if (!iso) return 'never used';
+  const then = new Date(iso).getTime();
+  if (!Number.isFinite(then)) return 'never used';
+  const deltaSec = Math.max(0, Math.floor((Date.now() - then) / 1000));
+  if (deltaSec < 60) return `used ${deltaSec}s ago`;
+  const deltaMin = Math.floor(deltaSec / 60);
+  if (deltaMin < 60) return `used ${deltaMin}m ago`;
+  const deltaHr = Math.floor(deltaMin / 60);
+  if (deltaHr < 24) return `used ${deltaHr}h ago`;
+  const deltaDay = Math.floor(deltaHr / 24);
+  return `used ${deltaDay}d ago`;
+}
+
+export function ApiKeyGenerator({
+  activeKeys,
+  loading,
+  error,
+  onGenerate,
+  onRevoke,
+  onRevokeAll,
+}: ApiKeyGeneratorProps) {
   const [generatedKey, setGeneratedKey] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
   const [label, setLabel] = useState('');
   const [copied, setCopied] = useState(false);
   const [revokeTarget, setRevokeTarget] = useState<string | null>(null);
+  const [revokeAllOpen, setRevokeAllOpen] = useState(false);
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -106,6 +143,21 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
           </div>
         )}
 
+        {activeKeys.length > 0 && onRevokeAll && (
+          <div className="flex justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setRevokeAllOpen(true)}
+              data-testid="revoke-all-keys"
+              className="text-danger hover:text-danger-hover hover:bg-danger-subtle"
+            >
+              <Trash2 className="h-4 w-4" />
+              Revoke all ({activeKeys.length})
+            </Button>
+          </div>
+        )}
+
         <div className="divide-y divide-border-light border border-border rounded-lg overflow-hidden">
           {activeKeys.map((key) => (
             <div key={key.id} className="flex items-center justify-between px-4 py-3 bg-surface">
@@ -113,7 +165,11 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
                 <Key className="h-4 w-4 text-text-tertiary shrink-0" />
                 <div className="min-w-0">
                   <p className="text-sm font-medium text-text truncate">{key.label || 'Untitled'}</p>
-                  <p className="text-xs text-text-secondary">Created {new Date(key.created_at).toLocaleDateString()}</p>
+                  <p className="text-xs text-text-secondary">
+                    Created {new Date(key.created_at).toLocaleDateString()}
+                    <span className="mx-1.5 text-text-disabled">·</span>
+                    <span data-testid={`key-last-used-${key.id}`}>{formatLastUsed(key.last_used_at)}</span>
+                  </p>
                 </div>
               </div>
               <Button
@@ -143,6 +199,19 @@ export function ApiKeyGenerator({ activeKeys, loading, error, onGenerate, onRevo
         title="Revoke API Key"
         message="This will permanently revoke this API key. Any integrations using it will stop working."
         confirmLabel="Revoke"
+        confirmVariant="danger"
+      />
+
+      <ConfirmModal
+        open={revokeAllOpen}
+        onConfirm={() => {
+          onRevokeAll?.();
+          setRevokeAllOpen(false);
+        }}
+        onCancel={() => setRevokeAllOpen(false)}
+        title="Revoke all API keys"
+        message={`This will revoke all ${activeKeys.length} active key${activeKeys.length === 1 ? '' : 's'}. Every integration will stop working until new keys are generated.`}
+        confirmLabel="Revoke all"
         confirmVariant="danger"
       />
     </Card>

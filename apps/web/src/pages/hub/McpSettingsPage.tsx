@@ -15,6 +15,7 @@ interface ActiveKey {
   id: string;
   label: string | null;
   created_at: string;
+  last_used_at: string | null;
 }
 
 const MAX_ACTIVE_KEYS = 10;
@@ -46,7 +47,7 @@ export function McpSettingsPage() {
       const { data, error: err } = await supabase
         .schema('hub')
         .from('api_keys')
-        .select('id, label, created_at')
+        .select('id, label, created_at, last_used_at')
         .eq('user_id', user!.id)
         .is('revoked_at', null)
         .order('created_at', { ascending: false });
@@ -124,6 +125,27 @@ export function McpSettingsPage() {
     },
   });
 
+  // Revoke all keys mutation — wired to the "Revoke all" button, and
+  // available to external callers (e.g. logout flow when the user has
+  // `revoke_keys_on_logout` enabled). Routes through the
+  // hub.revoke_all_api_keys_admin SECURITY DEFINER RPC so it works even
+  // if the RLS session is about to be torn down on signOut.
+  const revokeAllMutation = useMutation({
+    mutationFn: async (): Promise<number> => {
+      const { data, error: err } = await supabase
+        .schema('hub')
+        .rpc('revoke_all_api_keys_admin', { p_user_id: user!.id });
+      if (err) throw err;
+      return (data as number | null) ?? 0;
+    },
+    onError: (err: Error) => {
+      setError(err.message);
+    },
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.apiKeys(user!.id) });
+    },
+  });
+
   const handleCopyEndpoint = async () => {
     try {
       await navigator.clipboard.writeText(endpointUrl);
@@ -146,6 +168,11 @@ export function McpSettingsPage() {
   const handleRevoke = (keyId: string) => {
     setError(null);
     revokeMutation.mutate(keyId);
+  };
+
+  const handleRevokeAll = () => {
+    setError(null);
+    revokeAllMutation.mutate();
   };
 
   return (
@@ -175,10 +202,11 @@ export function McpSettingsPage() {
         ) : (
           <ApiKeyGenerator
             activeKeys={activeKeys}
-            loading={generateMutation.isPending || revokeMutation.isPending}
+            loading={generateMutation.isPending || revokeMutation.isPending || revokeAllMutation.isPending}
             error={error}
             onGenerate={handleGenerate}
             onRevoke={handleRevoke}
+            onRevokeAll={handleRevokeAll}
           />
         )}
       </div>

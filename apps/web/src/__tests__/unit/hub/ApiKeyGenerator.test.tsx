@@ -5,7 +5,7 @@ import { ApiKeyGenerator } from '@/components/hub/ApiKeyGenerator';
 
 describe('ApiKeyGenerator', () => {
   const defaultProps = {
-    activeKeys: [] as { id: string; label: string | null; created_at: string }[],
+    activeKeys: [] as { id: string; label: string | null; created_at: string; last_used_at: string | null }[],
     onGenerate: vi.fn().mockResolvedValue('sk-test-key-123'),
     onRevoke: vi.fn(),
   };
@@ -104,8 +104,8 @@ describe('ApiKeyGenerator', () => {
 
   it('active keys list rendering', () => {
     const activeKeys = [
-      { id: 'key-1', label: 'My Key', created_at: '2026-01-01T00:00:00Z' },
-      { id: 'key-2', label: null, created_at: '2026-02-01T00:00:00Z' },
+      { id: 'key-1', label: 'My Key', created_at: '2026-01-01T00:00:00Z', last_used_at: null },
+      { id: 'key-2', label: null, created_at: '2026-02-01T00:00:00Z', last_used_at: null },
     ];
     render(<ApiKeyGenerator {...defaultProps} activeKeys={activeKeys} />);
 
@@ -117,7 +117,7 @@ describe('ApiKeyGenerator', () => {
 
   it('revoke shows confirm modal and calls onRevoke on confirm', async () => {
     const onRevoke = vi.fn();
-    const activeKeys = [{ id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z' }];
+    const activeKeys = [{ id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z', last_used_at: null }];
     render(<ApiKeyGenerator {...defaultProps} activeKeys={activeKeys} onRevoke={onRevoke} />);
 
     // Click Revoke — should open confirm modal
@@ -142,7 +142,7 @@ describe('ApiKeyGenerator', () => {
 
   it('revoke cancel does not call onRevoke', async () => {
     const onRevoke = vi.fn();
-    const activeKeys = [{ id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z' }];
+    const activeKeys = [{ id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z', last_used_at: null }];
     render(<ApiKeyGenerator {...defaultProps} activeKeys={activeKeys} onRevoke={onRevoke} />);
 
     await userEvent.click(screen.getByText('Revoke'));

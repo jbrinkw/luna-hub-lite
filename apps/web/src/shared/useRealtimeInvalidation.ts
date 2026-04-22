@@ -94,6 +94,10 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
 
   useEffect(() => {
     if (!user) return;
+    // Test env: `supabase` is mocked without a `.channel` method. Skip all
+    // Realtime wiring entirely so non-Realtime unit tests don't need to
+    // stub the whole Realtime surface (channel + realtime + removeChannel).
+    if (typeof (supabase as any).channel !== 'function') return;
 
     // Guard so late async callbacks (onClose reconnect, timers) don't fire
     // after this effect's cleanup.

@@ -519,6 +519,12 @@ export function LiveTrackImportPage() {
       // an explicit null overrides the DEFAULT and fails the NOT NULL check.
       // Fall back to 0 if the keypad input doesn't parse; tare_weight_g is
       // genuinely nullable (no weight captured = leave blank).
+      //
+      // NOTE: `certified` is intentionally NOT part of the UPDATE set.
+      // The INSERT branch above (new-product path) seeds certified=1,
+      // but the UPDATE branch must respect any explicit de-certification
+      // the user made via Settings → Products. Re-running the wizard to
+      // recapture a tare should not silently flip `certified` back to 1.
       const { error: prodUpdErr } = await chefbyte()
         .from('products')
         .update({
@@ -528,10 +534,6 @@ export function LiveTrackImportPage() {
           carbs_per_serving: parseFloat(nutrition.carbs) || 0,
           fat_per_serving: parseFloat(nutrition.fat) || 0,
           protein_per_serving: parseFloat(nutrition.protein) || 0,
-          // Re-importing an existing product through the wizard also
-          // certifies it — user verified tare + nutrition. Safe to
-          // always set to 1 (leaves already-certified rows unchanged).
-          certified: 1,
         })
         .eq('product_id', product.product_id)
         .eq('user_id', user.id);
