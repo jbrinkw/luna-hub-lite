@@ -4,6 +4,7 @@ import { useAuth } from './auth/AuthProvider';
 import { supabase } from './supabase';
 import { queryKeys } from './queryKeys';
 import { useRealtimeInvalidation } from './useRealtimeInvalidation';
+import { useRealtimeHealth } from './useRealtimeHealth';
 
 interface AppContextType {
   activations: Record<string, boolean>;
@@ -12,6 +13,12 @@ interface AppContextType {
   lastSynced: Date | null;
   dayStartHour: number;
   refreshActivations: () => Promise<void>;
+  // True iff any tracked Supabase Realtime channel has lost its SUBSCRIBED
+  // status or missed 3 heartbeats — see `realtimeHealth.ts`.
+  realtimeDegraded: boolean;
+  // Force-reconnect every tracked realtime channel. Wired to the "Reconnect"
+  // button in `OfflineIndicator`.
+  reconnectRealtime: () => void;
 }
 
 const AppContext = createContext<AppContextType>({
@@ -21,6 +28,8 @@ const AppContext = createContext<AppContextType>({
   lastSynced: null,
   dayStartHour: 0,
   refreshActivations: async () => {},
+  realtimeDegraded: false,
+  reconnectRealtime: () => {},
 });
 
 export function useAppContext() {
@@ -99,9 +108,29 @@ export function AppProvider({ children }: { children: ReactNode }) {
     [user, queryClient],
   );
 
+  const { degraded: realtimeDegraded, reconnect: reconnectRealtime } = useRealtimeHealth();
+
   const value = useMemo(
-    () => ({ activations, activationsLoading, online, lastSynced, dayStartHour, refreshActivations }),
-    [activations, activationsLoading, online, lastSynced, dayStartHour, refreshActivations],
+    () => ({
+      activations,
+      activationsLoading,
+      online,
+      lastSynced,
+      dayStartHour,
+      refreshActivations,
+      realtimeDegraded,
+      reconnectRealtime,
+    }),
+    [
+      activations,
+      activationsLoading,
+      online,
+      lastSynced,
+      dayStartHour,
+      refreshActivations,
+      realtimeDegraded,
+      reconnectRealtime,
+    ],
   );
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;

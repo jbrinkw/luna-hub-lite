@@ -43,6 +43,8 @@ describe('HubHomePage', () => {
       lastSynced: new Date(),
       dayStartHour: 0,
       refreshActivations: vi.fn(),
+      realtimeDegraded: false,
+      reconnectRealtime: vi.fn(),
     });
   });
 
@@ -76,6 +78,8 @@ describe('HubHomePage', () => {
       lastSynced: new Date(),
       dayStartHour: 0,
       refreshActivations: vi.fn(),
+      realtimeDegraded: false,
+      reconnectRealtime: vi.fn(),
     });
     renderPage();
     expect(screen.getByTestId('app-card-coachbyte')).toBeInTheDocument();
@@ -90,6 +94,8 @@ describe('HubHomePage', () => {
       lastSynced: new Date(),
       dayStartHour: 0,
       refreshActivations: vi.fn(),
+      realtimeDegraded: false,
+      reconnectRealtime: vi.fn(),
     });
     renderPage();
     expect(screen.getByTestId('no-active-apps')).toBeInTheDocument();
@@ -116,6 +122,8 @@ describe('HubHomePage', () => {
       lastSynced: null,
       dayStartHour: 0,
       refreshActivations: vi.fn(),
+      realtimeDegraded: false,
+      reconnectRealtime: vi.fn(),
     });
     renderPage();
     expect(screen.getByTestId('launcher-loading')).toBeInTheDocument();
