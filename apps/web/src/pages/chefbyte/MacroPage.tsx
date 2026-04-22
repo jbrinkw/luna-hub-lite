@@ -7,8 +7,9 @@ import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
 import { MacroBarSkeleton, ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { supabase, chefbyte } from '@/shared/supabase';
-import { toDateStr, formatDateDisplay } from '@/shared/dates';
+import { toDateStr, todayStr, formatDateDisplay } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { computeRecipeMacros } from './RecipesPage';
 import { queryKeys } from '@/shared/queryKeys';
@@ -189,8 +190,13 @@ export function calcCaloriesFromMacros(protein: number, carbs: number, fat: numb
 
 export function MacroPage() {
   const { user } = useAuth();
+  const { dayStartHour } = useAppContext();
   const queryClient = useQueryClient();
-  const [currentDate, setCurrentDate] = useState(() => toDateStr(new Date()));
+  // Initial date = current logical date (respects day_start_hour).
+  // Without the shift, at 05:30 local time with day_start_hour=6 the page
+  // would show an empty "today" while the consume flows (InventoryPage,
+  // shelf-ingest) correctly stamp food_logs with yesterday's logical_date.
+  const [currentDate, setCurrentDate] = useState(() => todayStr(dayStartHour));
 
   /* ---- Temp Item modal ---- */
   const [showTempModal, setShowTempModal] = useState(false);
@@ -266,7 +272,7 @@ export function MacroPage() {
   };
 
   const goToday = () => {
-    setCurrentDate(toDateStr(new Date()));
+    setCurrentDate(todayStr(dayStartHour));
   };
 
   /* ---------------------------------------------------------------- */
@@ -544,9 +550,7 @@ export function MacroPage() {
           <div data-testid="consumed-table" className="space-y-2">
             {consumed.map((item) => {
               const badgeColor =
-                item.source === 'Meal Plan'
-                  ? 'bg-success-subtle text-chef-accent'
-                  : 'bg-violet-100 text-violet-700';
+                item.source === 'Meal Plan' ? 'bg-success-subtle text-chef-accent' : 'bg-violet-100 text-violet-700';
               return (
                 <div
                   key={item.id}

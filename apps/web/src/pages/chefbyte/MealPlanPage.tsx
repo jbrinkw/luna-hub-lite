@@ -4,8 +4,9 @@ import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte, escapeIlike } from '@/shared/supabase';
-import { toDateStr } from '@/shared/dates';
+import { toDateStr, todayStr } from '@/shared/dates';
 import { computeRecipeMacros } from './RecipesPage';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
@@ -124,8 +125,12 @@ function formatDateLong(dateStr: string, dayIndex: number): string {
 
 export function MealPlanPage() {
   const { user } = useAuth();
+  const { dayStartHour } = useAppContext();
   const queryClient = useQueryClient();
-  const [weekStart, setWeekStart] = useState(() => getMonday(new Date()));
+  // Initial week = Monday of the current logical date's week.
+  // Respects day_start_hour so early-morning sessions before the daily
+  // rollover don't jump to the calendar-next-day's week.
+  const [weekStart, setWeekStart] = useState(() => getMonday(new Date(todayStr(dayStartHour) + 'T00:00:00')));
   const [selectedDay, setSelectedDay] = useState<string | null>(null);
 
   /* ---- Add meal modal state ---- */
@@ -226,15 +231,18 @@ export function MealPlanPage() {
   /*  Auto-select today on initial load                                */
   /* ---------------------------------------------------------------- */
 
-  const todayStr = toDateStr(new Date());
+  // Today's logical date (respects day_start_hour — at 05:30 local with
+  // dsh=6 this returns yesterday so the MealPlan highlights the day the
+  // user's macros/meals are actually attributed to).
+  const todayLogical = todayStr(dayStartHour);
 
   useEffect(() => {
     if (!isLoading && selectedDay === null) {
-      if (todayStr >= startDate && todayStr <= endDate) {
-        setSelectedDay(todayStr);
+      if (todayLogical >= startDate && todayLogical <= endDate) {
+        setSelectedDay(todayLogical);
       }
     }
-    // Only run when loading finishes, not on every todayStr change
+    // Only run when loading finishes, not on every todayLogical change
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoading]);
 
@@ -253,7 +261,8 @@ export function MealPlanPage() {
   };
 
   const goToday = () => {
-    setWeekStart(getMonday(new Date()));
+    // Snap to the week containing today's logical date (respects dsh).
+    setWeekStart(getMonday(new Date(todayStr(dayStartHour) + 'T00:00:00')));
     setSelectedDay(null);
   };
 
@@ -540,8 +549,8 @@ export function MealPlanPage() {
     setAddMealPrep(false);
     setAddMealType(null);
     setAddShowDropdown(false);
-    // Default date: selected day or today
-    setAddDate(selectedDay || todayStr);
+    // Default date: selected day or today's logical date
+    setAddDate(selectedDay || todayLogical);
     setShowAddModal(true);
   };
 
@@ -656,7 +665,7 @@ export function MealPlanPage() {
           {dayDates.map((date, i) => {
             const dayMeals = mealsByDay.get(date) ?? [];
             const isSelected = selectedDay === date;
-            const isToday = date === todayStr;
+            const isToday = date === todayLogical;
             const mealCount = dayMeals.length;
 
             return (
@@ -694,7 +703,7 @@ export function MealPlanPage() {
           {dayDates.map((date, i) => {
             const dayMeals = mealsByDay.get(date) ?? [];
             const isSelected = selectedDay === date;
-            const isToday = date === todayStr;
+            const isToday = date === todayLogical;
             const mealCount = dayMeals.length;
 
             return (
