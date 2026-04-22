@@ -198,6 +198,128 @@ PATTERN_TO_EVENT_KIND: dict[str, Optional[str]] = {
 }
 
 
+# Cloud-side single-winner resolution (2026-04-22 dual-emit dedup).
+#
+# Background: a single physical REMOVE event can produce MULTIPLE
+# ``session_resolutions`` rows on the Pi. The fast-path in
+# ``handlers/scale_events.py`` writes ``in_flight_pickup`` at REMOVE
+# time (lot leaves shelf → status=in_flight). Later at session close,
+# the reconciler's Pass 2 writes ``consumed_or_removed`` if the pickup
+# stayed unpaired (C3: `reconciler.reconcile.py`). Both rows share the
+# same ``remove_event_id``. Each row has historically emitted its own
+# cloud event → the user physically picked up one bottle but the cloud
+# received TWO events:
+#   (a) in_flight_pickup → stock_lots.in_flight_since stamped (correct)
+#   (b) consumed         → stock_lots.qty_containers decremented (wrong;
+#                           the item isn't consumed, just off-shelf)
+#
+# This module imposes a single-winner precedence so that when multiple
+# patterns exist for one physical event, only the highest-priority one
+# emits to cloud. Local ``session_resolutions`` rows on the Pi are kept
+# untouched — they remain the authoritative audit trail for reconciler
+# bookkeeping (e.g. terminal lot accounting via ``consumed_or_removed``
+# local apply). The dedup is strictly about which cloud event fires.
+#
+# Precedence rules (higher wins; ties keep original emit order):
+#
+#   depleted (30)            — terminal. An empty lot is unambiguous.
+#                              If a ``depleted`` event exists for this
+#                              remove, the lot is genuinely gone.
+#                              (live_scale only; no live_shelf pattern
+#                              maps to depleted today.)
+#   in_flight_pickup (20)    — the item left the shelf but is expected
+#                              back. A wrong in_flight is REVERSIBLE
+#                              (the eventual return reconciles it or
+#                              the TTL reaper closes it as consumed).
+#   consumed_or_removed (10) — leftover REMOVE resolution written by
+#                              the reconciler when no ADD paired back.
+#                              A wrong consumption decrement is NOT
+#                              reversible on the cloud side (creates
+#                              phantom qty); prefer the in_flight
+#                              marker when both candidates exist.
+#
+# Patterns not in this map are treated as precedence 0 — they don't
+# clash with the REMOVE-event dedup set above. Terminal in-flight
+# patterns (``in_flight_return``, ``in_flight_replaced_new_item``,
+# ``in_flight_ttl_expired``) are intentionally outside this map: they
+# key on the ADD event (or fire standalone for TTL), not on the
+# original REMOVE, so they don't participate in this dedup group. The
+# reconciler's C3 claim guard already ensures those rows suppress the
+# REMOVE-time Pass 2 write in the paired case.
+CLOUD_PATTERN_PRECEDENCE: dict[str, int] = {
+    "consumed_or_removed": 10,
+    "in_flight_pickup": 20,
+    "depleted": 30,
+}
+
+
+def _precedence(pattern: Optional[str]) -> int:
+    """Return the cloud-emit precedence for ``pattern`` (0 if unknown)."""
+    if not pattern:
+        return 0
+    return CLOUD_PATTERN_PRECEDENCE.get(pattern, 0)
+
+
+def should_suppress_cloud_emit_for_remove_event(
+    conn: sqlite3.Connection,
+    *,
+    this_pattern: str,
+    remove_event_id: Optional[str],
+) -> bool:
+    """Return True when emitting ``this_pattern`` should be SUPPRESSED.
+
+    Looks up every ``session_resolutions`` row sharing the same
+    ``remove_event_id``. If any OTHER pattern for the same REMOVE has
+    a strictly higher cloud precedence (per :data:`CLOUD_PATTERN_PRECEDENCE`),
+    we suppress the emit so the cloud only receives the winner.
+
+    Why this matters — the 2026-04-22 chocolate-milk bug:
+      * fast-path writes ``in_flight_pickup`` at REMOVE time
+      * reconciler Pass 2 writes ``consumed_or_removed`` at session
+        close for the same REMOVE (unpaired pickup path)
+      * both emit to cloud → qty drops AND in_flight_since set
+    With this guard, ``consumed_or_removed``'s emit is suppressed when
+    an ``in_flight_pickup`` exists for the same REMOVE. The local
+    resolution row is kept (Pi accounting still works); only the cloud
+    event is suppressed.
+
+    Returns False (no suppression) when:
+      * ``remove_event_id`` is None (cross-pattern dedup impossible)
+      * ``this_pattern`` has the highest precedence of all rows
+      * no other rows exist for this REMOVE
+      * the query fails (defensive — we prefer emitting a possibly-
+        duplicate event over losing data entirely)
+    """
+    if not remove_event_id:
+        return False
+    my_prec = _precedence(this_pattern)
+    try:
+        rows = conn.execute(
+            "SELECT pattern FROM session_resolutions "
+            " WHERE remove_event_id = ? AND pattern != ?",
+            (remove_event_id, this_pattern),
+        ).fetchall()
+    except sqlite3.OperationalError as exc:
+        log.warning(
+            "cloud dedup: session_resolutions lookup failed for "
+            "remove_event_id=%s: %s",
+            remove_event_id, exc,
+        )
+        return False
+    for row in rows:
+        other_pattern = row["pattern"] if hasattr(row, "keys") else row[0]
+        if _precedence(other_pattern) > my_prec:
+            log.info(
+                "cloud dedup: suppressing %s emit for remove_event_id=%s; "
+                "%s (precedence %d) wins over %s (precedence %d)",
+                this_pattern, remove_event_id,
+                other_pattern, _precedence(other_pattern),
+                this_pattern, my_prec,
+            )
+            return True
+    return False
+
+
 def _iso_utc_ms() -> str:
     """Return current UTC time as ISO-8601 with ms precision + ``Z``."""
     now = datetime.now(tz=timezone.utc)
@@ -544,6 +666,22 @@ def backfill_missing_outbox_events(
             )
             continue
 
+        # Single-winner dedup mirror (2026-04-22 dual-emit fix): skip
+        # rows whose pattern would be outranked by another resolution
+        # for the same REMOVE event. The live-path adapter runs the
+        # same check inside ``_emit_cloud_for_resolution``; the backfill
+        # must replicate it or else the next boot would re-emit the
+        # loser (e.g. a ``consumed_or_removed`` row that rode in behind
+        # an ``in_flight_pickup``) and re-introduce the dual-emit bug.
+        if row["pattern"] in CLOUD_PATTERN_PRECEDENCE and (
+            should_suppress_cloud_emit_for_remove_event(
+                conn,
+                this_pattern=row["pattern"],
+                remove_event_id=row["remove_event_id"],
+            )
+        ):
+            continue
+
         # Derive delta_g + occurred_at from the pattern, matching the
         # live-path logic in ``RepoReconcilerAdapter``. We keep the
         # derivation inline here to avoid a circular import back into
@@ -697,9 +835,11 @@ def null_emitter() -> CloudEventEmitter:
 
 __all__ = [
     "ADD_SIDE_PATTERNS",
+    "CLOUD_PATTERN_PRECEDENCE",
     "CloudEventEmitter",
     "PATTERN_TO_EVENT_KIND",
     "REMOVE_SIDE_PATTERNS",
     "backfill_missing_outbox_events",
     "null_emitter",
+    "should_suppress_cloud_emit_for_remove_event",
 ]

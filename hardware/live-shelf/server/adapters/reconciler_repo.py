@@ -23,10 +23,12 @@ from typing import Any, Optional
 
 from ..cloud.integration import (
     ADD_SIDE_PATTERNS,
+    CLOUD_PATTERN_PRECEDENCE,
     CloudEventEmitter,
     REMOVE_SIDE_PATTERNS,
     _pick_occurred_at,
     null_emitter,
+    should_suppress_cloud_emit_for_remove_event,
 )
 from ..reconciler.models import (
     ClassificationResult,
@@ -310,6 +312,18 @@ class RepoReconcilerAdapter:
         Safe to call unconditionally — the emitter is a no-op when
         ``CLOUD_ENABLED=false``. Any derivation failure is logged +
         swallowed; the local resolution has already landed.
+
+        Single-winner cloud dedup (2026-04-22 dual-emit fix):
+        Before enqueuing, consult
+        :func:`cloud.integration.should_suppress_cloud_emit_for_remove_event`.
+        When two resolutions share the same ``remove_event_id`` (the
+        classic case is ``in_flight_pickup`` + reconciler-written
+        ``consumed_or_removed`` for the same physical pickup), we keep
+        both local rows for Pi bookkeeping but emit only the higher-
+        precedence cloud event. Precedence order (high → low):
+        ``depleted`` > ``in_flight_pickup`` > ``consumed_or_removed``.
+        See :data:`cloud.integration.CLOUD_PATTERN_PRECEDENCE` for the
+        rationale.
         """
         if not self._cloud_emitter.enabled:
             return
@@ -317,6 +331,24 @@ class RepoReconcilerAdapter:
         # have lot_id=None and won't produce a cloud event anyway (the
         # pattern→event_kind map returns None for those).
         if resolution.lot_id is None:
+            return
+        # Single-winner dedup: when another resolution for the same
+        # REMOVE event has a higher cloud precedence, suppress this
+        # emit. Applies to both directions:
+        #   * reconciler writes consumed_or_removed after an earlier
+        #     in_flight_pickup → consumed_or_removed suppressed (the
+        #     classic 2026-04-22 dual-emit bug path).
+        #   * an in_flight_pickup row written late (shouldn't happen in
+        #     the current code, but defensive) → preserved; it wins.
+        # Only kicks in for REMOVE-side patterns that participate in the
+        # precedence map; other patterns always pass through.
+        if resolution.pattern in CLOUD_PATTERN_PRECEDENCE and (
+            should_suppress_cloud_emit_for_remove_event(
+                self._conn,
+                this_pattern=resolution.pattern,
+                remove_event_id=resolution.remove_event_id,
+            )
+        ):
             return
         try:
             product_id: Optional[str] = None
