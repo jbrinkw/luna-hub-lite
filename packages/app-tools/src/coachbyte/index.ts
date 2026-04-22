@@ -2,6 +2,7 @@ import type { ToolDefinition } from '../types';
 import { getTodayPlan } from './get-today-plan';
 import { completeNextSet } from './complete-next-set';
 import { logSet } from './log-set';
+import { deleteCompletedSet } from './delete-completed-set';
 import { updatePlan } from './update-plan';
 import { updateSummary } from './update-summary';
 import { getHistory } from './get-history';
@@ -19,6 +20,7 @@ export const coachbyteTools: Record<string, ToolDefinition> = {
   [getTodayPlan.name]: getTodayPlan,
   [completeNextSet.name]: completeNextSet,
   [logSet.name]: logSet,
+  [deleteCompletedSet.name]: deleteCompletedSet,
   [updatePlan.name]: updatePlan,
   [updateSummary.name]: updateSummary,
   [getHistory.name]: getHistory,

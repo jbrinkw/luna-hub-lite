@@ -16,6 +16,7 @@ import { pauseTimer } from '../../coachbyte/pause-timer';
 import { resumeTimer } from '../../coachbyte/resume-timer';
 import { resetTimer } from '../../coachbyte/reset-timer';
 import { getExercises } from '../../coachbyte/get-exercises';
+import { deleteCompletedSet } from '../../coachbyte/delete-completed-set';
 
 // ---------------------------------------------------------------------------
 // CoachByte Tool Integration Tests
@@ -201,18 +202,14 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(data.rest_seconds).toBe(0);
   });
 
-  it('completeNextSet when no incomplete sets remain returns rest_seconds: 0', async () => {
-    // NOTE: The underlying RPC (complete_next_set) always returns one row.
-    // When no incomplete sets remain, no insert happens but the handler
-    // still returns success with rest_seconds: 0. This is a known limitation
-    // of the RPC return type — it doesn't distinguish "completed last set"
-    // from "nothing to complete".
+  it('completeNextSet returns toolError when the plan is already finished', async () => {
+    // RPC now returns { rest_seconds, completed:false } when no incomplete
+    // set was found, so the handler can surface a real error instead of a
+    // false-positive "Set completed" message.
     const result = await completeNextSet.handler({ plan_id: planId, reps: 5, load: 185 }, ctx);
-    const data = parseToolResult(result);
 
-    // The handler returns success with rest_seconds: 0 (null coalesced to 0)
-    expect(data.rest_seconds).toBe(0);
-    expect(data.message).toContain('5 reps');
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('No incomplete sets remaining');
   });
 
   it('after all sets completed, getTodayPlan shows completed_count === total_planned', async () => {
@@ -306,24 +303,29 @@ describe('CoachByte Tool Integration Tests', () => {
   // 5. getSplit — retrieve split configuration
   // -------------------------------------------------------------------------
 
-  it('getSplit with no weekday returns all splits', async () => {
+  it('getSplit with no weekday returns all 7 days (rest days as placeholders)', async () => {
     const result = await getSplit.handler({}, ctx);
     const data = parseToolResult(result);
 
     expect(data.splits).toBeDefined();
     expect(Array.isArray(data.splits)).toBe(true);
-    // We seeded one split for today's weekday
-    expect(data.splits.length).toBeGreaterThanOrEqual(1);
+    expect(data.splits).toHaveLength(7);
+    // Always sorted by weekday 0..6
+    expect(data.splits.map((s: any) => s.weekday)).toEqual([0, 1, 2, 3, 4, 5, 6]);
 
     const todaySplit = data.splits.find((s: any) => s.weekday === todayWeekday);
-    expect(todaySplit).toBeDefined();
     expect(todaySplit.day_name).toBe(dayNames[todayWeekday]);
-    expect(todaySplit.split_id).toBeDefined();
+    expect(todaySplit.split_id).not.toBeNull();
     expect(todaySplit.template_sets).toHaveLength(3);
 
-    // Verify exercise names are resolved
+    // A weekday with no split yet should still appear, just empty
+    const otherSeen = data.splits.find((s: any) => s.weekday === otherWeekday);
+    expect(otherSeen).toBeDefined();
+    expect(otherSeen.split_id).toBeNull();
+    expect(otherSeen.template_sets).toEqual([]);
+
+    // Exercise names resolve on the populated day
     const squatTemplate = todaySplit.template_sets.find((ts: any) => ts.exercise_id === squatId);
-    expect(squatTemplate).toBeDefined();
     expect(squatTemplate.exercise_name).toBe('Squat');
   });
 
@@ -335,13 +337,17 @@ describe('CoachByte Tool Integration Tests', () => {
     expect(data.splits[0].weekday).toBe(todayWeekday);
   });
 
-  it('getSplit for a weekday with no split returns empty array', async () => {
-    // otherWeekday has no split yet (we only seeded todayWeekday)
+  it('getSplit for a weekday with no split returns a placeholder rest-day entry', async () => {
+    // otherWeekday has no split yet (we only seeded todayWeekday).
+    // Rest days are normalized to {split_id: null, template_sets: []}
+    // so callers don't have to special-case missing weekdays.
     const result = await getSplit.handler({ weekday: otherWeekday }, ctx);
     const data = parseToolResult(result);
 
-    expect(data.splits).toHaveLength(0);
-    expect(data.message).toBeDefined();
+    expect(data.splits).toHaveLength(1);
+    expect(data.splits[0].weekday).toBe(otherWeekday);
+    expect(data.splits[0].split_id).toBeNull();
+    expect(data.splits[0].template_sets).toEqual([]);
   });
 
   // -------------------------------------------------------------------------
@@ -939,7 +945,9 @@ describe('CoachByte Tool Integration Tests', () => {
       expect(dbAbs.target_load_percentage).toBeNull();
     });
 
-    it('updatePlan writes relative=true sets to planned_sets.target_load_percentage', async () => {
+    it('updatePlan resolves percentages to absolute lbs at write time when a PR exists', async () => {
+      // Squat has a 5x230 PR from earlier tests → e1RM = 230 * (1+5/30) = 268.333.
+      // 85% of 268.333 = 228.083, rounded to nearest 5 = 230.
       const sets = [
         { exercise_id: squatId, target_reps: 5, load: 85, relative: true, rest_seconds: 150, order: 1 },
         { exercise_id: benchId, target_reps: 5, load: 185, rest_seconds: 90, order: 2 },
@@ -952,13 +960,13 @@ describe('CoachByte Tool Integration Tests', () => {
       const squatRow = data.sets.find((s: any) => s.exercise_id === squatId);
       expect(squatRow.load).toBe(85);
       expect(squatRow.relative).toBe(true);
-      expect(squatRow.resolved_load).toBeNull();
+      expect(squatRow.resolved_load).toBe(230);
 
       const benchRow = data.sets.find((s: any) => s.exercise_id === benchId);
       expect(benchRow.load).toBe(185);
       expect(benchRow.relative).toBe(false);
 
-      // DB storage: still two columns.
+      // DB columns: target_load resolved, target_load_percentage carries intent
       const { data: dbSets, error } = await admin
         .schema('coachbyte')
         .from('planned_sets')
@@ -968,13 +976,41 @@ describe('CoachByte Tool Integration Tests', () => {
       expect(error).toBeNull();
       expect(dbSets!).toHaveLength(2);
       expect(Number(dbSets![0].target_load_percentage)).toBe(85);
-      expect(dbSets![0].target_load).toBeNull();
+      expect(Number(dbSets![0].target_load)).toBe(230);
       expect(Number(dbSets![1].target_load)).toBe(185);
       expect(dbSets![1].target_load_percentage).toBeNull();
     });
 
+    it('updatePlan keeps target_load null when no PR exists for the exercise', async () => {
+      // Front Squat has never been completed → no Epley 1RM to resolve from.
+      const frontSquatId = exerciseMap['Front Squat'];
+      expect(frontSquatId).toBeDefined();
+      const sets = [
+        { exercise_id: frontSquatId, target_reps: 5, load: 70, relative: true, rest_seconds: 120, order: 1 },
+      ];
+
+      const result = await updatePlan.handler({ plan_id: planId, sets }, ctx);
+      const data = parseToolResult(result);
+
+      expect(data.sets).toHaveLength(1);
+      expect(data.sets[0].load).toBe(70);
+      expect(data.sets[0].relative).toBe(true);
+      expect(data.sets[0].resolved_load).toBeNull();
+
+      // Restore the prior plan shape so subsequent assertions still hold
+      await updatePlan.handler(
+        {
+          plan_id: planId,
+          sets: [
+            { exercise_id: squatId, target_reps: 5, load: 85, relative: true, rest_seconds: 150, order: 1 },
+            { exercise_id: benchId, target_reps: 5, load: 185, rest_seconds: 90, order: 2 },
+          ],
+        },
+        ctx,
+      );
+    });
+
     it('getTodayPlan surfaces {load, relative, resolved_load?} on each set', async () => {
-      // Prior test left an 85% squat + 185 lb bench plan on planId.
       const result = await getTodayPlan.handler({}, ctx);
       const data = parseToolResult(result);
 
@@ -987,8 +1023,8 @@ describe('CoachByte Tool Integration Tests', () => {
       const pctSet = data.sets.find((s: any) => s.exercise_id === squatId);
       expect(pctSet.relative).toBe(true);
       expect(Number(pctSet.load)).toBe(85);
-      // No PR for squat in this user's history, so resolved_load stays null
-      expect(pctSet.resolved_load).toBeNull();
+      // Squat has a PR so resolved_load is the materialized absolute (230 lbs)
+      expect(Number(pctSet.resolved_load)).toBe(230);
 
       const absSet = data.sets.find((s: any) => s.exercise_id === benchId);
       expect(absSet.relative).toBe(false);
@@ -1105,6 +1141,111 @@ describe('CoachByte Tool Integration Tests', () => {
       );
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Unknown exercise');
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 18. log_set input validation — reps in [1,50], load in [0,2000].
+  //     Protects PR derivation from typos like 9999×50.
+  // -------------------------------------------------------------------------
+
+  describe('logSet validation', () => {
+    it('rejects reps < 1', async () => {
+      const result = await logSet.handler({ exercise_id: 'Squat', reps: 0, load: 100 }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('reps');
+    });
+
+    it('rejects reps > 50', async () => {
+      const result = await logSet.handler({ exercise_id: 'Squat', reps: 51, load: 100 }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('50');
+    });
+
+    it('rejects negative load', async () => {
+      const result = await logSet.handler({ exercise_id: 'Squat', reps: 5, load: -10 }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('load');
+    });
+
+    it('rejects absurd load (> 2000 lbs)', async () => {
+      const result = await logSet.handler({ exercise_id: 'Squat', reps: 5, load: 9999 }, ctx);
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('2000');
+    });
+
+    it('accepts load=0 (bodyweight) with reps>=1', async () => {
+      const result = await logSet.handler({ exercise_id: 'Pull-Up', reps: 5, load: 0 }, ctx);
+      const data = parseToolResult(result);
+      expect(data.completed_set_id).toBeDefined();
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // 19. delete_completed_set — undo accidental log entries.
+  // -------------------------------------------------------------------------
+
+  describe('deleteCompletedSet', () => {
+    it('deletes a user-owned completed set and returns the deleted row', async () => {
+      // Log something we can immediately delete
+      const logResult = await logSet.handler({ exercise_id: 'Calf Raise', reps: 10, load: 50 }, ctx);
+      const logged = parseToolResult(logResult);
+      const csId = logged.completed_set_id;
+      expect(csId).toBeDefined();
+
+      const delResult = await deleteCompletedSet.handler({ completed_set_id: csId }, ctx);
+      const delData = parseToolResult(delResult);
+      expect(delData.deleted.completed_set_id).toBe(csId);
+
+      // Confirm gone
+      const { data: row } = await admin
+        .schema('coachbyte')
+        .from('completed_sets')
+        .select('completed_set_id')
+        .eq('completed_set_id', csId)
+        .maybeSingle();
+      expect(row).toBeNull();
+    });
+
+    it('returns toolError for an unknown completed_set_id', async () => {
+      const result = await deleteCompletedSet.handler(
+        { completed_set_id: '00000000-0000-0000-0000-000000000000' },
+        ctx,
+      );
+      expect(result.isError).toBe(true);
+      expect(result.content[0].text).toContain('not found');
+    });
+
+    it('refuses to delete another user\'s completed set (RLS scope)', async () => {
+      // Set up a second user with their own completed set
+      const otherUser = await createTestUser('coachbyte-delete-iso');
+      const otherCtx = createToolContext(otherUser.userId);
+      try {
+        const otherLog = await logSet.handler(
+          { exercise_id: 'Squat', reps: 5, load: 100 },
+          otherCtx,
+        );
+        const otherCs = parseToolResult(otherLog);
+
+        // ctx (jeremy's test user) tries to delete it — must fail as not-found
+        const result = await deleteCompletedSet.handler(
+          { completed_set_id: otherCs.completed_set_id },
+          ctx,
+        );
+        expect(result.isError).toBe(true);
+        expect(result.content[0].text).toContain('not found');
+
+        // Confirm the other user's row is still there
+        const { data: stillThere } = await admin
+          .schema('coachbyte')
+          .from('completed_sets')
+          .select('completed_set_id')
+          .eq('completed_set_id', otherCs.completed_set_id)
+          .single();
+        expect(stillThere).not.toBeNull();
+      } finally {
+        await otherUser.cleanup();
+      }
     });
   });
 });

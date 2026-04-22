@@ -16,6 +16,21 @@ export const logSet: ToolDefinition = {
   },
   handler: async (args, ctx) => {
     const { exercise_id, reps, load } = args;
+
+    // Sanity caps — protect PR-derivation from typos like 9999×50.
+    if (!Number.isInteger(reps) || reps < 1) {
+      return toolError('reps must be an integer >= 1');
+    }
+    if (reps > 50) {
+      return toolError('reps must be <= 50 (sanity cap; edit the DB row directly if you really did this)');
+    }
+    if (typeof load !== 'number' || Number.isNaN(load) || load < 0) {
+      return toolError('load must be a number >= 0');
+    }
+    if (load > 2000) {
+      return toolError('load must be <= 2000 lbs (sanity cap; edit the DB row directly if you really did this)');
+    }
+
     const { id: resolvedExerciseId, unresolved } = await resolveExerciseRef(
       ctx.supabase,
       ctx.userId,

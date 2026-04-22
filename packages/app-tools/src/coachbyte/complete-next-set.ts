@@ -25,20 +25,17 @@ export const completeNextSet: ToolDefinition = {
 
     if (error) return toolError(`Failed to complete set: ${error.message}`);
 
-    // The RPC RETURNS TABLE always yields one row. When no incomplete set
-    // was found (nothing to complete), it returns { rest_seconds: null }
-    // without inserting anything. We also get rest_seconds: null when the
-    // last set was completed (no "next" set). To distinguish: after getting
-    // a null result, check if there are still incomplete sets.
-    if (!data || data.length === 0) {
+    // RPC returns { rest_seconds, completed } — completed=false means no
+    // INSERT happened (plan was already finished). rest_seconds=null on a
+    // completed=true row means we just completed the LAST set (no follow-up).
+    const row = data?.[0];
+    if (!row || row.completed === false) {
       return toolError('No incomplete sets remaining in this plan');
     }
 
-    const restSeconds = data[0].rest_seconds;
-
     return toolSuccess({
       message: `Set completed: ${reps} reps @ ${load} lbs`,
-      rest_seconds: restSeconds ?? 0,
+      rest_seconds: row.rest_seconds ?? 0,
     });
   },
 };

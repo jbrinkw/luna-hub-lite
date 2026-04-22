@@ -2,6 +2,7 @@ import type { ToolDefinition } from '../types';
 import { toolSuccess, toolError } from '../shared';
 import { loadSpecFromDb, loadSpecInputSchema, loadSpecToDb } from './load-spec';
 import { EXERCISE_REF_DESCRIPTION, resolveExerciseRefs } from './exercise-ref';
+import { computeEstimated1RMs, resolvePercentLoad } from './epley';
 
 export const updatePlan: ToolDefinition = {
   name: 'COACHBYTE_update_plan',
@@ -60,7 +61,7 @@ export const updatePlan: ToolDefinition = {
       return {
         plan_id,
         user_id: ctx.userId,
-        exercise_id: ids[i],
+        exercise_id: ids[i] as string,
         target_reps: s.target_reps,
         target_load,
         target_load_percentage,
@@ -68,6 +69,25 @@ export const updatePlan: ToolDefinition = {
         order: s.order,
       };
     });
+
+    // Resolve percentages → absolute lbs at write time so resolved_load
+    // shows up immediately in get_today_plan output. Same formula and
+    // 5-lb rounding as private.ensure_daily_plan.
+    const relativeExerciseIds = rows
+      .filter((r) => r.target_load_percentage !== null)
+      .map((r) => r.exercise_id);
+    if (relativeExerciseIds.length > 0) {
+      const e1rmByEx = await computeEstimated1RMs(ctx.supabase, ctx.userId, relativeExerciseIds);
+      for (const r of rows) {
+        if (r.target_load_percentage !== null) {
+          const e1rm = e1rmByEx.get(r.exercise_id);
+          if (e1rm && e1rm > 0) {
+            r.target_load = resolvePercentLoad(r.target_load_percentage as number, e1rm);
+          }
+          // No PR yet → target_load stays null, surfaces as resolved_load=null
+        }
+      }
+    }
 
     // Delete old planned sets first, then insert new ones.
     // The FK on completed_sets.planned_set_id uses ON DELETE SET NULL,
