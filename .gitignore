@@ -11,6 +11,7 @@ dist/
 .dev.vars
 supabase/.temp/
 supabase/.branches/
+.verify/
 .worktrees/
 coverage/
 playwright-report/
