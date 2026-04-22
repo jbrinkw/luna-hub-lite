@@ -171,6 +171,11 @@ PATTERN_TO_EVENT_KIND: dict[str, Optional[str]] = {
     # In-flight fast-path resolutions (handlers/scale_events.py).
     "in_flight_return": "consumed",
     "in_flight_replaced_new_item": "consumed",  # old mass presumed eaten
+    # Companion to ``in_flight_replaced_new_item``: the NEW mass put on
+    # the shelf after a replacement. Cloud resolver decides MOVE vs
+    # MINT based on the same product_id — see migration
+    # 20260424080000_stock_lots_invariant_and_resolve.sql.
+    "in_flight_replacement_add": "added",
     "in_flight_ttl_expired": "consumed",
     # v2 territory — no cloud mutation for now.
     "swap_in": None,

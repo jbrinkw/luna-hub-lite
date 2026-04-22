@@ -539,23 +539,46 @@ export function LiveTrackImportPage() {
         .eq('user_id', user.id);
       if (prodUpdErr) throw new Error(prodUpdErr.message);
 
-      // Stock-lot insert. Quantity is derived from the measured net
-      // product weight rather than hardcoded to 1. The arithmetic lives
-      // in ``computeQtyContainersFromScale`` (livetrackSession.ts) so
-      // ``__tests__/unit/pure/livetrack-qty.test.ts`` can pin it. See
-      // commit 91550dd for the regression this guards against.
+      // Stock-lot write. Routes through the MOVE-vs-MINT resolver
+      // (migration 20260424080000) so a re-weigh of an existing pantry
+      // lot of this product with matching weight merges rather than
+      // minting a duplicate. The resolver converts placed_weight_g →
+      // qty_containers internally using products.net_weight_g, which
+      // matches the computation in ``computeQtyContainersFromScale``.
       //
-      // Full + sealed:  scaleG - tareG == net_weight_g → qty = 1.0
-      // Partial + AI:    fractional qty reflecting actual remaining product
-      // Manual w/ scale: same fraction as AI branch
-      // Manual w/o scale reading (user typed tare, no Pi reading posted):
-      //                  fall back to qty = 1 so the lot still lands.
-      const qtyContainers = computeQtyContainersFromScale({
-        scaleG: state.scaleG,
-        tareG,
-        netWeightG: product.net_weight_g,
-      });
-      if (defaultLocationId) {
+      // Fallback: if we don't have a finite scale/tare reading (pure
+      // manual save with no scale), preserve the legacy behaviour of
+      // "1 container at the default location" via a direct insert —
+      // the resolver needs a positive placed_weight_g to compute qty.
+      const scaleG = state.scaleG;
+      const netProductG =
+        scaleG != null
+        && Number.isFinite(scaleG)
+        && Number.isFinite(tareG)
+        && product.net_weight_g
+        && product.net_weight_g > 0
+          ? Math.max(0, (scaleG as number) - (tareG as number))
+          : null;
+
+      if (netProductG != null && netProductG > 0) {
+        const { error: rpcErr } = await (chefbyte() as any)
+          .rpc('resolve_add_to_shelf_lot_admin', {
+            p_product_id: product.product_id,
+            p_shelf_source: 'live_scale',
+            p_fallback_location: defaultLocationId ?? null,
+            p_placed_weight_g: netProductG,
+            p_occurred_at: new Date().toISOString(),
+          });
+        if (rpcErr) throw new Error(rpcErr.message);
+      } else if (defaultLocationId) {
+        // Legacy fallback — qty=1, source=manual, location=default.
+        // Only exercised when the save flow lacks a usable scale/net
+        // reading (user typed a tare but no Pi reading posted).
+        const qtyContainers = computeQtyContainersFromScale({
+          scaleG: state.scaleG,
+          tareG,
+          netWeightG: product.net_weight_g,
+        });
         await chefbyte()
           .from('stock_lots')
           .insert({

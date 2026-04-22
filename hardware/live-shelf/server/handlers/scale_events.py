@@ -1124,6 +1124,35 @@ class ScaleHandler:
                     "cloud emit failed for in-flight replacement of %s",
                     lot.lot_id, exc_info=True,
                 )
+
+            # Companion emit: the REPLACEMENT mass sitting on the shelf
+            # right now. Without this the cloud only sees the -pickup_g
+            # consumed event above — the new heavier container is
+            # physically on the shelf but invisible to cloud inventory
+            # (2026-04-22 chocolate-milk bug). Cloud's
+            # private.resolve_add_to_shelf_lot routes this add:
+            #   * if a pantry lot of this product with matching weight
+            #     exists → MOVE it onto the shelf
+            #   * otherwise → MINT a fresh live_shelf lot
+            # See migration 20260424080000_stock_lots_invariant_and_resolve.sql.
+            try:
+                self._cloud_emitter.emit_reconciler_resolution(
+                    pattern="in_flight_replacement_add",
+                    product_id=getattr(lot, "product_id", "") or "",
+                    scale_id=self._scale_id_for_shelf(
+                        getattr(lot, "shelf_id", "live_shelf")
+                    ),
+                    kind="live_shelf",
+                    delta_g=float(abs_delta),
+                    occurred_at=event_ts,
+                    resolution_id=replacement_resolution_id,
+                    pi_event_id=event_id,
+                )
+            except Exception:  # pragma: no cover - defensive
+                log.warning(
+                    "cloud emit failed for in-flight replacement_add of %s",
+                    lot.lot_id, exc_info=True,
+                )
             # Usage log emission — best-effort.
             self._emit_usage_log(
                 lot_id=lot.lot_id,

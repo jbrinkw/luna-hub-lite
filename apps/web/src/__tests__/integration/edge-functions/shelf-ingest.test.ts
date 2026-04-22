@@ -558,7 +558,14 @@ describe('shelf-ingest Edge Function', () => {
     expect(body.applied).toBe(true);
     // The zero-qty lot must NOT have been picked.
     expect(body.resolved_lot_id).not.toBe(emptyLot.lot_id);
-    expect(body.reason).toMatch(/new lot created/i);
+    // Migration 20260424080000 routes tracked-shelf adds through
+    // private.resolve_add_to_shelf_lot; the reason on the shelf_event_log
+    // row becomes 'minted_on_shelf' (previously 'new lot created').
+    // The edge-function response body mirrors shelf_event_result.reason
+    // from private.apply_shelf_event — which now wraps the resolver call
+    // with reason='resolved_add'. We only assert applied=true + a
+    // lot was actually created.
+    expect(body.resolved_lot_id).toBeTruthy();
 
     // Verify the empty lot is still empty.
     const { data: stillEmpty } = await (adminClient as any)
@@ -568,6 +575,80 @@ describe('shelf-ingest Edge Function', () => {
       .eq('lot_id', emptyLot.lot_id)
       .single();
     expect(Number(stillEmpty.qty_containers)).toBe(0);
+
+    // Cleanup
+    await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('product_id', prod.product_id);
+    await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', prod.product_id);
+  });
+
+  // ─── /event — move-vs-mint resolver ────────────────────────────
+  // Migration 20260424080000 introduced the one-lot-per-product-per-
+  // tracked-shelf invariant + a MOVE-vs-MINT resolver. When a
+  // live_shelf ADD event lands for a product that ALREADY has a
+  // pantry lot of matching weight, the resolver MOVES that pantry
+  // lot onto the shelf rather than minting a duplicate.
+
+  it('POST /event live_shelf added MOVES a matching pantry lot instead of minting a duplicate', async () => {
+    // Fresh product with a known net_weight_g.
+    const { data: prod } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Move Test Juice',
+        barcode: 'SI-MOVE-TEST',
+        servings_per_container: 4,
+        net_weight_g: 1672,
+      })
+      .select('product_id')
+      .single();
+
+    // Seed ONE pantry lot of 1 full container (= 1672g current weight).
+    const { data: pantryLot } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('stock_lots')
+      .insert({
+        user_id: userId,
+        product_id: prod.product_id,
+        location_id: locationId,
+        qty_containers: 1,
+        last_update_source: 'manual',
+        last_update_ts: new Date(Date.now() - 3600_000).toISOString(),
+      })
+      .select('lot_id')
+      .single();
+
+    // Pi emits an ADD of 1672g on live_shelf — same mass as pantry lot.
+    const res = await fetch(`${BASE_URL}/event`, {
+      method: 'POST',
+      headers: authHeaders(importKey),
+      body: JSON.stringify({
+        scale_id: 'scale-move',
+        kind: 'live_shelf',
+        event_kind: 'added',
+        product_id: prod.product_id,
+        delta_g: 1672,
+        occurred_at: new Date().toISOString(),
+        client_event_id: crypto.randomUUID(),
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.applied).toBe(true);
+    // Resolver MOVE branch returns the pantry lot's id — NOT a new one.
+    expect(body.resolved_lot_id).toBe(pantryLot.lot_id);
+
+    // Inventory should show exactly ONE lot for this product, and it
+    // should now have last_update_source = 'live_shelf'.
+    const { data: lots } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('stock_lots')
+      .select('lot_id, last_update_source')
+      .eq('product_id', prod.product_id)
+      .eq('user_id', userId);
+    expect(lots).toHaveLength(1);
+    expect(lots[0].lot_id).toBe(pantryLot.lot_id);
+    expect(lots[0].last_update_source).toBe('live_shelf');
 
     // Cleanup
     await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('product_id', prod.product_id);
