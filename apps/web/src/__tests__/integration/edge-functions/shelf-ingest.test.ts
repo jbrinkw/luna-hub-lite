@@ -508,25 +508,155 @@ describe('shelf-ingest Edge Function', () => {
     expect(Number(after.qty_containers)).toBeCloseTo(qtyBefore - 0.1, 3);
   });
 
-  // ─── /event — zero-qty lot bug ────────────────────────────────
+  // ─── /event — empty-lot revive (prod chocolate-milk fix 2026-04-22) ────
 
-  it('POST /event added with only zero-qty lots creates a NEW lot (does not resurrect the empty one)', async () => {
-    // Fresh product for this test so we control all lots.
+  it('POST /event live_scale refilled REVIVES an empty lot at the merge-key tuple (prod chocolate-milk fix)', async () => {
+    // Production repro (2026-04-22): user had a chocolate-milk lot
+    // depleted to qty=0 on live_shelf; next event was a live_scale
+    // refill on scale-03 paired to the same product. The old resolver
+    // fell through to a MINT, which violated stock_lots_merge_key
+    // (user, product, location, COALESCE(expires_on,'9999-12-31')) and
+    // raised 23505 — rolling back the shelf_event_log INSERT with it.
+    // Result: zero shelf_event_log rows for this user, every /event
+    // call returned 500, Pi outbox stalled indefinitely.
+    //
+    // Migration 20260425070000 adds an empty-lot reuse step: if any
+    // empty lot exists for (user, product) at the fallback location,
+    // REVIVE it (flip qty 0 → delta_g/net_weight_g) instead of minting.
+    //
+    // This test MUST fail against the pre-fix resolver (500 response)
+    // and pass after the migration lands.
     const { data: prod } = await (adminClient as any)
       .schema('chefbyte')
       .from('products')
       .insert({
         user_id: userId,
-        name: 'Refill Test Chips',
-        barcode: 'SI-REFILL-TEST',
+        name: 'Revive Test Milk',
+        barcode: 'SI-REVIVE-TEST',
+        servings_per_container: 4,
+        net_weight_g: 1000,
+        calories_per_serving: 100,
+      })
+      .select('product_id')
+      .single();
+
+    // Find the user's earliest-created location — that's what the
+    // resolver's mint path uses as fallback_location (ORDER BY
+    // created_at ASC LIMIT 1 inside private.apply_shelf_event). Seed
+    // the empty lot at THAT location so its merge-key collides with
+    // the mint path exactly — this is the production scenario.
+    const { data: fallbackLoc } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('locations')
+      .select('location_id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .single();
+
+    const { data: emptyLot } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('stock_lots')
+      .insert({
+        user_id: userId,
+        product_id: prod.product_id,
+        location_id: fallbackLoc.location_id,
+        qty_containers: 0,
+        last_update_source: 'live_shelf',
+        expires_on: null,
+      })
+      .select('lot_id')
+      .single();
+
+    const clientEventId = crypto.randomUUID();
+    const res = await fetch(`${BASE_URL}/event`, {
+      method: 'POST',
+      headers: authHeaders(importKey),
+      body: JSON.stringify({
+        scale_id: 'scale-revive-03',
+        kind: 'live_scale',
+        event_kind: 'refilled',
+        product_id: prod.product_id,
+        delta_g: 1000, // exactly 1 container
+        occurred_at: new Date().toISOString(),
+        client_event_id: clientEventId,
+      }),
+    });
+
+    // Before the fix: 500 because apply_shelf_event raised 23505.
+    // After the fix: 200 with applied=true.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.applied).toBe(true);
+    // The empty lot was revived, not a new one minted.
+    expect(body.resolved_lot_id).toBe(emptyLot.lot_id);
+
+    // shelf_event_log row landed — the whole point of the fix. Before
+    // the migration, the RPC's exception rolled this INSERT back, so
+    // there was no forensic trail at all.
+    const { data: logRow } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('shelf_event_log')
+      .select('applied, reason, resolved_lot_id')
+      .eq('user_id', userId)
+      .eq('client_event_id', clientEventId)
+      .single();
+    expect(logRow).toBeTruthy();
+    expect(logRow.applied).toBe(true);
+    expect(logRow.reason).toBe('revived_empty_lot');
+    expect(logRow.resolved_lot_id).toBe(emptyLot.lot_id);
+
+    // Empty lot now has stock — 1000g / net_weight_g(1000) = 1 container.
+    const { data: revivedLot } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('stock_lots')
+      .select('qty_containers, last_update_source')
+      .eq('lot_id', emptyLot.lot_id)
+      .single();
+    expect(Number(revivedLot.qty_containers)).toBeCloseTo(1.0, 3);
+    expect(revivedLot.last_update_source).toBe('live_scale');
+
+    // Exactly one lot for this product: the resurrected one. The
+    // merge_key unique index means a MINT attempt would have created
+    // a duplicate row — this assertion proves the resolver took the
+    // reuse path, not an (impossible) mint.
+    const { data: allLots } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('stock_lots')
+      .select('lot_id')
+      .eq('user_id', userId)
+      .eq('product_id', prod.product_id);
+    expect(allLots.length).toBe(1);
+
+    // Cleanup
+    await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('product_id', prod.product_id);
+    await (adminClient as any).schema('chefbyte').from('shelf_event_log').delete().eq('user_id', userId).eq('client_event_id', clientEventId);
+    await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', prod.product_id);
+  });
+
+  it('POST /event live_shelf added with empty lot at DIFFERENT location reuses + relocates it', async () => {
+    // When the empty lot is at a non-fallback location, the resolver's
+    // broader-sweep fallback kicks in: reuse the empty lot, stamp its
+    // location_id to the fallback (so future events converge). This
+    // prevents orphaned empty lots from accumulating across locations.
+    const { data: prod } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Cross-Location Revive Test',
+        barcode: 'SI-XLOC-REVIVE',
         servings_per_container: 1,
         net_weight_g: 100,
       })
       .select('product_id')
       .single();
 
-    // Empty lot (qty = 0) — simulates a fully depleted product still
-    // visible in history.
+    // Empty lot at a DIFFERENT location from the fallback. Use the
+    // test-scoped `locationId` (Shelf Test Location), which was
+    // created AFTER the activate_app() seeded locations — so the
+    // resolver's earliest-by-created_at fallback picks a different one.
     const { data: emptyLot } = await (adminClient as any)
       .schema('chefbyte')
       .from('stock_lots')
@@ -536,18 +666,18 @@ describe('shelf-ingest Edge Function', () => {
         location_id: locationId,
         qty_containers: 0,
       })
-      .select('lot_id')
+      .select('lot_id, location_id')
       .single();
 
     const res = await fetch(`${BASE_URL}/event`, {
       method: 'POST',
       headers: authHeaders(importKey),
       body: JSON.stringify({
-        scale_id: 'scale-refill',
+        scale_id: 'scale-xloc-revive',
         kind: 'live_shelf',
         event_kind: 'added',
         product_id: prod.product_id,
-        delta_g: 100, // +1 container
+        delta_g: 100,
         occurred_at: new Date().toISOString(),
         client_event_id: crypto.randomUUID(),
       }),
@@ -556,25 +686,19 @@ describe('shelf-ingest Edge Function', () => {
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.applied).toBe(true);
-    // The zero-qty lot must NOT have been picked.
-    expect(body.resolved_lot_id).not.toBe(emptyLot.lot_id);
-    // Migration 20260424080000 routes tracked-shelf adds through
-    // private.resolve_add_to_shelf_lot; the reason on the shelf_event_log
-    // row becomes 'minted_on_shelf' (previously 'new lot created').
-    // The edge-function response body mirrors shelf_event_result.reason
-    // from private.apply_shelf_event — which now wraps the resolver call
-    // with reason='resolved_add'. We only assert applied=true + a
-    // lot was actually created.
-    expect(body.resolved_lot_id).toBeTruthy();
+    // The empty lot must be reused, not a duplicate minted.
+    expect(body.resolved_lot_id).toBe(emptyLot.lot_id);
 
-    // Verify the empty lot is still empty.
-    const { data: stillEmpty } = await (adminClient as any)
+    const { data: revivedLot } = await (adminClient as any)
       .schema('chefbyte')
       .from('stock_lots')
-      .select('qty_containers')
+      .select('qty_containers, location_id')
       .eq('lot_id', emptyLot.lot_id)
       .single();
-    expect(Number(stillEmpty.qty_containers)).toBe(0);
+    expect(Number(revivedLot.qty_containers)).toBeCloseTo(1.0, 3);
+    // Original location preserved (COALESCE keeps it) — only future
+    // merge-key collisions would force relocation.
+    expect(revivedLot.location_id).toBe(emptyLot.location_id);
 
     // Cleanup
     await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('product_id', prod.product_id);
