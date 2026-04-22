@@ -4,6 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { WalmartTab } from '@/components/chefbyte/WalmartTab';
 import { ScalesTab } from '@/components/chefbyte/ScalesTab';
+import { BackupTab } from '@/components/chefbyte/BackupTab';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
@@ -41,13 +42,14 @@ interface Product {
 // LiquidTrack retired 2026-04-21 — replaced by LiveTrack (live_scale kind
 // under Scales tab + LiveTrack Import wizard). See
 // supabase/migrations/20260421060000_retire_liquidtrack.sql for the DB drop.
-type Tab = 'products' | 'walmart' | 'scales' | 'locations';
+type Tab = 'products' | 'walmart' | 'scales' | 'locations' | 'backup';
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'products', label: 'Products', icon: '\uD83D\uDCE6' },
   { id: 'walmart', label: 'Walmart', icon: '\uD83C\uDFEA' },
   { id: 'scales', label: 'Scales', icon: '\u2696\uFE0F' },
   { id: 'locations', label: 'Locations', icon: '\uD83D\uDCCD' },
+  { id: 'backup', label: 'Backup', icon: '\uD83D\uDCBE' },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -806,6 +808,11 @@ export function SettingsPage() {
             )}
           </div>
         )}
+
+        {/* ========================================================== */}
+        {/*  BACKUP TAB                                                  */}
+        {/* ========================================================== */}
+        {activeTab === 'backup' && <BackupTab />}
       </div>
     </ChefLayout>
   );

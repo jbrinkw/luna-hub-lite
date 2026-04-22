@@ -131,6 +131,18 @@ replaced by the LiveTrack system:
   the browser (JWT on `/create`) and the Pi (x-api-key on `/pi-update`).
 - Managed in ChefByte Settings → Scales tab.
 
+### Backup & Restore
+
+User-initiated manual snapshot / rollback of the caller's ChefByte data. Surfaced as a dedicated Settings → Backup tab.
+
+- **Scope (included tables):** `locations`, `products`, `stock_lots`, `recipes`, `recipe_ingredients`, `meal_plan_entries`, `food_logs`, `temp_items`, `shopping_list`, `user_config` (macro goals + per-user prefs). PK UUIDs are preserved so FK references survive the roundtrip.
+- **Excluded:** `shelf_event_log`, `event_overrides`, `livetrack_import_sessions`, `live_shelf_devices`, `scale_pairings` (Pi-owned / device state / ephemeral). The Pi regenerates its own log post-restore; the user re-pairs devices if needed.
+- **Schema version:** stamped on each backup (currently `20260423010000`). Restore rejects a version mismatch up-front — backups are NOT portable across schema-changing migrations.
+- **Restore contract:** wipe-and-replace in a single transaction. All of the caller's rows in the included tables are deleted before any backup row is inserted. FK-safe order (children → parents on wipe, parents → children on insert). Any error rolls back. Any row in the payload whose `user_id` differs from `auth.uid()` aborts the restore without wiping anything.
+- **RPCs:** `chefbyte.export_chefbyte_backup()` returns the JSONB envelope; `chefbyte.restore_chefbyte_backup(p_backup jsonb)` applies it. Both are `SECURITY DEFINER` wrappers over `private.*` implementations. Granted EXECUTE to `authenticated` only.
+- **UI flow:** download button saves `luna-hub-chefbyte-backup-YYYY-MM-DD.json`. Restore picker parses the file, previews schema_version + per-table row counts, and only enables the Restore button after an "I understand this wipes current data" consent checkbox is ticked. Success panel shows wiped + restored counts per table.
+- **Non-goals:** no Pi-side state, no encryption, no auto-schedule, no partial-restore UI.
+
 ## ChefByte UX
 
 Desktop-first with responsive design. Matching the legacy ChefByte layout.
@@ -146,7 +158,7 @@ Desktop-first with responsive design. Matching the legacy ChefByte layout.
 - **Meal Plan**: 7-day week grid. Each day card shows meal entries with recipe/product name, servings, **meal_type labels** (breakfast/lunch/dinner/snack), and **macros per entry** (calories, protein, carbs, fats). Navigation: Previous Week / Today / Next Week. Add Meal modal with recipe/product search. Day detail table showing entry, mode (regular/prep), meal type, status, **macros total row**, and actions. **Meal prep toggle on existing entries** allows switching between regular and prep modes. `[PREP]` opens the execute-confirmation flow and runs meal-prep execution.
 - **Recipes**: Card grid with recipe name, **description**, **servings**, times, per-serving macros, and **stock status badges** (`CAN MAKE` green / `PARTIAL` orange / `NO STOCK` red). Integrated filters (Can Be Made, carbs/protein density percentiles, active/total time sliders) and search live on this page. Cards open detail/edit mode from the same page.
 - **Recipe Create/Edit**: Single page supports both create and edit mode. Form includes name, description, base servings, active time, total time, instructions. Ingredient section: product search dropdown, amount, unit (Serving/Container), note, add button. Ingredient cards below with **inline editing** (quantity, unit, note fields editable in-place). **Zero-ingredient validation** prevents saving recipes without at least one ingredient. Live macro preview (per-serving and total) updates as ingredients are added or modified.
-- **Settings**: Tab interface with four sub-tabs: **Products** (product CRUD), **Walmart** (missing Walmart links with custom URL input and "Not on Walmart" marking; missing prices with manual entry; Refresh All Prices via `walmart-scrape` edge function), **Scales** (LiveTrack device management — live_shelf / catch_all / live_scale — with pairings, pending review count, and heartbeat metrics), and **Locations** (storage location CRUD — add new locations, delete locations with protection if stock exists in that location). Supports `?tab=` query param for deep linking (e.g., `/chef/settings?tab=walmart`).
+- **Settings**: Tab interface with five sub-tabs: **Products** (product CRUD), **Walmart** (missing Walmart links with custom URL input and "Not on Walmart" marking; missing prices with manual entry; Refresh All Prices via `walmart-scrape` edge function), **Scales** (LiveTrack device management — live_shelf / catch_all / live_scale — with pairings, pending review count, and heartbeat metrics), **Locations** (storage location CRUD — add new locations, delete locations with protection if stock exists in that location), and **Backup** (download a JSON snapshot of all user-scoped ChefByte state, or wipe-and-restore from a prior snapshot — see "Backup & Restore" below). Supports `?tab=` query param for deep linking (e.g., `/chef/settings?tab=walmart`, `/chef/settings?tab=backup`).
 
 **Shared across layouts:**
 
