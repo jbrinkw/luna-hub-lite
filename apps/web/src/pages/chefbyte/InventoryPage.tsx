@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { ChevronDown, ChevronRight, Activity } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ListSkeleton } from '@/components/ui/Skeleton';
@@ -38,6 +38,13 @@ interface StockLot {
   expires_on: string | null;
   last_update_source: 'manual' | 'live_shelf' | 'live_scale' | 'catch_all' | null;
   last_update_ts: string | null;
+  /**
+   * Set when a live-scale/shelf lot has been picked up but not yet placed
+   * back (or reconciled as consumed). Null on every row until the Pi flips
+   * it via the future mark_lot_in_flight RPC — drives the "In-flight"
+   * badge on the inventory page.
+   */
+  in_flight_since: string | null;
   locations: { name: string } | null;
 }
 
@@ -65,6 +72,13 @@ interface GroupedProduct {
   latestSource: 'live_shelf' | 'live_scale' | 'catch_all' | null;
   /** Timestamp of the row that produced `latestSource` — used as tie-breaker. */
   latestSourceTs: string | null;
+  /**
+   * Earliest `in_flight_since` across this product's lots (if any lot is
+   * currently in-flight). Null when no lot is in-flight — drives whether
+   * the "In-flight" badge renders. Using the earliest pickup time matches
+   * "how long has this product been off the shelf?" in the tooltip.
+   */
+  inFlightSince: string | null;
 }
 
 type ViewMode = 'grouped' | 'lots';
@@ -116,6 +130,29 @@ export function computeReviewState(
     reason = 'Invalid LAN IP — update in Settings → Scales';
   }
   return { pendingReviewTotal: total, reviewUrl: url, reviewDisabledReason: reason };
+}
+
+/**
+ * Pick the earliest `in_flight_since` across a product's lots (null if none
+ * are in-flight). Earliest-wins so the tooltip naturally shows "picked up X
+ * minutes ago" for the longest-outstanding lot — if two lots were picked up
+ * in quick succession and one comes back first, the badge reflects the
+ * oldest remaining pickup until it too is reconciled.
+ *
+ * Exported for unit testing; consumed by the Inventory page's grouped
+ * aggregation.
+ */
+export function pickEarliestInFlight(
+  lots: ReadonlyArray<{ in_flight_since: string | null }>,
+): string | null {
+  let earliest: string | null = null;
+  for (const l of lots) {
+    if (!l.in_flight_since) continue;
+    if (earliest === null || l.in_flight_since < earliest) {
+      earliest = l.in_flight_since;
+    }
+  }
+  return earliest;
 }
 
 /**
@@ -210,7 +247,7 @@ export function InventoryPage() {
       const { data, error } = await chefbyte()
         .from('stock_lots')
         .select(
-          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,locations:location_id(name)',
+          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,locations:location_id(name)',
         )
         .eq('user_id', user!.id);
       if (error) throw error;
@@ -294,6 +331,9 @@ export function InventoryPage() {
       // See `pickLatestAutomatedSource` for the full rationale.
       const { latestSource, latestSourceTs } = pickLatestAutomatedSource(productLots);
 
+      // Earliest outstanding pickup across this product's lots (null when none).
+      const inFlightSince = pickEarliestInFlight(productLots);
+
       return {
         product,
         totalStock,
@@ -301,6 +341,7 @@ export function InventoryPage() {
         lotCount: productLots.length,
         latestSource,
         latestSourceTs,
+        inFlightSince,
       };
     });
   }, [products, lots]);
@@ -641,7 +682,7 @@ export function InventoryPage() {
               </div>
 
               {/* Product rows */}
-              {filteredGrouped.map(({ product, totalStock, nearestExpiry, latestSource }, idx) => {
+              {filteredGrouped.map(({ product, totalStock, nearestExpiry, latestSource, inFlightSince }, idx) => {
                 const isZeroStock = totalStock <= 0;
                 const servingsTotal = totalStock * Number(product.servings_per_container);
                 const isExpanded = expandedProductId === product.product_id;
@@ -697,6 +738,20 @@ export function InventoryPage() {
                             className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(latestSource)}`}
                           >
                             {sourceLabel[latestSource]}
+                          </span>
+                        )}
+                        {inFlightSince && (
+                          <span
+                            data-testid="inflight-badge"
+                            title={`Picked up at ${new Date(inFlightSince).toLocaleTimeString([], {
+                              hour: '2-digit',
+                              minute: '2-digit',
+                            })} — not yet placed back`}
+                            className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
+                            aria-label="In-flight"
+                          >
+                            <Activity className="w-2.5 h-2.5" aria-hidden="true" />
+                            In-flight
                           </span>
                         )}
                       </div>

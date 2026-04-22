@@ -625,10 +625,12 @@ export type Database = {
         Row: {
           created_at: string
           expires_on: string | null
+          in_flight_since: string | null
           last_update_source: string | null
           last_update_ts: string | null
           location_id: string
           lot_id: string
+          pickup_event_id: string | null
           product_id: string
           qty_containers: number
           user_id: string
@@ -636,10 +638,12 @@ export type Database = {
         Insert: {
           created_at?: string
           expires_on?: string | null
+          in_flight_since?: string | null
           last_update_source?: string | null
           last_update_ts?: string | null
           location_id: string
           lot_id?: string
+          pickup_event_id?: string | null
           product_id: string
           qty_containers?: number
           user_id: string
@@ -647,10 +651,12 @@ export type Database = {
         Update: {
           created_at?: string
           expires_on?: string | null
+          in_flight_since?: string | null
           last_update_source?: string | null
           last_update_ts?: string | null
           location_id?: string
           lot_id?: string
+          pickup_event_id?: string | null
           product_id?: string
           qty_containers?: number
           user_id?: string

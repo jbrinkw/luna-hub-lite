@@ -377,6 +377,53 @@ test.describe('ChefByte Inventory', () => {
     }
   });
 
+  test('in-flight badge appears when a lot has in_flight_since set', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'inv-inflight');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      // Flip the Chicken Breast lot to in-flight via admin (simulates the
+      // future Pi-side RPC that will set in_flight_since). This drives the
+      // REAL query path — the page reads in_flight_since from stock_lots,
+      // aggregates via pickEarliestInFlight, and renders the badge.
+      const chef = (client as any).schema('chefbyte');
+      const pickupTs = new Date(Date.now() - 2 * 60 * 1000).toISOString(); // 2 min ago
+      const { error: updErr } = await chef
+        .from('stock_lots')
+        .update({ in_flight_since: pickupTs })
+        .eq('user_id', userId)
+        .eq('product_id', productMap['Great Value Boneless Skinless Chicken Breasts']);
+      if (updErr) throw new Error(`Failed to set in_flight_since: ${updErr.message}`);
+
+      await page.goto('/chef/inventory');
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
+
+      // Badge visible on the Chicken Breast row (assert visibility, NOT trial-click).
+      const chickenRow = page.getByTestId(
+        `inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`,
+      );
+      await expect(chickenRow.getByTestId('inflight-badge')).toBeVisible({ timeout: 30000 });
+      await expect(chickenRow.getByTestId('inflight-badge')).toContainText('In-flight', { timeout: 30000 });
+
+      // A product WITHOUT in_flight_since must NOT render the badge.
+      const riceRow = page.getByTestId(`inv-product-${productMap['Great Value Long Grain Brown Rice']}`);
+      await expect(riceRow.getByTestId('inflight-badge')).toHaveCount(0);
+
+      // Clear the in-flight state and confirm the badge disappears via the
+      // existing realtime subscription on stock_lots (no page reload).
+      const { error: clearErr } = await chef
+        .from('stock_lots')
+        .update({ in_flight_since: null })
+        .eq('user_id', userId)
+        .eq('product_id', productMap['Great Value Boneless Skinless Chicken Breasts']);
+      if (clearErr) throw new Error(`Failed to clear in_flight_since: ${clearErr.message}`);
+
+      await expect(chickenRow.getByTestId('inflight-badge')).toHaveCount(0, { timeout: 30000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('verify DB state after consume operation', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'inv-dbverify');
     try {

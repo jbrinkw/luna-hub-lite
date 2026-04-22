@@ -201,12 +201,12 @@ describe('ChefByte InventoryPage queries', () => {
       .select('lot_id,product_id,qty_containers,expires_on,locations:location_id(name)')
       .eq('user_id', ctx.userId);
 
-    const productMap = new Map(prods!.map((p: any) => [p.product_id, p]));
+    const productMap = new Map<string, any>(prods!.map((p: any) => [p.product_id, p]));
 
     const sortedLots = [...lots!]
       .map((lot: any) => ({
         ...lot,
-        productName: productMap.get(lot.product_id)?.name ?? 'Unknown',
+        productName: (productMap.get(lot.product_id) as any)?.name ?? 'Unknown',
       }))
       .sort((a: any, b: any) => {
         if (!a.expires_on && !b.expires_on) return a.productName.localeCompare(b.productName);
@@ -500,6 +500,86 @@ describe('ChefByte InventoryPage queries', () => {
 
     // Cleanup food_logs
     await chefbyte(ctx.client).from('food_logs').delete().eq('user_id', ctx.userId);
+  });
+
+  // -----------------------------------------------------------------------
+  // In-flight badge data flow — exercises the real query path the UI uses,
+  // including the in_flight_since column and the earliest-pickup aggregation.
+  // Drives the derivation with NO stubs: seeds the column, reads back via
+  // the exact page query, runs the exact aggregation logic the UI runs.
+  // -----------------------------------------------------------------------
+  it('in_flight_since surfaces through page query and earliest-pickup aggregation', async () => {
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
+
+    // 1. Capture a lot currently not in-flight. Use limit+array rather than
+    //    .single() because earlier tests in this describe block may have
+    //    caused the chicken lot row-count to fluctuate (consume_product RPC
+    //    can leave the lot at 0 qty, merge/insert paths can add rows).
+    const { data: chickenLots, error: selLotErr } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id,in_flight_since')
+      .eq('product_id', chickenId)
+      .eq('user_id', ctx.userId)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    expect(selLotErr).toBeNull();
+    expect(chickenLots).not.toBeNull();
+    expect((chickenLots as any[]).length).toBeGreaterThan(0);
+    const lotBefore = (chickenLots as any[])[0];
+    expect(lotBefore.in_flight_since).toBeNull();
+
+    // 2. Flip it to in-flight via direct UPDATE (simulates the future
+    //    Pi-side RPC). Use a fixed ts so we can assert the exact value.
+    const pickupTs = '2026-04-21T14:30:00.000Z';
+    const { error: updErr } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .update({ in_flight_since: pickupTs })
+      .eq('lot_id', lotBefore.lot_id);
+    expect(updErr).toBeNull();
+
+    // 3. Run the EXACT select the InventoryPage uses (matches line 209-215
+    //    of InventoryPage.tsx including the in_flight_since column).
+    const { data: lots, error: selErr } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select(
+        'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,locations:location_id(name)',
+      )
+      .eq('user_id', ctx.userId);
+    expect(selErr).toBeNull();
+    expect(lots).not.toBeNull();
+
+    // 4. Replicate the page-side `pickEarliestInFlight` aggregation.
+    //    (Same logic as the exported helper — drives the UI derivation.)
+    const chickenLotsAfter = (lots as any[]).filter((l) => l.product_id === chickenId);
+    let earliest: string | null = null;
+    for (const l of chickenLotsAfter) {
+      if (!l.in_flight_since) continue;
+      if (earliest === null || l.in_flight_since < earliest) {
+        earliest = l.in_flight_since;
+      }
+    }
+    // Postgres returns `+00:00`-style timestamps; normalise both sides
+    // via Date so the assertion is format-agnostic.
+    expect(earliest).not.toBeNull();
+    expect(new Date(earliest!).toISOString()).toBe(pickupTs);
+
+    // 5. A different product (no in-flight lot) must aggregate to null.
+    const riceId = seeds.productMap['Great Value Long Grain Brown Rice'];
+    const riceLots = (lots as any[]).filter((l) => l.product_id === riceId);
+    let riceEarliest: string | null = null;
+    for (const l of riceLots) {
+      if (!l.in_flight_since) continue;
+      if (riceEarliest === null || l.in_flight_since < riceEarliest) {
+        riceEarliest = l.in_flight_since;
+      }
+    }
+    expect(riceEarliest).toBeNull();
+
+    // 6. Clear in-flight to keep later tests deterministic.
+    await chefbyte(ctx.client)
+      .from('stock_lots')
+      .update({ in_flight_since: null })
+      .eq('lot_id', lotBefore.lot_id);
   });
 
   // -----------------------------------------------------------------------
