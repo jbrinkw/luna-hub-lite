@@ -240,8 +240,22 @@ export function ScalesTab() {
   ]);
 
   /* ---------------------------------------------------------------- */
-  /*  Derived: pairings grouped by device_id                           */
+  /*  Derived: banner surfaces for silent-deactivation + pairings grouping */
   /* ---------------------------------------------------------------- */
+
+  /**
+   * Surface a prominent banner when the user's ONLY device is is_active=false.
+   * This closes the silent-revoke UX gap from the 2026-04-24 invariant_batch
+   * consolidation where Jeremy's kitchen-pi got flipped to inactive without
+   * user action. A user with multiple devices is skipped — the inactive row
+   * is likely a retired device in that case and the generic "Revoked" badge
+   * on the device card is sufficient.
+   */
+  const silentRevokeDevice = useMemo(() => {
+    if (devices.length !== 1) return null;
+    const only = devices[0];
+    return only.is_active ? null : only;
+  }, [devices]);
 
   const pairingsByDevice = useMemo(() => {
     const map = new Map<string, ScalePairing[]>();
@@ -441,6 +455,43 @@ export function ScalesTab() {
 
       {error && (
         <p className="text-danger-text bg-danger-subtle px-3.5 py-2.5 rounded-md border border-danger mb-4">{error}</p>
+      )}
+
+      {/* ---- Silent-deactivation banner ----
+          Shown when the user's ONLY device is currently is_active=false.
+          Provides a one-click Reactivate so a migration/consolidation sweep
+          that unexpectedly flipped the flag doesn't require the user to
+          hunt through the device card to notice + fix. */}
+      {silentRevokeDevice && (
+        <div
+          data-testid="scales-silent-revoke-banner"
+          className="flex items-start gap-3 p-4 mb-4 rounded-lg border-2 border-danger bg-danger-subtle"
+        >
+          <div className="flex-1 min-w-0">
+            <h3 className="m-0 text-base font-bold text-danger-text">
+              Your Pi key was deactivated
+            </h3>
+            <p className="m-0 mt-1 text-sm text-text">
+              <span className="font-semibold">{silentRevokeDevice.device_name}</span>{' '}
+              is the only device on this account and is currently inactive, so
+              it can no longer post shelf events. Click Reactivate to restore
+              it.
+            </p>
+          </div>
+          <button
+            onClick={() =>
+              toggleActiveMutation.mutate({
+                deviceId: silentRevokeDevice.device_id,
+                isActive: true,
+              })
+            }
+            disabled={toggleActiveMutation.isPending}
+            data-testid="scales-silent-revoke-reactivate-btn"
+            className="shrink-0 bg-emerald-600 text-white border-none rounded-md cursor-pointer font-semibold text-sm px-4 py-2 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
+          >
+            {toggleActiveMutation.isPending ? 'Reactivating…' : 'Reactivate'}
+          </button>
+        </div>
       )}
 
       {/* ---- Add device ---- */}
