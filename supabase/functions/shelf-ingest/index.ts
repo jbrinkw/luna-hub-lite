@@ -33,7 +33,17 @@ const OCCURRED_AT_PAST_MS = 30 * 24 * 60 * 60 * 1000;
 const OCCURRED_AT_FUTURE_MS = 5 * 60 * 1000;
 
 const VALID_KINDS = ['live_shelf', 'live_scale', 'catch_all'] as const;
-const VALID_EVENT_KINDS = ['consumed', 'added', 'refilled', 'depleted'] as const;
+const VALID_EVENT_KINDS = [
+  'consumed',
+  'added',
+  'refilled',
+  'depleted',
+  // In-flight markers — non-stock-mutating events that mirror the Pi's
+  // on_shelf ↔ in_flight transitions into cloud stock_lots.in_flight_since.
+  // See migration 20260425080000_shelf_event_in_flight_pickup.sql.
+  'in_flight_pickup',
+  'in_flight_return',
+] as const;
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
