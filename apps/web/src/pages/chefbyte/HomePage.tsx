@@ -5,6 +5,7 @@ import {
   ChefHat,
   UtensilsCrossed,
   AlertTriangle,
+  Clock,
   DollarSign,
   PackageSearch,
   ShoppingCart,
@@ -111,6 +112,12 @@ interface HomePageData {
   missingPrices: number;
   placeholders: number;
   belowMinStock: number;
+  /**
+   * Count of lots where expires_on < today AND qty_containers > 0.
+   * Drives the "X expired" dashboard card — click navigates to the
+   * inventory page's Expired section (#expired anchor).
+   */
+  expiredCount: number;
   cartValue: number;
   macros: MacroTotals | null;
   mealPrep: MealPrepEntry[];
@@ -220,8 +227,14 @@ export function HomePage() {
           .select('product_id, min_stock_amount')
           .eq('user_id', userId!)
           .gt('min_stock_amount', 0),
-        // 4. Cart value
-        chefbyte().from('shopping_list').select('qty_containers, products:product_id(price)').eq('user_id', userId!),
+        // 4. Cart value — only active cart rows (imported rows represent
+        //    items already in stock_lots, so counting them in the total
+        //    would double-bill what's already in inventory).
+        chefbyte()
+          .from('shopping_list')
+          .select('qty_containers, products:product_id(price)')
+          .eq('user_id', userId!)
+          .is('imported_at', null),
         // 5. Macro summary
         (chefbyte() as any).rpc('get_daily_macros', { p_logical_date: today }),
         // 6. Meal prep
@@ -255,8 +268,11 @@ export function HomePage() {
           .select('temp_id, name, calories, protein, carbs, fat')
           .eq('user_id', userId!)
           .eq('logical_date', today),
-        // 10. All stock lots
-        chefbyte().from('stock_lots').select('product_id, qty_containers').eq('user_id', userId!),
+        // 10. All stock lots — also fetch expires_on for the expired-count card.
+        chefbyte()
+          .from('stock_lots')
+          .select('product_id, qty_containers, expires_on')
+          .eq('user_id', userId!),
       ]);
 
       // Check for errors
@@ -276,10 +292,27 @@ export function HomePage() {
       let belowCount = 0;
       const stockMap = new Map<string, number>();
 
+      // 3a. Expired count — lots with expires_on < today AND qty > 0.
+      // Computed over the same stockRes result so we do not pay for
+      // a second round-trip. Today includes the full local day (expires_on
+      // equal to today is NOT expired — food is still good through its
+      // printed date).
+      const todayYmd = (() => {
+        const d = new Date();
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      })();
+      let expiredCount = 0;
+
       // Build stock map first (needed for both below-min-stock and meal stock status)
       for (const lot of (stockRes.data ?? []) as any[]) {
         const cur = stockMap.get(lot.product_id) ?? 0;
         stockMap.set(lot.product_id, cur + Number(lot.qty_containers));
+        if (lot.expires_on && lot.expires_on < todayYmd && Number(lot.qty_containers) > 0) {
+          expiredCount++;
+        }
       }
 
       if (spArr.length > 0) {
@@ -327,6 +360,7 @@ export function HomePage() {
         missingPrices,
         placeholders,
         belowMinStock: belowCount,
+        expiredCount,
         cartValue,
         macros,
         mealPrep: (prepRes.data ?? []) as MealPrepEntry[],
@@ -360,6 +394,7 @@ export function HomePage() {
   const missingPrices = data?.missingPrices ?? 0;
   const placeholders = data?.placeholders ?? 0;
   const belowMinStock = data?.belowMinStock ?? 0;
+  const expiredCount = data?.expiredCount ?? 0;
   const cartValue = data?.cartValue ?? 0;
   const macros = data?.macros ?? null;
   const mealPrep = data?.mealPrep ?? [];
@@ -441,70 +476,20 @@ export function HomePage() {
   const importShoppingMutation = useMutation({
     mutationFn: async () => {
       if (!user) return;
-
-      // Get user's default location (first by created_at)
-      const { data: locations } = await chefbyte()
-        .from('locations')
-        .select('location_id')
-        .eq('user_id', user.id)
-        .order('created_at')
-        .limit(1);
-      const defaultLocationId = (locations?.[0] as any)?.location_id;
-      if (!defaultLocationId) return; // No locations -- can't import
-
-      // Get non-placeholder items from shopping list
-      const { data: items } = await chefbyte()
-        .from('shopping_list')
-        .select('*, products:product_id(is_placeholder)')
-        .eq('user_id', user.id)
-        .eq('purchased', true);
-
-      const validItems = ((items ?? []) as any[]).filter((item) => !item.products?.is_placeholder);
-      if (validItems.length > 0) {
-        // Merge stock lots: check for existing lot per item, increment qty or insert new
-        let stockError = false;
-        for (const item of validItems) {
-          const { data: existingLot } = await chefbyte()
-            .from('stock_lots')
-            .select('lot_id, qty_containers')
-            .eq('user_id', user.id)
-            .eq('product_id', item.product_id)
-            .eq('location_id', defaultLocationId)
-            .is('expires_on', null)
-            .single();
-
-          if (existingLot) {
-            const { error: updateErr } = await chefbyte()
-              .from('stock_lots')
-              .update({ qty_containers: Number((existingLot as any).qty_containers) + Number(item.qty_containers) })
-              .eq('lot_id', (existingLot as any).lot_id);
-            if (updateErr) {
-              stockError = true;
-              break;
-            }
-          } else {
-            const { error: insertErr } = await chefbyte()
-              .from('stock_lots')
-              .insert({
-                user_id: user.id,
-                product_id: item.product_id,
-                qty_containers: Number(item.qty_containers),
-                location_id: defaultLocationId,
-              });
-            if (insertErr) {
-              stockError = true;
-              break;
-            }
-          }
-        }
-
-        // Only delete shopping items if all stock operations succeeded
-        if (!stockError) {
-          const cartIds = validItems.map((item: any) => item.cart_item_id);
-          await chefbyte().from('shopping_list').delete().in('cart_item_id', cartIds);
-        }
+      // Delegates to the same atomic RPC as ShoppingPage — a single call
+      // merges lots and stamps imported_at. Idempotent if the user clicks
+      // twice in quick succession.
+      const { error } = await (chefbyte() as any).rpc('import_shopping_to_inventory', {
+        p_location_id: null,
+      });
+      // Silently swallow "no locations"/"nothing to import" — the dashboard
+      // button is a convenience, and spamming an error modal when the
+      // cart is empty is worse than the no-op.
+      if (error && !/No storage locations found|No purchased items/.test(error.message ?? '')) {
+        throw new Error(error.message);
       }
     },
+    onError: (err: Error) => setMutationError(err.message),
     onSettled: () => invalidateHome(),
   });
 
@@ -958,6 +943,25 @@ export function HomePage() {
         >
           <AlertTriangle className="w-3 h-3" />
           Stock: {belowMinStock}
+        </Link>
+        {/*
+          "X expired" counter card. Red when count > 0 (nag-worthy),
+          tertiary when zero (don't draw the eye to an empty state).
+          Click jumps to /chef/inventory#expired — the inventory page
+          anchors the Expired section on that hash.
+        */}
+        <Link
+          to="/chef/inventory#expired"
+          data-testid="card-expired"
+          className={[
+            'no-underline inline-flex items-center gap-1 px-2 py-1.5 rounded text-[11px] font-medium transition-colors',
+            expiredCount > 0
+              ? 'bg-danger-subtle text-danger-text hover:bg-danger'
+              : 'bg-surface-hover text-text-tertiary',
+          ].join(' ')}
+        >
+          <Clock className="w-3 h-3" />
+          {expiredCount} expired
         </Link>
         <Link
           to="/chef/settings?tab=walmart"

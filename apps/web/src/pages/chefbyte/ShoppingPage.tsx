@@ -21,6 +21,13 @@ interface ShoppingItem {
   qty_containers: number;
   purchased: boolean;
   created_at: string;
+  /**
+   * Set by chefbyte.import_shopping_to_inventory RPC when the row is
+   * copied into a stock_lot. Null = still in the active cart. The UI
+   * defaults to filtering active rows (imported_at IS NULL); the
+   * "Show imported" toggle surfaces recent imports for audit.
+   */
+  imported_at: string | null;
   products: {
     name: string;
     barcode: string | null;
@@ -56,6 +63,13 @@ export function ShoppingPage() {
   /* ---- Purchase animation state ---- */
   const [justPurchasedIds, setJustPurchasedIds] = useState<Set<string>>(new Set());
 
+  /* ---- "Show imported" toggle (default off) ---- */
+  /* When off, the active cart hides rows where imported_at is set.
+     When on, we additionally fetch rows imported in the last 7 days
+     for audit. Hidden behind a small checkbox so casual users never
+     see stale imports. */
+  const [showImported, setShowImported] = useState(false);
+
   const [confirmState, setConfirmState] = useState<{
     open: boolean;
     title: string;
@@ -71,13 +85,25 @@ export function ShoppingPage() {
   /* ---------------------------------------------------------------- */
 
   const { data: items = [], isLoading } = useQuery({
-    queryKey: queryKeys.shoppingList(user!.id),
+    queryKey: [...queryKeys.shoppingList(user!.id), { showImported }],
     queryFn: async () => {
-      const { data, error: loadErr } = await chefbyte()
+      // Active cart = imported_at IS NULL.
+      // With "Show imported" on, also fetch rows imported in the last 7 days
+      // for audit. Going further back would pollute the view with noise.
+      let query = chefbyte()
         .from('shopping_list')
         .select('*, products:product_id(name, barcode, price, walmart_link, is_placeholder)')
-        .eq('user_id', user!.id)
-        .order('created_at');
+        .eq('user_id', user!.id);
+
+      if (!showImported) {
+        query = query.is('imported_at', null);
+      } else {
+        const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+        // imported_at IS NULL OR imported_at >= 7 days ago
+        query = query.or(`imported_at.is.null,imported_at.gte.${sevenDaysAgo}`);
+      }
+
+      const { data, error: loadErr } = await query.order('created_at');
       if (loadErr) throw loadErr;
       return (data ?? []) as ShoppingItem[];
     },
@@ -96,8 +122,12 @@ export function ShoppingPage() {
   /*  Derived state                                                    */
   /* ---------------------------------------------------------------- */
 
-  const toBuy = useMemo(() => items.filter((i) => !i.purchased), [items]);
-  const purchased = useMemo(() => items.filter((i) => i.purchased), [items]);
+  // Active cart sections: imported rows NEVER count toward To Buy / Purchased
+  // totals, even with "Show imported" on (they're surfaced in their own
+  // section below so the counts match what you can actually act on).
+  const toBuy = useMemo(() => items.filter((i) => !i.purchased && !i.imported_at), [items]);
+  const purchased = useMemo(() => items.filter((i) => i.purchased && !i.imported_at), [items]);
+  const importedItems = useMemo(() => items.filter((i) => !!i.imported_at), [items]);
 
   /* ---------------------------------------------------------------- */
   /*  Product search (server-side ilike + 300ms debounce)              */
@@ -249,13 +279,32 @@ export function ShoppingPage() {
 
     if (!productId) return;
 
-    // Check if product already exists on the list — if so, increment quantity
-    const existing = items.find((i) => i.product_id === productId);
-    if (existing) {
+    // Look up ANY existing shopping_list row for this product — active or
+    // imported. The UNIQUE(user_id, product_id) constraint means we must
+    // update in place rather than insert a duplicate. If it's an imported
+    // row, re-activate it by clearing imported_at and resetting qty to the
+    // new addQty (the prior qty has already left the cart via import).
+    const { data: anyExisting } = await chefbyte()
+      .from('shopping_list')
+      .select('cart_item_id, qty_containers, imported_at, purchased')
+      .eq('user_id', user.id)
+      .eq('product_id', productId)
+      .limit(1)
+      .maybeSingle();
+
+    if (anyExisting) {
+      const wasImported = !!(anyExisting as any).imported_at;
+      const newQty = wasImported
+        ? addQty
+        : Number((anyExisting as any).qty_containers) + addQty;
       const { error: updateErr } = await chefbyte()
         .from('shopping_list')
-        .update({ qty_containers: Number(existing.qty_containers) + addQty })
-        .eq('cart_item_id', existing.cart_item_id);
+        .update({
+          qty_containers: newQty,
+          imported_at: null,
+          purchased: wasImported ? false : (anyExisting as any).purchased,
+        })
+        .eq('cart_item_id', (anyExisting as any).cart_item_id);
       if (updateErr) {
         setError(updateErr.message);
         return;
@@ -281,55 +330,14 @@ export function ShoppingPage() {
   const importToInventory = async () => {
     if (!user || purchased.length === 0) return;
 
-    // Get user's first location
-    const { data: locs } = await chefbyte()
-      .from('locations')
-      .select('location_id')
-      .eq('user_id', user.id)
-      .order('created_at')
-      .limit(1);
-    const locId = locs?.[0]?.location_id;
-    if (!locId) return;
-
-    // Merge stock lots: check for existing lot per item, increment qty or insert new
-    for (const item of purchased) {
-      const { data: existingLot } = await chefbyte()
-        .from('stock_lots')
-        .select('lot_id, qty_containers')
-        .eq('user_id', user.id)
-        .eq('product_id', item.product_id)
-        .eq('location_id', locId)
-        .is('expires_on', null)
-        .single();
-
-      if (existingLot) {
-        const { error: updateErr } = await chefbyte()
-          .from('stock_lots')
-          .update({ qty_containers: Number((existingLot as any).qty_containers) + Number(item.qty_containers) })
-          .eq('lot_id', (existingLot as any).lot_id);
-        if (updateErr) {
-          setError(updateErr.message);
-          return;
-        }
-      } else {
-        const { error: insertErr } = await chefbyte().from('stock_lots').insert({
-          user_id: user.id,
-          product_id: item.product_id,
-          location_id: locId,
-          qty_containers: item.qty_containers,
-        });
-        if (insertErr) {
-          setError(insertErr.message);
-          return;
-        }
-      }
-    }
-
-    // Delete purchased items from shopping list
-    const ids = purchased.map((i) => i.cart_item_id);
-    const { error: delErr } = await chefbyte().from('shopping_list').delete().in('cart_item_id', ids);
-    if (delErr) {
-      setError(delErr.message);
+    // Single-call RPC handles location resolution, stock_lot merge/insert,
+    // and imported_at stamping atomically. Prevents double-imports and
+    // orphaned stock_lots if a step mid-batch fails.
+    const { error: rpcErr } = await (chefbyte() as any).rpc('import_shopping_to_inventory', {
+      p_location_id: null,
+    });
+    if (rpcErr) {
+      setError(rpcErr.message);
       return;
     }
 
@@ -363,8 +371,17 @@ export function ShoppingPage() {
       stockByProduct.set(lot.product_id, current + Number(lot.qty_containers));
     }
 
-    // Collect deficient products — upsert sets qty to full deficit
-    const rowsToUpsert: Array<{ user_id: string; product_id: string; qty_containers: number }> = [];
+    // Collect deficient products — upsert sets qty to full deficit.
+    // imported_at is explicitly reset to null + purchased reset to false so
+    // a previously-imported row is re-activated in place (the UNIQUE
+    // (user_id, product_id) constraint prevents a parallel active row).
+    const rowsToUpsert: Array<{
+      user_id: string;
+      product_id: string;
+      qty_containers: number;
+      imported_at: null;
+      purchased: boolean;
+    }> = [];
     for (const product of prods) {
       const currentStock = stockByProduct.get(product.product_id) ?? 0;
       const minStock = Number(product.min_stock_amount);
@@ -375,6 +392,8 @@ export function ShoppingPage() {
             user_id: user.id,
             product_id: product.product_id,
             qty_containers: deficit,
+            imported_at: null,
+            purchased: false,
           });
         }
       }
@@ -657,6 +676,55 @@ export function ShoppingPage() {
             </div>
           )}
         </div>
+
+        {/* ============================================================ */}
+        {/*  SHOW IMPORTED TOGGLE + SECTION                              */}
+        {/* ============================================================ */}
+        <div className="flex items-center gap-2 mb-3">
+          <label className="inline-flex items-center gap-2 text-xs text-text-secondary cursor-pointer">
+            <input
+              type="checkbox"
+              checked={showImported}
+              onChange={(e) => setShowImported(e.target.checked)}
+              data-testid="show-imported-toggle"
+              className="cursor-pointer"
+            />
+            Show imported items (last 7 days)
+          </label>
+        </div>
+        {showImported && (
+          <div data-testid="imported-section" className="bg-surface border border-border rounded-lg p-4 mb-5">
+            <h3 className="m-0 mb-3 text-base font-semibold text-text-secondary">
+              Imported ({importedItems.length})
+            </h3>
+            {importedItems.length === 0 ? (
+              <div data-testid="no-imported" className="text-center text-text-tertiary py-5">
+                No items imported in the last 7 days.
+              </div>
+            ) : (
+              <div data-testid="imported-list" className="flex flex-col gap-2">
+                {importedItems.map((item) => (
+                  <div
+                    key={item.cart_item_id}
+                    data-testid={`imported-item-${item.cart_item_id}`}
+                    className="flex items-center gap-3 p-2.5 bg-surface-hover rounded-md opacity-70"
+                  >
+                    <div className="flex-1 line-through text-text-secondary">
+                      <strong>{item.products?.name ?? 'Unknown Product'}</strong>
+                      <span className="ml-3">{formatQty(item.qty_containers)}</span>
+                      <span
+                        data-testid={`imported-badge-${item.cart_item_id}`}
+                        className="ml-3 inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-success-subtle text-success-text border border-emerald-200"
+                      >
+                        Imported
+                      </span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ============================================================ */}
         {/*  CLEAR ALL BUTTON                                             */}

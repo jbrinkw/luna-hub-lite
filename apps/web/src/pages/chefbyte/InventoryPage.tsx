@@ -1,6 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
+import { useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Activity } from 'lucide-react';
+import { ChevronDown, ChevronRight, Activity, AlertTriangle } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ListSkeleton } from '@/components/ui/Skeleton';
@@ -347,6 +348,57 @@ export function InventoryPage() {
   }, [products, lots]);
 
   /* ---------------------------------------------------------------- */
+  /*  Expired lots — rendered as their own "discard" section at the   */
+  /*  top of the grouped view. Expired = expires_on < today. Today is */
+  /*  NOT expired (food is still good through the printed date).      */
+  /* ---------------------------------------------------------------- */
+
+  const todayYmd = todayStr(dayStartHour);
+
+  const expiredLots = useMemo(() => {
+    const productMap = new Map(products.map((p) => [p.product_id, p]));
+    return lots
+      .filter((l) => l.expires_on && l.expires_on < todayYmd && Number(l.qty_containers) > 0)
+      .map((l) => ({
+        ...l,
+        product: productMap.get(l.product_id) ?? null,
+        productName: productMap.get(l.product_id)?.name ?? 'Unknown',
+      }))
+      // Oldest expiry first — most urgent at the top of the section.
+      .sort((a, b) => {
+        const cmp = (a.expires_on ?? '').localeCompare(b.expires_on ?? '');
+        if (cmp !== 0) return cmp;
+        return a.productName.localeCompare(b.productName);
+      });
+  }, [lots, products, todayYmd]);
+
+  /**
+   * Days since an expired lot's printed date. Used to render the
+   * "X days expired" chip. expires_on is stored as YYYY-MM-DD so we
+   * compare midnight-to-midnight and floor fractions.
+   */
+  const daysExpired = (expiresOn: string): number => {
+    const expired = new Date(expiresOn + 'T00:00:00');
+    const today = new Date(todayYmd + 'T00:00:00');
+    const ms = today.getTime() - expired.getTime();
+    return Math.max(0, Math.floor(ms / (1000 * 60 * 60 * 24)));
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  Anchor scroll — #expired from dashboard card                    */
+  /* ---------------------------------------------------------------- */
+
+  const location = useLocation();
+  const expiredSectionRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    // Only scroll after data has loaded — otherwise the anchor sits
+    // inside the skeleton and scroll-to-element is a no-op.
+    if (!loading && location.hash === '#expired' && expiredSectionRef.current) {
+      expiredSectionRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  }, [location.hash, loading, expiredLots.length]);
+
+  /* ---------------------------------------------------------------- */
   /*  Filtered grouped (by search text)                                */
   /* ---------------------------------------------------------------- */
 
@@ -498,6 +550,49 @@ export function InventoryPage() {
     onSettled: () => {
       invalidateInventory();
     },
+  });
+
+  /**
+   * Discard an expired lot WITHOUT logging macros. Legitimate when food
+   * went bad and is being thrown out — we still need the stock to go to
+   * zero so the inventory isn't inflated, but the calories/macros must
+   * NOT be counted against the user's daily totals.
+   *
+   * Implementation: hit the specific lot directly (not consume_product,
+   * which is FIFO across all lots and always logs macros). Since RLS
+   * scopes by user_id, the UPDATE is safe to issue from the client.
+   */
+  const discardLotMutation = useMutation({
+    mutationFn: async ({ lotId }: { lotId: string }) => {
+      const { error: err } = await chefbyte().from('stock_lots').update({ qty_containers: 0 }).eq('lot_id', lotId);
+      if (err) throw err;
+    },
+    onError: (err: any) => setError(err.message ?? String(err)),
+    onSuccess: () => setError(null),
+    onSettled: () => invalidateInventory(),
+  });
+
+  /**
+   * "Consumed anyway" — user ate the expired food. Logs macros like a
+   * normal consume. Uses consume_product to respect per-product macro
+   * math (servings_per_container → kcal, etc). FIFO across lots is
+   * acceptable here: the user picked the expired product because it's
+   * the oldest, and FIFO will deplete the expired lot first.
+   */
+  const consumeExpiredMutation = useMutation({
+    mutationFn: async ({ productId, qty }: { productId: string; qty: number }) => {
+      const { error: err } = await (chefbyte() as any).rpc('consume_product', {
+        p_product_id: productId,
+        p_qty: qty,
+        p_unit: 'container',
+        p_log_macros: true,
+        p_logical_date: getLogicalDate(),
+      });
+      if (err) throw err;
+    },
+    onError: (err: any) => setError(err.message ?? String(err)),
+    onSuccess: () => setError(null),
+    onSettled: () => invalidateInventory(),
   });
 
   const handleConsumeAll = (productId: string) => {
@@ -659,6 +754,74 @@ export function InventoryPage() {
           className={inputCls}
         />
       </div>
+
+      {/* ========================================================== */}
+      {/*  EXPIRED — DISCARD SECTION (top of list)                    */}
+      {/* ========================================================== */}
+      {viewMode === 'grouped' && expiredLots.length > 0 && (
+        <div
+          id="expired"
+          ref={expiredSectionRef}
+          data-testid="expired-section"
+          className="mb-5 border-2 border-danger bg-danger-subtle rounded-lg overflow-hidden"
+        >
+          <div className="flex items-center gap-2 px-3 py-2 bg-danger text-white font-bold text-sm">
+            <AlertTriangle className="w-4 h-4" />
+            <span>Expired — discard ({expiredLots.length})</span>
+          </div>
+          <div className="flex flex-col">
+            {expiredLots.map((lot) => {
+              const days = daysExpired(lot.expires_on!);
+              return (
+                <div
+                  key={lot.lot_id}
+                  data-testid={`expired-lot-${lot.lot_id}`}
+                  className="flex flex-col sm:flex-row sm:items-center gap-2 px-3 py-2.5 border-l-4 border-danger border-b border-border-light last:border-b-0 bg-surface"
+                >
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="font-semibold text-sm text-text">{lot.productName}</span>
+                      <span
+                        data-testid={`expired-chip-${lot.lot_id}`}
+                        className="inline-flex items-center rounded-full px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide bg-danger text-white"
+                      >
+                        {days === 0 ? 'expired today' : `${days} day${days === 1 ? '' : 's'} expired`}
+                      </span>
+                    </div>
+                    <div className="text-xs text-text-secondary mt-0.5">
+                      <span className="line-through mr-2" data-testid={`expired-date-${lot.lot_id}`}>
+                        Expires {lot.expires_on}
+                      </span>
+                      <span>{Number(lot.qty_containers).toFixed(1)} ctn</span>
+                    </div>
+                  </div>
+                  <div className="flex gap-1.5 shrink-0">
+                    <button
+                      onClick={() => discardLotMutation.mutate({ lotId: lot.lot_id })}
+                      data-testid={`discard-lot-${lot.lot_id}`}
+                      className="px-2.5 py-1 bg-danger text-white rounded text-xs font-semibold hover:bg-danger-hover transition-colors"
+                    >
+                      Log as discarded
+                    </button>
+                    <button
+                      onClick={() =>
+                        consumeExpiredMutation.mutate({
+                          productId: lot.product_id,
+                          qty: Number(lot.qty_containers),
+                        })
+                      }
+                      data-testid={`consume-anyway-${lot.lot_id}`}
+                      className="px-2.5 py-1 bg-surface text-danger-text border border-danger rounded text-xs font-semibold hover:bg-danger-subtle transition-colors"
+                    >
+                      Consumed anyway
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ========================================================== */}
       {/*  GROUPED VIEW                                                */}

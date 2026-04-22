@@ -776,6 +776,208 @@ describe('ChefByte HomePage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // HomePage: expired-count card query
+  // Source: HomePage.tsx dashboard useQuery — now selects expires_on
+  // and increments expiredCount for each lot where expires_on < today
+  // AND qty_containers > 0.
+  // -------------------------------------------------------------------
+  it('stock_lots query with expires_on drives the expired-count card', async () => {
+    const chef = chefbyte(ctx.client);
+    const locId = seeds.locationId;
+    const chickenId = seeds.productMap['Great Value Boneless Skinless Chicken Breasts'];
+
+    // Clear any prior lots so this test is deterministic — leave baseline seed
+    // in tact is not safe when we need exact counts. Remove all and reseed.
+    await chef.from('stock_lots').delete().eq('user_id', ctx.userId);
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+    const tenDaysAgo = new Date();
+    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
+    const tenDaysAgoStr = tenDaysAgo.toISOString().split('T')[0];
+
+    const future = new Date();
+    future.setDate(future.getDate() + 30);
+    const futureStr = future.toISOString().split('T')[0];
+
+    // Seed two expired lots (one qty=2, one qty=1) and one fresh lot.
+    await chef.from('stock_lots').insert([
+      {
+        user_id: ctx.userId,
+        product_id: chickenId,
+        location_id: locId,
+        qty_containers: 2,
+        expires_on: yesterdayStr,
+      },
+      {
+        user_id: ctx.userId,
+        product_id: chickenId,
+        location_id: locId,
+        qty_containers: 1,
+        expires_on: tenDaysAgoStr,
+      },
+      {
+        user_id: ctx.userId,
+        product_id: chickenId,
+        location_id: locId,
+        qty_containers: 5,
+        expires_on: futureStr,
+      },
+    ]);
+
+    // Exact query the HomePage uses for the expired-card computation
+    // (plus lot_id so we can target a specific row for the discard sim).
+    const result = await chef
+      .from('stock_lots')
+      .select('lot_id, product_id, qty_containers, expires_on')
+      .eq('user_id', ctx.userId);
+
+    const data = assertQuerySucceeds(result, 'stock_lots for expired card') as any[];
+
+    const today = todayDate();
+    const expired = data.filter(
+      (l: any) => l.expires_on && l.expires_on < today && Number(l.qty_containers) > 0,
+    );
+
+    expect(expired.length).toBe(2);
+
+    // Simulate the discard that the InventoryPage "Log as discarded" button
+    // performs: set qty_containers=0 on one expired lot. Expired count
+    // should drop to 1.
+    const toDiscard = expired[0];
+    const { error: updateErr } = await chef
+      .from('stock_lots')
+      .update({ qty_containers: 0 })
+      .eq('lot_id', toDiscard.lot_id);
+    expect(updateErr).toBeNull();
+
+    const after = await chef
+      .from('stock_lots')
+      .select('lot_id, product_id, qty_containers, expires_on')
+      .eq('user_id', ctx.userId);
+    const afterData = assertQuerySucceeds(after, 'stock_lots after discard') as any[];
+    const expiredAfter = afterData.filter(
+      (l: any) => l.expires_on && l.expires_on < today && Number(l.qty_containers) > 0,
+    );
+    expect(expiredAfter.length).toBe(1);
+
+    // Restore the standard seed state so downstream tests in this file
+    // still see the original stock_lots (chicken + rice + eggs + peas).
+    // Without this, the "stock_lots for badges" test below fails because
+    // we wiped everything at the top of this block.
+    await chef.from('stock_lots').delete().eq('user_id', ctx.userId);
+    await chef.from('stock_lots').insert([
+      {
+        user_id: ctx.userId,
+        product_id: seeds.productMap['Great Value Boneless Skinless Chicken Breasts'],
+        location_id: locId,
+        qty_containers: 3,
+      },
+      {
+        user_id: ctx.userId,
+        product_id: seeds.productMap['Great Value Long Grain Brown Rice'],
+        location_id: locId,
+        qty_containers: 2,
+      },
+      {
+        user_id: ctx.userId,
+        product_id: seeds.productMap['Great Value Large White Eggs'],
+        location_id: locId,
+        qty_containers: 0.5,
+      },
+    ]);
+  });
+
+  // -------------------------------------------------------------------
+  // HomePage: import_shopping_to_inventory RPC (Feature X)
+  // Source: HomePage.tsx importShoppingMutation now calls the new RPC.
+  // Verifies imported_at stamping + idempotency on a second call.
+  // -------------------------------------------------------------------
+  it('import_shopping_to_inventory RPC stamps imported_at and is idempotent', async () => {
+    const chef = chefbyte(ctx.client);
+    const riceId = seeds.productMap['Great Value Long Grain Brown Rice'];
+
+    // Clean slate on the shopping list
+    await chef.from('shopping_list').delete().eq('user_id', ctx.userId);
+
+    // Seed a purchased cart row
+    const { data: inserted } = await chef
+      .from('shopping_list')
+      .insert({
+        user_id: ctx.userId,
+        product_id: riceId,
+        qty_containers: 2,
+        purchased: true,
+      })
+      .select('cart_item_id')
+      .single();
+    expect(inserted).not.toBeNull();
+
+    // Capture pre-import rice stock so we can verify the merge-or-insert
+    // added 2 containers (merge behavior is fine — the RPC prefers merging
+    // into an existing NULL-expires_on lot for the same product+location).
+    const lotsBefore = await chef
+      .from('stock_lots')
+      .select('lot_id, product_id, qty_containers')
+      .eq('user_id', ctx.userId);
+    const countBefore = (lotsBefore.data ?? []).length;
+    const riceBefore = ((lotsBefore.data ?? []) as any[])
+      .filter((l) => l.product_id === riceId)
+      .reduce((s, l) => s + Number(l.qty_containers), 0);
+
+    // First import — should process 1 row
+    const { data: first, error: firstErr } = await (chef as any).rpc('import_shopping_to_inventory', {
+      p_location_id: null,
+    });
+    expect(firstErr).toBeNull();
+    expect(first.success).toBe(true);
+    expect(first.lots_processed).toBe(1);
+
+    // imported_at is stamped
+    const { data: afterRow } = await chef
+      .from('shopping_list')
+      .select('imported_at')
+      .eq('cart_item_id', (inserted as any).cart_item_id)
+      .single();
+    expect((afterRow as any).imported_at).not.toBeNull();
+
+    // Total rice stock grew by exactly the imported qty (2). Whether the
+    // RPC merged or created a new lot is an implementation detail — what
+    // matters is the user sees +2 containers of rice.
+    const lotsAfter = await chef
+      .from('stock_lots')
+      .select('lot_id, product_id, qty_containers')
+      .eq('user_id', ctx.userId);
+    const riceAfter = ((lotsAfter.data ?? []) as any[])
+      .filter((l) => l.product_id === riceId)
+      .reduce((s, l) => s + Number(l.qty_containers), 0);
+    expect(riceAfter).toBeCloseTo(riceBefore + 2, 3);
+
+    // Total lot count either stayed the same (merged) or increased by 1 (inserted)
+    const countAfter = (lotsAfter.data ?? []).length;
+    expect([countBefore, countBefore + 1]).toContain(countAfter);
+
+    // Second call is idempotent — 0 processed, no new lots
+    const { data: second } = await (chef as any).rpc('import_shopping_to_inventory', {
+      p_location_id: null,
+    });
+    expect(second.lots_processed).toBe(0);
+
+    const lotsFinal = await chef.from('stock_lots').select('lot_id').eq('user_id', ctx.userId);
+    expect((lotsFinal.data ?? []).length).toBe(countAfter);
+
+    // Active cart (imported_at IS NULL) is empty
+    const { data: active } = await chef
+      .from('shopping_list')
+      .select('cart_item_id')
+      .eq('user_id', ctx.userId)
+      .is('imported_at', null);
+    expect(active).toHaveLength(0);
+  });
+
+  // -------------------------------------------------------------------
   // HomePage: stock_lots query for stock availability badges
   // Source: HomePage.tsx line ~227-230
   //   .from('stock_lots').select('product_id, qty_containers').eq('user_id', userId)

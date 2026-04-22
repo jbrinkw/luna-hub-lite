@@ -271,6 +271,121 @@ test.describe('ChefByte Shopping', () => {
     }
   });
 
+  // -------------------------------------------------------------------
+  // Feature X: Import to Inventory auto-clears the cart
+  // -------------------------------------------------------------------
+  test('import to inventory clears purchased section and surfaces via toggle', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-import-clear');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      // Seed two already-purchased items so Import to Inventory is active
+      await seedShoppingItems(client, userId, [
+        { productId: productMap['Great Value Boneless Skinless Chicken Breasts'], qtyContainers: 2, purchased: true },
+        { productId: productMap['Great Value Long Grain Brown Rice'], qtyContainers: 1, purchased: true },
+      ]);
+
+      await page.goto('/chef/shopping');
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
+
+      // Both items should be in the Purchased section before import
+      await expect(page.getByTestId('purchased-list')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('purchased-section')).toContainText(
+        'Great Value Boneless Skinless Chicken Breasts',
+        { timeout: 30000 },
+      );
+
+      // Click Import to Inventory
+      await page.getByTestId('import-inventory-btn').click();
+
+      // Purchased section should now be empty
+      await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 30000 });
+
+      // DB: shopping_list rows should have imported_at set
+      await expect(async () => {
+        const chef = (client as any).schema('chefbyte');
+        const { data: rows } = await chef.from('shopping_list').select('imported_at, purchased').eq('user_id', userId);
+        expect(rows).toBeTruthy();
+        expect(rows.length).toBe(2);
+        for (const r of rows!) {
+          expect(r.imported_at).not.toBeNull();
+        }
+      }).toPass({ timeout: 30000 });
+
+      // DB: two stock_lots exist matching the imported qty
+      await expect(async () => {
+        const chef = (client as any).schema('chefbyte');
+        const { data: lots } = await chef
+          .from('stock_lots')
+          .select('product_id, qty_containers')
+          .eq('user_id', userId);
+        // Two seeded during seedChefByteData already + 2 imported
+        const imported = (lots ?? []).filter(
+          (l: any) =>
+            (l.product_id === productMap['Great Value Boneless Skinless Chicken Breasts'] &&
+              Number(l.qty_containers) === 2) ||
+            (l.product_id === productMap['Great Value Long Grain Brown Rice'] && Number(l.qty_containers) === 1),
+        );
+        expect(imported.length).toBeGreaterThanOrEqual(1);
+      }).toPass({ timeout: 30000 });
+
+      // Toggle "Show imported" — the imported section reveals the two items
+      await page.getByTestId('show-imported-toggle').check();
+      await expect(page.getByTestId('imported-section')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('imported-list')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('imported-section')).toContainText(
+        'Great Value Boneless Skinless Chicken Breasts',
+        { timeout: 30000 },
+      );
+      await expect(page.getByTestId('imported-section')).toContainText('Great Value Long Grain Brown Rice', {
+        timeout: 30000,
+      });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('second import after all items imported is a no-op (no duplicate lots)', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-import-idempotent');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      await seedShoppingItems(client, userId, [
+        { productId: productMap['Banquet Chicken Breast Patties'], qtyContainers: 1, purchased: true },
+      ]);
+
+      await page.goto('/chef/shopping');
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
+
+      await page.getByTestId('import-inventory-btn').click();
+      await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 30000 });
+
+      // Count stock_lots after first import
+      const chef = (client as any).schema('chefbyte');
+      const { data: afterFirst } = await chef
+        .from('stock_lots')
+        .select('lot_id')
+        .eq('user_id', userId)
+        .eq('product_id', productMap['Banquet Chicken Breast Patties']);
+      const firstCount = (afterFirst ?? []).length;
+
+      // The button is no longer visible because purchased.length === 0.
+      // Instead, exercise the RPC directly via client to simulate a duplicate
+      // call path — confirms the server side is idempotent.
+      const { data: secondResult } = await (chef as any).rpc('import_shopping_to_inventory', { p_location_id: null });
+      expect(secondResult.lots_processed).toBe(0);
+
+      const { data: afterSecond } = await chef
+        .from('stock_lots')
+        .select('lot_id')
+        .eq('user_id', userId)
+        .eq('product_id', productMap['Banquet Chicken Breast Patties']);
+      expect((afterSecond ?? []).length).toBe(firstCount);
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('adding non-existent product name creates placeholder product', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-placeholder');
     try {

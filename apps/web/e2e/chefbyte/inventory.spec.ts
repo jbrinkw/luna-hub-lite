@@ -487,4 +487,111 @@ test.describe('ChefByte Inventory', () => {
       await cleanup();
     }
   });
+
+  // -------------------------------------------------------------------
+  // Feature Y: Expired-first inventory + discard action
+  // -------------------------------------------------------------------
+  test('expired lots render in Expired section at the top and can be discarded', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'inv-expired-discard');
+    try {
+      const { productMap, locationId } = await seedChefByteData(client, userId);
+
+      // Add an expired lot (3 days ago) for a product that also has a fresh lot.
+      // We use Birds Eye Sweet Peas because seedChefByteData already gave it
+      // a 0.5 qty lot 180 days out — this creates a clear "fresh below, expired above" render order.
+      const chef = (client as any).schema('chefbyte');
+      const threeDaysAgo = new Date();
+      threeDaysAgo.setDate(threeDaysAgo.getDate() - 3);
+      const threeDaysAgoStr = threeDaysAgo.toISOString().split('T')[0];
+
+      const { data: insertedLot } = await chef
+        .from('stock_lots')
+        .insert({
+          user_id: userId,
+          product_id: productMap['Birds Eye Sweet Peas'],
+          location_id: locationId,
+          qty_containers: 2,
+          expires_on: threeDaysAgoStr,
+        })
+        .select('lot_id')
+        .single();
+      const expiredLotId = (insertedLot as any).lot_id;
+
+      await page.goto('/chef/inventory');
+
+      // Expired section renders at the top with the expired lot listed
+      const expiredSection = page.getByTestId('expired-section');
+      await expect(expiredSection).toBeVisible({ timeout: 30000 });
+      await expect(expiredSection).toContainText('Expired — discard', { timeout: 30000 });
+      await expect(page.getByTestId(`expired-lot-${expiredLotId}`)).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId(`expired-chip-${expiredLotId}`)).toContainText('3 days expired', { timeout: 30000 });
+
+      // Fresh items still rendered in the grouped view below
+      await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
+      await expect(
+        page.getByTestId(`inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`),
+      ).toBeVisible({ timeout: 30000 });
+
+      // Click "Log as discarded" — qty_containers should drop to 0
+      await page.getByTestId(`discard-lot-${expiredLotId}`).click();
+
+      await expect(async () => {
+        const { data: lotAfter } = await chef.from('stock_lots').select('qty_containers').eq('lot_id', expiredLotId);
+        expect(lotAfter).toBeTruthy();
+        expect(lotAfter.length).toBe(1);
+        expect(Number(lotAfter[0].qty_containers)).toBe(0);
+      }).toPass({ timeout: 30000 });
+
+      // No food_log should have been created for this lot (macros NOT logged)
+      await expect(async () => {
+        const { data: logs } = await chef
+          .from('food_logs')
+          .select('log_id, product_id')
+          .eq('user_id', userId)
+          .eq('product_id', productMap['Birds Eye Sweet Peas']);
+        // No macros logged for the discard path (the only food_log rows
+        // for this product came from earlier test setup — Peas isn't consumed
+        // anywhere else, so the list must be empty).
+        expect((logs ?? []).length).toBe(0);
+      }).toPass({ timeout: 30000 });
+
+      // The expired section should no longer include the discarded lot
+      await expect(page.getByTestId(`expired-lot-${expiredLotId}`)).not.toBeVisible({ timeout: 30000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('dashboard expired card reflects expired lot count and navigates to inventory', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'inv-expired-card');
+    try {
+      const { productMap, locationId } = await seedChefByteData(client, userId);
+
+      const chef = (client as any).schema('chefbyte');
+      const yesterday = new Date();
+      yesterday.setDate(yesterday.getDate() - 1);
+      const yesterdayStr = yesterday.toISOString().split('T')[0];
+
+      await chef.from('stock_lots').insert({
+        user_id: userId,
+        product_id: productMap['Birds Eye Sweet Peas'],
+        location_id: locationId,
+        qty_containers: 1,
+        expires_on: yesterdayStr,
+      });
+
+      await page.goto('/chef/home');
+
+      const card = page.getByTestId('card-expired');
+      await expect(card).toBeVisible({ timeout: 30000 });
+      await expect(card).toContainText('1 expired', { timeout: 30000 });
+
+      // Click the card → navigates to /chef/inventory#expired
+      await card.click();
+      await expect(page).toHaveURL(/\/chef\/inventory#expired/, { timeout: 30000 });
+      await expect(page.getByTestId('expired-section')).toBeVisible({ timeout: 30000 });
+    } finally {
+      await cleanup();
+    }
+  });
 });
