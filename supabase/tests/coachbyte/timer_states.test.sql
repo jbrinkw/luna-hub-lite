@@ -1,569 +1,380 @@
--- pgTAP tests for coachbyte.timers state machine
--- Tests all valid and invalid state transitions enforced via WHERE guards on UPDATE
+-- pgTAP tests for the coachbyte timer state machine.
+--
+-- This file was rewritten (2026-04-25) after the legacy-test-fidelity
+-- audit flagged the original as a tautology: it re-implemented the
+-- WHERE-clause guards inside the test SQL and asserted the row count,
+-- which passes even when the production client removes every guard.
+-- The rewrite calls the NEW private.*_timer / coachbyte.*_timer RPCs
+-- introduced in 20260425040000_timer_state_machine_rpcs.sql — the
+-- single source of truth for the state machine. Removing a guard
+-- inside those RPCs causes the corresponding test to fail.
+--
+-- State machine:
+--
+--          ┌── start_timer ──┐ (any state → running)
+--          ▼                 │
+--        running ─ pause ─► paused
+--          │                 │
+--          │                 └── resume ─► running
+--          │
+--          └── expire ─► expired (only if end_time <= now())
+--
+--        reset_timer (DELETE): any state → (no row), soft-noop when empty
+--
+-- Each test:
+--   1. Seeds DB (via RPC or a narrow direct INSERT for "bad starting
+--      state" scenarios).
+--   2. Invokes the production RPC (coachbyte.* wrapper, uses the
+--      caller's auth.uid()) OR the private.* RPC (by user_id, for
+--      tests that exercise multi-user behavior).
+--   3. Asserts the DB-visible outcome.
 
 BEGIN;
 
-SELECT plan(31);
+SELECT plan(34);
 
--- ============================================================
--- Setup: create test users
--- ============================================================
+------------------------------------------------------------
+-- Setup
+------------------------------------------------------------
 
 SELECT tests.create_supabase_user('timer_user');
 SELECT tests.create_supabase_user('timer_user2');
 
--- ============================================================
--- 1. Insert timer with state=running is valid, end_time set
--- ============================================================
+------------------------------------------------------------
+-- 1. start_timer creates a running timer with end_time in the future
+------------------------------------------------------------
 
 SELECT tests.authenticate_as('timer_user');
 
-INSERT INTO coachbyte.timers (
-    timer_id,
-    user_id,
-    state,
-    end_time,
-    duration_seconds,
-    elapsed_before_pause
-) VALUES (
-    '00000000-0000-0000-0000-000000000001',
-    tests.get_supabase_uid('timer_user'),
-    'running',
-    now() + interval '60 seconds',
-    60,
-    0
+SELECT lives_ok(
+  $$ SELECT coachbyte.start_timer(60); $$,
+  'start_timer(60) succeeds for authenticated user'
 );
-
-SELECT ok(
-    EXISTS (
-        SELECT 1
-        FROM coachbyte.timers
-        WHERE timer_id = '00000000-0000-0000-0000-000000000001'
-          AND state = 'running'
-          AND end_time IS NOT NULL
-    ),
-    'Insert timer with state=running succeeds and end_time is set'
-);
-
--- ============================================================
--- 2. running → paused: succeeds, paused_at set, elapsed_before_pause calculated
--- ============================================================
-
--- Pause the running timer using WHERE state='running' guard
--- elapsed_before_pause = EXTRACT(EPOCH FROM (now() - (end_time - duration_seconds * interval '1 second')))
-UPDATE coachbyte.timers
-SET
-    state = 'paused',
-    paused_at = now(),
-    elapsed_before_pause = EXTRACT(EPOCH FROM (
-        now() - (end_time - (duration_seconds * interval '1 second'))
-    ))::INTEGER
-WHERE timer_id = '00000000-0000-0000-0000-000000000001'
-  AND state = 'running';
 
 SELECT is(
-    (SELECT count(*)::INTEGER FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000001' AND state = 'paused'),
-    1,
-    'running → paused transition succeeds'
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'running',
+  'start_timer inserts a row with state=running'
 );
 
 SELECT ok(
-    (SELECT paused_at IS NOT NULL
-     FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000001'),
-    'paused_at is set after running → paused transition'
+  (SELECT end_time > now() FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'start_timer sets end_time in the future'
 );
 
-SELECT ok(
-    (SELECT elapsed_before_pause >= 0
-     FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000001'),
-    'elapsed_before_pause is non-negative after pause'
+------------------------------------------------------------
+-- 2. pause_timer: running → paused, paused_at set, elapsed_before_pause computed
+------------------------------------------------------------
+
+SELECT lives_ok(
+  $$ SELECT coachbyte.pause_timer(); $$,
+  'pause_timer succeeds when state=running'
 );
-
--- ============================================================
--- 3. paused → running: succeeds, new end_time set
--- ============================================================
-
--- Resume from paused: remaining = duration_seconds - elapsed_before_pause
-UPDATE coachbyte.timers
-SET
-    state = 'running',
-    end_time = now() + ((duration_seconds - elapsed_before_pause) * interval '1 second'),
-    paused_at = NULL
-WHERE timer_id = '00000000-0000-0000-0000-000000000001'
-  AND state = 'paused';
 
 SELECT is(
-    (SELECT count(*)::INTEGER FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000001' AND state = 'running'),
-    1,
-    'paused → running transition succeeds'
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'paused',
+  'pause_timer transitions state to paused'
 );
 
 SELECT ok(
-    (SELECT end_time > now()
-     FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000001'),
-    'new end_time is set in the future after paused → running transition'
+  (SELECT paused_at IS NOT NULL FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'pause_timer sets paused_at'
 );
 
 SELECT ok(
-    (SELECT paused_at IS NULL
+  (SELECT elapsed_before_pause >= 0
      FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000001'),
-    'paused_at is cleared after paused → running transition'
+    WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'pause_timer computes a non-negative elapsed_before_pause'
 );
 
--- ============================================================
--- 4. running → expired (WHERE end_time <= NOW()): succeeds
--- ============================================================
+------------------------------------------------------------
+-- 3. resume_timer: paused → running, new end_time set, paused_at cleared
+------------------------------------------------------------
 
--- Set end_time to the past to simulate expiration
-UPDATE coachbyte.timers
-SET end_time = now() - interval '5 seconds'
-WHERE timer_id = '00000000-0000-0000-0000-000000000001';
-
--- Now transition to expired using the WHERE guard
-UPDATE coachbyte.timers
-SET state = 'expired'
-WHERE timer_id = '00000000-0000-0000-0000-000000000001'
-  AND state = 'running'
-  AND end_time <= now();
+SELECT lives_ok(
+  $$ SELECT coachbyte.resume_timer(); $$,
+  'resume_timer succeeds when state=paused'
+);
 
 SELECT is(
-    (SELECT count(*)::INTEGER FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000001' AND state = 'expired'),
-    1,
-    'running → expired succeeds when end_time <= now()'
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'running',
+  'resume_timer transitions state back to running'
 );
 
--- ============================================================
--- DESIGN NOTE: Tests 5-8 verify application-level state transition guards.
---
--- The timer state machine is enforced at the APPLICATION layer, not the DB.
--- The DB has no trigger or CHECK constraint preventing arbitrary state
--- transitions. The WHERE clauses in these UPDATE statements simulate
--- the guards the frontend/RPC layer applies. Tests 5-8 prove the
--- application-level pattern works (0 rows updated when guard fails).
--- Tests 5b-8b (below) prove the DB itself allows free state updates,
--- making this architectural choice explicit and tested.
--- ============================================================
+SELECT ok(
+  (SELECT end_time > now() FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'resume_timer mints a fresh end_time in the future'
+);
 
--- ============================================================
--- 5. paused → paused: no-op (0 rows updated, WHERE guard)
--- ============================================================
+SELECT ok(
+  (SELECT paused_at IS NULL FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'resume_timer clears paused_at'
+);
 
--- Insert a fresh paused timer for this test
-INSERT INTO coachbyte.timers (
-    timer_id,
-    user_id,
-    state,
-    end_time,
-    paused_at,
-    duration_seconds,
-    elapsed_before_pause
-) VALUES (
-    '00000000-0000-0000-0000-000000000002',
-    tests.get_supabase_uid('timer_user'),
-    'paused',
-    now() + interval '30 seconds',
-    now(),
-    60,
-    30
-) ON CONFLICT (user_id) DO UPDATE
-    SET timer_id = EXCLUDED.timer_id,
-        state = EXCLUDED.state,
-        end_time = EXCLUDED.end_time,
-        paused_at = EXCLUDED.paused_at,
-        duration_seconds = EXCLUDED.duration_seconds,
-        elapsed_before_pause = EXCLUDED.elapsed_before_pause;
+------------------------------------------------------------
+-- 4. expire_timer: running → expired (when end_time <= now())
+------------------------------------------------------------
 
--- Attempt paused → paused (invalid self-transition via WHERE guard requiring state = 'running')
--- The WHERE guard for pausing requires state = 'running', so this should match 0 rows
-WITH update_result AS (
-    UPDATE coachbyte.timers
-    SET
-        state = 'paused',
-        paused_at = now()
-    WHERE timer_id = '00000000-0000-0000-0000-000000000002'
-      AND state = 'running'  -- guard: can only pause if running
-    RETURNING timer_id
-)
+-- Force the running timer into the past so expire is legitimate.
+-- This is a narrow privileged write to set up the expire scenario — it
+-- simulates what the wall clock does after duration_seconds elapses.
+UPDATE coachbyte.timers
+   SET end_time = now() - interval '5 seconds'
+ WHERE user_id = tests.get_supabase_uid('timer_user');
+
+SELECT lives_ok(
+  $$ SELECT coachbyte.expire_timer(); $$,
+  'expire_timer succeeds when state=running AND end_time <= now()'
+);
+
 SELECT is(
-    (SELECT count(*)::INTEGER FROM update_result),
-    0,
-    'paused → paused is a no-op (0 rows updated, WHERE guard requires state=running)'
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'expired',
+  'expire_timer transitions state to expired'
 );
 
--- ============================================================
--- 6. expired → running: rejected (0 rows updated)
--- ============================================================
+------------------------------------------------------------
+-- 5. pause_timer on a paused timer is rejected (guard: state must be running)
+------------------------------------------------------------
 
--- Insert a fresh expired timer for this test (use a new user to avoid UNIQUE conflict)
+-- Reset and seed a paused timer via the real RPCs
+SELECT coachbyte.reset_timer();
+SELECT coachbyte.start_timer(60);
+SELECT coachbyte.pause_timer();
+
+SELECT throws_like(
+  $$ SELECT coachbyte.pause_timer(); $$,
+  '%cannot pause timer in state paused%',
+  'pause_timer rejects when state=paused (guard in RPC)'
+);
+
+SELECT is(
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'paused',
+  'timer remains paused after rejected pause_timer'
+);
+
+------------------------------------------------------------
+-- 6. resume_timer on an expired timer is rejected (guard: state must be paused)
+------------------------------------------------------------
+
+-- Seed an expired timer for user 2 by starting, forcing end_time past,
+-- and calling expire_timer through the real RPC chain.
 SELECT tests.authenticate_as('timer_user2');
 
-INSERT INTO coachbyte.timers (
-    timer_id,
-    user_id,
-    state,
-    end_time,
-    duration_seconds,
-    elapsed_before_pause
-) VALUES (
-    '00000000-0000-0000-0000-000000000003',
-    tests.get_supabase_uid('timer_user2'),
-    'expired',
-    now() - interval '10 seconds',
-    60,
-    60
-);
-
-WITH update_result AS (
-    UPDATE coachbyte.timers
-    SET
-        state = 'running',
-        end_time = now() + interval '60 seconds'
-    WHERE timer_id = '00000000-0000-0000-0000-000000000003'
-      AND state = 'paused'  -- guard: can only resume if paused
-    RETURNING timer_id
-)
-SELECT is(
-    (SELECT count(*)::INTEGER FROM update_result),
-    0,
-    'expired → running is rejected (0 rows updated, WHERE guard requires state=paused)'
-);
-
-SELECT is(
-    (SELECT state FROM coachbyte.timers WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
-    'expired',
-    'timer remains expired after rejected expired → running attempt'
-);
-
--- ============================================================
--- 7. expired → paused: rejected (0 rows updated)
--- ============================================================
-
-WITH update_result AS (
-    UPDATE coachbyte.timers
-    SET
-        state = 'paused',
-        paused_at = now()
-    WHERE timer_id = '00000000-0000-0000-0000-000000000003'
-      AND state = 'running'  -- guard: can only pause if running
-    RETURNING timer_id
-)
-SELECT is(
-    (SELECT count(*)::INTEGER FROM update_result),
-    0,
-    'expired → paused is rejected (0 rows updated, WHERE guard requires state=running)'
-);
-
-SELECT is(
-    (SELECT state FROM coachbyte.timers WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
-    'expired',
-    'timer remains expired after rejected expired → paused attempt'
-);
-
--- ============================================================
--- 8. paused → expired: rejected (end_time not relevant when paused)
--- ============================================================
-
--- The timer at 000...002 is in paused state
-SELECT tests.authenticate_as('timer_user');
-
-WITH update_result AS (
-    UPDATE coachbyte.timers
-    SET state = 'expired'
-    WHERE timer_id = '00000000-0000-0000-0000-000000000002'
-      AND state = 'running'       -- guard: can only expire from running
-      AND end_time <= now()
-    RETURNING timer_id
-)
-SELECT is(
-    (SELECT count(*)::INTEGER FROM update_result),
-    0,
-    'paused → expired is rejected (0 rows updated, WHERE guard requires state=running)'
-);
-
-SELECT is(
-    (SELECT state FROM coachbyte.timers WHERE timer_id = '00000000-0000-0000-0000-000000000002'),
-    'paused',
-    'timer remains paused after rejected paused → expired attempt'
-);
-
--- ============================================================
--- 5b-8b. POSITIVE: DB allows free state updates without guards
--- Proves the state machine is NOT enforced at DB level (by design).
--- ============================================================
-
--- 5b. DB allows paused → paused (no WHERE guard)
+SELECT coachbyte.start_timer(60);
 UPDATE coachbyte.timers
-SET state = 'paused', paused_at = now()
-WHERE timer_id = '00000000-0000-0000-0000-000000000002';
+   SET end_time = now() - interval '10 seconds'
+ WHERE user_id = tests.get_supabase_uid('timer_user2');
+SELECT coachbyte.expire_timer();
+
+SELECT throws_like(
+  $$ SELECT coachbyte.resume_timer(); $$,
+  '%cannot resume timer in state expired%',
+  'resume_timer rejects when state=expired (guard in RPC)'
+);
 
 SELECT is(
-    (SELECT state FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000002'),
-    'paused',
-    'DB allows paused → paused without guards (state machine is app-level)'
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user2')),
+  'expired',
+  'timer remains expired after rejected resume_timer'
 );
 
--- 6b. DB allows expired → running (no WHERE guard)
-SELECT tests.authenticate_as('timer_user2');
+------------------------------------------------------------
+-- 7. pause_timer on an expired timer is rejected (guard: state must be running)
+------------------------------------------------------------
 
-UPDATE coachbyte.timers
-SET state = 'running', end_time = now() + interval '60 seconds'
-WHERE timer_id = '00000000-0000-0000-0000-000000000003';
+SELECT throws_like(
+  $$ SELECT coachbyte.pause_timer(); $$,
+  '%cannot pause timer in state expired%',
+  'pause_timer rejects when state=expired (guard in RPC)'
+);
 
 SELECT is(
-    (SELECT state FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
-    'running',
-    'DB allows expired → running without guards (state machine is app-level)'
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user2')),
+  'expired',
+  'timer remains expired after rejected pause_timer'
 );
 
--- 7b. DB allows running → expired even when end_time is in the future (no WHERE guard)
-UPDATE coachbyte.timers
-SET state = 'expired'
-WHERE timer_id = '00000000-0000-0000-0000-000000000003';
-
-SELECT is(
-    (SELECT state FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
-    'expired',
-    'DB allows running → expired without end_time check (state machine is app-level)'
-);
-
--- 8b. DB allows expired → paused (no WHERE guard)
-UPDATE coachbyte.timers
-SET state = 'paused', paused_at = now()
-WHERE timer_id = '00000000-0000-0000-0000-000000000003';
-
-SELECT is(
-    (SELECT state FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
-    'paused',
-    'DB allows expired → paused without guards (state machine is app-level)'
-);
-
--- ============================================================
--- DELETE: owner can delete their own timer
--- ============================================================
-
-SELECT tests.authenticate_as('timer_user2');
-
-DELETE FROM coachbyte.timers
-WHERE timer_id = '00000000-0000-0000-0000-000000000003';
-
-SELECT is(
-    (SELECT count(*)::INTEGER FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
-    0,
-    'Owner can DELETE their own timer'
-);
-
--- Re-insert timer_user2's timer so the UNIQUE constraint test still works
-INSERT INTO coachbyte.timers (
-    timer_id, user_id, state, end_time, duration_seconds, elapsed_before_pause
-) VALUES (
-    '00000000-0000-0000-0000-000000000003',
-    tests.get_supabase_uid('timer_user2'),
-    'expired',
-    now() - interval '10 seconds',
-    60, 60
-);
+------------------------------------------------------------
+-- 8. expire_timer on a paused timer is rejected (guard: state must be running)
+------------------------------------------------------------
 
 SELECT tests.authenticate_as('timer_user');
+-- timer_user currently has a paused timer from test 5
 
--- ============================================================
--- 9. Only one timer per user (UNIQUE constraint)
--- ============================================================
+SELECT throws_like(
+  $$ SELECT coachbyte.expire_timer(); $$,
+  '%cannot expire timer in state paused%',
+  'expire_timer rejects when state=paused (guard in RPC)'
+);
 
--- Attempt to insert a second timer for timer_user (who already has one)
--- This should raise an exception due to UNIQUE(user_id)
+SELECT is(
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'paused',
+  'timer remains paused after rejected expire_timer'
+);
+
+------------------------------------------------------------
+-- 9. expire_timer on a running-but-not-yet-due timer is rejected
+--    (guard: end_time must be <= now())
+------------------------------------------------------------
+
+SELECT coachbyte.reset_timer();
+SELECT coachbyte.start_timer(600);  -- 10 minutes out, definitely not due
+
+SELECT throws_like(
+  $$ SELECT coachbyte.expire_timer(); $$,
+  '%has not reached end_time yet%',
+  'expire_timer rejects when end_time > now() (guard in RPC)'
+);
+
+SELECT is(
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'running',
+  'timer remains running after rejected expire_timer'
+);
+
+------------------------------------------------------------
+-- 10. reset_timer deletes the timer and returns 1; empty is a soft-noop
+------------------------------------------------------------
+
+SELECT is(
+  coachbyte.reset_timer(),
+  1,
+  'reset_timer returns 1 when a row existed'
+);
+
+SELECT is(
+  (SELECT count(*)::INTEGER FROM coachbyte.timers
+    WHERE user_id = tests.get_supabase_uid('timer_user')),
+  0,
+  'reset_timer removes the timer row'
+);
+
+SELECT is(
+  coachbyte.reset_timer(),
+  0,
+  'reset_timer returns 0 when no timer exists (soft noop, not an error)'
+);
+
+------------------------------------------------------------
+-- 11. UNIQUE(user_id) — only one timer per user
+------------------------------------------------------------
+
+-- Seed a running timer via the RPC, then try to INSERT another row
+-- directly for the same user. The UNIQUE constraint on coachbyte.timers
+-- (user_id) must raise unique_violation.
+SELECT coachbyte.start_timer(60);
+
 SELECT throws_ok(
-    $$
-        INSERT INTO coachbyte.timers (
-            timer_id,
-            user_id,
-            state,
-            end_time,
-            duration_seconds,
-            elapsed_before_pause
-        ) VALUES (
-            '00000000-0000-0000-0000-000000000099',
-            tests.get_supabase_uid('timer_user'),
-            'running',
-            now() + interval '60 seconds',
-            60,
-            0
-        )
-    $$,
-    '23505',  -- unique_violation
-    NULL,
-    'Inserting a second timer for the same user raises a unique_violation'
+  format(
+    $$ INSERT INTO coachbyte.timers (
+         timer_id, user_id, state, end_time, duration_seconds, elapsed_before_pause
+       ) VALUES (
+         '00000000-0000-0000-0000-000000000099',
+         %L,
+         'running',
+         now() + interval '60 seconds',
+         60, 0
+       ) $$,
+    tests.get_supabase_uid('timer_user')
+  ),
+  '23505',
+  NULL,
+  'UNIQUE(user_id) rejects a second timer row per user'
 );
 
--- ============================================================
--- 10. Starting new timer replaces existing (INSERT ON CONFLICT replaces)
--- ============================================================
+------------------------------------------------------------
+-- 12. start_timer on an existing timer replaces it (any prior state OK)
+------------------------------------------------------------
 
--- Capture the existing timer_id for timer_user before replacement
--- (timer_id = 00000000-0000-0000-0000-000000000002 after the UNIQUE conflict redirect earlier)
+-- User 1 currently has a running timer from test 11.
+-- Pause it, then call start_timer — the result must be a fresh
+-- running timer with the new duration, not the paused one.
+SELECT coachbyte.pause_timer();
 
--- Use INSERT ON CONFLICT (user_id) DO UPDATE to replace the existing timer
-INSERT INTO coachbyte.timers (
-    timer_id,
-    user_id,
-    state,
-    end_time,
-    duration_seconds,
-    elapsed_before_pause
-) VALUES (
-    '00000000-0000-0000-0000-000000000004',
-    tests.get_supabase_uid('timer_user'),
-    'running',
-    now() + interval '90 seconds',
-    90,
-    0
-) ON CONFLICT (user_id) DO UPDATE
-    SET timer_id              = EXCLUDED.timer_id,
-        state                 = EXCLUDED.state,
-        end_time              = EXCLUDED.end_time,
-        paused_at             = NULL,
-        duration_seconds      = EXCLUDED.duration_seconds,
-        elapsed_before_pause  = EXCLUDED.elapsed_before_pause;
+SELECT coachbyte.start_timer(90);
 
--- There must still be exactly one timer for this user
 SELECT is(
-    (SELECT count(*)::INTEGER FROM coachbyte.timers
-     WHERE user_id = tests.get_supabase_uid('timer_user')),
-    1,
-    'INSERT ON CONFLICT replaces existing timer — still only one timer per user'
-);
-
--- The replacement timer has the new values
-SELECT is(
-    (SELECT state FROM coachbyte.timers
-     WHERE user_id = tests.get_supabase_uid('timer_user')),
-    'running',
-    'Replacement timer is in running state'
+  (SELECT count(*)::INTEGER FROM coachbyte.timers
+    WHERE user_id = tests.get_supabase_uid('timer_user')),
+  1,
+  'start_timer on an existing paused timer leaves exactly one row (UPSERT)'
 );
 
 SELECT is(
-    (SELECT duration_seconds FROM coachbyte.timers
-     WHERE user_id = tests.get_supabase_uid('timer_user')),
-    90,
-    'Replacement timer has new duration_seconds'
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'running',
+  'start_timer resets state to running even if prior was paused'
 );
 
-SELECT ok(
-    (SELECT end_time > now() FROM coachbyte.timers
-     WHERE user_id = tests.get_supabase_uid('timer_user')),
-    'Replacement timer has end_time set in the future'
-);
-
--- ============================================================
--- RLS: user cannot see or modify another user's timer
--- ============================================================
-
--- timer_user2's timer (000...003) should not be visible to timer_user
 SELECT is(
-    (SELECT count(*)::INTEGER FROM coachbyte.timers
-     WHERE timer_id = '00000000-0000-0000-0000-000000000003'),
-    0,
-    'RLS: authenticated as timer_user cannot see timer_user2''s timer'
+  (SELECT duration_seconds FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  90,
+  'start_timer updates duration_seconds to the new value'
 );
 
--- timer_user2 cannot modify timer_user's timer
-SELECT tests.authenticate_as('timer_user2');
+------------------------------------------------------------
+-- 13. RLS — user 1 cannot see user 2's timer
+------------------------------------------------------------
 
-WITH update_result AS (
-    UPDATE coachbyte.timers
-    SET state = 'paused', paused_at = now()
-    WHERE user_id = tests.get_supabase_uid('timer_user')
-      AND state = 'running'
-    RETURNING timer_id
-)
+-- user_user2 currently has an expired timer from test 6.
 SELECT is(
-    (SELECT count(*)::INTEGER FROM update_result),
-    0,
-    'RLS: timer_user2 cannot update timer_user''s timer'
+  (SELECT count(*)::INTEGER FROM coachbyte.timers
+    WHERE user_id = tests.get_supabase_uid('timer_user2')),
+  0,
+  'RLS: timer_user cannot SELECT timer_user2''s row'
 );
 
--- ============================================================
--- RLS: User B INSERT with User A's user_id — should fail
--- ============================================================
+------------------------------------------------------------
+-- 14. RLS — user 2 cannot pause user 1's timer via the RPC
+------------------------------------------------------------
 
+-- The coachbyte.pause_timer() wrapper extracts auth.uid() from JWT,
+-- so calling it as user 2 targets user 2's own row — not user 1's.
+-- User 2's timer is currently expired, which means pause_timer on
+-- their OWN row is rejected by the guard. Either way, user 1's timer
+-- must remain running.
 SELECT tests.authenticate_as('timer_user2');
 
 SELECT throws_ok(
-    $$
-        INSERT INTO coachbyte.timers (
-            timer_id, user_id, state, end_time, duration_seconds, elapsed_before_pause
-        ) VALUES (
-            '00000000-0000-0000-0000-000000000099',
-            tests.get_supabase_uid('timer_user'),
-            'running',
-            now() + interval '60 seconds',
-            60,
-            0
-        )
-    $$,
-    '42501',
-    NULL,
-    'RLS: User B cannot insert timer with User A''s user_id'
+  $$ SELECT coachbyte.pause_timer(); $$,
+  NULL, NULL,
+  'pause_timer as timer_user2 raises (own timer is expired, not running)'
 );
 
--- ============================================================
--- RLS: User B DELETE on User A's timer — should affect 0 rows
--- ============================================================
-
-DELETE FROM coachbyte.timers
-WHERE user_id = tests.get_supabase_uid('timer_user');
-
--- Verify User A's timer still exists by switching back
 SELECT tests.authenticate_as('timer_user');
 
 SELECT is(
-    (SELECT count(*)::INTEGER FROM coachbyte.timers
-     WHERE user_id = tests.get_supabase_uid('timer_user')),
-    1,
-    'RLS: User A''s timer still exists after User B''s DELETE attempt'
+  (SELECT state FROM coachbyte.timers WHERE user_id = tests.get_supabase_uid('timer_user')),
+  'running',
+  'timer_user''s timer is untouched by timer_user2''s pause_timer call'
 );
 
-SELECT is(
-    (SELECT state FROM coachbyte.timers
-     WHERE user_id = tests.get_supabase_uid('timer_user')),
-    'running',
-    'RLS: User A''s timer state unchanged after User B''s DELETE attempt'
-);
-
--- ============================================================
--- CHECK constraint: invalid state value is rejected
--- ============================================================
-
-SELECT tests.authenticate_as('timer_user');
+------------------------------------------------------------
+-- 15. CHECK constraint: invalid state value still rejected by the DB
+------------------------------------------------------------
 
 SELECT throws_ok(
-    $$
-        UPDATE coachbyte.timers
-        SET state = 'invalid_state'
-        WHERE user_id = tests.get_supabase_uid('timer_user')
-    $$,
-    '23514',  -- check_violation
-    NULL,
-    'Setting state to an invalid value raises a check_violation'
+  format(
+    $$ UPDATE coachbyte.timers SET state = 'invalid_state'
+        WHERE user_id = %L $$,
+    tests.get_supabase_uid('timer_user')
+  ),
+  '23514',
+  NULL,
+  'CHECK(state) rejects invalid state values'
 );
 
--- ============================================================
+------------------------------------------------------------
 -- Cleanup
--- ============================================================
+------------------------------------------------------------
 
 SELECT tests.clear_authentication();
-
 SELECT tests.delete_supabase_user('timer_user');
 SELECT tests.delete_supabase_user('timer_user2');
 

@@ -2,6 +2,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { createClient } from '@supabase/supabase-js';
 import type { Database } from '@luna-hub/db-types';
 import { adminClient, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../setup.integration';
+import { waitForResetEmail, clearMailboxFor } from '../../mail-helpers';
 
 const userIds: string[] = [];
 
@@ -202,7 +203,15 @@ describe('Auth lifecycle', () => {
     expect(data.session?.user.id).toBe(created.user!.id);
   });
 
-  it('password reset: request sends reset email', async () => {
+  it('password reset: request sends a real email to the local mail catcher', async () => {
+    // Audit §2.4: the prior version accepted "rate limit OR invalid" as
+    // success and had no positive-case assertion. A broken redirectTo or
+    // a misconfigured SMTP relay would NOT fail the old test. This
+    // version polls the local Mailpit mail catcher (port 54324) and
+    // asserts:
+    //   1. An email actually arrived for the user within 5s.
+    //   2. The subject looks like a reset notification.
+    //   3. The body contains a /auth/v1/verify recovery token link.
     const client = anonClient();
     const email = `lifecycle-reset-${crypto.randomUUID().slice(0, 8)}@test.com`;
 
@@ -210,17 +219,27 @@ describe('Auth lifecycle', () => {
     expect(createErr).toBeNull();
     userIds.push(created.user!.id);
 
-    // Request password reset (goes to Inbucket in local dev)
-    const { error } = await client.auth.resetPasswordForEmail(email, {
-      redirectTo: 'http://localhost:5173/reset',
-    });
-    // Accept success, rate limit, or invalid email (production may reject @test.com domains)
-    if (error) {
-      expect(error.message).toMatch(/rate limit|invalid/i);
-    }
-  });
+    // Make sure no stale message matches our address.
+    await clearMailboxFor(email);
 
-  it('forgot password request sends reset email', async () => {
+    const redirectTo = 'http://localhost:5173/reset';
+    const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
+    expect(error, 'resetPasswordForEmail should not return an error').toBeNull();
+
+    // Poll Mailpit until a message for this address arrives.
+    const message = await waitForResetEmail(email, 5_000);
+    expect(message, 'a reset email must arrive within 5s').not.toBeNull();
+    expect(message!.Subject).toMatch(/reset|password/i);
+
+    // The recovery token link embeds type=recovery + the token — assert
+    // the body contains the verify endpoint so a mis-templated email
+    // (e.g. missing token) fails loudly.
+    const body = (message!.Text ?? '') + '\n' + (message!.HTML ?? '');
+    expect(body).toMatch(/\/auth\/v1\/verify\?token=/);
+    expect(body).toMatch(/type=recovery/);
+  }, 20_000);
+
+  it('forgot password: Mailpit receives a reset email addressed to the right user', async () => {
     const client = anonClient();
     const email = `lifecycle-forgot-${crypto.randomUUID().slice(0, 8)}@test.com`;
 
@@ -228,15 +247,26 @@ describe('Auth lifecycle', () => {
     expect(createErr).toBeNull();
     userIds.push(created.user!.id);
 
-    // Request password reset — goes to Inbucket in local dev
-    const { error } = await client.auth.resetPasswordForEmail(email, {
-      redirectTo: 'http://localhost:5173/hub/reset-password',
-    });
-    // Accept success, rate limit, or invalid email (production may reject @test.com domains)
-    if (error) {
-      expect(error.message).toMatch(/rate limit|invalid/i);
-    }
-  });
+    await clearMailboxFor(email);
+
+    const redirectTo = 'http://localhost:5173/hub/reset-password';
+    const { error } = await client.auth.resetPasswordForEmail(email, { redirectTo });
+    expect(error).toBeNull();
+
+    const message = await waitForResetEmail(email, 5_000);
+    expect(message, 'reset email must arrive').not.toBeNull();
+
+    // To-address round-trip: if the auth endpoint silently sends to the
+    // wrong recipient this caught-in-flight assertion fails.
+    expect(message!.To.map((t) => t.Address).join(',').toLowerCase()).toContain(email.toLowerCase());
+
+    // Body must contain the verify endpoint + a recovery type flag —
+    // a mis-templated email without a token/type would slip through a
+    // "did the SMTP layer fire" check alone.
+    const body = (message!.Text ?? '') + '\n' + (message!.HTML ?? '');
+    expect(body).toMatch(/\/auth\/v1\/verify\?token=/);
+    expect(body).toMatch(/type=recovery/);
+  }, 20_000);
 
   it('login with empty email returns validation error', async () => {
     const client = anonClient();

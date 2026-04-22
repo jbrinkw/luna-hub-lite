@@ -294,31 +294,128 @@ describe('API key lifecycle', () => {
     expect(data!.revoked_at).toBeNull();
   });
 
-  it('enforces max 10 active keys count check', async () => {
+  it('enforces max 10 active keys: 10th insert succeeds, 11th is rejected by the DB trigger', async () => {
+    // Regression guard for the original broken test (legacy audit §2.2):
+    //   inserted 2 keys, asserted count == 2 AND count <= 10 — which
+    //   passed regardless of whether the cap was enforced. A future
+    //   refactor that let a user generate thousands of keys would not
+    //   fail that test.
+    //
+    // After 20260425050000_api_keys_max_10.sql the cap is enforced by
+    // a BEFORE INSERT trigger (private.api_keys_enforce_max_active)
+    // so this test verifies the DB layer — the client-side guard in
+    // McpSettingsPage.tsx is redundant UX, not the source of truth.
     const { userId, client } = await createTestUser('key-max10');
     userIds.push(userId);
 
-    // Insert a couple of keys
-    for (let i = 0; i < 2; i++) {
+    // Insert 10 keys — all must succeed.
+    for (let i = 0; i < 10; i++) {
       const hash = await sha256(`max-key-${i}`);
       const { error: insertError } = await client
         .schema('hub')
         .from('api_keys')
         .insert({ user_id: userId, api_key_hash: hash, label: `Max Key ${i}` });
-      expect(insertError).toBeNull();
+      expect(insertError, `insert ${i} should succeed`).toBeNull();
     }
 
-    // Count active keys query (EXACT pattern from McpSettingsPage)
-    const { count, error } = await client
+    // Verify all 10 are active.
+    const { count: tenCount } = await client
       .schema('hub')
       .from('api_keys')
       .select('id', { count: 'exact', head: true })
       .eq('user_id', userId)
       .is('revoked_at', null);
-    expect(error).toBeNull();
-    expect(typeof count).toBe('number');
-    // Verify count matches what we inserted and is less than 10
-    expect(count).toBe(2);
-    expect(count).toBeLessThanOrEqual(10);
+    expect(tenCount).toBe(10);
+
+    // The 11th insert must be rejected by the DB trigger. The error
+    // message comes from the RAISE EXCEPTION inside the trigger — we
+    // assert on the "maximum of 10 active keys" substring so a future
+    // rewording of the trigger message is a visible change.
+    const hash11 = await sha256('max-key-11');
+    const { error: insert11Error } = await client
+      .schema('hub')
+      .from('api_keys')
+      .insert({ user_id: userId, api_key_hash: hash11, label: 'Max Key 11' });
+
+    expect(insert11Error, '11th insert must be rejected by the trigger').not.toBeNull();
+    expect(insert11Error!.message).toMatch(/maximum of 10 active keys/i);
+
+    // Count after rejected 11th: still 10.
+    const { count: finalCount } = await client
+      .schema('hub')
+      .from('api_keys')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .is('revoked_at', null);
+    expect(finalCount).toBe(10);
+  });
+
+  it('cap enforcement survives service-role / admin client bypasses', async () => {
+    // The legacy client-only cap was bypassable by anyone with the
+    // service-role key (a tool, a migration script, a support CLI).
+    // This test proves the DB trigger also fires on adminClient calls
+    // so the invariant cannot be silently bypassed.
+    const { userId } = await createTestUser('key-max10-admin');
+    userIds.push(userId);
+
+    for (let i = 0; i < 10; i++) {
+      const hash = await sha256(`admin-key-${i}`);
+      const { error: insertError } = await adminClient
+        .schema('hub')
+        .from('api_keys')
+        .insert({ user_id: userId, api_key_hash: hash, label: `Admin Key ${i}` });
+      expect(insertError, `admin insert ${i} should succeed`).toBeNull();
+    }
+
+    const hash11 = await sha256('admin-key-11');
+    const { error } = await adminClient
+      .schema('hub')
+      .from('api_keys')
+      .insert({ user_id: userId, api_key_hash: hash11, label: 'Admin Key 11' });
+
+    expect(error, 'service-role 11th insert must still fail').not.toBeNull();
+    expect(error!.message).toMatch(/maximum of 10 active keys/i);
+  });
+
+  it('revoking a key frees a slot: next insert succeeds', async () => {
+    const { userId, client } = await createTestUser('key-max10-revoke');
+    userIds.push(userId);
+
+    const insertedIds: string[] = [];
+    for (let i = 0; i < 10; i++) {
+      const hash = await sha256(`revoke-key-${i}`);
+      const { data, error: insertError } = await client
+        .schema('hub')
+        .from('api_keys')
+        .insert({ user_id: userId, api_key_hash: hash, label: `Revoke Key ${i}` })
+        .select('id')
+        .single();
+      expect(insertError).toBeNull();
+      insertedIds.push(data!.id);
+    }
+
+    // Revoke one — should drop active count to 9.
+    await client
+      .schema('hub')
+      .from('api_keys')
+      .update({ revoked_at: new Date().toISOString() })
+      .eq('id', insertedIds[0]);
+
+    // Now an 11th (net: 10 active) insert must succeed.
+    const hash11 = await sha256('revoke-key-replacement');
+    const { error: replaceErr } = await client
+      .schema('hub')
+      .from('api_keys')
+      .insert({ user_id: userId, api_key_hash: hash11, label: 'Replacement' });
+    expect(replaceErr).toBeNull();
+
+    // Total active = 10.
+    const { count } = await client
+      .schema('hub')
+      .from('api_keys')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', userId)
+      .is('revoked_at', null);
+    expect(count).toBe(10);
   });
 });
