@@ -19,6 +19,7 @@ from .client import CloudClient, CloudError
 from .event_overrides_poller import EventOverridesPoller
 from .integration import CloudEventEmitter, null_emitter
 from .livetrack_poller import LiveTrackPoller
+from .lot_snapshot_poller import LotSnapshotPoller
 from .outbox import enqueue_event
 from .product_sync_poller import ProductSyncPoller
 from .worker import CloudWorker
@@ -31,6 +32,7 @@ __all__ = [
     "CloudWorker",
     "EventOverridesPoller",
     "LiveTrackPoller",
+    "LotSnapshotPoller",
     "ProductSyncPoller",
     "enqueue_event",
     "fetch_catalog",

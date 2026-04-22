@@ -41,6 +41,7 @@ from .cloud import (
     CloudWorker,
     EventOverridesPoller,
     LiveTrackPoller,
+    LotSnapshotPoller,
     ProductSyncPoller,
 )
 from .cloud.integration import (
@@ -1817,6 +1818,32 @@ def create_app(
                     "failed to start event-overrides poller; "
                     "cloud override edits will not reach the Pi's lots "
                     "table until reboot",
+                )
+
+            # Lot-snapshot poller. Pulls cloud ``chefbyte.stock_lots``
+            # rows touched since the last watermark every 60s and
+            # mirrors them into the Pi's local ``cloud_lots`` table.
+            # This is the drift-recovery channel for lot state — the
+            # happy-path sync is still event-driven via the outbox
+            # drainer, but network outages / dropped events /
+            # manual cloud-side edits can leave the two sides out
+            # of step, and this poller closes that gap. Best-effort
+            # startup: log + continue on failure, same pattern as the
+            # product-sync and event-overrides pollers above.
+            try:
+                lot_snapshot_poller = LotSnapshotPoller(
+                    cloud_client,
+                    conn,
+                    state_path=cfg.data_root / "last_lot_sync.json",
+                    db_lock=db_lock,
+                )
+                lot_snapshot_poller.start()
+                log.info("lot-snapshot poller started (interval=60s)")
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "failed to start lot-snapshot poller; "
+                    "cloud stock_lots drift will not be reconciled "
+                    "until reboot",
                 )
         except Exception:  # pragma: no cover - defensive
             log.exception(

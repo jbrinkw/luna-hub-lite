@@ -62,6 +62,7 @@ if str(LIVE_SHELF_DIR) not in sys.path:
 from server.cloud.client import CloudClient  # noqa: E402
 from server.cloud.integration import CloudEventEmitter  # noqa: E402
 from server.cloud.livetrack_poller import LiveTrackPoller  # noqa: E402
+from server.cloud.lot_snapshot_poller import LotSnapshotPoller  # noqa: E402
 from server.cloud.product_sync_poller import ProductSyncPoller  # noqa: E402
 from server.cloud.worker import CloudWorker  # noqa: E402
 from server.handlers.scale_events import ScaleHandler  # noqa: E402
@@ -206,6 +207,7 @@ class HarnessContext:
         self._pi_scale_handler: Optional[ScaleHandler] = None
         self._pi_livetrack_poller: Optional[LiveTrackPoller] = None
         self._pi_product_sync_poller: Optional[ProductSyncPoller] = None
+        self._pi_lot_snapshot_poller: Optional[LotSnapshotPoller] = None
         self._pi_db_lock = threading.RLock()
 
     # ------------------------------------------------------------------
@@ -533,6 +535,21 @@ class HarnessContext:
                 db_lock=self._pi_db_lock,
             )
         return self._pi_product_sync_poller
+
+    @property
+    def pi_lot_snapshot_poller(self) -> LotSnapshotPoller:
+        """Lazily-constructed lot-snapshot poller wired to this scenario's
+        Pi SQLite + CloudClient. Scenarios call ``tick_once()`` manually.
+        """
+        if self._pi_lot_snapshot_poller is None:
+            state_path = self.tmp_dir / "last_lot_sync.json"
+            self._pi_lot_snapshot_poller = LotSnapshotPoller(
+                client=self.pi_cloud_client,
+                conn=self.pi_sqlite,
+                state_path=state_path,
+                db_lock=self._pi_db_lock,
+            )
+        return self._pi_lot_snapshot_poller
 
     def build_pi_scale_handler(
         self,

@@ -8,11 +8,12 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  * chefbyte.live_shelf_devices. `verify_jwt = false` in config.toml.
  *
  * Routes:
- *   GET  /shelf-ingest/catalog    — products + stock + pairings + locations
- *   GET  /shelf-ingest/overrides  — event_overrides since watermark (+ lot state)
- *   POST /shelf-ingest/event      — apply one scale event via private.apply_shelf_event
- *   POST /shelf-ingest/intake     — upsert a product (barcode flow)
- *   POST /shelf-ingest/heartbeat  — update device + scale_pairings rows
+ *   GET  /shelf-ingest/catalog       — products + stock + pairings + locations
+ *   GET  /shelf-ingest/overrides     — event_overrides since watermark (+ lot state)
+ *   GET  /shelf-ingest/lot-snapshot  — stock_lots delta since watermark (full row + tombstones)
+ *   POST /shelf-ingest/event         — apply one scale event via private.apply_shelf_event
+ *   POST /shelf-ingest/intake        — upsert a product (barcode flow)
+ *   POST /shelf-ingest/heartbeat     — update device + scale_pairings rows
  */
 
 const corsHeaders = {
@@ -78,9 +79,7 @@ type Device = {
 
 type AuthFailReason = 'bad_key' | 'inactive_device' | 'db_error';
 
-type AuthResult =
-  | { ok: true; device: Device }
-  | { ok: false; reason: AuthFailReason };
+type AuthResult = { ok: true; device: Device } | { ok: false; reason: AuthFailReason };
 
 /** Authenticate by x-api-key header. Returns {ok, device} or failure reason. */
 async function authenticate(supabase: SupabaseClient, apiKey: string | null): Promise<AuthResult> {
@@ -101,11 +100,7 @@ async function authenticate(supabase: SupabaseClient, apiKey: string | null): Pr
 
 // ─── Route handlers ──────────────────────────────────────────────────
 
-async function handleCatalog(
-  supabase: SupabaseClient,
-  device: Device,
-  url: URL,
-): Promise<Response> {
+async function handleCatalog(supabase: SupabaseClient, device: Device, url: URL): Promise<Response> {
   const userId = device.user_id;
 
   // Delta-sync support: when the Pi's product_sync_poller sends
@@ -116,8 +111,7 @@ async function handleCatalog(
   // 400'ing; a stuck poller re-establishing its watermark is less painful
   // than a hard error at startup.
   const updatedSinceRaw = url.searchParams.get('updated_since');
-  const updatedSince =
-    updatedSinceRaw && isValidIsoTimestamp(updatedSinceRaw) ? updatedSinceRaw : null;
+  const updatedSince = updatedSinceRaw && isValidIsoTimestamp(updatedSinceRaw) ? updatedSinceRaw : null;
   if (updatedSinceRaw && !updatedSince) {
     console.warn('shelf-ingest: /catalog ignoring invalid updated_since', {
       value: updatedSinceRaw,
@@ -219,16 +213,11 @@ async function handleCatalog(
  * shelf_event_log join is also filtered on user_id so a malicious Pi
  * can't see cross-user rows by crafting a client_event_id collision.
  */
-async function handleOverrides(
-  supabase: SupabaseClient,
-  device: Device,
-  url: URL,
-): Promise<Response> {
+async function handleOverrides(supabase: SupabaseClient, device: Device, url: URL): Promise<Response> {
   const userId = device.user_id;
 
   const updatedSinceRaw = url.searchParams.get('updated_since');
-  const updatedSince =
-    updatedSinceRaw && isValidIsoTimestamp(updatedSinceRaw) ? updatedSinceRaw : null;
+  const updatedSince = updatedSinceRaw && isValidIsoTimestamp(updatedSinceRaw) ? updatedSinceRaw : null;
   if (updatedSinceRaw && !updatedSince) {
     console.warn('shelf-ingest: /overrides ignoring invalid updated_since', {
       value: updatedSinceRaw,
@@ -326,6 +315,80 @@ async function handleOverrides(
     overrides: enriched,
     lots,
   });
+}
+
+/**
+ * GET /lot-snapshot?updated_since=<iso>
+ *
+ * Return chefbyte.stock_lots rows for the authenticated Pi's user whose
+ * updated_at > watermark (or all rows when no watermark is supplied).
+ * This is the cloud-side half of the lot-reconciliation loop: the Pi
+ * polls this endpoint every 60s and mirrors deltas into its local
+ * `cloud_lots` table so it has an authoritative view of cloud state.
+ *
+ * The companion to /catalog (products delta) — same shape, same
+ * soft-delete semantics:
+ *
+ *   * Delta pull (updated_since supplied): returns live + tombstoned
+ *     rows changed since the watermark. The Pi applies tombstones as
+ *     local row deletes.
+ *   * Full pull (no watermark): returns only live rows (deleted_at IS
+ *     NULL). A freshly-flashed Pi doesn't need to see historical
+ *     tombstones — just current state.
+ *
+ * Response shape:
+ *   {
+ *     lots: [
+ *       { lot_id, product_id, location_id, qty_containers, expires_on,
+ *         in_flight_since, pickup_event_id, updated_at, deleted_at },
+ *       ...
+ *     ]
+ *   }
+ *
+ * An invalid updated_since silently degrades to a full pull (matches
+ * /catalog + /overrides behavior — a stuck poller re-establishing its
+ * watermark is less painful than a hard error at startup).
+ *
+ * RLS: we filter explicitly on user_id (defense-in-depth; service_role
+ * bypasses RLS but the explicit filter limits the blast radius of any
+ * future schema change).
+ */
+async function handleLotSnapshot(supabase: SupabaseClient, device: Device, url: URL): Promise<Response> {
+  const userId = device.user_id;
+
+  const updatedSinceRaw = url.searchParams.get('updated_since');
+  const updatedSince = updatedSinceRaw && isValidIsoTimestamp(updatedSinceRaw) ? updatedSinceRaw : null;
+  if (updatedSinceRaw && !updatedSince) {
+    console.warn('shelf-ingest: /lot-snapshot ignoring invalid updated_since', {
+      value: updatedSinceRaw,
+      device_id: device.device_id,
+    });
+  }
+
+  let q = supabase
+    .schema('chefbyte')
+    .from('stock_lots')
+    .select(
+      'lot_id, product_id, location_id, qty_containers, expires_on, in_flight_since, pickup_event_id, updated_at, deleted_at',
+    )
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: true });
+  if (updatedSince) {
+    // Delta pull: include tombstones. The stock_lots_set_updated_at
+    // trigger (migration 20260426010000) bumps updated_at on every
+    // UPDATE including the soft-delete UPDATE, so deleted_at IS NOT NULL
+    // rows naturally land in the delta window.
+    q = q.gt('updated_at', updatedSince);
+  } else {
+    // Full pull (boot / fresh Pi): live rows only. Historical tombstones
+    // would be pure noise on first sync.
+    q = q.is('deleted_at', null);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  return jsonResponse({ lots: data ?? [] });
 }
 
 async function handleEvent(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
@@ -569,11 +632,7 @@ async function handleIntake(supabase: SupabaseClient, device: Device, body: any)
  * device's user. Missing / cross-user rows return 404 so the Pi's
  * fire-and-forget caller logs once and moves on.
  */
-async function handleProductTare(
-  supabase: SupabaseClient,
-  device: Device,
-  body: any,
-): Promise<Response> {
+async function handleProductTare(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
   const productId: string | undefined = body?.product_id;
   const tareRaw = body?.tare_weight_g;
   if (typeof productId !== 'string' || productId.length === 0) {
@@ -664,14 +723,11 @@ async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: a
   //   - product_id is explicitly omitted from the UPDATE SET clause so
   //     existing pairings keep whatever product the user set via the UI.
   if (scales.length > 0) {
-    const { error: hbErr } = await (supabase as any).schema('chefbyte').rpc(
-      'heartbeat_upsert_pairings_admin',
-      {
-        p_device_id: device.device_id,
-        p_user_id: userId,
-        p_scales: scales,
-      },
-    );
+    const { error: hbErr } = await (supabase as any).schema('chefbyte').rpc('heartbeat_upsert_pairings_admin', {
+      p_device_id: device.device_id,
+      p_user_id: userId,
+      p_scales: scales,
+    });
     if (hbErr) {
       console.error('shelf-ingest: heartbeat_upsert_pairings_admin failed', {
         device_id: device.device_id,
@@ -716,6 +772,10 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET' && leaf === 'overrides') {
       return await handleOverrides(supabase, device, url);
+    }
+
+    if (req.method === 'GET' && leaf === 'lot-snapshot') {
+      return await handleLotSnapshot(supabase, device, url);
     }
 
     if (req.method === 'POST') {

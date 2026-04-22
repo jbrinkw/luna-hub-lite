@@ -807,6 +807,48 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
             "ON sessions(shelf_id) WHERE ended_at IS NULL"
         )
 
+    # --- Cloud lot snapshot mirror (LOT_SNAPSHOT_RECONCILE). -----------------
+    # The ``lots`` table is keyed by Pi-minted UUIDs and has semantics
+    # tied to live-shelf physical state (on_shelf / in_flight /
+    # current_weight_g). Cloud ``chefbyte.stock_lots`` is keyed by
+    # cloud-minted UUIDs and tracks quantity-in-containers. The two are
+    # NOT 1:1 — merging them risks contaminating the reconciler's live
+    # model with cloud state that doesn't round-trip through the
+    # physical lot lifecycle.
+    #
+    # ``cloud_lots`` is a separate mirror of cloud's stock_lots for this
+    # user, populated by the lot-snapshot poller. Shape matches the
+    # cloud endpoint's projection 1:1 so the poller writes-through
+    # without mapping. The ``updated_at`` watermark column is the same
+    # cloud timestamp that drives the delta query. No FKs — the Pi's
+    # products table may or may not have the referenced product_id
+    # cached at any given moment; the poller tolerates the drift.
+    with conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS cloud_lots (
+              lot_id              TEXT PRIMARY KEY,
+              product_id          TEXT NOT NULL,
+              location_id         TEXT,
+              qty_containers      REAL NOT NULL DEFAULT 0,
+              expires_on          TEXT,
+              in_flight_since     TEXT,
+              pickup_event_id     TEXT,
+              updated_at          TEXT NOT NULL,
+              deleted_at          TEXT,
+              synced_at           TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_lots_product "
+            "ON cloud_lots(product_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_lots_updated_at "
+            "ON cloud_lots(updated_at)"
+        )
+
     # --- Invariant 8 note (cloud batch 20260424090000): ----------------------
     # The ``tare_arm`` table already enforces a STRONGER invariant via
     # ``CHECK(id = 1)`` — it is a true singleton, at most one row ever,
