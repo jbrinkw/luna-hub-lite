@@ -199,21 +199,35 @@ def test_in_flight_return_enqueues_live_shelf_consumed_event(tmp_path):
     assert lot_now.current_weight_g == pytest.approx(472.1)
     assert lot_now.total_consumed_g == pytest.approx(1199.9, rel=1e-3)
 
-    # Cloud outbox: exactly one new row with the live_shelf consumed event.
+    # Cloud outbox: TWO rows — a ``consumed`` event that decrements qty
+    # and a companion ``in_flight_return`` event that clears
+    # stock_lots.in_flight_since on the cloud. Before the 2026-04-27
+    # EMIT→HANDLE matrix fix only the consumed emit fired and the
+    # cloud's in_flight marker stayed stuck forever on same-item return.
     rows = _outbox_rows(conn)
-    assert len(rows) == 1, (
-        f"expected exactly 1 outbox row for the return, got {len(rows)}: "
+    assert len(rows) == 2, (
+        f"expected exactly 2 outbox rows for the return "
+        f"(consumed + in_flight_return marker-clear), got {len(rows)}: "
         f"{[r['payload_json'] for r in rows]}"
     )
-    payload = json.loads(rows[0]["payload_json"])
-    assert payload["kind"] == "live_shelf"
-    assert payload["event_kind"] == "consumed"
-    assert payload["product_id"] == product.product_id
-    assert payload["delta_g"] == pytest.approx(-1199.9, rel=1e-3)
-    assert payload["pi_event_id"] == e_add
-    assert "client_event_id" in payload
+    payload_consumed = json.loads(rows[0]["payload_json"])
+    assert payload_consumed["kind"] == "live_shelf"
+    assert payload_consumed["event_kind"] == "consumed"
+    assert payload_consumed["product_id"] == product.product_id
+    assert payload_consumed["delta_g"] == pytest.approx(-1199.9, rel=1e-3)
+    assert payload_consumed["pi_event_id"] == e_add
+    assert "client_event_id" in payload_consumed
     # scale_id for live_shelf events is synthesised from the shelf_id.
-    assert "scale_id" in payload
+    assert "scale_id" in payload_consumed
+
+    payload_marker = json.loads(rows[1]["payload_json"])
+    assert payload_marker["kind"] == "live_shelf"
+    assert payload_marker["event_kind"] == "in_flight_return"
+    assert payload_marker["product_id"] == product.product_id
+    # Marker-clear carries zero delta; qty mutation is owned by the
+    # preceding consumed event.
+    assert payload_marker["delta_g"] == 0.0
+    assert payload_marker["pi_event_id"] == e_add
 
 
 def test_self_heal_replays_stuck_in_flight_return(tmp_path):
@@ -309,16 +323,23 @@ def test_self_heal_replays_stuck_in_flight_return(tmp_path):
     assert lot_now.total_consumed_g == pytest.approx(1200.394, rel=1e-3)
 
     rows = _outbox_rows(conn)
-    assert len(rows) == 1, rows
-    payload = json.loads(rows[0]["payload_json"])
-    assert payload["kind"] == "live_shelf"
-    assert payload["event_kind"] == "consumed"
-    assert payload["product_id"] == product.product_id
-    assert payload["pi_event_id"] == e_add
+    # Two rows: consumed + in_flight_return marker-clear. The self-heal
+    # goes through the same _apply_add_against_in_flight_lot path as a
+    # live ADD event, so it inherits the same dual-emit contract added
+    # in the 2026-04-27 EMIT→HANDLE matrix fix.
+    assert len(rows) == 2, rows
+    payload_consumed = json.loads(rows[0]["payload_json"])
+    assert payload_consumed["kind"] == "live_shelf"
+    assert payload_consumed["event_kind"] == "consumed"
+    assert payload_consumed["product_id"] == product.product_id
+    assert payload_consumed["pi_event_id"] == e_add
+    payload_marker = json.loads(rows[1]["payload_json"])
+    assert payload_marker["event_kind"] == "in_flight_return"
+    assert payload_marker["product_id"] == product.product_id
 
     # Second call: nothing to heal (idempotent).
     assert handler.self_heal_stuck_in_flight_returns() == 0
-    assert len(_outbox_rows(conn)) == 1
+    assert len(_outbox_rows(conn)) == 2
 
 
 def test_self_heal_ignores_lots_already_closed(tmp_path):
@@ -438,13 +459,17 @@ def test_in_flight_return_event_enqueues_only_once(tmp_path):
         session_id=session_id, event_id=e_add, shelf_id="live_shelf",
     )
     handler._apply_lot_update_from_classification(**first_call)
-    assert len(_outbox_rows(conn)) == 1
+    # Two rows: ``consumed`` + ``in_flight_return`` marker-clear. The
+    # 2026-04-27 EMIT→HANDLE matrix fix adds the marker-clear to
+    # guarantee cloud's stock_lots.in_flight_since tracks Pi state.
+    assert len(_outbox_rows(conn)) == 2
 
     # Call again with identical args (simulates a sweeper retry after
     # ambiguous crash). Session-dedup check at line 1604 uses the same
     # event_id as the prior write, so the SECOND attempt should be a
-    # no-op — no new outbox row.
+    # no-op — no new outbox rows (neither consumed nor marker-clear).
     handler._apply_lot_update_from_classification(**first_call)
-    assert len(_outbox_rows(conn)) == 1, (
-        "duplicate apply must not double-emit to cloud"
+    assert len(_outbox_rows(conn)) == 2, (
+        "duplicate apply must not double-emit to cloud "
+        "(both consumed and in_flight_return must dedup by session-level guard)"
     )

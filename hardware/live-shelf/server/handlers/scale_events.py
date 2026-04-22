@@ -1277,6 +1277,29 @@ class ScaleHandler:
                     resolution_id=return_resolution_id,
                     pi_event_id=event_id,
                 )
+            # EMIT→HANDLE matrix fix 2026-04-27: companion
+            # ``in_flight_return`` cloud event that clears
+            # stock_lots.in_flight_since on the cloud. The ``consumed``
+            # event above decrements qty but NEVER clears the marker —
+            # without this second emit the cloud UI would show the lot
+            # stuck as in-flight forever after a same-item return.
+            #
+            # Top-up returns skip this branch because ``refilled``
+            # already routes through private.resolve_add_to_shelf_lot
+            # which clears in_flight_since on the ADD path. Zero- and
+            # noise-floor-clamped returns still emit the marker-clear
+            # (the item physically came back, so the cloud marker must
+            # track that) even though the consumed emit is skipped.
+            if product_id and resolution_pattern == "in_flight_return":
+                self._cloud_emitter.emit_in_flight_return_marker(
+                    scale_id=self._scale_id_for_shelf(
+                        getattr(lot, "shelf_id", "live_shelf")
+                    ),
+                    product_id=product_id,
+                    kind="live_shelf",
+                    occurred_at=event_ts,
+                    pi_event_id=event_id,
+                )
         except Exception:  # pragma: no cover - defensive
             log.warning(
                 "cloud emit failed for in-flight return of %s",
@@ -3156,6 +3179,22 @@ class ScaleHandler:
                             # cloud viewer can still fetch before/after
                             # images for the lot that never came back.
                             pi_event_id=getattr(lot, "pickup_event_id", None),
+                        )
+                        # EMIT→HANDLE matrix fix 2026-04-27: companion
+                        # ``in_flight_return`` event clears
+                        # stock_lots.in_flight_since on the cloud. The
+                        # consumed emit above zeros qty but the cloud's
+                        # consumed branch does NOT touch the marker —
+                        # without this second emit a TTL-reaped lot would
+                        # render as in-flight forever on /chef/inventory.
+                        self._cloud_emitter.emit_in_flight_return_marker(
+                            scale_id=self._scale_id_for_shelf(lot.shelf_id),
+                            product_id=lot.product_id,
+                            kind="live_shelf",
+                            occurred_at=now_ts,
+                            pi_event_id=getattr(
+                                lot, "pickup_event_id", None,
+                            ),
                         )
                     except Exception:  # pragma: no cover - defensive
                         log.warning(

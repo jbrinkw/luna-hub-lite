@@ -195,6 +195,25 @@ PATTERN_TO_EVENT_KIND: dict[str, Optional[str]] = {
     # the companion consumed_or_removed row zero'd cloud qty, hiding the
     # lot from /chef/inventory entirely.
     "in_flight_pickup": "in_flight_pickup",
+    # EMIT→HANDLE matrix fix 2026-04-27: the cloud validator
+    # (supabase/functions/shelf-ingest/index.ts VALID_EVENT_KINDS) and
+    # the DB branch in private.apply_shelf_event both accept
+    # event_kind='in_flight_return' since migration 20260425080000, but
+    # no Pi producer path had a mapping — the harness exercised it only
+    # via a hand-crafted _enqueue payload. The result: when a user put
+    # an in-flight item back, the Pi emitted only ``consumed`` (or
+    # ``refilled`` for a top-up), which decremented qty but NEVER
+    # cleared stock_lots.in_flight_since. The lot stayed stuck as
+    # "in flight" forever in the cloud UI.
+    #
+    # Fix: synthetic pattern ``in_flight_return_clear`` (never written
+    # to session_resolutions — it's an emit-only key) maps to
+    # event_kind='in_flight_return'. The fast-path return branch +
+    # TTL-reap path both fire this after their consumption emit so the
+    # cloud marker gets cleared. Topped-up returns don't need it
+    # because ``refilled`` already routes through
+    # private.resolve_add_to_shelf_lot which clears in_flight_since.
+    "in_flight_return_clear": "in_flight_return",
 }
 
 
@@ -542,6 +561,12 @@ class CloudEventEmitter:
         The reaper flips the lot to ``out`` after it stays off-shelf for
         ``in_flight_ttl_seconds``; we mirror that as a consumption of the
         full pickup mass since the item never came back.
+
+        NOTE: this emits ONLY the consumed event. Callers must invoke
+        :meth:`emit_in_flight_return_marker` afterward to clear the
+        cloud's ``stock_lots.in_flight_since`` — apply_shelf_event's
+        consumed branch does NOT clear the marker on its own (EMIT→HANDLE
+        matrix fix 2026-04-27).
         """
         if consumed_g <= 0 or not product_id:
             return None
@@ -551,6 +576,53 @@ class CloudEventEmitter:
             "event_kind": "consumed",
             "product_id": product_id,
             "delta_g": -abs(float(consumed_g)),
+            "occurred_at": occurred_at or _iso_utc_ms(),
+        }
+        if pi_event_id:
+            payload["pi_event_id"] = pi_event_id
+        return self._enqueue(payload)
+
+    def emit_in_flight_return_marker(
+        self,
+        *,
+        scale_id: str,
+        product_id: str,
+        kind: str = "live_shelf",
+        occurred_at: Optional[str] = None,
+        pi_event_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Emit a cloud ``in_flight_return`` marker-clear event.
+
+        EMIT→HANDLE matrix fix 2026-04-27. The cloud's
+        ``private.apply_shelf_event`` handler for
+        ``event_kind='in_flight_return'`` clears
+        ``stock_lots.in_flight_since`` + ``pickup_event_id`` on the
+        matching lot WITHOUT mutating qty_containers. Producers pair
+        this with their ``consumed`` emit (TTL reap; same-item return)
+        so the cloud's in-flight marker tracks the Pi's lot status.
+
+        Topped-up returns (``refilled`` cloud event_kind) don't need
+        this — ``private.resolve_add_to_shelf_lot`` already clears the
+        marker on the ADD path. Replacement returns (new item heavier
+        than pickup) also emit ``added`` which clears the marker via
+        the same resolve path.
+
+        Idempotent: the cloud returns applied=true, reason='no in_flight
+        lot to clear (no-op)' when no matching lot exists. Safe to call
+        multiple times; ``shelf_event_log`` dedup on
+        ``(user_id, client_event_id)`` guarantees at-most-once.
+        """
+        if not product_id:
+            return None
+        payload: dict[str, Any] = {
+            "scale_id": scale_id,
+            "kind": kind,
+            "event_kind": "in_flight_return",
+            "product_id": product_id,
+            # delta_g is ignored by the cloud handler for this kind but
+            # required by the edge function's validator. Zero is the
+            # unambiguous "no mutation" value.
+            "delta_g": 0.0,
             "occurred_at": occurred_at or _iso_utc_ms(),
         }
         if pi_event_id:

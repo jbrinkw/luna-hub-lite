@@ -1031,3 +1031,174 @@ class TestPiEventIdPassThrough:
             conn.execute("SELECT payload_json FROM cloud_outbox").fetchone()["payload_json"]
         )
         assert payload["pi_event_id"] == "single-evt-42"
+
+
+# ---------------------------------------------------------------------------
+# EMIT→HANDLE matrix meta-guard (2026-04-27)
+# ---------------------------------------------------------------------------
+
+
+class TestEmitHandleMatrixSync:
+    """Pin the Pi-emit → cloud-handle contract so future drift fails loudly.
+
+    Background
+    ----------
+    A single emitted ``event_kind`` string the cloud edge function
+    doesn't know about 400's at the validator. That 400 is permanent
+    (the Pi worker categorizes 4xx as non-retryable), so one orphaned
+    emit path bricks every event of that kind forever. Symmetrically, a
+    cloud-side ``event_kind`` branch no producer ever reaches is dead
+    code rotting silently.
+
+    The 2026-04-22 ``in_flight_pickup`` incident was the first-observed
+    fallout (2 rows stuck permanent-fail until the cloud caught up).
+    The 2026-04-27 discovery of the ``in_flight_return`` hole — cloud
+    had a handler but no producer — was the mirror: unused handler +
+    stuck in_flight marker on every return.
+
+    These tests enforce the two-directional contract:
+
+      1. Every non-None value in ``PATTERN_TO_EVENT_KIND`` must appear
+         in the cloud's ``VALID_EVENT_KINDS`` (else the emit 400's).
+      2. Every direct ``event_kind`` written by a dedicated emitter
+         method (``emit_single_item_event``, ``emit_in_flight_reap``,
+         ``emit_in_flight_return_marker``) must appear in
+         ``VALID_EVENT_KINDS``.
+      3. Every cloud-side ``VALID_EVENT_KINDS`` entry must be reachable
+         via at least one Pi emit path (dead-handler guard).
+    """
+
+    # Source of truth for the cloud-side validator set. Mirrored here
+    # instead of parsing supabase/functions/shelf-ingest/index.ts at
+    # runtime — Deno source isn't importable into Python, and the
+    # drift-check lives in test assertions rather than a runtime
+    # fetch. If you edit VALID_EVENT_KINDS in the edge function, you
+    # MUST mirror the change here and in the migration's CHECK list
+    # below. The drift gate + the harness scenario coverage both
+    # depend on this set.
+    CLOUD_VALID_EVENT_KINDS = frozenset({
+        "consumed",
+        "added",
+        "refilled",
+        "depleted",
+        "in_flight_pickup",
+        "in_flight_return",
+    })
+
+    # Event kinds emitted by dedicated helper methods that bypass
+    # PATTERN_TO_EVENT_KIND (the helpers hard-code the kind string). If
+    # you add a new helper, list its kind here.
+    DIRECT_EMIT_EVENT_KINDS = frozenset({
+        # emit_single_item_event → one of these three based on delta sign
+        "consumed",
+        "refilled",
+        "depleted",
+        # emit_in_flight_reap → always consumed (already covered)
+        # emit_in_flight_return_marker → in_flight_return
+        "in_flight_return",
+    })
+
+    def test_every_pattern_map_value_is_a_valid_cloud_event_kind(self):
+        """Drift guard: mutating PATTERN_TO_EVENT_KIND to introduce a
+        new event_kind that isn't in the cloud validator would cause
+        every event of that pattern to 400 at the edge function —
+        permanently bricking the outbox row. Catch this at test time
+        so it never hits production.
+        """
+        from server.cloud.integration import PATTERN_TO_EVENT_KIND
+        for pattern, kind in PATTERN_TO_EVENT_KIND.items():
+            if kind is None:
+                continue
+            assert kind in self.CLOUD_VALID_EVENT_KINDS, (
+                f"PATTERN_TO_EVENT_KIND[{pattern!r}] = {kind!r} is NOT in "
+                f"the cloud's VALID_EVENT_KINDS. The edge function will "
+                f"reject every event of this kind with a 400 — bricking "
+                f"the outbox row. Either add {kind!r} to "
+                f"supabase/functions/shelf-ingest/index.ts + a new "
+                f"handler branch in private.apply_shelf_event, or map "
+                f"this pattern to an existing valid kind."
+            )
+
+    def test_direct_emit_kinds_are_valid_cloud_event_kinds(self):
+        """The hard-coded event_kind strings inside emit_* methods must
+        also round-trip through the cloud validator. Guard against a
+        rename that forgets to update one call site."""
+        for kind in self.DIRECT_EMIT_EVENT_KINDS:
+            assert kind in self.CLOUD_VALID_EVENT_KINDS, (
+                f"emit_* helper hard-codes event_kind={kind!r} but the "
+                f"cloud's VALID_EVENT_KINDS does not accept it."
+            )
+
+    def test_every_cloud_event_kind_has_at_least_one_pi_emit_path(self):
+        """Dead-handler guard: a cloud VALID_EVENT_KINDS entry that no
+        Pi producer ever emits means the edge function's validator +
+        the apply_shelf_event branch are unreachable code paths. The
+        2026-04-27 finding was exactly this for ``in_flight_return``.
+
+        Aggregate every kind reachable via either PATTERN_TO_EVENT_KIND
+        OR the direct-emit helper set. If any cloud kind is missing,
+        either the handler is dead code or the Pi is missing an emit
+        path.
+        """
+        from server.cloud.integration import PATTERN_TO_EVENT_KIND
+        pi_emitted = set()
+        for k in PATTERN_TO_EVENT_KIND.values():
+            if k is not None:
+                pi_emitted.add(k)
+        pi_emitted |= set(self.DIRECT_EMIT_EVENT_KINDS)
+
+        missing = self.CLOUD_VALID_EVENT_KINDS - pi_emitted
+        assert not missing, (
+            f"cloud VALID_EVENT_KINDS contains {missing!r} but no Pi "
+            f"producer path emits them. The cloud handler branch is "
+            f"dead code, OR the Pi is missing an emit call site. "
+            f"See the 2026-04-27 EMIT→HANDLE matrix audit — this is "
+            f"exactly the class of bug that bricks features silently "
+            f"(ex: stuck in_flight_since markers on every return)."
+        )
+
+    def test_in_flight_return_clear_pattern_is_mapped(self):
+        """Regression test for the 2026-04-27 fix.
+
+        Before the fix, no entry in PATTERN_TO_EVENT_KIND produced the
+        ``in_flight_return`` event_kind. The synthetic pattern key
+        ``in_flight_return_clear`` was added as the emit-only bridge.
+        Pin the mapping so future refactors can't drop it silently.
+        """
+        from server.cloud.integration import PATTERN_TO_EVENT_KIND
+        assert (
+            PATTERN_TO_EVENT_KIND.get("in_flight_return_clear")
+            == "in_flight_return"
+        )
+
+    def test_cloud_valid_event_kinds_mirror_matches_edge_function(self):
+        """Smoke check that the mirrored set in this test file matches
+        the real edge function source. We can't import Deno TypeScript
+        at runtime, but we can scan the file as text for the
+        ``VALID_EVENT_KINDS = [...]`` block and cross-check names.
+
+        This catches the case where someone edits the edge function
+        without updating this test — the whole meta-guard is worthless
+        if the mirror falls out of sync.
+        """
+        import re
+        repo_root = Path(__file__).resolve().parents[5]
+        edge_fn = (
+            repo_root / "supabase" / "functions" / "shelf-ingest" / "index.ts"
+        )
+        text = edge_fn.read_text()
+        m = re.search(
+            r"VALID_EVENT_KINDS\s*=\s*\[(.*?)\]\s*as\s*const",
+            text, re.DOTALL,
+        )
+        assert m, (
+            f"could not locate VALID_EVENT_KINDS in {edge_fn}; the regex "
+            f"may need updating if the edge function was restructured."
+        )
+        # Extract every single-quoted literal inside the array.
+        literals = set(re.findall(r"'([a-z_]+)'", m.group(1)))
+        assert literals == self.CLOUD_VALID_EVENT_KINDS, (
+            f"test mirror and edge function VALID_EVENT_KINDS drifted. "
+            f"test has {self.CLOUD_VALID_EVENT_KINDS!r}; edge fn has "
+            f"{literals!r}. Sync the test mirror to the edge fn."
+        )
