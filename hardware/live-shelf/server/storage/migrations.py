@@ -755,6 +755,67 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
         finally:
             conn.execute("PRAGMA foreign_keys = ON")
 
+    # --- Invariant 7 (cloud batch 20260424090000): one OPEN session per -----
+    # shelf. Pre-scan closes extras (newest started_at wins; losers get
+    # ended_at = started_at + 1s, reconciled = 1 so the reconciler
+    # ignores them). Then we land a partial unique index. Idempotent.
+    with conn:
+        dup_rows = conn.execute(
+            """
+            SELECT shelf_id, COUNT(*) AS c
+              FROM sessions
+             WHERE ended_at IS NULL
+             GROUP BY shelf_id
+            HAVING COUNT(*) > 1
+            """
+        ).fetchall()
+        if dup_rows:
+            conn.execute(
+                """
+                WITH ranked AS (
+                  SELECT session_id,
+                         shelf_id,
+                         started_at,
+                         ROW_NUMBER() OVER (
+                           PARTITION BY shelf_id
+                           ORDER BY started_at DESC, session_id DESC
+                         ) AS rn
+                    FROM sessions
+                   WHERE ended_at IS NULL
+                )
+                UPDATE sessions
+                   SET ended_at = (
+                         SELECT datetime(ranked.started_at, '+1 second')
+                           FROM ranked
+                          WHERE ranked.session_id = sessions.session_id
+                       ),
+                       reconciled = 1,
+                       reconciled_at = datetime('now')
+                 WHERE session_id IN (
+                         SELECT session_id FROM ranked WHERE rn > 1
+                       )
+                """
+            )
+            total_closed = sum((row[1] - 1) for row in dup_rows)
+            log.warning(
+                "migrations: invariant 7 pre-scan closed %d stray open sessions "
+                "across %d shelf_ids (kept newest per shelf)",
+                total_closed, len(dup_rows),
+            )
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS sessions_one_open_per_shelf "
+            "ON sessions(shelf_id) WHERE ended_at IS NULL"
+        )
+
+    # --- Invariant 8 note (cloud batch 20260424090000): ----------------------
+    # The ``tare_arm`` table already enforces a STRONGER invariant via
+    # ``CHECK(id = 1)`` — it is a true singleton, at most one row ever,
+    # regardless of device_id / scale_id. The spec's proposed partial
+    # unique on (device_id, scale_id) WHERE disarmed_at IS NULL does
+    # not apply because neither ``scale_id`` nor ``disarmed_at``
+    # columns exist in this schema; a re-arm is an INSERT OR REPLACE
+    # into the singleton. No migration is needed.
+
 
 def _backfill_usage_log(conn: sqlite3.Connection) -> int:
     """One-shot backfill of ``usage_log`` from existing

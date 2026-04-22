@@ -186,9 +186,14 @@ SELECT is(
 -- 10. Cascade delete when auth.users row is removed
 ------------------------------------------------------------
 
-INSERT INTO chefbyte.live_shelf_devices (user_id, device_name, import_key_hash)
+-- Invariant 3 (20260424090000_invariant_batch.sql): at most one active Pi
+-- per user. The intruder already owns 'intruder-pi' (active), so the
+-- replacement is inserted as inactive — this cascade test doesn't care
+-- about the is_active flag, only that the row + its child sessions get
+-- nuked when auth.users is deleted.
+INSERT INTO chefbyte.live_shelf_devices (user_id, device_name, import_key_hash, is_active)
 VALUES (:'_intruder_uid'::uuid, 'intruder-pi-2',
-        'hash_intruder2_' || gen_random_uuid());
+        'hash_intruder2_' || gen_random_uuid(), false);
 
 SELECT device_id AS intruder_device2
   FROM chefbyte.live_shelf_devices

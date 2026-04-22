@@ -95,6 +95,13 @@ CREATE TABLE sessions (
 );
 CREATE INDEX idx_sessions_ended ON sessions(ended_at);
 CREATE INDEX idx_sessions_shelf ON sessions(shelf_id);
+-- Invariant 7 (cloud batch 20260424090000): at most one OPEN session
+-- (ended_at IS NULL) per shelf. SQLite supports partial unique
+-- indexes. Consolidation on long-lived DBs is applied in
+-- migrations._apply_column_additions.
+CREATE UNIQUE INDEX IF NOT EXISTS sessions_one_open_per_shelf
+  ON sessions (shelf_id)
+  WHERE ended_at IS NULL;
 
 -- Raw scale events from the ESP
 CREATE TABLE scale_events (
