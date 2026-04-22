@@ -197,14 +197,16 @@ export function ShoppingPage() {
     onMutate: async (item) => {
       const key = queryKeys.shoppingList(user!.id);
       await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData(key);
-      queryClient.setQueryData(key, (old: ShoppingItem[] | undefined) =>
+      const previous = queryClient.getQueriesData<ShoppingItem[]>({ queryKey: key });
+      queryClient.setQueriesData<ShoppingItem[]>({ queryKey: key }, (old) =>
         old?.map((i) => (i.cart_item_id === item.cart_item_id ? { ...i, purchased: !i.purchased } : i)),
       );
       return { previous };
     },
     onError: (err: any, _item, context) => {
-      queryClient.setQueryData(queryKeys.shoppingList(user!.id), context?.previous);
+      for (const [key, data] of context?.previous ?? []) {
+        queryClient.setQueryData(key, data);
+      }
       setError(err.message ?? String(err));
     },
     onSettled: () => {
@@ -238,14 +240,16 @@ export function ShoppingPage() {
     onMutate: async (cartItemId) => {
       const key = queryKeys.shoppingList(user!.id);
       await queryClient.cancelQueries({ queryKey: key });
-      const previous = queryClient.getQueryData(key);
-      queryClient.setQueryData(key, (old: ShoppingItem[] | undefined) =>
+      const previous = queryClient.getQueriesData<ShoppingItem[]>({ queryKey: key });
+      queryClient.setQueriesData<ShoppingItem[]>({ queryKey: key }, (old) =>
         old?.filter((i) => i.cart_item_id !== cartItemId),
       );
       return { previous };
     },
     onError: (err: any, _id, context) => {
-      queryClient.setQueryData(queryKeys.shoppingList(user!.id), context?.previous);
+      for (const [key, data] of context?.previous ?? []) {
+        queryClient.setQueryData(key, data);
+      }
       setError(err.message ?? String(err));
     },
     onSettled: () => {
@@ -294,9 +298,7 @@ export function ShoppingPage() {
 
     if (anyExisting) {
       const wasImported = !!(anyExisting as any).imported_at;
-      const newQty = wasImported
-        ? addQty
-        : Number((anyExisting as any).qty_containers) + addQty;
+      const newQty = wasImported ? addQty : Number((anyExisting as any).qty_containers) + addQty;
       const { error: updateErr } = await chefbyte()
         .from('shopping_list')
         .update({
@@ -694,9 +696,7 @@ export function ShoppingPage() {
         </div>
         {showImported && (
           <div data-testid="imported-section" className="bg-surface border border-border rounded-lg p-4 mb-5">
-            <h3 className="m-0 mb-3 text-base font-semibold text-text-secondary">
-              Imported ({importedItems.length})
-            </h3>
+            <h3 className="m-0 mb-3 text-base font-semibold text-text-secondary">Imported ({importedItems.length})</h3>
             {importedItems.length === 0 ? (
               <div data-testid="no-imported" className="text-center text-text-tertiary py-5">
                 No items imported in the last 7 days.
