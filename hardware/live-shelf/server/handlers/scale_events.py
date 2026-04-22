@@ -1440,6 +1440,20 @@ class ScaleHandler:
         """
         if not isinstance(classification, dict):
             return
+
+        # Defense-in-depth reunite guard (also applied by
+        # _classify_recorded_event before calling us; the second call
+        # here is idempotent — once the rewrite fires the item_id is a
+        # lot_id and the guard returns the dict unchanged). Load-bearing
+        # for callers that bypass the outer flow, e.g. the user-review
+        # apply path in apply_resolution_to_event which constructs a
+        # synthetic classification with the user's picked candidate_id.
+        classification = self._maybe_reunite_with_in_flight_lot(
+            classification=classification,
+            direction=direction,
+            delta_g=delta_g,
+            shelf_id=shelf_id,
+        )
         confidence = float(classification.get("confidence", 0.0) or 0.0)
         item_id = classification.get("item_id")
         if not item_id or item_id in {UNKNOWN_CANDIDATE_ID, "unknown"}:
@@ -2164,7 +2178,20 @@ class ScaleHandler:
         if direction == "noise":
             with self._db_lock:
                 app_state = storage_repo.get_app_state(self._conn)
-                session_id = app_state.current_session_id
+                # Per-shelf open-session pointer lookup.
+                # ``current_session_id`` is the live-shelf (brightness-gated)
+                # pointer; catch-all sessions live under
+                # ``current_catch_all_session_id`` (CATCH_ALL_SCALE_PLAN.md
+                # §4.2 + schema ``app_state`` columns). Picking the wrong
+                # pointer leaves catch-all scale_events rows with
+                # ``session_id=NULL`` even when a catch-all session is
+                # actually open, which breaks the session-close reconciler
+                # (it correlates by session_id) and causes the sweeper to
+                # spin in the "waiting for close-hook" branch.
+                if shelf_id == "catch_all":
+                    session_id = app_state.current_catch_all_session_id
+                else:
+                    session_id = app_state.current_session_id
                 ev = storage_repo.record_scale_event(
                     self._conn,
                     ScaleEventIn(
@@ -2216,7 +2243,16 @@ class ScaleHandler:
         # pile-up during long door-open sessions.
         with self._db_lock:
             app_state = storage_repo.get_app_state(self._conn)
-            session_id = app_state.current_session_id
+            # Per-shelf open-session pointer lookup — see comment above in
+            # the 'noise' branch. Without this split, every catch-all event
+            # is stamped with the live-shelf pointer (almost always None),
+            # the close-hook reconciler can't find the row by session_id,
+            # and the sweeper falls through to the deferred-to-close-hook
+            # path forever.
+            if shelf_id == "catch_all":
+                session_id = app_state.current_catch_all_session_id
+            else:
+                session_id = app_state.current_session_id
             ev = storage_repo.record_scale_event(
                 self._conn,
                 ScaleEventIn(
@@ -3491,6 +3527,24 @@ class ScaleHandler:
 
         # Pack classification JSON.
         classification_dict = _classification_to_dict(result)
+
+        # Defense-in-depth reunite guard for in-flight returns. When the
+        # classifier picked a product_id (catalog branch) even though the
+        # same product has an in-flight lot on this shelf, rewrite the
+        # classification to point at the in-flight lot_id so the
+        # downstream confidence gate + lot-resolve loop route this event
+        # through _apply_add_against_in_flight_lot (which closes the
+        # in-flight lot and records consumption) rather than minting a
+        # brand-new lot. Runs BEFORE the confidence / status decisions so
+        # the rewritten (bumped-to-1.0) confidence controls whether this
+        # event lands in "classified" or "review".
+        classification_dict = self._maybe_reunite_with_in_flight_lot(
+            classification=classification_dict,
+            direction=direction,
+            delta_g=delta_g,
+            shelf_id=event_shelf_id,
+        )
+
         confidence = float(classification_dict.get("confidence", 0.0) or 0.0)
         item_id = classification_dict.get("item_id")
         is_unknown = item_id in {None, "", UNKNOWN_CANDIDATE_ID, "unknown"}

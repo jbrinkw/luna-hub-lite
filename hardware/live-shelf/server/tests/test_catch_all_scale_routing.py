@@ -300,6 +300,82 @@ def test_catch_all_mint_path_writes_shelf_id_catch_all(tmp_path):
     assert rows[0][2] == "on_shelf"
 
 
+def test_catch_all_ingress_stamps_session_id_from_catch_all_pointer(tmp_path):
+    """Regression: catch-all events must read session_id from
+    ``app_state.current_catch_all_session_id``, NOT ``current_session_id``.
+
+    Reproduces the bug that caused "No images for catch-all scale" on the Pi:
+    a catch-all WeightHandler opens a session and stamps it on
+    ``current_catch_all_session_id``. The ingress path (pre-fix) read
+    ``current_session_id`` (the live-shelf pointer, which was None), so every
+    catch-all scale_events row landed with ``session_id=NULL``. The sweeper
+    then couldn't correlate it to the closed session and left the event
+    stranded in the deferred-to-close-hook loop. Fix is to pick the pointer
+    based on the resolved shelf_id.
+
+    This test sets both pointers to distinct session_ids and asserts the
+    catch-all event picks the catch-all one.
+    """
+    conn = init_db(":memory:")
+    handler = _make_handler(conn, tmp_path, catch_all_enabled=True)
+
+    # Seed two independent open sessions — one per shelf — then stamp the
+    # app_state pointers so the two branches are unambiguously distinct.
+    live_sess = storage_repo.open_session(
+        conn, "2026-04-18T07:59:50.000Z", 0.0, shelf_id="live_shelf",
+    )
+    catch_sess = storage_repo.open_session(
+        conn, "2026-04-18T07:59:55.000Z", 0.0, shelf_id="catch_all",
+    )
+    # open_session overwrites current_session_id each call; re-seat both.
+    conn.execute(
+        "UPDATE app_state SET current_session_id = ?, "
+        "current_catch_all_session_id = ? WHERE id = 1",
+        (live_sess.session_id, catch_sess.session_id),
+    )
+    conn.commit()
+
+    # Catch-all event — must pick the catch-all pointer.
+    resp, status = handler.handle_scale_event({
+        "ts": "2026-04-18T08:00:00.100Z",
+        "device_id": "scale-02",
+        "event_seq": 1,
+        "delta_g": 120.0,
+        "before_weight_g": 0.0,
+        "after_weight_g": 120.0,
+    })
+    assert status == 200, (resp, status)
+    row = conn.execute(
+        "SELECT shelf_id, session_id FROM scale_events WHERE event_id = ?",
+        (resp["event_id"],),
+    ).fetchone()
+    assert row[0] == "catch_all"
+    assert row[1] == catch_sess.session_id, (
+        f"Catch-all event linked to session_id={row[1]!r}; expected the "
+        f"catch-all session {catch_sess.session_id!r}, NOT the live-shelf "
+        f"session {live_sess.session_id!r}"
+    )
+
+    # Live-shelf event on the same handler must still pick the live-shelf
+    # pointer — regression guard so the conditional doesn't cross-wire the
+    # two paths.
+    resp2, status2 = handler.handle_scale_event({
+        "ts": "2026-04-18T08:00:01.100Z",
+        "device_id": "scale-01",
+        "event_seq": 2,
+        "delta_g": 120.0,
+        "before_weight_g": 0.0,
+        "after_weight_g": 120.0,
+    })
+    assert status2 == 200
+    row2 = conn.execute(
+        "SELECT shelf_id, session_id FROM scale_events WHERE event_id = ?",
+        (resp2["event_id"],),
+    ).fetchone()
+    assert row2[0] == "live_shelf"
+    assert row2[1] == live_sess.session_id
+
+
 def test_live_shelf_mint_still_writes_shelf_id_live_shelf(tmp_path):
     """Regression guard: the same apply-helper signature change must NOT
     break the pre-catch-all live-shelf ADD path. When called with the
