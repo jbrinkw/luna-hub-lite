@@ -1,5 +1,5 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useSearchParams } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ScanBarcode } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
@@ -134,6 +134,24 @@ export function ScannerPage() {
   const { dayStartHour } = useAppContext();
   const queryClient = useQueryClient();
   const barcodeRef = useRef<HTMLInputElement>(null);
+  const [searchParams] = useSearchParams();
+
+  // Deep-link support from EventViewerPage "Add stock" retry action:
+  //   /chef/scanner?mode=purchase&product=<uuid>
+  // The ?mode= param honors one of the four valid scan modes on mount.
+  // The ?product= param lands as a read-only hint today — the scanner's
+  // primary entrypoint is still a barcode scan. We log it on mount so
+  // operators can confirm the deep-link wired up correctly, and future
+  // work can upgrade it into an auto-queue entry without breaking the
+  // URL contract.
+  const initialModeParam = searchParams.get('mode') as ScanMode | null;
+  const initialMode: ScanMode =
+    initialModeParam === 'purchase' ||
+    initialModeParam === 'consume_macros' ||
+    initialModeParam === 'consume_no_macros' ||
+    initialModeParam === 'shopping'
+      ? initialModeParam
+      : 'purchase';
 
   // Cache default location to avoid re-fetching on every scan
   const { data: defaultLocationId } = useQuery({
@@ -152,7 +170,7 @@ export function ScannerPage() {
   });
 
   /* ---- Mode & queue ---- */
-  const [mode, setMode] = useState<ScanMode>('purchase');
+  const [mode, setMode] = useState<ScanMode>(initialMode);
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [filter, setFilter] = useState<'all' | 'new'>('all');
   const [activeItemId, setActiveItemId] = useState<string | null>(null);

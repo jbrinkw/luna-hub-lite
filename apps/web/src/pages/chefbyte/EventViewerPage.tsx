@@ -3,27 +3,32 @@
  *
  * Lists Pi-emitted classifier events (from ``chefbyte.shelf_event_log``)
  * LEFT JOIN'd to ``chefbyte.event_overrides`` so the UI can render the
- * current override state. Each row:
- *   - product name + event time (from shelf_event_log.payload.occurred_at)
- *   - before/after thumbnails streamed directly from the Pi on the LAN
- *   - stock + macro delta
- *   - list-level chips: "Edited" (any override present), "Macros off",
- *     "Voided"
- *   - expand to edit: independent stock/macros/kind fields + macros
- *     toggle + custom macros disclosure
+ * current override state. Also surfaces two failure modes that used to be
+ * silent:
+ *
+ *   - applied=false rows (shelf-ingest RPC rejected the event) render an
+ *     amber "Needs action" pill and a reason-specific action button
+ *     (Configure pairing / Edit product weight / Add stock / Retry).
+ *   - classifier_status='review' rows (Pi classifier < threshold) render
+ *     a dedicated expanded edit panel with Accept-classifier-pick /
+ *     Choose-different-product / Void actions, and any multi_match
+ *     alternatives from the classification JSON become one-click buttons.
+ *
+ * Filter toggle at the top: All / Applied / Needs Review / Voided.
  *
  * Images are loaded from http://<lan_ip>:8000/event/<pi_event_id>/before.jpg
  * — zero cloud storage cost. If any image 404s or times out we flip a
  * banner to "Pi offline — images unavailable". On-LAN only; out-of-LAN
  * users get the same banner.
  *
- * Realtime: subscribes to chefbyte.event_overrides postgres_changes and
- * invalidates the events query key so edits in another tab show up
- * immediately.
+ * Realtime: subscribes to chefbyte.event_overrides + shelf_event_log
+ * postgres_changes and invalidates the events query keys so edits in
+ * another tab + Pi retries show up live.
  */
 
 import { useState, useMemo, Fragment } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useNavigate } from 'react-router-dom';
 import {
   ChevronDown,
   ChevronUp,
@@ -32,6 +37,8 @@ import {
   ImageOff,
   RotateCcw,
   Pencil,
+  AlertTriangle,
+  HelpCircle,
 } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ListSkeleton } from '@/components/ui/Skeleton';
@@ -47,6 +54,8 @@ import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 type EventKind = 'consumed' | 'depleted' | 'added' | 'refilled';
 const EVENT_KINDS: EventKind[] = ['consumed', 'depleted', 'added', 'refilled'];
 
+type ClassifierStatus = 'pending' | 'classifying' | 'classified' | 'review' | 'failed';
+
 interface EventRow {
   event_id: string;
   client_event_id: string;
@@ -54,6 +63,12 @@ interface EventRow {
   applied: boolean;
   reason: string | null;
   created_at: string;
+  classifier_status: ClassifierStatus | null;
+  classification: {
+    item_id?: string;
+    confidence?: number;
+    multi_match?: Array<{ item_id: string; label?: string; confidence?: number }>;
+  } | null;
   payload: {
     scale_id?: string;
     kind?: string;
@@ -97,6 +112,7 @@ interface DeviceLite {
 }
 
 type RangeFilter = 'today' | 'week' | 'all';
+export type StatusFilter = 'all' | 'applied' | 'review' | 'voided';
 
 /* ------------------------------------------------------------------ */
 /*  Range helpers (exported for tests)                                 */
@@ -114,6 +130,39 @@ export function rangeCutoff(range: RangeFilter, now: Date = new Date()): string 
 }
 
 /* ------------------------------------------------------------------ */
+/*  Reason → retry action mapping                                      */
+/* ------------------------------------------------------------------ */
+
+export type RetryAction =
+  | { kind: 'configure_pairing'; label: string }
+  | { kind: 'edit_product_weight'; label: string; productId: string | null }
+  | { kind: 'add_stock'; label: string; productId: string | null }
+  | { kind: 'retry'; label: string };
+
+/**
+ * Map a shelf-ingest rejection reason to the user-facing action. Pure for
+ * easy testing. The reason strings are the exact ones emitted by
+ * private.apply_shelf_event (scale not paired / scale paired but product
+ * unset / product missing net_weight_g / no lot with stock to decrement).
+ */
+export function retryActionForReason(
+  reason: string | null,
+  productId: string | null,
+): RetryAction {
+  const r = (reason ?? '').toLowerCase();
+  if (r.includes('scale not paired') || r.includes('scale paired but product unset')) {
+    return { kind: 'configure_pairing', label: 'Configure pairing' };
+  }
+  if (r.includes('product missing net_weight_g') || r.includes('net_weight_g')) {
+    return { kind: 'edit_product_weight', label: 'Edit product weight', productId };
+  }
+  if (r.includes('no lot') || r.includes('lot with stock')) {
+    return { kind: 'add_stock', label: 'Add stock', productId };
+  }
+  return { kind: 'retry', label: 'Retry' };
+}
+
+/* ------------------------------------------------------------------ */
 /*  Derived row view model                                              */
 /* ------------------------------------------------------------------ */
 
@@ -121,7 +170,6 @@ interface EventView {
   event: EventRow;
   override: OverrideRow | null;
   product: ProductLite | null;
-  // Effective values after applying override (if any) — what the UI shows.
   effectiveKind: EventKind;
   effectiveServings: number;
   effectiveCalories: number;
@@ -131,8 +179,10 @@ interface EventView {
   effectiveStockDeltaContainers: number;
   isVoided: boolean;
   macroLoggingEnabled: boolean;
-  // True if any override field deviates from Pi-original defaults.
   hasEdit: boolean;
+  needsReview: boolean;
+  needsAction: boolean;
+  retryAction: RetryAction | null;
 }
 
 function deriveEventView(
@@ -182,8 +232,6 @@ function deriveEventView(
   const effectiveCarbs = override?.carbs_override ?? effectiveServings * perServingC;
   const effectiveFat = override?.fat_override ?? effectiveServings * perServingF;
 
-  // "Edited" chip trigger: any override field or kind override is set.
-  // A bare macro-logging-off or void-only override still counts as edited.
   const hasEdit = Boolean(
     override &&
       (override.stock_qty_override !== null ||
@@ -196,6 +244,12 @@ function deriveEventView(
         override.is_voided ||
         !override.macro_logging_enabled),
   );
+
+  const needsReview = event.classifier_status === 'review' && !isVoided;
+  const needsAction = !event.applied && !isVoided;
+  const retryAction = needsAction
+    ? retryActionForReason(event.reason, payload.product_id ?? null)
+    : null;
 
   return {
     event,
@@ -211,6 +265,9 @@ function deriveEventView(
     isVoided,
     macroLoggingEnabled,
     hasEdit,
+    needsReview,
+    needsAction,
+    retryAction,
   };
 }
 
@@ -221,8 +278,10 @@ function deriveEventView(
 export function EventViewerPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const [range, setRange] = useState<RangeFilter>('week');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [piOffline, setPiOffline] = useState(false);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
@@ -232,7 +291,7 @@ export function EventViewerPage() {
   const productsKey = ['event-viewer-products', user!.id] as const;
   const devicesKey = ['event-viewer-devices', user!.id] as const;
 
-  /* ---- Events (filtered classifier events) ---- */
+  /* ---- Events ---- */
   const {
     data: events = [],
     isLoading: eventsLoading,
@@ -242,7 +301,9 @@ export function EventViewerPage() {
     queryFn: async () => {
       let q = chefbyte()
         .from('shelf_event_log')
-        .select('event_id,client_event_id,pi_event_id,applied,reason,created_at,payload')
+        .select(
+          'event_id,client_event_id,pi_event_id,applied,reason,created_at,classifier_status,classification,payload',
+        )
         .eq('user_id', user!.id)
         .order('created_at', { ascending: false })
         .limit(200);
@@ -250,14 +311,17 @@ export function EventViewerPage() {
       if (cutoff) q = q.gte('created_at', cutoff);
       const { data, error } = await q;
       if (error) throw error;
-      // Only classifier events: payload.product_id present.
-      return (data ?? []).filter((r: EventRow) => !!r.payload?.product_id);
+      // Keep rows that have either a classifier payload OR an explicit
+      // classifier_status so the review/rejected queues never filter out
+      // rows with a NULL product_id (e.g. multi_match awaiting triage).
+      return (data ?? []).filter(
+        (r: EventRow) => !!r.payload?.product_id || !!r.classifier_status,
+      );
     },
     enabled: !!user,
     staleTime: 30_000,
   });
 
-  /* ---- Overrides ---- */
   const { data: overrides = [] } = useQuery({
     queryKey: overridesKey,
     queryFn: async () => {
@@ -274,7 +338,6 @@ export function EventViewerPage() {
     staleTime: 30_000,
   });
 
-  /* ---- Products (for name + macros) ---- */
   const { data: products = [] } = useQuery({
     queryKey: productsKey,
     queryFn: async () => {
@@ -291,7 +354,6 @@ export function EventViewerPage() {
     staleTime: 5 * 60_000,
   });
 
-  /* ---- Pi device LAN IP (first fresh-heartbeat device) ---- */
   const { data: devices = [] } = useQuery({
     queryKey: devicesKey,
     queryFn: async () => {
@@ -306,13 +368,12 @@ export function EventViewerPage() {
     staleTime: 60_000,
   });
 
-  /* ---- Realtime: react to override changes ---- */
   useRealtimeInvalidation('event-viewer', [
     { schema: 'chefbyte', table: 'event_overrides', queryKeys: [overridesKey] },
     { schema: 'chefbyte', table: 'shelf_event_log', queryKeys: [eventsKey] },
   ]);
 
-  /* ---- Merge events + overrides + products into view rows ---- */
+  /* ---- Merge ---- */
   const overridesByClient = useMemo(() => {
     const map: Record<string, OverrideRow> = {};
     for (const o of overrides) map[o.client_event_id] = o;
@@ -325,7 +386,7 @@ export function EventViewerPage() {
     return map;
   }, [products]);
 
-  const rows: EventView[] = useMemo(
+  const allRows: EventView[] = useMemo(
     () =>
       events.map((ev: EventRow) =>
         deriveEventView(
@@ -337,7 +398,21 @@ export function EventViewerPage() {
     [events, overridesByClient, productsById],
   );
 
-  /* ---- Pi LAN IP (most recently heartbeated device with a valid IP) ---- */
+  const rows: EventView[] = useMemo(() => {
+    switch (statusFilter) {
+      case 'applied':
+        return allRows.filter((r) => r.event.applied && !r.isVoided && !r.needsReview);
+      case 'review':
+        return allRows.filter((r) => r.needsReview);
+      case 'voided':
+        return allRows.filter((r) => r.isVoided);
+      case 'all':
+      default:
+        return allRows;
+    }
+  }, [allRows, statusFilter]);
+
+  /* ---- Pi LAN IP ---- */
   const lanIp = useMemo(() => {
     const fresh = [...devices]
       .filter((d) => d.lan_ip && d.lan_ip.trim() !== '')
@@ -349,7 +424,7 @@ export function EventViewerPage() {
     return fresh[0]?.lan_ip ?? null;
   }, [devices]);
 
-  /* ---- Apply-override mutation ---- */
+  /* ---- Mutations ---- */
   const applyOverride = useMutation({
     mutationFn: async (args: {
       clientEventId: string;
@@ -362,6 +437,7 @@ export function EventViewerPage() {
       macroLoggingEnabled?: boolean;
       isVoided?: boolean;
       eventKind?: EventKind | null;
+      classifierOverrideItemId?: string | null;
     }) => {
       const { data, error } = await (supabase as any).schema('chefbyte').rpc('apply_event_override', {
         p_client_event_id: args.clientEventId,
@@ -374,6 +450,7 @@ export function EventViewerPage() {
         p_macro_logging_enabled: args.macroLoggingEnabled ?? true,
         p_is_voided: args.isVoided ?? false,
         p_event_kind: args.eventKind ?? null,
+        p_classifier_override_item_id: args.classifierOverrideItemId ?? null,
       });
       if (error) throw error;
       return data;
@@ -381,24 +458,92 @@ export function EventViewerPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: overridesKey });
       queryClient.invalidateQueries({ queryKey: eventsKey });
-      // Cascade: macro totals + inventory will want to re-render.
       queryClient.invalidateQueries({ queryKey: ['daily-macros', user!.id] });
       queryClient.invalidateQueries({ queryKey: ['stock-lots', user!.id] });
+      queryClient.invalidateQueries({ queryKey: ['chef-events-attention', user!.id] });
     },
     onError: (e: any) => {
       setErrorMsg(e?.message ?? 'Failed to save override');
     },
   });
 
+  const retryEvent = useMutation({
+    mutationFn: async (clientEventId: string) => {
+      const { data, error } = await (supabase as any).schema('chefbyte').rpc('retry_shelf_event', {
+        p_client_event_id: clientEventId,
+      });
+      if (error) throw error;
+      return data;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: eventsKey });
+      queryClient.invalidateQueries({ queryKey: ['chef-events-attention', user!.id] });
+      queryClient.invalidateQueries({ queryKey: ['stock-lots', user!.id] });
+    },
+    onError: (e: any) => {
+      setErrorMsg(e?.message ?? 'Retry failed');
+    },
+  });
+
+  /* ---- Retry action router ---- */
+  const handleRetryAction = (row: EventView) => {
+    const action = row.retryAction;
+    if (!action) return;
+    switch (action.kind) {
+      case 'configure_pairing':
+        navigate('/chef/settings?tab=scales');
+        return;
+      case 'edit_product_weight':
+        if (action.productId) {
+          navigate(`/chef/settings?tab=products&product=${action.productId}`);
+        } else {
+          navigate('/chef/settings?tab=products');
+        }
+        return;
+      case 'add_stock':
+        if (action.productId) {
+          navigate(`/chef/scanner?mode=purchase&product=${action.productId}`);
+        } else {
+          navigate('/chef/scanner?mode=purchase');
+        }
+        return;
+      case 'retry':
+        retryEvent.mutate(row.event.client_event_id);
+        return;
+    }
+  };
+
   /* ---------------------------------------------------------------- */
   /*  Render                                                          */
   /* ---------------------------------------------------------------- */
+
+  const STATUS_FILTERS: Array<{ id: StatusFilter; label: string }> = [
+    { id: 'all', label: 'All' },
+    { id: 'applied', label: 'Applied' },
+    { id: 'review', label: 'Needs Review' },
+    { id: 'voided', label: 'Voided' },
+  ];
+
+  const attentionCount = useMemo(
+    () => allRows.filter((r) => r.needsAction || r.needsReview).length,
+    [allRows],
+  );
 
   return (
     <ChefLayout title="Events">
       <div className="space-y-4" data-testid="event-viewer-page">
         <header className="flex items-center justify-between flex-wrap gap-3">
-          <h1 className="text-2xl font-bold text-text">Event Viewer</h1>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-bold text-text">Event Viewer</h1>
+            {attentionCount > 0 && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full bg-warning-subtle text-warning-text"
+                data-testid="attention-count"
+              >
+                {attentionCount} need attention
+              </span>
+            )}
+          </div>
           <div className="flex items-center gap-2" role="tablist" aria-label="Range filter">
             {(['today', 'week', 'all'] as RangeFilter[]).map((r) => (
               <button
@@ -418,6 +563,31 @@ export function EventViewerPage() {
             ))}
           </div>
         </header>
+
+        {/* Status filter */}
+        <div
+          className="flex items-center gap-2 flex-wrap"
+          role="tablist"
+          aria-label="Status filter"
+          data-testid="status-filter"
+        >
+          {STATUS_FILTERS.map((s) => (
+            <button
+              key={s.id}
+              data-testid={`status-${s.id}`}
+              onClick={() => setStatusFilter(s.id)}
+              className={[
+                'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+                statusFilter === s.id
+                  ? 'bg-chef-accent text-white shadow-inner'
+                  : 'bg-surface text-text-secondary border border-border hover:bg-surface-hover',
+              ].join(' ')}
+              aria-pressed={statusFilter === s.id}
+            >
+              {s.label}
+            </button>
+          ))}
+        </div>
 
         {piOffline && (
           <Alert variant="warning" data-testid="pi-offline-banner">
@@ -452,6 +622,7 @@ export function EventViewerPage() {
               <EventCard
                 key={row.event.event_id}
                 row={row}
+                products={products}
                 lanIp={lanIp}
                 onImageError={() => setPiOffline(true)}
                 expanded={expandedEventId === row.event.event_id}
@@ -487,7 +658,15 @@ export function EventViewerPage() {
                     eventKind: row.effectiveKind,
                   })
                 }
-                saving={applyOverride.isPending}
+                onAcceptClassifier={(itemId) =>
+                  applyOverride.mutate({
+                    clientEventId: row.event.client_event_id,
+                    classifierOverrideItemId: itemId,
+                    eventKind: row.effectiveKind,
+                  })
+                }
+                onRetryAction={() => handleRetryAction(row)}
+                saving={applyOverride.isPending || retryEvent.isPending}
               />
             ))}
           </ul>
@@ -503,6 +682,7 @@ export function EventViewerPage() {
 
 interface EventCardProps {
   row: EventView;
+  products: ProductLite[];
   lanIp: string | null;
   onImageError: () => void;
   expanded: boolean;
@@ -521,12 +701,15 @@ interface EventCardProps {
   onToggleMacroLogging: () => void;
   onVoid: () => void;
   onUnvoid: () => void;
+  onAcceptClassifier: (itemId: string) => void;
+  onRetryAction: () => void;
   saving: boolean;
 }
 
 function EventCard(props: EventCardProps) {
   const {
     row,
+    products,
     lanIp,
     onImageError,
     expanded,
@@ -535,21 +718,42 @@ function EventCard(props: EventCardProps) {
     onToggleMacroLogging,
     onVoid,
     onUnvoid,
+    onAcceptClassifier,
+    onRetryAction,
     saving,
   } = props;
-  const { event, product, isVoided, macroLoggingEnabled, hasEdit, effectiveKind } = row;
+  const {
+    event,
+    product,
+    isVoided,
+    macroLoggingEnabled,
+    hasEdit,
+    effectiveKind,
+    needsReview,
+    needsAction,
+    retryAction,
+  } = row;
   const occurredAt = event.payload?.occurred_at ?? event.created_at;
   const piEventId = event.pi_event_id;
   const imgBase =
     lanIp && piEventId ? `http://${lanIp}:8000/event/${encodeURIComponent(piEventId)}` : null;
 
+  const borderCls = needsAction
+    ? 'border-warning-subtle ring-1 ring-warning-subtle'
+    : needsReview
+    ? 'border-warning-subtle'
+    : 'border-border';
+
   return (
     <li
       className={[
         'bg-surface border rounded-xl overflow-hidden transition-colors',
-        isVoided ? 'border-border opacity-60' : 'border-border',
+        borderCls,
+        isVoided ? 'opacity-60' : '',
       ].join(' ')}
       data-testid={`event-row-${event.client_event_id}`}
+      data-needs-action={needsAction ? 'true' : 'false'}
+      data-needs-review={needsReview ? 'true' : 'false'}
     >
       {/* Header row */}
       <div className="flex items-start gap-3 p-4">
@@ -590,6 +794,23 @@ function EventCard(props: EventCardProps) {
             <span className="font-semibold text-text truncate" data-testid="event-product-name">
               {product?.name ?? 'Unknown product'}
             </span>
+            {needsAction && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full bg-warning-subtle text-warning-text inline-flex items-center gap-1"
+                title={event.reason ?? 'Event not applied'}
+                data-testid="needs-action-badge"
+              >
+                <AlertTriangle className="h-3 w-3" /> Needs action
+              </span>
+            )}
+            {needsReview && (
+              <span
+                className="text-xs font-semibold px-2 py-0.5 rounded-full bg-warning-subtle text-warning-text inline-flex items-center gap-1"
+                data-testid="needs-review-badge"
+              >
+                <HelpCircle className="h-3 w-3" /> Review
+              </span>
+            )}
             {isVoided && (
               <span
                 className="text-xs font-semibold px-2 py-0.5 rounded-full bg-danger-subtle text-danger-text"
@@ -619,6 +840,15 @@ function EventCard(props: EventCardProps) {
             {new Date(occurredAt).toLocaleString()} ·{' '}
             <span data-testid="event-effective-kind">{effectiveKind}</span>
           </div>
+          {needsAction && event.reason && (
+            <div
+              className="text-xs text-warning-text mt-1"
+              data-testid="event-reason"
+              title={event.reason}
+            >
+              Reason: {event.reason}
+            </div>
+          )}
           <div className="text-sm text-text-secondary mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
             <span data-testid="event-stock-delta">
               Stock: {row.effectiveStockDeltaContainers.toFixed(1)} ctn
@@ -635,16 +865,27 @@ function EventCard(props: EventCardProps) {
 
         {/* Actions */}
         <div className="flex flex-col items-end gap-1.5 shrink-0">
+          {needsAction && retryAction && (
+            <button
+              onClick={onRetryAction}
+              disabled={saving}
+              data-testid="retry-action-btn"
+              data-retry-kind={retryAction.kind}
+              className="px-3 py-1 rounded-lg text-xs font-semibold bg-warning-subtle text-warning-text border border-warning-subtle hover:opacity-80 disabled:opacity-50"
+            >
+              {retryAction.label}
+            </button>
+          )}
           <button
             onClick={onToggleMacroLogging}
-            disabled={saving || isVoided}
+            disabled={saving || isVoided || needsAction}
             data-testid="toggle-macro-logging-btn"
             className={[
               'px-3 py-1 rounded-lg text-xs font-medium border transition-colors',
               macroLoggingEnabled
                 ? 'bg-success-subtle text-success-text border-success-subtle'
                 : 'bg-surface-sunken text-text-tertiary border-border',
-              saving || isVoided ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-80',
+              saving || isVoided || needsAction ? 'opacity-50 cursor-not-allowed' : 'hover:opacity-80',
             ].join(' ')}
             aria-pressed={macroLoggingEnabled}
           >
@@ -682,18 +923,128 @@ function EventCard(props: EventCardProps) {
               </Fragment>
             ) : (
               <Fragment>
-                Edit <ChevronDown className="h-3 w-3" />
+                {needsReview ? 'Review' : 'Edit'} <ChevronDown className="h-3 w-3" />
               </Fragment>
             )}
           </button>
         </div>
       </div>
 
-      {/* Edit drawer */}
+      {/* Edit / Review drawer */}
       {expanded && !isVoided && (
-        <EditorPanel row={row} onSave={onSave} saving={saving} />
+        <Fragment>
+          {needsReview && (
+            <ReviewPanel
+              row={row}
+              products={products}
+              onAcceptClassifier={onAcceptClassifier}
+              saving={saving}
+            />
+          )}
+          <EditorPanel row={row} onSave={onSave} saving={saving} />
+        </Fragment>
       )}
     </li>
+  );
+}
+
+/* ------------------------------------------------------------------ */
+/*  ReviewPanel — Needs-Review affordances                             */
+/* ------------------------------------------------------------------ */
+
+interface ReviewPanelProps {
+  row: EventView;
+  products: ProductLite[];
+  onAcceptClassifier: (itemId: string) => void;
+  saving: boolean;
+}
+
+function ReviewPanel({ row, products, onAcceptClassifier, saving }: ReviewPanelProps) {
+  const [picker, setPicker] = useState<string>('');
+  const classification = row.event.classification ?? {};
+  const multiMatch = Array.isArray(classification.multi_match) ? classification.multi_match : [];
+  const classifierPick = classification.item_id ?? row.event.payload?.product_id ?? null;
+  const classifierPickProduct = classifierPick
+    ? products.find((p) => p.product_id === classifierPick)
+    : null;
+
+  return (
+    <div
+      className="border-t border-warning-subtle p-4 bg-warning-subtle/10 space-y-3"
+      data-testid="review-panel"
+    >
+      <div className="flex items-center gap-2">
+        <HelpCircle className="h-4 w-4 text-warning-text" />
+        <span className="text-sm font-semibold text-warning-text">
+          Classifier confidence low — please confirm the product
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-2">
+        {classifierPick && (
+          <button
+            type="button"
+            onClick={() => onAcceptClassifier(classifierPick)}
+            disabled={saving}
+            data-testid="accept-classifier-btn"
+            className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-chef-accent text-white hover:opacity-90 disabled:opacity-50"
+          >
+            Accept classifier pick
+            {classifierPickProduct && (
+              <span className="ml-1 opacity-80">({classifierPickProduct.name})</span>
+            )}
+          </button>
+        )}
+        {multiMatch.map((alt) => {
+          const altProduct = products.find((p) => p.product_id === alt.item_id);
+          if (!altProduct) return null;
+          return (
+            <button
+              key={alt.item_id}
+              type="button"
+              onClick={() => onAcceptClassifier(alt.item_id)}
+              disabled={saving}
+              data-testid={`multi-match-${alt.item_id}`}
+              className="px-3 py-1.5 rounded-lg text-sm font-medium bg-surface text-text border border-border hover:bg-surface-hover disabled:opacity-50"
+            >
+              {alt.label ?? altProduct.name}
+              {typeof alt.confidence === 'number' && (
+                <span className="ml-1 text-xs text-text-tertiary">
+                  ({Math.round(alt.confidence * 100)}%)
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+      <div className="flex items-center gap-2">
+        <label className="text-sm text-text-secondary" htmlFor="choose-product-picker">
+          Choose different product:
+        </label>
+        <select
+          id="choose-product-picker"
+          data-testid="choose-product-picker"
+          className="rounded-lg border border-border bg-surface px-2 py-1 text-sm text-text"
+          value={picker}
+          onChange={(e) => setPicker(e.target.value)}
+        >
+          <option value="">— pick —</option>
+          {products.map((p) => (
+            <option key={p.product_id} value={p.product_id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+        <button
+          type="button"
+          onClick={() => picker && onAcceptClassifier(picker)}
+          disabled={saving || !picker}
+          data-testid="choose-product-apply-btn"
+          className="px-3 py-1 rounded-lg text-sm font-medium bg-surface text-text-secondary border border-border hover:bg-surface-hover disabled:opacity-50"
+        >
+          Apply
+        </button>
+      </div>
+    </div>
   );
 }
 
@@ -718,7 +1069,6 @@ interface EditorPanelProps {
 }
 
 function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
-  // Pre-fill the two independent fields from the effective derived values.
   const [stockQty, setStockQty] = useState<string>(
     row.effectiveStockDeltaContainers.toFixed(3).replace(/\.?0+$/, ''),
   );
@@ -741,7 +1091,6 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
   const perC = row.product?.carbs_per_serving ?? 0;
   const perF = row.product?.fat_per_serving ?? 0;
 
-  // Auto-derived macros from servings input (only if customOpen is false).
   const servingsNum = Number(servings) || 0;
   const derivedCal = servingsNum * perCal;
   const derivedP = servingsNum * perP;
@@ -759,8 +1108,6 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
   const handleSave = () => {
     onSave({
       stockQty: parseNum(stockQty),
-      // Only send macros servings for consumption kinds; additions have no
-      // food_logs row to write anyway.
       servings: isConsumption ? parseNum(servings) : null,
       calories: customOpen && isConsumption ? parseNum(cal) : null,
       protein: customOpen && isConsumption ? parseNum(prot) : null,
@@ -777,7 +1124,6 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
       className="border-t border-border p-4 bg-surface-sunken space-y-4"
       data-testid="edit-panel"
     >
-      {/* Event kind selector */}
       <div>
         <label className="block text-sm font-medium text-text-secondary mb-1">
           Event kind
@@ -813,7 +1159,6 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-        {/* Stock override — independent */}
         <label className="block text-sm font-medium text-text-secondary">
           Stock change (containers)
           <input
@@ -829,7 +1174,6 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
           </div>
         </label>
 
-        {/* Macros servings — independent, gated on consumption + toggle */}
         <label className="block text-sm font-medium text-text-secondary">
           <span className="flex items-center justify-between gap-2">
             <span>Macros (servings)</span>
@@ -869,7 +1213,6 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
         </label>
       </div>
 
-      {/* Derived macros summary (only meaningful for consumption + macros on) */}
       {isConsumption && macrosEnabled && (
         <div className="text-sm text-text-secondary">
           Derived macros: <span data-testid="derived-cal">{derivedCal.toFixed(0)}</span> cal · P{' '}
@@ -877,7 +1220,6 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
         </div>
       )}
 
-      {/* Custom macros disclosure — only show for consumption kinds */}
       {isConsumption && macrosEnabled && (
         <details
           className="rounded-lg border border-border bg-surface"

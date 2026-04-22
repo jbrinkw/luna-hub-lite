@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.1"
-  }
   chefbyte: {
     Tables: {
       event_overrides: {
@@ -74,7 +69,7 @@ export type Database = {
           log_id: string
           logical_date: string
           meal_id: string | null
-          product_id: string
+          product_id: string | null
           protein: number
           qty_consumed: number
           source_client_event_id: string | null
@@ -89,7 +84,7 @@ export type Database = {
           log_id?: string
           logical_date: string
           meal_id?: string | null
-          product_id: string
+          product_id?: string | null
           protein: number
           qty_consumed: number
           source_client_event_id?: string | null
@@ -104,7 +99,7 @@ export type Database = {
           log_id?: string
           logical_date?: string
           meal_id?: string | null
-          product_id?: string
+          product_id?: string | null
           protein?: number
           qty_consumed?: number
           source_client_event_id?: string | null
@@ -327,6 +322,7 @@ export type Database = {
           container_type: string | null
           created_at: string
           default_shelf_life_days: number | null
+          deleted_at: string | null
           density_g_per_ml: number | null
           description: string | null
           fat_per_serving: number
@@ -356,6 +352,7 @@ export type Database = {
           container_type?: string | null
           created_at?: string
           default_shelf_life_days?: number | null
+          deleted_at?: string | null
           density_g_per_ml?: number | null
           description?: string | null
           fat_per_serving?: number
@@ -385,6 +382,7 @@ export type Database = {
           container_type?: string | null
           created_at?: string
           default_shelf_life_days?: number | null
+          deleted_at?: string | null
           density_g_per_ml?: number | null
           description?: string | null
           fat_per_serving?: number
@@ -542,6 +540,8 @@ export type Database = {
       shelf_event_log: {
         Row: {
           applied: boolean
+          classification: Json | null
+          classifier_status: string | null
           client_event_id: string
           created_at: string
           device_id: string
@@ -554,6 +554,8 @@ export type Database = {
         }
         Insert: {
           applied: boolean
+          classification?: Json | null
+          classifier_status?: string | null
           client_event_id: string
           created_at?: string
           device_id: string
@@ -566,6 +568,8 @@ export type Database = {
         }
         Update: {
           applied?: boolean
+          classification?: Json | null
+          classifier_status?: string | null
           client_event_id?: string
           created_at?: string
           device_id?: string
@@ -743,10 +747,19 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      add_to_shopping_admin: {
+        Args: { p_product_id: string; p_qty: number; p_user_id: string }
+        Returns: {
+          out_cart_item_id: string
+          out_product_id: string
+          out_qty_containers: number
+        }[]
+      }
       apply_event_override: {
         Args: {
           p_calories_override?: number
           p_carbs_override?: number
+          p_classifier_override_item_id?: string
           p_client_event_id: string
           p_event_kind?: string
           p_fat_override?: number
@@ -802,6 +815,7 @@ export type Database = {
           }
       consume_product: {
         Args: {
+          p_confirm_large_amount?: boolean
           p_log_macros: boolean
           p_logical_date: string
           p_product_id: string
@@ -812,6 +826,7 @@ export type Database = {
       }
       consume_product_admin: {
         Args: {
+          p_confirm_large_amount?: boolean
           p_log_macros: boolean
           p_logical_date: string
           p_product_id: string
@@ -821,6 +836,7 @@ export type Database = {
         }
         Returns: Json
       }
+      export_chefbyte_backup: { Args: never; Returns: Json }
       get_daily_macros: { Args: { p_logical_date: string }; Returns: Json }
       get_daily_macros_admin: {
         Args: { p_logical_date: string; p_user_id: string }
@@ -834,6 +850,17 @@ export type Database = {
       mark_meal_done_admin: {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: Json
+      }
+      restore_chefbyte_backup: { Args: { p_backup: Json }; Returns: Json }
+      retry_shelf_event: {
+        Args: { p_client_event_id: string }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       save_recipe_ingredients: {
         Args: { p_ingredients: Json; p_recipe_id: string }
@@ -1102,8 +1129,13 @@ export type Database = {
     }
     Functions: {
       complete_next_set: {
-        Args: { p_load: number; p_plan_id: string; p_reps: number }
+        Args: {
+          p_actual_load: number
+          p_actual_reps: number
+          p_plan_id: string
+        }
         Returns: {
+          completed: boolean
           rest_seconds: number
         }[]
       }
@@ -1115,6 +1147,7 @@ export type Database = {
           p_user_id: string
         }
         Returns: {
+          completed: boolean
           rest_seconds: number
         }[]
       }
@@ -1172,6 +1205,7 @@ export type Database = {
           created_at: string
           id: string
           label: string | null
+          last_used_at: string | null
           revoked_at: string | null
           user_id: string
         }
@@ -1180,6 +1214,7 @@ export type Database = {
           created_at?: string
           id?: string
           label?: string | null
+          last_used_at?: string | null
           revoked_at?: string | null
           user_id: string
         }
@@ -1188,6 +1223,7 @@ export type Database = {
           created_at?: string
           id?: string
           label?: string | null
+          last_used_at?: string | null
           revoked_at?: string | null
           user_id?: string
         }
@@ -1276,6 +1312,7 @@ export type Database = {
           created_at: string
           day_start_hour: number
           display_name: string | null
+          revoke_keys_on_logout: boolean
           timezone: string
           user_id: string
         }
@@ -1283,6 +1320,7 @@ export type Database = {
           created_at?: string
           day_start_hour?: number
           display_name?: string | null
+          revoke_keys_on_logout?: boolean
           timezone?: string
           user_id: string
         }
@@ -1290,6 +1328,7 @@ export type Database = {
           created_at?: string
           day_start_hour?: number
           display_name?: string | null
+          revoke_keys_on_logout?: boolean
           timezone?: string
           user_id?: string
         }
@@ -1322,6 +1361,10 @@ export type Database = {
     }
     Functions: {
       activate_app: { Args: { p_app_name: string }; Returns: undefined }
+      bump_api_key_used_admin: {
+        Args: { p_api_key_hash: string }
+        Returns: undefined
+      }
       clear_agent_anthropic_key: { Args: never; Returns: undefined }
       deactivate_app: { Args: { p_app_name: string }; Returns: undefined }
       get_agent_anthropic_key_admin: {
@@ -1359,6 +1402,10 @@ export type Database = {
         Returns: string
       }
       reset_demo_dates: { Args: never; Returns: undefined }
+      revoke_all_api_keys_admin: {
+        Args: { p_user_id: string }
+        Returns: number
+      }
       save_agent_anthropic_key: { Args: { p_key: string }; Returns: undefined }
       save_agent_system_prompt: {
         Args: { p_prompt: string }
@@ -1396,6 +1443,7 @@ export type Database = {
         Args: {
           p_calories_override?: number
           p_carbs_override?: number
+          p_classifier_override_item_id?: string
           p_client_event_id: string
           p_event_kind?: string
           p_fat_override?: number
@@ -1449,6 +1497,10 @@ export type Database = {
               isSetofReturn: false
             }
           }
+      bump_api_key_used: {
+        Args: { p_api_key_hash: string }
+        Returns: undefined
+      }
       complete_next_set: {
         Args: {
           p_actual_load: number
@@ -1457,11 +1509,13 @@ export type Database = {
           p_user_id: string
         }
         Returns: {
+          completed: boolean
           rest_seconds: number
         }[]
       }
       consume_product: {
         Args: {
+          p_confirm_large_amount?: boolean
           p_log_macros: boolean
           p_logical_date: string
           p_product_id: string
@@ -1479,6 +1533,7 @@ export type Database = {
         Args: { p_day: string; p_user_id: string }
         Returns: Json
       }
+      export_chefbyte_backup: { Args: never; Returns: Json }
       get_daily_macros: {
         Args: { p_logical_date: string; p_user_id: string }
         Returns: Json
@@ -1496,6 +1551,18 @@ export type Database = {
         Returns: Json
       }
       reset_demo_dates: { Args: never; Returns: undefined }
+      restore_chefbyte_backup: { Args: { p_backup: Json }; Returns: Json }
+      retry_shelf_event: {
+        Args: { p_client_event_id: string }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      revoke_all_api_keys: { Args: { p_user_id: string }; Returns: number }
       save_extension_credentials: {
         Args: {
           p_credentials_json: string
@@ -1653,3 +1720,4 @@ export const Constants = {
     Enums: {},
   },
 } as const
+

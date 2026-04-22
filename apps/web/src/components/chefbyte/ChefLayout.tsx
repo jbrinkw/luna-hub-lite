@@ -1,8 +1,11 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useMemo, type ReactNode } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { useQuery } from '@tanstack/react-query';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
 import { useSettingsAlerts } from '@/hooks/useSettingsAlerts';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { chefbyte } from '@/shared/supabase';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { Alert } from '@/components/ui/Alert';
 import { Menu, X, Camera } from 'lucide-react';
@@ -12,26 +15,26 @@ interface ChefLayoutProps {
   children: ReactNode;
 }
 
-const tabItems: TabItem[] = [
-  { label: 'Dashboard', value: '/chef', href: '/chef' },
-  { label: 'Meal Plan', value: '/chef/meal-plan', href: '/chef/meal-plan' },
-  { label: 'Recipes', value: '/chef/recipes', href: '/chef/recipes' },
-  { label: 'Shopping', value: '/chef/shopping', href: '/chef/shopping' },
-  { label: 'Inventory', value: '/chef/inventory', href: '/chef/inventory' },
-  { label: 'Events', value: '/chef/events', href: '/chef/events' },
-  { label: 'Settings', value: '/chef/settings', href: '/chef/settings' },
+const TAB_VALUES = [
+  '/chef',
+  '/chef/meal-plan',
+  '/chef/recipes',
+  '/chef/shopping',
+  '/chef/inventory',
+  '/chef/events',
+  '/chef/settings',
 ];
 
 function getActiveTab(pathname: string): string {
   if (pathname === '/chef' || pathname === '/chef/home' || pathname.startsWith('/chef/macros')) {
     return '/chef';
   }
-  const match = tabItems.find((t) => t.value !== '/chef' && pathname.startsWith(t.value));
-  return match?.value ?? '/chef';
+  const match = TAB_VALUES.find((v) => v !== '/chef' && pathname.startsWith(v));
+  return match ?? '/chef';
 }
 
 export function ChefLayout({ children }: ChefLayoutProps) {
-  const { signOut } = useAuth();
+  const { user, signOut } = useAuth();
   const { online } = useAppContext();
   const location = useLocation();
   const navigate = useNavigate();
@@ -42,6 +45,56 @@ export function ChefLayout({ children }: ChefLayoutProps) {
   // hiding it on the scanner page stranded users with no visible module nav.
 
   const activeTab = getActiveTab(location.pathname);
+
+  /* ---- Events needing attention (applied=false OR classifier_status='review') ---- */
+  const attentionKey = ['chef-events-attention', user?.id ?? 'anon'] as const;
+  const { data: attentionCount = 0 } = useQuery({
+    queryKey: attentionKey,
+    enabled: !!user,
+    staleTime: 60_000,
+    queryFn: async () => {
+      const [rejectedRes, reviewRes] = await Promise.all([
+        chefbyte()
+          .from('shelf_event_log')
+          .select('event_id', { count: 'exact', head: true })
+          .eq('user_id', user!.id)
+          .eq('applied', false),
+        chefbyte()
+          .from('shelf_event_log')
+          .select('event_id', { count: 'exact', head: true })
+          .eq('user_id', user!.id)
+          .eq('classifier_status', 'review'),
+      ]);
+      // Two disjoint queries — there's no cheap SQL-side dedup for the
+      // rare overlap (applied=false AND classifier_status='review').
+      // Cap at the sum; an overcount by ≤ one or two when both apply to
+      // the same row is acceptable for a visual "needs attention" hint.
+      return (rejectedRes.count ?? 0) + (reviewRes.count ?? 0);
+    },
+  });
+
+  useRealtimeInvalidation('chef-layout-attention', [
+    { schema: 'chefbyte', table: 'shelf_event_log', queryKeys: [attentionKey] },
+    { schema: 'chefbyte', table: 'event_overrides', queryKeys: [attentionKey] },
+  ]);
+
+  const tabItems: TabItem[] = useMemo(
+    () => [
+      { label: 'Dashboard', value: '/chef', href: '/chef' },
+      { label: 'Meal Plan', value: '/chef/meal-plan', href: '/chef/meal-plan' },
+      { label: 'Recipes', value: '/chef/recipes', href: '/chef/recipes' },
+      { label: 'Shopping', value: '/chef/shopping', href: '/chef/shopping' },
+      { label: 'Inventory', value: '/chef/inventory', href: '/chef/inventory' },
+      {
+        label: 'Events',
+        value: '/chef/events',
+        href: '/chef/events',
+        badge: attentionCount > 0 ? String(attentionCount) : undefined,
+      },
+      { label: 'Settings', value: '/chef/settings', href: '/chef/settings' },
+    ],
+    [attentionCount],
+  );
 
   return (
     <div className="flex flex-col h-full overflow-y-hidden bg-surface-sunken text-text">
@@ -119,7 +172,17 @@ export function ChefLayout({ children }: ChefLayoutProps) {
                 ].join(' ')}
                 onClick={() => setDrawerOpen(false)}
               >
-                {tab.label}
+                <span className="inline-flex items-center gap-1.5">
+                  {tab.label}
+                  {tab.badge && (
+                    <span
+                      className="inline-flex items-center rounded-full bg-warning-subtle px-1.5 py-0.5 text-[10px] font-semibold text-warning-text"
+                      data-testid={`chef-tab-badge-${tab.value}`}
+                    >
+                      {tab.badge}
+                    </span>
+                  )}
+                </span>
               </Link>
             ))}
             <button

@@ -414,6 +414,152 @@ test.describe('Event Viewer', () => {
     }
   });
 
+  // ────────────────────────────────────────────────────────────
+  // Feature: rejected events get a retry-action badge + deep-link.
+  // ────────────────────────────────────────────────────────────
+  test('8. applied=false event shows needs-action badge + Configure pairing deep-link', async ({
+    page,
+  }) => {
+    const { userId, cleanup } = await seedFullAndLogin(page, 'event-viewer-8');
+    try {
+      const { productId } = await seedProductAndLot(userId, {
+        productName: 'Rejected Event Product',
+      });
+
+      // Device but NO scale_pairing — shelf-ingest would return "scale paired
+      // but product unset". Seed the log row directly with applied=false so
+      // we don't need the edge function.
+      const { data: dev } = await chef(admin)
+        .from('live_shelf_devices')
+        .insert({
+          user_id: userId,
+          device_name: 'e2e-rejected',
+          import_key_hash: `e2e-hash-r-${Math.random().toString(36).slice(2)}`,
+          lan_ip: '192.168.0.181',
+        })
+        .select('device_id')
+        .single();
+      const clientEventId = `ev-${userId}-8`;
+      await chef(admin)
+        .from('shelf_event_log')
+        .insert({
+          user_id: userId,
+          device_id: dev!.device_id,
+          client_event_id: clientEventId,
+          pi_event_id: 'pi-evt-8',
+          payload: {
+            scale_id: 'scale-unpaired',
+            kind: 'live_scale',
+            event_kind: 'consumed',
+            product_id: productId,
+            delta_g: -100,
+            occurred_at: new Date().toISOString(),
+          },
+          applied: false,
+          reason: 'scale paired but product unset',
+        });
+
+      await gotoEvents(page);
+
+      const row = page.getByTestId(`event-row-${clientEventId}`);
+      await expect(row).toBeVisible({ timeout: 15_000 });
+      await expect(row.getByTestId('needs-action-badge')).toBeVisible();
+      await expect(row.getByTestId('event-reason')).toContainText(
+        'scale paired but product unset',
+      );
+
+      const retryBtn = row.getByTestId('retry-action-btn');
+      await expect(retryBtn).toHaveAttribute('data-retry-kind', 'configure_pairing');
+      await expect(retryBtn).toHaveText(/Configure pairing/);
+      await retryBtn.click();
+
+      await expect(page).toHaveURL(/\/chef\/settings\?tab=scales/);
+    } finally {
+      await cleanup();
+    }
+  });
+
+  // ────────────────────────────────────────────────────────────
+  // Feature: Needs-Review filter + Accept-classifier-pick acceptance.
+  // ────────────────────────────────────────────────────────────
+  test('9. Needs Review filter + Accept classifier pick writes DB state', async ({ page }) => {
+    const { userId, client, cleanup } = await seedFullAndLogin(page, 'event-viewer-9');
+    try {
+      const { productId, lotId } = await seedProductAndLot(userId, {
+        productName: 'Review Queue Product',
+      });
+
+      const clientEventId = `ev-${userId}-9`;
+      await seedShelfEvent(userId, productId, lotId, {
+        clientEventId,
+        piEventId: 'pi-evt-9',
+      });
+
+      // Flag the event as needing classifier review.
+      await chef(admin)
+        .from('shelf_event_log')
+        .update({
+          classifier_status: 'review',
+          classification: { item_id: productId, confidence: 0.42, multi_match: [] },
+        })
+        .eq('client_event_id', clientEventId);
+
+      // Also seed a second applied event so the filter actually narrows.
+      const clientEventIdApplied = `ev-${userId}-9-applied`;
+      await seedShelfEvent(userId, productId, lotId, {
+        clientEventId: clientEventIdApplied,
+        piEventId: 'pi-evt-9-applied',
+      });
+
+      await gotoEvents(page);
+
+      // Review filter narrows to just the review event.
+      await page.getByTestId('status-review').click();
+      const reviewRow = page.getByTestId(`event-row-${clientEventId}`);
+      await expect(reviewRow).toBeVisible({ timeout: 15_000 });
+      await expect(reviewRow.getByTestId('needs-review-badge')).toBeVisible();
+      await expect(page.getByTestId(`event-row-${clientEventIdApplied}`)).toHaveCount(0);
+
+      // Open the review panel + accept the classifier pick.
+      await reviewRow.getByTestId('toggle-edit-btn').click();
+      await expect(reviewRow.getByTestId('review-panel')).toBeVisible();
+      await reviewRow.getByTestId('accept-classifier-btn').click();
+
+      // shelf_event_log.classifier_status flips to 'classified' AND an
+      // override row is now present. Verify via fresh admin query (not
+      // just the UI label) to catch reconcile-level regressions.
+      await expect
+        .poll(
+          async () => {
+            const { data } = await chef(client)
+              .from('shelf_event_log')
+              .select('classifier_status')
+              .eq('client_event_id', clientEventId)
+              .maybeSingle();
+            return data?.classifier_status;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe('classified');
+
+      await expect
+        .poll(
+          async () => {
+            const { data } = await chef(client)
+              .from('event_overrides')
+              .select('override_id')
+              .eq('client_event_id', clientEventId)
+              .maybeSingle();
+            return data?.override_id ?? null;
+          },
+          { timeout: 15_000 },
+        )
+        .not.toBeNull();
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('7. flip event kind consumed → added reverses stock direction', async ({ page }) => {
     const { userId, client, cleanup } = await seedFullAndLogin(page, 'event-viewer-7');
     try {
