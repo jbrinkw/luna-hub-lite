@@ -22,6 +22,10 @@ test-results/
 .stryker-tmp-*/
 reports/mutation/
 
+# Python bytecode caches (harness + Pi server tests)
+__pycache__/
+*.pyc
+
 # Temp files
 *.png
 .playwright-mcp/
