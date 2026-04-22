@@ -81,13 +81,15 @@ SELECT is(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 2: Calling again on already-completed meal returns success=false
+-- Test 2: Calling again on already-completed meal raises (atomic RPC)
 -- ─────────────────────────────────────────────────────────────
 
-SELECT is(
-  (SELECT (chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000001'::uuid))->>'success'),
-  'false',
-  'calling mark_meal_done on already-completed meal returns success=false'
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000001'::uuid)
+  $$,
+  'Meal already completed',
+  'calling mark_meal_done on already-completed meal raises'
 );
 
 -- ─────────────────────────────────────────────────────────────
@@ -227,14 +229,16 @@ SELECT isnt(
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Test 7: Marking already-completed meal returns success=false
--- (already tested in test 2, but here we verify the error msg)
+-- Test 7: Already-completed meal raise message matches (redundant with Test 2
+-- but kept to preserve the test count in the plan header).
 -- ─────────────────────────────────────────────────────────────
 
-SELECT is(
-  (SELECT (chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000001'::uuid))->>'error'),
+SELECT throws_ok(
+  $$
+    SELECT chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000001'::uuid)
+  $$,
   'Meal already completed',
-  'already-completed meal returns error message'
+  'already-completed meal raises with the expected message'
 );
 
 -- ─────────────────────────────────────────────────────────────

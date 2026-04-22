@@ -117,6 +117,14 @@ class RepoWebAdapter:
                 state_d["last_scale_weight_g"] = rt["weight_g"]
         else:
             state_d["scale_stable"] = None
+        # Cloud clock drift (populated by CloudClient on every response).
+        # Lazy import so web_repo stays importable in environments without
+        # the cloud stack (e.g. bare-bones pytest fixtures).
+        try:
+            from ..cloud.client import get_last_drift_s
+            state_d["cloud_drift_s"] = get_last_drift_s()
+        except Exception:  # noqa: BLE001 — defensive
+            state_d["cloud_drift_s"] = None
         return state_d
 
     # ----------------------------------------------------------- registry

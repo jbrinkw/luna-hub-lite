@@ -1103,6 +1103,114 @@ describe('ChefByte Tool Integration Tests', () => {
       const result = await markDone.handler({ meal_id: '00000000-0000-0000-0000-000000000000' }, ctx);
       expect(result.isError).toBe(true);
     });
+
+    // -----------------------------------------------------------------
+    // Atomicity: insufficient stock → full rollback (Bug B)
+    // -----------------------------------------------------------------
+    // Drives the atomic mark_meal_done RPC end-to-end. Seeds a recipe
+    // where one ingredient is short of stock, calls CHEFBYTE_mark_done,
+    // and asserts:
+    //   (a) handler returns isError=true with an "Insufficient stock" message
+    //   (b) the *other* ingredient's stock is untouched (no partial deduct)
+    //   (c) the meal stays uncompleted
+    //   (d) no food_logs were written for the meal_id
+    it('insufficient stock on any ingredient rolls back the whole mark_meal_done', async () => {
+      const u = await createTestUser('chefbyte-markdone-atomic');
+      const uctx = createToolContext(u.userId);
+      try {
+        // Two products: one with plenty of stock, one with almost none.
+        const plentyRes = parseToolResult(
+          await createProduct.handler({ name: 'AtomicChickenMCP' }, uctx),
+        );
+        const shortRes = parseToolResult(
+          await createProduct.handler({ name: 'AtomicRiceMCP' }, uctx),
+        );
+        const plentyId = plentyRes.product.product_id;
+        const shortId = shortRes.product.product_id;
+
+        // Plenty: 5 containers. Short: 0.1 container.
+        await addStock.handler(
+          { product_id: plentyId, qty_containers: 5 }, uctx,
+        );
+        await addStock.handler(
+          { product_id: shortId, qty_containers: 0.1 }, uctx,
+        );
+
+        // Recipe requires 1 container of each; base_servings=2, meal
+        // servings=2 → scale_factor 1.0 → needs 1 short container
+        // which is MORE than the 0.1 in stock.
+        const recipeRes = parseToolResult(
+          await createRecipe.handler(
+            {
+              name: 'AtomicRollbackBowl',
+              base_servings: 2,
+              ingredients: [
+                { product_id: plentyId, quantity: 1, unit: 'container' },
+                { product_id: shortId, quantity: 1, unit: 'container' },
+              ],
+            },
+            uctx,
+          ),
+        );
+        const recipeId = recipeRes.recipe.recipe_id;
+
+        const today = new Date().toISOString().slice(0, 10);
+        const mealRes = parseToolResult(
+          await addMeal.handler(
+            { logical_date: today, recipe_id: recipeId, servings: 2 },
+            uctx,
+          ),
+        );
+        const mealId = mealRes.meal.meal_id;
+
+        // (a) Handler surfaces the raise as isError=true + a stock message.
+        const result = await markDone.handler({ meal_id: mealId }, uctx);
+        expect(result.isError).toBe(true);
+        const errMsg = (result.content?.[0] as any)?.text ?? '';
+        expect(errMsg.toLowerCase()).toContain('insufficient stock');
+
+        // (b) Plenty-stock ingredient is untouched.
+        const plentyLots = parseToolResult(
+          await getProductLots.handler({ product_id: plentyId }, uctx),
+        );
+        const plentyTotal = plentyLots.lots.reduce(
+          (sum: number, l: any) => sum + Number(l.qty_containers), 0,
+        );
+        expect(plentyTotal).toBeCloseTo(5, 3);
+
+        // (c) Short-stock ingredient is also untouched (still 0.1).
+        const shortLots = parseToolResult(
+          await getProductLots.handler({ product_id: shortId }, uctx),
+        );
+        const shortTotal = shortLots.lots.reduce(
+          (sum: number, l: any) => sum + Number(l.qty_containers), 0,
+        );
+        expect(shortTotal).toBeCloseTo(0.1, 3);
+
+        // (d) Meal stays uncompleted.
+        const afterPlan = parseToolResult(
+          await getMealPlan.handler(
+            { start_date: today, end_date: today }, uctx,
+          ),
+        );
+        const entry = afterPlan.entries.find(
+          (e: any) => e.meal_id === mealId,
+        );
+        expect(entry).toBeDefined();
+        expect(entry.completed).toBe(false);
+
+        // (e) No food_logs written for the meal_id (verify via admin).
+        const { data: logs } = await admin
+          .schema('chefbyte')
+          .from('food_logs')
+          .select('log_id')
+          .eq('user_id', u.userId)
+          .eq('meal_id', mealId);
+        expect(logs ?? []).toEqual([]);
+      } finally {
+        await u.cleanup();
+      }
+    });
   });
 
   // -----------------------------------------------------------------------

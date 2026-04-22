@@ -7,19 +7,144 @@ fails fast so upstream code can decide how to recover.
 Wire protocol: every request carries ``x-api-key: <import-key>`` which
 the edge function hashes (SHA-256) and looks up in
 ``chefbyte.live_shelf_devices``. Content is JSON in both directions.
+
+Clock-drift monitor
+-------------------
+On every HTTP response, the client compares the cloud-supplied ``Date``
+header against the Pi's own UTC clock. If the absolute drift exceeds
+:data:`DRIFT_WARN_THRESHOLD_S` the client emits a WARNING, subject to
+:data:`DRIFT_LOG_COOLDOWN_S` to prevent log flooding while the Pi's
+clock remains out-of-sync. The rationale: cloud is the authoritative
+clock for logical_date derivation (see
+``20260424060000_logical_date_from_cloud_clock.sql``) but the Pi still
+stamps ``occurred_at`` forensically, so operators need a heads-up when
+the Pi's own clock drifts on the bench / in the rack. The last-known
+drift is exposed via :func:`get_last_drift_s` for ``/api/state``.
 """
 
 from __future__ import annotations
 
+import email.utils
 import json
 import logging
-from typing import Any
+import threading
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 import requests
 
 log = logging.getLogger(__name__)
 
 USER_AGENT = "live-shelf-pi/1.0"
+
+# ---------------------------------------------------------------------------
+# Clock-drift monitor state (module-level, thread-safe via a lock).
+# ---------------------------------------------------------------------------
+
+# Drift above this threshold (seconds) triggers a WARNING log. 60s picks
+# the commonly-cited "material wall-clock skew" line — below this,
+# ntpd / chrony will usually catch up on their own; above this the
+# day-boundary attribution risk becomes real (see the Bug A migration
+# header for full rationale).
+DRIFT_WARN_THRESHOLD_S = 60.0
+
+# Minimum delay between consecutive WARNING logs for the same drift
+# condition. Without this the worker's 5s drain cadence would spam
+# hundreds of identical lines per minute during a sustained skew.
+DRIFT_LOG_COOLDOWN_S = 600.0  # 10 minutes
+
+_drift_lock = threading.Lock()
+_last_drift_s: Optional[float] = None
+_last_drift_logged_at: Optional[datetime] = None
+_last_drift_observed_at: Optional[datetime] = None
+
+
+def _now_utc() -> datetime:
+    """Wrapper so tests can monkeypatch ``datetime.now`` cleanly."""
+    return datetime.now(timezone.utc)
+
+
+def observe_drift(
+    date_header: Optional[str],
+    *,
+    now_fn=_now_utc,
+) -> Optional[float]:
+    """Parse an HTTP ``Date`` header, compute drift vs local UTC, log if large.
+
+    Called after every 2xx/4xx/5xx response. Returns the signed drift in
+    seconds (``cloud_time - local_time``) on success, or ``None`` when
+    the header is missing / malformed. On drift above
+    :data:`DRIFT_WARN_THRESHOLD_S` emits a WARNING with
+    :data:`DRIFT_LOG_COOLDOWN_S` cooldown. The last-known drift is
+    stored in module state for later retrieval by :func:`get_last_drift_s`.
+
+    ``now_fn`` is the callable used to read the local clock — defaulted
+    to ``datetime.now(tz=UTC)`` and overridable from tests so a
+    deterministic "local clock" can be paired with a synthetic Date
+    header.
+    """
+    global _last_drift_s, _last_drift_logged_at, _last_drift_observed_at
+
+    # Defensive: tests and mocks may feed non-strings through
+    # ``resp.headers.get("Date")`` when the headers attr is a MagicMock.
+    if not isinstance(date_header, str) or not date_header:
+        return None
+    try:
+        cloud_dt = email.utils.parsedate_to_datetime(date_header)
+    except (TypeError, ValueError):
+        return None
+    if cloud_dt is None:
+        return None
+    # RFC 2822 parsers return a naive datetime when no tz offset is
+    # present; normalize to UTC so the subtraction is well-defined.
+    if cloud_dt.tzinfo is None:
+        cloud_dt = cloud_dt.replace(tzinfo=timezone.utc)
+
+    local_dt = now_fn()
+    if local_dt.tzinfo is None:
+        local_dt = local_dt.replace(tzinfo=timezone.utc)
+
+    drift_s = (cloud_dt - local_dt).total_seconds()
+
+    with _drift_lock:
+        _last_drift_s = drift_s
+        _last_drift_observed_at = local_dt
+        if abs(drift_s) > DRIFT_WARN_THRESHOLD_S:
+            should_log = True
+            if _last_drift_logged_at is not None:
+                elapsed = (local_dt - _last_drift_logged_at).total_seconds()
+                if elapsed < DRIFT_LOG_COOLDOWN_S:
+                    should_log = False
+            if should_log:
+                _last_drift_logged_at = local_dt
+                log.warning(
+                    "cloud-client: Pi clock drift %.1fs vs cloud Date "
+                    "header (threshold %.0fs); logical_date is derived "
+                    "server-side so attribution is unaffected, but the "
+                    "Pi's own `occurred_at` stamps are skewed",
+                    drift_s, DRIFT_WARN_THRESHOLD_S,
+                )
+    return drift_s
+
+
+def get_last_drift_s() -> Optional[float]:
+    """Return the most recently observed cloud-vs-local drift in seconds.
+
+    ``None`` before any response has carried a parseable ``Date`` header
+    (e.g. fresh boot, or cloud unreachable). The value is signed:
+    positive = cloud is ahead of Pi, negative = Pi is ahead of cloud.
+    """
+    with _drift_lock:
+        return _last_drift_s
+
+
+def _reset_drift_state_for_tests() -> None:
+    """Test hook: wipe module state so tests start from a known baseline."""
+    global _last_drift_s, _last_drift_logged_at, _last_drift_observed_at
+    with _drift_lock:
+        _last_drift_s = None
+        _last_drift_logged_at = None
+        _last_drift_observed_at = None
 
 
 class CloudError(Exception):
@@ -109,7 +234,18 @@ class CloudClient:
         Non-JSON error bodies are preserved verbatim in
         :attr:`CloudError.body` so operators can read plain-text errors
         (e.g. Supabase's "Missing authorization header").
+
+        Also feeds the response's ``Date`` header to the module-level
+        clock-drift monitor (on success or failure — every cloud round
+        trip is equally useful for drift observation).
         """
+        # Always observe drift before branching on ``ok`` — even a 500
+        # response carries a Date header, so we want that signal too.
+        try:
+            observe_drift(resp.headers.get("Date"))
+        except Exception:  # noqa: BLE001 — drift monitor must never raise
+            log.debug("cloud-client: observe_drift failed", exc_info=True)
+
         if not resp.ok:
             # Prefer the raw text — error bodies are often HTML from
             # the edge runtime, not JSON.
