@@ -9,6 +9,19 @@ export function toolError(message: string): ToolResult {
   return { content: [{ type: 'text', text: message }], isError: true };
 }
 
+/**
+ * Escape special characters in user input before passing to `.ilike()`.
+ * Prevents `%`, `_`, and `\` in user-typed text from acting as SQL wildcards —
+ * e.g. `search: '%'` previously matched every row.
+ *
+ * Postgres' `LIKE`/`ILIKE` use `\` as the default escape character. We escape
+ * the backslash first, then `%` and `_`, producing a literal-match pattern
+ * when wrapped in `%...%`.
+ */
+export function escapeIlike(s: string): string {
+  return s.replace(/[%_\\]/g, '\\$&');
+}
+
 /** Get today's logical date for a user (same logic as private.get_logical_date) */
 export async function getLogicalDate(supabase: any, userId: string): Promise<string> {
   const { data: profile, error } = await supabase

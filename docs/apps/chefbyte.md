@@ -185,14 +185,14 @@ Desktop-first with responsive design. Matching the legacy ChefByte layout.
 | `CHEFBYTE_create_product`               | Create product with full metadata (barcode nullable)                                                                                                                            |
 | `CHEFBYTE_update_product`               | Update product fields by product_id (name, barcode, nutrition, price, min_stock, walmart_link)                                                                                  |
 | `CHEFBYTE_get_shopping_list`            | Current shopping list                                                                                                                                                           |
-| `CHEFBYTE_add_to_shopping`              | Add item to shopping list (merges if exists)                                                                                                                                    |
+| `CHEFBYTE_add_to_shopping`              | Add containers to shopping list. **Additive upsert** — calling twice for the same product sums the quantities (qty=3 then qty=2 → final qty=5)                                 |
 | `CHEFBYTE_toggle_purchased`             | Toggle the purchased boolean on a shopping list item                                                                                                                            |
 | `CHEFBYTE_delete_shopping_item`         | Delete a single item from the shopping list                                                                                                                                     |
 | `CHEFBYTE_clear_shopping`               | Clear shopping list                                                                                                                                                             |
 | `CHEFBYTE_import_shopping_to_inventory` | Import all purchased shopping items into inventory as stock lots, then remove from shopping list                                                                                |
 | `CHEFBYTE_below_min_stock`              | Auto-add deficit items to shopping list (uses additive upsert — adds to existing qty rather than replacing)                                                                     |
 | `CHEFBYTE_get_meal_plan`                | Current meal plan                                                                                                                                                               |
-| `CHEFBYTE_add_meal`                     | Add entry (with optional meal_prep flag)                                                                                                                                        |
+| `CHEFBYTE_add_meal`                     | Add entry (with optional meal_prep flag). `logical_date` is **optional** — defaults to the user's current logical date (profile tz + day_start_hour) when omitted                |
 | `CHEFBYTE_delete_meal_entry`            | Delete a meal plan entry by meal_id                                                                                                                                             |
 | `CHEFBYTE_mark_done`                    | Execute meal plan entry (regular: consume + log macros; meal prep: consume + create `[MEAL]` lot, no immediate macro log)                                                       |
 | `CHEFBYTE_unmark_done`                  | **Not yet wired as MCP tool** (DB function exists). Undo a completed meal: reverses food_logs, restores stock, deletes `[MEAL]` product for prep entries, clears `completed_at` |
@@ -202,6 +202,10 @@ Desktop-first with responsive design. Matching the legacy ChefByte layout.
 | `CHEFBYTE_get_macros`                   | Today's macro summary with goals                                                                                                                                                |
 | `CHEFBYTE_log_temp_item`                | Log off-inventory macro entry                                                                                                                                                   |
 | `CHEFBYTE_set_price`                    | Update product price                                                                                                                                                            |
+| `CHEFBYTE_delete_food_log`              | Delete one `food_logs` row by `log_id`. Used to undo accidental `consume` calls                                                                                                 |
+| `CHEFBYTE_delete_temp_item`             | Delete one `temp_items` row by `temp_id`. Used to undo a stray `log_temp_item`                                                                                                  |
+| `CHEFBYTE_delete_recipe`                | Delete a recipe by `recipe_id`. Cascades to `recipe_ingredients`. Fails if any meal plan entries still reference it                                                             |
+| `CHEFBYTE_delete_product`               | **DESTRUCTIVE**: delete a product by `product_id`. Cascades to stock lots, meal plan entries, food logs, shopping list rows, recipe ingredients                                 |
 
 ## ChefByte Edge Functions
 

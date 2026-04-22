@@ -1,5 +1,5 @@
 import type { ToolDefinition } from '../types';
-import { toolSuccess, toolError } from '../shared';
+import { toolSuccess, toolError, escapeIlike } from '../shared';
 
 export const getExercises: ToolDefinition = {
   name: 'COACHBYTE_get_exercises',
@@ -24,7 +24,7 @@ export const getExercises: ToolDefinition = {
       .order('name', { ascending: true });
 
     if (args.search) {
-      query = query.ilike('name', `%${args.search}%`);
+      query = query.ilike('name', `%${escapeIlike(args.search)}%`);
     }
 
     const { data, error } = await query;

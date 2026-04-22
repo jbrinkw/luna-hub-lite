@@ -27,6 +27,10 @@ import { deleteShoppingItem } from '../../chefbyte/delete-shopping-item';
 import { togglePurchased } from '../../chefbyte/toggle-purchased';
 import { importShoppingToInventory } from '../../chefbyte/import-shopping-to-inventory';
 import { deleteMealEntry } from '../../chefbyte/delete-meal-entry';
+import { deleteFoodLog } from '../../chefbyte/delete-food-log';
+import { deleteTempItem } from '../../chefbyte/delete-temp-item';
+import { deleteRecipe } from '../../chefbyte/delete-recipe';
+import { deleteProduct } from '../../chefbyte/delete-product';
 
 // ---------------------------------------------------------------------------
 // ChefByte Tool Integration Tests
@@ -525,7 +529,9 @@ describe('ChefByte Tool Integration Tests', () => {
       expect(Number(data.item.qty_containers)).toBe(4);
     });
 
-    it('upserts when adding the same product again', async () => {
+    it('additive upsert: adding the same product again SUMS the quantities (bug 2 fix)', async () => {
+      // Previous qty was 4. Adding 7 more should yield 11, not replace with 7.
+      // This is the 2026-04-22 MCP E2E audit Bug 2 regression pin.
       const result = await addToShopping.handler(
         {
           product_id: secondProductId,
@@ -535,9 +541,44 @@ describe('ChefByte Tool Integration Tests', () => {
       );
       const data = parseToolResult(result);
 
-      // Should update, not duplicate
-      expect(Number(data.item.qty_containers)).toBe(7);
+      expect(Number(data.item.qty_containers)).toBe(11);
       expect(data.item.product_id).toBe(secondProductId);
+
+      // Confirm via the admin-read path too (no UI-side merging).
+      const { data: row } = await admin
+        .schema('chefbyte')
+        .from('shopping_list')
+        .select('qty_containers')
+        .eq('user_id', userId)
+        .eq('product_id', secondProductId)
+        .single();
+      expect(Number(row!.qty_containers)).toBe(11);
+    });
+
+    it('additive upsert: multiple small adds accumulate (3 + 2 = 5)', async () => {
+      // Use productId (a fresh slot) — this product was stocked/consumed earlier
+      // but never added to the shopping list in this test file.
+      // Make sure we start from 0 on the shopping list for this product.
+      await admin
+        .schema('chefbyte')
+        .from('shopping_list')
+        .delete()
+        .eq('user_id', userId)
+        .eq('product_id', productId);
+
+      await addToShopping.handler({ product_id: productId, qty_containers: 3 }, ctx);
+      const result2 = await addToShopping.handler({ product_id: productId, qty_containers: 2 }, ctx);
+      const data2 = parseToolResult(result2);
+
+      expect(Number(data2.item.qty_containers)).toBe(5);
+
+      // Cleanup so later tests that re-seed the shopping list behave normally.
+      await admin
+        .schema('chefbyte')
+        .from('shopping_list')
+        .delete()
+        .eq('user_id', userId)
+        .eq('product_id', productId);
     });
 
     it('rejects zero qty_containers', async () => {
@@ -569,10 +610,11 @@ describe('ChefByte Tool Integration Tests', () => {
       const yogurtItem = data.items.find((i: any) => i.product_id === secondProductId);
       expect(yogurtItem).toBeDefined();
       expect(yogurtItem.product_name).toBe('Test Greek Yogurt');
-      expect(Number(yogurtItem.qty_containers)).toBe(7);
-      // Price = 5.99, qty = 7 => estimated_cost = 41.93
+      // Additive upsert: 4 (first add) + 7 (second add) = 11
+      expect(Number(yogurtItem.qty_containers)).toBe(11);
+      // Price = 5.99, qty = 11 => estimated_cost = 65.89
       expect(Number(yogurtItem.price)).toBeCloseTo(5.99, 2);
-      expect(Number(yogurtItem.estimated_cost)).toBeCloseTo(41.93, 2);
+      expect(Number(yogurtItem.estimated_cost)).toBeCloseTo(65.89, 2);
 
       // estimated_total should reflect the sum
       expect(data.estimated_total).toBeGreaterThan(0);
@@ -1493,6 +1535,433 @@ describe('ChefByte Tool Integration Tests', () => {
 
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('not found');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Bug 1 (2026-04-22 audit): get_products / get_recipes ilike wildcard escape
+  // -----------------------------------------------------------------------
+
+  describe('ilike wildcard escape (Bug 1)', () => {
+    it('search:"%" does NOT match every product (escapes %)', async () => {
+      // Use a dedicated user to get a clean, known product count.
+      const u = await createTestUser('chefbyte-ilike-percent');
+      const uctx = createToolContext(u.userId);
+      try {
+        await createProduct.handler({ name: 'Apple' }, uctx);
+        await createProduct.handler({ name: 'Banana' }, uctx);
+        await createProduct.handler({ name: 'Cherry' }, uctx);
+
+        // Sanity: with empty search, we see 3
+        const all = parseToolResult(await getProducts.handler({}, uctx));
+        expect(all.total).toBe(3);
+
+        // Bug 1 pin: search='%' must NOT return every row. Escaped, it becomes
+        // a literal '%' which matches nothing in 'Apple', 'Banana', 'Cherry'.
+        const pct = parseToolResult(await getProducts.handler({ search: '%' }, uctx));
+        expect(pct.total).toBe(0);
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('search:"_" does NOT match every product (escapes _)', async () => {
+      const u = await createTestUser('chefbyte-ilike-underscore');
+      const uctx = createToolContext(u.userId);
+      try {
+        await createProduct.handler({ name: 'Apple' }, uctx);
+        await createProduct.handler({ name: 'Banana' }, uctx);
+
+        // Pre-escape, '_' as ilike wildcard would match any single char, so a
+        // 5-letter name like 'Apple' would be picked up by a single '_' with
+        // the '%_%' wrap. Escaped, it matches literal '_' — zero rows.
+        const underscore = parseToolResult(await getProducts.handler({ search: '_' }, uctx));
+        expect(underscore.total).toBe(0);
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('literal "%" in product name is still findable via escaped search', async () => {
+      // If a user names a product 'Off 50% Deal' and searches '50%', the
+      // escaped '%' becomes a literal and matches only that one product.
+      const u = await createTestUser('chefbyte-ilike-literal');
+      const uctx = createToolContext(u.userId);
+      try {
+        await createProduct.handler({ name: 'Off 50% Deal' }, uctx);
+        await createProduct.handler({ name: 'Regular Item' }, uctx);
+
+        const res = parseToolResult(await getProducts.handler({ search: '50%' }, uctx));
+        expect(res.total).toBe(1);
+        expect(res.products[0].name).toBe('Off 50% Deal');
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('get_recipes:search="%" does NOT match every recipe (escapes %)', async () => {
+      const u = await createTestUser('chefbyte-ilike-recipe');
+      const uctx = createToolContext(u.userId);
+      try {
+        // Need a product to build a recipe.
+        const prod = parseToolResult(await createProduct.handler({ name: 'Ingredient' }, uctx));
+        await createRecipe.handler(
+          {
+            name: 'Alpha Bowl',
+            ingredients: [{ product_id: prod.product.product_id, quantity: 1 }],
+          },
+          uctx,
+        );
+        await createRecipe.handler(
+          {
+            name: 'Beta Bowl',
+            ingredients: [{ product_id: prod.product.product_id, quantity: 1 }],
+          },
+          uctx,
+        );
+
+        const all = parseToolResult(await getRecipes.handler({}, uctx));
+        expect(all.total).toBe(2);
+
+        const pct = parseToolResult(await getRecipes.handler({ search: '%' }, uctx));
+        expect(pct.total).toBe(0);
+      } finally {
+        await u.cleanup();
+      }
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Bug 3 (2026-04-22 audit): PGRST116 → clean "not found" messages
+  // -----------------------------------------------------------------------
+
+  describe('PGRST116 clean errors (Bug 3)', () => {
+    const fakeId = '00000000-0000-0000-0000-000000000000';
+
+    it('update_product with non-existent UUID returns "not found" (not PGRST116 jargon)', async () => {
+      const res = await updateProduct.handler({ product_id: fakeId, name: 'Ghost' }, ctx);
+      expect(res.isError).toBe(true);
+      const msg = res.content[0].text;
+      expect(msg.toLowerCase()).toContain('not found');
+      expect(msg).not.toContain('Cannot coerce');
+      expect(msg).not.toContain('PGRST116');
+    });
+
+    it('set_price with non-existent UUID returns "not found"', async () => {
+      const res = await setPrice.handler({ product_id: fakeId, price: 1.0 }, ctx);
+      expect(res.isError).toBe(true);
+      const msg = res.content[0].text;
+      expect(msg.toLowerCase()).toContain('not found');
+      expect(msg).not.toContain('Cannot coerce');
+      expect(msg).not.toContain('PGRST116');
+    });
+
+    it('toggle_purchased with non-existent UUID returns "not found"', async () => {
+      const res = await togglePurchased.handler({ item_id: fakeId }, ctx);
+      expect(res.isError).toBe(true);
+      const msg = res.content[0].text;
+      expect(msg.toLowerCase()).toContain('not found');
+      expect(msg).not.toContain('Cannot coerce');
+      expect(msg).not.toContain('PGRST116');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Bug 4 (2026-04-22 audit): new delete tools
+  // -----------------------------------------------------------------------
+
+  describe('delete tools (Bug 4)', () => {
+    it('delete_food_log: seed → delete → row gone', async () => {
+      const u = await createTestUser('chefbyte-delete-food-log');
+      const uctx = createToolContext(u.userId);
+      try {
+        const prod = parseToolResult(await createProduct.handler({ name: 'DeleteLogProd' }, uctx));
+        const prodId = prod.product.product_id;
+
+        // Give it macros so consume logs something non-trivial.
+        await admin
+          .schema('chefbyte')
+          .from('products')
+          .update({ calories_per_serving: 10, servings_per_container: 1 })
+          .eq('product_id', prodId);
+
+        // Seed stock and consume (creates a food_log row).
+        const { data: locs } = await admin
+          .schema('chefbyte')
+          .from('locations')
+          .select('location_id')
+          .eq('user_id', u.userId)
+          .limit(1);
+        await addStock.handler(
+          { product_id: prodId, qty_containers: 2, location_id: locs![0].location_id },
+          uctx,
+        );
+        await consume.handler({ product_id: prodId, qty: 1, unit: 'container', log_macros: true }, uctx);
+
+        const { data: logsBefore } = await admin
+          .schema('chefbyte')
+          .from('food_logs')
+          .select('log_id')
+          .eq('user_id', u.userId)
+          .eq('product_id', prodId);
+        expect(logsBefore!.length).toBe(1);
+        const logId = logsBefore![0].log_id;
+
+        const delRes = parseToolResult(await deleteFoodLog.handler({ log_id: logId }, uctx));
+        expect(delRes.success).toBe(true);
+        expect(delRes.deleted.log_id).toBe(logId);
+
+        const { data: logsAfter } = await admin
+          .schema('chefbyte')
+          .from('food_logs')
+          .select('log_id')
+          .eq('user_id', u.userId)
+          .eq('product_id', prodId);
+        expect(logsAfter!.length).toBe(0);
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('delete_food_log: non-existent log_id returns not-found error', async () => {
+      const res = await deleteFoodLog.handler({ log_id: '00000000-0000-0000-0000-000000000000' }, ctx);
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text.toLowerCase()).toContain('not found');
+    });
+
+    it('delete_temp_item: seed → delete → row gone', async () => {
+      const u = await createTestUser('chefbyte-delete-temp-item');
+      const uctx = createToolContext(u.userId);
+      try {
+        const logged = parseToolResult(
+          await logTempItem.handler({ name: 'Coffee', calories: 5 }, uctx),
+        );
+        const tempId = logged.item.temp_id;
+        expect(tempId).toBeTruthy();
+
+        const delRes = parseToolResult(await deleteTempItem.handler({ temp_id: tempId }, uctx));
+        expect(delRes.success).toBe(true);
+        expect(delRes.deleted.temp_id).toBe(tempId);
+
+        const { data: rowsAfter } = await admin
+          .schema('chefbyte')
+          .from('temp_items')
+          .select('temp_id')
+          .eq('user_id', u.userId)
+          .eq('temp_id', tempId);
+        expect(rowsAfter!.length).toBe(0);
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('delete_temp_item: non-existent temp_id returns not-found error', async () => {
+      const res = await deleteTempItem.handler({ temp_id: '00000000-0000-0000-0000-000000000000' }, ctx);
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text.toLowerCase()).toContain('not found');
+    });
+
+    it('delete_recipe: seed with no meal plan refs → delete → row gone', async () => {
+      const u = await createTestUser('chefbyte-delete-recipe');
+      const uctx = createToolContext(u.userId);
+      try {
+        const prod = parseToolResult(await createProduct.handler({ name: 'RecipeProd' }, uctx));
+        const created = parseToolResult(
+          await createRecipe.handler(
+            {
+              name: 'Disposable Recipe',
+              ingredients: [{ product_id: prod.product.product_id, quantity: 1 }],
+            },
+            uctx,
+          ),
+        );
+        const recipeId = created.recipe.recipe_id;
+
+        const delRes = parseToolResult(await deleteRecipe.handler({ recipe_id: recipeId }, uctx));
+        expect(delRes.success).toBe(true);
+        expect(delRes.deleted.recipe_id).toBe(recipeId);
+        expect(delRes.deleted.name).toBe('Disposable Recipe');
+
+        // Recipe should be gone; recipe_ingredients cascaded.
+        const { data: rcpAfter } = await admin
+          .schema('chefbyte')
+          .from('recipes')
+          .select('recipe_id')
+          .eq('recipe_id', recipeId);
+        expect(rcpAfter!.length).toBe(0);
+
+        const { data: ingsAfter } = await admin
+          .schema('chefbyte')
+          .from('recipe_ingredients')
+          .select('ingredient_id')
+          .eq('recipe_id', recipeId);
+        expect(ingsAfter!.length).toBe(0);
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('delete_recipe: blocks delete when meal_plan_entries still reference the recipe', async () => {
+      const u = await createTestUser('chefbyte-delete-recipe-blocked');
+      const uctx = createToolContext(u.userId);
+      try {
+        const prod = parseToolResult(await createProduct.handler({ name: 'BlockerProd' }, uctx));
+        const created = parseToolResult(
+          await createRecipe.handler(
+            {
+              name: 'Locked Recipe',
+              ingredients: [{ product_id: prod.product.product_id, quantity: 1 }],
+            },
+            uctx,
+          ),
+        );
+        const recipeId = created.recipe.recipe_id;
+
+        // Add a meal plan entry referencing this recipe — no explicit
+        // logical_date, server should derive it (Bug 5 fix).
+        await addMeal.handler({ recipe_id: recipeId }, uctx);
+
+        const res = await deleteRecipe.handler({ recipe_id: recipeId }, uctx);
+        expect(res.isError).toBe(true);
+        expect(res.content[0].text).toContain('meal plan entries');
+
+        // Recipe still exists.
+        const { data: rcpStill } = await admin
+          .schema('chefbyte')
+          .from('recipes')
+          .select('recipe_id')
+          .eq('recipe_id', recipeId);
+        expect(rcpStill!.length).toBe(1);
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('delete_product: seed → delete → row gone (and stock cascades)', async () => {
+      const u = await createTestUser('chefbyte-delete-product');
+      const uctx = createToolContext(u.userId);
+      try {
+        const created = parseToolResult(await createProduct.handler({ name: 'Doomed Product' }, uctx));
+        const prodId = created.product.product_id;
+        const { data: locs } = await admin
+          .schema('chefbyte')
+          .from('locations')
+          .select('location_id')
+          .eq('user_id', u.userId)
+          .limit(1);
+        await addStock.handler(
+          { product_id: prodId, qty_containers: 2, location_id: locs![0].location_id },
+          uctx,
+        );
+
+        const delRes = parseToolResult(await deleteProduct.handler({ product_id: prodId }, uctx));
+        expect(delRes.success).toBe(true);
+        expect(delRes.deleted.product_id).toBe(prodId);
+
+        const { data: prodAfter } = await admin
+          .schema('chefbyte')
+          .from('products')
+          .select('product_id')
+          .eq('product_id', prodId);
+        expect(prodAfter!.length).toBe(0);
+
+        // stock_lots should have cascaded.
+        const { data: lotsAfter } = await admin
+          .schema('chefbyte')
+          .from('stock_lots')
+          .select('lot_id')
+          .eq('product_id', prodId);
+        expect(lotsAfter!.length).toBe(0);
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('delete_product: non-existent product_id returns not-found error', async () => {
+      const res = await deleteProduct.handler(
+        { product_id: '00000000-0000-0000-0000-000000000000' },
+        ctx,
+      );
+      expect(res.isError).toBe(true);
+      expect(res.content[0].text.toLowerCase()).toContain('not found');
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Bug 5 (2026-04-22 audit): add_meal logical_date optional → server default
+  // -----------------------------------------------------------------------
+
+  describe('add_meal optional logical_date (Bug 5)', () => {
+    it('omitting logical_date defaults to private.get_logical_date for the user', async () => {
+      const u = await createTestUser('chefbyte-addmeal-default-date');
+      const uctx = createToolContext(u.userId);
+      try {
+        const prod = parseToolResult(await createProduct.handler({ name: 'NoDateProd' }, uctx));
+
+        // Call add_meal WITHOUT logical_date
+        const res = parseToolResult(
+          await addMeal.handler({ product_id: prod.product.product_id, servings: 1 }, uctx),
+        );
+        expect(res.meal).toBeDefined();
+        expect(res.meal.logical_date).toBeTruthy();
+
+        // Fetch the user's current logical_date via the authoritative RPC
+        // (mirrors what the handler should have used).
+        const { data: rpcDate, error: rpcErr } = await (admin as any)
+          .schema('private')
+          .rpc('get_logical_date', { p_user_id: u.userId });
+        // If the RPC isn't exposed to service_role, fall back to computing
+        // via profile read (same logic the TS helper uses).
+        let expected: string;
+        if (!rpcErr && rpcDate) {
+          expected = rpcDate as string;
+        } else {
+          const { data: profile } = await admin
+            .schema('hub')
+            .from('profiles')
+            .select('timezone, day_start_hour')
+            .eq('user_id', u.userId)
+            .single();
+          const tz = profile?.timezone || 'America/New_York';
+          const dayStart = profile?.day_start_hour ?? 6;
+          const now = new Date();
+          const localDateStr = new Intl.DateTimeFormat('en-CA', { timeZone: tz }).format(now);
+          const localHour = parseInt(
+            new Intl.DateTimeFormat('en-US', {
+              timeZone: tz,
+              hour: 'numeric',
+              hour12: false,
+            }).format(now),
+          );
+          expected =
+            localHour < dayStart
+              ? new Date(new Date(localDateStr).getTime() - 86400000).toISOString().slice(0, 10)
+              : localDateStr;
+        }
+
+        expect(res.meal.logical_date).toBe(expected);
+      } finally {
+        await u.cleanup();
+      }
+    });
+
+    it('explicit logical_date still overrides the default (backward compat)', async () => {
+      const u = await createTestUser('chefbyte-addmeal-explicit-date');
+      const uctx = createToolContext(u.userId);
+      try {
+        const prod = parseToolResult(await createProduct.handler({ name: 'ExplicitProd' }, uctx));
+        const explicitDate = '2029-07-04';
+
+        const res = parseToolResult(
+          await addMeal.handler(
+            { product_id: prod.product.product_id, logical_date: explicitDate, servings: 1 },
+            uctx,
+          ),
+        );
+        expect(res.meal.logical_date).toBe(explicitDate);
+      } finally {
+        await u.cleanup();
+      }
     });
   });
 });

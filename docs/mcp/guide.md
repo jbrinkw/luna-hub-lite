@@ -33,6 +33,14 @@ All tool handlers return structured responses. On failure, tools return `isError
 
 MVP note: mutating tools do **not** use idempotency keys yet. If a network timeout occurs and write status is unknown, the tool returns an error instructing the client to refresh state before retrying.
 
+### Date conventions
+
+`logical_date` is the ChefByte/CoachByte day boundary derived from the user's profile `timezone` + `day_start_hour` (not wall-clock UTC). ChefByte write tools that touch a date-stamped row resolve `logical_date` server-side whenever possible so AI agents computing "today" from UTC do not accidentally land on a different day than the user's macros/plan.
+
+- `CHEFBYTE_consume` — always server-derived.
+- `CHEFBYTE_log_temp_item` — always server-derived.
+- `CHEFBYTE_add_meal` — `logical_date` is **optional**; if omitted, server derives it the same way. Pass an explicit `YYYY-MM-DD` only when you intentionally want a different day (e.g. scheduling tomorrow's breakfast).
+
 ## Tool Call Logging
 
 Every MCP tool invocation (through `tools/call` or the OpenAI-compatible `/v1/chat/completions` agentic loop) is logged to `hub.mcp_tool_logs`. Each row captures `user_id`, `tool_name`, `tool_args` (with top-level secret-looking keys redacted), `status` (`ok` | `tool_error` | `exception`), `error_message`, and `duration_ms`.

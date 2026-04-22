@@ -26,7 +26,13 @@ export const setPrice: ToolDefinition = {
       .select('product_id, name, price')
       .single();
 
-    if (error) return toolError(`Failed to set price: ${error.message}`);
+    if (error) {
+      if ((error as any).code === 'PGRST116') {
+        return toolError('Product not found or does not belong to you');
+      }
+      return toolError(`Failed to set price: ${error.message}`);
+    }
+    if (!data) return toolError('Product not found or does not belong to you');
 
     return toolSuccess({
       message: `Price for "${data.name}" set to $${Number(data.price).toFixed(2)}`,

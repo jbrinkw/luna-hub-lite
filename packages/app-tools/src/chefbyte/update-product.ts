@@ -57,7 +57,14 @@ export const updateProduct: ToolDefinition = {
       .select('product_id, name, barcode')
       .single();
 
-    if (error) return toolError(`Failed to update product: ${error.message}`);
+    if (error) {
+      // PGRST116: "Cannot coerce the result to a single JSON object" — 0 rows
+      // matched the update filter. Rewrap as a friendly not-found message.
+      if ((error as any).code === 'PGRST116') {
+        return toolError('Product not found or does not belong to you');
+      }
+      return toolError(`Failed to update product: ${error.message}`);
+    }
     if (!data) return toolError('Product not found or does not belong to you');
 
     return toolSuccess({ message: `Product "${data.name}" updated`, product: data });

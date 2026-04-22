@@ -24,7 +24,12 @@ export const togglePurchased: ToolDefinition = {
       .single();
 
     if (fetchError || !current) {
-      return toolError(`Shopping item not found: ${fetchError?.message ?? 'no matching row'}`);
+      // PGRST116 ("Cannot coerce the result to a single JSON object") = no row.
+      // Surface a clean message either way.
+      if (fetchError && (fetchError as any).code && (fetchError as any).code !== 'PGRST116') {
+        return toolError(`Shopping item not found: ${fetchError.message}`);
+      }
+      return toolError('Shopping item not found');
     }
 
     const newPurchased = !current.purchased;
@@ -38,7 +43,13 @@ export const togglePurchased: ToolDefinition = {
       .select('cart_item_id, product_id, qty_containers, purchased')
       .single();
 
-    if (error) return toolError(`Failed to toggle purchased: ${error.message}`);
+    if (error) {
+      if ((error as any).code === 'PGRST116') {
+        return toolError('Shopping item not found');
+      }
+      return toolError(`Failed to toggle purchased: ${error.message}`);
+    }
+    if (!data) return toolError('Shopping item not found');
 
     return toolSuccess({
       message: `Item marked as ${newPurchased ? 'purchased' : 'not purchased'}`,

@@ -23,6 +23,10 @@ import { updateProduct } from './update-product';
 import { togglePurchased } from './toggle-purchased';
 import { deleteShoppingItem } from './delete-shopping-item';
 import { importShoppingToInventory } from './import-shopping-to-inventory';
+import { deleteFoodLog } from './delete-food-log';
+import { deleteTempItem } from './delete-temp-item';
+import { deleteRecipe } from './delete-recipe';
+import { deleteProduct } from './delete-product';
 
 export const chefbyteTools: Record<string, ToolDefinition> = {
   [getInventory.name]: getInventory,
@@ -49,4 +53,8 @@ export const chefbyteTools: Record<string, ToolDefinition> = {
   [togglePurchased.name]: togglePurchased,
   [deleteShoppingItem.name]: deleteShoppingItem,
   [importShoppingToInventory.name]: importShoppingToInventory,
+  [deleteFoodLog.name]: deleteFoodLog,
+  [deleteTempItem.name]: deleteTempItem,
+  [deleteRecipe.name]: deleteRecipe,
+  [deleteProduct.name]: deleteProduct,
 };
