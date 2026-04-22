@@ -57,11 +57,20 @@ jobs:
       - run: supabase link --project-ref btlfsxammjzkyluophgr
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-      - run: supabase db push
+      # --include-all: apply every local migration whose timestamp isn't
+      # already present on remote, even if newer ones landed out-of-order.
+      # Without this flag, any skipped/failed migration from an earlier
+      # deploy becomes a blocking wall ("Found local migration files to be
+      # inserted before the last migration on remote database"). Since we
+      # never rewrite migration history and RLS-check every function,
+      # include-all is the correct default for our monotonic migration flow.
+      - run: supabase db push --include-all
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
       - run: |
           supabase functions deploy analyze-product --no-verify-jwt
           supabase functions deploy walmart-scrape --no-verify-jwt
+          supabase functions deploy shelf-ingest --no-verify-jwt
+          supabase functions deploy livetrack-session --no-verify-jwt
         env:
           SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
