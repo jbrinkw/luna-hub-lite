@@ -95,8 +95,24 @@ test.describe('CoachByte Today Page', () => {
       // Blur the textarea to trigger the immediate save
       await page.getByTestId('next-in-queue').click();
 
-      // Wait for the save to persist to DB
-      await page.waitForTimeout(3000);
+      // Poll the DB for the save to land instead of sleeping. A regression
+      // that made the on-blur write fire-and-forget with no actual PATCH
+      // would cause this poll to time out — the previous 3s sleep hid
+      // that failure mode.
+      await expect
+        .poll(
+          async () => {
+            const { data } = await client
+              .schema('coachbyte')
+              .from('daily_plans')
+              .select('summary')
+              .eq('user_id', userId)
+              .single();
+            return (data as any)?.summary ?? null;
+          },
+          { timeout: 15_000 },
+        )
+        .toBe('Good session');
 
       // Reload the page and verify the summary persisted
       await page.reload();
@@ -710,6 +726,12 @@ test.describe('CoachByte Today Page', () => {
       }).toPass({ timeout: 10_000 });
 
       // ── Step 3: click Pause at ~2s into the 90s timer ──
+      // INTENTIONAL wall-clock wait (not a flaky-sleep smell): the pause
+      // assertion below requires `elapsed_before_pause > 0`, which is
+      // driven by real wall-time progression. No event can replace this
+      // — we're testing that the server-side `pause_timer` RPC captures
+      // the correct elapsed slice, which only has a meaningful value
+      // once the clock has advanced.
       await page.waitForTimeout(2_000);
       await page.getByTestId('pause-btn').click();
 
@@ -726,6 +748,13 @@ test.describe('CoachByte Today Page', () => {
       }).toPass({ timeout: 10_000 });
 
       // ── Step 4: DOM countdown frozen while paused ──
+      // INTENTIONAL wall-clock wait (not a flaky-sleep smell): this is a
+      // NEGATIVE assertion — "display MUST NOT change across 3 real
+      // seconds while paused." Any replacement with a locator-based
+      // waiter (`expect().toHaveText(...)`, `expect.poll`) would satisfy
+      // immediately on the already-stable text and prove nothing. The
+      // only way to prove the countdown is actually paused is to let
+      // wall-clock time pass and re-read.
       const timerDisplay = page.getByTestId('timer-display');
       const displayBefore = (await timerDisplay.textContent())?.trim() ?? '';
       await page.waitForTimeout(3_000);
@@ -740,19 +769,12 @@ test.describe('CoachByte Today Page', () => {
       }
 
       // ── Step 5: Resume → state='running' again ──
-      {
-        const { data: preRows } = await coach.from('timers').select('*').eq('user_id', userId);
-        // eslint-disable-next-line no-console
-        console.log('[timer-lifecycle] pre-resume DB state:', JSON.stringify(preRows));
-      }
+      // The `.toPass` poll below is the actual assertion — it re-reads
+      // the DB until state flips to 'running'. No sleep needed; the
+      // previous 1s `waitForTimeout` was only for debug logging and
+      // hid the case where the RPC never fired (poll would have caught
+      // that, sleep wouldn't have).
       await page.getByTestId('resume-btn').click();
-      // Give the click a beat to propagate its async work, then re-read DB.
-      await page.waitForTimeout(1_000);
-      {
-        const { data: postRows } = await coach.from('timers').select('*').eq('user_id', userId);
-        // eslint-disable-next-line no-console
-        console.log('[timer-lifecycle] post-resume DB state (1s after click):', JSON.stringify(postRows));
-      }
       await expect(async () => {
         const { data: rows } = await coach.from('timers').select('state, paused_at, end_time').eq('user_id', userId);
         expect(rows![0].state).toBe('running');

@@ -496,20 +496,30 @@ describe('MCP Worker E2E', () => {
     }
   });
 
-  // ─── Test 20a: Session resumption behavior pin (audit rec #27) ────────
+  // ─── Test 20a: Stateless transport behavior pin (audit rec #27) ───────
   //
-  // The MCP spec (2025-03-26 Streamable HTTP) lets a client reuse a
-  // sessionId on reconnect. The Worker currently runs STATELESS — POST
-  // /mcp authenticates + rebuilds the tool registry on every request;
-  // the `Mcp-Session-Id` header is echoed back but carries no server-
-  // side state. Commits `b98fb3f` and `c265c4e` deliberately gutted the
-  // stateful Durable Object path to stop DO duration billing.
+  // HONEST NAMING NOTE (re-audit #2.13): these tests were originally titled
+  // "reconnect with same sessionId" but the Worker runs STATELESS — POST
+  // /mcp authenticates + rebuilds the tool registry on every request; the
+  // `Mcp-Session-Id` header is echoed back but carries NO server-side
+  // state. Commits `b98fb3f` and `c265c4e` deliberately gutted the
+  // stateful Durable Object path to stop DO duration billing. There is
+  // therefore no "connection" to "reconnect" to — what we're actually
+  // pinning is:
   //
-  // These tests pin the current behavior so a future "accidental" return
-  // to stateful sessions (or a regression where sessionId-less requests
-  // stop working) fails loudly.
+  //   a) the server honors a client-supplied Mcp-Session-Id header across
+  //      independent HTTP requests (echoes it back unchanged),
+  //   b) the same sessionId submitted on a follow-up request yields the
+  //      same tool-set size for the same user (no hidden session-scoped
+  //      differentiation), and
+  //   c) a sessionId-less request still works (no implicit state
+  //      requirement).
+  //
+  // A regression that ever tried to move sessionId into server-side state
+  // (e.g. rejecting unknown sessionIds, 409 on "resumed" ids issued from
+  // a different instance) will fail these assertions.
 
-  it('reconnect with same sessionId: tool call succeeds against current stateless transport', async () => {
+  it('sessionId echo: server honors client-supplied Mcp-Session-Id across independent stateless requests', async () => {
     // 1. Initialize and capture sessionId.
     const first = await fetch(`${WORKER_BASE}/mcp`, {
       method: 'POST',
@@ -521,7 +531,7 @@ describe('MCP Worker E2E', () => {
         params: {
           protocolVersion: '2024-11-05',
           capabilities: {},
-          clientInfo: { name: 'session-resume', version: '1.0' },
+          clientInfo: { name: 'session-echo', version: '1.0' },
         },
       }),
     });
@@ -543,11 +553,13 @@ describe('MCP Worker E2E', () => {
     const firstList = (await firstCall.json()) as any;
     expect(Array.isArray(firstList.result?.tools)).toBe(true);
     const firstToolCount = firstList.result.tools.length;
+    expect(firstToolCount).toBeGreaterThan(0); // guard: empty-tool-set passthrough would make echo trivially hold
 
-    // 3. "Reconnect" — simulate client dropping the connection and coming
-    //    back with the same sessionId. In stateless mode this is just a
-    //    fresh HTTP request, which must succeed.
-    const reconnect = await fetch(`${WORKER_BASE}/mcp`, {
+    // 3. Issue a completely separate HTTP request with the SAME sessionId
+    //    — since transport is stateless, this is functionally identical
+    //    to a first-ever request except that the client chose a specific
+    //    session id. Server MUST echo that id back unchanged.
+    const echo = await fetch(`${WORKER_BASE}/mcp`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -556,15 +568,23 @@ describe('MCP Worker E2E', () => {
       },
       body: JSON.stringify({ jsonrpc: '2.0', id: 3, method: 'tools/list', params: {} }),
     });
-    expect(reconnect.status).toBe(200);
-    const reconnectedSessionId = reconnect.headers.get('mcp-session-id');
-    // Server echoes the client-supplied sessionId rather than issuing a new one.
-    expect(reconnectedSessionId).toBe(firstSessionId);
+    expect(echo.status).toBe(200);
+    const echoedSessionId = echo.headers.get('mcp-session-id');
+    // Echo guarantee: header round-trips byte-for-byte.
+    expect(echoedSessionId).toBe(firstSessionId);
 
-    const reconnectList = (await reconnect.json()) as any;
-    expect(Array.isArray(reconnectList.result?.tools)).toBe(true);
-    // Tool set is user-scoped + stable across requests for the same user.
-    expect(reconnectList.result.tools.length).toBe(firstToolCount);
+    const echoList = (await echo.json()) as any;
+    expect(Array.isArray(echoList.result?.tools)).toBe(true);
+    // Tool set is user-scoped + stable across independent stateless
+    // requests for the same Bearer. Tool count matches exactly — a
+    // regression that made tool resolution session-scoped (e.g. caching
+    // a subset per-session) would diverge here.
+    expect(echoList.result.tools.length).toBe(firstToolCount);
+    // Same NAMES, not just same count — catches accidental tool
+    // reshuffling that happens to preserve cardinality.
+    const firstNames = (firstList.result.tools as any[]).map((t) => t.name).sort();
+    const echoNames = (echoList.result.tools as any[]).map((t) => t.name).sort();
+    expect(echoNames).toEqual(firstNames);
   });
 
   it('cross-session isolation: different sessionId still authenticates the same user, tool set unchanged', async () => {

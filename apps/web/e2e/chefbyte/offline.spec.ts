@@ -74,17 +74,58 @@ test.describe('ChefByte — offline behavior', () => {
       await page.context().setOffline(true);
       await expect(page.getByTestId('offline-banner')).toBeVisible({ timeout: 30000 });
 
-      // A forced click (timeout-bounded) should NOT produce a DB write —
-      // pointer-events: none blocks normal clicks, and even if we force the
-      // handler to run, the RPC should fail at the transport layer offline.
-      // We try a trial click with a tight timeout; whether Playwright can
-      // reach the button or not, the DB must be unchanged.
-      await page
-        .getByTestId(`sub-ctn-${chickenId}`)
-        .click({ trial: true, timeout: 3000 })
-        .catch(() => {
-          // Expected: pointer events are disabled.
+      // Assert the actual mechanism: the content wrapper carries
+      // `pointer-events: none` while offline. This pins the *enforcement*
+      // layer — a future regression that flips the banner visibility but
+      // forgets the style (or vice-versa) fails here loudly instead of
+      // silently allowing a mutation through.
+      //
+      // We read the computed style (not the inline attribute) so any
+      // implementation — inline style, CSS class, data-attribute — still
+      // passes as long as the effective pointer-events is `none`.
+      const contentPointerEvents = await page
+        .locator('[data-testid="offline-banner"]')
+        .locator('..')  // parent — the flex column
+        .locator('> div').last()  // the content wrapper (last sibling after banner)
+        .evaluate((el) => getComputedStyle(el).pointerEvents);
+      // Scope check is brittle to DOM reshuffles; fall back to explicitly
+      // locating the content area via a deeper query on the chef root.
+      void contentPointerEvents; // kept for debug; real check below
+
+      // Robust variant: the content wrapper sits inside the ChefLayout
+      // flex column, after the header/tab/banner. We grab it via the
+      // grouped-view's nearest positioned ancestor that carries the
+      // pointer-events style. ChefLayout applies the inline style to a
+      // single wrapper so inspecting any descendant works.
+      const effectivePE = await page
+        .getByTestId('grouped-view')
+        .evaluate((el) => {
+          // Walk up until we find a node with a non-'auto' pointer-events,
+          // or hit body. If none found, return 'auto'.
+          let n: HTMLElement | null = el as HTMLElement;
+          while (n && n !== document.body) {
+            const pe = getComputedStyle(n).pointerEvents;
+            if (pe && pe !== 'auto') return pe;
+            n = n.parentElement;
+          }
+          return 'auto';
         });
+      expect(effectivePE).toBe('none');
+
+      // Now issue a REAL click with { force: true } to bypass Playwright's
+      // actionability check (which would itself detect pointer-events:none
+      // and throw). A forced click physically dispatches the MouseEvent —
+      // but the browser's CSS engine still drops it when pointer-events is
+      // 'none', so no click handler fires and no RPC goes out. If a future
+      // regression removes the CSS guard, the click WILL reach the handler
+      // and the DB assertion below fails.
+      await page.getByTestId(`sub-ctn-${chickenId}`).click({ force: true, timeout: 3000 });
+
+      // Give any accidental write a chance to land before reading.
+      // (Successful offline mutation would be a TanStack optimistic update
+      // followed by an RPC; we want to catch both the RPC-landed path and
+      // the "optimistic write committed to IndexedDB + replayed" path.)
+      await expect(page.getByTestId('offline-banner')).toBeVisible();
 
       // Verify DB is unchanged (3 containers seeded; no decrement)
       const chef = (client as any).schema('chefbyte');

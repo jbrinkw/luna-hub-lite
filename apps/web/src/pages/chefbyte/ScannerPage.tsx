@@ -9,6 +9,7 @@ import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { queryKeys } from '@/shared/queryKeys';
 import { useScannerDetection } from '@/hooks/useScannerDetection';
+import { handleKeypadStep } from './keypadLogic';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -761,36 +762,25 @@ export function ScannerPage() {
   /* ---------------------------------------------------------------- */
 
   const handleKeypadClick = (key: string) => {
-    // Compute next value from the latest state via functional setters so that
-    // rapid-fire presses queued in the same React batch each see the PREVIOUS
-    // press's output (not the stale render-time closure). Same for the
-    // overwriteNext flag — read/write through the ref, not the state closure.
-    const computeNext = (current: string): string | null => {
-      const prevOverwrite = overwriteNextRef.current;
-      if (key === '\u2190') {
-        overwriteNextRef.current = false;
-        return current.slice(0, -1) || '0';
-      }
-      if (key === '.') {
-        if (prevOverwrite) {
-          overwriteNextRef.current = false;
-          return '0.';
-        }
-        if (!current.includes('.')) {
-          return current + '.';
-        }
-        return null; // no change
-      }
-      if (prevOverwrite) {
-        overwriteNextRef.current = false;
-        return key;
-      }
-      return current === '0' ? key : current + key;
+    // Use the shared `handleKeypadStep` reducer (same code the unit tests
+    // cover) and mirror its `overwriteNext` into the ref so rapid-fire
+    // presses queued in the same React batch each see the previous press's
+    // output — the ref-versus-state distinction is the wrapper's job, the
+    // reducer itself is pure.
+    const step = (current: string): string | null => {
+      const prevState = {
+        screenValue: current,
+        overwriteNext: overwriteNextRef.current,
+      };
+      const next = handleKeypadStep(prevState, key);
+      if (next === prevState) return null; // double-decimal no-op (same ref)
+      overwriteNextRef.current = next.overwriteNext;
+      return next.screenValue;
     };
 
     if (activeField === 'screen') {
       setScreenValue((prev) => {
-        const next = computeNext(prev);
+        const next = step(prev);
         return next ?? prev;
       });
     } else {
@@ -800,12 +790,13 @@ export function ScannerPage() {
       userEditedFieldsRef.current.add(field);
       setNutrition((prev) => {
         const current = prev[field] ?? '';
-        const next = computeNext(current);
+        const next = step(current);
         if (next === null) return prev;
         return autoScaleNutrition(field, next, prev, originalNutrition);
       });
     }
   };
+
 
   /* ---------------------------------------------------------------- */
   /*  Nutrition change handler                                         */
