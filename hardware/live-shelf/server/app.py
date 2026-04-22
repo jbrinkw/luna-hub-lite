@@ -36,7 +36,13 @@ from .camera import mjpeg
 from .camera.daemon import CameraDaemon, DaemonConfig, now_iso_utc_ms
 from .camera import session_capture
 from .camera.locked_settings import apply_locked_settings
-from .cloud import CloudClient, CloudWorker, LiveTrackPoller, ProductSyncPoller
+from .cloud import (
+    CloudClient,
+    CloudWorker,
+    EventOverridesPoller,
+    LiveTrackPoller,
+    ProductSyncPoller,
+)
 from .cloud.integration import (
     CloudEventEmitter,
     backfill_missing_outbox_events,
@@ -218,6 +224,31 @@ def _resolve_camera_source(
 DISK_RETENTION_MAX_AGE_SECONDS: int = 14 * 24 * 60 * 60  # 14 days
 DISK_RETENTION_INTERVAL_SECONDS: int = 24 * 60 * 60      # 24 hours
 
+# Event frame GC — gate deletion of ``data/events/<event_id>/`` on the
+# scale_events row's classifier_status. ``pending`` / ``classifying``
+# events still need their frames for the classifier + reconciler; only
+# rows that have reached a stable outcome can be reaped.
+#
+# ``review`` is included because once a dir is old enough to hit the age
+# cutoff (14+ days) the user has effectively abandoned it — further
+# manual review won't happen. The cloud event viewer tolerates missing
+# frames (placeholder tiles), and the local review_queue UI is a staff-
+# only debugging surface that can tolerate gaps this old.
+#
+# NOT included: ``pending``, ``classifying``, or a NULL status. A NULL-
+# status row is usually a legacy / partially-migrated write and we
+# defensively keep those frames — a 14d-old mystery row is cheap to
+# preserve and expensive to lose.
+_TERMINAL_CLASSIFIER_STATUSES: tuple[str, ...] = (
+    "classified", "failed", "review",
+)
+
+# Outbox retention — delete sent rows whose ``sent_at`` is older than
+# this many days. Chosen so a week's worth of successful sends remain
+# available to correlate with cloud-side bug reports without letting the
+# SD card fill linearly.
+OUTBOX_RETENTION_DAYS: int = 7
+
 
 def _dir_size_bytes(root: Path) -> int:
     """Sum of every regular file's size under ``root``. Best-effort — any
@@ -235,24 +266,90 @@ def _dir_size_bytes(root: Path) -> int:
     return total
 
 
+def _load_terminal_event_ids(
+    conn: Optional[sqlite3.Connection],
+    db_lock: Optional[threading.RLock],
+) -> Optional[set[str]]:
+    """Return the set of scale_events.event_id values whose status is
+    terminal (safe to GC frames for). Returns ``None`` if the DB isn't
+    available — callers MUST then skip the events/ sweep to preserve
+    frames for pending / classifying rows (safety first).
+
+    Querying only the terminal set (rather than "not pending") means a
+    DB read error or schema mismatch falls through to the ``None`` path
+    and the sweep is skipped — we can't distinguish "frame dir for a
+    pending event" from "orphan dir with no DB row" without a positive
+    terminal-id list.
+    """
+    if conn is None:
+        return None
+    try:
+        if db_lock is not None:
+            db_lock.acquire()
+        try:
+            placeholders = ",".join("?" for _ in _TERMINAL_CLASSIFIER_STATUSES)
+            rows = conn.execute(
+                f"SELECT event_id FROM scale_events "
+                f" WHERE classifier_status IN ({placeholders})",
+                _TERMINAL_CLASSIFIER_STATUSES,
+            ).fetchall()
+        finally:
+            if db_lock is not None:
+                db_lock.release()
+    except Exception:  # pragma: no cover - defensive
+        log.exception(
+            "disk retention: failed to load terminal event ids; "
+            "skipping events/ sweep to avoid GC'ing pending frames"
+        )
+        return None
+    return {r[0] for r in rows}
+
+
 def _sweep_old_run_artifacts(
     data_root: Path,
     *,
     max_age_seconds: int = DISK_RETENTION_MAX_AGE_SECONDS,
+    conn: Optional[sqlite3.Connection] = None,
+    db_lock: Optional[threading.RLock] = None,
 ) -> dict[str, Any]:
     """Delete subdirectories under ``data/events/``, ``data/sessions/``
     and ``data/diag/`` whose mtime is older than ``max_age_seconds``.
 
     Returns a summary dict with counts + bytes freed. Idempotent and
     tolerant of missing top-level dirs.
+
+    Event-dir safety (bug fix 2026-04-22): ``data/events/<event_id>/``
+    is ONLY reaped when the matching ``scale_events`` row has reached a
+    terminal ``classifier_status`` (classified / failed / review). A
+    pending or classifying event still needs its frames for downstream
+    processing; deleting them mid-flight breaks the classifier.
+
+    When ``conn`` is None (startup-time call before storage is open) or
+    the DB read fails, the events/ sweep is skipped entirely — never
+    deleted blindly. The sessions/ and diag/ sweeps don't have this
+    constraint and always run by mtime.
+
+    A dir with no matching scale_events row is kept — it may be from
+    an intake/other code path; losing it is cheaper than breaking a
+    non-``scale_events`` feature we don't know about.
     """
     now = time.time()
     dirs_deleted = 0
     bytes_freed = 0
+    events_skipped_pending = 0
+
+    terminal_ids: Optional[set[str]] = None
     for name in ("events", "sessions", "diag"):
         root = data_root / name
         if not root.exists() or not root.is_dir():
             continue
+        # Defer the DB read until we actually need it — a fresh Pi with
+        # no events yet skips the scan entirely.
+        if name == "events":
+            terminal_ids = _load_terminal_event_ids(conn, db_lock)
+            if terminal_ids is None and conn is not None:
+                # DB read failed — skip events/ to protect pending rows.
+                continue
         for child in root.iterdir():
             if not child.is_dir():
                 continue
@@ -263,6 +360,14 @@ def _sweep_old_run_artifacts(
             age = now - mtime
             if age < max_age_seconds:
                 continue
+            # Gate events/ dirs on the terminal status set. When conn
+            # is None (tests, startup-time call), skip the status check
+            # entirely and fall back to mtime-only (pre-existing
+            # behavior so callers without a DB don't regress).
+            if name == "events" and terminal_ids is not None:
+                if child.name not in terminal_ids:
+                    events_skipped_pending += 1
+                    continue
             size = _dir_size_bytes(child)
             try:
                 shutil.rmtree(child, ignore_errors=True)
@@ -271,7 +376,47 @@ def _sweep_old_run_artifacts(
             if not child.exists():
                 dirs_deleted += 1
                 bytes_freed += size
-    return {"dirs_deleted": dirs_deleted, "bytes_freed": bytes_freed}
+    return {
+        "dirs_deleted": dirs_deleted,
+        "bytes_freed": bytes_freed,
+        "events_skipped_pending": events_skipped_pending,
+    }
+
+
+def _prune_cloud_outbox(
+    conn: Optional[sqlite3.Connection],
+    db_lock: Optional[threading.RLock],
+    *,
+    days: int = OUTBOX_RETENTION_DAYS,
+) -> int:
+    """Delete successfully-delivered cloud_outbox rows older than ``days``.
+
+    No-op when ``conn`` is ``None`` (e.g. cloud disabled; nothing to
+    prune). Never raises; logs-and-returns-zero on failure so the
+    janitor loop stays alive.
+
+    Uses :func:`server.cloud.outbox.prune_sent_older_than` which scopes
+    the DELETE to ``sent_at IS NOT NULL AND failed_permanently = 0`` —
+    pending events and forensic failures stay put.
+    """
+    if conn is None:
+        return 0
+    # Local import: the cloud package pulls ``requests`` which is
+    # heavy on the Pi's cold path. Defer it to janitor tick time so
+    # tests that don't exercise cloud can run without it.
+    from .cloud import outbox as _outbox_mod
+
+    try:
+        if db_lock is not None:
+            db_lock.acquire()
+        try:
+            return _outbox_mod.prune_sent_older_than(conn, days=days)
+        finally:
+            if db_lock is not None:
+                db_lock.release()
+    except Exception:  # pragma: no cover - defensive
+        log.exception("cloud_outbox prune failed")
+        return 0
 
 
 LIFECYCLE_RETENTION_DAYS: int = 30
@@ -406,23 +551,54 @@ def start_disk_retention_sweeper(
     *,
     max_age_seconds: int = DISK_RETENTION_MAX_AGE_SECONDS,
     interval_seconds: int = DISK_RETENTION_INTERVAL_SECONDS,
+    conn: Optional[sqlite3.Connection] = None,
+    db_lock: Optional[threading.RLock] = None,
+    outbox_retention_days: int = OUTBOX_RETENTION_DAYS,
 ) -> threading.Thread:
-    """Run ``_sweep_old_run_artifacts`` immediately, then every
-    ``interval_seconds`` from a daemon thread. Returns the thread for
-    tests/observability; nothing to join in normal app lifetime.
+    """Run ``_sweep_old_run_artifacts`` + ``_prune_cloud_outbox``
+    immediately, then every ``interval_seconds`` from a daemon thread.
+    Returns the thread for tests/observability; nothing to join in
+    normal app lifetime.
+
+    Janitor unification (bug fix 2026-04-22): the same thread now runs
+    both the disk sweep (data/events, data/sessions, data/diag) and the
+    cloud_outbox prune. Keeping them on one timer avoids two competing
+    wake-ups and gives operators a single log line to grep for.
+
+    The DB writer loops (reconciler, scale handler) grab ``db_lock``
+    per-statement; the janitor does the same inside
+    :func:`_prune_cloud_outbox` / :func:`_load_terminal_event_ids` so
+    it never races with a drain cycle.
     """
     def _loop() -> None:
         while True:
             try:
                 summary = _sweep_old_run_artifacts(
-                    data_root, max_age_seconds=max_age_seconds,
+                    data_root,
+                    max_age_seconds=max_age_seconds,
+                    conn=conn,
+                    db_lock=db_lock,
                 )
                 log.info(
-                    "disk retention sweeper: removed %d dirs, freed %d bytes",
-                    summary["dirs_deleted"], summary["bytes_freed"],
+                    "disk retention sweeper: removed %d dirs, freed %d "
+                    "bytes, skipped %d non-terminal event(s)",
+                    summary["dirs_deleted"],
+                    summary["bytes_freed"],
+                    summary.get("events_skipped_pending", 0),
                 )
             except Exception:
                 log.exception("disk retention sweeper: iteration threw")
+            try:
+                pruned = _prune_cloud_outbox(
+                    conn, db_lock, days=outbox_retention_days,
+                )
+                if pruned > 0:
+                    log.info(
+                        "cloud_outbox prune: deleted %d sent rows older "
+                        "than %dd", pruned, outbox_retention_days,
+                    )
+            except Exception:
+                log.exception("cloud_outbox prune: iteration threw")
             time.sleep(interval_seconds)
 
     t = threading.Thread(
@@ -432,8 +608,9 @@ def start_disk_retention_sweeper(
     )
     t.start()
     log.info(
-        "disk retention sweeper started (max_age=%ds, interval=%ds)",
-        max_age_seconds, interval_seconds,
+        "disk retention sweeper started (max_age=%ds, interval=%ds, "
+        "outbox_retention=%dd)",
+        max_age_seconds, interval_seconds, outbox_retention_days,
     )
     return t
 
@@ -924,8 +1101,13 @@ def create_app(
 
     # Daily disk-retention sweeper. ``data/events/``, ``data/sessions/``
     # and ``data/diag/`` accumulate per-run directories forever without
-    # intervention; this trims anything older than 14 days.
-    start_disk_retention_sweeper(cfg.data_root)
+    # intervention; this trims anything older than 14 days. The same
+    # loop also prunes the cloud_outbox table (7d retention on sent
+    # rows) so the SQLite file doesn't grow unbounded on long-lived
+    # Pis — see bug fix 2026-04-22.
+    start_disk_retention_sweeper(
+        cfg.data_root, conn=conn, db_lock=db_lock,
+    )
 
     # Lifecycle tables + system_health: 30-day retention; snapshot every 60s.
     start_lifecycle_retention_sweeper(conn, db_lock)
@@ -1610,6 +1792,31 @@ def create_app(
                 log.exception(
                     "failed to start product-sync poller; "
                     "cloud product edits will only reach the Pi on reboot",
+                )
+
+            # Event-overrides poller. Pulls cloud-side
+            # ``chefbyte.event_overrides`` rows touched since the last
+            # watermark every 30s and mirrors the post-reconcile
+            # ``stock_lots`` state into the Pi's local ``lots`` table.
+            # Without this, a user editing servings on an event via the
+            # cloud /chef/events UI leaves the Pi's baseline weight
+            # stale — the next scale pickup on the same lot computes
+            # delta against the wrong "before" weight. Same pattern as
+            # the product-sync poller: best-effort, log-and-continue.
+            try:
+                event_overrides_poller = EventOverridesPoller(
+                    cloud_client,
+                    conn,
+                    state_path=cfg.data_root / "last_overrides_sync.json",
+                    db_lock=db_lock,
+                )
+                event_overrides_poller.start()
+                log.info("event-overrides poller started (interval=30s)")
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "failed to start event-overrides poller; "
+                    "cloud override edits will not reach the Pi's lots "
+                    "table until reboot",
                 )
         except Exception:  # pragma: no cover - defensive
             log.exception(

@@ -383,6 +383,170 @@ def test_partial_index_uses_new_filter(conn):
     assert "sent_at IS NULL" in idx_ddl
 
 
+# ---------------------------------------------------------------------------
+# prune_sent_older_than (bug fix 2026-04-22: cloud_outbox grew unbounded)
+# ---------------------------------------------------------------------------
+
+
+def _backdate_sent_at(
+    conn: sqlite3.Connection, outbox_id: int, days_ago: float,
+) -> None:
+    """Force ``sent_at = datetime('now', '-<days_ago> days')`` so we can
+    exercise the prune cutoff without actually sleeping for days.
+
+    We use SQLite's own datetime() so the stored string format is
+    bit-identical to what ``mark_sent`` produces — otherwise a format
+    mismatch could mask a real bug where the prune's datetime() compare
+    silently failed on cross-format strings.
+    """
+    with conn:
+        conn.execute(
+            "UPDATE cloud_outbox "
+            "   SET sent_at = datetime('now', ?) "
+            " WHERE outbox_id = ?",
+            (f"-{days_ago} days", outbox_id),
+        )
+
+
+def _backdate_failed_permanently_sent_at(
+    conn: sqlite3.Connection, outbox_id: int, days_ago: float,
+) -> None:
+    """Flag a row failed_permanently AND back-date sent_at — not a real
+    state (failed-permanent rows have sent_at NULL) but we use it to
+    prove prune_sent_older_than's ``failed_permanently = 0`` filter
+    does NOT rely on ``sent_at IS NULL`` alone."""
+    _backdate_sent_at(conn, outbox_id, days_ago)
+    with conn:
+        conn.execute(
+            "UPDATE cloud_outbox SET failed_permanently = 1 "
+            "WHERE outbox_id = ?",
+            (outbox_id,),
+        )
+
+
+def test_prune_sent_older_than_deletes_only_expired_sent_rows(conn):
+    """Seed a mix of rows across age brackets and delivery status,
+    run the prune with a 7-day cutoff, assert:
+
+      - 10-day-old sent row → DELETED
+      - 3-day-old sent row  → KEPT (within cutoff)
+      - pending row (any age) → KEPT
+      - 10-day-old permanent-failure row → KEPT (audit trail)
+
+    This is the full coverage promise for the janitor: sent + old →
+    gone; everything else → preserved.
+    """
+    # Seed four rows in insertion order so we can address them by
+    # ``outbox_id``.
+    id_old_sent   = outbox.enqueue_event(conn, {"k": "old_sent"})
+    id_new_sent   = outbox.enqueue_event(conn, {"k": "new_sent"})
+    id_pending    = outbox.enqueue_event(conn, {"k": "pending"})
+    id_failed_old = outbox.enqueue_event(conn, {"k": "failed_old"})
+
+    def _row_id(client_id: str) -> int:
+        return conn.execute(
+            "SELECT outbox_id FROM cloud_outbox WHERE client_event_id = ?",
+            (client_id,),
+        ).fetchone()["outbox_id"]
+
+    outbox.mark_sent(conn, _row_id(id_old_sent))
+    _backdate_sent_at(conn, _row_id(id_old_sent), days_ago=10)
+
+    outbox.mark_sent(conn, _row_id(id_new_sent))
+    _backdate_sent_at(conn, _row_id(id_new_sent), days_ago=3)
+
+    # id_pending: never marked sent; stays pending regardless of age.
+
+    # Failed-permanent with a backdated sent_at: the prune must still
+    # skip it because the failed_permanently flag overrides.
+    _backdate_failed_permanently_sent_at(
+        conn, _row_id(id_failed_old), days_ago=10,
+    )
+
+    deleted = outbox.prune_sent_older_than(conn, days=7)
+
+    assert deleted == 1, (
+        "only the 10-day-old successfully-sent row should be deleted; "
+        "got %d" % deleted
+    )
+    remaining_keys = {
+        r["client_event_id"] for r in conn.execute(
+            "SELECT client_event_id FROM cloud_outbox"
+        ).fetchall()
+    }
+    assert id_old_sent not in remaining_keys, "old sent row must be gone"
+    assert id_new_sent in remaining_keys, "recent sent row must stay"
+    assert id_pending in remaining_keys, "pending row must stay"
+    assert id_failed_old in remaining_keys, (
+        "failed_permanently row must stay as audit trail even if old"
+    )
+
+
+def test_prune_sent_older_than_idempotent(conn):
+    """Running the prune a second time on the same state must delete
+    zero additional rows — the first call already removed the eligible
+    rows, the second has nothing to do."""
+    eid = outbox.enqueue_event(conn, {"k": "v"})
+    row_id = conn.execute(
+        "SELECT outbox_id FROM cloud_outbox WHERE client_event_id = ?",
+        (eid,),
+    ).fetchone()["outbox_id"]
+    outbox.mark_sent(conn, row_id)
+    _backdate_sent_at(conn, row_id, days_ago=30)
+
+    first = outbox.prune_sent_older_than(conn, days=7)
+    second = outbox.prune_sent_older_than(conn, days=7)
+    assert first == 1
+    assert second == 0
+
+
+def test_prune_sent_older_than_rejects_non_positive_days(conn):
+    """``days <= 0`` would delete every sent row — require an explicit
+    caller path for that, not an accidental config typo feeding in
+    zero via an env var."""
+    with pytest.raises(ValueError):
+        outbox.prune_sent_older_than(conn, days=0)
+    with pytest.raises(ValueError):
+        outbox.prune_sent_older_than(conn, days=-1)
+
+
+def test_prune_sent_older_than_is_single_statement_transaction(conn):
+    """Atomicity guarantee: the DELETE + its datetime cutoff must be
+    one SQL statement so a concurrent enqueue_event can't interleave
+    between "compute cutoff" and "delete matching rows"."""
+    eid = outbox.enqueue_event(conn, {"k": "v"})
+    row_id = conn.execute(
+        "SELECT outbox_id FROM cloud_outbox WHERE client_event_id = ?",
+        (eid,),
+    ).fetchone()["outbox_id"]
+    outbox.mark_sent(conn, row_id)
+    _backdate_sent_at(conn, row_id, days_ago=30)
+
+    calls: list[str] = []
+
+    class _CountingConn:
+        def __init__(self, inner): self._inner = inner
+        def execute(self, sql, *args, **kwargs):
+            calls.append(sql)
+            return self._inner.execute(sql, *args, **kwargs)
+        def __enter__(self): return self._inner.__enter__()
+        def __exit__(self, *exc): return self._inner.__exit__(*exc)
+        def __getattr__(self, name): return getattr(self._inner, name)
+
+    proxy = _CountingConn(conn)
+    deleted = outbox.prune_sent_older_than(proxy, days=7)  # type: ignore[arg-type]
+
+    assert deleted == 1
+    outbox_stmts = [s for s in calls if "cloud_outbox" in s]
+    assert len(outbox_stmts) == 1
+    assert outbox_stmts[0].lstrip().upper().startswith("DELETE")
+
+
+# ---------------------------------------------------------------------------
+# trim_oldest_over — single-statement invariant (kept verbatim below)
+# ---------------------------------------------------------------------------
+
+
 def test_trim_oldest_over_is_single_statement_transaction(conn):
     """Trim must issue the count + delete as one SQL statement so a
     concurrent enqueue can't interleave between "how many over?" and

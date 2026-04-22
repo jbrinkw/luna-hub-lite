@@ -220,6 +220,53 @@ def count_permanent_failures(conn: sqlite3.Connection) -> int:
     return int(row["c"] if row is not None else 0)
 
 
+def prune_sent_older_than(
+    conn: sqlite3.Connection, *, days: int = 7
+) -> int:
+    """Delete rows whose delivery succeeded more than ``days`` days ago.
+
+    Retention policy (bug fix 2026-04-22): sent rows accumulate
+    indefinitely on the Pi's SD card. Observed in production: 4+ rows
+    from 2+ days ago with ``sent_at`` populated, growing unbounded.
+    This function drops anything with ``sent_at < now-days``.
+
+    Scope guarantees — any row is preserved when:
+      * ``sent_at IS NULL`` — still pending delivery, mustn't be lost.
+      * ``failed_permanently = 1`` — forensic record of a 4xx rejection
+        that operators may want to inspect (the dedupe key collided, a
+        product reference was stale, etc.). Those rows stay as an audit
+        trail until manually cleared.
+      * ``sent_at >= now-days`` — recent successful sends stay around
+        long enough to correlate a cloud-side bug report with the Pi's
+        original payload.
+
+    The ``datetime('now', '-N days')`` expression is computed by SQLite
+    in a single statement alongside the DELETE so no race can interleave
+    between the bound read and the prune. Returns the number of rows
+    removed; useful for the janitor log line.
+
+    Pairs with :func:`trim_oldest_over` (cap-based) as belt-and-
+    suspenders: age-based pruning is the primary mechanism; the cap is
+    a last-resort bound if an operator sets ``days`` too high.
+    """
+    days_int = int(days)
+    if days_int <= 0:
+        # Guard: a zero/negative cutoff would delete every sent row in
+        # one call, which is a valid admin action but must be explicit —
+        # expose it only via an explicit caller path, not this helper.
+        raise ValueError("days must be > 0")
+    cutoff = f"-{days_int} days"
+    with conn:
+        cur = conn.execute(
+            "DELETE FROM cloud_outbox "
+            " WHERE sent_at IS NOT NULL "
+            "   AND failed_permanently = 0 "
+            "   AND datetime(sent_at) < datetime('now', ?)",
+            (cutoff,),
+        )
+    return cur.rowcount or 0
+
+
 def trim_oldest_over(
     conn: sqlite3.Connection, cap: int = 10_000
 ) -> int:
