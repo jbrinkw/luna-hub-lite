@@ -9,6 +9,7 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  *
  * Routes:
  *   GET  /shelf-ingest/catalog    — products + stock + pairings + locations
+ *   GET  /shelf-ingest/overrides  — event_overrides since watermark (+ lot state)
  *   POST /shelf-ingest/event      — apply one scale event via private.apply_shelf_event
  *   POST /shelf-ingest/intake     — upsert a product (barcode flow)
  *   POST /shelf-ingest/heartbeat  — update device + scale_pairings rows
@@ -117,15 +118,33 @@ async function handleCatalog(
   // Projection includes updated_at so the Pi advances its high-watermark
   // to the max(updated_at) it just received — no reliance on the Pi's
   // own wall-clock (which may drift vs cloud).
+  //
+  // Soft-delete: deleted_at is included in the projection so the Pi
+  // poller can apply local hard-deletes for tombstoned rows. Deleted
+  // rows WITHIN the updated_since window must be returned — that's the
+  // whole point of soft-delete for Pi propagation. Outside the window
+  // (e.g. deleted 10 days ago, full catalog pull at boot), we filter
+  // them out so the Pi's initial boot-sync stays clean. The poller
+  // re-pulls any row it's already deleted locally; SQLite
+  // DELETE-IF-EXISTS is idempotent anyway.
   let productsQuery = supabase
     .schema('chefbyte')
     .from('products')
     .select(
-      'product_id, name, barcode, brand, variant, net_weight_g, gross_weight_g, tare_weight_g, serving_weight_g, container_type, unit_type, density_g_per_ml, certified, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, updated_at',
+      'product_id, name, barcode, brand, variant, net_weight_g, gross_weight_g, tare_weight_g, serving_weight_g, container_type, unit_type, density_g_per_ml, certified, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, updated_at, deleted_at',
     )
     .eq('user_id', userId);
   if (updatedSince) {
+    // Delta pull: include both live + tombstoned rows changed since the
+    // last watermark. The UPDATE that set deleted_at also bumped
+    // updated_at via the products_set_updated_at trigger, so tombstones
+    // naturally land in the delta window.
     productsQuery = productsQuery.gt('updated_at', updatedSince);
+  } else {
+    // Full pull (boot / fresh Pi): only live rows. A freshly-flashed Pi
+    // has no ghost entries to reconcile against, so emitting the full
+    // set of historical tombstones would be pure noise.
+    productsQuery = productsQuery.is('deleted_at', null);
   }
 
   const [productsRes, stockRes, pairingsRes, locationsRes] = await Promise.all([
@@ -155,6 +174,147 @@ async function handleCatalog(
     stock: stockRes.data ?? [],
     pairings: pairingsRes.data ?? [],
     locations: locationsRes.data ?? [],
+  });
+}
+
+/**
+ * GET /overrides?updated_since=<iso>
+ *
+ * Return event_overrides rows for the authenticated user whose updated_at
+ * is strictly > the watermark, plus the derived post-reconcile lot state
+ * (qty_containers, last_update_source, last_update_ts) for each override's
+ * resolved_lot_id. The Pi consumes this to sync its local `lots` table
+ * so a future scale event on that lot uses the correct baseline weight.
+ *
+ * Shape:
+ *   {
+ *     overrides: [
+ *       { override_id, client_event_id, updated_at, stock_qty_override,
+ *         macros_servings_override, event_kind_override, is_voided,
+ *         macro_logging_enabled,
+ *         // Denormalised from shelf_event_log so the Pi can map
+ *         // override → lot without a second round-trip:
+ *         resolved_lot_id, product_id, pi_event_id
+ *       }, ...
+ *     ],
+ *     lots: [
+ *       { lot_id, product_id, qty_containers, last_update_source,
+ *         last_update_ts }
+ *     ]
+ *   }
+ *
+ * RLS: event_overrides.user_id = device.user_id is enforced at the DB
+ * layer via the event_overrides_user_rls policy (service_role bypasses
+ * RLS but we still filter explicitly in the query — defense-in-depth).
+ * shelf_event_log join is also filtered on user_id so a malicious Pi
+ * can't see cross-user rows by crafting a client_event_id collision.
+ */
+async function handleOverrides(
+  supabase: SupabaseClient,
+  device: Device,
+  url: URL,
+): Promise<Response> {
+  const userId = device.user_id;
+
+  const updatedSinceRaw = url.searchParams.get('updated_since');
+  const updatedSince =
+    updatedSinceRaw && isValidIsoTimestamp(updatedSinceRaw) ? updatedSinceRaw : null;
+  if (updatedSinceRaw && !updatedSince) {
+    console.warn('shelf-ingest: /overrides ignoring invalid updated_since', {
+      value: updatedSinceRaw,
+      device_id: device.device_id,
+    });
+  }
+
+  // Pull overrides for this user, joined to the originating event row so
+  // the Pi can resolve client_event_id → lot_id / product_id without a
+  // second round-trip. Supabase PostgREST's implicit inner-join on the
+  // embedded resource mirrors the SQL:
+  //   SELECT ... FROM event_overrides
+  //     JOIN shelf_event_log USING(user_id, client_event_id)
+  //     WHERE event_overrides.updated_at > :watermark
+  //
+  // NOTE: there's no declared FK between these two tables (they share
+  // user_id + client_event_id as a logical key), so we can't use
+  // PostgREST's FK-embedding syntax. Instead we do two queries and join
+  // in JS. That's fine for the expected volume — a heavy user might have
+  // ~dozens of overrides per day, far below any N+1 concern.
+  let overridesQuery = supabase
+    .schema('chefbyte')
+    .from('event_overrides')
+    .select(
+      'override_id, client_event_id, updated_at, stock_qty_override, macros_servings_override, calories_override, protein_override, carbs_override, fat_override, macro_logging_enabled, is_voided, event_kind_override',
+    )
+    .eq('user_id', userId)
+    .order('updated_at', { ascending: true });
+  if (updatedSince) {
+    overridesQuery = overridesQuery.gt('updated_at', updatedSince);
+  }
+
+  const { data: overrides, error: overridesErr } = await overridesQuery;
+  if (overridesErr) throw overridesErr;
+
+  const overrideList = overrides ?? [];
+  if (overrideList.length === 0) {
+    return jsonResponse({ overrides: [], lots: [] });
+  }
+
+  // Resolve each override's client_event_id → originating shelf_event_log
+  // row to get resolved_lot_id + pi_event_id. One IN-query batches all.
+  const clientEventIds = overrideList.map((o: any) => o.client_event_id);
+  const { data: eventRows, error: eventsErr } = await supabase
+    .schema('chefbyte')
+    .from('shelf_event_log')
+    .select('client_event_id, resolved_lot_id, pi_event_id, payload')
+    .eq('user_id', userId)
+    .in('client_event_id', clientEventIds);
+  if (eventsErr) throw eventsErr;
+
+  const eventByClientId = new Map<string, any>();
+  for (const row of eventRows ?? []) {
+    eventByClientId.set(row.client_event_id, row);
+  }
+
+  // Enrich the override payload with the joined event fields so the Pi
+  // has everything in one blob.
+  const enriched = overrideList.map((o: any) => {
+    const ev = eventByClientId.get(o.client_event_id);
+    const payload = ev?.payload ?? {};
+    return {
+      ...o,
+      resolved_lot_id: ev?.resolved_lot_id ?? null,
+      pi_event_id: ev?.pi_event_id ?? null,
+      product_id: payload?.product_id ?? null,
+    };
+  });
+
+  // Post-reconcile lot state. apply_event_override mutates stock_lots
+  // rows; the Pi needs the CURRENT qty_containers on each affected lot
+  // so its local `lots.current_weight_g` can reflect reality. Pull the
+  // distinct set of resolved_lot_ids that are non-null.
+  const affectedLotIds = Array.from(
+    new Set(
+      enriched
+        .map((o: any) => o.resolved_lot_id)
+        .filter((x: string | null): x is string => typeof x === 'string' && x.length > 0),
+    ),
+  );
+
+  let lots: any[] = [];
+  if (affectedLotIds.length > 0) {
+    const { data: lotRows, error: lotsErr } = await supabase
+      .schema('chefbyte')
+      .from('stock_lots')
+      .select('lot_id, product_id, qty_containers, last_update_source, last_update_ts')
+      .eq('user_id', userId)
+      .in('lot_id', affectedLotIds);
+    if (lotsErr) throw lotsErr;
+    lots = lotRows ?? [];
+  }
+
+  return jsonResponse({
+    overrides: enriched,
+    lots,
   });
 }
 
@@ -542,6 +702,10 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET' && leaf === 'catalog') {
       return await handleCatalog(supabase, device, url);
+    }
+
+    if (req.method === 'GET' && leaf === 'overrides') {
+      return await handleOverrides(supabase, device, url);
     }
 
     if (req.method === 'POST') {

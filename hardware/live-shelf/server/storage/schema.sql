@@ -26,11 +26,16 @@ CREATE TABLE products (
   fat_per_serving     REAL,
   description         TEXT,
   certified           INTEGER NOT NULL DEFAULT 0,  -- 1 = ready for live shelf
+  -- Soft-delete tombstone mirrored from cloud chefbyte.products.deleted_at.
+  -- NULL = live. Hard-delete would break lots.product_id FK (no cascade),
+  -- so we filter on this column in list / candidate queries instead.
+  deleted_at          TEXT,
   created_at          TEXT NOT NULL DEFAULT (datetime('now')),
   updated_at          TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE INDEX idx_products_barcode ON products(barcode);
 CREATE INDEX idx_products_certified ON products(certified);
+CREATE INDEX idx_products_deleted_at ON products(deleted_at);
 
 -- Reference images per product (2-3 per product, captured at intake)
 CREATE TABLE product_reference_images (

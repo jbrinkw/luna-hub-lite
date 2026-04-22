@@ -208,6 +208,78 @@ def test_malformed_product_skipped_without_poisoning_batch(conn, tmp_path):
     assert row["product_id"] == "good"
 
 
+def test_deletion_tombstone_marks_local_row_soft_deleted(conn, tmp_path):
+    """Cloud tombstoned row (deleted_at set) in updated_since delta →
+    Pi's local row gets deleted_at set, and subsequent list_products()
+    filters it out. Multi-call flow: initial sync inserts live → cloud
+    mutation → next sync applies tombstone."""
+    from server.storage.repo import list_products  # noqa: E402
+
+    state_path = tmp_path / "last_product_sync.json"
+    client = MagicMock()
+
+    # ---- Tick 1: live row lands on the Pi ------------------------------
+    fake_fetch = MagicMock(
+        return_value=Catalog(
+            products=[
+                _product("p-del", updated_at="2026-04-21T10:00:00Z"),
+            ],
+        ),
+    )
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path, fetch_catalog_fn=fake_fetch,
+    )
+    assert poller.tick_once() == 1
+    assert len(list_products(conn)) == 1
+    # Watermark advanced to the row's updated_at.
+    assert poller.high_watermark == "2026-04-21T10:00:00Z"
+
+    # ---- Tick 2: cloud tombstones it (bumps updated_at via trigger) ---
+    tombstoned = _product("p-del", updated_at="2026-04-21T11:00:00Z")
+    tombstoned["deleted_at"] = "2026-04-21T11:00:00Z"
+    fake_fetch.return_value = Catalog(products=[tombstoned])
+
+    assert poller.tick_once() == 1  # upsert path still runs
+    # Filtered out of the public list — Pi classifier + UI won't see it.
+    assert list_products(conn) == []
+    # But the row still physically exists in the table (lots FK would
+    # otherwise break). Confirm it's present with deleted_at set.
+    row = conn.execute(
+        "SELECT deleted_at FROM products WHERE product_id = 'p-del'"
+    ).fetchone()
+    assert row is not None
+    assert row["deleted_at"] == "2026-04-21T11:00:00Z"
+
+
+def test_deletion_restore_clears_tombstone(conn, tmp_path):
+    """If the cloud later clears deleted_at (undelete flow), the Pi must
+    pick it up — the row becomes visible in list_products() again."""
+    from server.storage.repo import list_products  # noqa: E402
+
+    state_path = tmp_path / "last_product_sync.json"
+    client = MagicMock()
+
+    # Seed tombstoned row directly.
+    tombstoned = _product("p-restore", updated_at="2026-04-21T10:00:00Z")
+    tombstoned["deleted_at"] = "2026-04-21T10:00:00Z"
+    fake_fetch = MagicMock(return_value=Catalog(products=[tombstoned]))
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path, fetch_catalog_fn=fake_fetch,
+    )
+    poller.tick_once()
+    assert list_products(conn) == []  # hidden
+
+    # Cloud restores: deleted_at back to null, updated_at bumped.
+    restored = _product("p-restore", updated_at="2026-04-21T11:00:00Z")
+    restored["deleted_at"] = None
+    fake_fetch.return_value = Catalog(products=[restored])
+
+    poller.tick_once()
+    visible = list_products(conn)
+    assert len(visible) == 1
+    assert visible[0].product_id == "p-restore"
+
+
 def test_unreadable_state_file_degrades_to_full_resync(conn, tmp_path, caplog):
     """A corrupt state file must not crash the poller — falls back to
     ``updated_since=None`` and rewrites the file on next success."""

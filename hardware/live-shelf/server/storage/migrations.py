@@ -166,6 +166,19 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
             conn.execute(
                 "ALTER TABLE products ADD COLUMN description TEXT"
             )
+        # Soft-delete tombstone mirrored from cloud. Nullable, defaults to
+        # NULL (live). Hard-deleting the local row would break the lots
+        # table's ``product_id REFERENCES products`` FK (no cascade), so
+        # we mark + filter in list/candidate queries instead. The cloud
+        # poller writes this from the /catalog payload's deleted_at field.
+        if "deleted_at" not in prod_cols:
+            conn.execute(
+                "ALTER TABLE products ADD COLUMN deleted_at TEXT"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_products_deleted_at "
+            "ON products(deleted_at)"
+        )
 
     # Usage log (USAGE_LOG_PLAN.md §3). Long-lived DBs predate this table.
     with conn:

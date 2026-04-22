@@ -1229,4 +1229,265 @@ describe('shelf-ingest Edge Function', () => {
 
     await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', body.product_id);
   });
+
+  // ─── /catalog — soft-delete propagation ─────────────────────────────
+  //
+  // The cloud "delete product" flow is a soft-delete: UPDATE … SET
+  // deleted_at = now(). The /catalog endpoint must include tombstoned
+  // rows in the updated_since delta window so the Pi's 30s poller can
+  // apply the deletion locally. Outside the window (boot / fresh Pi),
+  // tombstones are filtered out — a brand-new Pi should not see
+  // historical deletions.
+
+  it('GET /catalog with no updated_since hides soft-deleted rows', async () => {
+    // Create a product then soft-delete it.
+    const { data: doomed } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Catalog Delete Candidate',
+        net_weight_g: 200,
+      })
+      .select('product_id')
+      .single();
+
+    const { error: delErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('product_id', doomed.product_id);
+    expect(delErr).toBeNull();
+
+    // Full-pull /catalog: tombstoned row must NOT appear.
+    const res = await fetch(`${BASE_URL}/catalog`, {
+      method: 'GET',
+      headers: authHeaders(importKey),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const ids = body.products.map((p: any) => p.product_id);
+    expect(ids).not.toContain(doomed.product_id);
+
+    await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', doomed.product_id);
+  });
+
+  it('GET /catalog?updated_since=<old-iso> includes soft-deleted rows with deleted_at set', async () => {
+    // Watermark: pin 1s ago so our newly-created+deleted row lands in
+    // the delta window.
+    const watermark = new Date(Date.now() - 1000).toISOString();
+
+    // Seed and immediately soft-delete.
+    const { data: doomed } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Delta Delete Target',
+        net_weight_g: 150,
+      })
+      .select('product_id')
+      .single();
+
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .update({ deleted_at: new Date().toISOString() })
+      .eq('product_id', doomed.product_id);
+
+    const res = await fetch(
+      `${BASE_URL}/catalog?updated_since=${encodeURIComponent(watermark)}`,
+      { method: 'GET', headers: authHeaders(importKey) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    const doomedRow = body.products.find(
+      (p: any) => p.product_id === doomed.product_id,
+    );
+    expect(doomedRow).toBeTruthy();
+    expect(doomedRow.deleted_at).toBeTruthy();
+
+    await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', doomed.product_id);
+  });
+
+  // ─── /overrides ─────────────────────────────────────────────────────
+
+  it('GET /overrides returns event_overrides + lot state for the authed user only', async () => {
+    // Seed: product + lot + event row + override. The Pi's poller needs
+    // all three to reconcile. apply_event_override is the supported path
+    // but requires a JWT session — we write directly with the admin
+    // client to keep the test focused on the /overrides read path.
+    const clientEventId = crypto.randomUUID();
+
+    // Create a product + lot + shelf_event_log row for this override.
+    const { data: ovProd } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Override Target',
+        net_weight_g: 500,
+        servings_per_container: 2,
+        calories_per_serving: 100,
+      })
+      .select('product_id')
+      .single();
+
+    const { data: ovLot } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('stock_lots')
+      .insert({
+        user_id: userId,
+        product_id: ovProd.product_id,
+        location_id: locationId,
+        qty_containers: 0.6,
+        last_update_source: 'manual',
+      })
+      .select('lot_id')
+      .single();
+
+    const { error: logErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('shelf_event_log')
+      .insert({
+        user_id: userId,
+        device_id: deviceId,
+        client_event_id: clientEventId,
+        payload: {
+          scale_id: 'scale-ov',
+          kind: 'live_shelf',
+          event_kind: 'consumed',
+          product_id: ovProd.product_id,
+          delta_g: -200,
+          occurred_at: new Date().toISOString(),
+          pi_event_id: 'pi-test-evt',
+        },
+        applied: true,
+        reason: 'decremented',
+        resolved_lot_id: ovLot.lot_id,
+        pi_event_id: 'pi-test-evt',
+      });
+    expect(logErr).toBeNull();
+
+    const { error: ovErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('event_overrides')
+      .insert({
+        user_id: userId,
+        client_event_id: clientEventId,
+        macros_servings_override: 1.0,
+      });
+    expect(ovErr).toBeNull();
+
+    // Full pull (no watermark): override + lot state both present.
+    const res = await fetch(`${BASE_URL}/overrides`, {
+      method: 'GET',
+      headers: authHeaders(importKey),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(Array.isArray(body.overrides)).toBe(true);
+    expect(Array.isArray(body.lots)).toBe(true);
+
+    const ov = body.overrides.find((o: any) => o.client_event_id === clientEventId);
+    expect(ov).toBeTruthy();
+    expect(ov.resolved_lot_id).toBe(ovLot.lot_id);
+    expect(ov.product_id).toBe(ovProd.product_id);
+    expect(ov.pi_event_id).toBe('pi-test-evt');
+
+    const lot = body.lots.find((l: any) => l.lot_id === ovLot.lot_id);
+    expect(lot).toBeTruthy();
+    expect(Number(lot.qty_containers)).toBeCloseTo(0.6, 3);
+
+    // Cleanup
+    await (adminClient as any).schema('chefbyte').from('event_overrides').delete().eq('client_event_id', clientEventId);
+    await (adminClient as any).schema('chefbyte').from('shelf_event_log').delete().eq('client_event_id', clientEventId);
+    await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('lot_id', ovLot.lot_id);
+    await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', ovProd.product_id);
+  });
+
+  it('GET /overrides?updated_since=<future> returns empty overrides + empty lots', async () => {
+    // Watermark in the future → no rows qualify.
+    const future = new Date(Date.now() + 60_000).toISOString();
+    const res = await fetch(
+      `${BASE_URL}/overrides?updated_since=${encodeURIComponent(future)}`,
+      { method: 'GET', headers: authHeaders(importKey) },
+    );
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.overrides).toEqual([]);
+    expect(body.lots).toEqual([]);
+  });
+
+  it('GET /overrides isolates overrides across users (RLS-adjacent)', async () => {
+    // Seed an override on the OTHER user and confirm the authed user's
+    // /overrides response does not include it. shelf_event_log.user_id
+    // is the only cross-user leak vector; the explicit .eq('user_id',
+    // device.user_id) filter in the handler is what we're verifying.
+    const otherCeid = crypto.randomUUID();
+
+    const { data: otherLoc } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('locations')
+      .insert({ user_id: otherUserId, name: 'Other Override Location' })
+      .select('location_id')
+      .single();
+
+    const { data: otherLot } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('stock_lots')
+      .insert({
+        user_id: otherUserId,
+        product_id: otherUserProductId,
+        location_id: otherLoc.location_id,
+        qty_containers: 1.0,
+      })
+      .select('lot_id')
+      .single();
+
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('shelf_event_log')
+      .insert({
+        user_id: otherUserId,
+        device_id: deviceId, // intentionally cross-device — RLS still blocks
+        client_event_id: otherCeid,
+        payload: {
+          scale_id: 'other-scale',
+          kind: 'live_shelf',
+          event_kind: 'consumed',
+          product_id: otherUserProductId,
+          delta_g: -50,
+          occurred_at: new Date().toISOString(),
+        },
+        applied: true,
+        reason: 'decremented',
+        resolved_lot_id: otherLot.lot_id,
+      });
+
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('event_overrides')
+      .insert({ user_id: otherUserId, client_event_id: otherCeid });
+
+    const res = await fetch(`${BASE_URL}/overrides`, {
+      method: 'GET',
+      headers: authHeaders(importKey), // primary user's key
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    const leaked = body.overrides.find(
+      (o: any) => o.client_event_id === otherCeid,
+    );
+    expect(leaked).toBeUndefined();
+    const leakedLot = body.lots.find((l: any) => l.lot_id === otherLot.lot_id);
+    expect(leakedLot).toBeUndefined();
+
+    // Cleanup
+    await (adminClient as any).schema('chefbyte').from('event_overrides').delete().eq('client_event_id', otherCeid);
+    await (adminClient as any).schema('chefbyte').from('shelf_event_log').delete().eq('client_event_id', otherCeid);
+    await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('lot_id', otherLot.lot_id);
+    await (adminClient as any).schema('chefbyte').from('locations').delete().eq('location_id', otherLoc.location_id);
+  });
 });

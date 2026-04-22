@@ -118,6 +118,7 @@ export function SettingsPage() {
         .from('products')
         .select('*')
         .eq('user_id', user!.id)
+        .is('deleted_at', null)
         .not('name', 'ilike', '[MEAL]%')
         .order('name');
       if (loadErr) throw loadErr;
@@ -203,7 +204,17 @@ export function SettingsPage() {
 
   const deleteProductMutation = useMutation({
     mutationFn: async (productId: string) => {
-      const { error: deleteErr } = await chefbyte().from('products').delete().eq('product_id', productId);
+      // Soft-delete: set deleted_at so the Pi's product-sync poller sees
+      // the tombstone in its next updated_since delta. The
+      // products_set_updated_at trigger bumps updated_at automatically.
+      // Historical rows (stock_lots / food_logs / meal_plan_entries /
+      // recipe_ingredients) stay intact so charts + recipes don't
+      // retroactively lose data.
+      const { error: deleteErr } = await chefbyte()
+        .from('products')
+        .update({ deleted_at: new Date().toISOString() })
+        .eq('product_id', productId)
+        .is('deleted_at', null);
       if (deleteErr) throw deleteErr;
     },
     onMutate: async (productId) => {

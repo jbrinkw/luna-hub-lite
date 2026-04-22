@@ -272,8 +272,16 @@ def get_product_by_barcode(
 
 
 def list_products(conn: sqlite3.Connection) -> list[Product]:
+    # Filter soft-deleted rows so the classifier's candidate pool + the
+    # /inventory UI don't surface products the cloud has tombstoned. We
+    # keep the rows in the local DB (rather than hard-deleting) because
+    # lots.product_id references products with no cascade — dropping the
+    # row would orphan historical lots. Match by ``deleted_at IS NULL``
+    # because SQLite TEXT compares lexicographically and any non-null
+    # string (even empty) means "deleted on cloud".
     rows = conn.execute(
-        "SELECT * FROM products ORDER BY created_at ASC"
+        "SELECT * FROM products WHERE deleted_at IS NULL "
+        "ORDER BY created_at ASC"
     ).fetchall()
     return [_row_to_product(r) for r in rows]
 

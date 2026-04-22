@@ -16,6 +16,7 @@ from __future__ import annotations
 
 from .catalog import Catalog, fetch_catalog
 from .client import CloudClient, CloudError
+from .event_overrides_poller import EventOverridesPoller
 from .integration import CloudEventEmitter, null_emitter
 from .livetrack_poller import LiveTrackPoller
 from .outbox import enqueue_event
@@ -28,6 +29,7 @@ __all__ = [
     "CloudError",
     "CloudEventEmitter",
     "CloudWorker",
+    "EventOverridesPoller",
     "LiveTrackPoller",
     "ProductSyncPoller",
     "enqueue_event",

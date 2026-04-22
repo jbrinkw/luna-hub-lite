@@ -78,6 +78,7 @@ _PRODUCT_COLUMNS: tuple[str, ...] = (
     "fat_per_serving",
     "description",
     "certified",
+    "deleted_at",
 )
 
 # Valid unit_type values on the Pi's local CHECK constraint. The cloud
@@ -179,6 +180,19 @@ def upsert_product_from_cloud(
     fat_per_serving = _extract(product, "fat_per_serving")
     description = _extract(product, "description")
     certified_raw = _extract(product, "certified")
+    # Soft-delete tombstone. Cloud sends an ISO-8601 string when the row
+    # is deleted, NULL when live. We store it verbatim — SQLite TEXT
+    # comparisons use lexicographic ordering on ISO-8601 so no parse
+    # needed for the filter. ``None`` is explicitly stored so a
+    # "restore" (cloud clears deleted_at) reaches the Pi on the next
+    # poller tick.
+    deleted_at_raw = _extract(product, "deleted_at")
+    if deleted_at_raw is None or (
+        isinstance(deleted_at_raw, str) and deleted_at_raw.strip()
+    ):
+        deleted_at = deleted_at_raw if isinstance(deleted_at_raw, str) else None
+    else:
+        deleted_at = None
 
     # Finding #3: the cloud's unit_type has no CHECK — integration tests
     # have already pushed 'volume' through. The Pi's CHECK constraint
@@ -259,6 +273,7 @@ def upsert_product_from_cloud(
                     fat_per_serving = excluded.fat_per_serving,
                     description = excluded.description,
                     certified = excluded.certified,
+                    deleted_at = excluded.deleted_at,
                     updated_at = datetime('now')
                 """,
                 (
@@ -281,6 +296,7 @@ def upsert_product_from_cloud(
                     fat_per_serving,
                     description,
                     certified,
+                    deleted_at,
                 ),
             )
 
