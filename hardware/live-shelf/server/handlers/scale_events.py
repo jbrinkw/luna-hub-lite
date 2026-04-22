@@ -3458,17 +3458,18 @@ class ScaleHandler:
             "stable": stable,
             "uptime_s": uptime_s,
         })
-        # LiveTrack Import: when the container is already sitting stable on
-        # the catch-all scale (no delta event will fire), use the heartbeat
-        # to post the current reading so the wizard unblocks. Guards:
-        #   * scale is catch_all
-        #   * reading is stable AND in a plausible range
-        #   * current reading differs from the arm-time baseline by at least
-        #     LIVETRACK_MIN_DELTA_FROM_BASELINE_G. This stops empty-scale
-        #     drift (catch_all sits at ~90g idle) from being posted as if
-        #     the user placed a container. The poller captures the baseline
-        #     when it first sees state=waiting_scale (see LiveTrackPoller).
-        LIVETRACK_MIN_DELTA_FROM_BASELINE_G = 30.0
+        # LiveTrack Import: stream live weight to the session row on every
+        # stable heartbeat while the wizard is awaiting scale input. The
+        # wizard renders session.scale_reading_g and shows an explicit
+        # "Use this reading" button — the user decides when to commit.
+        # No delta gate: drift from an empty scale is fine because it
+        # won't be accepted until the user clicks the button.
+        #
+        # Kept posting while state is in {waiting_scale, scale_reading_received}
+        # so the displayed weight updates as the user adjusts contents. Once
+        # the UI transitions past scale_reading_received (user clicked
+        # accept → ai_tare_ready / manual_tare), the Pi stops updating
+        # and the committed reading is frozen.
         if (
             stable
             and self._catch_all_enabled
@@ -3481,46 +3482,32 @@ class ScaleHandler:
             shelf_id = shelf.shelf_id if shelf is not None else None
             if shelf_id == "catch_all":
                 arm = self._livetrack_poller.snapshot()
-                if arm is not None and arm.get("state") == "waiting_scale":
-                    # Record the baseline on the FIRST heartbeat seen while
-                    # armed. _livetrack_baseline_g is per-poller state set
-                    # via maybe_set_baseline. The poller clears it when the
-                    # session transitions away from waiting_scale.
-                    baseline_g = self._livetrack_poller.maybe_set_baseline(weight_g)
-                    delta_from_baseline = abs(weight_g - baseline_g)
-                    if delta_from_baseline < LIVETRACK_MIN_DELTA_FROM_BASELINE_G:
-                        # Empty scale or no meaningful change yet. Skip.
-                        log.debug(
-                            "livetrack: heartbeat weight=%.2f within baseline=%.2f "
-                            "(Δ=%.2f < %.2f); not posting",
-                            weight_g, baseline_g, delta_from_baseline,
-                            LIVETRACK_MIN_DELTA_FROM_BASELINE_G,
-                        )
-                    else:
-                        session_id = str(arm.get("session_id", ""))
-                        client = self._cloud_client
-                        fn = getattr(client, "post_livetrack_session_update", None)
-                        if session_id and callable(fn):
-                            try:
-                                fn(
-                                    session_id,
-                                    scale_reading_g=weight_g,
-                                    scale_reading_ts=now_iso_utc_ms(),
-                                    state="scale_reading_received",
-                                )
-                                log.info(
-                                    "livetrack: heartbeat-driven scale reading "
-                                    "posted for session=%s "
-                                    "(weight=%.2fg, baseline=%.2fg, Δ=%.2fg)",
-                                    session_id, weight_g, baseline_g,
-                                    delta_from_baseline,
-                                )
-                            except Exception:  # pragma: no cover - defensive
-                                log.exception(
-                                    "livetrack: failed to post heartbeat-driven "
-                                    "scale reading for session=%s",
-                                    session_id,
-                                )
+                if arm is not None and arm.get("state") in (
+                    "waiting_scale",
+                    "scale_reading_received",
+                ):
+                    session_id = str(arm.get("session_id", ""))
+                    client = self._cloud_client
+                    fn = getattr(client, "post_livetrack_session_update", None)
+                    if session_id and callable(fn):
+                        try:
+                            fn(
+                                session_id,
+                                scale_reading_g=weight_g,
+                                scale_reading_ts=now_iso_utc_ms(),
+                                state="scale_reading_received",
+                            )
+                            log.info(
+                                "livetrack: heartbeat-driven scale reading "
+                                "posted for session=%s (weight=%.2fg)",
+                                session_id, weight_g,
+                            )
+                        except Exception:  # pragma: no cover - defensive
+                            log.exception(
+                                "livetrack: failed to post heartbeat-driven "
+                                "scale reading for session=%s",
+                                session_id,
+                            )
         return {"ok": True}, 200
 
 
