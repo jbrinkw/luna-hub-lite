@@ -293,116 +293,161 @@ export function SettingsPage() {
     form: Record<string, any>,
     onChange: (field: string, value: any) => void,
     testIdPrefix: string,
-  ) => (
-    <div className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-3">
-      <div>
-        <label className={labelCls}>Name</label>
-        <input
-          value={form.name ?? ''}
-          onChange={(e) => onChange('name', e.target.value)}
-          data-testid={`${testIdPrefix}-name`}
-          className={inputCls}
-        />
+  ) => {
+    const sectionHeaderCls =
+      'text-[11px] font-bold uppercase tracking-wider text-text-tertiary pb-1.5 mb-2 border-b border-border-light';
+
+    return (
+      <div className="space-y-5">
+        {/* Identity */}
+        <div>
+          <div className={sectionHeaderCls}>Identity</div>
+          <div className="grid grid-cols-1 md:grid-cols-[2fr_1fr] gap-3">
+            <div>
+              <label className={labelCls}>Name</label>
+              <input
+                value={form.name ?? ''}
+                onChange={(e) => onChange('name', e.target.value)}
+                data-testid={`${testIdPrefix}-name`}
+                className={inputCls}
+                placeholder="e.g. Great Value Chicken Breast"
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Barcode</label>
+              <input
+                value={form.barcode ?? ''}
+                onChange={(e) => onChange('barcode', e.target.value || null)}
+                data-testid={`${testIdPrefix}-barcode`}
+                className={inputCls}
+                placeholder="UPC / EAN"
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Nutrition */}
+        <div>
+          <div className={sectionHeaderCls}>
+            Nutrition <span className="normal-case text-text-tertiary font-normal ml-1">· per serving</span>
+          </div>
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
+            <div>
+              <label className={labelCls}>Servings / container</label>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={form.servings_per_container ?? 1}
+                onChange={(e) => onChange('servings_per_container', Number(e.target.value) || 1)}
+                data-testid={`${testIdPrefix}-servings`}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>
+                Calories <span className="text-text-tertiary font-normal">kcal</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={form.calories_per_serving ?? 0}
+                onChange={(e) => onChange('calories_per_serving', Number(e.target.value) || 0)}
+                data-testid={`${testIdPrefix}-calories`}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>
+                Carbs <span className="text-text-tertiary font-normal">g</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={form.carbs_per_serving ?? 0}
+                onChange={(e) => onChange('carbs_per_serving', Number(e.target.value) || 0)}
+                data-testid={`${testIdPrefix}-carbs`}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>
+                Protein <span className="text-text-tertiary font-normal">g</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={form.protein_per_serving ?? 0}
+                onChange={(e) => onChange('protein_per_serving', Number(e.target.value) || 0)}
+                data-testid={`${testIdPrefix}-protein`}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>
+                Fat <span className="text-text-tertiary font-normal">g</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                value={form.fat_per_serving ?? 0}
+                onChange={(e) => onChange('fat_per_serving', Number(e.target.value) || 0)}
+                data-testid={`${testIdPrefix}-fat`}
+                className={inputCls}
+              />
+            </div>
+          </div>
+        </div>
+
+        {/* Inventory & Shopping */}
+        <div>
+          <div className={sectionHeaderCls}>Inventory &amp; Shopping</div>
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_2fr] gap-3">
+            <div>
+              <label className={labelCls}>
+                Min stock <span className="text-text-tertiary font-normal">containers</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="0.1"
+                value={form.min_stock_amount ?? 0}
+                onChange={(e) => onChange('min_stock_amount', Number(e.target.value) || 0)}
+                data-testid={`${testIdPrefix}-min-stock`}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Price</label>
+              <div className="relative">
+                <span className="absolute inset-y-0 left-3 flex items-center text-text-tertiary pointer-events-none">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={form.price ?? ''}
+                  onChange={(e) => onChange('price', e.target.value ? Number(e.target.value) : null)}
+                  data-testid={`${testIdPrefix}-price`}
+                  placeholder="0.00"
+                  className={`${inputCls} pl-6`}
+                />
+              </div>
+            </div>
+            <div>
+              <label className={labelCls}>Walmart link</label>
+              <input
+                value={form.walmart_link ?? ''}
+                onChange={(e) => onChange('walmart_link', e.target.value || null)}
+                data-testid={`${testIdPrefix}-walmart-link`}
+                placeholder="https://www.walmart.com/ip/..."
+                className={inputCls}
+              />
+            </div>
+          </div>
+        </div>
       </div>
-      <div>
-        <label className={labelCls}>Barcode</label>
-        <input
-          value={form.barcode ?? ''}
-          onChange={(e) => onChange('barcode', e.target.value || null)}
-          data-testid={`${testIdPrefix}-barcode`}
-          className={inputCls}
-        />
-      </div>
-      <div>
-        <label className={labelCls}>Servings/Container</label>
-        <input
-          type="number"
-          min="0"
-          value={form.servings_per_container ?? 1}
-          onChange={(e) => onChange('servings_per_container', Number(e.target.value) || 1)}
-          data-testid={`${testIdPrefix}-servings`}
-          className={inputCls}
-        />
-      </div>
-      <div>
-        <label className={labelCls}>Calories/Serving</label>
-        <input
-          type="number"
-          min="0"
-          value={form.calories_per_serving ?? 0}
-          onChange={(e) => onChange('calories_per_serving', Number(e.target.value) || 0)}
-          data-testid={`${testIdPrefix}-calories`}
-          className={inputCls}
-        />
-      </div>
-      <div>
-        <label className={labelCls}>Carbs/Serving</label>
-        <input
-          type="number"
-          min="0"
-          value={form.carbs_per_serving ?? 0}
-          onChange={(e) => onChange('carbs_per_serving', Number(e.target.value) || 0)}
-          data-testid={`${testIdPrefix}-carbs`}
-          className={inputCls}
-        />
-      </div>
-      <div>
-        <label className={labelCls}>Protein/Serving</label>
-        <input
-          type="number"
-          min="0"
-          value={form.protein_per_serving ?? 0}
-          onChange={(e) => onChange('protein_per_serving', Number(e.target.value) || 0)}
-          data-testid={`${testIdPrefix}-protein`}
-          className={inputCls}
-        />
-      </div>
-      <div>
-        <label className={labelCls}>Fat/Serving</label>
-        <input
-          type="number"
-          min="0"
-          value={form.fat_per_serving ?? 0}
-          onChange={(e) => onChange('fat_per_serving', Number(e.target.value) || 0)}
-          data-testid={`${testIdPrefix}-fat`}
-          className={inputCls}
-        />
-      </div>
-      <div>
-        <label className={labelCls}>Min Stock</label>
-        <input
-          type="number"
-          min="0"
-          value={form.min_stock_amount ?? 0}
-          onChange={(e) => onChange('min_stock_amount', Number(e.target.value) || 0)}
-          data-testid={`${testIdPrefix}-min-stock`}
-          className={inputCls}
-        />
-      </div>
-      <div>
-        <label className={labelCls}>Walmart Link</label>
-        <input
-          value={form.walmart_link ?? ''}
-          onChange={(e) => onChange('walmart_link', e.target.value || null)}
-          data-testid={`${testIdPrefix}-walmart-link`}
-          placeholder="https://www.walmart.com/ip/..."
-          className={inputCls}
-        />
-      </div>
-      <div>
-        <label className={labelCls}>Price</label>
-        <input
-          type="number"
-          min="0"
-          value={form.price ?? ''}
-          onChange={(e) => onChange('price', e.target.value ? Number(e.target.value) : null)}
-          data-testid={`${testIdPrefix}-price`}
-          placeholder="$0.00"
-          className={inputCls}
-        />
-      </div>
-    </div>
-  );
+    );
+  };
 
   /* ================================================================ */
   /*  RENDER                                                           */
@@ -526,17 +571,27 @@ export function SettingsPage() {
               data-testid="product-list"
               className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-3"
             >
-              {filteredProducts.map((p) => (
-                <div key={p.product_id} data-testid={`product-${p.product_id}`} className={productCardCls}>
-                  {editingId === p.product_id ? (
-                    /* Editing mode */
+              {filteredProducts.map((p) => {
+                const isEditing = editingId === p.product_id;
+                return (
+                <div
+                  key={p.product_id}
+                  data-testid={`product-${p.product_id}`}
+                  className={`${productCardCls}${isEditing ? ' col-span-full ring-2 ring-emerald-500/40 shadow-md' : ''}`}
+                >
+                  {isEditing ? (
+                    /* Editing mode — escapes the card grid to use full row width */
                     <div>
+                      <div className="flex items-baseline justify-between mb-4 pb-2 border-b border-border-light">
+                        <h4 className="m-0 text-base font-semibold">Editing: {p.name}</h4>
+                        <span className="text-xs text-text-tertiary">{p.barcode ?? 'no barcode'}</span>
+                      </div>
                       {renderProductFields(
                         editForm,
                         (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
                         'edit',
                       )}
-                      <div className="flex gap-2 mt-3">
+                      <div className="flex gap-2 mt-5 pt-4 border-t border-border-light">
                         <button
                           className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700"
                           onClick={() => saveProductMutation.mutate()}
@@ -600,7 +655,8 @@ export function SettingsPage() {
                     </div>
                   )}
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             {/* Delete confirmation dialog */}
