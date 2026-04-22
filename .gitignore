@@ -17,6 +17,11 @@ coverage/
 playwright-report/
 test-results/
 
+# Mutation-testing artifacts (scripts/mutation/, Stryker)
+.stryker-tmp/
+.stryker-tmp-*/
+reports/mutation/
+
 # Temp files
 *.png
 .playwright-mcp/

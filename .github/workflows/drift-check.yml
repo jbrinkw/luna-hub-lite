@@ -1,0 +1,145 @@
+name: drift-check
+
+# VERIFY.md "Gate: Drift — PR-level". On every PR to main, run
+# `supabase db push --dry-run --include-all --linked` against the
+# production project and classify the result:
+#   in_sync  → pass, no comment
+#   ahead    → pass, annotate PR with the pending migrations list
+#   behind   → FAIL (unrecoverable historical-order drift, as in 20260422040000)
+#   error    → FAIL (infrastructure problem to be triaged)
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      # Only rerun when migrations or the drift gate itself changes.
+      - 'supabase/migrations/**'
+      - 'supabase/config.toml'
+      - 'scripts/drift/**'
+      - '.github/workflows/drift-check.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  pull-requests: write # needed to annotate PRs with pending-migration lists
+
+jobs:
+  dry-run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Pin supabase CLI to the version in package.json devDependencies.
+      # Using the official setup action rather than npm install so the
+      # binary is directly on $PATH without pnpm workspace plumbing.
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.76.15
+
+      - name: Verify CLI
+        run: supabase --version
+
+      - name: Link to project
+        # SUPABASE_ACCESS_TOKEN → scoped PAT in repo secrets.
+        # Project ref is the prod Luna Hub Lite Supabase project.
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase link --project-ref btlfsxammjzkyluophgr
+
+      - name: Run drift check
+        id: drift
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        run: bash scripts/drift/check.sh
+        # We let non-zero propagate so the job fails on behind/error.
+        # ahead/in_sync exit 0 → job passes; PR annotation happens below.
+
+      - name: Upload drift artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-report
+          path: |
+            .verify/drift.json
+            .verify/drift.log
+          if-no-files-found: ignore
+
+      # Load the artifact into env so the github-script step reads the
+      # report from process.env instead of touching the filesystem.
+      - name: Load drift artifact into env
+        if: always() && github.event_name == 'pull_request'
+        id: load
+        run: |
+          if [[ -f .verify/drift.json ]]; then
+            {
+              echo 'DRIFT_REPORT<<EOF_DRIFT'
+              cat .verify/drift.json
+              echo
+              echo 'EOF_DRIFT'
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Annotate PR on drift
+        if: always() && github.event_name == 'pull_request' && env.DRIFT_REPORT != ''
+        uses: actions/github-script@v7
+        env:
+          DRIFT_REPORT: ${{ env.DRIFT_REPORT }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const raw = process.env.DRIFT_REPORT;
+            if (!raw) {
+              core.warning('DRIFT_REPORT env var is empty — skipping annotation.');
+              return;
+            }
+            let report;
+            try {
+              report = JSON.parse(raw);
+            } catch (e) {
+              core.warning(`Could not parse drift report: ${e.message}`);
+              return;
+            }
+
+            const state = report.state;
+            const pending = report.pending_migrations || [];
+
+            let body;
+            if (state === 'in_sync') {
+              core.info('Drift check: in sync with prod — no annotation needed.');
+              return;
+            } else if (state === 'ahead') {
+              body = [
+                '**Migration drift: forward-only**',
+                '',
+                `This PR adds ${pending.length} migration(s) not yet on prod:`,
+                '',
+                ...pending.map((m) => `- \`${m}\``),
+                '',
+                'This is expected when the PR introduces schema changes. The merge will trigger deployment which applies them. No action needed unless the migration list looks wrong.',
+              ].join('\n');
+            } else if (state === 'behind') {
+              body = [
+                '**Migration drift: UNRECOVERABLE (PR blocked)**',
+                '',
+                'Remote prod has migration(s) that local does NOT, ordered BEFORE the latest local migration timestamp. This is the same failure mode that bit us with `20260422040000` — `supabase db push` will refuse to apply.',
+                '',
+                'Fix by rebasing local migration filenames so their timestamps are strictly newer than the latest remote timestamp. See `.verify/drift.log` in the job artifacts for CLI output.',
+              ].join('\n');
+            } else {
+              body = [
+                '**Migration drift: CLI error**',
+                '',
+                'Drift gate could not complete. See `.verify/drift.log` in artifacts.',
+              ].join('\n');
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
