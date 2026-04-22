@@ -1,9 +1,8 @@
-import type { ToolDefinition, ToolContext, ExtensionToolContext } from '@luna-hub/app-tools';
-import { toolError } from '@luna-hub/app-tools';
+import type { ToolDefinition } from '@luna-hub/app-tools';
 import { JsonRpcRequest, JsonRpcResponse, jsonRpcSuccess, jsonRpcError, sseEvent, McpToolSchema } from './protocol';
 import { buildUserTools } from './registry';
 import { createServiceClient } from './supabase';
-import { validateToolArgs } from './validate';
+import { executeToolWithLogging } from './tool-logger';
 
 interface Env {
   MCP_SESSION: DurableObjectNamespace;
@@ -185,59 +184,13 @@ export class McpSession implements DurableObject {
           return jsonRpcError(rpc.id, -32602, `Unknown tool: ${toolName}`);
         }
 
-        const validationError = validateToolArgs(toolArgs, tool.inputSchema);
-        if (validationError) {
-          return jsonRpcSuccess(rpc.id, toolError(validationError));
-        }
-
-        const toolCtx: ToolContext = { userId: this.userId, supabase: this.supabase };
-        try {
-          if ('extensionName' in tool) {
-            const extensionName = (tool as any).extensionName as string | undefined;
-            if (!extensionName) {
-              return jsonRpcSuccess(rpc.id, toolError('Invalid extension tool definition'));
-            }
-            const { data: settings } = await this.supabase
-              .schema('hub')
-              .from('extension_settings')
-              .select('enabled')
-              .eq('user_id', this.userId)
-              .eq('extension_name', extensionName)
-              .eq('enabled', true)
-              .single();
-
-            if (!settings) {
-              return jsonRpcSuccess(rpc.id, toolError(`Configure ${extensionName} credentials in Hub settings.`));
-            }
-
-            const { data: decryptedJson, error: decryptErr } = await this.supabase
-              .schema('hub')
-              .rpc('get_extension_credentials_admin', {
-                p_user_id: this.userId,
-                p_extension_name: extensionName,
-              });
-
-            if (decryptErr || !decryptedJson) {
-              return jsonRpcSuccess(rpc.id, toolError(`Configure ${extensionName} credentials in Hub settings.`));
-            }
-
-            let credentials: Record<string, string>;
-            try {
-              credentials = JSON.parse(decryptedJson);
-            } catch {
-              return jsonRpcSuccess(rpc.id, toolError('Failed to parse extension credentials.'));
-            }
-            const extCtx: ExtensionToolContext = { ...toolCtx, credentials };
-            const result = await tool.handler(toolArgs, extCtx);
-            return jsonRpcSuccess(rpc.id, result);
-          } else {
-            const result = await tool.handler(toolArgs, toolCtx);
-            return jsonRpcSuccess(rpc.id, result);
-          }
-        } catch (err: any) {
-          console.error(`Tool ${toolName} error:`, err);
-          return jsonRpcSuccess(rpc.id, toolError(`Tool error: ${err.message}`));
-        }
+        // Route through executeToolWithLogging so this legacy DO path has the
+        // same observability/redaction/auth guarantees as the stateless path
+        // (mcp_tool_logs insert, schema validation, extension credential
+        // fetch, exception → generic tool_error). Previously this handler
+        // inlined its own tool dispatch and silently bypassed mcp_tool_logs.
+        const result = await executeToolWithLogging(toolName, toolArgs, tool, this.userId, this.supabase);
+        return jsonRpcSuccess(rpc.id, result);
       }
 
       default:

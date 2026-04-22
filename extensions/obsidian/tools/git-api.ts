@@ -29,13 +29,83 @@ export interface TreeEntry {
   type: 'blob' | 'tree';
 }
 
+/**
+ * SSRF guard — reject user-supplied URLs that point at loopback, link-local,
+ * cloud metadata, RFC1918, IPv6 loopback/link-local/ULA, mapped IPv4, or
+ * non-http(s) schemes. Mirrors the ha-api.ts policy since the GitHub Enterprise
+ * `github_api_url` is free-form user input exactly like `ha_url`.
+ *
+ * Returns the normalized origin (protocol + hostname + port, no trailing slash)
+ * when the URL is safe, or null if blocked or unparseable.
+ */
+function validateGitApiUrl(raw: string): string | null {
+  let parsed: URL;
+  try {
+    parsed = new URL(raw);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null;
+  const rawHost = parsed.hostname;
+  const ipv6 = rawHost.startsWith('[') && rawHost.endsWith(']') ? rawHost.slice(1, -1) : null;
+  const host = ipv6 ?? rawHost;
+  // IPv4-mapped IPv6 (e.g. ::ffff:10.0.0.1) — extract embedded IPv4
+  let mappedV4: string | null = null;
+  if (ipv6) {
+    const mapped = ipv6.match(/^::ffff:(?:([0-9a-f]{1,4}):([0-9a-f]{1,4})|(\d{1,3}(?:\.\d{1,3}){3}))$/i);
+    if (mapped) {
+      if (mapped[3]) {
+        mappedV4 = mapped[3];
+      } else {
+        const hi = parseInt(mapped[1]!, 16);
+        const lo = parseInt(mapped[2]!, 16);
+        mappedV4 = `${(hi >> 8) & 0xff}.${hi & 0xff}.${(lo >> 8) & 0xff}.${lo & 0xff}`;
+      }
+    }
+  }
+  const v4Candidates = [host, mappedV4].filter((h): h is string => !!h);
+  const isBlocked =
+    host === 'localhost' ||
+    host === '169.254.169.254' ||
+    host === 'metadata.google.internal' ||
+    host.endsWith('.internal') ||
+    host === '0.0.0.0' ||
+    host === '::1' ||
+    host === '::' ||
+    /^fe80:/i.test(host) ||
+    /^fd[0-9a-f]{0,2}:/i.test(host) ||
+    /^fc[0-9a-f]{0,2}:/i.test(host) ||
+    v4Candidates.some((h) => /^127\./.test(h)) ||
+    v4Candidates.some((h) => /^10\./.test(h)) ||
+    v4Candidates.some((h) => /^192\.168\./.test(h)) ||
+    v4Candidates.some((h) => /^169\.254\./.test(h)) ||
+    v4Candidates.some((h) => /^172\.(1[6-9]|2\d|3[01])\./.test(h));
+  if (isBlocked) return null;
+  // origin drops trailing slashes and normalizes case — matches what the old
+  // `(github_api_url || GITHUB_API).replace(/\/+$/, '')` produced.
+  return parsed.origin;
+}
+
 export function getGitCredentials(ctx: ExtensionToolContext): GitCredentials | null {
   const { github_token, github_repo, github_api_url } = ctx.credentials;
   if (!github_token || !github_repo) return null;
+  // Default GITHUB_API is a public hostname so skip the SSRF check on it.
+  // Any user-supplied override (self-hosted GitHub Enterprise) MUST pass the
+  // private-network / loopback filter — otherwise an attacker with write
+  // access to their own extension settings could aim the Worker's fetch at
+  // cloud metadata services or internal LAN IPs.
+  let apiUrl: string;
+  if (github_api_url && github_api_url.trim().length > 0) {
+    const validated = validateGitApiUrl(github_api_url);
+    if (!validated) return null;
+    apiUrl = validated;
+  } else {
+    apiUrl = GITHUB_API;
+  }
   return {
     token: github_token,
     repo: github_repo,
-    apiUrl: (github_api_url || GITHUB_API).replace(/\/+$/, ''),
+    apiUrl,
   };
 }
 
