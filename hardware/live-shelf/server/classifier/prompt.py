@@ -83,6 +83,26 @@ DIRECTION SEMANTICS:
     of that set. A populated multi_match must NEVER be paired with
     item_id = "unknown"; item_id names the primary/largest removed item.
 
+IN_FLIGHT CANDIDATES (ADD events):
+A candidate with why_candidate="in_flight" is a specific lot the user just
+picked UP from the shelf and is expected to put back — possibly partially
+consumed. Its expected_weight_g is what the container weighed when it LEFT
+the shelf (the pickup weight), NOT the catalog / full weight. For an ADD
+event on a shelf that has an in_flight candidate:
+
+  - If the added mass is LESS THAN OR EQUAL TO the in_flight candidate's
+    expected_weight_g (within ~15% tolerance), this is almost certainly
+    the SAME lot coming back — the user drank, ate, or otherwise consumed
+    some of it. PREFER this candidate with action="added". Do NOT pick a
+    catalog candidate of the same product just because its "full" weight
+    is closer to the delta — a partially consumed returning bottle is
+    the DEFAULT interpretation, not an edge case.
+  - If the added mass is SIGNIFICANTLY HEAVIER than the in_flight
+    expected_weight_g (ratio > 1.15), the user has likely put something
+    different in the slot. Only then prefer a catalog candidate.
+  - Return action="added" even for a returning in-flight lot — the
+    handler recognises the lot id and computes consumption automatically.
+
 WHEN TO USE "unknown":
 Only when the evidence genuinely does not converge on any answer — no subset
 of candidates fits the weight delta AND no interpretable visual change is
@@ -131,6 +151,13 @@ INSTRUCTION_TEXT = (
     "delta if that candidate is visibly present in BOTH frames — that item "
     "was not involved in this event. Do not pick an item that is absent "
     "from both frames. "
+    ""
+    "For ADD events, if any candidate has why_candidate=\"in_flight\", the "
+    "user just lifted that specific lot and its expected_weight_g is the "
+    "pickup weight. If the placed mass is <= that pickup weight (within "
+    "~15%), pick the in_flight candidate with action=\"added\" — this is "
+    "the same item returning, possibly partially consumed. Do NOT pick a "
+    "catalog candidate of the same SKU in this case. "
     ""
     "For REMOVE events that account for more than one candidate, populate "
     "\"multi_match\" with every candidate that left. Set \"item_id\" to "

@@ -16,7 +16,7 @@ is always the final entry after ranking.
 from __future__ import annotations
 
 import math
-from typing import Iterable
+from typing import Any, Iterable
 
 from .models import (
     UNKNOWN_CANDIDATE_ID,
@@ -264,9 +264,12 @@ def pool_for_add(
     # tests that don't implement get_in_flight_lots.
     get_in_flight = getattr(source, "get_in_flight_lots", None)
     in_flight_lots: list[Candidate] = []
+    in_flight_lot_rows: list[Any] = []
     if callable(get_in_flight):
-        lots = _call_source(get_in_flight, shelf_id=shelf_id)
-        in_flight_lots = [_from_lot(lot, "in_flight") for lot in lots]
+        in_flight_lot_rows = list(_call_source(get_in_flight, shelf_id=shelf_id))
+        in_flight_lots = [
+            _from_lot(lot, "in_flight") for lot in in_flight_lot_rows
+        ]
 
     # Branch 1: recently out lots — optionally shelf-scoped.
     recently_out = [
@@ -298,6 +301,26 @@ def pool_for_add(
     catalog_not_on_shelf = [
         _from_product(p) for p in source.get_certified_not_on_shelf()
     ]
+
+    # In-flight reunite guard: when a product has a lot in-flight on this
+    # shelf, suppress the product's catalog entry. Rationale: both the
+    # in-flight lot and the catalog product carry the same SKU identity
+    # but different expected_weight_g semantics (pickup_weight_g vs
+    # full/gross weight). A partially-consumed returning bottle (|delta|
+    # lighter than the catalog weight) lets the classifier reason its
+    # way to the catalog entry with a "partially full" justification,
+    # which mints a brand-new lot and orphans the in-flight one. By
+    # dropping the catalog dup, the only way for the model to represent
+    # "same SKU back on shelf" is via the in-flight lot_id — which the
+    # handler routes to _apply_add_against_in_flight_lot correctly.
+    in_flight_product_ids = {
+        lot.product_id for lot in in_flight_lot_rows
+    }
+    if in_flight_product_ids:
+        catalog_not_on_shelf = [
+            c for c in catalog_not_on_shelf
+            if c.candidate_id not in in_flight_product_ids
+        ]
 
     # In-flight first so it wins duplicate-id collisions (same lot listed
     # as in_flight AND recently_out when the status just flipped).
