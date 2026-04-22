@@ -414,3 +414,86 @@ def test_use_return_consumed_with_positive_consumed_still_emits(
     assert len(emitter.calls) == 1
     assert emitter.calls[0]["event_kind"] == "consumed"
     assert emitter.calls[0]["delta_g"] == pytest.approx(-42.0)
+
+
+# ---------------------------------------------------------------------------
+# Bug B fix 2026-04-22: in_flight_pickup emits to cloud
+# ---------------------------------------------------------------------------
+
+
+def test_in_flight_pickup_emits_dedicated_event_kind(conn, seeded):
+    """``in_flight_pickup`` resolution must produce a cloud event with
+    ``event_kind='in_flight_pickup'`` so the cloud handler stamps
+    stock_lots.in_flight_since without mutating qty.
+
+    Before the 2026-04-22 fix, PATTERN_TO_EVENT_KIND['in_flight_pickup']
+    was None and the emit was silently dropped — cloud /chef/inventory
+    diverged from Pi lots by hours until the terminal return emitted
+    a consumed event.
+    """
+    emitter = _CapturingEmitter(conn)
+    adapter = RepoReconcilerAdapter(
+        conn, db_lock=None, cloud_emitter=emitter
+    )
+
+    adapter.write_resolution(
+        SessionResolution(
+            session_id=seeded["session_id"],
+            pattern="in_flight_pickup",
+            lot_id=seeded["lot_id"],
+            consumed_g=None,
+            confidence=0.95,
+            add_event_id=None,
+            remove_event_id=seeded["remove_event_id"],
+        )
+    )
+
+    assert len(emitter.calls) == 1, (
+        "in_flight_pickup must emit exactly one cloud event (was 0 before "
+        "the 2026-04-22 fix)"
+    )
+    payload = emitter.calls[0]
+    assert payload["event_kind"] == "in_flight_pickup"
+    assert payload["occurred_at"] == seeded["remove_ts"], (
+        "in_flight_pickup is a REMOVE-side pattern — occurred_at should "
+        "be the pickup (remove) event timestamp"
+    )
+    # Delta is informational for this kind — cloud ignores it — but
+    # still needs to be signed consistently (negative for mass-removed).
+    assert payload["delta_g"] == pytest.approx(-250.0), (
+        "delta_g should mirror the remove event's magnitude as a "
+        "negative value (mass left the shelf)"
+    )
+    # pi_event_id is populated from the REMOVE event id so the cloud
+    # viewer can fetch the pickup frame.
+    assert payload["pi_event_id"] == seeded["remove_event_id"]
+
+
+def test_in_flight_pickup_without_remove_event_emits_with_zero_delta(
+    conn, seeded,
+):
+    """Defence in depth — if a malformed resolution somehow arrives with
+    no remove_event_id, we still emit the marker (delta_g=0 is legal for
+    in_flight_pickup since cloud ignores the field). The old delta guard
+    would have suppressed this emit entirely; the new guard special-cases
+    in_flight_pickup."""
+    emitter = _CapturingEmitter(conn)
+    adapter = RepoReconcilerAdapter(
+        conn, db_lock=None, cloud_emitter=emitter
+    )
+
+    adapter.write_resolution(
+        SessionResolution(
+            session_id=seeded["session_id"],
+            pattern="in_flight_pickup",
+            lot_id=seeded["lot_id"],
+            consumed_g=None,
+            confidence=0.95,
+            add_event_id=None,
+            remove_event_id=None,
+        )
+    )
+
+    assert len(emitter.calls) == 1
+    assert emitter.calls[0]["event_kind"] == "in_flight_pickup"
+    assert emitter.calls[0]["delta_g"] == pytest.approx(0.0)

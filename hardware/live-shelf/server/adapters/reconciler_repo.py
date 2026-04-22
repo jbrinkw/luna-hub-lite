@@ -339,7 +339,10 @@ class RepoReconcilerAdapter:
             # Derive signed delta_g. Sign convention: negative=stock drop
             # (consumed), positive=stock rise (refilled/added).
             delta_g = self._derive_delta_g_from_resolution(resolution)
-            if delta_g == 0.0:
+            # in_flight_pickup doesn't mutate qty on either side — the
+            # cloud handler ignores delta_g for that kind. Let a 0-delta
+            # through so the in_flight_since marker still lands.
+            if delta_g == 0.0 and resolution.pattern != "in_flight_pickup":
                 # No quantity change — nothing meaningful to sync.
                 return
 
@@ -462,6 +465,19 @@ class RepoReconcilerAdapter:
                 )
                 if ev is not None:
                     return abs(float(ev.delta_g or 0.0))
+            return 0.0
+        if pattern == "in_flight_pickup":
+            # The cloud handler for in_flight_pickup stamps in_flight_since
+            # without mutating qty. The "delta" here is informational —
+            # we pass the pickup event's mass (negative since stock was
+            # removed from the shelf) so downstream analytics can still
+            # reason about the mass moved, but cloud-side qty is unchanged.
+            if resolution.remove_event_id:
+                ev = storage_repo.get_event(
+                    self._conn, resolution.remove_event_id
+                )
+                if ev is not None:
+                    return -abs(float(ev.delta_g or 0.0))
             return 0.0
         return 0.0
 

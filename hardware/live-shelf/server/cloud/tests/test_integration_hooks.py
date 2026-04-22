@@ -573,9 +573,21 @@ class TestPatternMap:
         assert PATTERN_TO_EVENT_KIND["new_arrival"] == "added"
 
     def test_v2_patterns_are_skipped(self):
+        # in_flight_pickup was removed from this list in the 2026-04-22
+        # Pi↔Cloud sync audit fix — see test_in_flight_pickup_emits_*.
         for p in ("swap_in", "swap_out", "relocation", "unknown",
-                  "no_op", "use_return_no_consumption", "in_flight_pickup"):
+                  "no_op", "use_return_no_consumption"):
             assert PATTERN_TO_EVENT_KIND[p] is None
+
+    def test_in_flight_pickup_emits_as_dedicated_kind(self):
+        # Bug B fix 2026-04-22: in_flight_pickup now maps to the
+        # like-named cloud event_kind so stock_lots.in_flight_since gets
+        # stamped without mutating qty. Before this fix the mapping was
+        # None and cloud state diverged from Pi lots (chocolate-milk
+        # invisible on /chef/inventory because the companion
+        # consumed_or_removed row zero'd qty while Pi still tracked
+        # the bottle as physically in-flight).
+        assert PATTERN_TO_EVENT_KIND["in_flight_pickup"] == "in_flight_pickup"
 
 
 # ---------------------------------------------------------------------------

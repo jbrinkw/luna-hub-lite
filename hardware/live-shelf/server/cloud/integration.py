@@ -110,6 +110,10 @@ REMOVE_SIDE_PATTERNS: frozenset[str] = frozenset({
     "in_flight_ttl_expired",
     "in_flight_return",
     "in_flight_replaced_new_item",
+    # in_flight_pickup fires at REMOVE time — occurred_at should be the
+    # pickup event's wall clock so the cloud's in_flight_since matches
+    # when the user physically picked up the item.
+    "in_flight_pickup",
 })
 ADD_SIDE_PATTERNS: frozenset[str] = frozenset({
     "new_arrival",
@@ -183,9 +187,14 @@ PATTERN_TO_EVENT_KIND: dict[str, Optional[str]] = {
     "relocation": None,
     "unknown": None,
     "no_op": None,
-    # in_flight_pickup is bookkeeping only (lot picked up but not
-    # consumed yet); the terminal return/reap emits the actual event.
-    "in_flight_pickup": None,
+    # Bug B fix 2026-04-22: in_flight_pickup now DOES emit to cloud as a
+    # dedicated in_flight_pickup event_kind, which the cloud-side
+    # apply_shelf_event (migration 20260425080000) stamps onto
+    # stock_lots.in_flight_since without mutating qty. This closes the
+    # divergence window where the Pi tracks a bottle as in-flight while
+    # the companion consumed_or_removed row zero'd cloud qty, hiding the
+    # lot from /chef/inventory entirely.
+    "in_flight_pickup": "in_flight_pickup",
 }
 
 
@@ -477,7 +486,11 @@ def backfill_missing_outbox_events(
                AND sr.pattern IN (
                    'use_return_consumed', 'topped_up', 'consumed_or_removed',
                    'new_arrival', 'in_flight_return',
-                   'in_flight_replaced_new_item', 'in_flight_ttl_expired'
+                   'in_flight_replaced_new_item', 'in_flight_ttl_expired',
+                   -- Bug B fix 2026-04-22: in_flight_pickup now emits to
+                   -- cloud as a dedicated event_kind that stamps
+                   -- stock_lots.in_flight_since.
+                   'in_flight_pickup'
                )
              ORDER BY sr.created_at ASC
             """,
@@ -648,6 +661,12 @@ def _derive_backfill_delta(
         return (-_ev_delta(remove_event_id), occurred_at)
     if pattern == "new_arrival":
         return (_ev_delta(add_event_id), occurred_at)
+    if pattern == "in_flight_pickup":
+        # Cloud handler doesn't consume delta_g for this pattern, but we
+        # pass the pickup mass (negative) so downstream analytics are
+        # consistent with the live-path emit. See reconciler_repo
+        # ._derive_delta_g_from_resolution for the mirror.
+        return (-_ev_delta(remove_event_id), occurred_at)
     return (0.0, occurred_at)
 
 
