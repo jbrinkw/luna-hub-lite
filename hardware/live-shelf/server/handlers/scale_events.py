@@ -33,6 +33,7 @@ from flask import Blueprint, jsonify, request
 from .. import shelves as shelf_registry
 from ..camera import session_capture
 from ..camera.daemon import CameraDaemon, now_iso_utc_ms, parse_iso_utc
+from ..camera.extract import FrameNotAvailableError, frame_at_with
 from ..classifier.classify import classify_event
 from ..classifier.models import (
     CandidateSource,
@@ -317,6 +318,24 @@ class ScaleHandler:
         # cloud never hears about them. Duck-typed so tests can pass a
         # stub with a single ``post_product_tare`` method.
         cloud_client: Any | None = None,
+        # Optional catch-all camera daemon. When provided + shelf_id is
+        # ``catch_all`` on a non-noise event, we grab a JPEG from this
+        # daemon's ring buffer at ingress and write it to
+        # ``events/<event_id>/{before,after}.jpg`` so the local /event
+        # detail page and the cloud event-viewer have pictures. The
+        # catch-all has no brightness-driven session_capture pipeline
+        # (CATCH_ALL_SCALE_PLAN.md §6.2 — "no session_capture hookup");
+        # without this inline capture, catch-all events have no frames
+        # on disk and the UI shows placeholder tiles forever.
+        catch_all_camera: Optional[CameraDaemon] = None,
+        # Photo-delay (CATCH_ALL_SCALE_PLAN.md §4.3/§5.1). Time (s)
+        # between a weight-stable event firing and the frame we grab
+        # from the catch-all ring. 0.0 = grab the frame closest to the
+        # event's Pi-received ts. The ESP's stability window already
+        # introduces ~500 ms of settle, so 0 is fine for most loads; a
+        # nonzero value lets operators push the photo later into the
+        # placement animation if the scene settles slowly.
+        catch_all_photo_delay_s: float = 0.0,
     ) -> None:
         self._conn = conn
         self._db_lock = db_lock
@@ -378,6 +397,10 @@ class ScaleHandler:
         # Cloud client — used only by the tare-capture push-back. No-op
         # when None; the tare capture still lands locally.
         self._cloud_client = cloud_client
+        # Catch-all camera daemon (for inline frame capture on catch-all
+        # events). May be None in tests and when catch-all is disabled.
+        self._catch_all_camera = catch_all_camera
+        self._catch_all_photo_delay_s = float(catch_all_photo_delay_s)
         # LiveTrack import poller — when attached, its snapshot drives the
         # import-arm interception branch in handle_scale_event. Duck-typed
         # so tests can pass a stub with a single ``snapshot()`` method.
@@ -684,6 +707,118 @@ class ScaleHandler:
         p = self._events_root / event_id
         p.mkdir(parents=True, exist_ok=True)
         return p
+
+    def _capture_catch_all_frames(
+        self,
+        event_id: str,
+        pi_received_ts: str,
+    ) -> tuple[Optional[str], Optional[str]]:
+        """Write before/after JPEGs for a catch-all event from the ring buffer.
+
+        Catch-all events have no brightness-driven ``session_capture``
+        pipeline (the catch-all ``CameraDaemon`` is constructed with
+        ``brightness_detection_enabled=False`` in ``server.app`` and
+        ``session_capture.register`` is wired to the live-shelf daemon
+        only). Without this inline capture, catch-all events never get
+        JPEGs on disk — so the Pi's ``/event/<event_id>/before.jpg``
+        route 404s and the cloud event viewer shows placeholder tiles.
+
+        We grab a single frame from the catch-all camera's ring buffer
+        at ``pi_received_ts + photo_delay`` and copy it to both
+        ``before.jpg`` and ``after.jpg``. The two filenames are the same
+        frame by design — the catch-all weight-session is a single-state
+        interaction (user places item → ESP fires event). Before/after
+        is a live-shelf concept (door open → multi-event session →
+        door close) that doesn't map onto the catch-all model.
+
+        Returns ``(before_path, after_path)`` — both may be None when
+        the camera is absent, the ring is empty, or the write fails.
+        Never raises; on any failure we log and return (None, None).
+        """
+        camera = self._catch_all_camera
+        if camera is None:
+            return None, None
+        try:
+            out_dir = self._event_dir(event_id)
+        except OSError:
+            log.warning(
+                "catch_all frames: mkdir failed for event %s",
+                event_id, exc_info=True,
+            )
+            return None, None
+        # Target ts = event_ts + photo_delay. Ring holds ~30 s of frames;
+        # photo_delay defaults to 0 s, so we pull the frame whose ts is
+        # closest to the event's stability declaration.
+        jpeg_path: Optional[Path] = None
+        try:
+            written = frame_at_with(
+                camera,
+                pi_received_ts,
+                offset_seconds=self._catch_all_photo_delay_s,
+                output_dir=out_dir,
+                filename_prefix="catch_all",
+                max_slop_seconds=2.0,
+            )
+            jpeg_path = Path(written)
+        except FrameNotAvailableError as exc:
+            # Ring miss: frame outside slop or ring empty. Fall back to
+            # the ring's most-recent frame — still better than no image
+            # at all (operators can at least see the tail of the scene).
+            log.info(
+                "catch_all frames: ring miss for event %s ts=%s (%s); "
+                "falling back to current_frame",
+                event_id, pi_received_ts, exc,
+            )
+            try:
+                buf = camera.current_frame_jpeg()
+                if buf:
+                    jpeg_path = out_dir / "catch_all-current.jpg"
+                    jpeg_path.write_bytes(buf)
+            except Exception:  # pragma: no cover - defensive
+                log.warning(
+                    "catch_all frames: current_frame_jpeg failed for %s",
+                    event_id, exc_info=True,
+                )
+                return None, None
+        except Exception:  # pragma: no cover - defensive
+            log.warning(
+                "catch_all frames: capture threw for event %s",
+                event_id, exc_info=True,
+            )
+            return None, None
+        if jpeg_path is None or not jpeg_path.is_file():
+            return None, None
+        # Copy the single captured frame to the canonical before/after
+        # names. Same bytes on disk — the catch-all has a single-frame
+        # model; the duplication is for the Flask + cloud routes that
+        # expect ``before.jpg`` AND ``after.jpg`` per event.
+        before_path: Optional[str] = None
+        after_path: Optional[str] = None
+        try:
+            before_dst = out_dir / "before.jpg"
+            shutil.copyfile(jpeg_path, before_dst)
+            before_path = str(before_dst.resolve())
+        except OSError:
+            log.warning(
+                "catch_all frames: copy to before.jpg failed for %s",
+                event_id, exc_info=True,
+            )
+        try:
+            after_dst = out_dir / "after.jpg"
+            shutil.copyfile(jpeg_path, after_dst)
+            after_path = str(after_dst.resolve())
+        except OSError:
+            log.warning(
+                "catch_all frames: copy to after.jpg failed for %s",
+                event_id, exc_info=True,
+            )
+        # The intermediate ring-capture file is redundant once copied —
+        # clean it up so the event dir only contains the canonical pair.
+        try:
+            jpeg_path.unlink()
+        except OSError:
+            pass
+        return before_path, after_path
 
     def _capture_frames(
         self,
@@ -1109,6 +1244,175 @@ class ScaleHandler:
             occurred_at=event_ts,
         )
         return True
+
+    def _maybe_reunite_with_in_flight_lot(
+        self,
+        *,
+        classification: dict[str, Any],
+        direction: str,
+        delta_g: Optional[float],
+        shelf_id: str,
+    ) -> dict[str, Any]:
+        """Defense-in-depth reunite guard for returning in-flight lots.
+
+        IN_FLIGHT_TRACKER_PLAN.md / in-flight-reunite-fix: the classifier
+        occasionally picks a product_id (catalog_not_on_shelf candidate)
+        for an ADD event even when the same product already has an
+        in-flight lot on the same shelf — typically when the placed
+        weight is well under the catalog weight and the AI rationalises
+        it as a "partially full container". In that case the default
+        apply path mints a brand-new lot and orphans the in-flight one,
+        never computing the consumption.
+
+        This helper catches that case BEFORE the confidence gate or the
+        lot-resolve loop:
+
+          * direction must be ``add``
+          * ``item_id`` must resolve to a product (``get_lot`` miss,
+            ``get_product`` hit) — i.e. the classifier picked a catalog
+            candidate, not a lot candidate.
+          * an in-flight lot with that same product_id must exist on
+            this shelf, with a pickup_weight_g large enough to cover
+            the observed delta (within the in-flight-reunite tolerance
+            of pickup_weight_g × new_item_weight_ratio).
+
+        When all three hold, the classification dict is rewritten in
+        place-ish (a shallow copy is returned): ``item_id`` is swapped
+        for the in-flight ``lot_id`` and ``confidence`` is bumped to
+        1.0 so the outer status decision treats this as a confident
+        identification. ``reasoning`` is augmented with a short note
+        documenting the redirect. The candidate_pool_used is preserved
+        so validation downstream still works (the in-flight lot_id is
+        present in the pool per candidate_pool.py).
+
+        Returns the (possibly rewritten) classification dict. The
+        original dict is never mutated — callers that need to preserve
+        audit state still have it.
+        """
+
+        if direction != "add":
+            return classification
+        if not isinstance(classification, dict):
+            return classification
+
+        item_id = classification.get("item_id")
+        if not item_id or item_id in {UNKNOWN_CANDIDATE_ID, "unknown"}:
+            return classification
+
+        # Only redirect when the picked id is a product_id (catalog branch),
+        # NOT a lot_id. If get_lot() hits, the existing in-flight branch
+        # in _apply_lot_update_from_classification already handles it.
+        try:
+            lot_row = storage_repo.get_lot(self._conn, str(item_id))
+        except Exception:  # pragma: no cover - defensive
+            return classification
+        if lot_row is not None:
+            return classification
+
+        try:
+            product_row = storage_repo.get_product(self._conn, str(item_id))
+        except Exception:  # pragma: no cover - defensive
+            return classification
+        if product_row is None:
+            return classification
+
+        # Is there an in-flight lot for this product on this shelf?
+        try:
+            candidates = storage_repo.list_in_flight_lots(
+                self._conn, shelf_id=shelf_id,
+            )
+        except TypeError:
+            # Storage helper may pre-date the shelf_id kwarg. Fall back
+            # to the un-scoped query and filter by shelf_id in Python.
+            try:
+                candidates = storage_repo.list_in_flight_lots(self._conn)
+            except Exception:  # pragma: no cover - defensive
+                return classification
+            candidates = [
+                lot for lot in candidates
+                if getattr(lot, "shelf_id", "live_shelf") == shelf_id
+            ]
+        except Exception:  # pragma: no cover - defensive
+            return classification
+
+        matches = [
+            lot for lot in candidates
+            if lot.product_id == product_row.product_id
+        ]
+        if not matches:
+            return classification
+
+        # Prefer the oldest in-flight lot (matches list_in_flight_lots
+        # ordering). Tolerance check: the placed delta must be
+        # consistent with the in-flight pickup_weight_g (≤ the
+        # replacement ratio). If it's way heavier than pickup_weight,
+        # the user genuinely placed a different / fuller item — leave
+        # the original classification alone so the replacement path
+        # closes the old in-flight lot as ``out`` via the existing
+        # handler code path (after the outer call re-resolves item_id
+        # as a product and mints a new lot; the in-flight lot will be
+        # reaped by TTL if it stays orphaned, and we log loudly here).
+        lot = matches[0]
+        pickup = lot.pickup_weight_g
+        if pickup is None or pickup <= 0:
+            log.warning(
+                "reunite guard: in-flight lot %s has pickup_weight_g=%r; "
+                "cannot validate delta. Skipping redirect.",
+                lot.lot_id, pickup,
+            )
+            return classification
+
+        abs_delta = abs(float(delta_g or 0.0))
+        max_plausible = float(pickup) * float(self._new_item_weight_ratio)
+        if abs_delta > max_plausible:
+            log.info(
+                "reunite guard: delta %.1fg exceeds in-flight lot %s "
+                "pickup=%.1fg × ratio=%.2f=%.1fg — leaving catalog "
+                "product_id pick in place (replacement path will apply)",
+                abs_delta, lot.lot_id, pickup,
+                self._new_item_weight_ratio, max_plausible,
+            )
+            return classification
+
+        log.warning(
+            "reunite guard: classifier picked product_id %s but an "
+            "in-flight lot %s exists on shelf=%s for the same product "
+            "(pickup=%.1fg, delta=%.1fg). Redirecting item_id to lot_id "
+            "so the return branch runs and consumption is recorded.",
+            str(item_id)[:8], lot.lot_id[:8], shelf_id, pickup, abs_delta,
+        )
+        rewritten = dict(classification)
+        rewritten["item_id"] = lot.lot_id
+        # Bump confidence to 1.0 so the outer status-decision treats this
+        # as a confident identification. The in-flight match is arithmetic
+        # truth (pickup_weight is tracked by the handler itself), not a
+        # visual guess — the original confidence reflected the AI's
+        # uncertainty about the catalog-vs-partial interpretation, which
+        # this redirect resolves.
+        rewritten["confidence"] = 1.0
+        reasoning = rewritten.get("reasoning")
+        note = (
+            f" [reunite guard: redirected to in-flight lot {lot.lot_id[:8]}]"
+        )
+        if isinstance(reasoning, str):
+            rewritten["reasoning"] = reasoning + note
+        else:
+            rewritten["reasoning"] = note.strip()
+        # Stamp meta for audit so the review UI + logs can see the rewrite.
+        meta = rewritten.get("meta")
+        if not isinstance(meta, dict):
+            meta = {}
+        meta = dict(meta)
+        meta["reunite_redirect"] = {
+            "original_item_id": str(item_id),
+            "redirected_lot_id": lot.lot_id,
+            "product_id": product_row.product_id,
+            "shelf_id": shelf_id,
+            "pickup_weight_g": pickup,
+            "delta_g": abs_delta,
+        }
+        rewritten["meta"] = meta
+        return rewritten
 
     def _apply_lot_update_from_classification(
         self,
@@ -1955,6 +2259,39 @@ class ScaleHandler:
             },
         )
 
+        # Catch-all frame capture (CATCH_ALL_SCALE_PLAN.md §6.2 —
+        # "apply-path frame pick reads from the catch-all daemon's ring
+        # buffer at event_ts + CATCH_ALL_PHOTO_DELAY_S"). The catch-all
+        # has no brightness-driven session_capture, so frames are not
+        # written by the close-hook pathway — they must be grabbed
+        # inline off the ring or the event has no pictures on disk and
+        # both the local /event/<id> page and the cloud event viewer
+        # show placeholder tiles. Best-effort; failures never block the
+        # ingress response (the row is already committed).
+        if shelf_id == "catch_all" and self._catch_all_camera is not None:
+            try:
+                ca_before, ca_after = self._capture_catch_all_frames(
+                    event_id, pi_received_ts,
+                )
+                self._lc_event(
+                    event_id,
+                    actor="fast_path",
+                    reason_code=(
+                        ReasonCode.FRAMES_COPIED
+                        if (ca_before or ca_after)
+                        else ReasonCode.FRAMES_COPY_ERROR
+                    ),
+                    payload={
+                        "source": "catch_all_ring",
+                        "before_path": ca_before,
+                        "after_path": ca_after,
+                    },
+                )
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "catch_all frames: unexpected raise for %s", event_id,
+                )
+
         # If a matching closed session is ALREADY available at record
         # time (post-close event: scale stabilized after the door already
         # shut), classify inline on a best-effort basis without blocking.
@@ -2465,23 +2802,54 @@ class ScaleHandler:
                 # returns no match. Without this check, the sweeper
                 # marks events failed that the close-hook would have
                 # classified seconds later.
+                #
+                # Bound the window by WALL-CLOCK (``datetime('now')``),
+                # NOT by the event's created_at. The previous predicate
+                # (``ended_at + 30s >= event.created_at``) was trivially
+                # true for any session that bracketed the event, which
+                # meant events from closed sessions hours ago stayed in
+                # the defer loop forever — the sweeper logged
+                # "waiting for close-hook" every 10 s for events that
+                # had aged tens of thousands of seconds. The close-hook
+                # race is measured in SECONDS; 60 s of wall-clock grace
+                # is a generous upper bound and lets genuinely stranded
+                # events (especially catch-all ones that have no
+                # close-hook at all) fall through to the "mark failed"
+                # branch.
+                #
+                # Also gate on ``shelf_id``: catch-all sessions never
+                # have session_capture frames (the catch-all camera
+                # daemon runs with ``brightness_detection_enabled=False``
+                # and ``session_capture.register`` is wired to the
+                # live-shelf daemon only; catch-all frames are captured
+                # inline at ingress — see ``_capture_catch_all_frames``
+                # above). Waiting for a close-hook that will never fire
+                # just keeps the event stuck in pending.
                 try:
                     with self._db_lock:
                         db_sess = self._conn.execute(
                             """
-                            SELECT session_id, ended_at
+                            SELECT session_id, ended_at, shelf_id
                               FROM sessions
                              WHERE started_at <= ?
                                AND (ended_at IS NULL OR
-                                    datetime(ended_at, '+30 seconds') >= datetime(?))
+                                    datetime(ended_at, '+60 seconds')
+                                    >= datetime('now'))
                              ORDER BY started_at DESC
                              LIMIT 1
                             """,
-                            (created_at_iso, created_at_iso),
+                            (created_at_iso,),
                         ).fetchone()
                 except Exception:  # pragma: no cover - defensive
                     db_sess = None
-                if db_sess is not None:
+                # Only defer when the matched session is a live-shelf
+                # (brightness-driven). Catch-all sessions have no
+                # close-hook + no session_capture frames; deferring
+                # them strands the event.
+                if (
+                    db_sess is not None
+                    and (db_sess[2] or "live_shelf") == "live_shelf"
+                ):
                     log.info(
                         "sweeper: event %s (age=%.1fs) falls inside recently "
                         "closed session %s — waiting for close-hook to "

@@ -772,6 +772,16 @@ def create_app(
         # calls it inside a broad try/except so cloud errors never
         # block local writes.
         cloud_client=cloud_client,
+        # Catch-all camera daemon used for inline frame capture at
+        # ingress (CATCH_ALL_SCALE_PLAN.md §6.2). The catch-all has no
+        # brightness-driven session_capture pipeline; without this the
+        # handler has no source for ``events/<event_id>/before.jpg`` +
+        # ``after.jpg`` and both the local /event page and the cloud
+        # event viewer render placeholder tiles. May be None on hosts
+        # where the second USB camera isn't plugged in — in that case
+        # the handler silently skips the capture.
+        catch_all_camera=catch_all_camera,
+        catch_all_photo_delay_s=cfg.catch_all_photo_delay_s,
     )
 
     # --- WeightHandler (catch-all session driver) -----------------------
