@@ -40,6 +40,17 @@ interface NutritionData {
   carbs: string;
   fat: string;
   protein: string;
+  /**
+   * Net product weight per container in grams. Editable by the user and
+   * written back to `products.net_weight_g` on save. When the product
+   * row doesn't have a net_weight_g on file, we derive a default from
+   * `servings_per_container × serving_weight_g` (if the serving_weight_g
+   * column is populated, often from OFF). User can override either way.
+   * Kept as a string so the input is controllable in edit; parsed at use.
+   */
+  netWeightG: string;
+  /** Editable serving weight (g). Same story: derived when net/spc known. */
+  servingWeightG: string;
 }
 
 interface ProductRow {
@@ -50,6 +61,7 @@ interface ProductRow {
   calories_per_serving: number | null;
   carbs_per_serving: number | null;
   fat_per_serving: number | null;
+  serving_weight_g: number | null;
   protein_per_serving: number | null;
   net_weight_g: number | null;
   tare_weight_g: number | null;
@@ -333,7 +345,7 @@ export function LiveTrackImportPage() {
         const { data: existing } = await chefbyte()
           .from('products')
           .select(
-            'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type',
+            'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g',
           )
           .eq('user_id', user.id)
           .eq('barcode', barcode)
@@ -407,6 +419,14 @@ export function LiveTrackImportPage() {
             protein_per_serving: s?.protein_per_serving ?? offProt ?? 0,
             default_shelf_life_days: s?.default_shelf_life_days ?? null,
             net_weight_g: off?.product_quantity ?? null,
+            serving_weight_g: (() => {
+              // Derive from OFF's serving_size parse when available — same
+              // regex as the offSpc derivation above.
+              const servingSize = off?.serving_size ?? null;
+              const m = servingSize ? String(servingSize).match(/\((\d+(?:\.\d+)?)\s*g\)/i) : null;
+              const g = m ? Number(m[1]) : null;
+              return g && g > 0 ? g : null;
+            })(),
             container_type: null,
             unit_type: null,
             // Running a product through the LiveTrack Import wizard is
@@ -421,7 +441,7 @@ export function LiveTrackImportPage() {
             .from('products')
             .insert({ user_id: user.id, ...productFields })
             .select(
-              'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type',
+              'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g',
             )
             .single();
           if (insErr || !created) {
@@ -438,12 +458,25 @@ export function LiveTrackImportPage() {
           state: 'waiting_scale',
         });
 
+        // Derive net_weight_g if missing but spc × serving_weight_g is
+        // computable. Jeremy's ask: a product with per-serving grams +
+        // spc should still unlock the auto-tare path even if the catalog
+        // didn't populate net_weight_g directly (common on analyze-product
+        // AI outputs where OFF carried serving_size but no product_quantity).
+        const spcN = Number(product.servings_per_container ?? 0);
+        const swN = Number(product.serving_weight_g ?? 0);
+        const derivedNet =
+          spcN > 0 && swN > 0 ? Math.round(spcN * swN * 100) / 100 : null;
+        const netW = product.net_weight_g ?? derivedNet;
+
         const nut: NutritionData = {
           servingsPerContainer: String(product.servings_per_container ?? 1),
           calories: String(product.calories_per_serving ?? ''),
           carbs: String(product.carbs_per_serving ?? ''),
           fat: String(product.fat_per_serving ?? ''),
           protein: String(product.protein_per_serving ?? ''),
+          netWeightG: netW != null ? String(netW) : '',
+          servingWeightG: product.serving_weight_g != null ? String(product.serving_weight_g) : '',
         };
         dispatch({ type: 'product_loaded', product, nutrition: nut });
 
@@ -525,6 +558,8 @@ export function LiveTrackImportPage() {
       // but the UPDATE branch must respect any explicit de-certification
       // the user made via Settings → Products. Re-running the wizard to
       // recapture a tare should not silently flip `certified` back to 1.
+      const netWeightParsed = parseFloat(nutrition.netWeightG);
+      const servingWeightParsed = parseFloat(nutrition.servingWeightG);
       const { error: prodUpdErr } = await chefbyte()
         .from('products')
         .update({
@@ -534,6 +569,9 @@ export function LiveTrackImportPage() {
           carbs_per_serving: parseFloat(nutrition.carbs) || 0,
           fat_per_serving: parseFloat(nutrition.fat) || 0,
           protein_per_serving: parseFloat(nutrition.protein) || 0,
+          net_weight_g: Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null,
+          serving_weight_g:
+            Number.isFinite(servingWeightParsed) && servingWeightParsed > 0 ? servingWeightParsed : null,
         })
         .eq('product_id', product.product_id)
         .eq('user_id', user.id);
@@ -551,12 +589,15 @@ export function LiveTrackImportPage() {
       // "1 container at the default location" via a direct insert —
       // the resolver needs a positive placed_weight_g to compute qty.
       const scaleG = state.scaleG;
+      // Use the EDITED net weight (already written back to products above)
+      // rather than the possibly-stale product.net_weight_g snapshot.
+      const effectiveNetWeightG =
+        Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null;
       const netProductG =
         scaleG != null
         && Number.isFinite(scaleG)
         && Number.isFinite(tareG)
-        && product.net_weight_g
-        && product.net_weight_g > 0
+        && effectiveNetWeightG != null
           ? Math.max(0, (scaleG as number) - (tareG as number))
           : null;
 
@@ -577,7 +618,7 @@ export function LiveTrackImportPage() {
         const qtyContainers = computeQtyContainersFromScale({
           scaleG: state.scaleG,
           tareG,
-          netWeightG: product.net_weight_g,
+          netWeightG: effectiveNetWeightG,
         });
         await chefbyte()
           .from('stock_lots')
@@ -725,10 +766,14 @@ export function LiveTrackImportPage() {
               if (state.kind !== 'product_loaded') return;
               const r = session?.scale_reading_g;
               if (r == null) return;
+              // Use the EDITABLE nutrition.netWeightG rather than the
+              // stored product.net_weight_g so user overrides / derived-
+              // from-serving-weight values drive the tare math.
+              const editedNet = parseFloat(state.nutrition.netWeightG);
               dispatch({
                 type: 'scale_reading',
                 scaleG: Number(r),
-                netG: state.product.net_weight_g,
+                netG: Number.isFinite(editedNet) && editedNet > 0 ? editedNet : null,
               });
             }}
           />
@@ -799,7 +844,12 @@ function ProductEditor({
   onConfirmAutoTare,
 }: ProductEditorProps) {
   const { product, nutrition, isFullContainer } = state;
-  const hasNet = (product.net_weight_g ?? null) != null;
+  // hasNet is driven by the editable nutrition.netWeightG, not the stored
+  // product.net_weight_g. User can type in a net weight (or accept the
+  // spc×serving_weight_g derivation) and unlock the Full + sealed path
+  // even if the catalog didn't populate the column. Any finite > 0 wins.
+  const netG = parseFloat(nutrition.netWeightG);
+  const hasNet = Number.isFinite(netG) && netG > 0;
 
   return (
     <section className="rounded-md border border-slate-200 p-4 space-y-4" data-testid="livetrack-product-loaded">
@@ -816,6 +866,41 @@ function ProductEditor({
         <Field id="lt-carbs" label="Carbs" value={nutrition.carbs} onChange={(v) => onNutritionChange({ carbs: v })} />
         <Field id="lt-fat" label="Fat" value={nutrition.fat} onChange={(v) => onNutritionChange({ fat: v })} />
         <Field id="lt-protein" label="Protein" value={nutrition.protein} onChange={(v) => onNutritionChange({ protein: v })} />
+        <Field
+          id="lt-serving-weight"
+          label="Serving wt (g)"
+          value={nutrition.servingWeightG}
+          onChange={(v) => {
+            // When the user edits serving_weight and a valid spc is present,
+            // auto-update net_weight to spc × new serving weight. Only fires
+            // when netWeightG is empty OR already matches the prior product
+            // of spc × old serving weight (so we don't clobber an explicit
+            // user-entered net).
+            const newSw = parseFloat(v);
+            const spc = parseFloat(nutrition.servingsPerContainer);
+            const patch: Partial<NutritionData> = { servingWeightG: v };
+            if (Number.isFinite(newSw) && newSw > 0 && Number.isFinite(spc) && spc > 0) {
+              const curNet = parseFloat(nutrition.netWeightG);
+              const oldSw = parseFloat(nutrition.servingWeightG);
+              const derivedFromOld =
+                Number.isFinite(oldSw) && oldSw > 0 ? Math.round(spc * oldSw * 100) / 100 : null;
+              const currentNetMatchesDerived =
+                !Number.isFinite(curNet) ||
+                curNet <= 0 ||
+                (derivedFromOld != null && Math.abs(curNet - derivedFromOld) < 0.5);
+              if (currentNetMatchesDerived) {
+                patch.netWeightG = String(Math.round(spc * newSw * 100) / 100);
+              }
+            }
+            onNutritionChange(patch);
+          }}
+        />
+        <Field
+          id="lt-net-weight"
+          label="Net wt (g)"
+          value={nutrition.netWeightG}
+          onChange={(v) => onNutritionChange({ netWeightG: v })}
+        />
       </div>
 
       <fieldset className="space-y-2">
@@ -853,7 +938,7 @@ function ProductEditor({
           {currentScaleReadingG == null ? (
             <p className="rounded bg-slate-50 p-3 text-sm text-slate-700" data-testid="livetrack-waiting-scale-hint">
               Place container on the catch-all scale. Tare will auto-compute
-              from {product.net_weight_g}g net.
+              from {netG}g net.
             </p>
           ) : (
             <>
@@ -869,9 +954,9 @@ function ProductEditor({
                 <div className="text-xs text-slate-500">
                   Auto tare ={' '}
                   <span className="font-mono">
-                    {Math.max(0, Number(currentScaleReadingG) - Number(product.net_weight_g ?? 0)).toFixed(1)}g
+                    {Math.max(0, Number(currentScaleReadingG) - netG).toFixed(1)}g
                   </span>
-                  {' '}(reading − {product.net_weight_g}g net)
+                  {' '}(reading − {netG}g net)
                 </div>
               </div>
               <button
