@@ -7,8 +7,22 @@ import {
   todayDate,
   type PageTestContext,
 } from './helpers';
+import {
+  HISTORY_PAGE_SIZE,
+  loadHistoryPage,
+  loadHistoryTotalCount,
+  loadHistoryExercises,
+  loadHistoryDetail,
+  loadPlanIdsWithExercise,
+} from '@/pages/coachbyte/HistoryPage';
 
-describe('CoachByte HistoryPage queries', () => {
+// Legacy-audit issue #3 (2026-04-22): this test previously replicated
+// HistoryPage's query strings inline with "// Source:" comments that
+// drifted out of sync with the page. Now the test calls the exact
+// exported loaders the UI uses — refactoring one side surfaces the
+// other automatically.
+
+describe('CoachByte HistoryPage loaders', () => {
   let ctx: PageTestContext;
   let planId: string;
 
@@ -16,21 +30,29 @@ describe('CoachByte HistoryPage queries', () => {
     ctx = await createPageTestContext('coach-history');
     await seedSplit(ctx);
 
-    // Create a daily plan so there's history data
     const today = todayDate();
     const planResult = await coachbyte(ctx.client).rpc('ensure_daily_plan', { p_day: today });
     assertQuerySucceeds(planResult, 'setup ensure_daily_plan');
     planId = planResult.data.plan_id;
 
-    // Complete a set so plan has completed_sets
-    const completeResult = await coachbyte(ctx.client).rpc('complete_next_set', {
+    // Accept both the legacy (p_reps/p_load) and migrated
+    // (p_actual_reps/p_actual_load) RPC signatures — the pgTAP-integration
+    // agent is actively renaming these during the 2026-04-25 batch.
+    // First attempt: legacy. If PGRST202 (sig not found), retry migrated.
+    let completeResult: any = await coachbyte(ctx.client).rpc('complete_next_set', {
       p_plan_id: planId,
       p_reps: 5,
       p_load: 225,
     });
+    if (completeResult.error && completeResult.error.code === 'PGRST202') {
+      completeResult = await coachbyte(ctx.client).rpc('complete_next_set', {
+        p_plan_id: planId,
+        p_actual_reps: 5,
+        p_actual_load: 225,
+      });
+    }
     assertQuerySucceeds(completeResult, 'setup complete_next_set');
 
-    // Update summary for richer data
     await coachbyte(ctx.client).from('daily_plans').update({ summary: 'Test history day' }).eq('plan_id', planId);
   });
 
@@ -39,333 +61,169 @@ describe('CoachByte HistoryPage queries', () => {
   });
 
   // -------------------------------------------------------------------
-  // HistoryPage: daily_plans query with pagination
-  // Source: HistoryPage.tsx line 40-46
-  //   .from('daily_plans')
-  //   .select('plan_id, plan_date, summary')
-  //   .eq('user_id', user.id)
-  //   .order('plan_date', { ascending: false })
-  //   .limit(PAGE_SIZE + 1)
+  // loadHistoryPage — the queryFn behind the first-page load + loadMore.
+  // Asserts: shape of each HistoryDay row, planned/completed counts
+  // filled in from the in-clause queries, hasMore flag when fewer than
+  // PAGE_SIZE+1 rows exist.
   // -------------------------------------------------------------------
-  it('daily_plans query returns plan_id, plan_date, summary', async () => {
-    const PAGE_SIZE = 20;
-    const result = await coachbyte(ctx.client)
-      .from('daily_plans')
-      .select('plan_id, plan_date, summary')
-      .eq('user_id', ctx.userId)
-      .order('plan_date', { ascending: false })
-      .limit(PAGE_SIZE + 1);
+  it('loadHistoryPage returns days with filled planned/completed counts', async () => {
+    const page = await loadHistoryPage(ctx.userId, null, ctx.client);
 
-    const data = assertQuerySucceeds(result, 'daily_plans history');
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThanOrEqual(1);
+    expect(page.days.length).toBeGreaterThanOrEqual(1);
+    expect(page.hasMore).toBe(false); // only 1 plan in this user
+    expect(page.cursor).toBe(todayDate());
 
-    const first = data[0];
-    expect(first.plan_id).toBe(planId);
-    expect(first.plan_date).toBe(todayDate());
-    expect(first.summary).toBe('Test history day');
+    const today = page.days.find((d) => d.plan_id === planId);
+    expect(today).toBeDefined();
+    expect(today!.plan_date).toBe(todayDate());
+    expect(today!.summary).toBe('Test history day');
+    // seedSplit seeds 3 template sets → ensure_daily_plan copies them in.
+    expect(today!.planned_count).toBeGreaterThanOrEqual(1);
+    // One complete_next_set call in beforeAll → exactly one completed row.
+    expect(today!.completed_count).toBe(1);
   });
 
   // -------------------------------------------------------------------
-  // HistoryPage: keyset pagination with .lt('plan_date', cursorDate)
-  // Source: HistoryPage.tsx line 48-49
-  //   if (cursorDate) { query = query.lt('plan_date', cursorDate); }
+  // loadHistoryPage cursor semantics — the `.lt('plan_date', cursor)`
+  // contract. Past cursor → no rows; future cursor → all rows.
   // -------------------------------------------------------------------
-  it('keyset pagination with lt filter succeeds', async () => {
-    // Use a future date cursor so our plan is included
-    const futureCursor = '2099-12-31';
-    const PAGE_SIZE = 20;
-    const result = await coachbyte(ctx.client)
-      .from('daily_plans')
-      .select('plan_id, plan_date, summary')
-      .eq('user_id', ctx.userId)
-      .order('plan_date', { ascending: false })
-      .lt('plan_date', futureCursor)
-      .limit(PAGE_SIZE + 1);
-
-    const data = assertQuerySucceeds(result, 'keyset pagination');
-    expect(data.length).toBeGreaterThanOrEqual(1);
-    expect(data[0].plan_id).toBe(planId);
+  it('loadHistoryPage with past cursor returns empty', async () => {
+    const page = await loadHistoryPage(ctx.userId, '2000-01-01', ctx.client);
+    expect(page.days).toEqual([]);
+    expect(page.hasMore).toBe(false);
+    expect(page.cursor).toBeNull();
   });
 
-  it('keyset pagination with past cursor returns empty', async () => {
-    const pastCursor = '2000-01-01';
-    const PAGE_SIZE = 20;
-    const result = await coachbyte(ctx.client)
-      .from('daily_plans')
-      .select('plan_id, plan_date, summary')
-      .eq('user_id', ctx.userId)
-      .order('plan_date', { ascending: false })
-      .lt('plan_date', pastCursor)
-      .limit(PAGE_SIZE + 1);
-
-    const data = assertQuerySucceeds(result, 'keyset pagination past cursor');
-    expect(data.length).toBe(0);
+  it('loadHistoryPage with future cursor returns full history', async () => {
+    const page = await loadHistoryPage(ctx.userId, '2099-12-31', ctx.client);
+    expect(page.days.length).toBeGreaterThanOrEqual(1);
+    expect(page.days.some((d) => d.plan_id === planId)).toBe(true);
   });
 
   // -------------------------------------------------------------------
-  // HistoryPage: planned_sets count query
-  // Source: HistoryPage.tsx line 65-69
-  //   .from('planned_sets')
-  //   .select('plan_id')
-  //   .in('plan_id', planIds)
+  // loadHistoryTotalCount — powers the "1–N of TOTAL" summary.
   // -------------------------------------------------------------------
-  it('planned_sets count query returns rows with plan_id', async () => {
-    const result = await coachbyte(ctx.client).from('planned_sets').select('plan_id').in('plan_id', [planId]);
-
-    const data = assertQuerySucceeds(result, 'planned_sets count');
-    expect(Array.isArray(data)).toBe(true);
-    // Should have planned sets from split template (3 sets)
-    expect(data.length).toBeGreaterThanOrEqual(1);
-    expect(data[0].plan_id).toBe(planId);
+  it('loadHistoryTotalCount returns the row count', async () => {
+    const total = await loadHistoryTotalCount(ctx.userId, ctx.client);
+    expect(total).toBeGreaterThanOrEqual(1);
   });
 
   // -------------------------------------------------------------------
-  // HistoryPage: completed_sets count query
-  // Source: HistoryPage.tsx line 71-75
-  //   .from('completed_sets')
-  //   .select('plan_id')
-  //   .in('plan_id', planIds)
+  // loadHistoryExercises — populates the filter dropdown.
   // -------------------------------------------------------------------
-  it('completed_sets count query returns rows with plan_id', async () => {
-    const result = await coachbyte(ctx.client).from('completed_sets').select('plan_id').in('plan_id', [planId]);
-
-    const data = assertQuerySucceeds(result, 'completed_sets count');
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBeGreaterThanOrEqual(1);
-    expect(data[0].plan_id).toBe(planId);
+  it('loadHistoryExercises returns exercises in alphabetical order', async () => {
+    const exercises = await loadHistoryExercises(ctx.userId, ctx.client);
+    expect(exercises.length).toBeGreaterThanOrEqual(1);
+    for (let i = 1; i < exercises.length; i++) {
+      expect(exercises[i].name.localeCompare(exercises[i - 1].name)).toBeGreaterThanOrEqual(0);
+    }
+    for (const e of exercises) {
+      expect(typeof e.exercise_id).toBe('string');
+      expect(typeof e.name).toBe('string');
+    }
   });
 
   // -------------------------------------------------------------------
-  // HistoryPage: exercises query for filter dropdown
-  // Source: HistoryPage.tsx line 108-113
-  //   .from('exercises')
-  //   .select('exercise_id, name')
-  //   .or(`user_id.is.null,user_id.eq.${user.id}`)
-  //   .order('name')
+  // loadHistoryDetail — expanded plan card's joined completed_sets.
   // -------------------------------------------------------------------
-  it('exercises query for filter dropdown returns exercise_id and name', async () => {
-    const result = await coachbyte(ctx.client)
-      .from('exercises')
-      .select('exercise_id, name')
-      .or(`user_id.is.null,user_id.eq.${ctx.userId}`)
-      .order('name');
+  it('loadHistoryDetail returns completed sets with exercise_name joined', async () => {
+    const detail = await loadHistoryDetail(planId, ctx.userId, ctx.client);
 
-    const data = assertQuerySucceeds(result, 'exercises filter');
-    expect(data.length).toBeGreaterThanOrEqual(1);
-    expect(typeof data[0].exercise_id).toBe('string');
-    expect(typeof data[0].name).toBe('string');
-  });
-
-  // -------------------------------------------------------------------
-  // HistoryPage: completed_sets detail query with exercises join
-  // Source: HistoryPage.tsx line 124-129
-  //   .from('completed_sets')
-  //   .select('actual_reps, actual_load, completed_at, exercises(name)')
-  //   .eq('plan_id', planId)
-  //   .order('completed_at')
-  // -------------------------------------------------------------------
-  it('completed_sets detail query returns joined exercise name', async () => {
-    const result = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('actual_reps, actual_load, completed_at, exercises(name)')
-      .eq('plan_id', planId)
-      .order('completed_at');
-
-    const data = assertQuerySucceeds(result, 'completed_sets detail');
-    expect(data.length).toBeGreaterThanOrEqual(1);
-
-    const first = data[0];
+    expect(detail.length).toBeGreaterThanOrEqual(1);
+    const first = detail[0];
+    expect(first.exercise_name).toBe('Squat');
     expect(first.actual_reps).toBe(5);
-    expect(Number(first.actual_load)).toBe(225);
+    expect(first.actual_load).toBe(225);
     expect(typeof first.completed_at).toBe('string');
-    expect(first.exercises).not.toBeNull();
-    expect(first.exercises.name).toBe('Squat');
   });
 
-  // -------------------------------------------------------------------
-  // HistoryPage: expanded day detail with zero completed sets returns empty
-  // Source: HistoryPage.tsx line 145-151 — loadDetail
-  //   .from('completed_sets')
-  //   .select('actual_reps, actual_load, completed_at, exercises(name)')
-  //   .eq('plan_id', planId)
-  //   .order('completed_at')
-  // -------------------------------------------------------------------
-  it('expanded day detail with zero completed sets returns empty array', async () => {
-    // Create a plan with no completed sets
+  it('loadHistoryDetail returns [] for a plan with no completed sets', async () => {
     const emptyDate = '2026-01-10';
-    const { data: emptyPlan } = await (coachbyte(ctx.client) as any).rpc('ensure_daily_plan', {
-      p_day: emptyDate,
-    });
+    const { data: emptyPlan } = await (coachbyte(ctx.client) as any).rpc('ensure_daily_plan', { p_day: emptyDate });
     expect(emptyPlan).not.toBeNull();
 
-    // Query completed_sets for this plan (EXACT pattern from loadDetail)
-    const result = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('actual_reps, actual_load, completed_at, exercises(name)')
-      .eq('plan_id', emptyPlan.plan_id)
-      .order('completed_at');
+    const detail = await loadHistoryDetail(emptyPlan.plan_id, ctx.userId, ctx.client);
+    expect(detail).toEqual([]);
 
-    const data = assertQuerySucceeds(result, 'empty plan completed_sets');
-    expect(Array.isArray(data)).toBe(true);
-    expect(data.length).toBe(0);
-
-    // Cleanup
     await coachbyte(ctx.client).from('daily_plans').delete().eq('plan_id', emptyPlan.plan_id);
   });
 
   // -------------------------------------------------------------------
-  // HistoryPage: history days filtered by exercise_id
-  // Source: HistoryPage.tsx line 170-180 — exerciseFilter effect
-  //   .from('completed_sets')
-  //   .select('plan_id')
-  //   .eq('user_id', user.id)
-  //   .eq('exercise_id', exerciseFilter)
-  //   Then filteredDays = days.filter(d => exercisePlanIds.has(d.plan_id))
+  // loadPlanIdsWithExercise — powers the exercise-filter dropdown.
+  // Returns the Set of plan_ids containing any completed_set for the
+  // given exercise_id; UI uses `exercisePlanIds.has(day.plan_id)` to
+  // narrow the days list.
   // -------------------------------------------------------------------
-  it('history days filtered by exercise_id returns only matching plans', async () => {
-    // Get the exercise_id for the completed set we made in setup (Squat)
-    const { data: completedSets } = await coachbyte(ctx.client)
+  it('loadPlanIdsWithExercise returns a set containing the matching plan_id', async () => {
+    // Find the exercise that has a completed set
+    const { data: sets } = await coachbyte(ctx.client)
       .from('completed_sets')
       .select('exercise_id')
       .eq('user_id', ctx.userId)
       .limit(1);
-    expect(completedSets).not.toBeNull();
-    expect(completedSets!.length).toBeGreaterThan(0);
-    const exerciseId = completedSets![0].exercise_id;
+    expect(sets!.length).toBeGreaterThan(0);
+    const exerciseId = sets![0].exercise_id;
 
-    // EXACT query from HistoryPage exerciseFilter effect
-    const { data: matchingPlanIds } = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('plan_id')
-      .eq('user_id', ctx.userId)
-      .eq('exercise_id', exerciseId);
+    const ids = await loadPlanIdsWithExercise(ctx.userId, exerciseId, ctx.client);
+    expect(ids.has(planId)).toBe(true);
+  });
 
-    expect(matchingPlanIds).not.toBeNull();
-    expect(matchingPlanIds!.length).toBeGreaterThan(0);
-
-    // The plan_id should match our known planId
-    const ids = matchingPlanIds!.map((r: any) => r.plan_id);
-    expect(ids).toContain(planId);
-
+  it('loadPlanIdsWithExercise excludes plans without the chosen exercise', async () => {
     // Create a plan with a DIFFERENT exercise to verify filtering
     const otherDate = '2026-01-11';
-    const { data: otherPlan } = await (coachbyte(ctx.client) as any).rpc('ensure_daily_plan', {
-      p_day: otherDate,
-    });
+    const { data: otherPlan } = await (coachbyte(ctx.client) as any).rpc('ensure_daily_plan', { p_day: otherDate });
 
-    // Get a different exercise
     const { data: allExercises } = await coachbyte(ctx.client)
       .from('exercises')
       .select('exercise_id, name')
       .is('user_id', null)
       .order('name');
-    const differentEx = allExercises!.find((e: any) => e.exercise_id !== exerciseId);
-    expect(differentEx).toBeDefined();
 
-    // Insert a completed set for the different exercise
+    // Find an exercise NOT used by the main planId's completed_sets
+    const { data: usedSets } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('exercise_id')
+      .eq('plan_id', planId);
+    const usedIds = new Set((usedSets ?? []).map((r: any) => r.exercise_id as string));
+    const unusedExercise = (allExercises as any[]).find((e) => !usedIds.has(e.exercise_id));
+    expect(unusedExercise).toBeDefined();
+
     await coachbyte(ctx.client).from('completed_sets').insert({
       plan_id: otherPlan.plan_id,
       user_id: ctx.userId,
-      exercise_id: differentEx!.exercise_id,
+      exercise_id: unusedExercise!.exercise_id,
       actual_reps: 10,
       actual_load: 50,
     });
 
-    // Re-query with the ORIGINAL exercise filter — should NOT include otherPlan
-    const { data: filtered } = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('plan_id')
-      .eq('user_id', ctx.userId)
-      .eq('exercise_id', exerciseId);
-
-    const filteredIds = filtered!.map((r: any) => r.plan_id);
-    expect(filteredIds).toContain(planId);
-    expect(filteredIds).not.toContain(otherPlan.plan_id);
+    // Filter by the OTHER exercise — should not include the main planId
+    const otherIds = await loadPlanIdsWithExercise(ctx.userId, unusedExercise!.exercise_id, ctx.client);
+    expect(otherIds.has(otherPlan.plan_id)).toBe(true);
+    expect(otherIds.has(planId)).toBe(false);
 
     // Cleanup
     await coachbyte(ctx.client).from('daily_plans').delete().eq('plan_id', otherPlan.plan_id);
   });
-
-  // -------------------------------------------------------------------
-  // HistoryPage: exercise filter query (completed_sets plan_ids by exercise)
-  // Source: HistoryPage.tsx line 183-194
-  //   .from('completed_sets')
-  //   .select('plan_id')
-  //   .eq('user_id', user.id)
-  //   .eq('exercise_id', exerciseFilter)
-  // -------------------------------------------------------------------
-  it('completed_sets filter by exercise_id returns plan_ids', async () => {
-    // Get an exercise that has completed sets
-    const { data: completedSets } = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('exercise_id')
-      .eq('user_id', ctx.userId)
-      .limit(1);
-
-    expect(completedSets).not.toBeNull();
-    expect(completedSets!.length).toBeGreaterThan(0);
-
-    const exerciseId = completedSets![0].exercise_id;
-
-    // EXACT query from HistoryPage exercise filter
-    const { data: planIds } = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('plan_id')
-      .eq('user_id', ctx.userId)
-      .eq('exercise_id', exerciseId);
-
-    expect(planIds).not.toBeNull();
-    expect(planIds!.length).toBeGreaterThan(0);
-    expect(typeof planIds![0].plan_id).toBe('string');
-  });
-
-  // -------------------------------------------------------------------
-  // #33: History toggle collapse — click View Details, then click Hide
-  // The UI toggles expandedPlan state and queries completed_sets for
-  // the clicked plan_id. Verify the detail query returns data.
-  // -------------------------------------------------------------------
-  it('plan detail query returns completed_sets for expand/collapse', async () => {
-    // Expand: query completed_sets for a specific plan_id
-    const { data: detail } = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('completed_set_id, exercise_id, actual_reps, actual_load')
-      .eq('plan_id', planId)
-      .eq('user_id', ctx.userId);
-
-    expect(detail).not.toBeNull();
-    expect(detail!.length).toBeGreaterThan(0);
-
-    // Collapse is pure UI state (expandedPlan = null), no query needed
-    // The point is the query works both ways — data is available for expand
-    expect(detail![0].completed_set_id).toBeDefined();
-    expect(detail![0].actual_reps).toBeDefined();
-  });
 });
 
 // =====================================================================
-// Audit recommendation #17 (MEDIUM): keyset pagination cross-page
-// boundary. Catches a regression where `.lt('plan_date', cursor)`
-// silently drifts to `.lte(...)` — the last row of page N would then
-// duplicate as the first row of page N+1.
-//
-// Independent describe with its own fresh user + 25 seeded plans so the
-// PAGE_SIZE arithmetic is clean and nothing from the main describe's
-// seed leaks into the boundary math.
+// Keyset pagination boundary test — unchanged in structure but now
+// drives loadHistoryPage directly instead of duplicating its query.
+// PAGE_SIZE is imported from the page so if the page ever changes
+// the constant, the test boundary math picks it up.
 // =====================================================================
 describe('CoachByte HistoryPage keyset pagination boundary', () => {
   let ctx: PageTestContext;
-  const PAGE_SIZE = 10;
-  const SEED_DAYS = 25;
+  // Use the production page-size constant directly — if the UI changes
+  // its page size, the test math stays coupled.
+  const PAGE_SIZE = HISTORY_PAGE_SIZE;
+  // Seed PAGE_SIZE*2 + half so we cover three pages (full, full, partial).
+  const SEED_DAYS = PAGE_SIZE * 2 + Math.floor(PAGE_SIZE / 4);
   const seededDates: string[] = []; // newest-first, matching descending order
 
   beforeAll(async () => {
     ctx = await createPageTestContext('coach-history-boundary');
 
-    // Seed 25 consecutive past days of daily_plans directly (skip splits
-    // + completed_sets; HistoryPage only needs plan_date to paginate).
-    // We insert in SEED_DAYS..1 order relative to a fixed anchor so
-    // plan_date values are unique and monotonically decreasing.
     const coach = coachbyte(ctx.client);
     const anchor = new Date('2025-06-15T00:00:00Z');
     const rows: Array<{ user_id: string; plan_date: string; logical_date: string }> = [];
@@ -377,7 +235,7 @@ describe('CoachByte HistoryPage keyset pagination boundary', () => {
       const day = String(d.getUTCDate()).padStart(2, '0');
       const dateStr = `${y}-${m}-${day}`;
       rows.push({ user_id: ctx.userId, plan_date: dateStr, logical_date: dateStr });
-      seededDates.push(dateStr); // i=0 is newest → matches descending order
+      seededDates.push(dateStr);
     }
 
     const { error } = await coach.from('daily_plans').insert(rows);
@@ -388,66 +246,31 @@ describe('CoachByte HistoryPage keyset pagination boundary', () => {
     await ctx.cleanup();
   });
 
-  // ---------------------------------------------------------------------
-  // Replica of HistoryPage pagination: fetch PAGE_SIZE+1 per page,
-  // discard the sentinel, use last-plan_date as next cursor with
-  // `.lt('plan_date', cursor)`. Any drift to `.lte(...)` duplicates
-  // the boundary row on the next page.
-  //
-  // Source references:
-  //   - initial fetch: HistoryPage.tsx lines 51-59
-  //   - loadMore:      HistoryPage.tsx lines 172-182 (uses .lt)
-  // ---------------------------------------------------------------------
-  async function fetchPage(cursor: string | null): Promise<{ rows: Array<{ plan_id: string; plan_date: string }>; hasMore: boolean }> {
-    let q = coachbyte(ctx.client)
-      .from('daily_plans')
-      .select('plan_id, plan_date')
-      .eq('user_id', ctx.userId)
-      .order('plan_date', { ascending: false });
-
-    if (cursor) q = q.lt('plan_date', cursor);
-    q = q.limit(PAGE_SIZE + 1);
-
-    const res = await q;
-    const data = assertQuerySucceeds(res, `fetchPage cursor=${cursor}`);
-    const hasMore = (data as any[]).length > PAGE_SIZE;
-    const rows = hasMore ? (data as any[]).slice(0, PAGE_SIZE) : (data as any[]);
-    return { rows, hasMore };
-  }
-
-  it('paginates 25 rows across 3 pages (10+10+5) with no duplicates, no gaps, strictly decreasing', async () => {
-    // Page 1
-    const page1 = await fetchPage(null);
-    expect(page1.rows.length).toBe(PAGE_SIZE);
+  it('paginates across 3 pages with no duplicates, no gaps, strictly decreasing', async () => {
+    // Page 1 — no cursor
+    const page1 = await loadHistoryPage(ctx.userId, null, ctx.client);
+    expect(page1.days.length).toBe(PAGE_SIZE);
     expect(page1.hasMore).toBe(true);
+    expect(page1.cursor).toBe(page1.days[page1.days.length - 1].plan_date);
 
-    // Page 2 — cursor is the last plan_date of page 1
-    const cursor1 = page1.rows[page1.rows.length - 1].plan_date;
-    const page2 = await fetchPage(cursor1);
-    expect(page2.rows.length).toBe(PAGE_SIZE);
+    // Page 2 — cursor from page 1's last row
+    const page2 = await loadHistoryPage(ctx.userId, page1.cursor, ctx.client);
+    expect(page2.days.length).toBe(PAGE_SIZE);
     expect(page2.hasMore).toBe(true);
 
-    // Page 3 — cursor is the last plan_date of page 2. Only 5 rows left.
-    const cursor2 = page2.rows[page2.rows.length - 1].plan_date;
-    const page3 = await fetchPage(cursor2);
-    expect(page3.rows.length).toBe(5);
+    // Page 3 — partial
+    const page3 = await loadHistoryPage(ctx.userId, page2.cursor, ctx.client);
+    expect(page3.days.length).toBe(SEED_DAYS - 2 * PAGE_SIZE);
     expect(page3.hasMore).toBe(false);
 
     // ── Boundary check: .lt vs .lte regression guard ──
-    // First row of page 2 must be STRICTLY less than last row of page 1.
-    // If `.lt` ever drifts to `.lte`, page 2's first row == page 1's last
-    // row and the Set-size assertion below fails on the duplicate.
-    const page1Last = page1.rows[page1.rows.length - 1].plan_date;
-    const page2First = page2.rows[0].plan_date;
-    expect(page2First < page1Last).toBe(true);
-
-    const page2Last = page2.rows[page2.rows.length - 1].plan_date;
-    const page3First = page3.rows[0].plan_date;
-    expect(page3First < page2Last).toBe(true);
+    // First row of page N+1 must be STRICTLY less than last row of page N.
+    expect(page2.days[0].plan_date < page1.days[page1.days.length - 1].plan_date).toBe(true);
+    expect(page3.days[0].plan_date < page2.days[page2.days.length - 1].plan_date).toBe(true);
 
     // ── No duplicates across pages ──
-    const allDates = [...page1.rows, ...page2.rows, ...page3.rows].map((r) => r.plan_date);
-    const allPlanIds = [...page1.rows, ...page2.rows, ...page3.rows].map((r) => r.plan_id);
+    const allDates = [...page1.days, ...page2.days, ...page3.days].map((r) => r.plan_date);
+    const allPlanIds = [...page1.days, ...page2.days, ...page3.days].map((r) => r.plan_id);
     expect(new Set(allDates).size).toBe(allDates.length);
     expect(new Set(allPlanIds).size).toBe(allPlanIds.length);
     expect(allDates.length).toBe(SEED_DAYS);
@@ -455,26 +278,21 @@ describe('CoachByte HistoryPage keyset pagination boundary', () => {
     // ── No missing rows (set equality against seeded input) ──
     expect(new Set(allDates)).toEqual(new Set(seededDates));
 
-    // ── Monotonically decreasing (newest → oldest) ──
+    // ── Monotonically decreasing ──
     for (let i = 1; i < allDates.length; i++) {
       expect(allDates[i] < allDates[i - 1]).toBe(true);
     }
 
-    // ── Specific boundary values: the first seeded date must appear
-    // first on page 1; the oldest seeded date must appear last on page 3.
+    // ── Boundary values ──
     expect(allDates[0]).toBe(seededDates[0]); // newest
     expect(allDates[allDates.length - 1]).toBe(seededDates[seededDates.length - 1]); // oldest
   });
 
   it('page 2 first row is NOT equal to page 1 last row (explicit .lt regression pin)', async () => {
-    // Tight focus on the exact regression: if `.lt` → `.lte`, the
-    // boundary row repeats. This assertion fails loudly if that happens,
-    // independently of the overall set/sequence checks above.
-    const page1 = await fetchPage(null);
-    const cursor1 = page1.rows[page1.rows.length - 1].plan_date;
-    const page2 = await fetchPage(cursor1);
+    const page1 = await loadHistoryPage(ctx.userId, null, ctx.client);
+    const page2 = await loadHistoryPage(ctx.userId, page1.cursor, ctx.client);
 
-    expect(page1.rows[page1.rows.length - 1].plan_date).not.toBe(page2.rows[0].plan_date);
-    expect(page1.rows[page1.rows.length - 1].plan_id).not.toBe(page2.rows[0].plan_id);
+    expect(page1.days[page1.days.length - 1].plan_date).not.toBe(page2.days[0].plan_date);
+    expect(page1.days[page1.days.length - 1].plan_id).not.toBe(page2.days[0].plan_id);
   });
 });

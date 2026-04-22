@@ -1,12 +1,13 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { MacroProgressBar } from '@/components/shared/MacroProgressBar';
 import { MacroBarSkeleton, ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { chefbyte } from '@/shared/supabase';
+import { supabase, chefbyte } from '@/shared/supabase';
 import { toDateStr, formatDateDisplay } from '@/shared/dates';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { computeRecipeMacros } from './RecipesPage';
@@ -17,12 +18,12 @@ import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface MacroTotals {
+export interface MacroTotals {
   consumed: { calories: number; protein: number; carbs: number; fat: number };
   goals: { calories: number; protein: number; carbs: number; fat: number };
 }
 
-interface ConsumedItem {
+export interface ConsumedItem {
   id: string;
   source: string;
   name: string;
@@ -32,7 +33,7 @@ interface ConsumedItem {
   fat: number;
 }
 
-interface PlannedItem {
+export interface PlannedItem {
   meal_id: string;
   name: string;
   calories: number;
@@ -41,10 +42,137 @@ interface PlannedItem {
   fat: number;
 }
 
-interface MacroPageData {
+export interface MacroPageData {
   macros: MacroTotals | null;
   consumed: ConsumedItem[];
   planned: PlannedItem[];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Exported data loader (legacy-audit #3 fix)                         */
+/* ------------------------------------------------------------------ */
+
+function asChefbyte(client?: SupabaseClient<any>) {
+  return ((client ?? supabase) as any).schema('chefbyte');
+}
+
+/** Load the full MacroPage dataset for a given date.
+ *
+ * Replaces the previous "test replicates the page's 4-query fan-out
+ * with a // Source: comment block" anti-pattern (2026-04-22 legacy
+ * audit, issue #3). Integration tests call this loader directly.
+ *
+ * Uses Promise.all to fire the 4 independent queries in parallel:
+ *   1. get_daily_macros RPC (totals + goals + remaining)
+ *   2. food_logs (consumed from meal plan)
+ *   3. temp_items (consumed ad-hoc entries)
+ *   4. meal_plan_entries with deep recipe/product join (planned)
+ */
+export async function loadMacroPageData(
+  userId: string,
+  logicalDate: string,
+  client?: SupabaseClient<any>,
+): Promise<MacroPageData> {
+  const chef = asChefbyte(client);
+  const [macroRes, foodLogsRes, tempItemsRes, plannedRes] = await Promise.all([
+    chef.rpc('get_daily_macros', { p_logical_date: logicalDate }),
+    chef
+      .from('food_logs')
+      .select('log_id, product_id, calories, protein, carbs, fat, products:product_id(name)')
+      .eq('user_id', userId)
+      .eq('logical_date', logicalDate)
+      .order('created_at'),
+    chef
+      .from('temp_items')
+      .select('temp_id, name, calories, protein, carbs, fat')
+      .eq('user_id', userId)
+      .eq('logical_date', logicalDate)
+      .order('created_at'),
+    chef
+      .from('meal_plan_entries')
+      .select(
+        'meal_id, servings, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving)',
+      )
+      .eq('user_id', userId)
+      .eq('logical_date', logicalDate)
+      .eq('meal_prep', false)
+      .is('completed_at', null),
+  ]);
+
+  if (macroRes.error) throw new Error(macroRes.error.message);
+
+  let macros: MacroTotals | null = null;
+  if (macroRes.data) {
+    const rpc = macroRes.data as Record<string, { consumed: number; goal: number; remaining: number }>;
+    macros = {
+      consumed: {
+        calories: Number(rpc.calories?.consumed) || 0,
+        protein: Number(rpc.protein?.consumed) || 0,
+        carbs: Number(rpc.carbs?.consumed) || 0,
+        fat: Number(rpc.fat?.consumed) || 0,
+      },
+      goals: {
+        calories: Number(rpc.calories?.goal) || 0,
+        protein: Number(rpc.protein?.goal) || 0,
+        carbs: Number(rpc.carbs?.goal) || 0,
+        fat: Number(rpc.fat?.goal) || 0,
+      },
+    };
+  }
+
+  const items: ConsumedItem[] = [];
+  for (const log of (foodLogsRes.data ?? []) as any[]) {
+    items.push({
+      id: log.log_id,
+      source: 'Meal Plan',
+      name: log.products?.name ?? 'Unknown',
+      calories: Number(log.calories) || 0,
+      protein: Number(log.protein) || 0,
+      carbs: Number(log.carbs) || 0,
+      fat: Number(log.fat) || 0,
+    });
+  }
+  for (const ti of (tempItemsRes.data ?? []) as any[]) {
+    items.push({
+      id: ti.temp_id,
+      source: 'Temp Item',
+      name: ti.name,
+      calories: Number(ti.calories) || 0,
+      protein: Number(ti.protein) || 0,
+      carbs: Number(ti.carbs) || 0,
+      fat: Number(ti.fat) || 0,
+    });
+  }
+
+  const plannedItems: PlannedItem[] = [];
+  for (const entry of (plannedRes.data ?? []) as any[]) {
+    const servings = Number(entry.servings) || 1;
+    if (entry.recipes) {
+      const recipeMacros = computeRecipeMacros(
+        entry.recipes.recipe_ingredients ?? [],
+        Number(entry.recipes.base_servings) || 1,
+      );
+      plannedItems.push({
+        meal_id: entry.meal_id,
+        name: entry.recipes.name ?? 'Unknown',
+        calories: Math.round(recipeMacros.calories * servings),
+        protein: Math.round(recipeMacros.protein * servings),
+        carbs: Math.round(recipeMacros.carbs * servings),
+        fat: Math.round(recipeMacros.fat * servings),
+      });
+    } else if (entry.products) {
+      plannedItems.push({
+        meal_id: entry.meal_id,
+        name: entry.products.name ?? 'Unknown',
+        calories: Math.round((Number(entry.products.calories_per_serving) || 0) * servings),
+        protein: Math.round((Number(entry.products.protein_per_serving) || 0) * servings),
+        carbs: Math.round((Number(entry.products.carbs_per_serving) || 0) * servings),
+        fat: Math.round((Number(entry.products.fat_per_serving) || 0) * servings),
+      });
+    }
+  }
+
+  return { macros, consumed: items, planned: plannedItems };
 }
 
 /* ------------------------------------------------------------------ */
@@ -96,113 +224,7 @@ export function MacroPage() {
     error: loadError,
   } = useQuery({
     queryKey: [...queryKeys.dailyMacros(userId!, currentDate), 'full'],
-    queryFn: async (): Promise<MacroPageData> => {
-      // Fire all independent queries in parallel
-      const [macroRes, foodLogsRes, tempItemsRes, plannedRes] = await Promise.all([
-        (chefbyte() as any).rpc('get_daily_macros', { p_logical_date: currentDate }),
-        chefbyte()
-          .from('food_logs')
-          .select('log_id, product_id, calories, protein, carbs, fat, products:product_id(name)')
-          .eq('user_id', userId!)
-          .eq('logical_date', currentDate)
-          .order('created_at'),
-        chefbyte()
-          .from('temp_items')
-          .select('temp_id, name, calories, protein, carbs, fat')
-          .eq('user_id', userId!)
-          .eq('logical_date', currentDate)
-          .order('created_at'),
-        chefbyte()
-          .from('meal_plan_entries')
-          .select(
-            'meal_id, servings, recipes:recipe_id(name, base_servings, recipe_ingredients(quantity, unit, products:product_id(calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))), products:product_id(name, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving)',
-          )
-          .eq('user_id', userId!)
-          .eq('logical_date', currentDate)
-          .eq('meal_prep', false)
-          .is('completed_at', null),
-      ]);
-
-      if (macroRes.error) throw new Error(macroRes.error.message);
-
-      // Process macros
-      let macros: MacroTotals | null = null;
-      if (macroRes.data) {
-        const rpc = macroRes.data as Record<string, { consumed: number; goal: number; remaining: number }>;
-        macros = {
-          consumed: {
-            calories: Number(rpc.calories?.consumed) || 0,
-            protein: Number(rpc.protein?.consumed) || 0,
-            carbs: Number(rpc.carbs?.consumed) || 0,
-            fat: Number(rpc.fat?.consumed) || 0,
-          },
-          goals: {
-            calories: Number(rpc.calories?.goal) || 0,
-            protein: Number(rpc.protein?.goal) || 0,
-            carbs: Number(rpc.carbs?.goal) || 0,
-            fat: Number(rpc.fat?.goal) || 0,
-          },
-        };
-      }
-
-      // Process consumed items from 3 sources
-      const items: ConsumedItem[] = [];
-
-      for (const log of (foodLogsRes.data ?? []) as any[]) {
-        items.push({
-          id: log.log_id,
-          source: 'Meal Plan',
-          name: log.products?.name ?? 'Unknown',
-          calories: Number(log.calories) || 0,
-          protein: Number(log.protein) || 0,
-          carbs: Number(log.carbs) || 0,
-          fat: Number(log.fat) || 0,
-        });
-      }
-
-      for (const ti of (tempItemsRes.data ?? []) as any[]) {
-        items.push({
-          id: ti.temp_id,
-          source: 'Temp Item',
-          name: ti.name,
-          calories: Number(ti.calories) || 0,
-          protein: Number(ti.protein) || 0,
-          carbs: Number(ti.carbs) || 0,
-          fat: Number(ti.fat) || 0,
-        });
-      }
-
-      // Process planned items
-      const plannedItems: PlannedItem[] = [];
-      for (const entry of (plannedRes.data ?? []) as any[]) {
-        const servings = Number(entry.servings) || 1;
-        if (entry.recipes) {
-          const recipeMacros = computeRecipeMacros(
-            entry.recipes.recipe_ingredients ?? [],
-            Number(entry.recipes.base_servings) || 1,
-          );
-          plannedItems.push({
-            meal_id: entry.meal_id,
-            name: entry.recipes.name ?? 'Unknown',
-            calories: Math.round(recipeMacros.calories * servings),
-            protein: Math.round(recipeMacros.protein * servings),
-            carbs: Math.round(recipeMacros.carbs * servings),
-            fat: Math.round(recipeMacros.fat * servings),
-          });
-        } else if (entry.products) {
-          plannedItems.push({
-            meal_id: entry.meal_id,
-            name: entry.products.name ?? 'Unknown',
-            calories: Math.round((Number(entry.products.calories_per_serving) || 0) * servings),
-            protein: Math.round((Number(entry.products.protein_per_serving) || 0) * servings),
-            carbs: Math.round((Number(entry.products.carbs_per_serving) || 0) * servings),
-            fat: Math.round((Number(entry.products.fat_per_serving) || 0) * servings),
-          });
-        }
-      }
-
-      return { macros, consumed: items, planned: plannedItems };
-    },
+    queryFn: () => loadMacroPageData(userId!, currentDate),
     enabled: !!userId,
   });
 

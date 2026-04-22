@@ -1,8 +1,9 @@
 import { useState, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
-import { supabase, coachbyte } from '@/shared/supabase';
+import { supabase } from '@/shared/supabase';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -11,7 +12,7 @@ import { CardSkeleton } from '@/components/ui/Skeleton';
 import { Settings, ChevronDown, ChevronRight } from 'lucide-react';
 import { queryKeys } from '@/shared/queryKeys';
 
-interface ExercisePR {
+export interface ExercisePR {
   exercise_id: string;
   exercise_name: string;
   e1rm: number;
@@ -23,6 +24,133 @@ export function epley1RM(load: number, reps: number): number {
   if (reps <= 0 || load <= 0) return 0;
   if (reps === 1) return load;
   return Math.round(load * (1 + reps / 30));
+}
+
+// ---------------------------------------------------------------------------
+// Exported data loaders — PrsPage's queries pulled out of ``queryFn``
+// closures so integration tests can call the SAME function the UI calls
+// instead of replicating the query body in a parallel "// Source: ..."
+// comment block. See apps/web/src/__tests__/integration/pages/coach-prs.test.ts.
+// ---------------------------------------------------------------------------
+
+/** Schema-scoped coachbyte client for the data loaders. Accepts any
+ * SupabaseClient (test harness authenticated client) or defaults to the
+ * app's shared instance. ``as any`` mirrors the legacy ``coachbyte()``
+ * helper in ``shared/supabase.ts`` — the non-public schemas aren't in
+ * the generated Database type yet. */
+function asCoachbyte(client?: SupabaseClient<any>) {
+  return ((client ?? supabase) as any).schema('coachbyte');
+}
+
+/** Load the user's completed_sets + group them into ExercisePR records.
+ *
+ * Mirrors the queryFn that drives ``queryKeys.prs(userId, dateRange)``.
+ * When ``dateRange < 9999`` the query adds a ``completed_at >= now - dateRange``
+ * filter; 9999 is the "all history" sentinel (no gte clause).
+ */
+export async function loadPrsData(
+  userId: string,
+  dateRange: number,
+  client?: SupabaseClient<any>,
+): Promise<ExercisePR[]> {
+  let query = asCoachbyte(client)
+    .from('completed_sets')
+    .select('exercise_id, actual_reps, actual_load, exercises(name)')
+    .eq('user_id', userId)
+    .order('completed_at', { ascending: false });
+
+  if (dateRange < 9999) {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - dateRange);
+    query = query.gte('completed_at', cutoffDate.toISOString());
+  }
+
+  const { data: completedSets, error: setsErr } = await query;
+  if (setsErr) throw setsErr;
+  if (!completedSets || completedSets.length === 0) return [];
+
+  const exerciseMap = new Map<string, { name: string; repBests: Map<number, number> }>();
+  for (const cs of completedSets as any[]) {
+    const id = cs.exercise_id;
+    const name = cs.exercises?.name ?? 'Unknown';
+    const reps = cs.actual_reps;
+    const load = Number(cs.actual_load);
+
+    if (!exerciseMap.has(id)) {
+      exerciseMap.set(id, { name, repBests: new Map() });
+    }
+    const entry = exerciseMap.get(id)!;
+    const current = entry.repBests.get(reps) ?? 0;
+    if (load > current) {
+      entry.repBests.set(reps, load);
+    }
+  }
+
+  const result: ExercisePR[] = [];
+  for (const [exerciseId, data] of exerciseMap) {
+    const repRecords = Array.from(data.repBests.entries())
+      .map(([reps, load]) => ({ reps, load }))
+      .sort((a, b) => a.reps - b.reps);
+
+    let maxE1RM = 0;
+    for (const r of repRecords) {
+      const e = epley1RM(r.load, r.reps);
+      if (e > maxE1RM) maxE1RM = e;
+    }
+
+    result.push({
+      exercise_id: exerciseId,
+      exercise_name: data.name,
+      e1rm: maxE1RM,
+      rep_records: repRecords,
+    });
+  }
+
+  result.sort((a, b) => a.exercise_name.localeCompare(b.exercise_name));
+  return result;
+}
+
+/** Load global + user-owned exercises (exercise_id, name) ordered by name.
+ * Shared by the PR tracker search and the "tracked exercises" chips. */
+export async function loadExercisesForPrs(
+  userId: string,
+  client?: SupabaseClient<any>,
+): Promise<{ exercise_id: string; name: string }[]> {
+  const { data, error } = await asCoachbyte(client)
+    .from('exercises')
+    .select('exercise_id, name')
+    .or(`user_id.is.null,user_id.eq.${userId}`)
+    .order('name');
+  if (error) throw error;
+  return (data ?? []) as { exercise_id: string; name: string }[];
+}
+
+/** Load the saved pr_tracked_exercise_ids from user_settings; null when
+ * the user hasn't opted in yet (the UI then defaults to tracking all). */
+export async function loadPrTrackedExerciseIds(
+  userId: string,
+  client?: SupabaseClient<any>,
+): Promise<string[] | null> {
+  const { data } = await asCoachbyte(client)
+    .from('user_settings')
+    .select('pr_tracked_exercise_ids')
+    .eq('user_id', userId)
+    .maybeSingle();
+  return (data?.pr_tracked_exercise_ids as string[] | null) ?? null;
+}
+
+/** Persist the pr_tracked_exercise_ids column. The UI debounces tag
+ * toggles through this helper so each add/remove lands as one write. */
+export async function savePrTrackedExerciseIds(
+  userId: string,
+  ids: string[],
+  client?: SupabaseClient<any>,
+): Promise<void> {
+  const { error } = await asCoachbyte(client)
+    .from('user_settings')
+    .update({ pr_tracked_exercise_ids: ids })
+    .eq('user_id', userId);
+  if (error) throw error;
 }
 
 export function PrsPage() {
@@ -40,102 +168,21 @@ export function PrsPage() {
     error: loadError,
   } = useQuery({
     queryKey: queryKeys.prs(user!.id, String(dateRange)),
-    queryFn: async (): Promise<ExercisePR[]> => {
-      let query = supabase
-        .schema('coachbyte')
-        .from('completed_sets')
-        .select('exercise_id, actual_reps, actual_load, exercises(name)')
-        .eq('user_id', user!.id)
-        .order('completed_at', { ascending: false });
-
-      if (dateRange < 9999) {
-        const cutoffDate = new Date();
-        cutoffDate.setDate(cutoffDate.getDate() - dateRange);
-        query = query.gte('completed_at', cutoffDate.toISOString());
-      }
-
-      const { data: completedSets, error: setsErr } = await query;
-      if (setsErr) throw setsErr;
-
-      if (!completedSets || completedSets.length === 0) {
-        return [];
-      }
-
-      // Group by exercise, find best load at each rep count
-      const exerciseMap = new Map<string, { name: string; repBests: Map<number, number> }>();
-
-      for (const cs of completedSets as any[]) {
-        const id = cs.exercise_id;
-        const name = cs.exercises?.name ?? 'Unknown';
-        const reps = cs.actual_reps;
-        const load = Number(cs.actual_load);
-
-        if (!exerciseMap.has(id)) {
-          exerciseMap.set(id, { name, repBests: new Map() });
-        }
-        const entry = exerciseMap.get(id)!;
-        const current = entry.repBests.get(reps) ?? 0;
-        if (load > current) {
-          entry.repBests.set(reps, load);
-        }
-      }
-
-      const result: ExercisePR[] = [];
-      for (const [exerciseId, data] of exerciseMap) {
-        const repRecords = Array.from(data.repBests.entries())
-          .map(([reps, load]) => ({ reps, load }))
-          .sort((a, b) => a.reps - b.reps);
-
-        // e1RM = max Epley across all rep records
-        let maxE1RM = 0;
-        for (const r of repRecords) {
-          const e = epley1RM(r.load, r.reps);
-          if (e > maxE1RM) maxE1RM = e;
-        }
-
-        result.push({
-          exercise_id: exerciseId,
-          exercise_name: data.name,
-          e1rm: maxE1RM,
-          rep_records: repRecords,
-        });
-      }
-
-      result.sort((a, b) => a.exercise_name.localeCompare(b.exercise_name));
-      return result;
-    },
+    queryFn: () => loadPrsData(user!.id, dateRange),
     enabled: !!user,
   });
 
   // ── Exercises + tracked settings query ──
   const { data: allExercises = [] } = useQuery({
     queryKey: queryKeys.exercises(user!.id),
-    queryFn: async () => {
-      const { data, error: err } = await supabase
-        .schema('coachbyte')
-        .from('exercises')
-        .select('exercise_id, name')
-        .or(`user_id.is.null,user_id.eq.${user!.id}`)
-        .order('name');
-      if (err) throw err;
-      return (data ?? []) as { exercise_id: string; name: string }[];
-    },
+    queryFn: () => loadExercisesForPrs(user!.id),
     enabled: !!user,
   });
 
   // Load tracked exercise settings
   useQuery({
     queryKey: queryKeys.coachSettings(user!.id),
-    queryFn: async () => {
-      const { data } = await coachbyte()
-        .from('user_settings')
-        .select('pr_tracked_exercise_ids')
-        .eq('user_id', user!.id)
-        .maybeSingle();
-
-      const savedIds: string[] | null = data?.pr_tracked_exercise_ids ?? null;
-      return savedIds;
-    },
+    queryFn: () => loadPrTrackedExerciseIds(user!.id),
     enabled: !!user && allExercises.length > 0,
     // When data arrives, sync tracked exercises state
     select: (savedIds: string[] | null) => {
@@ -160,7 +207,7 @@ export function PrsPage() {
   const saveTrackedExercises = useCallback(
     async (ids: string[]) => {
       if (!user) return;
-      await coachbyte().from('user_settings').update({ pr_tracked_exercise_ids: ids }).eq('user_id', user.id);
+      await savePrTrackedExerciseIds(user.id, ids);
     },
     [user],
   );

@@ -8,8 +8,21 @@ import {
   type PageTestContext,
   type CoachByteSeeds,
 } from './helpers';
+import {
+  epley1RM,
+  loadPrsData,
+  loadExercisesForPrs,
+  loadPrTrackedExerciseIds,
+  savePrTrackedExerciseIds,
+} from '@/pages/coachbyte/PrsPage';
 
-describe('CoachByte PrsPage queries', () => {
+// Legacy-audit issue #3 (2026-04-22): this test used to replicate each
+// query from PrsPage.tsx inline with a "// Source: PrsPage.tsx line N"
+// comment. Stale replicas kept passing after refactors. Now the test
+// calls the SAME exported loaders the page calls — if a loader changes,
+// this test exercises the new behavior automatically.
+
+describe('CoachByte PrsPage loaders', () => {
   let ctx: PageTestContext;
   let seeds: CoachByteSeeds;
   let planId: string;
@@ -65,370 +78,186 @@ describe('CoachByte PrsPage queries', () => {
   });
 
   // -------------------------------------------------------------------
-  // PrsPage: completed_sets query for PR computation
-  // Source: PrsPage.tsx line 32-36
-  //   .from('completed_sets')
-  //   .select('exercise_id, actual_reps, actual_load, exercises(name)')
-  //   .eq('user_id', user.id)
+  // loadPrsData — aggregates completed_sets by exercise + rep bucket
+  // and computes e1RM. This is the primary query driving the PR cards.
+  //
+  // The loader groups by exercise_id, keeps the best load per rep
+  // bucket, and computes e1RM as the max Epley across buckets. We
+  // assert against the completed_sets rows actually in the DB — seed
+  // helpers are noisy enough that a fixed-count assertion here is
+  // fragile (see the original coach-prs suite's beforeAll, whose ad-
+  // hoc insert is fire-and-forget). This is the point of the
+  // extraction refactor: the test pins loader BEHAVIOR, not seed shape.
   // -------------------------------------------------------------------
-  it('completed_sets query returns exercise_id, actual_reps, actual_load, exercises(name)', async () => {
-    const result = await coachbyte(ctx.client)
+  it('loadPrsData groups completed_sets by exercise + rep bucket with max-Epley e1RM', async () => {
+    const prs = await loadPrsData(ctx.userId, 90, ctx.client);
+
+    expect(Array.isArray(prs)).toBe(true);
+    expect(prs.length).toBeGreaterThanOrEqual(1);
+
+    // Rebuild the expected grouping directly from completed_sets so the
+    // assertion stays true regardless of which seed rows landed.
+    const { data: raw } = await coachbyte(ctx.client)
       .from('completed_sets')
       .select('exercise_id, actual_reps, actual_load, exercises(name)')
       .eq('user_id', ctx.userId);
+    expect(raw).not.toBeNull();
 
-    const data = assertQuerySucceeds(result, 'completed_sets for PRs');
-    expect(Array.isArray(data)).toBe(true);
-    // We completed 3 planned + 1 ad-hoc = 4 sets
-    expect(data.length).toBe(4);
-
-    const first = data[0];
-    expect(typeof first.exercise_id).toBe('string');
-    expect(typeof first.actual_reps).toBe('number');
-    expect(typeof Number(first.actual_load)).toBe('number');
-    expect(first.exercises).not.toBeNull();
-    expect(typeof first.exercises.name).toBe('string');
-    // All exercises should be either Squat or Bench Press
-    expect(['Squat', 'Bench Press']).toContain(first.exercises.name);
-  });
-
-  // -------------------------------------------------------------------
-  // PrsPage: verify PR data can be grouped by exercise (mirrors client-side logic)
-  // Source: PrsPage.tsx line 44-84 — groups by exercise_id, finds best load per rep count
-  // -------------------------------------------------------------------
-  it('PR data groups correctly by exercise with rep bests', async () => {
-    const result = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('exercise_id, actual_reps, actual_load, exercises(name)')
-      .eq('user_id', ctx.userId);
-
-    const data = assertQuerySucceeds(result, 'PR grouping') as any[];
-
-    // Group by exercise (same logic as PrsPage)
-    const exerciseMap = new Map<string, { name: string; repBests: Map<number, number> }>();
-    for (const cs of data) {
-      const id = cs.exercise_id;
-      const name = cs.exercises?.name ?? 'Unknown';
-      const reps = cs.actual_reps;
-      const load = Number(cs.actual_load);
-
-      if (!exerciseMap.has(id)) {
-        exerciseMap.set(id, { name, repBests: new Map() });
-      }
-      const entry = exerciseMap.get(id)!;
-      const current = entry.repBests.get(reps) ?? 0;
-      if (load > current) {
-        entry.repBests.set(reps, load);
-      }
+    const expectedByExercise = new Map<string, { name: string; byReps: Map<number, number> }>();
+    for (const row of raw as any[]) {
+      const id = row.exercise_id as string;
+      const name = row.exercises?.name ?? 'Unknown';
+      const reps = row.actual_reps as number;
+      const load = Number(row.actual_load);
+      if (!expectedByExercise.has(id)) expectedByExercise.set(id, { name, byReps: new Map() });
+      const entry = expectedByExercise.get(id)!;
+      entry.byReps.set(reps, Math.max(entry.byReps.get(reps) ?? 0, load));
     }
 
-    // Should have 2 exercises: Squat + Bench Press
-    expect(exerciseMap.size).toBe(2);
+    // Loader must produce one PR record per distinct exercise_id.
+    expect(prs).toHaveLength(expectedByExercise.size);
 
-    const squatId = seeds.exerciseMap['Squat'];
-    const benchId = seeds.exerciseMap['Bench Press'];
+    // Loader sorts by exercise name ascending.
+    for (let i = 1; i < prs.length; i++) {
+      expect(prs[i].exercise_name.localeCompare(prs[i - 1].exercise_name)).toBeGreaterThanOrEqual(0);
+    }
 
-    // Squat should have 2 rep records: 5x225 and 3x275
-    const squatData = exerciseMap.get(squatId);
-    expect(squatData).toBeDefined();
-    expect(squatData!.name).toBe('Squat');
-    expect(squatData!.repBests.get(5)).toBe(225);
-    expect(squatData!.repBests.get(3)).toBe(275);
+    // Every card matches the rep-bucket pivot + the max-Epley e1RM.
+    for (const pr of prs) {
+      const expected = expectedByExercise.get(pr.exercise_id)!;
+      expect(expected).toBeDefined();
+      expect(pr.exercise_name).toBe(expected.name);
 
-    // Bench should have 1 rep record: 5x185
-    const benchData = exerciseMap.get(benchId);
-    expect(benchData).toBeDefined();
-    expect(benchData!.name).toBe('Bench Press');
-    expect(benchData!.repBests.get(5)).toBe(185);
-  });
+      // rep_records contains one entry per distinct reps count, with
+      // the load equal to the max load observed at that count.
+      expect(pr.rep_records).toHaveLength(expected.byReps.size);
+      for (const r of pr.rep_records) {
+        expect(r.load).toBe(expected.byReps.get(r.reps));
+      }
 
-  // -------------------------------------------------------------------
-  // PrsPage: exercises query for tracking list
-  // Source: PrsPage.tsx line 96-101
-  //   .from('exercises')
-  //   .select('exercise_id, name')
-  //   .or(`user_id.is.null,user_id.eq.${user.id}`)
-  //   .order('name')
-  // -------------------------------------------------------------------
-  it('exercises query returns exercise_id and name, ordered alphabetically', async () => {
-    const result = await coachbyte(ctx.client)
-      .from('exercises')
-      .select('exercise_id, name')
-      .or(`user_id.is.null,user_id.eq.${ctx.userId}`)
-      .order('name');
+      // Ascending by reps.
+      for (let i = 1; i < pr.rep_records.length; i++) {
+        expect(pr.rep_records[i].reps).toBeGreaterThan(pr.rep_records[i - 1].reps);
+      }
 
-    const data = assertQuerySucceeds(result, 'exercises for PR tracking');
-    expect(data.length).toBeGreaterThanOrEqual(1);
-
-    const first = data[0];
-    expect(first).toHaveProperty('exercise_id');
-    expect(first).toHaveProperty('name');
-
-    // Verify alphabetical ordering
-    for (let i = 1; i < data.length; i++) {
-      expect(data[i].name.localeCompare(data[i - 1].name)).toBeGreaterThanOrEqual(0);
+      // e1RM = max Epley across all rep records.
+      const expectedE1rm = Math.max(...pr.rep_records.map((r) => epley1RM(r.load, r.reps)));
+      expect(pr.e1rm).toBe(expectedE1rm);
     }
   });
 
   // -------------------------------------------------------------------
-  // PrsPage: Epley 1RM formula verification (exported from PrsPage)
-  // Source: PrsPage.tsx line 15-19
-  //   export function epley1RM(load: number, reps: number): number {
-  //     if (reps <= 0 || load <= 0) return 0;
-  //     if (reps === 1) return load;
-  //     return Math.round(load * (1 + reps / 30));
-  //   }
+  // loadPrsData date-range sentinel — 9999 means "all history" (no gte).
+  // Tests both branches of the conditional inside the loader.
   // -------------------------------------------------------------------
-  it('Epley 1RM formula computes correctly from DB data', async () => {
-    // This verifies the query data is compatible with the Epley formula
-    const result = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('actual_reps, actual_load')
-      .eq('user_id', ctx.userId)
-      .eq('exercise_id', seeds.exerciseMap['Squat']);
+  it('loadPrsData with dateRange=9999 returns all history (no gte filter)', async () => {
+    const boundedPrs = await loadPrsData(ctx.userId, 90, ctx.client);
+    const unboundedPrs = await loadPrsData(ctx.userId, 9999, ctx.client);
 
-    const data = assertQuerySucceeds(result, 'squat sets for Epley') as any[];
-
-    // Compute Epley for each set
-    const e1rms = data.map((cs: any) => {
-      const load = Number(cs.actual_load);
-      const reps = cs.actual_reps;
-      if (reps <= 0 || load <= 0) return 0;
-      if (reps === 1) return load;
-      return Math.round(load * (1 + reps / 30));
-    });
-
-    // 5x225: Epley = round(225 * (1 + 5/30)) = round(225 * 1.1667) = round(262.5) = 263
-    // 3x275: Epley = round(275 * (1 + 3/30)) = round(275 * 1.1) = round(302.5) = 303
-    const maxE1rm = Math.max(...e1rms);
-    expect(maxE1rm).toBe(303); // 3x275 produces highest e1RM
+    // Every set completed in beforeAll is recent, so both sets should
+    // have identical PR cards. The important thing is the 9999 branch
+    // didn't fail and produced the same shape.
+    expect(unboundedPrs).toHaveLength(boundedPrs.length);
+    expect(
+      unboundedPrs.map((p) => p.exercise_name).sort(),
+    ).toEqual(boundedPrs.map((p) => p.exercise_name).sort());
   });
 
   // -------------------------------------------------------------------
-  // PrsPage: user_settings pr_tracked_exercise_ids save/load
-  // Source: PrsPage.tsx line 156-159 — saveTrackedExercises
-  //   .from('user_settings').update({ pr_tracked_exercise_ids: ids }).eq('user_id', user.id)
-  // Source: PrsPage.tsx line 135 — loadExercisesAndSettings
-  //   .from('user_settings').select('pr_tracked_exercise_ids').eq('user_id', user.id).maybeSingle()
+  // loadExercisesForPrs — populates the search + tracked-chip list.
   // -------------------------------------------------------------------
-  it('user_settings pr_tracked_exercise_ids save and load round-trip', async () => {
-    // Get exercises
-    const { data: exercises } = await coachbyte(ctx.client)
-      .from('exercises')
-      .select('exercise_id')
-      .is('user_id', null)
-      .limit(3);
-    expect(exercises!.length).toBeGreaterThanOrEqual(2);
+  it('loadExercisesForPrs returns alphabetically-ordered exercise list', async () => {
+    const exercises = await loadExercisesForPrs(ctx.userId, ctx.client);
+    expect(exercises.length).toBeGreaterThanOrEqual(2);
 
-    const trackedIds = [exercises![0].exercise_id, exercises![1].exercise_id];
+    for (let i = 1; i < exercises.length; i++) {
+      expect(exercises[i].name.localeCompare(exercises[i - 1].name)).toBeGreaterThanOrEqual(0);
+    }
 
-    // Save (EXACT pattern from PrsPage saveTrackedExercises)
-    const updateResult = await coachbyte(ctx.client)
-      .from('user_settings')
-      .update({ pr_tracked_exercise_ids: trackedIds })
-      .eq('user_id', ctx.userId);
-    expect(updateResult.error).toBeNull();
+    // Every row has the column shape the UI consumes.
+    for (const e of exercises) {
+      expect(typeof e.exercise_id).toBe('string');
+      expect(typeof e.name).toBe('string');
+    }
+  });
 
-    // Load back (EXACT pattern from PrsPage loadExercisesAndSettings)
-    const { data: loaded } = await coachbyte(ctx.client)
-      .from('user_settings')
-      .select('pr_tracked_exercise_ids')
-      .eq('user_id', ctx.userId)
-      .maybeSingle();
-    expect(loaded).not.toBeNull();
-    expect(loaded!.pr_tracked_exercise_ids).toEqual(trackedIds);
+  // -------------------------------------------------------------------
+  // loadPrTrackedExerciseIds / savePrTrackedExerciseIds round-trip —
+  // same helper pair the chip toggles use.
+  // -------------------------------------------------------------------
+  it('savePrTrackedExerciseIds + loadPrTrackedExerciseIds round-trip', async () => {
+    const exercises = await loadExercisesForPrs(ctx.userId, ctx.client);
+    const ids = [exercises[0].exercise_id, exercises[1].exercise_id];
 
-    // Cleanup - reset to null (default)
-    await coachbyte(ctx.client)
+    await savePrTrackedExerciseIds(ctx.userId, ids, ctx.client);
+    const loaded = await loadPrTrackedExerciseIds(ctx.userId, ctx.client);
+    expect(loaded).toEqual(ids);
+
+    // Empty list is a distinct signal from null — the UI respects "user
+    // explicitly tracks zero" vs "user hasn't configured yet".
+    await savePrTrackedExerciseIds(ctx.userId, [], ctx.client);
+    const empty = await loadPrTrackedExerciseIds(ctx.userId, ctx.client);
+    expect(empty).toEqual([]);
+
+    // Cleanup: restore the null sentinel so other tests see the
+    // unconfigured state.
+    const { error } = await coachbyte(ctx.client)
       .from('user_settings')
       .update({ pr_tracked_exercise_ids: null })
       .eq('user_id', ctx.userId);
+    expect(error).toBeNull();
   });
 
   // -------------------------------------------------------------------
-  // PrsPage: PR cards sorted alphabetically by exercise name
-  // Source: PrsPage.tsx line 102 — result.sort((a, b) => a.exercise_name.localeCompare(b.exercise_name))
+  // Derived UI state — tracked-filter removes cards whose exercise_id
+  // isn't in the tracked set. Keep this as a pure-function check of
+  // the render-side filter that operates on loadPrsData's output.
   // -------------------------------------------------------------------
-  it('PR cards sorted alphabetically by exercise name', async () => {
-    const result = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('exercise_id, actual_reps, actual_load, exercises(name)')
-      .eq('user_id', ctx.userId);
+  it('PR cards filter by tracked exercise_ids (UI render-side filter)', async () => {
+    const prs = await loadPrsData(ctx.userId, 90, ctx.client);
+    expect(prs.length).toBeGreaterThan(0);
 
-    const data = assertQuerySucceeds(result, 'completed_sets for PR sort') as any[];
+    // Track only Squat → filteredPRs must drop Bench Press.
+    const squatId = seeds.exerciseMap['Squat'];
+    const trackedIds = new Set([squatId]);
+    const filtered = prs.filter((pr) => trackedIds.has(pr.exercise_id));
+    expect(filtered.map((p) => p.exercise_name)).toEqual(['Squat']);
 
-    // Group by exercise (same logic as PrsPage computePRs)
-    const exerciseMap = new Map<string, { name: string; e1rm: number }>();
-    for (const cs of data) {
-      const id = cs.exercise_id;
-      const name = cs.exercises?.name ?? 'Unknown';
-      const reps = cs.actual_reps;
-      const load = Number(cs.actual_load);
-      const e1rm = reps <= 0 || load <= 0 ? 0 : reps === 1 ? load : Math.round(load * (1 + reps / 30));
-
-      if (!exerciseMap.has(id)) {
-        exerciseMap.set(id, { name, e1rm });
-      }
-      const entry = exerciseMap.get(id)!;
-      if (e1rm > entry.e1rm) entry.e1rm = e1rm;
-    }
-
-    // Sort alphabetically (same as PrsPage)
-    const sorted = Array.from(exerciseMap.values()).sort((a, b) => a.name.localeCompare(b.name));
-    expect(sorted.length).toBe(2); // Bench Press, Squat
-    expect(sorted[0].name).toBe('Bench Press');
-    expect(sorted[1].name).toBe('Squat');
+    // Track nothing → empty PR cards.
+    const noneTracked = new Set<string>();
+    expect(prs.filter((pr) => noneTracked.has(pr.exercise_id))).toEqual([]);
   });
 
   // -------------------------------------------------------------------
-  // PrsPage: search excludes already-tracked exercise_ids
-  // Source: PrsPage.tsx line 168-173 — searchResults
-  //   allExercises.filter(e => e.name.toLowerCase().includes(searchText) && !trackedIds.has(e.exercise_id))
+  // Derived UI state — search excludes already-tracked exercises.
+  // Pure function over loadExercisesForPrs output.
   // -------------------------------------------------------------------
-  it('search excludes already-tracked exercise_ids', async () => {
-    // Get all exercises
-    const { data: allExercises } = await coachbyte(ctx.client)
-      .from('exercises')
-      .select('exercise_id, name')
-      .or(`user_id.is.null,user_id.eq.${ctx.userId}`)
-      .order('name');
+  it('search excludes already-tracked exercise_ids (UI filter)', async () => {
+    const all = await loadExercisesForPrs(ctx.userId, ctx.client);
+    expect(all.length).toBeGreaterThanOrEqual(2);
 
-    expect(allExercises).not.toBeNull();
-    expect(allExercises!.length).toBeGreaterThanOrEqual(2);
-
-    // Simulate tracking first 2 exercises
-    const trackedIds = new Set([allExercises![0].exercise_id, allExercises![1].exercise_id]);
-
-    // Simulate search (same as PrsPage searchResults)
+    const trackedIds = new Set([all[0].exercise_id, all[1].exercise_id]);
     const searchText = '';
-    const searchResults = allExercises!.filter(
-      (e: any) => (searchText === '' || e.name.toLowerCase().includes(searchText)) && !trackedIds.has(e.exercise_id),
+    const searchResults = all.filter(
+      (e) => (searchText === '' || e.name.toLowerCase().includes(searchText)) && !trackedIds.has(e.exercise_id),
     );
 
-    // No tracked exercises should appear in results
     for (const r of searchResults) {
       expect(trackedIds.has(r.exercise_id)).toBe(false);
     }
-    expect(searchResults.length).toBe(allExercises!.length - 2);
+    expect(searchResults).toHaveLength(all.length - 2);
   });
 
   // -------------------------------------------------------------------
-  // PrsPage: removing all tracked exercises returns empty PR list
-  // Source: PrsPage.tsx line 166 — filteredPRs = prs.filter(pr => trackedIds.has(pr.exercise_id))
+  // Epley formula — pure function. Keep this because it pins the
+  // numeric behavior the PR cards surface.
   // -------------------------------------------------------------------
-  it('removing all tracked exercises returns empty PR list', async () => {
-    // Compute PRs (same as PrsPage)
-    const { data: completedSets } = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('exercise_id, actual_reps, actual_load, exercises(name)')
-      .eq('user_id', ctx.userId);
-
-    expect(completedSets).not.toBeNull();
-    expect(completedSets!.length).toBeGreaterThan(0);
-
-    // Build PR list
-    const exerciseMap = new Map<string, string>();
-    for (const cs of completedSets as any[]) {
-      exerciseMap.set(cs.exercise_id, cs.exercises?.name ?? 'Unknown');
-    }
-    const prs = Array.from(exerciseMap.entries()).map(([id, name]) => ({
-      exercise_id: id,
-      exercise_name: name,
-    }));
-
-    expect(prs.length).toBeGreaterThan(0);
-
-    // Simulate removing all tracked exercises (empty set)
-    const trackedIds = new Set<string>();
-    const filteredPRs = prs.filter((pr) => trackedIds.has(pr.exercise_id));
-    expect(filteredPRs.length).toBe(0);
-
-    // Save empty tracked list to DB and verify round-trip
-    const updateResult = await coachbyte(ctx.client)
-      .from('user_settings')
-      .update({ pr_tracked_exercise_ids: [] })
-      .eq('user_id', ctx.userId);
-    expect(updateResult.error).toBeNull();
-
-    const { data: loaded } = await coachbyte(ctx.client)
-      .from('user_settings')
-      .select('pr_tracked_exercise_ids')
-      .eq('user_id', ctx.userId)
-      .maybeSingle();
-
-    expect(loaded!.pr_tracked_exercise_ids).toEqual([]);
-
-    // Cleanup — reset to null
-    await coachbyte(ctx.client)
-      .from('user_settings')
-      .update({ pr_tracked_exercise_ids: null })
-      .eq('user_id', ctx.userId);
-  });
-
-  // -------------------------------------------------------------------
-  // PrsPage: completed_sets with date range filter
-  // Source: PrsPage.tsx line 45-56 — computePRs with dateRange
-  //   .from('completed_sets')
-  //   .select('exercise_id, actual_reps, actual_load, exercises(name)')
-  //   .eq('user_id', user.id)
-  //   .gte('completed_at', cutoffDate.toISOString())
-  //   .order('completed_at', { ascending: false })
-  // -------------------------------------------------------------------
-  it('completed_sets query with date range gte filter', async () => {
-    const ninetyDaysAgo = new Date();
-    ninetyDaysAgo.setDate(ninetyDaysAgo.getDate() - 90);
-    const dateStr = ninetyDaysAgo.toISOString();
-
-    // EXACT query from PrsPage (with date range)
-    const { data: sets } = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('exercise_id, actual_reps, actual_load, exercises(name)')
-      .eq('user_id', ctx.userId)
-      .gte('completed_at', dateStr)
-      .order('completed_at', { ascending: false });
-
-    expect(sets).not.toBeNull();
-    expect(Array.isArray(sets)).toBe(true);
-    // We completed 3 planned + 1 ad-hoc = 4 sets in beforeAll, all within 90 days
-    expect(sets!.length).toBe(4);
-
-    // Verify each row has the expected shape
-    for (const s of sets!) {
-      expect(typeof s.exercise_id).toBe('string');
-      expect(typeof s.actual_reps).toBe('number');
-      expect(typeof Number(s.actual_load)).toBe('number');
-      expect(s.exercises).not.toBeNull();
-      expect(typeof (s as any).exercises.name).toBe('string');
-    }
-  });
-
-  // -------------------------------------------------------------------
-  // #35: PRs filtered after removing tracked exercise
-  // The UI tracks exercises in user_config. When an exercise is removed
-  // from the tracked list, filteredPRs = prs.filter(pr => trackedIds.has(pr.exercise_id))
-  // excludes it. Test the underlying data query and filtering logic.
-  // -------------------------------------------------------------------
-  it('filtering completed_sets by tracked exercise_ids works', async () => {
-    // Get all unique exercise_ids from completed_sets
-    const { data: allSets } = await coachbyte(ctx.client)
-      .from('completed_sets')
-      .select('exercise_id')
-      .eq('user_id', ctx.userId);
-    expect(allSets).not.toBeNull();
-    expect(allSets!.length).toBeGreaterThan(0);
-
-    const uniqueIds = [...new Set((allSets as any[]).map((s) => s.exercise_id))];
-    expect(uniqueIds.length).toBeGreaterThanOrEqual(1);
-
-    // Simulate tracking only the first exercise
-    const trackedIds = new Set([uniqueIds[0]]);
-    const filtered = (allSets as any[]).filter((s) => trackedIds.has(s.exercise_id));
-    expect(filtered.length).toBeGreaterThan(0);
-    expect(filtered.length).toBeLessThanOrEqual(allSets!.length);
-
-    // Simulate removing that exercise from tracked (empty tracked list)
-    const emptyTracked = new Set<string>();
-    const afterRemove = (allSets as any[]).filter((s) => emptyTracked.has(s.exercise_id));
-    expect(afterRemove.length).toBe(0);
+  it('epley1RM matches the formula used to populate e1rm', () => {
+    expect(epley1RM(225, 1)).toBe(225);
+    expect(epley1RM(185, 5)).toBe(216); // round(185 * (1 + 5/30))
+    expect(epley1RM(275, 3)).toBe(303); // round(275 * 1.1)
+    // Guards
+    expect(epley1RM(0, 5)).toBe(0);
+    expect(epley1RM(225, 0)).toBe(0);
   });
 });

@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
@@ -7,7 +8,7 @@ import { formatTime } from '@/shared/formatTime';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
-import { coachbyte } from '@/shared/supabase';
+import { supabase, coachbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { epley1RM } from '@/pages/coachbyte/PrsPage';
@@ -21,7 +22,7 @@ import { CardSkeleton } from '@/components/ui/Skeleton';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
-interface CompletedSet {
+export interface CompletedSet {
   completed_set_id: string;
   exercise_name: string;
   actual_reps: number;
@@ -29,26 +30,141 @@ interface CompletedSet {
   completed_at: string;
 }
 
-interface TimerState {
+export interface TimerState {
   state: 'running' | 'paused' | 'expired' | 'idle';
   end_time: string | null;
   duration_seconds: number;
   elapsed_before_pause: number;
 }
 
-const DEFAULT_TIMER: TimerState = {
+export const DEFAULT_TIMER: TimerState = {
   state: 'idle',
   end_time: null,
   duration_seconds: 0,
   elapsed_before_pause: 0,
 };
 
-interface DailyPlanData {
+export interface DailyPlanData {
   planId: string;
   sets: PlannedSet[];
   completedSets: CompletedSet[];
   summary: string;
   notes: string;
+}
+
+// ---------------------------------------------------------------------------
+// Exported data loaders — TodayPage's queryFn bodies hoisted to top-level
+// so integration tests can exercise them directly. See the 2026-04-22
+// legacy audit issue #3 ("query-replica drift") for motivation.
+// ---------------------------------------------------------------------------
+
+function asCoachbyte(client?: SupabaseClient<any>) {
+  return ((client ?? supabase) as any).schema('coachbyte');
+}
+
+/** Load + assemble the TodayPage daily-plan data blob.
+ *
+ * Wraps:
+ *   - ``ensure_daily_plan(p_day)`` RPC (creates the row if missing)
+ *   - ``planned_sets`` select + exercises join
+ *   - ``completed_sets`` select + exercises join
+ *   - ``daily_plans`` summary/notes select
+ *
+ * Then folds planned+completed into a joined ``sets: PlannedSet[]`` where
+ * each set carries ``completed: boolean`` computed from the completed-set
+ * planned_set_id set.
+ */
+export async function loadDailyPlanData(
+  day: string,
+  client?: SupabaseClient<any>,
+): Promise<DailyPlanData> {
+  const coach = asCoachbyte(client);
+  const { data: planResult, error: planErr } = await coach.rpc('ensure_daily_plan', { p_day: day });
+  if (planErr) throw planErr;
+  const result = planResult as { plan_id: string; status: string };
+
+  const [{ data: plannedData }, { data: completedData }, { data: planInfo }] = await Promise.all([
+    coach
+      .from('planned_sets')
+      .select(
+        'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)',
+      )
+      .eq('plan_id', result.plan_id)
+      .order('"order"'),
+    coach
+      .from('completed_sets')
+      .select('completed_set_id, planned_set_id, actual_reps, actual_load, completed_at, exercises(name)')
+      .eq('plan_id', result.plan_id)
+      .order('completed_at'),
+    coach.from('daily_plans').select('summary, notes').eq('plan_id', result.plan_id).single(),
+  ]);
+
+  const completedPlanIds = new Set(
+    (completedData ?? []).map((cs: any) => cs.planned_set_id).filter(Boolean),
+  );
+
+  const sets: PlannedSet[] = (plannedData ?? []).map((ps: any) => ({
+    planned_set_id: ps.planned_set_id,
+    exercise_id: ps.exercise_id,
+    exercise_name: ps.exercises?.name ?? 'Unknown',
+    target_reps: ps.target_reps,
+    target_load: ps.target_load ? Number(ps.target_load) : null,
+    target_load_percentage: ps.target_load_percentage ? Number(ps.target_load_percentage) : null,
+    rest_seconds: ps.rest_seconds,
+    order: ps.order,
+    completed: completedPlanIds.has(ps.planned_set_id),
+  }));
+
+  const completedSets: CompletedSet[] = (completedData ?? []).map((cs: any) => ({
+    completed_set_id: cs.completed_set_id,
+    exercise_name: cs.exercises?.name ?? 'Unknown',
+    actual_reps: cs.actual_reps,
+    actual_load: Number(cs.actual_load),
+    completed_at: cs.completed_at,
+  }));
+
+  return {
+    planId: result.plan_id,
+    sets,
+    completedSets,
+    summary: planInfo?.summary ?? '',
+    notes: (planInfo as any)?.notes ?? '',
+  };
+}
+
+/** Load the current timer state for a user. Returns DEFAULT_TIMER when
+ * no row exists (the UI treats "no row" as "idle"). */
+export async function loadTimerState(
+  userId: string,
+  client?: SupabaseClient<any>,
+): Promise<TimerState> {
+  const { data } = await asCoachbyte(client)
+    .from('timers')
+    .select('state, end_time, duration_seconds, elapsed_before_pause')
+    .eq('user_id', userId)
+    .maybeSingle();
+
+  if (!data) return { ...DEFAULT_TIMER };
+  return {
+    state: data.state as TimerState['state'],
+    end_time: data.end_time,
+    duration_seconds: data.duration_seconds,
+    elapsed_before_pause: data.elapsed_before_pause,
+  };
+}
+
+/** Load global + user-owned exercises for the AdHocSetForm. */
+export async function loadExercisesForToday(
+  userId: string,
+  client?: SupabaseClient<any>,
+): Promise<Exercise[]> {
+  const { data, error } = await asCoachbyte(client)
+    .from('exercises')
+    .select('exercise_id, name')
+    .or(`user_id.is.null,user_id.eq.${userId}`)
+    .order('name');
+  if (error) throw error;
+  return (data ?? []) as Exercise[];
 }
 
 export function TodayPage() {
@@ -96,58 +212,7 @@ export function TodayPage() {
     error: planError,
   } = useQuery({
     queryKey: queryKeys.dailyPlan(user!.id, today),
-    queryFn: async (): Promise<DailyPlanData> => {
-      const { data: planResult, error: planErr } = await coachbyte().rpc('ensure_daily_plan', { p_day: today });
-      if (planErr) throw planErr;
-
-      const result = planResult as { plan_id: string; status: string };
-
-      const [{ data: plannedData }, { data: completedData }, { data: planInfo }] = await Promise.all([
-        coachbyte()
-          .from('planned_sets')
-          .select(
-            'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, "order", exercises(name)',
-          )
-          .eq('plan_id', result.plan_id)
-          .order('"order"'),
-        coachbyte()
-          .from('completed_sets')
-          .select('completed_set_id, planned_set_id, actual_reps, actual_load, completed_at, exercises(name)')
-          .eq('plan_id', result.plan_id)
-          .order('completed_at'),
-        coachbyte().from('daily_plans').select('summary, notes').eq('plan_id', result.plan_id).single(),
-      ]);
-
-      const completedPlanIds = new Set(completedData?.map((cs: any) => cs.planned_set_id).filter(Boolean) ?? []);
-
-      const mapped: PlannedSet[] = (plannedData ?? []).map((ps: any) => ({
-        planned_set_id: ps.planned_set_id,
-        exercise_id: ps.exercise_id,
-        exercise_name: ps.exercises?.name ?? 'Unknown',
-        target_reps: ps.target_reps,
-        target_load: ps.target_load ? Number(ps.target_load) : null,
-        target_load_percentage: ps.target_load_percentage ? Number(ps.target_load_percentage) : null,
-        rest_seconds: ps.rest_seconds,
-        order: ps.order,
-        completed: completedPlanIds.has(ps.planned_set_id),
-      }));
-
-      const completedMapped: CompletedSet[] = (completedData ?? []).map((cs: any) => ({
-        completed_set_id: cs.completed_set_id,
-        exercise_name: cs.exercises?.name ?? 'Unknown',
-        actual_reps: cs.actual_reps,
-        actual_load: Number(cs.actual_load),
-        completed_at: cs.completed_at,
-      }));
-
-      return {
-        planId: result.plan_id,
-        sets: mapped,
-        completedSets: completedMapped,
-        summary: planInfo?.summary ?? '',
-        notes: (planInfo as any)?.notes ?? '',
-      };
-    },
+    queryFn: () => loadDailyPlanData(today),
     enabled: !!user,
   });
 
@@ -170,38 +235,14 @@ export function TodayPage() {
   // ── Timer query ──
   const { data: timer = DEFAULT_TIMER } = useQuery({
     queryKey: queryKeys.timer(user!.id),
-    queryFn: async (): Promise<TimerState> => {
-      const { data } = await coachbyte()
-        .from('timers')
-        .select('state, end_time, duration_seconds, elapsed_before_pause')
-        .eq('user_id', user!.id)
-        .maybeSingle();
-
-      if (data) {
-        return {
-          state: data.state as TimerState['state'],
-          end_time: data.end_time,
-          duration_seconds: data.duration_seconds,
-          elapsed_before_pause: data.elapsed_before_pause,
-        };
-      }
-      return DEFAULT_TIMER;
-    },
+    queryFn: () => loadTimerState(user!.id),
     enabled: !!user,
   });
 
   // ── Exercises query ──
   const { data: exercises = [] } = useQuery({
     queryKey: queryKeys.exercises(user!.id),
-    queryFn: async (): Promise<Exercise[]> => {
-      const { data, error: err } = await coachbyte()
-        .from('exercises')
-        .select('exercise_id, name')
-        .or(`user_id.is.null,user_id.eq.${user!.id}`)
-        .order('name');
-      if (err) throw err;
-      return (data ?? []) as Exercise[];
-    },
+    queryFn: () => loadExercisesForToday(user!.id),
     enabled: !!user,
   });
 
