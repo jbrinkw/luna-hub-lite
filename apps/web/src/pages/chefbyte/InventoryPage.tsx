@@ -143,9 +143,7 @@ export function computeReviewState(
  * Exported for unit testing; consumed by the Inventory page's grouped
  * aggregation.
  */
-export function pickEarliestInFlight(
-  lots: ReadonlyArray<{ in_flight_since: string | null }>,
-): string | null {
+export function pickEarliestInFlight(lots: ReadonlyArray<{ in_flight_since: string | null }>): string | null {
   let earliest: string | null = null;
   for (const l of lots) {
     if (!l.in_flight_since) continue;
@@ -357,19 +355,21 @@ export function InventoryPage() {
 
   const expiredLots = useMemo(() => {
     const productMap = new Map(products.map((p) => [p.product_id, p]));
-    return lots
-      .filter((l) => l.expires_on && l.expires_on < todayYmd && Number(l.qty_containers) > 0)
-      .map((l) => ({
-        ...l,
-        product: productMap.get(l.product_id) ?? null,
-        productName: productMap.get(l.product_id)?.name ?? 'Unknown',
-      }))
-      // Oldest expiry first — most urgent at the top of the section.
-      .sort((a, b) => {
-        const cmp = (a.expires_on ?? '').localeCompare(b.expires_on ?? '');
-        if (cmp !== 0) return cmp;
-        return a.productName.localeCompare(b.productName);
-      });
+    return (
+      lots
+        .filter((l) => l.expires_on && l.expires_on < todayYmd && Number(l.qty_containers) > 0)
+        .map((l) => ({
+          ...l,
+          product: productMap.get(l.product_id) ?? null,
+          productName: productMap.get(l.product_id)?.name ?? 'Unknown',
+        }))
+        // Oldest expiry first — most urgent at the top of the section.
+        .sort((a, b) => {
+          const cmp = (a.expires_on ?? '').localeCompare(b.expires_on ?? '');
+          if (cmp !== 0) return cmp;
+          return a.productName.localeCompare(b.productName);
+        })
+    );
   }, [lots, products, todayYmd]);
 
   /**
@@ -403,13 +403,29 @@ export function InventoryPage() {
   /* ---------------------------------------------------------------- */
 
   const filteredGrouped = useMemo(() => {
-    let result = grouped.filter((g) => g.totalStock > 0 || Number(g.product.min_stock_amount) > 0);
+    // Keep: any stock, or a min-stock target (shows as out-of-stock reminder),
+    // or currently-in-flight (picked up, waiting for reunite — stock may be 0).
+    // The in-flight carve-out fixes the "item disappears after pickup" bug:
+    // a lot with qty=0 + in_flight_since IS NOT NULL is tracked, not lost,
+    // and must remain visible so the user sees where it went.
+    let result = grouped.filter(
+      (g) => g.totalStock > 0 || Number(g.product.min_stock_amount) > 0 || g.inFlightSince !== null,
+    );
     if (searchText.trim()) {
       const lower = searchText.toLowerCase();
       result = result.filter((g) => g.product.name.toLowerCase().includes(lower));
     }
-    // Sort: in-stock items first (alphabetically), then 0-qty items at end (alphabetically)
+    // Sort order:
+    //   1. In-flight products first — what's out RIGHT NOW is most relevant.
+    //   2. In-stock (totalStock > 0) next.
+    //   3. Zero-stock (e.g. min-stock reminders, or returned-but-consumed) last.
+    //   4. Within each group, alphabetical by product name.
+    // Ties inside the in-flight group fall through to the name comparator so
+    // there's no dependence on earliest-pickup ordering across products.
     result.sort((a, b) => {
+      const aInFlight = a.inFlightSince !== null ? 0 : 1;
+      const bInFlight = b.inFlightSince !== null ? 0 : 1;
+      if (aInFlight !== bInFlight) return aInFlight - bInFlight;
       const aZero = a.totalStock <= 0 ? 1 : 0;
       const bZero = b.totalStock <= 0 ? 1 : 0;
       if (aZero !== bZero) return aZero - bZero;
@@ -420,14 +436,25 @@ export function InventoryPage() {
 
   /* ---------------------------------------------------------------- */
   /*  Sorted lots for Lots view                                        */
+  /*  Filter: qty > 0 OR in_flight_since IS NOT NULL.                  */
+  /*  In-flight lots with qty=0 are tracked (picked up, waiting for    */
+  /*  reunite) and must remain visible — dropping them is the "item    */
+  /*  disappears after pickup" bug this view is part of.               */
+  /*  Tombstoned zero-qty rows (not in-flight) are still hidden.       */
   /* ---------------------------------------------------------------- */
 
   const sortedLots = useMemo(() => {
     const productMap = new Map(products.map((p) => [p.product_id, p]));
-    return [...lots]
+    return lots
+      .filter((l) => Number(l.qty_containers) > 0 || l.in_flight_since !== null)
       .map((lot) => ({ ...lot, productName: productMap.get(lot.product_id)?.name ?? 'Unknown' }))
       .sort((a, b) => {
-        // Primary: expires_on ASC NULLS LAST
+        // Primary: in-flight first (what's off the shelf right now is most
+        // relevant for the user to see).
+        const aInFlight = a.in_flight_since !== null ? 0 : 1;
+        const bInFlight = b.in_flight_since !== null ? 0 : 1;
+        if (aInFlight !== bInFlight) return aInFlight - bInFlight;
+        // Secondary: expires_on ASC NULLS LAST within each group.
         if (!a.expires_on && !b.expires_on) return a.productName.localeCompare(b.productName);
         if (!a.expires_on) return 1;
         if (!b.expires_on) return -1;
@@ -847,6 +874,14 @@ export function InventoryPage() {
               {/* Product rows */}
               {filteredGrouped.map(({ product, totalStock, nearestExpiry, latestSource, inFlightSince }, idx) => {
                 const isZeroStock = totalStock <= 0;
+                // A zero-stock product that's currently in-flight is NOT really
+                // "missing" — it's off the shelf, waiting to be placed back.
+                // Skip the row dim (opacity-50 is the "out of stock reminder"
+                // treatment reserved for truly-empty products kept around as
+                // min-stock reminders) and replace the "0.0 ctn" numeric with
+                // a "(picked up)" label so the user immediately sees WHY the
+                // stock dropped to zero — the bottle is in their hand, not gone.
+                const isPickedUp = isZeroStock && inFlightSince !== null;
                 const servingsTotal = totalStock * Number(product.servings_per_container);
                 const isExpanded = expandedProductId === product.product_id;
                 const expiryLabel = nearestExpiry
@@ -860,7 +895,7 @@ export function InventoryPage() {
                   <div
                     key={product.product_id}
                     data-testid={`inv-product-${product.product_id}`}
-                    className={`${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock ? 'opacity-50' : ''}`}
+                    className={`${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock && !isPickedUp ? 'opacity-50' : ''}`}
                   >
                     {/* Collapsed row — always visible, clickable to toggle */}
                     <button
@@ -919,9 +954,15 @@ export function InventoryPage() {
                         )}
                       </div>
 
-                      {/* Stock */}
+                      {/* Stock — "(picked up)" replaces the "0.0 ctn" numeric
+                          when the product is zero-stock BUT in-flight. Keeps
+                          the user from thinking the system lost the item. */}
                       <span data-testid={`stock-badge-${product.product_id}`} className="font-semibold text-sm">
-                        {totalStock.toFixed(1)} ctn
+                        {isPickedUp ? (
+                          <span className="text-amber-800 italic">(picked up)</span>
+                        ) : (
+                          `${totalStock.toFixed(1)} ctn`
+                        )}
                       </span>
 
                       {/* Expiry (hidden on small screens) */}
@@ -939,10 +980,14 @@ export function InventoryPage() {
                         className="px-4 pb-4 pt-1 bg-surface-sunken/50 border-t border-border-light"
                         data-testid={`inv-detail-${product.product_id}`}
                       >
-                        {/* Detail info */}
+                        {/* Detail info — matches the collapsed row's treatment:
+                            in-flight zero-stock shows "(picked up)" instead of
+                            a misleading "0.0 containers (0.0 servings)". */}
                         <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-text-secondary mb-3">
                           <span data-testid={`stock-servings-${product.product_id}`}>
-                            {totalStock.toFixed(1)} containers ({servingsTotal.toFixed(1)} servings)
+                            {isPickedUp
+                              ? '(picked up — awaiting reunite)'
+                              : `${totalStock.toFixed(1)} containers (${servingsTotal.toFixed(1)} servings)`}
                           </span>
                           <span data-testid={`min-stock-${product.product_id}`}>
                             Min stock: {Number(product.min_stock_amount).toFixed(1)}
@@ -1045,9 +1090,29 @@ export function InventoryPage() {
                           {sourceLabel[lot.last_update_source]}
                         </span>
                       )}
+                      {lot.in_flight_since && (
+                        <span
+                          data-testid={`lot-inflight-badge-${lot.lot_id}`}
+                          title={`Picked up at ${new Date(lot.in_flight_since).toLocaleTimeString([], {
+                            hour: '2-digit',
+                            minute: '2-digit',
+                          })} — not yet placed back`}
+                          className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
+                          aria-label="In-flight"
+                        >
+                          <Activity className="w-2.5 h-2.5" aria-hidden="true" />
+                          In-flight
+                        </span>
+                      )}
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-secondary">
-                      <span>{Number(lot.qty_containers).toFixed(1)} ctn</span>
+                      <span>
+                        {Number(lot.qty_containers) <= 0 && lot.in_flight_since !== null ? (
+                          <span className="text-amber-800 italic">(picked up)</span>
+                        ) : (
+                          `${Number(lot.qty_containers).toFixed(1)} ctn`
+                        )}
+                      </span>
                       <span>{lot.locations?.name ?? '\u2014'}</span>
                       <span>Expires: {lot.expires_on ?? '\u2014'}</span>
                     </div>
@@ -1084,10 +1149,30 @@ export function InventoryPage() {
                                 {sourceLabel[lot.last_update_source]}
                               </span>
                             )}
+                            {lot.in_flight_since && (
+                              <span
+                                data-testid={`lot-inflight-badge-${lot.lot_id}`}
+                                title={`Picked up at ${new Date(lot.in_flight_since).toLocaleTimeString([], {
+                                  hour: '2-digit',
+                                  minute: '2-digit',
+                                })} — not yet placed back`}
+                                className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
+                                aria-label="In-flight"
+                              >
+                                <Activity className="w-2.5 h-2.5" aria-hidden="true" />
+                                In-flight
+                              </span>
+                            )}
                           </span>
                         </td>
                         <td className="p-3">{lot.locations?.name ?? '\u2014'}</td>
-                        <td className="text-right p-3">{Number(lot.qty_containers).toFixed(1)}</td>
+                        <td className="text-right p-3">
+                          {Number(lot.qty_containers) <= 0 && lot.in_flight_since !== null ? (
+                            <span className="text-amber-800 italic">(picked up)</span>
+                          ) : (
+                            Number(lot.qty_containers).toFixed(1)
+                          )}
+                        </td>
                         <td className="p-3">{lot.expires_on ?? '\u2014'}</td>
                       </tr>
                     ))}
