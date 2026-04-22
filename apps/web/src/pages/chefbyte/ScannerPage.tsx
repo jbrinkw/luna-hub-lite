@@ -1,5 +1,7 @@
 import { useState, useRef, useCallback, useEffect } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { ScanBarcode } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
@@ -978,7 +980,17 @@ export function ScannerPage() {
 
   return (
     <ChefLayout title="Scanner">
-      <h1 className="text-2xl font-bold text-text mb-4">Scanner</h1>
+      <div className="flex items-center justify-between mb-4 gap-3">
+        <h1 className="text-2xl font-bold text-text">Scanner</h1>
+        <Link
+          to="/chef/livetrack-import"
+          data-testid="livetrack-import-btn"
+          className="inline-flex items-center gap-2 px-4 py-2 rounded-md bg-emerald-600 hover:bg-emerald-700 text-white no-underline shadow-sm text-sm font-semibold transition-colors"
+        >
+          <ScanBarcode className="w-4 h-4 shrink-0" aria-hidden="true" />
+          <span>LiveTrack Import</span>
+        </Link>
+      </div>
 
       <div
         data-testid="scanner-container"

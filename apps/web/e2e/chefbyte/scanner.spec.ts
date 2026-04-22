@@ -21,6 +21,25 @@ test.describe('ChefByte Scanner', () => {
     }
   });
 
+  test('LiveTrack Import button routes to wizard', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-livetrack-entry');
+    try {
+      await seedChefByteData(client, userId);
+      await page.goto('/chef/scanner');
+
+      const btn = page.getByTestId('livetrack-import-btn');
+      await expect(btn).toBeVisible({ timeout: 30000 });
+      await expect(btn).toContainText(/LiveTrack Import/i);
+
+      await btn.click();
+
+      await expect(page).toHaveURL(/\/chef\/livetrack-import$/, { timeout: 30000 });
+      await expect(page.getByTestId('livetrack-page')).toBeVisible({ timeout: 30000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('mode selector defaults to purchase and can switch modes', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'scan-modes');
     try {
