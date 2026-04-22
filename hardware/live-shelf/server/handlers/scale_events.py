@@ -1071,9 +1071,10 @@ class ScaleHandler:
                     "ratio": ratio,
                 },
             )
+            replacement_resolution_id: Optional[str] = None
             if session_id is not None:
                 try:
-                    storage_repo.write_resolution(
+                    res = storage_repo.write_resolution(
                         self._conn,
                         SessionResolutionIn(
                             session_id=session_id,
@@ -1082,6 +1083,9 @@ class ScaleHandler:
                             consumed_g=float(pickup_weight_g),
                             add_event_id=event_id,
                         ),
+                    )
+                    replacement_resolution_id = getattr(
+                        res, "resolution_id", None,
                     )
                 except Exception:  # pragma: no cover - defensive
                     log.exception(
@@ -1094,14 +1098,25 @@ class ScaleHandler:
             # classifier path and produces its own ``added`` event via
             # the reconciler on session close. Gated: emitter is a
             # no-op when CLOUD_ENABLED=false.
+            #
+            # Emit via emit_reconciler_resolution (NOT emit_in_flight_reap)
+            # so the ``_pi_resolution_id`` is stamped on the outbox payload
+            # — that's what backfill_missing_outbox_events uses to skip
+            # already-emitted rows. Without it, the startup back-fill scan
+            # sees no match and re-emits a duplicate. emit_in_flight_reap
+            # is still used by the TTL reaper path where there is no
+            # resolution row to anchor the dedup key to.
             try:
-                self._cloud_emitter.emit_in_flight_reap(
+                self._cloud_emitter.emit_reconciler_resolution(
+                    pattern="in_flight_replaced_new_item",
+                    product_id=getattr(lot, "product_id", "") or "",
                     scale_id=self._scale_id_for_shelf(
                         getattr(lot, "shelf_id", "live_shelf")
                     ),
-                    product_id=getattr(lot, "product_id", "") or "",
-                    consumed_g=float(pickup_weight_g),
+                    kind="live_shelf",
+                    delta_g=-float(pickup_weight_g),
                     occurred_at=event_ts,
+                    resolution_id=replacement_resolution_id,
                     pi_event_id=event_id,
                 )
             except Exception:  # pragma: no cover - defensive
@@ -1169,9 +1184,10 @@ class ScaleHandler:
         resolution_pattern = (
             "topped_up" if action == "added_to_existing" else "in_flight_return"
         )
+        return_resolution_id: Optional[str] = None
         if session_id is not None:
             try:
-                storage_repo.write_resolution(
+                res = storage_repo.write_resolution(
                     self._conn,
                     SessionResolutionIn(
                         session_id=session_id,
@@ -1181,6 +1197,7 @@ class ScaleHandler:
                         add_event_id=event_id,
                     ),
                 )
+                return_resolution_id = getattr(res, "resolution_id", None)
             except Exception:  # pragma: no cover - defensive
                 log.exception(
                     "failed to write %s resolution for event %s",
@@ -1192,6 +1209,13 @@ class ScaleHandler:
         #   * topped_up         → refilled (stock rose by -consumption_g,
         #                         which is positive because consumption_g
         #                         was clamped negative for a top-up)
+        #
+        # Pass ``resolution_id`` so the startup back-fill scanner
+        # (cloud.integration.backfill_missing_outbox_events) can match
+        # this outbox row against the session_resolutions row and skip
+        # re-emitting on the next boot. Without it, every restart within
+        # the backfill window re-emits a duplicate (found 2026-04-22
+        # during first deploy of the stuck-in-flight self-heal).
         try:
             product_id = getattr(lot, "product_id", None) or ""
             if product_id and resolution_pattern == "topped_up":
@@ -1208,6 +1232,7 @@ class ScaleHandler:
                         kind="live_shelf",
                         delta_g=refill_g,
                         occurred_at=event_ts,
+                        resolution_id=return_resolution_id,
                         pi_event_id=event_id,
                     )
             elif product_id and consumption_g > 0:
@@ -1220,6 +1245,7 @@ class ScaleHandler:
                     kind="live_shelf",
                     delta_g=-float(consumption_g),
                     occurred_at=event_ts,
+                    resolution_id=return_resolution_id,
                     pi_event_id=event_id,
                 )
         except Exception:  # pragma: no cover - defensive
@@ -1574,12 +1600,28 @@ class ScaleHandler:
             if lot is not None:
                 # Fix 3: guard against the lot_id-vs-product_id ambiguity.
                 # If get_lot(cid) succeeded but that lot's product_id was
-                # NOT in the pool we sent, the classifier likely picked a
+                # NOT in the pool we sent, the classifier MAY have picked a
                 # product_id (catalog_not_on_shelf) that coincidentally
-                # collides with an unrelated lot_id. Log which path was
-                # taken, and when we have pool product_ids to validate
-                # against, skip the mismatched resolution entirely.
-                if valid_product_ids and lot.product_id not in valid_product_ids:
+                # collides with an unrelated lot_id. But: when the ``cid``
+                # itself was in the pool's ``valid_ids`` (i.e. the
+                # classifier's pick was a candidate_id we sent it), the
+                # classifier explicitly chose this entry — not a colliding
+                # product_id — so there is no ambiguity to guard against.
+                # The previous unconditional check mis-fired for pool
+                # candidates built from lot rows (``in_flight``,
+                # ``recently_out``, ``top_up_target``, ``currently_on_shelf``)
+                # because ``_from_lot`` doesn't project ``product_id`` into
+                # the Candidate dict, so these lots' product_ids never land
+                # in ``valid_product_ids``. Real-world symptom (2026-04-22
+                # chocolate-milk event): classifier returned the in-flight
+                # lot_id (correct pick); apply-path bailed here; in-flight
+                # lot stayed stuck and no cloud event was emitted.
+                pool_cid_match = bool(valid_ids) and str(cid) in valid_ids
+                if (
+                    valid_product_ids
+                    and lot.product_id not in valid_product_ids
+                    and not pool_cid_match
+                ):
                     log.warning(
                         "classifier id %r resolved to lot %s (product %s) "
                         "but that product is not in the candidate pool; "
@@ -3128,6 +3170,139 @@ class ScaleHandler:
                     "in_flight reaper: failed to reap lot %s", lot.lot_id
                 )
         return reaped
+
+    def self_heal_stuck_in_flight_returns(
+        self, *, window_hours: int = 72, limit: int = 50,
+    ) -> int:
+        """Replay apply-path for classified ADD events whose in-flight lot
+        never closed.
+
+        Rescues the 2026-04-22 chocolate-milk scenario: the old
+        _apply_lot_update_from_classification bailed on "ambiguous product"
+        before reaching _apply_add_against_in_flight_lot, so the ADD event
+        stamped ``classified`` but the in-flight lot stayed stuck + no
+        session_resolutions row + no cloud emit. The current fix closes
+        the gap for new events; this helper heals pre-fix stuck lots.
+
+        Scan criteria (all must hold):
+          * scale_events.classifier_status = 'classified'
+          * scale_events.direction = 'add'
+          * scale_events.ts within ``window_hours`` of now
+          * classification.item_id resolves to a real lot with
+            status='in_flight'
+          * No existing session_resolutions row for (event_id, lot_id)
+            with pattern in
+            ('in_flight_return', 'in_flight_replaced_new_item', 'topped_up')
+
+        For each match, invoke _apply_lot_update_from_classification with
+        the stored classification JSON. The method is idempotent via the
+        session-level dedup at line ~1604 (if another resolution for that
+        lot already exists in the session besides in_flight_pickup, the
+        apply is skipped). The cloud emit from _apply_add_against_in_flight_lot
+        enqueues one cloud_outbox row per heal.
+
+        Returns the number of events successfully healed. Safe to call
+        repeatedly; once a heal writes its session_resolutions row the
+        next pass skips it.
+        """
+        # Pull candidates in the window.
+        try:
+            rows = self._conn.execute(
+                """
+                SELECT event_id, ts, delta_g, session_id, shelf_id,
+                       classification
+                  FROM scale_events
+                 WHERE classifier_status = 'classified'
+                   AND direction = 'add'
+                   AND ts >= datetime('now', ?)
+                 ORDER BY ts ASC
+                 LIMIT ?
+                """,
+                (f'-{int(window_hours)} hours', int(limit)),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            log.warning("self_heal_stuck_in_flight_returns: DB scan failed",
+                        exc_info=True)
+            return 0
+        if not rows:
+            return 0
+
+        healed = 0
+        for row in rows:
+            event_id = row["event_id"]
+            raw = row["classification"]
+            if not raw:
+                continue
+            try:
+                classification = json.loads(raw)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(classification, dict):
+                continue
+            item_id = classification.get("item_id")
+            if not item_id or item_id in {UNKNOWN_CANDIDATE_ID, "unknown"}:
+                continue
+
+            # Is item_id a lot that's STILL in_flight?
+            lot = storage_repo.get_lot(self._conn, str(item_id))
+            if lot is None or lot.status != "in_flight":
+                continue
+
+            # Has this event already produced a terminal return-side
+            # resolution against this lot? Then we're done.
+            existing = self._conn.execute(
+                """
+                SELECT 1 FROM session_resolutions
+                 WHERE lot_id = ? AND add_event_id = ?
+                   AND pattern IN (
+                       'in_flight_return',
+                       'in_flight_replaced_new_item',
+                       'topped_up'
+                   )
+                 LIMIT 1
+                """,
+                (lot.lot_id, event_id),
+            ).fetchone()
+            if existing is not None:
+                continue
+
+            # Replay via the canonical apply path. Holds db_lock for the
+            # duration — matches the fast-path's write semantics.
+            try:
+                delta_g = float(row["delta_g"])
+                with self._db_lock, self._conn:
+                    self._apply_lot_update_from_classification(
+                        direction="add",
+                        classification=classification,
+                        event_ts=row["ts"],
+                        delta_g=delta_g,
+                        session_id=row["session_id"],
+                        event_id=event_id,
+                        shelf_id=row["shelf_id"] or "live_shelf",
+                    )
+            except Exception:  # noqa: BLE001 - self-heal must not crash boot
+                log.warning(
+                    "self_heal_stuck_in_flight_returns: apply raised for "
+                    "event %s (lot %s)", event_id, lot.lot_id, exc_info=True,
+                )
+                continue
+
+            # Verify the heal landed — lot should now be status != in_flight.
+            healed_lot = storage_repo.get_lot(self._conn, lot.lot_id)
+            if healed_lot is not None and healed_lot.status != "in_flight":
+                healed += 1
+                log.warning(
+                    "self_heal: closed stuck in-flight lot %s via ADD event %s "
+                    "(pickup=%.1fg, delta=%.1fg) — was stuck in_flight pre-fix",
+                    lot.lot_id, event_id,
+                    lot.pickup_weight_g or 0.0, abs(delta_g),
+                )
+        if healed > 0:
+            log.info(
+                "self_heal_stuck_in_flight_returns: healed %d stuck in-flight "
+                "lot(s) in last %dh window", healed, window_hours,
+            )
+        return healed
 
     def start_sweeper(self, interval_s: float = 5.0) -> None:
         """Launch a daemon thread that runs ``sweep_orphans`` on a fixed

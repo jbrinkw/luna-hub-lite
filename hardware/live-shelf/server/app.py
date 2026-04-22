@@ -900,6 +900,22 @@ def create_app(
         on_close_callback=scale_handler.process_session_events,
     )
 
+    # Self-heal for the 2026-04-22 stuck-in-flight bug: rescan recent
+    # classified ADD events whose lot stayed in_flight because the
+    # pre-fix ambiguity guard bailed before _apply_add_against_in_flight_lot.
+    # No-op once every stuck lot has been healed (pattern matches the
+    # in_flight_return / topped_up / replaced rows so repeat passes skip
+    # healed events). See handlers/scale_events.py::self_heal_stuck_in_flight_returns.
+    try:
+        healed = scale_handler.self_heal_stuck_in_flight_returns()
+        if healed:
+            log.warning(
+                "startup: self-healed %d stuck in-flight lot(s) "
+                "(pre-fix ambiguity-guard bug)", healed,
+            )
+    except Exception:
+        log.exception("startup self-heal stuck-in-flight failed (non-fatal)")
+
     # Background sweeper for events that never match a session (e.g.,
     # door closed with no lit frames at event time). The sweeper marks
     # them failed after a grace window, and also catches post-close

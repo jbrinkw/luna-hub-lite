@@ -92,6 +92,16 @@ class Candidate:
     # only sees the ranked order (see §6.3 "classifier gets ranks, not raw
     # scores").
     rank_score: float = 0.0
+    # Underlying product_id for lot-backed candidates (``in_flight``,
+    # ``recently_out``, ``top_up_target``, ``currently_on_shelf``). Always
+    # equals ``candidate_id`` for the ``catalog_not_on_shelf`` branch.
+    # ``None`` for the UNKNOWN sentinel. Not serialised into the prompt
+    # (via ``to_prompt_dict`` below) so the classifier never sees a direct
+    # lot→product link — that link is for Pi-side audit + apply-path
+    # validation only. Populated retroactively alongside the defense-in-
+    # depth fix for the 2026-04-22 chocolate-milk stuck-in-flight bug
+    # (handlers/scale_events.py ambiguity guard).
+    product_id: str | None = None
 
     def to_prompt_dict(self) -> dict[str, Any]:
         """Project into the JSON payload the classifier sees.

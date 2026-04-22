@@ -594,3 +594,237 @@ class TestReuniteGuardIsShelfScoped:
         assert result["item_id"] == product.product_id
         assert result["confidence"] == 0.90
         assert "reunite_redirect" not in (result.get("meta") or {})
+
+
+# ---------------------------------------------------------------------------
+# Layer 3 (2026-04-22 addendum): even when the classifier correctly returns
+# ``item_id=lot_id`` AND the candidate_pool_used dict DOESN'T carry a
+# ``product_id`` field (production shape via _from_lot -> asdict), the
+# apply-path must still hit _apply_add_against_in_flight_lot and emit the
+# cloud consumption event. The prior code bailed with "ambiguous" because
+# the in-flight lot's product_id wasn't in valid_product_ids — losing both
+# the lot-close and the cloud emit.
+# ---------------------------------------------------------------------------
+
+
+class TestProductionPoolShapeLotBackedPickApplies:
+    """Regression for the 2026-04-22 chocolate-milk stuck-in-flight event.
+
+    Real event shape (from scale_events.classification on the Pi):
+      - classifier item_id = lot_id (correct pick post 2026-04-21 prompt fix)
+      - candidate_pool_used[0] = {candidate_id=lot_id, why_candidate=in_flight, ...}
+        NO product_id field (asdict(_from_lot(...)) pre-fix).
+      - candidate_pool_used[1..] = catalog_not_on_shelf for OTHER products.
+    The apply-path MUST NOT reject the picked lot on "product not in pool"
+    grounds — the lot_id itself is in the pool, which is unambiguous.
+    """
+
+    def test_production_pool_shape_in_flight_lot_pick_closes_and_emits(
+        self, tmp_path
+    ):
+        conn = init_db(":memory:")
+        handler = _make_handler(conn, tmp_path)
+        product, lot = _setup_chocolate_milk(conn)
+        session_id = _open_session(conn)
+
+        # Stage the pickup.
+        e_remove = _record_remove(
+            conn, session_id,
+            delta_g=-1672.0,
+            ts="2026-04-22T03:01:39.000Z",
+            weight_before=1672.0,
+        )
+        handler._apply_lot_update_from_classification(
+            direction="remove",
+            classification={
+                "item_id": lot.lot_id,
+                "action": "removed",
+                "confidence": 0.95,
+                "multi_match": [],
+                "candidate_pool_used": [{"candidate_id": lot.lot_id}],
+            },
+            event_ts="2026-04-22T03:01:39.000Z",
+            delta_g=-1672.0,
+            session_id=session_id,
+            event_id=e_remove,
+        )
+        assert storage_repo.get_lot(conn, lot.lot_id).status == "in_flight"
+
+        # Spy on cloud emitter so we can assert the consumption event
+        # gets enqueued.
+        emit_calls: list[dict] = []
+
+        def _spy(**kwargs):
+            emit_calls.append(kwargs)
+            return None
+
+        handler._cloud_emitter.emit_reconciler_resolution = _spy  # type: ignore[assignment]
+
+        # Return: 472.1g. Classifier (fixed prompt) picks the in-flight
+        # lot_id. The candidate_pool_used dict matches the PRODUCTION
+        # shape — lot-backed entry has NO product_id, plus two unrelated
+        # catalog products. This is the exact shape Jeremy's event had
+        # when the bug fired.
+        e_add = _record_add(
+            conn, session_id,
+            delta_g=472.1,
+            ts="2026-04-22T04:03:54.000Z",
+            weight_before=0.0,
+        )
+        handler._apply_lot_update_from_classification(
+            direction="add",
+            classification={
+                "item_id": lot.lot_id,
+                "action": "added",
+                "confidence": 0.92,
+                "multi_match": [],
+                "candidate_pool_used": [
+                    # Lot-backed entry WITHOUT product_id (production shape).
+                    {"candidate_id": lot.lot_id,
+                     "why_candidate": "in_flight",
+                     "expected_weight_g": 1672.494},
+                    # Unrelated catalog dups for OTHER products — their
+                    # candidate_id IS their product_id per _from_product.
+                    {"candidate_id": "aa9f27c3-dba8-4c2f-ba34-333159d685ad",
+                     "why_candidate": "catalog_not_on_shelf"},
+                    {"candidate_id": "00000000-0000-0000-0000-019db187d973",
+                     "why_candidate": "catalog_not_on_shelf"},
+                    {"candidate_id": UNKNOWN_CANDIDATE_ID,
+                     "why_candidate": "sentinel"},
+                ],
+            },
+            event_ts="2026-04-22T04:03:54.000Z",
+            delta_g=472.1,
+            session_id=session_id,
+            event_id=e_add,
+        )
+
+        # Lot transitioned on_shelf with the placed weight and consumption.
+        lot_now = storage_repo.get_lot(conn, lot.lot_id)
+        assert lot_now.status == "on_shelf", (
+            "in-flight lot still stuck — ambiguity guard rejected the "
+            "correct classifier pick because the lot's product_id wasn't "
+            "in the pool's catalog_not_on_shelf list"
+        )
+        assert lot_now.current_weight_g == pytest.approx(472.1)
+        assert lot_now.total_consumed_g == pytest.approx(1199.9, rel=1e-3)
+        assert lot_now.in_flight_since is None
+        assert lot_now.pickup_weight_g is None
+
+        # No new lot minted.
+        on_shelf = _on_shelf_lots_for_product(conn, product.product_id)
+        assert len(on_shelf) == 1
+        assert on_shelf[0]["lot_id"] == lot.lot_id
+
+        # Session resolution written: in_flight_return.
+        resolutions = _resolutions_for(conn, session_id)
+        patterns = [r["pattern"] for r in resolutions]
+        assert "in_flight_return" in patterns
+        return_row = next(
+            r for r in resolutions if r["pattern"] == "in_flight_return"
+        )
+        assert return_row["consumed_g"] == pytest.approx(1199.9, rel=1e-3)
+        assert return_row["add_event_id"] == e_add
+
+        # Cloud emit fired exactly once with the consumption event.
+        assert len(emit_calls) == 1, (
+            f"expected one cloud emit, got {len(emit_calls)}: {emit_calls}"
+        )
+        call = emit_calls[0]
+        assert call["pattern"] == "in_flight_return"
+        assert call["kind"] == "live_shelf"
+        assert call["product_id"] == product.product_id
+        assert call["delta_g"] == pytest.approx(-1199.9, rel=1e-3)
+        assert call["pi_event_id"] == e_add
+
+
+class TestProductionPoolShapeTopUpPickApplies:
+    """Same ambiguity-guard fix, top-up variant: classifier picks lot_id
+    with action='added_to_existing', delta slightly above pickup (user
+    topped off the bottle).
+    """
+
+    def test_top_up_pick_closes_and_emits_refilled(self, tmp_path):
+        conn = init_db(":memory:")
+        handler = _make_handler(conn, tmp_path)
+        product, lot = _setup_chocolate_milk(conn)
+        session_id = _open_session(conn)
+
+        # Stage pickup at 1672g.
+        e_remove = _record_remove(
+            conn, session_id,
+            delta_g=-1672.0,
+            ts="2026-04-22T03:01:39.000Z",
+            weight_before=1672.0,
+        )
+        handler._apply_lot_update_from_classification(
+            direction="remove",
+            classification={
+                "item_id": lot.lot_id,
+                "action": "removed",
+                "confidence": 0.95,
+                "multi_match": [],
+                "candidate_pool_used": [{"candidate_id": lot.lot_id}],
+            },
+            event_ts="2026-04-22T03:01:39.000Z",
+            delta_g=-1672.0,
+            session_id=session_id,
+            event_id=e_remove,
+        )
+
+        emit_calls: list[dict] = []
+
+        def _spy(**kwargs):
+            emit_calls.append(kwargs)
+            return None
+
+        handler._cloud_emitter.emit_reconciler_resolution = _spy  # type: ignore[assignment]
+
+        # Place back slightly HEAVIER than pickup (user added contents).
+        # 1800g is within 1.15× pickup (1922g) so it's still the return
+        # branch, not replacement. action='added_to_existing' routes the
+        # resolution to topped_up → cloud emits refilled.
+        e_add = _record_add(
+            conn, session_id,
+            delta_g=1800.0,
+            ts="2026-04-22T04:03:54.000Z",
+            weight_before=0.0,
+        )
+        handler._apply_lot_update_from_classification(
+            direction="add",
+            classification={
+                "item_id": lot.lot_id,
+                "action": "added_to_existing",
+                "confidence": 0.92,
+                "multi_match": [],
+                "candidate_pool_used": [
+                    {"candidate_id": lot.lot_id,
+                     "why_candidate": "in_flight",
+                     "expected_weight_g": 1672.0},
+                ],
+            },
+            event_ts="2026-04-22T04:03:54.000Z",
+            delta_g=1800.0,
+            session_id=session_id,
+            event_id=e_add,
+        )
+
+        lot_now = storage_repo.get_lot(conn, lot.lot_id)
+        assert lot_now.status == "on_shelf"
+        assert lot_now.current_weight_g == pytest.approx(1800.0)
+        # Consumption is clamped at 0 for top-ups.
+        assert lot_now.total_consumed_g == pytest.approx(0.0, abs=1e-6)
+
+        # Resolution is topped_up.
+        resolutions = _resolutions_for(conn, session_id)
+        patterns = [r["pattern"] for r in resolutions]
+        assert "topped_up" in patterns
+
+        # Cloud emit: refilled with positive delta (added mass).
+        assert len(emit_calls) == 1, emit_calls
+        call = emit_calls[0]
+        assert call["pattern"] == "topped_up"
+        assert call["kind"] == "live_shelf"
+        assert call["product_id"] == product.product_id
+        assert call["delta_g"] == pytest.approx(128.0, rel=1e-2)  # 1800-1672
+        assert call["pi_event_id"] == e_add

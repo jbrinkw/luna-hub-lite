@@ -126,6 +126,7 @@ def _rank_candidates(candidates: list[Candidate], observed_abs_delta: float) -> 
             why_candidate=c.why_candidate,
             reference_image_paths=c.reference_image_paths,
             rank_score=score,
+            product_id=c.product_id,
         )
 
         tier = _tier_rank(c.why_candidate)
@@ -163,6 +164,7 @@ def _from_lot(lot: LotCandidate, why: str) -> Candidate:
         container_type=lot.container_type,
         why_candidate=why,  # type: ignore[arg-type]
         reference_image_paths=lot.reference_image_paths,
+        product_id=lot.product_id,
     )
 
 
@@ -175,6 +177,7 @@ def _from_product(product: ProductCandidate) -> Candidate:
         container_type=product.container_type,
         why_candidate="catalog_not_on_shelf",
         reference_image_paths=product.reference_image_paths,
+        product_id=product.product_id,
     )
 
 
