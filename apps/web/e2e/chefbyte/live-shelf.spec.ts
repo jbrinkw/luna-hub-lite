@@ -419,6 +419,72 @@ test.describe('Live Shelf Scales tab', () => {
     }
   });
 
+  test('silent-revoke banner surfaces when the only device is inactive', async ({ page }) => {
+    // Bug A (2026-04-24): the invariant_batch consolidation silently
+    // flipped kitchen-pi is_active=false. The generic "Revoked" badge
+    // on the device card was the only UX surface — easy to miss on a
+    // dashboard with only one device. This test asserts the prominent
+    // reactivation banner shows up AND the Reactivate button works.
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shelf-silent-revoke');
+    try {
+      // Seed an already-inactive device (simulating the post-migration state).
+      const { deviceId } = await seedDeviceAdmin({ userId, name: 'Silent Revoke Pi' });
+      await chef(client)
+        .from('live_shelf_devices')
+        .update({ is_active: false })
+        .eq('device_id', deviceId);
+
+      await gotoScalesTab(page);
+
+      // Banner visible
+      const banner = page.getByTestId('scales-silent-revoke-banner');
+      await expect(banner).toBeVisible({ timeout: 15_000 });
+      await expect(banner).toContainText(/Your Pi key was deactivated/i);
+      await expect(banner).toContainText('Silent Revoke Pi');
+
+      // Click Reactivate on the banner
+      await banner.getByTestId('scales-silent-revoke-reactivate-btn').click();
+
+      // DB reflects active=true
+      await expect(async () => {
+        const { data } = await chef(client)
+          .from('live_shelf_devices')
+          .select('is_active')
+          .eq('device_id', deviceId)
+          .single();
+        expect(data?.is_active).toBe(true);
+      }).toPass({ timeout: 15_000 });
+
+      // Banner disappears
+      await expect(banner).toBeHidden({ timeout: 10_000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
+  test('silent-revoke banner is NOT shown when user has multiple devices (one retired is OK)', async ({ page }) => {
+    // Guard: the banner should only surface for the one-device case.
+    // A user who has an active primary + an intentionally-retired
+    // secondary shouldn't see the banner — the retired device's
+    // "Revoked" badge on its own card is sufficient.
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shelf-two-dev');
+    try {
+      await seedDeviceAdmin({ userId, name: 'Primary Active Pi' });
+      const { deviceId: secondaryId } = await seedDeviceAdmin({ userId, name: 'Retired Pi' });
+      await chef(client)
+        .from('live_shelf_devices')
+        .update({ is_active: false })
+        .eq('device_id', secondaryId);
+
+      await gotoScalesTab(page);
+
+      const banner = page.getByTestId('scales-silent-revoke-banner');
+      await expect(banner).toBeHidden({ timeout: 5_000 });
+    } finally {
+      await cleanup();
+    }
+  });
+
   test('scales list: empty before heartbeat, 3 rows after, correct kind UI, product picker only on live_scale', async ({
     page,
   }) => {
