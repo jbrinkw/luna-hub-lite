@@ -69,23 +69,41 @@ function emptyCredentialsCtx(): ExtensionToolContext {
 // Obsidian mock data helpers
 // ---------------------------------------------------------------------------
 
-/** Mock a git trees API response followed by contents API responses for each .md file. */
+/**
+ * URL-aware Obsidian vault mock. Responds based on the URL so tests don't
+ * break when tools only fetch a subset of files or fetch in parallel.
+ * - GET /git/trees/{branch}?recursive=1 → tree listing
+ * - GET /git/blobs/{sha} → base64 blob content
+ * - GET /contents/{path} → contents API (content + sha)
+ */
 function mockObsidianVault(files: Array<{ path: string; content: string; sha?: string }>) {
-  // First call: GET /git/trees/main?recursive=1
-  mockFetch.mockReturnValueOnce(
-    mockFetchResponse({
-      tree: files.map((f) => ({ type: 'blob', path: f.path })),
-    }),
-  );
-  // Subsequent calls: GET /contents/{path} for each .md file
-  for (const f of files.filter((f) => f.path.endsWith('.md'))) {
-    mockFetch.mockReturnValueOnce(
-      mockFetchResponse({
-        content: btoa(f.content),
-        sha: f.sha || 'sha-' + f.path.replace(/\//g, '-'),
-      }),
-    );
-  }
+  const withSha = files.map((f) => ({
+    ...f,
+    sha: f.sha || 'sha-' + f.path.replace(/\//g, '-'),
+  }));
+  const bySha = new Map(withSha.map((f) => [f.sha, f]));
+  const byPath = new Map(withSha.map((f) => [f.path, f]));
+
+  mockFetch.mockImplementation((url: string) => {
+    if (url.includes('/git/trees/')) {
+      return mockFetchResponse({
+        tree: withSha.map((f) => ({ type: 'blob', path: f.path, sha: f.sha })),
+      });
+    }
+    const blobMatch = url.match(/\/git\/blobs\/([^?]+)/);
+    if (blobMatch) {
+      const f = bySha.get(blobMatch[1]);
+      if (!f) return mockFetchResponse('not found', false, 404);
+      return mockFetchResponse({ content: btoa(f.content), encoding: 'base64', sha: f.sha });
+    }
+    const contentsMatch = url.match(/\/contents\/([^?]+)/);
+    if (contentsMatch) {
+      const f = byPath.get(decodeURIComponent(contentsMatch[1]));
+      if (!f) return mockFetchResponse('not found', false, 404);
+      return mockFetchResponse({ content: btoa(f.content), encoding: 'base64', sha: f.sha });
+    }
+    return mockFetchResponse('unexpected url: ' + url, false, 500);
+  });
 }
 
 const PROJECT_A_MD = `---
@@ -207,7 +225,7 @@ describe('OBSIDIAN_get_project_text', () => {
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.status).toBe('success');
-    expect(parsed.project_id).toBe('a');
+    expect(parsed.project_id).toBe('Projects/A');
     expect(parsed.root_page_text).toContain('# Project A');
     expect(parsed.note_page_text).toContain('3/5/26');
   });
@@ -252,7 +270,10 @@ describe('OBSIDIAN_get_notes_by_date_range', () => {
   const handler = obsidianTools.OBSIDIAN_get_notes_by_date_range.handler;
 
   it('returns entries within the date range', async () => {
-    mockObsidianVault([{ path: 'Projects/A/Notes.md', content: NOTES_A_MD }]);
+    mockObsidianVault([
+      { path: 'Projects/A/A.md', content: PROJECT_A_MD },
+      { path: 'Projects/A/Notes.md', content: NOTES_A_MD },
+    ]);
 
     const result = await handler({ start_date: '3/1/26', end_date: '3/6/26' }, obsidianCtx());
 
@@ -265,7 +286,10 @@ describe('OBSIDIAN_get_notes_by_date_range', () => {
   });
 
   it('filters out entries outside the date range', async () => {
-    mockObsidianVault([{ path: 'Projects/A/Notes.md', content: NOTES_A_MD }]);
+    mockObsidianVault([
+      { path: 'Projects/A/A.md', content: PROJECT_A_MD },
+      { path: 'Projects/A/Notes.md', content: NOTES_A_MD },
+    ]);
 
     const result = await handler({ start_date: '3/4/26', end_date: '3/6/26' }, obsidianCtx());
 
@@ -313,27 +337,17 @@ describe('OBSIDIAN_update_project_note', () => {
   const handler = obsidianTools.OBSIDIAN_update_project_note.handler;
 
   it('appends content and returns success', async () => {
-    // First: listAllFiles + getMultipleFiles (trees + contents for each .md)
     mockObsidianVault([
       { path: 'Projects/A/A.md', content: PROJECT_A_MD, sha: 'sha-a' },
       { path: 'Projects/A/Notes.md', content: NOTES_A_MD, sha: 'sha-notes' },
     ]);
-    // Then: getFileContent for the notes file (to get existing content + sha)
-    mockFetch.mockReturnValueOnce(
-      mockFetchResponse({
-        content: btoa(NOTES_A_MD),
-        sha: 'sha-notes',
-      }),
-    );
-    // Then: putFileContent (PUT)
-    mockFetch.mockReturnValueOnce(mockFetchResponse({ content: {} }, true, 200));
 
     const result = await handler({ project_id: 'a', content: 'test note' }, obsidianCtx());
 
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
     expect(parsed.status).toBe('success');
-    expect(parsed.project_id).toBe('a');
+    expect(parsed.project_id).toBe('Projects/A');
     // Either created_entry or appended should be true
     expect(parsed.created_entry === true || parsed.appended === true).toBe(true);
   });
