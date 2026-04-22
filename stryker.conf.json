@@ -1,10 +1,15 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "_": [
-    "Root Stryker config. Scoped to @luna-hub/app-tools workspace because it has",
-    "the most mature vitest setup in node env and hosts all MCP tool handlers",
-    "(the primary 'contract' layer). apps/mcp-worker and apps/web/shared are",
-    "deferred follow-ups — see scripts/mutation/README.md for rationale."
+    "Root Stryker config. Scoped to the `extensions/` folder because that's",
+    "the only contract surface currently covered by unit tests that run",
+    "without Supabase (extensions.test.ts). The coachbyte/chefbyte MCP tool",
+    "handlers in packages/app-tools/src/ have ONLY integration tests (live",
+    "Supabase required) and the top-level vitest.config.ts excludes them —",
+    "so vitest --related finds no tests for those files and Stryker errors",
+    "with 'No tests were executed'. Follow-up: either add a unit-test layer",
+    "for the coachbyte/chefbyte handlers or run stryker with a configured",
+    "integration harness. See scripts/mutation/README.md."
   ],
 
   "packageManager": "pnpm",
@@ -22,12 +27,10 @@
   "concurrency": 2,
 
   "mutate": [
-    "packages/app-tools/src/**/*.ts",
-    "!packages/app-tools/src/**/*.test.ts",
-    "!packages/app-tools/src/**/*.spec.ts",
-    "!packages/app-tools/src/__tests__/**",
-    "!packages/app-tools/src/types.ts",
-    "!packages/app-tools/src/index.ts"
+    "extensions/**/*.ts",
+    "!extensions/**/*.test.ts",
+    "!extensions/**/*.spec.ts",
+    "!extensions/**/__tests__/**"
   ],
 
   "ignorePatterns": [
