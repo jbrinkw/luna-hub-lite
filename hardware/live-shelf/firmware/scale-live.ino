@@ -84,7 +84,14 @@ const float DEFAULT_SCALE_FACTOR = 415.0;
 const char*   DEFAULT_PI_URL     = "http://192.168.0.181:8000";
 const char*   DEFAULT_DEVICE_ID  = "scale-01";
 const float   DEFAULT_STAB_WIN   = 2.0f;
-const uint16_t DEFAULT_STAB_N    = 8;
+// Stability window = DEFAULT_STAB_N * SAMPLE_INTERVAL_MS. At 100ms/sample:
+//   8  = 0.8s  (pre-2026-04-22 default — too short; caught mid-swap dips)
+//   20 = 2.0s  (current — long enough that a one-motion milk-out-granola-in
+//               swap holds the transient empty state beyond the window and
+//               doesn't fire a spurious "remove" event with after_weight=1g)
+// If you raise this further, raise MIN_ACCEPTABLE_STAB_N at the sanity
+// check below in lockstep so existing scales auto-upgrade on next boot.
+const uint16_t DEFAULT_STAB_N    = 20;
 const float   DEFAULT_NEAR_WIN   = 4.0f;
 const float   DEFAULT_DELTA_THR  = 5.0f;
 
@@ -325,7 +332,15 @@ bool loadAll() {
   if (cfg.pi_url[0] == 0) strncpy(cfg.pi_url, DEFAULT_PI_URL, sizeof(cfg.pi_url) - 1);
   if (cfg.device_id[0] == 0) strncpy(cfg.device_id, DEFAULT_DEVICE_ID, sizeof(cfg.device_id) - 1);
   if (!(cfg.stability_window_g > 0))      cfg.stability_window_g = DEFAULT_STAB_WIN;
-  if (cfg.stable_samples_required == 0 || cfg.stable_samples_required > MAX_WIN)
+  // Auto-upgrade existing EEPROM values below the minimum acceptable
+  // floor. The pre-2026-04-22 default of 8 (0.8s window) caught mid-swap
+  // transient dips — e.g. removing milk and immediately placing granola
+  // produced a spurious "remove" event with after_weight=1g. Any field
+  // device booting with stable_samples_required < 12 gets silently
+  // upgraded to the current DEFAULT_STAB_N without wiping calibration.
+  const uint16_t MIN_ACCEPTABLE_STAB_N = 12;
+  if (cfg.stable_samples_required < MIN_ACCEPTABLE_STAB_N ||
+      cfg.stable_samples_required > MAX_WIN)
     cfg.stable_samples_required = DEFAULT_STAB_N;
   if (!(cfg.near_stable_window_g > 0))    cfg.near_stable_window_g = DEFAULT_NEAR_WIN;
   if (!(cfg.delta_threshold_g > 0))       cfg.delta_threshold_g = DEFAULT_DELTA_THR;

@@ -104,7 +104,10 @@ const float DEFAULT_SCALE_FACTOR = 415.0;
 const char*   DEFAULT_PI_URL     = "http://192.168.0.181:8000";
 const char*   DEFAULT_DEVICE_ID  = "scale-02";
 const float   DEFAULT_STAB_WIN   = 2.0f;
-const uint16_t DEFAULT_STAB_N    = 8;
+// See scale-live.ino for the rationale: 0.8s was too short, letting
+// mid-swap empty-shelf transients (remove X → place Y) fire spurious
+// remove events with after_weight near zero. 2.0s rides through them.
+const uint16_t DEFAULT_STAB_N    = 20;
 const float   DEFAULT_NEAR_WIN   = 4.0f;
 const float   DEFAULT_DELTA_THR  = 5.0f;
 
@@ -345,7 +348,11 @@ bool loadAll() {
   if (cfg.pi_url[0] == 0) strncpy(cfg.pi_url, DEFAULT_PI_URL, sizeof(cfg.pi_url) - 1);
   if (cfg.device_id[0] == 0) strncpy(cfg.device_id, DEFAULT_DEVICE_ID, sizeof(cfg.device_id) - 1);
   if (!(cfg.stability_window_g > 0))      cfg.stability_window_g = DEFAULT_STAB_WIN;
-  if (cfg.stable_samples_required == 0 || cfg.stable_samples_required > MAX_WIN)
+  // Auto-upgrade pre-2026-04-22 (8-sample, 0.8s) defaults to the new
+  // floor. See scale-live.ino for the mid-swap-dip rationale.
+  const uint16_t MIN_ACCEPTABLE_STAB_N = 12;
+  if (cfg.stable_samples_required < MIN_ACCEPTABLE_STAB_N ||
+      cfg.stable_samples_required > MAX_WIN)
     cfg.stable_samples_required = DEFAULT_STAB_N;
   if (!(cfg.near_stable_window_g > 0))    cfg.near_stable_window_g = DEFAULT_NEAR_WIN;
   if (!(cfg.delta_threshold_g > 0))       cfg.delta_threshold_g = DEFAULT_DELTA_THR;
