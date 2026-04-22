@@ -64,6 +64,10 @@ interface ProductRow {
   serving_weight_g: number | null;
   protein_per_serving: number | null;
   net_weight_g: number | null;
+  /** 3-state certification flag used to gate Pi classifier pool. null=
+   * never set, 0=explicitly de-certified (unused in current UX), 1=
+   * certified. Wizard UPDATE path promotes null/0 → 1. */
+  certified: number | boolean | null;
   tare_weight_g: number | null;
   container_type: string | null;
   unit_type: string | null;
@@ -345,7 +349,7 @@ export function LiveTrackImportPage() {
         const { data: existing } = await chefbyte()
           .from('products')
           .select(
-            'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g',
+            'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g, certified',
           )
           .eq('user_id', user.id)
           .eq('barcode', barcode)
@@ -441,7 +445,7 @@ export function LiveTrackImportPage() {
             .from('products')
             .insert({ user_id: user.id, ...productFields })
             .select(
-              'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g',
+              'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g, certified',
             )
             .single();
           if (insErr || !created) {
@@ -553,26 +557,31 @@ export function LiveTrackImportPage() {
       // Fall back to 0 if the keypad input doesn't parse; tare_weight_g is
       // genuinely nullable (no weight captured = leave blank).
       //
-      // NOTE: `certified` is intentionally NOT part of the UPDATE set.
-      // The INSERT branch above (new-product path) seeds certified=1,
-      // but the UPDATE branch must respect any explicit de-certification
-      // the user made via Settings → Products. Re-running the wizard to
-      // recapture a tare should not silently flip `certified` back to 1.
+      // `certified` policy: running the wizard IS the certification
+      // ritual, so we promote null/0 → 1 every time. Preserve an
+      // explicit 1 (wizard re-runs on an already-certified product just
+      // re-write the same 1). Products that were never certified before
+      // (null / 0) get bumped so the Pi's classifier candidate pool
+      // picks them up; a prior variant that skipped certified on UPDATE
+      // left never-certified products invisible to the Pi forever.
       const netWeightParsed = parseFloat(nutrition.netWeightG);
       const servingWeightParsed = parseFloat(nutrition.servingWeightG);
+      const promotedCertified = Number(product.certified ?? 0) >= 1 ? undefined : 1;
+      const updatePayload: Record<string, unknown> = {
+        tare_weight_g: Number.isFinite(tareG) ? tareG : null,
+        servings_per_container: parseFloat(nutrition.servingsPerContainer) || 1,
+        calories_per_serving: parseFloat(nutrition.calories) || 0,
+        carbs_per_serving: parseFloat(nutrition.carbs) || 0,
+        fat_per_serving: parseFloat(nutrition.fat) || 0,
+        protein_per_serving: parseFloat(nutrition.protein) || 0,
+        net_weight_g: Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null,
+        serving_weight_g:
+          Number.isFinite(servingWeightParsed) && servingWeightParsed > 0 ? servingWeightParsed : null,
+      };
+      if (promotedCertified !== undefined) updatePayload.certified = promotedCertified;
       const { error: prodUpdErr } = await chefbyte()
         .from('products')
-        .update({
-          tare_weight_g: Number.isFinite(tareG) ? tareG : null,
-          servings_per_container: parseFloat(nutrition.servingsPerContainer) || 1,
-          calories_per_serving: parseFloat(nutrition.calories) || 0,
-          carbs_per_serving: parseFloat(nutrition.carbs) || 0,
-          fat_per_serving: parseFloat(nutrition.fat) || 0,
-          protein_per_serving: parseFloat(nutrition.protein) || 0,
-          net_weight_g: Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null,
-          serving_weight_g:
-            Number.isFinite(servingWeightParsed) && servingWeightParsed > 0 ? servingWeightParsed : null,
-        })
+        .update(updatePayload)
         .eq('product_id', product.product_id)
         .eq('user_id', user.id);
       if (prodUpdErr) throw new Error(prodUpdErr.message);
