@@ -39,3 +39,8 @@ legacy/
 
 # Personal journal — not code
 Journal.json
+
+# Python mutation-testing artifacts (mutmut, scripts/mutation/python.sh)
+hardware/live-shelf/mutants/
+hardware/live-shelf/.mutmut-cache
+**/.testmondata

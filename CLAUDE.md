@@ -116,10 +116,11 @@ A separate, actively-developed sub-project that does NOT share the Supabase/Verc
 **What it is:** Fridge-shelf computer-vision demo. ESP8266 + 4× HX711 load cells → Pi 4 (Flask + SQLite + USB camera) → Anthropic Sonnet classifier. Detects items being placed on / removed from a shelf via weight deltas, records per-session before/after photos + MP4 video, and classifies the item visually.
 
 **Tech stack (NOT Supabase/Vercel):**
+
 - Pi: Python 3.13, Flask (threaded dev server), SQLite, OpenCV, Anthropic Python SDK
 - ESP8266: Arduino, ESP8266WiFi, HX711 library, ArduinoOTA
 - No cloud, no auth, LAN-only demo. Runs at `192.168.0.181:8000`.
 
-**Before doing ANY work in `hardware/live-shelf/`:** Read `/home/jeremy/luna-hub-lite/LIVE_SHELF_HANDOFF.txt` top-to-bottom. It has the full architecture, every known bug + fix, deploy workflow, debug tools, and production state. The React/Supabase guidance above does NOT apply here.
+**Before doing ANY work in `hardware/live-shelf/`:** read the in-repo design docs under `hardware/live-shelf/docs/` — in particular `ARCHITECTURE_AUDIT_2026-04-16.md` (system overview), `IN_FLIGHT_TRACKER_PLAN.md` (pickup/return state machine), `PROD_MIGRATION_PLAN.md` (cloud sync) and `plan.md` (roadmap). The React/Supabase guidance above does NOT apply here.
 
 **Deploy skill:** `~/.claude/skills/live-shelf-deploy/` — automates scp+ssh+restart+healthcheck. Invoke via `~/.claude/skills/live-shelf-deploy/deploy.sh --restart <files>...` or `--status` / `--logs [N]`.
