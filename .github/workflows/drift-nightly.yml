@@ -1,0 +1,215 @@
+name: drift-nightly
+
+# VERIFY.md "Gate: Drift — Nightly". Runs once a day:
+#
+#   1. Boot local supabase, `supabase db reset` to replay migrations/*.
+#   2. `supabase db dump --local --schema-only`  → local DDL.
+#   3. `supabase db dump --linked --schema-only` → prod DDL.
+#   4. Normalize both through scripts/drift/lib/normalize_schema.py.
+#   5. Diff. Non-empty diff → open/update a GitHub issue tagged
+#      `drift-nightly` + `needs-triage`. Empty diff → close any
+#      open drift-nightly issue (resolution).
+#
+# The diff patch goes into the issue body as a collapsed <details> block
+# so humans can triage without downloading artifacts. The JSON artifact
+# + diff patch also upload to workflow artifacts for postmortem.
+
+on:
+  schedule:
+    # 06:00 UTC daily ~= 01:00 America/New_York (EST) / 02:00 EDT. Runs after
+    # the nightly-audits job (08:00 UTC) has enough headroom.
+    - cron: '0 6 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write  # create/update/close drift-nightly issues
+
+jobs:
+  ast-diff:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      # Pin to the same CLI version as drift-check.yml so both gates read
+      # the same pg_dump output shape.
+      - name: Setup Supabase CLI
+        uses: supabase/setup-cli@v1
+        with:
+          version: 2.76.15
+
+      - name: Verify CLI
+        run: supabase --version
+
+      - name: Link to project
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: supabase link --project-ref btlfsxammjzkyluophgr
+
+      # `supabase db reset` requires Docker. Runners have it pre-installed
+      # but not started for the current shell. The reset command will
+      # boot supabase itself via `supabase start` as needed.
+      - name: Run nightly AST diff
+        id: drift_nightly
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+        # Don't fail the job on drift — we want to reach the issue-mgmt
+        # step below. The exit code is captured here for downstream use.
+        run: |
+          set +e
+          bash scripts/drift/nightly-ast-diff.sh
+          echo "script_exit=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: drift-nightly-report
+          path: |
+            .verify/drift-nightly.json
+            .verify/drift-nightly.log
+            .verify/diff.patch
+          if-no-files-found: ignore
+          retention-days: 30
+
+      # Load artifact into env for the issue-mgmt step.
+      - name: Load artifact into env
+        if: always()
+        run: |
+          if [[ -f .verify/drift-nightly.json ]]; then
+            {
+              echo 'DRIFT_REPORT<<EOF_DRIFT'
+              cat .verify/drift-nightly.json
+              echo
+              echo 'EOF_DRIFT'
+            } >> "$GITHUB_ENV"
+          fi
+          if [[ -f .verify/diff.patch ]]; then
+            # Truncate diff to 60KB for the issue body (GitHub limit is
+            # 65536 chars). Full diff still in the uploaded artifact.
+            head -c 60000 .verify/diff.patch > diff.truncated.patch || true
+            {
+              echo 'DIFF_TRUNCATED<<EOF_DIFF'
+              cat diff.truncated.patch
+              echo
+              echo 'EOF_DIFF'
+            } >> "$GITHUB_ENV"
+          fi
+
+      - name: Manage drift-nightly issue
+        if: always()
+        uses: actions/github-script@v7
+        env:
+          DRIFT_REPORT: ${{ env.DRIFT_REPORT }}
+          DIFF_TRUNCATED: ${{ env.DIFF_TRUNCATED }}
+          SCRIPT_EXIT: ${{ steps.drift_nightly.outputs.script_exit }}
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const raw = process.env.DRIFT_REPORT;
+            if (!raw) {
+              core.warning('No drift report — script crashed before writing artifact. Check workflow logs.');
+              return;
+            }
+            let report;
+            try {
+              report = JSON.parse(raw);
+            } catch (e) {
+              core.warning(`Could not parse drift report: ${e.message}`);
+              return;
+            }
+
+            const label = 'drift-nightly';
+            const triageLabel = 'needs-triage';
+            const ok = report.ok === true;
+            const diffBytes = report.diff_bytes || 0;
+
+            // Find any currently-open drift-nightly issues (don't spam-create).
+            const { data: existing } = await github.rest.issues.listForRepo({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: 'open',
+              labels: label,
+              per_page: 20,
+            });
+
+            if (ok) {
+              // No drift. Close any open drift issues — drift was resolved.
+              for (const issue of existing) {
+                core.info(`Closing resolved drift-nightly issue #${issue.number}`);
+                await github.rest.issues.createComment({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  body: `Drift resolved. Nightly check ran at ${report.ran_at} and the normalized schemas are now identical. Auto-closing.`,
+                });
+                await github.rest.issues.update({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: issue.number,
+                  state: 'closed',
+                });
+              }
+              core.info('Drift clean — nothing to do.');
+              return;
+            }
+
+            // Non-empty diff. Open a new issue OR update the existing one.
+            const diff = process.env.DIFF_TRUNCATED || '(diff missing)';
+            const title = `Schema drift detected: local vs prod (${report.ran_at})`;
+            const body = [
+              `**Drift detected by nightly AST diff** — \`${report.ran_at}\``,
+              '',
+              `- diff_bytes: ${diffBytes}`,
+              `- hunks: ${report.hunks || 0}`,
+              `- script exit: ${process.env.SCRIPT_EXIT || '(unknown)'}`,
+              '',
+              'See VERIFY.md "Gate: Drift → Nightly" for triage steps. The normalizer ignores role/grant/owner/comment/SET-preamble stanzas by design — any diff here is a material DDL divergence.',
+              '',
+              '<details><summary>Unified diff (truncated to 60KB)</summary>',
+              '',
+              '```diff',
+              diff,
+              '```',
+              '',
+              '</details>',
+              '',
+              'Full diff + JSON artifact attached to workflow run.',
+            ].join('\n');
+
+            if (existing.length > 0) {
+              // Update the first matching issue — avoid spam-creating.
+              const issue = existing[0];
+              core.info(`Updating existing drift-nightly issue #${issue.number}`);
+              await github.rest.issues.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                title,
+                body,
+                labels: [label, triageLabel],
+              });
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: issue.number,
+                body: `Drift still present as of ${report.ran_at} (diff_bytes=${diffBytes}). See updated body for latest diff.`,
+              });
+            } else {
+              core.info('Creating new drift-nightly issue');
+              await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body,
+                labels: [label, triageLabel],
+              });
+            }

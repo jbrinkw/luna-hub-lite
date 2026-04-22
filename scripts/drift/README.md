@@ -90,20 +90,152 @@ Configure in repo settings → Secrets and variables → Actions.
 
 ## Nightly full-schema AST diff
 
-**Deferred.** VERIFY.md also describes a nightly job that dumps both local
-and remote DDL, normalizes to an AST, and diffs. That's a larger build:
-requires running a local `supabase db reset` on CI (Docker), generating a
-canonical schema dump, applying the same to prod via `supabase db dump`,
-and running a normalizer that's robust to column-order and constraint-name
-noise.
+Implements VERIFY.md "Gate: Drift → Nightly". Catches silent DDL edits
+made outside the migrations folder — cases the PR-time dry-run misses
+because they don't change `supabase/migrations/*`.
 
-The PR-level dry-run already closes the recurring failure mode that
-motivated this gate (historical-order drift). Nightly AST diff catches
-silent DDL edits made outside the migrations folder — valuable but not
-blocking-critical for Phase 1.
+### How PR-time vs nightly differ
 
-Follow-up tracked at `scripts/drift/README.md` (this file) → ping Agent
-Infrastructure when the full-diff is a priority.
+| Axis            | PR-time (`drift-check.yml`)                                                 | Nightly (`drift-nightly.yml`)                                                      |
+| --------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------- |
+| Trigger         | Every PR to `main` touching migrations                                      | Scheduled cron (06:00 UTC daily)                                                   |
+| What it runs    | `supabase db push --dry-run --include-all`                                  | `db reset` + `db dump --local` vs `db dump --linked`                               |
+| What it catches | Out-of-order migration timestamps (the bug that bit us at `20260422040000`) | Any structural DDL divergence — columns added/dropped in prod via SQL editor, etc. |
+| Cost            | ~30 seconds (one CLI call)                                                  | ~3-5 minutes (Docker boot + full dump)                                             |
+| Failure mode    | FAIL the PR job, block merge                                                | Open/update a GitHub issue; never blocks merges                                    |
+| Artifact        | `.verify/drift.json` + `drift.log`                                          | `.verify/drift-nightly.json` + `diff.patch`                                        |
+
+### What the nightly normalizer ignores (the contract)
+
+The normalizer (`scripts/drift/lib/normalize_schema.py`) produces a
+canonical text form so spurious diffs don't create noise. **If a
+divergence falls entirely inside one of these stanzas, the nightly
+gate will NOT flag it.** That is intentional — these legitimately
+differ between local dev and prod.
+
+Ignored stanza kinds:
+
+1. **Comments** — `-- line comments` and `/* block comments */`.
+2. **Ownership + privileges** — `GRANT`, `REVOKE`, `CREATE ROLE`,
+   `ALTER ROLE`, `DROP ROLE`, `ALTER ... OWNER TO`,
+   `ALTER DEFAULT PRIVILEGES`, `SET ROLE`, `RESET ROLE`,
+   `REASSIGN OWNED`, `DROP OWNED`.
+3. **Session-config SETs** — any `SET <name> = <value>` statement
+   from the `pg_dump` preamble. This absorbs CLI-version differences
+   in `SET search_path` dialect (quoted vs unquoted, different
+   orderings).
+4. **`SELECT pg_catalog.set_config(...)`** — the canonical pg_dump
+   preamble form of the above.
+5. **`COMMENT ON`** — metadata, not structural.
+6. **Statement ordering** — CREATE TABLE/INDEX/FUNCTION/etc are
+   sorted by (kind, identity) so pg_dump ordering divergences between
+   the two CLIs don't diff.
+7. **Whitespace inside statements** — runs of whitespace collapse to
+   single spaces; trailing semicolons are canonicalized.
+
+**NOT ignored (will diff):**
+
+- Added / removed / renamed columns.
+- Added / removed / renamed tables, indexes, functions, triggers,
+  policies, schemas, views, types, sequences.
+- Changed data types, defaults, constraints (NOT NULL, CHECK, FK,
+  PK, UNIQUE).
+- Changed function bodies (including `RETURNS` clause, `LANGUAGE`,
+  `SECURITY DEFINER`).
+
+If you find the normalizer is ignoring something that should diff,
+add a new regex to `DROP_STANZA_PATTERNS` in
+`scripts/drift/lib/normalize_schema.py` — but first confirm the
+meta-test (`tests/test_nightly_ast_meta.sh`) still passes and add a
+fixture case that nails down the new rule.
+
+### How to triage a drift-nightly issue
+
+When you open a `drift-nightly` issue, the body has a truncated
+unified diff patch. Full diff is in the workflow-run artifact.
+
+Triage checklist:
+
+1. **Is the change legitimate?** — if someone ran DDL in the Supabase
+   SQL editor instead of adding a migration, that's drift. Write a
+   migration that matches the prod state, commit it. Next night's
+   gate should close the issue automatically.
+
+2. **Is the change malicious / unexpected?** — check `pg_stat_statements`
+   on prod for recent DDL. Revert if necessary.
+
+3. **Is the diff pure normalization noise?** — treat it as a
+   normalizer bug. Add the fixture that reproduces it to
+   `scripts/drift/tests/fixtures/` and extend
+   `lib/normalize_schema.py` to squash the noise. Meta-test must
+   still pass.
+
+4. **False-positive column-order?** — The normalizer sorts
+   statements but NOT columns-within-CREATE-TABLE. If prod has
+   `CREATE TABLE foo (id, name)` and local has `CREATE TABLE foo
+(name, id)`, that's a material divergence worth flagging. Decide
+   whether to add a column-sort pass or accept the diff.
+
+### Issue lifecycle
+
+- **Drift detected, no existing issue** → create one, labels
+  `drift-nightly` + `needs-triage`, body = summary + truncated diff.
+- **Drift detected, existing drift-nightly issue open** → update the
+  issue's body with the latest diff and post a comment noting the
+  still-drifting timestamp. Does NOT spam-create duplicates.
+- **Drift resolved, existing drift-nightly issue open** → post a
+  resolution comment and auto-close the issue.
+- **Artifacts** — every run uploads `.verify/drift-nightly.json`,
+  `.verify/drift-nightly.log` (reset + dump output), and
+  `.verify/diff.patch` (full un-truncated diff) with 30-day retention.
+
+### How to invoke locally
+
+```bash
+# Real mode — requires supabase link + Docker running.
+bash scripts/drift/nightly-ast-diff.sh
+
+# Mock mode — the load-bearing path for meta-tests + offline dev.
+# Both files must be passed; the script never calls the supabase CLI.
+bash scripts/drift/nightly-ast-diff.sh \
+  --mock-local scripts/drift/tests/fixtures/local-schema.sql \
+  --mock-prod  scripts/drift/tests/fixtures/prod-schema.sql
+
+# Normalizer in isolation (useful for debugging a suspected
+# false-positive):
+python3 scripts/drift/lib/normalize_schema.py some-dump.sql
+python3 scripts/drift/lib/normalize_schema.py --self-test
+```
+
+### Meta-test
+
+`scripts/drift/tests/test_nightly_ast_meta.sh` drives the script through
+three cases:
+
+1. Same fixture on both sides → empty diff.
+2. Pair differing ONLY in ignored stanzas → empty diff (normalizer works).
+3. Pair with a MATERIAL column drop → non-empty diff (exit 1, ok=false).
+
+Run: `bash scripts/drift/tests/test_nightly_ast_meta.sh`
+
+No network, no Docker. Purely mechanical.
+
+### Workflow-level details
+
+`.github/workflows/drift-nightly.yml` is the scheduled counterpart to
+`drift-check.yml`:
+
+- Cron: `0 6 * * *` (06:00 UTC daily).
+- `workflow_dispatch: {}` allows manual trigger for post-merge spot checks.
+- Uses the same `SUPABASE_ACCESS_TOKEN` + `SUPABASE_DB_PASSWORD` secrets.
+- `permissions.issues: write` — required to create/update/close the
+  triage issue. PR-time workflow doesn't need this since it only
+  comments on PRs.
+- The job NEVER fails on drift — drift surfaces as a GitHub issue,
+  not a red job. If you want a failing-job signal, add branch
+  protection requiring the `ast-diff` job; but the current design
+  prefers issues over merge-blocking because nightly-detected drift
+  usually wasn't introduced in the PR being considered.
 
 ## Supabase CLI version pinning
 
