@@ -1,0 +1,73 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_": [
+    "Stryker config for the apps/web workspace, scoped to src/shared/*.",
+    "Targets shared primitives that have real unit tests in",
+    "apps/web/src/__tests__/unit/shared/ and /unit/pure/: date helpers,",
+    "shared constants, and the realtimeHealth singleton.",
+    "",
+    "useRealtimeInvalidation.ts and related React-hook wiring are NOT",
+    "mutated here — their tests require jsdom + fake timers + a mocked",
+    "Supabase client, which Stryker's perTest coverage analysis struggles",
+    "with (mutants frequently time out). Covered indirectly by the",
+    "component tests that render pages using the hook.",
+    "",
+    "Note: configFile points at scripts/mutation/stryker-configs/vitest.web.config.ts",
+    "(not apps/web/vitest.config.ts). Stryker's vitest-runner sets `root`",
+    "to the sandbox root, which breaks relative setupFiles resolution in",
+    "the app's own config. The stryker-specific wrapper uses absolute",
+    "paths from __dirname to work around that. See the file for details.",
+    "",
+    "See scripts/mutation/README.md for the per-workspace layout rationale."
+  ],
+
+  "packageManager": "pnpm",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+
+  "vitest": {
+    "configFile": "scripts/mutation/stryker-configs/vitest.web.config.ts",
+    "related": false
+  },
+
+  "coverageAnalysis": "perTest",
+  "timeoutMS": 10000,
+  "timeoutFactor": 1.5,
+  "concurrency": 2,
+
+  "mutate": [
+    "apps/web/src/shared/dates.ts",
+    "apps/web/src/shared/constants.ts",
+    "apps/web/src/shared/realtimeHealth.ts",
+    "!apps/web/src/**/*.test.ts",
+    "!apps/web/src/**/*.test.tsx",
+    "!apps/web/src/__tests__/**"
+  ],
+
+  "ignorePatterns": [
+    "dist",
+    "coverage",
+    "legacy",
+    "hardware",
+    "supabase/migrations",
+    "packages/db-types/src/database.ts",
+    "**/*.tsbuildinfo",
+    ".verify",
+    ".turbo",
+    ".wrangler",
+    ".vercel",
+    ".stryker-tmp"
+  ],
+
+  "reporters": ["progress", "clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/mutation-web-shared.json" },
+
+  "thresholds": {
+    "high": 60,
+    "low": 40,
+    "break": 40
+  },
+
+  "tempDirName": ".stryker-tmp-web-shared",
+  "cleanTempDir": true
+}

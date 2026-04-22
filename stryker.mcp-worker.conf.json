@@ -1,0 +1,68 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_": [
+    "Stryker config for the apps/mcp-worker workspace.",
+    "Targets the MCP-surface contract files (SSE framing, tool dispatch +",
+    "logging, voice-ack loader, arg validation, chat-streaming). These are",
+    "the files that have real unit tests in apps/mcp-worker/src/__tests__/,",
+    "so Stryker's `--related` resolution and per-mutant vitest runs work",
+    "without a live Supabase.",
+    "",
+    "Leaf files (cors.ts, openai-types.ts, protocol.ts, registry.ts,",
+    "session.ts, stateless.ts, supabase.ts, index.ts, openai-compat.ts)",
+    "are either trivial type exports or only exercised by integration",
+    "tests; deliberately NOT mutated here. See scripts/mutation/README.md."
+  ],
+
+  "packageManager": "pnpm",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+
+  "vitest": {
+    "configFile": "apps/mcp-worker/vitest.config.ts",
+    "dir": "apps/mcp-worker"
+  },
+
+  "coverageAnalysis": "perTest",
+  "timeoutMS": 10000,
+  "timeoutFactor": 1.5,
+  "concurrency": 2,
+
+  "mutate": [
+    "apps/mcp-worker/src/validate.ts",
+    "apps/mcp-worker/src/sse.ts",
+    "apps/mcp-worker/src/voice-ack.ts",
+    "apps/mcp-worker/src/tool-executor.ts",
+    "apps/mcp-worker/src/tool-logger.ts",
+    "apps/mcp-worker/src/chat-streaming.ts",
+    "!apps/mcp-worker/src/**/*.test.ts",
+    "!apps/mcp-worker/src/__tests__/**"
+  ],
+
+  "ignorePatterns": [
+    "dist",
+    "coverage",
+    "legacy",
+    "hardware",
+    "supabase/migrations",
+    "packages/db-types/src/database.ts",
+    "**/*.tsbuildinfo",
+    ".verify",
+    ".turbo",
+    ".wrangler",
+    ".vercel",
+    ".stryker-tmp"
+  ],
+
+  "reporters": ["progress", "clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/mutation-mcp-worker.json" },
+
+  "thresholds": {
+    "high": 60,
+    "low": 40,
+    "break": 40
+  },
+
+  "tempDirName": ".stryker-tmp-mcp-worker",
+  "cleanTempDir": true
+}

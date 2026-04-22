@@ -1,15 +1,20 @@
 {
   "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
   "_": [
-    "Root Stryker config. Scoped to the `extensions/` folder because that's",
-    "the only contract surface currently covered by unit tests that run",
-    "without Supabase (extensions.test.ts). The coachbyte/chefbyte MCP tool",
-    "handlers in packages/app-tools/src/ have ONLY integration tests (live",
-    "Supabase required) and the top-level vitest.config.ts excludes them —",
-    "so vitest --related finds no tests for those files and Stryker errors",
-    "with 'No tests were executed'. Follow-up: either add a unit-test layer",
-    "for the coachbyte/chefbyte handlers or run stryker with a configured",
-    "integration harness. See scripts/mutation/README.md."
+    "Root Stryker config for the `extensions/` contract surface, which is",
+    "covered by `packages/app-tools/src/__tests__/extensions.test.ts`",
+    "(vitest config at packages/app-tools/vitest.config.ts).",
+    "",
+    "Sibling configs cover the other workspace contract surfaces:",
+    "  - stryker.mcp-worker.conf.json  → apps/mcp-worker/src/*.ts",
+    "  - stryker.web-shared.conf.json  → apps/web/src/shared/*.ts",
+    "",
+    "scripts/mutation/run.sh auto-routes --related files across all three",
+    "configs by path prefix. Full mode iterates every registered config.",
+    "",
+    "Deferred (non-goals): coachbyte/chefbyte MCP tool handlers under",
+    "packages/app-tools/src/{coachbyte,chefbyte}/ only have integration",
+    "tests that require a live Supabase — see scripts/mutation/README.md."
   ],
 
   "packageManager": "pnpm",

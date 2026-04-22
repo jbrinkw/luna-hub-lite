@@ -2,11 +2,20 @@
 # scripts/mutation/tests/test_mutation_meta.sh
 #
 # Meta-test for the mutation gate (VERIFY.md "Gate: Mutation" → Meta-test).
-# Runs Stryker independently on two fixture files:
-#   - good_contract.ts  (expects HIGH score, >80%)
-#   - tautology.ts      (expects LOW score,  <30%)
-# If the gate produces inverted or uncorrelated scores, Stryker plus our
-# wiring is NOT actually discriminating rigor — bail.
+#
+# Phase A — rigor discrimination (fixtures):
+#   Runs Stryker independently on two fixture files:
+#     - good_contract.ts  (expects HIGH score, >80%)
+#     - tautology.ts      (expects LOW score,  <30%)
+#   If the gate produces inverted or uncorrelated scores, Stryker plus our
+#   wiring is NOT actually discriminating rigor — bail.
+#
+# Phase B — multi-config aggregation (real repo):
+#   Runs `scripts/mutation/run.sh --related` with one file per registered
+#   workspace config (extensions, mcp-worker, web-shared) and asserts the
+#   aggregated .verify/mutation.json artifact contains a `checks[]` entry
+#   for each config. Guards against regressions where a new config lands
+#   but the aggregator silently drops its report.
 #
 # Exit 0 on pass, non-zero on fail.
 
@@ -65,7 +74,7 @@ NODE
 FAIL=0
 
 # ---------------------------------------------------------------------------
-# Fixture A: good_contract — expect HIGH score
+# Phase A.1: good_contract — expect HIGH score
 # ---------------------------------------------------------------------------
 set +e
 run_stryker_fixture "stryker.good.conf.json" "good_contract" > "$REPORT_DIR/meta-good.log"
@@ -90,7 +99,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Fixture B: tautology — expect LOW score
+# Phase A.2: tautology — expect LOW score
 # ---------------------------------------------------------------------------
 set +e
 run_stryker_fixture "stryker.tautology.conf.json" "tautology" > "$REPORT_DIR/meta-taut.log"
@@ -114,8 +123,7 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# Cross-check: the good fixture must score strictly higher than the tautology.
-# If they're equal or inverted, Stryker's output isn't meaningful for us.
+# Phase A.3: cross-check — good must strictly exceed tautology
 # ---------------------------------------------------------------------------
 if [[ "$GOOD_SCORE" != "null" && "$TAUT_SCORE" != "null" ]]; then
   ORDER=$(node -e "process.stdout.write(Number('$GOOD_SCORE') > Number('$TAUT_SCORE') ? 'yes' : 'no')")
@@ -124,6 +132,103 @@ if [[ "$GOOD_SCORE" != "null" && "$TAUT_SCORE" != "null" ]]; then
     FAIL=1
   else
     echo "PASS: good_contract ($GOOD_SCORE%) > tautology ($TAUT_SCORE%)" >&2
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Phase B: multi-config aggregation. Verify run.sh fans out across every
+# registered config and the aggregate artifact reflects each one. We use
+# --related to keep runtime bounded; the Stryker-ran check in the artifact
+# proves each config actually produced a report.
+# ---------------------------------------------------------------------------
+ONE_PER_CONFIG=(
+  "extensions/obsidian/tools/vault-parser.ts"
+  "apps/mcp-worker/src/validate.ts"
+  "apps/web/src/shared/constants.ts"
+)
+EXPECTED_CHECKS=(
+  "stryker-ran:stryker.conf.json"
+  "stryker-ran:stryker.mcp-worker.conf.json"
+  "stryker-ran:stryker.web-shared.conf.json"
+)
+
+echo "[meta] Phase B: running run.sh --related across all configs…" >&2
+set +e
+bash "$REPO_ROOT/scripts/mutation/run.sh" --related "${ONE_PER_CONFIG[@]}" --skip-python \
+  > "$REPORT_DIR/meta-multiconfig.log" 2>&1
+RUN_EXIT=$?
+set -e 2>/dev/null || true
+
+AGG_ARTIFACT="$REPO_ROOT/.verify/mutation.json"
+if [[ ! -f "$AGG_ARTIFACT" ]]; then
+  echo "FAIL: multi-config run did not write $AGG_ARTIFACT (exit=$RUN_EXIT)" >&2
+  FAIL=1
+else
+  if [[ "$RUN_EXIT" -ne 0 ]]; then
+    echo "FAIL: multi-config run exited $RUN_EXIT — see $REPORT_DIR/meta-multiconfig.log" >&2
+    FAIL=1
+  fi
+  # Extract check names and file scopes from the artifact and assert each
+  # expected check is present with ok=true.
+  MISSING=$(node --input-type=module - "$AGG_ARTIFACT" "${EXPECTED_CHECKS[@]}" <<'NODE'
+import fs from 'node:fs';
+const [artifactPath, ...expected] = process.argv.slice(2);
+const a = JSON.parse(fs.readFileSync(artifactPath, 'utf8'));
+const missing = [];
+for (const name of expected) {
+  const c = (a.checks ?? []).find(x => x.name === name);
+  if (!c || !c.ok) missing.push(name);
+}
+process.stdout.write(missing.join(','));
+NODE
+  )
+  if [[ -n "$MISSING" ]]; then
+    echo "FAIL: aggregated artifact missing/failing checks: $MISSING" >&2
+    FAIL=1
+  else
+    echo "PASS: aggregated artifact contains an ok check for every registered config" >&2
+  fi
+  FILE_COUNT=$(node --input-type=module - "$AGG_ARTIFACT" <<'NODE'
+import fs from 'node:fs';
+const a = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+process.stdout.write(String((a.files ?? []).length));
+NODE
+  )
+  if [[ "$FILE_COUNT" -ne "${#ONE_PER_CONFIG[@]}" ]]; then
+    echo "FAIL: expected ${#ONE_PER_CONFIG[@]} files in artifact, got $FILE_COUNT" >&2
+    FAIL=1
+  else
+    echo "PASS: aggregated artifact lists all $FILE_COUNT mutated files" >&2
+  fi
+fi
+
+# ---------------------------------------------------------------------------
+# Phase B.2: out-of-scope --related file must no-op gracefully (exit 0,
+# artifact ok:true, no configs invoked). Guards the router's skip branch.
+# ---------------------------------------------------------------------------
+echo "[meta] Phase B.2: out-of-scope --related should no-op…" >&2
+set +e
+bash "$REPO_ROOT/scripts/mutation/run.sh" --related README.md --skip-python \
+  > "$REPORT_DIR/meta-noop.log" 2>&1
+NOOP_EXIT=$?
+set -e 2>/dev/null || true
+
+if [[ "$NOOP_EXIT" -ne 0 ]]; then
+  echo "FAIL: out-of-scope --related exited $NOOP_EXIT — should be 0" >&2
+  FAIL=1
+else
+  NOOP_OK=$(node --input-type=module - "$AGG_ARTIFACT" <<'NODE'
+import fs from 'node:fs';
+const a = JSON.parse(fs.readFileSync(process.argv[2], 'utf8'));
+const hasNoop = (a.checks ?? []).some(c => c.name === 'no-op' && c.ok);
+process.stdout.write(hasNoop && a.ok === true && (a.files ?? []).length === 0 ? 'yes' : 'no');
+NODE
+  )
+  if [[ "$NOOP_OK" != "yes" ]]; then
+    echo "FAIL: out-of-scope artifact did not record a passing no-op check" >&2
+    FAIL=1
+  else
+    echo "PASS: out-of-scope --related produced a valid no-op artifact" >&2
   fi
 fi
 
