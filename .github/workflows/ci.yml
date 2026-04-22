@@ -34,48 +34,13 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
 
-  unit-tests:
-    name: Unit Tests
-    runs-on: ubuntu-latest
-    env:
-      VITE_SUPABASE_URL: http://localhost:54321
-      VITE_SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.placeholder
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - run: pnpm install --frozen-lockfile
-      - run: pnpm test
-
-  integration-tests:
-    name: Integration Tests
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: pnpm
-      - uses: supabase/setup-cli@v1
-        with:
-          version: latest
-      - run: pnpm install --frozen-lockfile
-      - name: Start Supabase
-        run: |
-          supabase start
-          # Export Supabase env vars for tests
-          echo "SUPABASE_URL=$(supabase status --output json | jq -r '.API_URL')" >> $GITHUB_ENV
-          echo "SUPABASE_ANON_KEY=$(supabase status --output json | jq -r '.ANON_KEY')" >> $GITHUB_ENV
-          echo "SUPABASE_SERVICE_ROLE_KEY=$(supabase status --output json | jq -r '.SERVICE_ROLE_KEY')" >> $GITHUB_ENV
-          echo "VITE_SUPABASE_URL=$(supabase status --output json | jq -r '.API_URL')" >> $GITHUB_ENV
-          echo "VITE_SUPABASE_ANON_KEY=$(supabase status --output json | jq -r '.ANON_KEY')" >> $GITHUB_ENV
-      - run: pnpm test:integration
-      - run: pnpm --filter @luna-hub/mcp-worker test:integration
-      - run: supabase test db
+  # Unit + integration test jobs removed 2026-04-22 — run them locally
+  # (`pnpm test` / `pnpm test:integration` / `supabase test db`). CI spent
+  # most of its wall-clock on ubuntu + pnpm + supabase setup for tests
+  # that are fast locally, and the integration suite was flaky against
+  # the live OpenFoodFacts API. The `lint` + `typecheck` jobs above stay
+  # (clean-install catches missing deps and stale tsbuildinfo hides).
+  # Drift, deploy, and nightly-audit workflows are unaffected.
 
   # e2e-tests:
   #   name: E2E Tests
