@@ -298,7 +298,7 @@ class ScaleHandler:
         lifecycle_verbose: bool = False,
         # In-flight tracker knobs (IN_FLIGHT_TRACKER_PLAN.md §9). Defaults
         # match config.py; app.py wires the current AppConfig values.
-        in_flight_ttl_seconds: int = 14_400,
+        in_flight_ttl_seconds: int = 21_600,
         new_item_weight_ratio: float = 1.15,
         consumption_noise_floor_g: float = 2.0,
         # Catch-all scale wiring (CATCH_ALL_SCALE_PLAN.md §4.3, §6).

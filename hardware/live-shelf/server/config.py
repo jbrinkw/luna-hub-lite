@@ -51,7 +51,7 @@ DEFAULTS: dict[str, Any] = {
     # debugging a specific flow; the DB grows quickly at capture-fps.
     "LIFECYCLE_VERBOSE": False,
     # In-flight tracker (IN_FLIGHT_TRACKER_PLAN.md §9).
-    "IN_FLIGHT_TTL_SECONDS": 14_400,        # 4 hours
+    "IN_FLIGHT_TTL_SECONDS": 21_600,        # 6 hours
     "NEW_ITEM_WEIGHT_RATIO": 1.15,          # return > pickup × this → new item
     "CONSUMPTION_NOISE_FLOOR_G": 2.0,       # |consumption| < this clamps to 0
     # Catch-all scale (CATCH_ALL_SCALE_PLAN.md §8). Feature flag stays
@@ -187,7 +187,7 @@ class AppConfig:
     frame_lookback_seconds: float = 2.0
     lifecycle_verbose: bool = False
     # In-flight tracker knobs.
-    in_flight_ttl_seconds: int = 14_400
+    in_flight_ttl_seconds: int = 21_600
     new_item_weight_ratio: float = 1.15
     consumption_noise_floor_g: float = 2.0
     # Catch-all scale knobs (CATCH_ALL_SCALE_PLAN.md §8).

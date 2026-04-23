@@ -340,7 +340,7 @@ Three new config values, all with sensible defaults:
 
 | Name                        | Default | Purpose                                   |
 | --------------------------- | ------- | ----------------------------------------- | ----------- | ----------------------- |
-| `IN_FLIGHT_TTL_SECONDS`     | 14400   | 4 h. After this, in-flight → out.         |
+| `IN_FLIGHT_TTL_SECONDS`     | 21600   | 6 h. After this, in-flight → out.         |
 | `NEW_ITEM_WEIGHT_RATIO`     | 1.15    | delta > pickup·this → replacement branch. |
 | `CONSUMPTION_NOISE_FLOOR_G` | 2.0     |                                           | consumption | below this clamps to 0. |
 
