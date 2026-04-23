@@ -416,6 +416,92 @@ class ScaleHandler:
         """
         self._livetrack_poller = poller
 
+    # Non-terminal LiveTrack session states. An ACTIVE session in any of
+    # these means the browser wizard is still placing items on the scale
+    # for calibration / pairing / initial inventory — weight deltas in
+    # this window are intentional human actions, not stock movements, so
+    # the event pipeline (shelf state machine, classifier, cloud_outbox)
+    # must not fire. 'closed' and 'expired' are terminal and do NOT
+    # suppress. See docs: ``LIVETRACK_WIZARD_SUPPRESSION.md``.
+    _LIVETRACK_ACTIVE_STATES = frozenset({
+        "waiting_barcode",
+        "waiting_scale",
+        "scale_reading_received",
+        "awaiting_ai_tare",
+        "ai_tare_ready",
+    })
+
+    # Defensive Pi-side safety timeout for wizard suppression. The cloud
+    # edge function already enforces a 10-minute ``expires_at`` on every
+    # livetrack_import_sessions row (migration 20260421020000) and
+    # filters closed/expired rows out of ``GET /livetrack-session/active``,
+    # so a cleanly-closed browser reliably clears suppression within one
+    # poll tick (500ms active / 2s idle). This Pi-side ceiling is a
+    # belt-and-suspenders clamp for the rare case where the Pi's
+    # _snapshot got cached while the cloud flipped the row to expired
+    # but the poll hasn't re-run yet — or the poller thread has died.
+    # 15min > 10min cloud expiry so this is dominated by the cloud-side
+    # timer in the happy path.
+    _LIVETRACK_MAX_SUPPRESSION_SECONDS = 15 * 60
+
+    def _is_wizard_active(self) -> tuple[bool, Optional[str], Optional[str]]:
+        """Return (suppress, session_id, state) from the LiveTrack snapshot.
+
+        Called at the top of ``handle_scale_event`` to decide whether to
+        short-circuit the full event pipeline (no scale_events row, no
+        classifier, no cloud_outbox emission) because the user is mid-
+        wizard on the cloud UI.
+
+        Returns ``(True, session_id, state)`` when the snapshot reports
+        an ACTIVE (non-terminal) session whose ``created_at`` is within
+        :attr:`_LIVETRACK_MAX_SUPPRESSION_SECONDS`. Returns
+        ``(False, None, None)`` otherwise — no poller attached, no
+        snapshot, terminal state, unknown state, or the defensive
+        Pi-side timeout has fired.
+
+        The defensive timeout exists for the rare case where the poll
+        thread dies or blocks: without it, a stuck snapshot would
+        permanently silence the event pipeline.
+        """
+        poller = self._livetrack_poller
+        if poller is None:
+            return False, None, None
+        try:
+            snap = poller.snapshot()
+        except Exception:  # noqa: BLE001 — never let the gate raise
+            log.warning(
+                "livetrack: poller.snapshot() raised; treating as inactive",
+                exc_info=True,
+            )
+            return False, None, None
+        if not isinstance(snap, dict):
+            return False, None, None
+        state = str(snap.get("state", ""))
+        if state not in self._LIVETRACK_ACTIVE_STATES:
+            return False, None, None
+        # Defensive Pi-side timeout: if created_at is absent or stale
+        # beyond the ceiling, don't suppress. created_at is stamped by
+        # the cloud at session insert (schema DEFAULT now()).
+        created_at = snap.get("created_at")
+        if isinstance(created_at, str) and created_at:
+            try:
+                parsed = parse_iso_utc(created_at)
+            except (ValueError, TypeError):
+                parsed = None
+            if parsed is not None:
+                age_s = (
+                    datetime.now(timezone.utc) - parsed
+                ).total_seconds()
+                if age_s > self._LIVETRACK_MAX_SUPPRESSION_SECONDS:
+                    log.warning(
+                        "livetrack: snapshot age %.0fs exceeds ceiling "
+                        "%ds; NOT suppressing (stale snapshot?)",
+                        age_s, self._LIVETRACK_MAX_SUPPRESSION_SECONDS,
+                    )
+                    return False, None, None
+        session_id = snap.get("session_id")
+        return True, (str(session_id) if session_id else None), state
+
     def _push_tare_to_cloud(self, product_id: str, tare_g: float) -> None:
         """Fire-and-forget cloud push of a captured tare value.
 
@@ -2196,6 +2282,68 @@ class ScaleHandler:
                     "product_id": tare_product_id,
                 }, 200
             # No arm active → fall through to the normal pipeline.
+
+        # LiveTrack wizard suppression gate (2026-04-22).
+        # While the browser-side LiveTrack Import wizard is running
+        # (any non-terminal session state), the user is placing items
+        # on the scale for calibration / pairing / initial inventory —
+        # those placements are intentional human actions already handled
+        # by the wizard flow. Let them through to the normal event
+        # pipeline and they spawn phantom pickup/remove/add sessions,
+        # bogus in-flight states, and spurious Anthropic classifier
+        # calls. This gate short-circuits every downstream branch:
+        #   * no scale_events row
+        #   * no classifier invocation
+        #   * no cloud_outbox emit
+        # Applies to ALL shelves (live_shelf, catch_all, single_item)
+        # because any of them can be "the scale being calibrated".
+        #
+        # Placement rationale: runs AFTER the existing waiting_scale
+        # and tare-arm branches so those more-specific catch-all
+        # paths (which DO legitimately POST to cloud — the wizard
+        # needs the reading) still fire. The gate catches everything
+        # else that would have fallen through to session creation,
+        # classifier dispatch, or single_item emission.
+        #
+        # Weight-trace recording is preserved for debug observability
+        # per the plan ("Weight readings can still be recorded for
+        # debugging, but no downstream processing runs").
+        #
+        # Noise events ARE suppressed too — they normally just record
+        # an app_state update + a scale_events row with direction=noise
+        # + a new cloud_outbox entry; none of that is useful during a
+        # wizard session either.
+        wizard_active, wiz_session_id, wiz_state = self._is_wizard_active()
+        if wizard_active:
+            _append_weight_trace({
+                "kind": "event_suppressed",
+                "device_id": device_id,
+                "esp_ts": ts,
+                "pi_ts": pi_received_ts,
+                "event_seq": event_seq,
+                "delta_g": delta_g,
+                "before_weight_g": before_weight_g,
+                "after_weight_g": after_weight_g,
+                "reason": "livetrack_wizard_active",
+                "livetrack_session_id": wiz_session_id,
+                "livetrack_state": wiz_state,
+            })
+            log.info(
+                "livetrack: wizard_active suppressed event — "
+                "device_id=%s event_seq=%s delta_g=%.1fg "
+                "session_id=%s state=%s shelf=%s",
+                device_id, event_seq, delta_g,
+                wiz_session_id, wiz_state, shelf_id,
+            )
+            return {
+                "ok": True,
+                "suppressed": "livetrack_wizard_active",
+                "livetrack_session_id": wiz_session_id,
+                "livetrack_state": wiz_state,
+                "shelf_id": shelf_id,
+                "direction": direction,
+                "delta_g": delta_g,
+            }, 200
 
         # Single-item (live_scale) rig: direct-consumption hardware where
         # the scale is permanently paired to one product (see
