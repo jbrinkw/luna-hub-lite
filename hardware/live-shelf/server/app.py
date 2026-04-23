@@ -176,16 +176,140 @@ class AppBundle:
 
 
 def _last_weight_from_state(
-    conn: sqlite3.Connection, db_lock: threading.RLock
+    conn: sqlite3.Connection,
+    db_lock: threading.RLock,
+    *,
+    device_id: Optional[str] = None,
+    median_window: int = 5,
 ):
     """Return a nullary callable used by the brightness handler.
 
-    Reads app_state.last_scale_weight_g under the DB lock.
+    Implements a stability gate on the close-weight snapshot to reject
+    mid-motion transients (bug fix 2026-04-22).
+
+    Background
+    ----------
+    Previously this just returned ``app_state.last_scale_weight_g`` —
+    the raw last-heartbeat reading. That made :class:`BrightnessHandler`
+    vulnerable to noisy sub-gram spikes the instant the door closed:
+    if the user was rearranging items and the scale briefly read
+    ``-0.2 g`` (hand brushing the shelf) right as the door shut, the
+    sweeper's ``_maybe_synthesize_gap_remove`` computed a huge
+    ``unaccounted`` gap against the session's initial_weight and
+    synthesized a phantom REMOVE. The classifier matched the phantom
+    to whatever lot was closest in weight (e.g. a bottle of milk) and
+    flipped the lot to ``in_flight_pickup`` even though nothing was
+    picked up.
+
+    Fix (Approach B: N-sample median, with STABLE-flag tiebreaker)
+    -------------------------------------------------------------
+    Pull the last ``median_window`` heartbeat samples from the rolling
+    weight trace in :mod:`server.handlers.scale_events` and return the
+    median. A single-sample transient (one ``-0.2 g`` reading in a sea
+    of ``472 g`` readings) is outvoted; a real removal (``[472, 472,
+    400, 200, 0, 0, 0]``) still yields the correct post-removal reading.
+
+    When the ESP has reported ``stable=true`` on its most recent fresh
+    heartbeat, we prefer THAT weight directly — it's the scale's own
+    stability declaration, which is more authoritative than any
+    smoothing we could do. The median is the fallback for the common
+    case where the close lands mid-motion (stable=false on the tail
+    sample).
+
+    Safety: if neither the trace nor the runtime state yield a usable
+    reading (fresh boot, ESP down, etc.), fall back to
+    ``app_state.last_scale_weight_g`` with a WARNING log so session
+    close doesn't hang.
     """
+    # Late import to avoid circular: scale_events imports from app in
+    # test fixtures. The module-level state we rely on is initialized
+    # at module import time, not by any handler instance.
+    from .handlers import scale_events as _scale_events_mod
+
+    def _pick_weight(
+        trace: list[dict[str, Any]],
+        runtime: dict[str, Any],
+    ) -> tuple[float, str]:
+        """Return (weight_g, source) picking the best available reading.
+
+        Source tags:
+          * ``stable`` — ESP-reported stable weight (most authoritative)
+          * ``median`` — median of last N heartbeat samples (filters noise)
+          * ``fallback`` — raw last reading (only when trace too short)
+        """
+        # Prefer the ESP's own stability declaration when fresh.
+        if (
+            runtime
+            and runtime.get("stable") is True
+            and runtime.get("weight_g") is not None
+        ):
+            try:
+                return float(runtime["weight_g"]), "stable"
+            except (TypeError, ValueError):
+                pass
+
+        # Otherwise: median of the last N heartbeat samples. Filter
+        # scale-event entries out (kind == "heartbeat") so a settle-
+        # event's after_weight doesn't skew the median of raw telemetry.
+        hb_samples: list[float] = []
+        for entry in reversed(trace):
+            if entry.get("kind") != "heartbeat":
+                continue
+            w = entry.get("weight_g")
+            if w is None:
+                continue
+            try:
+                hb_samples.append(float(w))
+            except (TypeError, ValueError):
+                continue
+            if len(hb_samples) >= median_window:
+                break
+        if len(hb_samples) >= 3:
+            # sorted() + midpoint — cheaper and dependency-free vs. statistics.
+            s = sorted(hb_samples)
+            mid = len(s) // 2
+            if len(s) % 2 == 1:
+                return s[mid], "median"
+            return (s[mid - 1] + s[mid]) / 2.0, "median"
+        # Too few samples for a stable median.
+        if hb_samples:
+            return hb_samples[0], "fallback"
+        return 0.0, "fallback"
+
     def _getter() -> float:
-        with db_lock:
-            state = storage_repo.get_app_state(conn)
-        return float(state.last_scale_weight_g or 0.0)
+        try:
+            runtime = _scale_events_mod.get_scale_runtime_state(device_id)
+            trace = _scale_events_mod.get_weight_trace(device_id)
+        except Exception:  # pragma: no cover - defensive
+            runtime, trace = {}, []
+
+        weight_g, source = _pick_weight(trace, runtime)
+        if source == "fallback":
+            # Degenerate path — heartbeats haven't populated the trace
+            # yet (fresh boot right after door transition, or tests
+            # that don't push heartbeats). Fall back to the legacy
+            # app_state read so session close doesn't produce a
+            # nonsense ``0.0 g`` close weight.
+            try:
+                with db_lock:
+                    state = storage_repo.get_app_state(conn)
+                legacy_weight = float(state.last_scale_weight_g or 0.0)
+            except Exception:  # pragma: no cover - defensive
+                legacy_weight = 0.0
+            log.warning(
+                "close-weight stability gate: insufficient heartbeat "
+                "samples for median (have=%d, need>=3); falling back to "
+                "app_state.last_scale_weight_g=%.2fg",
+                len(trace),
+                legacy_weight,
+            )
+            return legacy_weight
+        log.debug(
+            "close-weight stability gate: source=%s weight=%.2fg",
+            source, weight_g,
+        )
+        return weight_g
+
     return _getter
 
 

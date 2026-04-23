@@ -105,17 +105,17 @@ implicitly through timestamps.
 
 ### Responsibilities (who writes what)
 
-| Store | Written by | Read by |
-|---|---|---|
-| `sessions` row | brightness watcher (on open/close) | reconciler, scale_events, adapters |
-| `app_state.current_session_id` | brightness watcher (open clears, close nulls), wipe | scale_events ingress (fast path) |
-| `session_capture._CURRENT` | session_capture `_handle_open`, `_handle_frame` | `get_frames_for_event`, sweeper |
-| `session_capture._CLOSED` deque | session_capture `_handle_close`, video encoder | `get_frames_for_event`, sweeper |
-| `scale_events` row | ingress, classify thread, sweeper (status), synth gap | close-hook, sweeper, reconciler, UI |
-| `lots` | classify thread, reconciler, intake, admin | UI, classifier pool builder, reconciler |
-| `review_queue` | classify thread, reconciler, sweeper | UI `/review` routes, `apply_user_reviewed_candidate` |
-| dedup LRU | ingress, heartbeat (reboot purge) | ingress |
-| wipe epoch | admin wipe | every classify write site |
+| Store                           | Written by                                            | Read by                                              |
+| ------------------------------- | ----------------------------------------------------- | ---------------------------------------------------- |
+| `sessions` row                  | brightness watcher (on open/close)                    | reconciler, scale_events, adapters                   |
+| `app_state.current_session_id`  | brightness watcher (open clears, close nulls), wipe   | scale_events ingress (fast path)                     |
+| `session_capture._CURRENT`      | session_capture `_handle_open`, `_handle_frame`       | `get_frames_for_event`, sweeper                      |
+| `session_capture._CLOSED` deque | session_capture `_handle_close`, video encoder        | `get_frames_for_event`, sweeper                      |
+| `scale_events` row              | ingress, classify thread, sweeper (status), synth gap | close-hook, sweeper, reconciler, UI                  |
+| `lots`                          | classify thread, reconciler, intake, admin            | UI, classifier pool builder, reconciler              |
+| `review_queue`                  | classify thread, reconciler, sweeper                  | UI `/review` routes, `apply_user_reviewed_candidate` |
+| dedup LRU                       | ingress, heartbeat (reboot purge)                     | ingress                                              |
+| wipe epoch                      | admin wipe                                            | every classify write site                            |
 
 ### The three executions per close
 
@@ -135,6 +135,47 @@ This order is load-bearing. It was bug #743a to spawn the reconciler
 from (1) because it ran before (3) classified anything. The fix moved
 the reconciler spawn to the tail of (3). But the ordering is **encoded
 only in subscription order**, not in a data structure that enforces it.
+
+### Close-weight stability gate (2026-04-22 fix)
+
+`BrightnessHandler._on_close` stamps `sessions.final_shelf_weight_g` by
+calling its injected `last_weight_provider`. Until the 2026-04-22 fix
+this was `app_state.last_scale_weight_g` — the raw last heartbeat.
+That was vulnerable to a single-sample transient: if the user was
+rearranging items and the HX711 briefly reported `-0.21 g` (hand
+brushing the shelf) at the exact instant the door-close transition
+fired, the sweeper's `_maybe_synthesize_remove_gap` saw a huge
+`unaccounted` delta vs. the session's `initial_shelf_weight_g` and
+synthesized a phantom bulk-REMOVE. The classifier matched the phantom
+to whatever lot was closest in weight; a real ADD (e.g. placing
+parmesan) moments later completed the false remove/add pair.
+
+The fix lives in `server/app.py::_last_weight_from_state` — a small
+stability filter in front of the raw reading:
+
+1. If the ESP has reported `stable=true` on its most recent fresh
+   heartbeat, return THAT weight directly (authoritative: the scale's
+   own stability algorithm).
+2. Otherwise, pull the last 5 heartbeat samples from the rolling
+   `_WEIGHT_TRACE` in `handlers/scale_events.py` and return the median.
+   A single-sample `-0.2 g` transient in a window of `472 g` readings
+   is outvoted; a genuine removal trajectory `[400, 200, 0, 0, 0]`
+   still yields 0 g (no gap-fill suppression).
+3. Fall back to `app_state.last_scale_weight_g` with a WARNING log
+   when fewer than 3 heartbeat samples are available (fresh boot,
+   ESP down).
+
+Safety: session close never hangs on waiting for stability — the
+median-or-fallback path always produces a reading. The gate also
+applies symmetrically on `_on_open` so a noisy pre-open sample cannot
+poison the session's `initial_shelf_weight_g`.
+
+Gap-fill skip-reason labeling was also tightened in the same commit.
+Previously every skip row logged `reason=below_threshold` regardless
+of direction; now a positive `unaccounted` gap exceeding the threshold
+uses `reason=positive_gap_not_supported` so operators can tell "items
+added without ESP stability (nothing to synthesize)" from "magnitude
+too small (noise floor)".
 
 ---
 
@@ -406,11 +447,13 @@ or not at all. Real inconsistencies that have existed in production:
 ### P9. Observability is grep-driven
 
 Every bug this session was diagnosed by:
+
 1. Grepping `server.log` for the event's id prefix (`--logs 50`).
 2. Running `/api/diag/dump-session` and pulling frames+events locally.
 3. Opening `shelf.sqlite3` in a SQLite client.
 
 There is no:
+
 - Per-event lifecycle transition log. The only evidence of an event's
   path through the system is its final row state plus whatever made
   it into `server.log`.
@@ -452,6 +495,7 @@ clock-domain comments. Maybe 4-6 hours.
 ### R2. One Session object, three-actor state machine
 
 **Mechanism**: Introduce a `Session` class that owns:
+
 - The DB row (`session_id`, `started_at`, `ended_at`, ...).
 - The in-memory `_CURRENT`/`_CLOSED` entry.
 - The frames timeline (live-archive list).
@@ -714,17 +758,17 @@ transition site. 1 day.
 Ordered by value-per-hour, assuming Jeremy's time and the current
 bug pressure:
 
-| # | Change | Effort | Risk | Impact |
-|---|---|---|---|---|
-| 1 | R9 — Event lifecycle log + reason codes | 8 h | Low (additive) | Very high — turns every future bug into a 5-minute diagnosis instead of 5-hour |
-| 2 | R1 — Pi-clock-only wire format + `pi_received_ts` column | 6 h | Low | High — removes clock-domain bugs permanently |
-| 3 | R8 — Schema CHECK constraints + FK on | 3 h | Low-medium (existing row audit) | High — DB rejects impossible states |
-| 4 | R5 — Unified score for auto-apply | 3 h | Medium (threshold tuning) | Medium-high — replaces two ad-hoc gates with one principled one |
-| 5 | R3 — Attribution as pure function | 8 h | Medium | High — removes 5+ disagreeing rules |
-| 6 | R7 — Review queue as action log | 6 h | Low | Medium-high — makes resolution auditable |
-| 7 | R2 — One Session object | 16-24 h | High (broad surface) | Very high structurally but only worth it after 1-5 land |
-| 8 | R4 — Weight-anchored frame pick | 10-12 h | Medium (needs data-set validation) | High for multi-item-same-window cases |
-| 9 | R6 — Symmetric multi-item ADD | 4 h | Low-medium (prompt changes) | Medium |
+| #   | Change                                                   | Effort  | Risk                               | Impact                                                                         |
+| --- | -------------------------------------------------------- | ------- | ---------------------------------- | ------------------------------------------------------------------------------ |
+| 1   | R9 — Event lifecycle log + reason codes                  | 8 h     | Low (additive)                     | Very high — turns every future bug into a 5-minute diagnosis instead of 5-hour |
+| 2   | R1 — Pi-clock-only wire format + `pi_received_ts` column | 6 h     | Low                                | High — removes clock-domain bugs permanently                                   |
+| 3   | R8 — Schema CHECK constraints + FK on                    | 3 h     | Low-medium (existing row audit)    | High — DB rejects impossible states                                            |
+| 4   | R5 — Unified score for auto-apply                        | 3 h     | Medium (threshold tuning)          | Medium-high — replaces two ad-hoc gates with one principled one                |
+| 5   | R3 — Attribution as pure function                        | 8 h     | Medium                             | High — removes 5+ disagreeing rules                                            |
+| 6   | R7 — Review queue as action log                          | 6 h     | Low                                | Medium-high — makes resolution auditable                                       |
+| 7   | R2 — One Session object                                  | 16-24 h | High (broad surface)               | Very high structurally but only worth it after 1-5 land                        |
+| 8   | R4 — Weight-anchored frame pick                          | 10-12 h | Medium (needs data-set validation) | High for multi-item-same-window cases                                          |
+| 9   | R6 — Symmetric multi-item ADD                            | 4 h     | Low-medium (prompt changes)        | Medium                                                                         |
 
 **Suggested sequencing**: Land 1 first (observability is the force
 multiplier). Then 2, 3, 4 in parallel (independent, all small). Then
@@ -776,23 +820,23 @@ What this audit **does not** recommend:
 For posterity — a mapping of this session's fix stories to the
 underlying structural problem they reveal:
 
-| Bug story | Root (P#) |
-|---|---|
-| Framing wrong after stability | P4 |
-| Session attribution wrong across close-grace | P3 |
-| Grace-window poaching by next session | P2, P3 |
-| Confidence threshold blocking obvious weight matches | P5 |
-| Candidate pool empty after wipe | P8 |
-| Review resolution stub → no lot mutation | P7 |
-| Multi-item same-window undistinguishable | P4, P6 |
-| Post-close-grace events double-counted | P3, P8 |
-| ESP stability race (slow-settling items) | P1, P4 |
-| Zombie `current_session_id` across restart | P2 |
-| Wipe FK violation | P2, P8 |
-| Sweeper age-failing in-progress sessions | P3, P9 |
-| Reconciler ran before classifier | P2 (execution-order implicit) |
-| Dedup LRU + event_seq reset on ESP reboot | P1 (clock/uptime) |
-| Frame-path `before = after` on short session | P4 |
+| Bug story                                            | Root (P#)                     |
+| ---------------------------------------------------- | ----------------------------- |
+| Framing wrong after stability                        | P4                            |
+| Session attribution wrong across close-grace         | P3                            |
+| Grace-window poaching by next session                | P2, P3                        |
+| Confidence threshold blocking obvious weight matches | P5                            |
+| Candidate pool empty after wipe                      | P8                            |
+| Review resolution stub → no lot mutation             | P7                            |
+| Multi-item same-window undistinguishable             | P4, P6                        |
+| Post-close-grace events double-counted               | P3, P8                        |
+| ESP stability race (slow-settling items)             | P1, P4                        |
+| Zombie `current_session_id` across restart           | P2                            |
+| Wipe FK violation                                    | P2, P8                        |
+| Sweeper age-failing in-progress sessions             | P3, P9                        |
+| Reconciler ran before classifier                     | P2 (execution-order implicit) |
+| Dedup LRU + event_seq reset on ESP reboot            | P1 (clock/uptime)             |
+| Frame-path `before = after` on short session         | P4                            |
 
 Almost every story ladders back to one of: **fragmented identity,
 inconsistent attribution, unanchored frame pick, or clock-domain

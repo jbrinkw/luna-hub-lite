@@ -2860,13 +2860,28 @@ class ScaleHandler:
         # without stability). A positive unaccounted delta would imply
         # items added without stability — that's physically implausible
         # (putting something down generates a settle) so we skip.
+        #
+        # Two distinct skip reasons (fix 2026-04-22):
+        #   * ``below_threshold`` — the gap is negative but smaller in
+        #     magnitude than the minimum-REMOVE threshold (noise floor).
+        #   * ``positive_gap_not_supported`` — the gap is positive (scale
+        #     ended UP vs. start), meaning items were added without ESP
+        #     stability. The synthesizer only produces REMOVE events, so
+        #     there's nothing it can do here even if the magnitude is
+        #     large. Labeling this correctly lets operators distinguish
+        #     "too-small negative" from "unsupported positive" when
+        #     digging through GAP_FILL_SKIPPED rows.
         if unaccounted > -self._GAP_REMOVE_MIN_G:
+            if unaccounted > self._GAP_REMOVE_MIN_G:
+                skip_reason = "positive_gap_not_supported"
+            else:
+                skip_reason = "below_threshold"
             self._lc_session(
                 session_id,
                 actor="sweeper",
                 reason_code=ReasonCode.GAP_FILL_SKIPPED,
                 payload={
-                    "reason": "below_threshold",
+                    "reason": skip_reason,
                     "unaccounted": unaccounted,
                     "threshold": self._GAP_REMOVE_MIN_G,
                 },
