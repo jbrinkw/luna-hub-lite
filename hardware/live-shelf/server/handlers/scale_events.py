@@ -1855,6 +1855,20 @@ class ScaleHandler:
                         # is corrupt — treat as a plain return).
                         if handled:
                             continue
+                    # Bug fix 2026-04-27: out → on_shelf ADD emits cloud
+                    # ``added`` event + writes a ``new_arrival`` session
+                    # resolution row inline. Previously only the default
+                    # ``update_lot`` ran, so a TTL-reaped lot being placed
+                    # back on the shelf produced zero cloud traffic — the
+                    # cloud stayed at qty=0 until session close, and
+                    # reconciler Pass 3 also saw status='on_shelf' (not
+                    # 'out', because we just flipped it) so it wrote
+                    # ``new_arrival`` rather than ``use_return_consumed``.
+                    # Either way nothing was emitted at hot-path time.
+                    # The cloud revives the empty lot via
+                    # resolve_add_to_shelf_lot's empty-lot-reuse step
+                    # (migration 20260425070000).
+                    was_out = lot.status == "out"
                     storage_repo.update_lot(
                         self._conn,
                         cid,
@@ -1862,6 +1876,56 @@ class ScaleHandler:
                         current_weight_g=lot_weight_g,
                         last_seen_at=event_ts,
                     )
+                    if was_out:
+                        revive_resolution_id: Optional[str] = None
+                        if session_id is not None:
+                            try:
+                                res = storage_repo.write_resolution(
+                                    self._conn,
+                                    SessionResolutionIn(
+                                        session_id=session_id,
+                                        pattern="new_arrival",
+                                        lot_id=lot.lot_id,
+                                        confidence=confidence,
+                                        add_event_id=event_id,
+                                    ),
+                                )
+                                revive_resolution_id = getattr(
+                                    res, "resolution_id", None,
+                                )
+                            except Exception:  # pragma: no cover - defensive
+                                log.exception(
+                                    "failed to write new_arrival resolution "
+                                    "for out→on_shelf revive of lot %s "
+                                    "(event %s)", lot.lot_id, event_id,
+                                )
+                        try:
+                            product_id_str = (
+                                getattr(lot, "product_id", None) or ""
+                            )
+                            if product_id_str and lot_weight_g > 0:
+                                self._cloud_emitter.emit_reconciler_resolution(
+                                    pattern="new_arrival",
+                                    product_id=product_id_str,
+                                    scale_id=self._scale_id_for_shelf(
+                                        getattr(lot, "shelf_id", "live_shelf")
+                                    ),
+                                    kind="live_shelf",
+                                    delta_g=float(lot_weight_g),
+                                    occurred_at=event_ts,
+                                    resolution_id=revive_resolution_id,
+                                    pi_event_id=event_id,
+                                )
+                        except Exception:  # pragma: no cover - defensive
+                            log.warning(
+                                "cloud emit failed for out→on_shelf revive "
+                                "of lot %s", lot.lot_id, exc_info=True,
+                            )
+                        log.info(
+                            "out→on_shelf revive: lot %s (product %s) "
+                            "placed back (weight %.1fg) — emitted new_arrival",
+                            lot.lot_id, lot.product_id, lot_weight_g,
+                        )
                 elif direction == "remove":
                     # Bug B3b: don't double-flip an already-out lot. If
                     # status=='out' we'd just re-stamp last_out_at with

@@ -399,6 +399,12 @@ def _reconcile_session_locked(
                     "in_flight_return",
                     "in_flight_replaced_new_item",
                     "in_flight_ttl_expired",
+                    # 2026-04-27: out→on_shelf revive hot path writes a
+                    # ``new_arrival`` resolution + emits a cloud ``added``
+                    # event directly. Without claiming the add_event_id
+                    # here the reconciler's Pass 3 would write a SECOND
+                    # ``new_arrival`` for the same event → double emit.
+                    "new_arrival",
                 ):
                     continue
                 add_id = getattr(existing, "add_event_id", None)

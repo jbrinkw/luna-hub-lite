@@ -8,8 +8,8 @@ Scope: `hardware/live-shelf/server/`
 
 ## 1. What it is
 
-An in-flight tracker tells us, in real time, which items are currently *off the
-shelf but expected back* — so the UI can distinguish "this yogurt is being
+An in-flight tracker tells us, in real time, which items are currently _off the
+shelf but expected back_ — so the UI can distinguish "this yogurt is being
 eaten right now" from "this yogurt is gone for good." When the item comes back,
 the weight difference is recorded as consumption. If the returning mass is
 materially heavier than the pickup mass, the lot is closed and a new lot is
@@ -24,9 +24,10 @@ new-item threshold into the fast path.
 ## 2. Goals / non-goals
 
 **Goals**
+
 - Lot status `in_flight` visible the moment a REMOVE applies, not after session close.
 - Same-item return across or within sessions computes `consumption_g =
-  pickup_weight_g - return_delta_g`, clamped at noise floor, added to
+pickup_weight_g - return_delta_g`, clamped at noise floor, added to
   `total_consumed_g`.
 - Significantly heavier return (> pickup × `NEW_ITEM_WEIGHT_RATIO`) closes the
   in-flight lot as `out` and mints a new lot for the returned mass.
@@ -34,12 +35,13 @@ new-item threshold into the fast path.
   transitions to `out` (same terminal state as today).
 
 **Non-goals**
+
 - No replacement for the reconciler. Reconciler still runs at session close
   and provides the authoritative resolution log; in-flight is the fast path.
-- No attempt to track *which physical container* was picked up when a single
+- No attempt to track _which physical container_ was picked up when a single
   product has multiple lots (e.g., two Philly tubs). The classifier picks a
   specific lot_id, and that's the one flagged in-flight.
-- No support for items that were in-flight *before* the feature shipped.
+- No support for items that were in-flight _before_ the feature shipped.
   Migration is forward-only; legacy `out` lots stay `out`.
 
 ## 3. Data model changes
@@ -62,7 +64,8 @@ ALTER TABLE lots ADD COLUMN pickup_session_id    TEXT REFERENCES sessions(sessio
 ```
 
 Invariants (enforced by code, not DB):
-- `status='in_flight'`  ⇒  all four new columns non-NULL.
+
+- `status='in_flight'` ⇒ all four new columns non-NULL.
 - `status` in `('on_shelf','out','depleted',…)` ⇒ all four new columns NULL.
 - `in_flight_since` monotonically ≥ `last_seen_at`.
 
@@ -71,15 +74,15 @@ Invariants (enforced by code, not DB):
 Additive to the existing `pattern` check constraint. None of the existing
 patterns change semantics.
 
-| Pattern                        | When written                                    | `consumed_g` |
-| ------------------------------ | ----------------------------------------------- | ------------ |
-| `in_flight_pickup`             | REMOVE applied with status → `in_flight`        | NULL         |
-| `in_flight_return`             | ADD applied against an in-flight lot, ≤ pickup  | pickup − add |
-| `in_flight_replaced_new_item`  | ADD against in-flight slot, heavier than pickup | NULL *       |
-| `in_flight_ttl_expired`        | TTL reaper flipped in-flight → out              | NULL         |
+| Pattern                       | When written                                    | `consumed_g` |
+| ----------------------------- | ----------------------------------------------- | ------------ |
+| `in_flight_pickup`            | REMOVE applied with status → `in_flight`        | NULL         |
+| `in_flight_return`            | ADD applied against an in-flight lot, ≤ pickup  | pickup − add |
+| `in_flight_replaced_new_item` | ADD against in-flight slot, heavier than pickup | NULL \*      |
+| `in_flight_ttl_expired`       | TTL reaper flipped in-flight → out              | NULL         |
 
 \* The closed in-flight lot gets `in_flight_replaced_new_item` (no
-consumption accounting — we can't tell what happened to it). The *new* lot
+consumption accounting — we can't tell what happened to it). The _new_ lot
 that's minted gets the usual `new_arrival` pattern.
 
 ### 3.3 `event_lifecycle` — new reason codes
@@ -88,8 +91,8 @@ Append to `server/storage/lifecycle.py` `ReasonCode`:
 
 - `LOT_MARKED_IN_FLIGHT`
 - `LOT_RETURNED_FROM_FLIGHT`
-- `LOT_REPLACED_IN_FLIGHT`   (new item closed the in-flight slot)
-- `LOT_EXPIRED_IN_FLIGHT`    (TTL reaper)
+- `LOT_REPLACED_IN_FLIGHT` (new item closed the in-flight slot)
+- `LOT_EXPIRED_IN_FLIGHT` (TTL reaper)
 
 Payloads carry `lot_id`, `pickup_weight_g`, `return_delta_g` (where
 applicable), `consumption_g`, `ttl_seconds`.
@@ -107,7 +110,7 @@ applicable), `consumption_g`, `ttl_seconds`.
    - `pickup_weight_g = <lot.current_weight_g before REMOVE>`
    - `pickup_event_id = event_id`
    - `pickup_session_id = session_id`
-   - `last_seen_at = event_ts`    (preserved)
+   - `last_seen_at = event_ts` (preserved)
 5. Session resolution row: `in_flight_pickup`, `consumed_g=NULL`.
 6. Lifecycle: `LOT_MARKED_IN_FLIGHT`.
 
@@ -119,7 +122,7 @@ applicable), `consumption_g`, `ttl_seconds`.
    the yogurt.
 4. Apply path detects `status='in_flight'` on the picked lot AND the ADD
    delta is ≤ `pickup_weight_g × NEW_ITEM_WEIGHT_RATIO` (default 1.15).
-   → *return* branch:
+   → _return_ branch:
    - `consumption_g = max(0, pickup_weight_g − delta_g) = 20g`
    - If `|consumption_g| < CONSUMPTION_NOISE_FLOOR_G` (default 2g), clamp to 0.
    - `status = 'on_shelf'`
@@ -137,8 +140,8 @@ applicable), `consumption_g`, `ttl_seconds`.
 2. ADD delta=+450. Classifier may pick the yogurt lot (recently in-flight,
    similar position) or may pick a catalog candidate. Apply path sees:
    - Picked candidate is an in-flight lot, AND
-   - `delta_g > pickup_weight_g × NEW_ITEM_WEIGHT_RATIO`  (450 > 200·1.15=230)
-   → *replacement* branch:
+   - `delta_g > pickup_weight_g × NEW_ITEM_WEIGHT_RATIO` (450 > 200·1.15=230)
+     → _replacement_ branch:
    - Close the in-flight lot as `status='out'`, `last_out_at=event_ts`,
      clear the in-flight columns.
    - Mint a NEW lot for the 450g item using the existing new-arrival path
@@ -154,10 +157,49 @@ applicable), `consumption_g`, `ttl_seconds`.
 A reaper thread (folds into the existing scale-events-sweeper 5s tick) scans
 `lots` where `status='in_flight'` and `datetime(in_flight_since) +
 IN_FLIGHT_TTL_SECONDS < now`. For each:
+
 - `status = 'out'`, `last_out_at = <in_flight_since + TTL>`, clear in-flight
   columns.
 - Session resolution: `in_flight_ttl_expired`, scoped to the pickup session.
 - Lifecycle: `LOT_EXPIRED_IN_FLIGHT`.
+
+**Cloud semantics (2026-04-27 fix).** The Pi emits two cloud events: a
+`consumed` with `delta_g = -pickup_weight_g` and a companion
+`in_flight_return` marker-clear. The cloud's `apply_shelf_event` consumed
+branch now detects that `p_pi_event_id` matches the lot's
+`pickup_event_id` and treats the event as a **whole-lot removal**: sets
+`qty_containers=0`, clears `in_flight_since` + `pickup_event_id`,
+regardless of the fractional weight the Pi reported. This is tolerant of
+weight-reading drift — if the scale's pickup reading was 150g for a
+500g bottle (30% drift), the cloud still removes the whole lot instead
+of leaving a phantom 0.7 qty behind. See migration
+`20260427010000_in_flight_pickup_resolve_whole_lot.sql`.
+
+### 4.4a Edge: in-flight TTL expiry then item placed back
+
+After §4.4 runs, the Pi lot is `status='out'` and cloud lot has `qty=0`.
+If the user later places the (same) container back on the shelf:
+
+- **Pi**: classifier matches the `recently_out` candidate → `lot_id`.
+  `handlers/scale_events.py` ADD branch detects `lot.status == 'out'`
+  and runs the _out → on_shelf revive_ path (2026-04-27 fix):
+  - `update_lot(status='on_shelf', ...)` as before.
+  - Writes a `new_arrival` `session_resolutions` row inline (not
+    waiting for session-close reconciler) so the reconciler's
+    `claimed_event_ids` skip-set covers this event.
+  - Emits a cloud `added` event via `emit_reconciler_resolution`.
+
+- **Cloud**: `resolve_add_to_shelf_lot` walks:
+  1. No in-flight match (pickup was cleared at TTL reap).
+  2. No qty > 0 live_shelf lot.
+  3. No weight-matching pantry lot.
+  4. **Step-4 empty-lot reuse** (from migration
+     `20260425070000_resolve_add_reuse_empty_lot.sql`): finds the
+     qty=0 lot, bumps qty 0 → N, stamps last_update_source. No mint.
+  - `shelf_event_log.reason = 'revived_empty_lot'`.
+
+Net effect: the pre-TTL lot is revived in place — no orphan qty, no
+second row.
 
 ### 4.5 Edge: multiple in-flight lots, partial return
 
@@ -170,6 +212,7 @@ single lot at a time.
 
 User lifts A at 200g, closes door. Five minutes later, opens door, puts A
 back at 180g. This is two sessions:
+
 - Session 1 contains the REMOVE → `in_flight_pickup` row.
 - Session 2 contains the ADD → `in_flight_return` row. Note the returning
   session_id differs from `pickup_session_id`; both rows are written,
@@ -193,6 +236,7 @@ row with `consumed_g=0.0`, no lot weight change.
 
 E.g. pickup 200g, return 220g. Ratio = 1.1, under the 1.15 threshold.
 Interpretation: user topped up. Two sub-options:
+
 - **A (recommended)**: treat as `in_flight_return` with `consumed_g = -20g`
   (negative consumption = addition). `total_consumed_g` stays clamped at ≥ 0.
 - **B**: promote to `topped_up` pattern (already in the schema) and leave the
@@ -230,7 +274,7 @@ there because they aren't on the shelf — correct behaviour.
 `adapters/candidate_source.py` adds `get_in_flight_lots(session_id=None,
 max_age_seconds=None)` that returns `LotCandidate`s with
 `expected_weight_g = pickup_weight_g` (so the classifier sees the weight the
-user *took*, which is what it should match the ADD delta against). Optional
+user _took_, which is what it should match the ADD delta against). Optional
 filters let the reconciler or UI query a subset.
 
 ## 6. Apply-path changes (`handlers/scale_events.py`)
@@ -247,8 +291,8 @@ Three small diffs, contained within the existing `_apply_lot_update_from_classif
    - `≤ NEW_ITEM_WEIGHT_RATIO` (default 1.15): return branch (§4.2).
    - `>  NEW_ITEM_WEIGHT_RATIO`: replacement branch (§4.3).
 
-3. **Short-circuit the reconciler's use_return path for events with an
-   `in_flight_*` resolution already written.** The reconciler's pass 3
+3. **Short-circuit the reconciler's use*return path for events with an
+   `in_flight*\*` resolution already written.** The reconciler's pass 3
    (leftover ADDs → use_return_consumed or new_arrival) needs to skip any
    ADD event already stamped with an `in_flight_return` or
    `in_flight_replaced_new_item` row. This prevents duplicate resolutions.
@@ -294,11 +338,11 @@ the §4.4 treatment.
 
 Three new config values, all with sensible defaults:
 
-| Name                               | Default | Purpose                                       |
-| ---------------------------------- | ------- | --------------------------------------------- |
-| `IN_FLIGHT_TTL_SECONDS`            | 14400   | 4 h. After this, in-flight → out.             |
-| `NEW_ITEM_WEIGHT_RATIO`            | 1.15    | delta > pickup·this → replacement branch.     |
-| `CONSUMPTION_NOISE_FLOOR_G`        | 2.0     | |consumption| below this clamps to 0.        |
+| Name                        | Default | Purpose                                   |
+| --------------------------- | ------- | ----------------------------------------- | ----------- | ----------------------- |
+| `IN_FLIGHT_TTL_SECONDS`     | 14400   | 4 h. After this, in-flight → out.         |
+| `NEW_ITEM_WEIGHT_RATIO`     | 1.15    | delta > pickup·this → replacement branch. |
+| `CONSUMPTION_NOISE_FLOOR_G` | 2.0     |                                           | consumption | below this clamps to 0. |
 
 All three are runtime-tunable through the existing `/api/config` route
 (already supports whitelist-based PATCH in `config.py`). Add them to the
@@ -328,6 +372,7 @@ Each in-flight row shows `pickup_weight_g`, `in_flight_since` rendered as
 ### 10.2 Event detail
 
 Each event rendered with a "Paired with" line linking to its partner:
+
 - REMOVE that marked in_flight → links to the return ADD event (or "TTL
   expired" if reaped).
 - ADD that returned from in_flight → links to the pickup REMOVE event,
@@ -396,6 +441,7 @@ No migration is needed for existing `out` lots. Legacy rows stay `out`.
 ### 12.6 Integration test
 
 `server/tests/test_in_flight_end_to_end.py` — one test per flow:
+
 - Same-session pickup → return → consumption recorded.
 - Cross-session pickup → return → consumption recorded.
 - Pickup → heavier return → new lot minted, old lot closed.
@@ -423,6 +469,7 @@ Each new state transition emits exactly one `event_lifecycle` row. Dashboards
 SYSTEM_HEALTH columns needed; in-flight counts can be derived from `lots`.
 
 Log lines (at INFO):
+
 - `lot <lot_id[:8]> → in_flight (session=<sid[:8]>, pickup=<weight>g)`
 - `lot <lot_id[:8]> returned (consumption=<g>, session=<sid[:8]>)`
 - `lot <lot_id[:8]> replaced by new item (return_delta=<g>, ratio=<f>)`
@@ -438,8 +485,8 @@ Implement in this order so each step is independently testable and deployable:
    tests. No behaviour change yet.
 2. **Config** — three new knobs + `/api/config` whitelist entries + tests.
 3. **Candidate pool** — `get_in_flight_lots()` + new branch in the ADD pool
-   + classifier-side unit tests. Still no behaviour change for real events
-   because the apply path doesn't yet emit `in_flight` status.
+   - classifier-side unit tests. Still no behaviour change for real events
+     because the apply path doesn't yet emit `in_flight` status.
 4. **Apply path — REMOVE side only** — mark lots `in_flight` instead of
    `out`. This alone is a visible behaviour change — deploy behind a
    feature flag env `IN_FLIGHT_ENABLED=1` so we can diff a day of data
@@ -481,4 +528,4 @@ Each step is committable on its own and each ships with its own tests.
 
 ---
 
-*End of plan.*
+_End of plan._
