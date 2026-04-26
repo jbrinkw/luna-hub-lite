@@ -5,3 +5,7 @@ legacy/
 pnpm-lock.yaml
 packages/db-types/src/
 supabase/.temp/
+# Jinja templates use {% ... %} / {{ ... }} which prettier's HTML
+# parser misreads as malformed tags (e.g. {% endif %} between two
+# <td>s makes it think the first <td> wasn't closed).
+hardware/live-shelf/server/web/templates/

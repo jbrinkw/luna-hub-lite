@@ -44,6 +44,11 @@ const VALID_EVENT_KINDS = [
   // See migration 20260425080000_shelf_event_in_flight_pickup.sql.
   'in_flight_pickup',
   'in_flight_return',
+  // Manual discard from Pi /inventory remove button. Zeros qty + clears
+  // in_flight_since/pickup_event_id WITHOUT writing food_logs (no macro
+  // tracking by design — spilled / fed-to-pet / given-away). See
+  // migration 20260427020000_shelf_event_discarded.sql.
+  'discarded',
 ] as const;
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {

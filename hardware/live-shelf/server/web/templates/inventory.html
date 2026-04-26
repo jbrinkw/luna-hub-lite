@@ -721,14 +721,21 @@
     }
   })();
 
-  // Per-row on-shelf lot delete.
+  // Per-row on-shelf lot delete. Propagates to cloud as a manual
+  // ``discarded`` event (zeros qty + clears in-flight marker, NO
+  // macro/food-log entry) — see migration
+  // 20260427020000_shelf_event_discarded.sql + decisions.md #44.
   document.querySelectorAll('button.del-lot').forEach(function (btn) {
     btn.addEventListener('click', async function () {
       const lid = btn.getAttribute('data-lot-id');
       const label = btn.getAttribute('data-lot-label') || lid;
       if (!lid) return;
       if (!confirm('remove this lot from the shelf?\n\n' + label +
-                   '\n\nthe product stays in the catalog. cannot be undone.')) {
+                   "\n\nThe product stays in the catalog. This is a manual " +
+                   "discard (spilled / expired / fed-to-pet / given-away) " +
+                   "— it WILL NOT track macros or write a food-log entry. " +
+                   "Cloud inventory will be zeroed for this lot.\n\n" +
+                   "Cannot be undone.")) {
         return;
       }
       btn.disabled = true;

@@ -214,6 +214,14 @@ PATTERN_TO_EVENT_KIND: dict[str, Optional[str]] = {
     # because ``refilled`` already routes through
     # private.resolve_add_to_shelf_lot which clears in_flight_since.
     "in_flight_return_clear": "in_flight_return",
+    # Manual-discard from /inventory remove button (2026-04-27).
+    # Synthetic emit-only pattern (never written to session_resolutions
+    # — produced exclusively by the Pi-side _delete_lot route). Maps to
+    # cloud event_kind='discarded' which the cloud's apply_shelf_event
+    # zeros qty + clears in_flight_since/pickup_event_id WITHOUT writing
+    # food_logs. See migration 20260427020000_shelf_event_discarded.sql
+    # and decisions.md #44 for the rationale (vs. consumed+skip_macros).
+    "manual_discard": "discarded",
 }
 
 
@@ -576,6 +584,53 @@ class CloudEventEmitter:
             "event_kind": "consumed",
             "product_id": product_id,
             "delta_g": -abs(float(consumed_g)),
+            "occurred_at": occurred_at or _iso_utc_ms(),
+        }
+        if pi_event_id:
+            payload["pi_event_id"] = pi_event_id
+        return self._enqueue(payload)
+
+    def emit_manual_discard(
+        self,
+        *,
+        scale_id: str,
+        product_id: str,
+        kind: str = "live_shelf",
+        occurred_at: Optional[str] = None,
+        pi_event_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Emit a cloud ``discarded`` event from the Pi /inventory remove button.
+
+        Manual discard semantics: the user explicitly removed the lot
+        from inventory WITHOUT recording it as consumed (spilled,
+        expired-and-thrown-out, fed-to-pet, given-away). The cloud
+        handler (migration 20260427020000_shelf_event_discarded.sql)
+        zeros qty_containers, clears in_flight_since +
+        pickup_event_id, sets last_update_source='manual_discard', and
+        DOES NOT write a food_logs row.
+
+        Idempotent on already-zeroed-and-cleared lots — the cloud
+        returns applied=true with reason='discarded (idempotent
+        no-op)'. Safe to call as a recovery affordance for stuck
+        in-flight lots.
+
+        Producer is the Pi web /api/lot/<lot_id>/delete handler; the
+        local DELETE on the Pi happens before this emit so the local
+        state is the leading edge. Cloud-side dedup via
+        shelf_event_log UNIQUE(user_id, client_event_id) makes a
+        worker retry safe.
+        """
+        if not product_id:
+            return None
+        payload: dict[str, Any] = {
+            "scale_id": scale_id,
+            "kind": kind,
+            "event_kind": "discarded",
+            "product_id": product_id,
+            # delta_g is informational for ``discarded`` (handler zeroes
+            # the lot regardless). Send 0.0 to satisfy the edge fn
+            # validator without claiming a specific mass.
+            "delta_g": 0.0,
             "occurred_at": occurred_at or _iso_utc_ms(),
         }
         if pi_event_id:

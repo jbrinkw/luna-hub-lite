@@ -33,12 +33,14 @@
 ## 2. What moves, what stays
 
 ### Stays on Pi (unchanged)
+
 - CV classifier, reconciler, in-flight tracker, session lifecycle
 - Reference photos, session frames, videos (never uploaded)
-- Review queue (still Pi-local; cloud only sees the *count*)
+- Review queue (still Pi-local; cloud only sees the _count_)
 - Barcode intake flow: scanner physically on Pi, captures ref photos to local disk
 
 ### New on Pi
+
 - `server/cloud/client.py` — HTTPS client with `x-api-key` auth; fails fast — retries handled by `worker.py`
 - `server/cloud/catalog.py` — `fetch_catalog()` called per event
 - `server/cloud/outbox.py` — SQLite queue for events when cloud is unreachable
@@ -48,6 +50,7 @@
 - Product intake writes to cloud (`POST /intake`) instead of local `products` table
 
 ### Cloud new
+
 - Six migrations (see §4 below): tables + columns + plpgsql function + wrapper + idempotency log + hardening
 - One edge function: `shelf-ingest/` with 4 endpoints
 - `chefbyte.shelf_event_log` table for wire-level idempotency keyed on `(user_id, client_event_id)`
@@ -58,12 +61,12 @@
 
 All endpoints on one edge function `shelf-ingest/`, auth via `x-api-key` → SHA-256 → lookup in `chefbyte.live_shelf_devices`. `verify_jwt = false`.
 
-| Verb | Path | Purpose |
-|---|---|---|
-| `GET`  | `/catalog` | Returns `{products, stock, pairings, locations}` in one payload (non-depleted stock only) |
-| `POST` | `/event` | Apply a scale event to stock + macros (atomic via plpgsql); 1 event per call; `client_event_id` REQUIRED — absent → 400 |
-| `POST` | `/intake` | Create/upsert a row in `chefbyte.products` (called during Pi barcode intake) |
-| `POST` | `/heartbeat` | Update device `last_heartbeat_ts`, `lan_ip`, `pending_review_count`, and per-scale `scale_pairings` rows |
+| Verb   | Path         | Purpose                                                                                                                 |
+| ------ | ------------ | ----------------------------------------------------------------------------------------------------------------------- |
+| `GET`  | `/catalog`   | Returns `{products, stock, pairings, locations}` in one payload (non-depleted stock only)                               |
+| `POST` | `/event`     | Apply a scale event to stock + macros (atomic via plpgsql); 1 event per call; `client_event_id` REQUIRED — absent → 400 |
+| `POST` | `/intake`    | Create/upsert a row in `chefbyte.products` (called during Pi barcode intake)                                            |
+| `POST` | `/heartbeat` | Update device `last_heartbeat_ts`, `lan_ip`, `pending_review_count`, and per-scale `scale_pairings` rows                |
 
 `analyze-product` is not re-implemented — Pi calls it directly (it already exists and already accepts authenticated calls).
 
@@ -77,12 +80,12 @@ The claim/replay is owned by `private.apply_shelf_event` itself (its first state
 
 Shipped as five migrations (applied in order). Each one isolates a concern so the deployment window can stop mid-way without leaving the schema in a broken state.
 
-| File | Purpose |
-|---|---|
-| `20260419010000_live_shelf.sql` | Initial tables (`live_shelf_devices`, `scale_pairings`), weight/container columns on `products`, `last_update_source`/`_ts` on `stock_lots`, first version of `private.apply_shelf_event` (7 args) |
-| `20260419020000_live_shelf_lan_ip.sql` | `lan_ip` column on `live_shelf_devices` (for "Review (N)" deep-link to the Pi) |
-| `20260419030000_shelf_ingest_wrapper.sql` | `chefbyte.apply_shelf_event_admin` pass-through — required because PostgREST does not expose functions from the `private` schema |
-| `20260419040000_shelf_ingest_fixes.sql` | Adds `chefbyte.shelf_event_log` (idempotency), fixes `hub.profile` → `hub.profiles` typo, hardens `apply_shelf_event` `added` branch to skip zero-qty lots and guard negative fallback inserts |
+| File                                        | Purpose                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| ------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `20260419010000_live_shelf.sql`             | Initial tables (`live_shelf_devices`, `scale_pairings`), weight/container columns on `products`, `last_update_source`/`_ts` on `stock_lots`, first version of `private.apply_shelf_event` (7 args)                                                                                                                                                                                                                             |
+| `20260419020000_live_shelf_lan_ip.sql`      | `lan_ip` column on `live_shelf_devices` (for "Review (N)" deep-link to the Pi)                                                                                                                                                                                                                                                                                                                                                 |
+| `20260419030000_shelf_ingest_wrapper.sql`   | `chefbyte.apply_shelf_event_admin` pass-through — required because PostgREST does not expose functions from the `private` schema                                                                                                                                                                                                                                                                                               |
+| `20260419040000_shelf_ingest_fixes.sql`     | Adds `chefbyte.shelf_event_log` (idempotency), fixes `hub.profile` → `hub.profiles` typo, hardens `apply_shelf_event` `added` branch to skip zero-qty lots and guard negative fallback inserts                                                                                                                                                                                                                                 |
 | `20260419050000_shelf_ingest_hardening.sql` | Adds six intake columns to `products` (`brand`, `variant`, `serving_weight_g`, `unit_type`, `density_g_per_ml`, `certified`); moves idempotency claim inside `apply_shelf_event` (race-free); `depleted` forces qty to zero; NULL-safe macros; `p_kind` / `client_event_id` validation; `lan_ip` shape CHECK; `client_event_id` length CHECK (≤128); extra `service_role` grants; `deactivate_app` cascade for live_shelf rows |
 
 Summarized schema after all five migrations:
@@ -179,30 +182,52 @@ RLS on all new tables: `(select auth.uid()) = user_id TO authenticated`. `shelf_
 
 ## 5. Phases
 
-| # | Phase | Deliverable | Days |
-|---|-------|-------------|------|
-| **0** | **Cloud foundation** | Migration + 4-endpoint edge function skeleton with auth working end-to-end via curl | **1** |
-| **1** | **Pi cloud client** | `server/cloud/*.py` modules; standalone `fetch_catalog()` and `post_event()` demoable from Python REPL | **0.5** |
-| **2** | **Outbox + worker** | SQLite outbox table + migration; worker thread drains in the background + handles backoff; heartbeat includes review count | **1** |
-| **3** | **Classifier candidate-pool swap** | Candidate-pool builder calls `fetch_catalog()` at event time; fallback to last known catalog on network error; cold start blocks first-N seconds until catalog fetched | **1** |
-| **4** | **Reconciler → outbox hook** | Every reconciler decision + single-item event + in-flight reap enqueues a cloud event row | **0.5** |
-| **5** | **Intake rewrite** | Barcode scanner → cloud `POST /intake` → local ref photo capture → product_id stored locally as cache only | **1** |
-| **6** | **ChefByte UI: Scales tab** | Register device (gen import key), list scales with pairing picker for single-item | **1** |
-| **7** | **ChefByte UI: inventory touch-ups** | Source-tag pill on rows, always-visible "Review (N)" button linking to Pi LAN URL | **0.5** |
-| **8** | **E2E + runbook** | DONE — `scripts/e2e_shelf_ingest_prod.py` drives real Pi → real cloud against a seeded account; `apps/web/e2e/chefbyte/live-shelf.spec.ts` covers the UI side | **0.5** |
+| #     | Phase                                | Deliverable                                                                                                                                                            | Days    |
+| ----- | ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------- |
+| **0** | **Cloud foundation**                 | Migration + 4-endpoint edge function skeleton with auth working end-to-end via curl                                                                                    | **1**   |
+| **1** | **Pi cloud client**                  | `server/cloud/*.py` modules; standalone `fetch_catalog()` and `post_event()` demoable from Python REPL                                                                 | **0.5** |
+| **2** | **Outbox + worker**                  | SQLite outbox table + migration; worker thread drains in the background + handles backoff; heartbeat includes review count                                             | **1**   |
+| **3** | **Classifier candidate-pool swap**   | Candidate-pool builder calls `fetch_catalog()` at event time; fallback to last known catalog on network error; cold start blocks first-N seconds until catalog fetched | **1**   |
+| **4** | **Reconciler → outbox hook**         | Every reconciler decision + single-item event + in-flight reap enqueues a cloud event row                                                                              | **0.5** |
+| **5** | **Intake rewrite**                   | Barcode scanner → cloud `POST /intake` → local ref photo capture → product_id stored locally as cache only                                                             | **1**   |
+| **6** | **ChefByte UI: Scales tab**          | Register device (gen import key), list scales with pairing picker for single-item                                                                                      | **1**   |
+| **7** | **ChefByte UI: inventory touch-ups** | Source-tag pill on rows, always-visible "Review (N)" button linking to Pi LAN URL                                                                                      | **0.5** |
+| **8** | **E2E + runbook**                    | DONE — `scripts/e2e_shelf_ingest_prod.py` drives real Pi → real cloud against a seeded account; `apps/web/e2e/chefbyte/live-shelf.spec.ts` covers the UI side          | **0.5** |
 
 **Total: ~7 working days.**
 
 ## 6. Risks + mitigations
 
-| Risk | Severity | Mitigation |
-|---|---|---|
-| Per-event network round-trip delays classification | **Low** | User already accepted this. Typical round-trip <200 ms; classifier call is seconds anyway |
-| Cloud outage leaves classifier unable to identify | **Medium** | Keep last-successful `/catalog` response in memory as fallback; classifier runs against stale data with a warning flag on the event |
-| Outbox drains slow enough to fill the disk | **Low** | Cap outbox at 10 k rows, drop oldest; at typical event rates this is weeks of offline capacity |
-| Single-item scale sends event before the user pairs it | **Medium** | Pi returns 200 to the ESP but drops the event locally + surfaces "unpaired" on Pi's local UI + heartbeat bumps review count |
-| Barcode intake stalls during ref-photo capture if Wi-Fi drops mid-flow | **Low** | Product row is already created in cloud before ref-photo step; ref photos are local only, so Wi-Fi drop after cloud write is fine — Pi completes locally |
-| ID swap (Pi's old local UUIDs vs cloud UUIDs) | **Low** | Line-in-the-sand at migration day: wipe Pi's local `products`/`lots` on first boot with `CLOUD_ENABLED=1`, start fresh |
+| Risk                                                                   | Severity   | Mitigation                                                                                                                                               |
+| ---------------------------------------------------------------------- | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Per-event network round-trip delays classification                     | **Low**    | User already accepted this. Typical round-trip <200 ms; classifier call is seconds anyway                                                                |
+| Cloud outage leaves classifier unable to identify                      | **Medium** | Keep last-successful `/catalog` response in memory as fallback; classifier runs against stale data with a warning flag on the event                      |
+| Outbox drains slow enough to fill the disk                             | **Low**    | Cap outbox at 10 k rows, drop oldest; at typical event rates this is weeks of offline capacity                                                           |
+| Single-item scale sends event before the user pairs it                 | **Medium** | Pi returns 200 to the ESP but drops the event locally + surfaces "unpaired" on Pi's local UI + heartbeat bumps review count                              |
+| Barcode intake stalls during ref-photo capture if Wi-Fi drops mid-flow | **Low**    | Product row is already created in cloud before ref-photo step; ref photos are local only, so Wi-Fi drop after cloud write is fine — Pi completes locally |
+| ID swap (Pi's old local UUIDs vs cloud UUIDs)                          | **Low**    | Line-in-the-sand at migration day: wipe Pi's local `products`/`lots` on first boot with `CLOUD_ENABLED=1`, start fresh                                   |
+
+## 6.1 Cloud event kinds
+
+`shelf-ingest` POST /event accepts the following `event_kind` values
+(see `supabase/functions/shelf-ingest/index.ts::VALID_EVENT_KINDS`).
+Any new kind must be added BOTH to that constant AND to a branch in
+`private.apply_shelf_event` — the Pi-side `TestEmitHandleMatrixSync`
+meta-guard fails the build if the two drift.
+
+| `event_kind`       | Mutates qty?              | Writes `food_logs`?                    | Clears in_flight marker?                                                 | Pi producer                                                                                         | Cloud handler migration |
+| ------------------ | ------------------------- | -------------------------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- | ----------------------- |
+| `consumed`         | yes (decrement)           | yes (servings → macros)                | only when pickup_event_id matches a stuck-in-flight lot (20260427010000) | reconciler `consumed_or_removed` / `use_return_consumed` / single-item negative deltas / TTL reaper | 20260419010000          |
+| `depleted`         | yes (zero)                | yes                                    | only via pickup-resolve detection                                        | single-item zero-floor reads                                                                        | 20260419010000          |
+| `added`            | yes (increment / new lot) | no                                     | yes (clear-on-add via `resolve_add_to_shelf_lot`)                        | reconciler `new_arrival` + intake first-placement                                                   | 20260419010000          |
+| `refilled`         | yes (increment)           | no                                     | yes (same as `added`)                                                    | reconciler `topped_up`                                                                              | 20260419010000          |
+| `in_flight_pickup` | no                        | no                                     | sets `in_flight_since` + `pickup_event_id`                               | scale_events fast-path REMOVE branch                                                                | 20260425080000          |
+| `in_flight_return` | no                        | no                                     | clears `in_flight_since` + `pickup_event_id`                             | scale_events fast-path return + TTL reaper companion emit                                           | 20260425080000          |
+| `discarded`        | yes (zero)                | **no** (manual discard — not consumed) | yes                                                                      | Pi web UI `POST /api/lot/<lot_id>/delete` (× button on `/inventory`)                                | 20260427020000          |
+
+The `discarded` kind exists specifically so the Pi `/inventory` remove
+button can propagate to cloud WITHOUT polluting macros. Decision
+rationale: see `decisions.md` #44.
 
 ## 7. What v1 explicitly does NOT do
 
@@ -216,6 +241,7 @@ RLS on all new tables: `(select auth.uid()) = user_id TO authenticated`. `shelf_
 ## 8. Confidence: ~90%
 
 Lower risk than prior versions because we dropped:
+
 - Supabase Storage bucket RLS (the one genuinely new pattern)
 - Sync loop + cache coherence complexity
 - Unmatched events tray + cloud-side triage UI

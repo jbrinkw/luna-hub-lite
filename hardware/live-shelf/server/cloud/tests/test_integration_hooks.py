@@ -1083,6 +1083,7 @@ class TestEmitHandleMatrixSync:
         "depleted",
         "in_flight_pickup",
         "in_flight_return",
+        "discarded",
     })
 
     # Event kinds emitted by dedicated helper methods that bypass
@@ -1096,6 +1097,8 @@ class TestEmitHandleMatrixSync:
         # emit_in_flight_reap → always consumed (already covered)
         # emit_in_flight_return_marker → in_flight_return
         "in_flight_return",
+        # emit_manual_discard → always discarded
+        "discarded",
     })
 
     def test_every_pattern_map_value_is_a_valid_cloud_event_kind(self):
