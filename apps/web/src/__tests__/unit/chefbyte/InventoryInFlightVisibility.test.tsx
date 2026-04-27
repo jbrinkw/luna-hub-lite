@@ -270,7 +270,11 @@ describe('InventoryPage — in-flight lot visibility (bug 2026-04-22)', () => {
     // (Certified / On Scale / In Flight). Regex matches both spellings
     // for forward-compat with any future re-namings.
     expect(badge).toHaveTextContent(/in[- ]flight/i);
-    expect(badge).toHaveAttribute('aria-label', 'In Flight');
+    // 2026-04-27 close-out modal landed: the badge is now an interactive
+    // affordance (role=button), so its aria-label includes "click to close
+    // out" for screen-reader discoverability. Regex keeps the assertion
+    // resilient to future copy tweaks while still pinning the core label.
+    expect(badge.getAttribute('aria-label') ?? '').toMatch(/In Flight/i);
 
     // Stock cell shows "(picked up)" NOT "0.0 ctn". This is the user-
     // facing "why did the qty go to zero" affordance.

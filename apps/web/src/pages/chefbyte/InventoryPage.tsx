@@ -6,6 +6,7 @@ import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
+import { CloseInFlightModal, type CloseInFlightResolution } from '@/components/chefbyte/CloseInFlightModal';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte } from '@/shared/supabase';
@@ -293,6 +294,19 @@ export function InventoryPage() {
 
   /* ---- Mutation error state ---- */
   const [error, setError] = useState<string | null>(null);
+
+  /* ---- Close-in-flight modal state ----
+     The In-Flight badge is a button that opens this modal scoped to a
+     specific lot. The modal calls back with one of three resolutions
+     ('discarded' | 'consumed' | 'returned') which we forward to the
+     ``chefbyte.close_in_flight_lot`` RPC. Carries the product name +
+     pickup timestamp purely for display — the lot_id is the source of
+     truth on the server. */
+  const [closeModalLot, setCloseModalLot] = useState<{
+    lotId: string;
+    productName: string;
+    pickupTs: string | null;
+  } | null>(null);
 
   /* ---------------------------------------------------------------- */
   /*  Data loading via TanStack Query                                  */
@@ -745,6 +759,90 @@ export function InventoryPage() {
   });
 
   /**
+   * Manual close-out for an in-flight lot. Calls the
+   * ``chefbyte.close_in_flight_lot`` RPC introduced in migration
+   * 20260427110000_close_in_flight_lot_rpc.sql. The RPC enforces
+   * ownership + the in_flight_since IS NOT NULL precondition; we only
+   * surface the returned error here.
+   *
+   * Optimistic update: we eagerly clear ``in_flight_since`` on the
+   * matching lot in the TanStack Query cache so the badge disappears
+   * immediately. For 'discarded' / 'consumed' we also zero qty so the
+   * row drops out of the visible list (mirrors what the realtime
+   * invalidation will produce). 'returned' preserves qty on the server,
+   * so we only clear in_flight_since locally. Roll back the previous
+   * snapshot on error.
+   */
+  const closeInFlightMutation = useMutation({
+    mutationFn: async ({
+      lotId,
+      resolution,
+      note,
+    }: {
+      lotId: string;
+      resolution: CloseInFlightResolution;
+      note: string | null;
+    }) => {
+      const { error: err } = await (chefbyte() as any).rpc('close_in_flight_lot', {
+        p_lot_id: lotId,
+        p_resolution: resolution,
+        p_note: note,
+      });
+      if (err) throw err;
+    },
+    onMutate: async ({ lotId, resolution }) => {
+      const key = queryKeys.stockLots(user!.id);
+      await queryClient.cancelQueries({ queryKey: key });
+      const previous = queryClient.getQueryData<StockLot[]>(key);
+      queryClient.setQueriesData<StockLot[]>({ queryKey: key }, (old) => {
+        if (!old) return old;
+        return old.map((l) => {
+          if (l.lot_id !== lotId) return l;
+          // 'returned' keeps qty as-is; the other two zero it.
+          const nextQty = resolution === 'returned' ? l.qty_containers : 0;
+          return { ...l, in_flight_since: null, qty_containers: nextQty };
+        });
+      });
+      return { previous };
+    },
+    onError: (_err, _vars, ctx) => {
+      // Roll back to the prior snapshot so a server-side failure doesn't
+      // leave the user with a phantom "this lot is fine now" UI.
+      if (ctx?.previous) {
+        queryClient.setQueryData(queryKeys.stockLots(user!.id), ctx.previous);
+      }
+    },
+    onSettled: () => {
+      invalidateInventory();
+    },
+  });
+
+  const handleOpenCloseModal = (lotId: string, productName: string, pickupTs: string | null) => {
+    setCloseModalLot({ lotId, productName, pickupTs });
+  };
+
+  const handleResolveClose = async ({
+    resolution,
+    note,
+  }: {
+    resolution: CloseInFlightResolution;
+    note: string | null;
+  }): Promise<{ ok: true } | { ok: false; error: string }> => {
+    if (!closeModalLot) return { ok: false, error: 'no lot selected' };
+    try {
+      await closeInFlightMutation.mutateAsync({
+        lotId: closeModalLot.lotId,
+        resolution,
+        note,
+      });
+      setCloseModalLot(null);
+      return { ok: true };
+    } catch (err: any) {
+      return { ok: false, error: err?.message ?? String(err) };
+    }
+  };
+
+  /**
    * "Consumed anyway" — user ate the expired food. Logs macros like a
    * normal consume. Uses consume_product to respect per-product macro
    * math (servings_per_container → kcal, etc). FIFO across lots is
@@ -1113,21 +1211,57 @@ export function InventoryPage() {
                           {/* In Flight — per-product, lights when ANY lot is
                             currently in-flight. Independent of On Scale +
                             Certified; the bottle is physically off the
-                            shelf right now. */}
-                          {inFlightSince && (
-                            <span
-                              data-testid="inflight-badge"
-                              title={`In Flight — picked up at ${new Date(inFlightSince).toLocaleTimeString([], {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })}, not yet placed back`}
-                              className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
-                              aria-label="In Flight"
-                            >
-                              <Activity className="w-2.5 h-2.5" aria-hidden="true" />
-                              In Flight
-                            </span>
-                          )}
+                            shelf right now. Clickable: opens the close-out
+                            modal scoped to the EARLIEST in-flight lot of
+                            this product (matches the inFlightSince
+                            timestamp shown). The grouped view uses
+                            earliest-pickup-wins for the badge timestamp,
+                            so we resolve the same lot here for the modal. */}
+                          {inFlightSince &&
+                            (() => {
+                              const productLot = lots.find(
+                                (l) => l.product_id === product.product_id && l.in_flight_since === inFlightSince,
+                              );
+                              // Note: the wrapping row is a <button>, so this
+                              // affordance is rendered as a span with role
+                              // ``button`` to avoid nested-button DOM nesting
+                              // (invalid HTML — would cause hydration warnings
+                              // and inconsistent click handling). Pointer events
+                              // stop-propagation so clicking the badge does NOT
+                              // also toggle the row's expand/collapse.
+                              const openCloseOut = () => {
+                                if (productLot) {
+                                  handleOpenCloseModal(productLot.lot_id, product.name, productLot.in_flight_since);
+                                }
+                              };
+                              return (
+                                <span
+                                  role="button"
+                                  tabIndex={0}
+                                  data-testid="inflight-badge"
+                                  title={`In Flight — picked up at ${new Date(inFlightSince).toLocaleTimeString([], {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  })}. Click to close out.`}
+                                  className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer hover:bg-amber-200 transition-colors"
+                                  aria-label="In Flight — click to close out"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    openCloseOut();
+                                  }}
+                                  onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                      e.preventDefault();
+                                      e.stopPropagation();
+                                      openCloseOut();
+                                    }
+                                  }}
+                                >
+                                  <Activity className="w-2.5 h-2.5" aria-hidden="true" />
+                                  In Flight
+                                </span>
+                              );
+                            })()}
                         </div>
 
                         {/* Stock — "(picked up)" replaces the "0.0 ctn" numeric
@@ -1296,20 +1430,23 @@ export function InventoryPage() {
                           {sourceLabel[lot.last_update_source as NonNullable<GroupedProduct['latestSource']>]}
                         </span>
                       )}
-                      {/* ✋ In Flight — per-lot, off the shelf right now. */}
+                      {/* ✋ In Flight — per-lot, off the shelf right now.
+                        Clickable: opens close-out modal scoped to this lot. */}
                       {lot.in_flight_since && (
-                        <span
+                        <button
+                          type="button"
                           data-testid={`lot-inflight-badge-${lot.lot_id}`}
                           title={`In Flight — picked up at ${new Date(lot.in_flight_since).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit',
-                          })}, not yet placed back`}
-                          className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
-                          aria-label="In Flight"
+                          })}. Click to close out.`}
+                          className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer hover:bg-amber-200 transition-colors"
+                          aria-label="In Flight — click to close out"
+                          onClick={() => handleOpenCloseModal(lot.lot_id, lot.productName, lot.in_flight_since)}
                         >
                           <Activity className="w-2.5 h-2.5" aria-hidden="true" />
                           In Flight
-                        </span>
+                        </button>
                       )}
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-secondary">
@@ -1384,9 +1521,11 @@ export function InventoryPage() {
                                 {sourceLabel[lot.last_update_source as NonNullable<GroupedProduct['latestSource']>]}
                               </span>
                             )}
-                            {/* ✋ In Flight (per-lot) */}
+                            {/* ✋ In Flight (per-lot) — clickable, opens
+                              close-out modal scoped to this lot. */}
                             {lot.in_flight_since && (
-                              <span
+                              <button
+                                type="button"
                                 data-testid={`lot-inflight-badge-${lot.lot_id}`}
                                 title={`In Flight — picked up at ${new Date(lot.in_flight_since).toLocaleTimeString(
                                   [],
@@ -1394,13 +1533,14 @@ export function InventoryPage() {
                                     hour: '2-digit',
                                     minute: '2-digit',
                                   },
-                                )}, not yet placed back`}
-                                className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
-                                aria-label="In Flight"
+                                )}. Click to close out.`}
+                                className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200 cursor-pointer hover:bg-amber-200 transition-colors"
+                                aria-label="In Flight — click to close out"
+                                onClick={() => handleOpenCloseModal(lot.lot_id, lot.productName, lot.in_flight_since)}
                               >
                                 <Activity className="w-2.5 h-2.5" aria-hidden="true" />
                                 In Flight
-                              </span>
+                              </button>
                             )}
                           </span>
                         </td>
@@ -1489,6 +1629,24 @@ export function InventoryPage() {
         title="Consume All Stock"
         message="Are you sure you want to consume all remaining stock for this product?"
         confirmLabel="Consume All"
+      />
+
+      {/* ========================================================== */}
+      {/*  CLOSE IN-FLIGHT MODAL                                       */}
+      {/* ========================================================== */}
+      {/* `key` on lot_id forces a fresh component instance per lot — the
+        modal's internal note/busy/error state resets without needing a
+        useEffect-driven reset (which would trip the react-hooks
+        cascading-render warning). When closeModalLot is null we still
+        need a stable key, so we fall back to 'closed'. */}
+      <CloseInFlightModal
+        key={closeModalLot?.lotId ?? 'closed'}
+        isOpen={closeModalLot !== null}
+        lotId={closeModalLot?.lotId ?? null}
+        productName={closeModalLot?.productName ?? null}
+        pickupTs={closeModalLot?.pickupTs ?? null}
+        onClose={() => setCloseModalLot(null)}
+        onResolve={handleResolveClose}
       />
     </ChefLayout>
   );
