@@ -1504,7 +1504,7 @@ class ScaleHandler:
         # the per-status semantics.
         return lots[0]
 
-    def _mint_pi_lot_for_inventory_only_pick(
+    def _populate_pi_lot_mirror_from_cloud(
         self,
         *,
         product_id: str,
@@ -1553,14 +1553,14 @@ class ScaleHandler:
             ).fetchone()
         except Exception:  # pragma: no cover - defensive
             log.exception(
-                "_mint_pi_lot_for_inventory_only_pick: cloud_lots check "
+                "_populate_pi_lot_mirror_from_cloud: cloud_lots check "
                 "raised for product_id=%s",
                 product_id,
             )
             return None
         if row is None:
             log.warning(
-                "_mint_pi_lot_for_inventory_only_pick: refusing to mint "
+                "_populate_pi_lot_mirror_from_cloud: refusing to mint "
                 "Pi lot for product %s — no cloud_lots inventory "
                 "(decision #45: minting from a place event is forbidden)",
                 product_id,
@@ -1581,7 +1581,7 @@ class ScaleHandler:
             )
         except Exception:  # pragma: no cover - defensive
             log.exception(
-                "_mint_pi_lot_for_inventory_only_pick: create_lot raised "
+                "_populate_pi_lot_mirror_from_cloud: create_lot raised "
                 "for product_id=%s shelf=%s",
                 product_id, shelf_id,
             )
@@ -1755,6 +1755,131 @@ class ScaleHandler:
         }
         rewritten["meta"] = meta
         return rewritten
+
+    def _maybe_emit_empty_container_discard(
+        self,
+        *,
+        lot: Any,
+        delta_g: float,
+        event_ts: str,
+        event_id: Optional[str],
+        session_id: Optional[str],
+        confidence: float,
+    ) -> bool:
+        """Detect empty-container catch-all placements and emit ``discarded``.
+
+        2026-04-27 feature. Catch-all only. The user picks up a bottle
+        from the live shelf, drinks all of it (consumption is already
+        logged via the live_scale weight changes during the session),
+        then places the empty bottle on the catch-all scale to "log
+        out" the container from inventory. We detect this by comparing
+        the placed weight to the product's tare:
+
+            tolerance = 0.05 * (tare_weight_g + net_weight_g)
+            empty if abs(placed_weight_g - tare_weight_g) <= tolerance
+
+        i.e. a 5% window centered on the tare, sized by ONE full
+        container's full mass (tare + net). For a 600g full bottle
+        (25g tare + 575g net), the window is ±30g around 25g —
+        anything in [tare-30g, tare+30g] reads as "empty".
+
+        On hit:
+          * Local lot is deleted (matches manual_discard semantics).
+          * Cloud emit fires ``discarded`` for the lot's product_id +
+            scale-02 / catch_all kind. Cloud handler (migration
+            20260427020000_shelf_event_discarded.sql) zeros qty,
+            clears in_flight_since, and writes NO food_logs row.
+          * Returns ``True`` so the caller short-circuits the rest
+            of the apply path (no duplicate consumed/added/new_arrival
+            emit).
+
+        Defensive: when ``tare_weight_g`` or ``net_weight_g`` is missing
+        on the product row, return ``False`` and fall through to the
+        normal flow. The branch is unreachable by design for uncertified
+        / not-in-inventory products (they're not in the candidate pool),
+        but keep the guard so a stale snapshot can't crash the apply.
+        """
+        if delta_g is None:
+            return False
+        product_id = getattr(lot, "product_id", None)
+        if not product_id:
+            return False
+        try:
+            product = storage_repo.get_product(self._conn, product_id)
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "empty-container check: get_product threw for %s",
+                product_id,
+            )
+            return False
+        if product is None:
+            return False
+        tare = getattr(product, "tare_weight_g", None)
+        net = getattr(product, "net_weight_g", None)
+        if tare is None or net is None:
+            return False
+        try:
+            tare_f = float(tare)
+            net_f = float(net)
+        except (TypeError, ValueError):
+            return False
+        if tare_f <= 0.0 or net_f <= 0.0:
+            return False
+        placed_weight_g = abs(float(delta_g))
+        tolerance = 0.05 * (tare_f + net_f)
+        if abs(placed_weight_g - tare_f) > tolerance:
+            return False
+
+        # Empty-container hit. Mirror the manual_discard sequence:
+        # local DELETE first (so the Pi's view is the leading edge),
+        # then enqueue the cloud event. The cloud's discarded handler
+        # is idempotent on already-zeroed-and-cleared lots.
+        log.info(
+            "empty-container discard: lot %s product %s (tare=%.1fg "
+            "net=%.1fg, placed=%.1fg, tolerance=±%.1fg) — emitting "
+            "discarded for catch-all event %s",
+            lot.lot_id, product_id, tare_f, net_f,
+            placed_weight_g, tolerance, event_id,
+        )
+        try:
+            storage_repo.delete_lot(self._conn, lot.lot_id)
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "empty-container discard: local delete_lot failed for %s",
+                lot.lot_id,
+            )
+            # Don't return False — we'd then double-emit on retry.
+            # Fall through to the cloud emit anyway (best-effort).
+        # Lifecycle log so /event/<id> shows the empty-container path.
+        self._lc_event(
+            event_id,
+            actor="classifier",
+            reason_code=ReasonCode.APPLY_ACCEPTED,
+            payload={
+                "branch": "empty_container_discard",
+                "lot_id": lot.lot_id,
+                "product_id": product_id,
+                "tare_weight_g": tare_f,
+                "net_weight_g": net_f,
+                "placed_weight_g": placed_weight_g,
+                "tolerance_g": tolerance,
+            },
+        )
+        try:
+            self._cloud_emitter.emit_manual_discard(
+                scale_id=self._scale_id_for_shelf("catch_all"),
+                product_id=str(product_id),
+                kind="catch_all",
+                occurred_at=event_ts,
+                pi_event_id=event_id,
+            )
+        except Exception:  # pragma: no cover - defensive
+            log.warning(
+                "empty-container discard: cloud emit failed for lot %s "
+                "(product %s)",
+                lot.lot_id, product_id, exc_info=True,
+            )
+        return True
 
     def _apply_lot_update_from_classification(
         self,
@@ -1995,7 +2120,7 @@ class ScaleHandler:
                     # below promotes the existing cloud stock_lot via
                     # ``resolve_add_to_shelf_lot`` step 2/3 (NOT step 5
                     # which would mint a duplicate cloud lot).
-                    minted_lot = self._mint_pi_lot_for_inventory_only_pick(
+                    minted_lot = self._populate_pi_lot_mirror_from_cloud(
                         product_id=str(cid),
                         weight_g=lot_weight_g,
                         event_ts=event_ts,
@@ -2101,6 +2226,36 @@ class ScaleHandler:
                     cid, lot.lot_id, lot.product_id,
                 )
                 if direction == "add":
+                    # Empty-container detection (catch-all only, 2026-04-27).
+                    # When the user places a product on the catch-all
+                    # scale and its weight is within 5% of one container's
+                    # full mass (tare + net) of the product's tare alone,
+                    # treat it as the user logging an empty container out
+                    # of inventory. Emit a ``discarded`` event (zero qty,
+                    # clear in_flight, NO food_logs — consumption was
+                    # already logged earlier when the user actually drank
+                    # from the bottle, e.g. via live_scale weight changes).
+                    #
+                    # Only certified products in inventory can reach this
+                    # branch by design (the classifier's candidate pool
+                    # is inventory-scoped); we still defensively skip when
+                    # tare/net are missing on the product row.
+                    if (
+                        shelf_id == "catch_all"
+                        and self._maybe_emit_empty_container_discard(
+                            lot=lot,
+                            delta_g=delta_g,
+                            event_ts=event_ts,
+                            event_id=event_id,
+                            session_id=session_id,
+                            confidence=confidence,
+                        )
+                    ):
+                        # Empty-container fired — short-circuit the rest
+                        # of the apply logic for this matched id (no
+                        # duplicate ``consumed`` / ``added`` emit, no
+                        # in_flight return mutation, no new_arrival).
+                        continue
                     # In-flight return/replacement branch — when the
                     # classifier picked a lot that's currently in_flight,
                     # decide whether this is a return (consumption math)
