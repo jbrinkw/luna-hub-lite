@@ -77,8 +77,20 @@ class LotCandidate:
 class Candidate:
     """A single entry in the ranked candidate list sent to the classifier.
 
-    Mirrors the JSON shape specified in §4.5. `candidate_id` is either a
-    lot_id, a product_id, or :data:`UNKNOWN_CANDIDATE_ID`.
+    **2026-04-27 invariant:** ``candidate_id`` is the underlying
+    ``product_id`` for every non-sentinel entry. The classifier never
+    sees lot-level identifiers — lot resolution is purely deterministic
+    on the apply-path side (see ``_pick_best_lot_for_product`` in
+    ``handlers/scale_events.py``). The user's design intent is captured
+    in decisions.md #42: classifier picks a product, programmatic
+    matcher picks the lot.
+
+    The internal ``lot_id`` field below preserves the underlying lot
+    identity for the *single* most-likely lot a product was sourced
+    from — the apply path uses it as a fast-path hint but is allowed
+    to override it via ``_pick_best_lot_for_product`` when fresh
+    inventory state is more authoritative (e.g. a lot status changed
+    between pool assembly and classification return).
     """
 
     candidate_id: str
@@ -92,16 +104,21 @@ class Candidate:
     # only sees the ranked order (see §6.3 "classifier gets ranks, not raw
     # scores").
     rank_score: float = 0.0
-    # Underlying product_id for lot-backed candidates (``in_flight``,
-    # ``recently_out``, ``top_up_target``, ``currently_on_shelf``). Always
-    # equals ``candidate_id`` for the ``catalog_not_on_shelf`` branch.
-    # ``None`` for the UNKNOWN sentinel. Not serialised into the prompt
-    # (via ``to_prompt_dict`` below) so the classifier never sees a direct
-    # lot→product link — that link is for Pi-side audit + apply-path
-    # validation only. Populated retroactively alongside the defense-in-
-    # depth fix for the 2026-04-22 chocolate-milk stuck-in-flight bug
-    # (handlers/scale_events.py ambiguity guard).
+    # Underlying product_id. After the 2026-04-27 lots-out-of-prompt fix
+    # this ALWAYS equals ``candidate_id`` for non-sentinel candidates.
+    # Kept as an explicit field for backwards-compat with apply-path
+    # validation that grew ``valid_product_ids`` cross-checks.
     product_id: str | None = None
+    # Underlying lot_id for lot-backed candidates (``in_flight``,
+    # ``recently_out``, ``top_up_target``, ``currently_on_shelf``).
+    # ``None`` for ``catalog_not_on_shelf`` and the UNKNOWN sentinel.
+    # NEVER serialised into the prompt — see ``to_prompt_dict`` below.
+    # The candidate_pool builder collapses multiple lots of the same
+    # product into one ``Candidate``; this field carries the
+    # representative lot's id for diagnostics + as a hint to the
+    # apply-path lot picker. The picker is authoritative when a lot's
+    # state has shifted since pool assembly.
+    lot_id: str | None = None
 
     def to_prompt_dict(self) -> dict[str, Any]:
         """Project into the JSON payload the classifier sees.
@@ -109,6 +126,15 @@ class Candidate:
         Reference images are injected as separate image blocks in the user
         message, so only a count+placeholder marker is included here to keep
         the JSON compact and debuggable.
+
+        **Invariant:** the dict NEVER contains lot-level keys
+        (``lot_id``, ``expires_on``, ``qty_containers``, ``in_flight_since``,
+        ``pickup_weight_g``, ``current_weight_g``, ``status``, ``last_out_at``,
+        ``placed_at``, ``last_seen_at``). Test
+        ``test_prompt::test_prompt_never_leaks_lot_fields`` pins this
+        contract — failing it means the classifier is being shown
+        per-lot state again, which the user has explicitly forbidden
+        (decisions.md #42).
         """
 
         return {

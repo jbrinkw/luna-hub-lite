@@ -291,3 +291,148 @@ class TestWeightText:
         text_block = next(b for b in blocks if b["type"] == "text" and "Weight change" in b["text"])
         assert "shelf dropped" in text_block["text"]
         assert "Event direction: remove" in text_block["text"]
+
+
+# --- Prompt-purity invariant (decisions.md #42) -----------------------------
+
+
+# Per-lot field names that MUST NEVER appear in the classifier prompt body.
+# The classifier sees products only; lot resolution is purely deterministic
+# on the apply path (``_pick_best_lot_for_product`` in
+# ``handlers/scale_events.py``). User design intent: "the classifier agent
+# shouldn't be seeing individual lots. matching should be done programmatically."
+_FORBIDDEN_LOT_KEYS = (
+    "lot_id",
+    "expires_on",
+    "qty_containers",
+    "in_flight_since",
+    "pickup_weight_g",
+    "current_weight_g",
+    "pickup_event_id",
+    "last_out_at",
+    "pickup_session_id",
+)
+
+
+def _serialise_prompt_text(payload: dict) -> str:
+    """Concatenate every text block from a prompt payload.
+
+    Image blocks are skipped — they're base64 bytes, not prose. The
+    system prompt is also included so a regression that puts a
+    forbidden key in the cached prefix doesn't slip through.
+    """
+    chunks: list[str] = []
+    system = payload["system"]
+    if isinstance(system, str):
+        chunks.append(system)
+    else:
+        for block in system:
+            if block.get("type") == "text":
+                chunks.append(block.get("text", ""))
+    for message in payload["messages"]:
+        for block in message["content"]:
+            if block.get("type") == "text":
+                chunks.append(block.get("text", ""))
+    return "\n".join(chunks)
+
+
+class TestPromptPurity:
+    """Decisions.md #42 — classifier never sees lot-level fields.
+
+    These tests grep the rendered prompt body for forbidden keys. If
+    one fires, the candidate-pool builder or ``Candidate.to_prompt_dict``
+    is leaking lot-level state into the model's view — the user has
+    explicitly forbidden this. Fix the leak; do NOT relax the test.
+    """
+
+    def test_to_prompt_dict_has_no_forbidden_keys(self):
+        # Direct contract test on the per-candidate projection.
+        cand = Candidate(
+            candidate_id="prod_123",
+            name="Chicken",
+            brand="Tyson",
+            expected_weight_g=540.0,
+            container_type="container",
+            why_candidate="currently_on_shelf",
+            reference_image_paths=(),
+            product_id="prod_123",
+            lot_id="lot_xyz_must_not_leak",
+        )
+        d = cand.to_prompt_dict()
+        for key in _FORBIDDEN_LOT_KEYS:
+            assert key not in d, (
+                f"Candidate.to_prompt_dict() leaked forbidden lot-level "
+                f"key {key!r}: {d!r}"
+            )
+        # Positive: candidate_id is the product_id, not the lot_id.
+        assert d["candidate_id"] == "prod_123"
+        # The internal lot_id field must not appear.
+        assert "lot_xyz_must_not_leak" not in json.dumps(d)
+
+    def test_full_payload_text_has_no_forbidden_keys(self, image_paths):
+        # End-to-end: render a full prompt payload and grep every text
+        # block for forbidden lot fields.
+        event = _event(image_paths["before"], image_paths["after"])
+        candidates = [
+            Candidate(
+                candidate_id="prod_a",
+                name="Item A",
+                brand=None,
+                expected_weight_g=120.0,
+                container_type="bottle",
+                why_candidate="currently_on_shelf",
+                reference_image_paths=(image_paths["ref1"],),
+                product_id="prod_a",
+                lot_id="LOT_SECRET_DO_NOT_LEAK_A",
+            ),
+            Candidate(
+                candidate_id="prod_b",
+                name="Item B",
+                brand=None,
+                expected_weight_g=320.0,
+                container_type="jar",
+                why_candidate="recently_out",
+                reference_image_paths=(),
+                product_id="prod_b",
+                lot_id="LOT_SECRET_DO_NOT_LEAK_B",
+            ),
+        ]
+        payload = build_messages_payload(event, candidates)
+        prompt_text = _serialise_prompt_text(payload)
+        for key in _FORBIDDEN_LOT_KEYS:
+            assert key not in prompt_text, (
+                f"Prompt body leaked forbidden lot-level key {key!r}. "
+                f"This violates decisions.md #42. Fix the leak in "
+                f"candidate_pool / models, do NOT relax this assertion."
+            )
+        # The internal lot_id values must not appear anywhere in the
+        # serialised prompt text — they were stored on the Candidate
+        # but should be projected away by ``to_prompt_dict``.
+        assert "LOT_SECRET_DO_NOT_LEAK_A" not in prompt_text
+        assert "LOT_SECRET_DO_NOT_LEAK_B" not in prompt_text
+
+    def test_no_lot_status_or_in_flight_in_prompt(self, image_paths):
+        # Specifically pin that ``status`` (on_shelf / out / in_flight)
+        # never appears as a JSON key — the classifier should not
+        # reason about per-lot lifecycle state.
+        event = _event(image_paths["before"], image_paths["after"])
+        candidates = [
+            Candidate(
+                candidate_id="prod_x",
+                name="Item X",
+                brand=None,
+                expected_weight_g=200.0,
+                container_type=None,
+                why_candidate="in_flight",
+                reference_image_paths=(),
+                product_id="prod_x",
+                lot_id="lot_inflight_x",
+            ),
+        ]
+        payload = build_messages_payload(event, candidates)
+        prompt_text = _serialise_prompt_text(payload)
+        # JSON-quoted to avoid false positives from prose mentions of
+        # the word "status" in human-readable instructions.
+        assert '"status":' not in prompt_text
+        assert '"in_flight_since":' not in prompt_text
+        assert '"pickup_weight_g":' not in prompt_text

@@ -672,6 +672,64 @@ def list_lots_by_shelf_and_status(
     return [_row_to_lot(r) for r in rows]
 
 
+def list_lots_by_product(
+    conn: sqlite3.Connection,
+    product_id: str,
+    *,
+    shelf_id: Optional[str] = None,
+) -> list[Lot]:
+    """Return every lot for a product, ordered by classifier-relevance.
+
+    Used by ``_pick_best_lot_for_product`` (handlers/scale_events.py) on
+    the apply path AFTER the classifier returns a product_id. Ordering:
+
+      1. ``in_flight`` lots first (the user just lifted this — almost
+         certainly the same one returning).
+      2. ``out`` lots next (recently consumed; place-back means revive).
+      3. ``on_shelf`` lots last (already-present; ADD becomes a top-up).
+
+    Within each tier, secondary sort is ``placed_at DESC`` (most-recent
+    first) — a proxy for "freshest known instance of this product."
+
+    The ordering is intentionally NOT FEFO (expires_on) because the Pi
+    schema has no ``expires_on`` column on ``lots`` (cloud-only field).
+    Callers needing FEFO must consult the cloud catalog directly.
+    """
+    if shelf_id is not None:
+        rows = conn.execute(
+            """
+            SELECT * FROM lots
+             WHERE product_id = ? AND shelf_id = ?
+             ORDER BY
+               CASE status
+                 WHEN 'in_flight' THEN 0
+                 WHEN 'out'       THEN 1
+                 WHEN 'on_shelf'  THEN 2
+                 ELSE 3
+               END ASC,
+               placed_at DESC
+            """,
+            (product_id, shelf_id),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT * FROM lots
+             WHERE product_id = ?
+             ORDER BY
+               CASE status
+                 WHEN 'in_flight' THEN 0
+                 WHEN 'out'       THEN 1
+                 WHEN 'on_shelf'  THEN 2
+                 ELSE 3
+               END ASC,
+               placed_at DESC
+            """,
+            (product_id,),
+        ).fetchall()
+    return [_row_to_lot(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # lots: in-flight tracker helpers (IN_FLIGHT_TRACKER_PLAN.md §6)
 # ---------------------------------------------------------------------------

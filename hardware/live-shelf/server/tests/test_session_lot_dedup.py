@@ -220,11 +220,14 @@ def test_apply_lot_update_skips_duplicate_in_session(tmp_path: Path, caplog):
 
 
 def test_apply_lot_update_skips_duplicate_new_arrival_mint(tmp_path: Path, caplog):
-    """Second ADD for same product in same session must NOT mint a 2nd lot.
+    """Second ADD for same product in same session must NOT create a 2nd lot.
 
-    Scenario: two ADD events fire, classifier picks the same
-    catalog_not_on_shelf product for both. Only the first should mint
-    a fresh lot; the second is a duplicate pick and must be skipped.
+    Scenario: two ADD events fire, classifier picks the same product for
+    both. Under the **2026-04-27 inventory-only rule (decisions.md #42)**
+    minting from a place event is forbidden — the apply path resolves
+    each pick to the EXISTING lot via ``_pick_best_lot_for_product``.
+    The second event hits the in-session dedup guard (the lot already
+    has a session_resolution from event A) and is skipped.
     """
     conn = init_db(":memory:")
     handler = _make_handler(conn, tmp_path)
@@ -302,10 +305,14 @@ def test_apply_lot_update_skips_duplicate_new_arrival_mint(tmp_path: Path, caplo
         f"duplicate apply minted a second lot (count {before_lot_count} "
         f"→ {after_lot_count}); dedup guard failed"
     )
+    # Under the new contract the in-session dedup guard catches the
+    # duplicate before any mutation happens — the log wording is
+    # "already resolved in session" rather than the old "already
+    # received a session_resolution".
     assert any(
-        "already received a session_resolution" in rec.getMessage()
+        "already resolved in session" in rec.getMessage()
         for rec in caplog.records
-    ), "expected a warning about duplicate new-lot mint"
+    ), "expected a warning about duplicate apply via dedup guard"
 
 
 # ---------------------------------------------------------------------------

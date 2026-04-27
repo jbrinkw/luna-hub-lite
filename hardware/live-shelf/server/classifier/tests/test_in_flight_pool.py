@@ -67,6 +67,7 @@ def test_tier_rank_in_flight_outranks_recently_out():
 
 
 def test_pool_for_add_includes_in_flight_lots():
+    # **2026-04-27 (decisions.md #42):** candidate_id is product_id.
     ctx = ClassifierContext(
         source=_StubSource(
             in_flight=[_lot("INF-1", 200.0, status="in_flight")],
@@ -74,10 +75,13 @@ def test_pool_for_add_includes_in_flight_lots():
     )
     pool = pool_for_add(180.0, ctx)
     ids_and_reasons = [(c.candidate_id, c.why_candidate) for c in pool]
-    assert ("INF-1", "in_flight") in ids_and_reasons
+    assert ("p-INF-1", "in_flight") in ids_and_reasons
 
 
 def test_pool_for_add_ranks_in_flight_above_recently_out_at_equal_weight():
+    # In_flight + recently_out have DIFFERENT product_ids so the
+    # collapse step doesn't merge them — this test verifies tier
+    # priority across distinct products.
     ctx = ClassifierContext(
         source=_StubSource(
             in_flight=[_lot("INF-1", 200.0, status="in_flight")],
@@ -87,12 +91,12 @@ def test_pool_for_add_ranks_in_flight_above_recently_out_at_equal_weight():
     pool = pool_for_add(200.0, ctx)
     # Strip the sentinel for ordering check.
     non_sentinel = [c for c in pool if c.why_candidate != "sentinel"]
-    # In-flight should come FIRST.
-    assert non_sentinel[0].candidate_id == "INF-1"
+    # In-flight should come FIRST. candidate_id is the product_id.
+    assert non_sentinel[0].candidate_id == "p-INF-1"
     assert non_sentinel[0].why_candidate == "in_flight"
     # Recently-out is next.
     next_ids = [c.candidate_id for c in non_sentinel[1:]]
-    assert "OUT-1" in next_ids
+    assert "p-OUT-1" in next_ids
 
 
 def test_pool_for_add_handles_candidate_source_without_get_in_flight_lots():
@@ -117,18 +121,23 @@ def test_pool_for_add_handles_candidate_source_without_get_in_flight_lots():
 
 
 def test_pool_for_add_deduplicates_in_flight_wins_over_recently_out():
-    """If the same lot_id appears in both in_flight and recently_out
-    (status race during migration), the in-flight entry wins because
-    it's first in the union order and dedupe keeps the first."""
-    same_id = "L1"
+    """**2026-04-27 (decisions.md #42):** when the same product appears
+    in both in_flight and recently_out (status race during migration,
+    or two lots of same SKU split between branches), the candidates
+    collapse to ONE entry keyed by product_id with the in-flight tier
+    winning (highest priority).
+    """
+    same_lot = "L1"
     ctx = ClassifierContext(
         source=_StubSource(
-            in_flight=[_lot(same_id, 200.0, status="in_flight", name="InF")],
-            recently_out=[_lot(same_id, 200.0, status="out", name="OoF")],
+            in_flight=[_lot(same_lot, 200.0, status="in_flight", name="InF")],
+            recently_out=[_lot(same_lot, 200.0, status="out", name="OoF")],
         ),
     )
     pool = pool_for_add(200.0, ctx)
-    matching = [c for c in pool if c.candidate_id == same_id]
+    # candidate_id is product_id under the new contract.
+    expected_pid = f"p-{same_lot}"
+    matching = [c for c in pool if c.candidate_id == expected_pid]
     assert len(matching) == 1
     assert matching[0].why_candidate == "in_flight"
     assert matching[0].name == "InF"

@@ -310,8 +310,10 @@ def test_full_flow_remove_then_reconcile(
     # flow but quicker for the test; the intake blueprint is covered
     # separately in its own test module).
     product_id, lot_id = _seed_product_and_lot(conn, cfg.refs_root)
-    # Update the classifier stub so it returns THIS lot_id.
-    fake_classifier_remove._payload["item_id"] = lot_id
+    # **2026-04-27 (decisions.md #42):** the classifier returns
+    # product_id, not lot_id. The apply path's
+    # ``_pick_best_lot_for_product`` resolves it to the actual lot.
+    fake_classifier_remove._payload["item_id"] = product_id
 
     # 2. Pre-set the last-known weight so open_session sees a non-zero
     # starting shelf weight (mirrors what a heartbeat would do).
@@ -536,18 +538,23 @@ def test_event_outside_session_still_runs_classifier(
     assert body["classifier_status"] != "skipped_no_session"
 
 
-def test_add_event_for_catalog_product_creates_lot(
+def test_add_event_for_catalog_only_product_does_not_mint_lot(
     app_cfg: AppConfig,
     tmp_data_dir: Path,
     fake_camera: _FakeCamera,
 ):
-    """ADD event classified as a catalog (not-on-shelf) product mints a lot.
+    """**2026-04-27 inventory-only matching (decisions.md #42):**
 
-    Regression test for the "item identified but never on the shelf" bug:
-    for a `catalog_not_on_shelf` candidate the classifier returns the
-    product_id as `item_id`. The scale handler must mint a fresh lot
-    inline so the shelf registry reflects the placement immediately,
-    even for out-of-session ADDs (no reconciler will run).
+    When the user places an item on the live-shelf for a product that
+    has NO existing inventory, the apply path must NOT mint a new lot.
+    Minting from a place event is forbidden — the user must intake
+    the product first (so a lot exists), then re-place on the shelf.
+
+    Pre-2026-04-27 the same scenario would mint a lot from the
+    catalog_not_on_shelf branch. That branch is now removed (the
+    classifier never sees catalog products without inventory), and
+    the apply path's lot picker returns None for products with no
+    lots, which the apply loop logs and drops.
     """
     conn = init_db(str(app_cfg.db_path))
     # Seed a certified product with NO on-shelf lot.
@@ -564,13 +571,16 @@ def test_add_event_for_catalog_product_creates_lot(
             certified=1,
         ),
     )
-    # No pre-existing lot — the classifier will pick the catalog entry.
+    # The classifier won't see this product in the pool (inventory-only),
+    # but if it did, the apply path would still refuse to mint. We stub
+    # the classifier response as UNKNOWN to match what the real classifier
+    # would return given an inventory-empty pool.
     classifier = _FakeAnthropicClient(
         {
-            "item_id": product.product_id,
-            "action": "added",
-            "confidence": 0.92,
-            "reasoning": "catalog pick",
+            "item_id": "UNKNOWN",
+            "action": "unknown",
+            "confidence": 0.0,
+            "reasoning": "no inventory candidates",
             "multi_match": [],
         }
     )
@@ -584,11 +594,6 @@ def test_add_event_for_catalog_product_creates_lot(
     )
     try:
         client = bundle.app.test_client()
-        # Publish a closed session in session_capture before the event
-        # so the handler's post-close grace window (10s) can resolve
-        # frames for an out-of-session event. Without this, classification
-        # only happens via the 5s sweeper interval, which exceeds the
-        # test's deadline.
         ts_open = now_iso_utc_ms()
         fake_camera.emit_transition(BrightnessTransition("open", ts_open, 120.0))
         time.sleep(0.02)
@@ -609,8 +614,6 @@ def test_add_event_for_catalog_product_creates_lot(
         )
         assert r.status_code == 200, r.get_data(as_text=True)
         body = r.get_json()
-        # Classification is dispatched to a background thread; poll the
-        # DB until the event's classifier_status transitions out of pending.
         event_id = body["event_id"]
         deadline = time.time() + 3.0
         final_status = "pending"
@@ -625,18 +628,17 @@ def test_add_event_for_catalog_product_creates_lot(
             if final_status in ("classified", "review", "failed"):
                 break
             time.sleep(0.05)
-        assert final_status == "classified", (
-            f"expected classifier_status=classified, got {final_status!r}"
-        )
-        # A fresh lot for this product must exist now, on the shelf.
+        # No lot should be minted under the inventory-only rule.
         lots = [
             lot for lot in storage_repo.list_lots_by_status(conn, "on_shelf")
             if lot.product_id == product.product_id
         ]
-        assert len(lots) == 1, f"expected 1 on-shelf lot, got {len(lots)}"
-        lot = lots[0]
-        assert lot.current_weight_g == pytest.approx(260.0)
-        assert lot.initial_weight_g == pytest.approx(260.0)
+        assert len(lots) == 0, (
+            f"inventory-only rule violated: expected 0 on-shelf lots for "
+            f"a catalog-only product (no pre-existing inventory), got "
+            f"{len(lots)}. The classifier must NEVER mint from a place "
+            f"event under decisions.md #42."
+        )
     finally:
         bundle.shutdown()
 
@@ -646,12 +648,15 @@ def test_reconciler_handles_catalog_product_id_from_classifier(
     tmp_data_dir: Path,
     fake_camera: _FakeCamera,
 ):
-    """Full round-trip: manual session → catalog ADD → close → reconcile.
+    """**2026-04-27 (decisions.md #42):** classifier returns product_id;
+    apply path resolves to existing lot via ``_pick_best_lot_for_product``.
 
-    Regression test for an FK-constraint crash: the classifier returns
-    a product_id for catalog_not_on_shelf picks, and the reconciler's
-    Pass 3 must write a resolution whose lot_id resolves to a real
-    lots row (not a product_id, which would violate the FK).
+    Pre-2026-04-27 this test seeded a product with NO inventory and
+    asserted a brand-new lot was minted from the classifier's catalog
+    pick. Under the inventory-only rule the test now seeds an EXISTING
+    out-of-stock lot for the product, places the item on the shelf,
+    and verifies the apply path RE-USES the existing lot (revives it
+    from out → on_shelf) rather than minting a duplicate.
     """
     conn = init_db(str(app_cfg.db_path))
     product = storage_repo.create_product(
@@ -667,12 +672,28 @@ def test_reconciler_handles_catalog_product_id_from_classifier(
             certified=1,
         ),
     )
+    # Seed an existing out lot — the apply path's picker will resolve
+    # the classifier's product_id pick to this lot and revive it. The
+    # ``last_out_at`` MUST be within the recently_out window
+    # (default 24h) so the candidate-pool picks it up.
+    from server.storage.models import LotIn as _LotIn
+    existing_lot = storage_repo.create_lot(
+        conn,
+        _LotIn(
+            product_id=product.product_id,
+            status="out",
+            current_weight_g=0.0,
+            initial_weight_g=260.0,
+            total_consumed_g=260.0,
+            last_out_at=now_iso_utc_ms(),
+        ),
+    )
     classifier = _FakeAnthropicClient(
         {
             "item_id": product.product_id,
             "action": "added",
             "confidence": 0.88,
-            "reasoning": "catalog pick",
+            "reasoning": "product pick (apply-path resolves lot)",
             "multi_match": [],
         }
     )
@@ -767,28 +788,38 @@ def test_reconciler_handles_catalog_product_id_from_classifier(
         )
 
         # The resolution must have a valid lot_id that points to the
-        # minted lot, NOT the product_id.
+        # EXISTING (revived) lot, NOT the product_id, NOT a new lot.
         resolutions = storage_repo.list_resolutions_for_session(
             conn, session_id
         )
         assert resolutions
-        # Find the new_arrival or new-lot resolution — for out-of-session
-        # ADDs the handler mints the lot inline, so the reconciler will
-        # see the ADD as either new_arrival (no prior lot for this
-        # product) or use_return_consumed (if a prior out-lot existed).
         target = [
             r for r in resolutions
             if r.add_event_id is not None and r.lot_id is not None
         ]
         assert target, "expected a resolution with both add_event_id and lot_id"
-        # Verify every resolution's lot_id points to a real lot row.
+        # Verify every resolution's lot_id points to the SEEDED lot
+        # (no duplicate lot was minted under the inventory-only rule).
         for r in target:
-            lot = storage_repo.get_lot(conn, r.lot_id)
-            assert lot is not None, (
-                f"resolution lot_id {r.lot_id!r} does not resolve to a lot; "
-                "FK would fail"
+            assert r.lot_id == existing_lot.lot_id, (
+                f"apply path created a different lot ({r.lot_id!r}) "
+                f"instead of reviving the existing one "
+                f"({existing_lot.lot_id!r}); inventory-only rule violated"
             )
+            lot = storage_repo.get_lot(conn, r.lot_id)
+            assert lot is not None
             assert lot.product_id == product.product_id
+
+        # Confirm only one lot exists for this product — no duplicate
+        # minted by the apply path.
+        all_lots = conn.execute(
+            "SELECT COUNT(*) FROM lots WHERE product_id = ?",
+            (product.product_id,),
+        ).fetchone()[0]
+        assert all_lots == 1, (
+            f"expected exactly one lot for product (the seeded out-lot, "
+            f"now revived); got {all_lots}. Inventory-only rule violated."
+        )
     finally:
         bundle.shutdown()
 

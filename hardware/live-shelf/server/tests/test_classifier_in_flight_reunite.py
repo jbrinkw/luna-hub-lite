@@ -219,6 +219,12 @@ class _InFlightOnlySource:
 
 class TestCandidatePoolSuppressesCatalogDup:
     def test_pool_for_add_drops_catalog_when_in_flight_exists(self, tmp_path):
+        """**2026-04-27 (decisions.md #42):** under the inventory-only
+        rule, the catalog branch is dropped from the ADD pool entirely.
+        An in-flight lot for a product produces a single product-keyed
+        Candidate (collapsed). The classifier sees product_ids only;
+        the apply-path lot picker resolves to the in-flight lot.
+        """
         conn = init_db(":memory:")
         product, lot = _setup_chocolate_milk(conn)
         source = _InFlightOnlySource(product, lot)
@@ -228,26 +234,34 @@ class TestCandidatePoolSuppressesCatalogDup:
         # Sentinel is always present.
         assert pool[-1].candidate_id == UNKNOWN_CANDIDATE_ID
 
-        # In-flight lot must be present.
-        lot_entry = next(
-            (c for c in pool if c.candidate_id == lot.lot_id), None
+        # The in-flight product must appear as a Candidate keyed by
+        # product_id (NOT lot_id under the new contract).
+        product_entry = next(
+            (c for c in pool if c.candidate_id == product.product_id),
+            None,
         )
-        assert lot_entry is not None
-        assert lot_entry.why_candidate == "in_flight"
-        # Pickup weight, not catalog weight.
-        assert lot_entry.expected_weight_g == 1672.0
+        assert product_entry is not None, (
+            "in-flight product must appear in the pool as a "
+            "product-keyed Candidate"
+        )
+        assert product_entry.why_candidate == "in_flight"
+        # Pickup weight, not catalog weight (the lot's expected_weight_g
+        # propagates to the Candidate).
+        assert product_entry.expected_weight_g == 1672.0
+        # The internal lot_id is stored on the Candidate but is NEVER
+        # exposed to the classifier (decisions.md #42).
+        assert product_entry.lot_id == lot.lot_id
 
-        # Catalog product_id for the SAME SKU must be suppressed — that's
-        # the core fix.
-        catalog_dup = [
-            c for c in pool
-            if c.candidate_id == product.product_id
+        # Pre-2026-04-27 the test asserted "catalog product_id with the
+        # same SKU is suppressed." Under the new rule there's no
+        # catalog branch at all, so the pool simply contains one entry
+        # per product. Verify the pool's only non-sentinel entry is
+        # the collapsed in-flight one.
+        non_sentinel = [
+            c for c in pool if c.candidate_id != UNKNOWN_CANDIDATE_ID
         ]
-        assert catalog_dup == [], (
-            "catalog product_id should not appear when the same SKU has "
-            "an in-flight lot; its presence is what let the classifier "
-            "pick the wrong candidate in the bug report"
-        )
+        assert len(non_sentinel) == 1
+        assert non_sentinel[0].candidate_id == product.product_id
 
 
 # ---------------------------------------------------------------------------
@@ -828,3 +842,269 @@ class TestProductionPoolShapeTopUpPickApplies:
         assert call["product_id"] == product.product_id
         assert call["delta_g"] == pytest.approx(128.0, rel=1e-2)  # 1800-1672
         assert call["pi_event_id"] == e_add
+
+
+# ---------------------------------------------------------------------------
+# 2026-04-27: chicken-case regression — product-keyed classifier pick
+# resolves to existing inventory lot, weight mismatch is tolerated.
+# (decisions.md #45.)
+# ---------------------------------------------------------------------------
+
+
+class TestChickenCaseInventoryOnly:
+    """Regression suite for the user's chicken case (decisions.md #45).
+
+    User reported: chicken was already in inventory (cloud `stock_lots`
+    row existed at 1000g), but the live-shelf classifier weight-matched
+    against the catalog (which it shouldn't have seen) and minted a
+    duplicate Pi-only lot, orphaning the original. Quote:
+
+        "with the chicken i think it was already in inventory but the
+        weight didnt match so i thought it was a different item but
+        that is a normal pattern of something going from general
+        inventory to livetrack with less than was being tracked
+        originally bc it wasnt being tracked. it should just pick the
+        most likely lot from inventory and link it."
+
+    These tests pin the structural fix:
+      * classifier returns ``product_id`` (not ``lot_id``)
+      * apply path resolves via ``_pick_best_lot_for_product``
+      * weight mismatch is NOT a rejection signal
+      * NO duplicate lot is minted
+    """
+
+    def _seed_chicken(self, conn, *, on_shelf_weight_g=1000.0):
+        product = storage_repo.create_product(
+            conn,
+            ProductIn(
+                name="Chicken Breast",
+                barcode="CHK-1",
+                net_weight_g=1000.0,
+                gross_weight_g=1000.0,
+                unit_type="solid",
+                container_type="container",
+                certified=1,
+            ),
+        )
+        # Existing inventory lot — the user's "chicken in general inventory"
+        # before they paired it to the live-shelf.
+        lot = storage_repo.create_lot(
+            conn,
+            LotIn(
+                product_id=product.product_id,
+                status="on_shelf",
+                current_weight_g=on_shelf_weight_g,
+                initial_weight_g=on_shelf_weight_g,
+                shelf_id="live_shelf",
+            ),
+        )
+        return product, lot
+
+    def test_chicken_placed_lighter_resolves_to_existing_lot(self, tmp_path):
+        """Chicken is in inventory at 1000g (last tracked weight); user
+        places it on the shelf at 540g (consumed 460g untracked between
+        purchase and shelf-pairing).
+
+        Pre-2026-04-27: classifier would weight-match against the
+        catalog at 1000g (close to original) and MINT a duplicate lot.
+        Post-fix: classifier sees only the product_id (not the lot),
+        apply-path picker resolves to the existing on-shelf lot, the
+        ADD becomes a top-up update, no duplicate.
+        """
+        conn = init_db(":memory:")
+        handler = _make_handler(conn, tmp_path)
+        product, lot = self._seed_chicken(conn, on_shelf_weight_g=1000.0)
+        session_id = _open_session(conn)
+
+        e_add = _record_add(
+            conn, session_id,
+            delta_g=540.0,
+            ts="2026-04-27T12:00:00.000Z",
+            weight_before=0.0,
+        )
+
+        # Classifier returns the product_id (new contract) — sees only
+        # products, not lots. The candidate_pool_used has the product_id
+        # as the candidate_id (collapsed from the on-shelf lot).
+        classification = {
+            "item_id": product.product_id,
+            "action": "added",
+            "confidence": 0.85,
+            "multi_match": [],
+            "candidate_pool_used": [
+                {"candidate_id": product.product_id,
+                 "product_id": product.product_id,
+                 "why_candidate": "currently_on_shelf",
+                 "expected_weight_g": 1000.0},  # weight WAY off the 540g delta
+            ],
+        }
+
+        handler._apply_lot_update_from_classification(
+            direction="add",
+            classification=classification,
+            event_ts="2026-04-27T12:00:00.000Z",
+            delta_g=540.0,
+            session_id=session_id,
+            event_id=e_add,
+            shelf_id="live_shelf",
+        )
+
+        # Apply path resolved product_id → existing lot. NO duplicate.
+        on_shelf = _on_shelf_lots_for_product(conn, product.product_id)
+        assert len(on_shelf) == 1, (
+            f"chicken-case duplicate lot regression — expected exactly 1 "
+            f"on-shelf lot for the product, got {len(on_shelf)} "
+            f"({on_shelf!r}). The apply path must NEVER mint from a "
+            f"place event under decisions.md #45."
+        )
+        # The same lot id (no new mint).
+        assert on_shelf[0]["lot_id"] == lot.lot_id
+
+    def test_chicken_no_inventory_emits_no_lot(self, tmp_path):
+        """Inventory-only rule: place event for a product with NO existing
+        lot (catalog only) must NOT mint a new lot.
+
+        The classifier would not normally pick this product because the
+        ADD pool is now inventory-only, but if a malformed pool somehow
+        surfaced a catalog product (or a test fixture forces one), the
+        apply-path picker returns None and the event is dropped with
+        a warning — never a mint.
+        """
+        conn = init_db(":memory:")
+        handler = _make_handler(conn, tmp_path)
+        # Product but NO existing lot. Inventory-only rule must hold.
+        product = storage_repo.create_product(
+            conn,
+            ProductIn(
+                name="Brand New Item",
+                barcode="NEW-1",
+                net_weight_g=300.0,
+                gross_weight_g=300.0,
+                unit_type="solid",
+                container_type="bottle",
+                certified=1,
+            ),
+        )
+        session_id = _open_session(conn)
+        e_add = _record_add(
+            conn, session_id,
+            delta_g=300.0,
+            ts="2026-04-27T13:00:00.000Z",
+            weight_before=0.0,
+        )
+
+        classification = {
+            "item_id": product.product_id,
+            "action": "added",
+            "confidence": 0.95,
+            "multi_match": [],
+            "candidate_pool_used": [
+                {"candidate_id": product.product_id,
+                 "product_id": product.product_id,
+                 "why_candidate": "catalog_not_on_shelf",
+                 "expected_weight_g": 300.0},
+            ],
+        }
+
+        handler._apply_lot_update_from_classification(
+            direction="add",
+            classification=classification,
+            event_ts="2026-04-27T13:00:00.000Z",
+            delta_g=300.0,
+            session_id=session_id,
+            event_id=e_add,
+            shelf_id="live_shelf",
+        )
+
+        # No lot exists for this product, period.
+        all_lots = conn.execute(
+            "SELECT lot_id FROM lots WHERE product_id = ?",
+            (product.product_id,),
+        ).fetchall()
+        assert len(all_lots) == 0, (
+            f"inventory-only rule violated: place event for a "
+            f"catalog-only product minted a new lot. Got {all_lots!r}. "
+            f"User must intake the product first per decisions.md #45."
+        )
+
+    def test_picker_prefers_in_flight_over_on_shelf_for_same_product(
+        self, tmp_path
+    ):
+        """When a product has BOTH an in_flight lot and a separate
+        on_shelf lot (rare but possible), the picker prefers in_flight
+        — it's the lot the user is actively interacting with.
+        """
+        conn = init_db(":memory:")
+        handler = _make_handler(conn, tmp_path)
+        product = storage_repo.create_product(
+            conn,
+            ProductIn(
+                name="Yogurt", barcode="Y-1",
+                net_weight_g=200.0, gross_weight_g=200.0,
+                unit_type="solid", container_type="cup", certified=1,
+            ),
+        )
+        on_shelf_lot = storage_repo.create_lot(
+            conn,
+            LotIn(
+                product_id=product.product_id,
+                status="on_shelf",
+                current_weight_g=200.0,
+                initial_weight_g=200.0,
+                shelf_id="live_shelf",
+            ),
+        )
+        # Create as on_shelf first, then mark in_flight (which sets the
+        # in_flight_since column the CHECK constraint requires).
+        in_flight_lot = storage_repo.create_lot(
+            conn,
+            LotIn(
+                product_id=product.product_id,
+                status="on_shelf",
+                current_weight_g=200.0,
+                initial_weight_g=200.0,
+                shelf_id="live_shelf",
+            ),
+        )
+        storage_repo.mark_lot_in_flight(
+            conn, in_flight_lot.lot_id,
+            pickup_weight_g=200.0,
+            pickup_event_id=None,
+            pickup_session_id=None,
+            in_flight_since="2026-04-27T13:00:00.000Z",
+        )
+
+        picked = handler._pick_best_lot_for_product(
+            product_id=product.product_id,
+            direction="add",
+            shelf_id="live_shelf",
+        )
+        assert picked is not None
+        assert picked.lot_id == in_flight_lot.lot_id, (
+            f"picker preference violated — expected in_flight lot "
+            f"({in_flight_lot.lot_id}), got {picked.lot_id} "
+            f"(status={picked.status})"
+        )
+
+    def test_picker_returns_none_for_product_with_no_inventory(
+        self, tmp_path
+    ):
+        """Picker returns None when no lots exist — apply path uses this
+        as the no-mint signal.
+        """
+        conn = init_db(":memory:")
+        handler = _make_handler(conn, tmp_path)
+        product = storage_repo.create_product(
+            conn,
+            ProductIn(
+                name="Catalog Only", barcode="CO-1",
+                net_weight_g=100.0, gross_weight_g=100.0,
+                unit_type="solid", container_type="jar", certified=1,
+            ),
+        )
+        picked = handler._pick_best_lot_for_product(
+            product_id=product.product_id,
+            direction="add",
+            shelf_id="live_shelf",
+        )
+        assert picked is None

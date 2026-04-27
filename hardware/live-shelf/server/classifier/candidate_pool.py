@@ -127,15 +127,15 @@ def _rank_candidates(candidates: list[Candidate], observed_abs_delta: float) -> 
             reference_image_paths=c.reference_image_paths,
             rank_score=score,
             product_id=c.product_id,
+            lot_id=c.lot_id,
         )
 
         tier = _tier_rank(c.why_candidate)
         # Split priority tiers between "weight-matches" and "fallback" for
-        # recently_out and catalog_not_on_shelf, per §6.1.
+        # recently_out (catalog_not_on_shelf is dropped per the
+        # inventory-only rule).
         if c.why_candidate == "recently_out":
             tier = 1 if _matches_weight(c, observed_abs_delta) else 4
-        elif c.why_candidate == "catalog_not_on_shelf":
-            tier = 3 if _matches_weight(c, observed_abs_delta) else 4
 
         # Sort key: (tier ascending, score descending). UNKNOWN is forced to
         # tier 5 above so it always ends up last.
@@ -156,8 +156,15 @@ def _ensure_sentinel_last(candidates: list[Candidate]) -> list[Candidate]:
 
 
 def _from_lot(lot: LotCandidate, why: str) -> Candidate:
+    """Build a product-keyed Candidate from a lot row.
+
+    **2026-04-27:** ``candidate_id`` is the lot's ``product_id``, NOT
+    the ``lot_id``. The classifier sees products only; the apply path
+    resolves the actual lot deterministically via
+    ``_pick_best_lot_for_product`` (decisions.md #42).
+    """
     return Candidate(
-        candidate_id=lot.lot_id,
+        candidate_id=lot.product_id,
         name=lot.name,
         brand=lot.brand,
         expected_weight_g=lot.expected_weight_g,
@@ -165,6 +172,7 @@ def _from_lot(lot: LotCandidate, why: str) -> Candidate:
         why_candidate=why,  # type: ignore[arg-type]
         reference_image_paths=lot.reference_image_paths,
         product_id=lot.product_id,
+        lot_id=lot.lot_id,
     )
 
 
@@ -178,35 +186,70 @@ def _from_product(product: ProductCandidate) -> Candidate:
         why_candidate="catalog_not_on_shelf",
         reference_image_paths=product.reference_image_paths,
         product_id=product.product_id,
+        lot_id=None,
     )
 
 
+# Tier preference for collapsing multiple lots of the same product into one
+# Candidate. Lower index = stronger evidence the lot is "the one" the user
+# is interacting with. Mirrors ``_tier_rank`` but split out so the collapser
+# can prefer in_flight/recently_out lots without depending on the ranking
+# pipeline. See decisions.md #42 for the design rationale.
+_PRODUCT_COLLAPSE_PRIORITY = {
+    "in_flight": 0,
+    "recently_out": 1,
+    "top_up_target": 2,
+    "currently_on_shelf": 3,
+    "catalog_not_on_shelf": 4,
+    "sentinel": 5,
+}
+
+
 def _dedupe_by_product(candidates: Iterable[Candidate]) -> list[Candidate]:
-    """Dedupe the ADD pool union.
+    """Collapse multiple lots of the same product into one Candidate.
 
-    Fix 4: dedupe on ``candidate_id`` (lot_id for LotCandidate sources,
-    product_id for ProductCandidate sources). The previous key —
-    ``name|container_type`` — collapsed two distinct lots of the same
-    SKU into one entry, which hid a second on-shelf/out lot of the same
-    product from the classifier. ``candidate_id`` is unique per lot and
-    per product, so distinct instances are preserved while genuine
-    duplicates (same lot appearing via two branches, or the UNKNOWN
-    sentinel showing up pre-rank) still collapse.
+    **2026-04-27 design (decisions.md #42):** the classifier sees one
+    entry per product. When the union of ADD branches yields more than
+    one candidate for the same ``product_id`` (e.g. an ``in_flight`` lot
+    AND a ``catalog_not_on_shelf`` entry for the same SKU; or two
+    ``recently_out`` lots of the same product on different shelves),
+    we keep the strongest-tier representative and discard the rest.
 
-    Stable preference order: the first occurrence in the union order
-    wins. Callers pass recently_out first (§6.1 listing order), so
-    lot-backed candidates take precedence over bare products naturally.
+    Stability: when two candidates of the same product have equal tier
+    priority, the first-seen wins (callers pass branches in §6.1
+    listing order, so the higher-tier branch is encountered first).
+
+    Sentinel and catalog candidates with no ``product_id`` (e.g. the
+    UNKNOWN sentinel itself) bypass collapse — they are unique by
+    ``candidate_id``.
     """
 
-    seen_keys: set[str] = set()
-    out: list[Candidate] = []
+    best_by_product: dict[str, Candidate] = {}
+    other: list[Candidate] = []
     for c in candidates:
-        key = c.candidate_id
-        if key in seen_keys:
+        # Sentinel + any candidate without a product_id is keyed by
+        # candidate_id — preserves UNKNOWN exactly once.
+        pid = c.product_id
+        if pid is None:
+            other.append(c)
             continue
-        seen_keys.add(key)
-        out.append(c)
-    return out
+        existing = best_by_product.get(pid)
+        if existing is None:
+            best_by_product[pid] = c
+            continue
+        new_pri = _PRODUCT_COLLAPSE_PRIORITY.get(c.why_candidate, 99)
+        cur_pri = _PRODUCT_COLLAPSE_PRIORITY.get(existing.why_candidate, 99)
+        if new_pri < cur_pri:
+            best_by_product[pid] = c
+    # Dedupe sentinel-or-no-pid by candidate_id to preserve UNKNOWN once.
+    seen: set[str] = set()
+    deduped_other: list[Candidate] = []
+    for c in other:
+        if c.candidate_id in seen:
+            continue
+        seen.add(c.candidate_id)
+        deduped_other.append(c)
+    return list(best_by_product.values()) + deduped_other
 
 
 # --- Shelf-scoping compatibility helper ------------------------------------
@@ -247,8 +290,21 @@ def pool_for_add(
 ) -> list[Candidate]:
     """Assemble the ADD candidate pool for an add-direction event.
 
-    Follows §6.1 exactly: union the three branches, dedupe by product,
-    rank by tier+weight-proximity, truncate to top-N, append UNKNOWN.
+    **2026-04-27 inventory-only matching (decisions.md #42):** the ADD
+    pool is restricted to products that already have at least one lot
+    in inventory (in_flight, recently_out, on_shelf). The
+    ``catalog_not_on_shelf`` branch is INTENTIONALLY dropped — minting
+    a brand-new lot from a place event is no longer allowed. If the
+    user places a product on the shelf that has zero inventory, the
+    classifier returns UNKNOWN and the event surfaces in the review
+    queue (the user must intake the product first).
+
+    Why: items normally arrive on the live-shelf weighing LESS than
+    the original tracked weight (consumed untracked between purchase
+    and shelf-pairing). A weight-mismatched catalog match was creating
+    duplicate lots when the user actually meant "this is my existing
+    chicken, transferred from general inventory." The fix is to make
+    inventory presence the matching gate, not catalog membership.
 
     Args:
         delta_g: Positive scale delta in grams.
@@ -267,7 +323,6 @@ def pool_for_add(
     # tests that don't implement get_in_flight_lots.
     get_in_flight = getattr(source, "get_in_flight_lots", None)
     in_flight_lots: list[Candidate] = []
-    in_flight_lot_rows: list[Any] = []
     if callable(get_in_flight):
         in_flight_lot_rows = list(_call_source(get_in_flight, shelf_id=shelf_id))
         in_flight_lots = [
@@ -284,50 +339,27 @@ def pool_for_add(
         )
     ]
 
-    # Branch 2: top-up targets — on-shelf lots whose expected refill tolerance
-    # matches the observed delta. "expected refill" is approximated as the
-    # lot's current weight range; treating it as a 0..current band, anything
-    # within 25% of the lot's expected weight counts.
+    # Branch 2: every on-shelf lot is an inventory candidate for ADD.
+    # Previously this branch was filtered to "top_up_targets" (small delta
+    # relative to current weight), which excluded the most common ADD case
+    # — placing a product back on the shelf that has on-shelf siblings.
+    # Per the inventory-only rule, on-shelf lots are now candidates for
+    # any ADD: the classifier picks a product, the apply path then
+    # decides between top-up vs. revive-out vs. in-flight-return.
     top_up_targets: list[Candidate] = []
     for lot in _call_source(source.get_on_shelf_lots, shelf_id=shelf_id):
         if lot.expected_weight_g is None or lot.expected_weight_g <= 0:
             continue
-        # A top-up is a small positive delta relative to the container — use
-        # the relative tolerance against the lot's current weight as a proxy.
-        tolerance = lot.expected_weight_g * TOP_UP_RELATIVE_TOLERANCE
-        if observed_abs <= tolerance:
-            top_up_targets.append(_from_lot(lot, "top_up_target"))
+        top_up_targets.append(_from_lot(lot, "top_up_target"))
 
-    # Branch 3: certified products not currently on the shelf. The catalog
-    # is shared across shelves (CATCH_ALL_SCALE_PLAN.md §5.2) so we don't
-    # thread shelf_id here.
-    catalog_not_on_shelf = [
-        _from_product(p) for p in source.get_certified_not_on_shelf()
-    ]
-
-    # In-flight reunite guard: when a product has a lot in-flight on this
-    # shelf, suppress the product's catalog entry. Rationale: both the
-    # in-flight lot and the catalog product carry the same SKU identity
-    # but different expected_weight_g semantics (pickup_weight_g vs
-    # full/gross weight). A partially-consumed returning bottle (|delta|
-    # lighter than the catalog weight) lets the classifier reason its
-    # way to the catalog entry with a "partially full" justification,
-    # which mints a brand-new lot and orphans the in-flight one. By
-    # dropping the catalog dup, the only way for the model to represent
-    # "same SKU back on shelf" is via the in-flight lot_id — which the
-    # handler routes to _apply_add_against_in_flight_lot correctly.
-    in_flight_product_ids = {
-        lot.product_id for lot in in_flight_lot_rows
-    }
-    if in_flight_product_ids:
-        catalog_not_on_shelf = [
-            c for c in catalog_not_on_shelf
-            if c.candidate_id not in in_flight_product_ids
-        ]
+    # Branch 3 (catalog_not_on_shelf) is INTENTIONALLY DROPPED. See the
+    # docstring above + decisions.md #42. If a user places an item with
+    # no existing lot, the classifier sees only UNKNOWN and we surface
+    # the event for review rather than minting a duplicate.
 
     # In-flight first so it wins duplicate-id collisions (same lot listed
     # as in_flight AND recently_out when the status just flipped).
-    union = in_flight_lots + recently_out + top_up_targets + catalog_not_on_shelf
+    union = in_flight_lots + recently_out + top_up_targets
     deduped = _dedupe_by_product(union)
 
     ranked = _rank_candidates(deduped, observed_abs)
@@ -344,22 +376,24 @@ def pool_for_remove(
 ) -> list[Candidate]:
     """Assemble the REMOVE candidate pool (§6.2).
 
-    Returns the currently-on-shelf lots, ranked by individual weight
-    proximity to ``|delta|``. The sentinel is NOT appended: §6.2 specifies
-    the classifier is told to return 1+ items summing to ``|delta|`` or
-    ``"unknown"``, not a sentinel candidate.
+    Returns the currently-on-shelf lots, collapsed by ``product_id``
+    and ranked by weight proximity. The sentinel is NOT appended: §6.2
+    specifies the classifier returns 1+ items summing to ``|delta|`` or
+    ``"unknown"``, not a sentinel.
 
-    Fallback: when no on-shelf lots exist (e.g. the user admin-deleted
-    their lots but physical items are still on the shelf, or the demo
-    was reset mid-session), fall back to the catalog of certified
-    products. Without this, every REMOVE event during a no-lot period
-    becomes a blanket UNKNOWN with no multi_match, losing the one bit
-    of signal the LLM can still provide (identifying products visible
-    in the before-frame whose combined weight sums to |delta|). The
-    fallback entries are tagged ``why_candidate="currently_on_shelf"``
-    so downstream reasoning about "what was visibly on the shelf"
-    still makes sense — the classifier's job is to confirm presence
-    in the before-frame either way.
+    **2026-04-27 lots-out-of-prompt (decisions.md #42):** REMOVE
+    candidates are also collapsed to one per product. When the same
+    product has multiple on-shelf lots (e.g. two yogurts of the same
+    SKU), the classifier sees one entry; the apply path's
+    ``_pick_best_lot_for_product`` picks the actual lot (FEFO).
+    Multi_match for a single product picked twice is meaningless to
+    the classifier under this contract — the model should populate
+    multi_match with DISTINCT product_ids only.
+
+    Fallback: when no on-shelf lots exist, the pool is empty. The
+    pre-2026-04-27 catalog fallback is removed for consistency with
+    the inventory-only ADD rule — a REMOVE with no inventory is a
+    sensor anomaly, not something the classifier should guess at.
     """
 
     source: CandidateSource = ctx.source
@@ -370,17 +404,10 @@ def pool_for_remove(
     on_shelf_lots = list(
         _call_source(source.get_on_shelf_lots, shelf_id=shelf_id)
     )
-    candidates = [_from_lot(lot, "currently_on_shelf") for lot in on_shelf_lots]
-
-    if not candidates:
-        # Catalog fallback: assemble Candidate rows from certified products.
-        # Use the product_id as candidate_id — downstream minting in
-        # scale_events.py already handles "id resolves to product_id
-        # (minting new lot)" for ADD events; for REMOVE events we don't
-        # mint, but the resolution/review-queue row still records the
-        # attribution so the session timeline isn't empty.
-        catalog = list(source.get_certified_not_on_shelf())
-        candidates = [_from_product(p) for p in catalog]
+    raw_candidates = [_from_lot(lot, "currently_on_shelf") for lot in on_shelf_lots]
+    # Collapse multiple lots of the same product so the classifier sees
+    # products only.
+    candidates = _dedupe_by_product(raw_candidates)
 
     ranked = _rank_candidates(candidates, observed_abs)
     return ranked[:limit]

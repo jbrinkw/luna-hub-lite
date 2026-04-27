@@ -358,8 +358,11 @@ class TestClassifyEvent:
 
     def test_pool_passes_direction_correctly(self, frame_paths):
         before, after = frame_paths
-        # Add event → should see a catalog-not-on-shelf candidate + sentinel,
-        # not an on-shelf lot.
+        # **2026-04-27 (decisions.md #42):** ADD pool is inventory-only.
+        # A catalog product with NO existing lot is NOT in the pool —
+        # only the UNKNOWN sentinel. The classifier returns UNKNOWN.
+        # If the user wants the product matched, they must intake it
+        # first so a lot exists.
         from server.classifier.models import ProductCandidate
 
         product = ProductCandidate(
@@ -373,10 +376,10 @@ class TestClassifyEvent:
         source = StubSource(catalog=[product])
         response_text = json.dumps(
             {
-                "item_id": "PROD_MAYO",
-                "action": "added",
-                "confidence": 0.88,
-                "reasoning": "New jar appeared in after frame.",
+                "item_id": "UNKNOWN",
+                "action": "unknown",
+                "confidence": 0.0,
+                "reasoning": "Catalog-only product not in inventory.",
             }
         )
         client = FakeClient([response_text])
@@ -384,11 +387,11 @@ class TestClassifyEvent:
         event = _event(before, after, direction="add", delta=450.0)
 
         result = classify_event(event, ctx)
-        assert result.item_id == "PROD_MAYO"
-        # Verify the pool included the sentinel (ADD path) and the product.
+        assert result.item_id == UNKNOWN_CANDIDATE_ID
+        # Pool contains only the sentinel — catalog product is dropped
+        # under the inventory-only rule.
         ids = {c.candidate_id for c in result.candidate_pool_used}
-        assert UNKNOWN_CANDIDATE_ID in ids
-        assert "PROD_MAYO" in ids
+        assert ids == {UNKNOWN_CANDIDATE_ID}
 
     def test_model_override_forwarded_to_client(self, frame_paths):
         before, after = frame_paths

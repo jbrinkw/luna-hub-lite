@@ -30,7 +30,7 @@ from server.shelves import build_registry_from_config  # noqa: E402
 from server.config import AppConfig  # noqa: E402
 from server.storage import init_db  # noqa: E402
 from server.storage import repo as storage_repo  # noqa: E402
-from server.storage.models import ProductIn, ScaleEventIn  # noqa: E402
+from server.storage.models import LotIn, ProductIn, ScaleEventIn  # noqa: E402
 
 
 class _NullCandidateSource:
@@ -216,14 +216,23 @@ def test_scale_event_ingress_unknown_device_without_catch_all_falls_back_to_live
 # ---------------------------------------------------------------------------
 
 
-def test_catch_all_mint_path_writes_shelf_id_catch_all(tmp_path):
-    """Simulates a catch-all ADD whose classifier picked a catalog
-    product (catalog_not_on_shelf branch). Assert the minted lots row
-    carries shelf_id='catch_all', not the live_shelf default."""
+def test_catch_all_revive_path_uses_existing_shelf_id(tmp_path):
+    """**2026-04-27 (decisions.md #42):** the apply-path no longer mints
+    lots from a catalog pick. When the classifier returns a product_id
+    for a catch-all ADD event, the picker resolves to the EXISTING lot
+    (must already be in inventory under the inventory-only rule). This
+    test verifies the lot's existing ``shelf_id`` is preserved (not
+    overwritten) on the revive.
+
+    Pre-2026-04-27 the test asserted a brand-new ``catch_all``-tagged
+    lot was minted from a ``catalog_not_on_shelf`` pick. That branch
+    is removed.
+    """
     conn = init_db(":memory:")
     handler = _make_handler(conn, tmp_path)
 
-    # Catalog product that the classifier will pick.
+    # Catalog product + an EXISTING out-lot already on catch_all that
+    # the apply path will resolve to.
     product = storage_repo.create_product(
         conn,
         ProductIn(
@@ -236,9 +245,25 @@ def test_catch_all_mint_path_writes_shelf_id_catch_all(tmp_path):
             certified=1,
         ),
     )
+    from datetime import datetime, timezone
+    now_iso = datetime.now(tz=timezone.utc).isoformat(
+        timespec="milliseconds"
+    ).replace("+00:00", "Z")
+    existing_lot = storage_repo.create_lot(
+        conn,
+        LotIn(
+            product_id=product.product_id,
+            status="out",
+            current_weight_g=0.0,
+            initial_weight_g=500.0,
+            total_consumed_g=500.0,
+            last_out_at=now_iso,
+            shelf_id="catch_all",
+        ),
+    )
 
     # Record an ADD event that the handler would have seen on the catch-all.
-    event_ts = "2026-04-18T09:00:00.000Z"
+    event_ts = now_iso
     ev = storage_repo.record_scale_event(
         conn,
         ScaleEventIn(
@@ -253,9 +278,8 @@ def test_catch_all_mint_path_writes_shelf_id_catch_all(tmp_path):
         ),
     )
 
-    # Mirror what a successful classifier pass would feed to the apply
-    # helper for a catalog_not_on_shelf pick: item_id is the product_id,
-    # with that product_id visible in the pool.
+    # Classifier pick is the product_id (it sees products only under
+    # the new contract).
     classification = {
         "item_id": product.product_id,
         "action": "added",
@@ -264,8 +288,9 @@ def test_catch_all_mint_path_writes_shelf_id_catch_all(tmp_path):
         "candidate_pool_used": [
             {
                 "candidate_id": product.product_id,
+                "product_id": product.product_id,
                 "expected_weight_g": 500.0,
-                "why_candidate": "catalog_not_on_shelf",
+                "why_candidate": "recently_out",
             },
         ],
     }
@@ -274,7 +299,7 @@ def test_catch_all_mint_path_writes_shelf_id_catch_all(tmp_path):
         "SELECT COUNT(*) FROM lots WHERE product_id = ?",
         (product.product_id,),
     ).fetchone()[0]
-    assert before_count == 0
+    assert before_count == 1
 
     handler._apply_lot_update_from_classification(
         direction="add",
@@ -286,16 +311,17 @@ def test_catch_all_mint_path_writes_shelf_id_catch_all(tmp_path):
         shelf_id="catch_all",
     )
 
+    # Same lot — no new mint. shelf_id preserved on the revive.
     rows = conn.execute(
         "SELECT lot_id, shelf_id, status FROM lots WHERE product_id = ?",
         (product.product_id,),
     ).fetchall()
     assert len(rows) == 1, (
-        "Expected exactly one minted lot for the catalog pick"
+        "Inventory-only rule violated: a duplicate lot was minted"
     )
+    assert rows[0][0] == existing_lot.lot_id
     assert rows[0][1] == "catch_all", (
-        f"Catch-all ADD mint wrote shelf_id={rows[0][1]!r}; expected "
-        f"'catch_all' — the shelf_id must be threaded into LotIn."
+        f"Existing lot's shelf_id={rows[0][1]!r} not preserved on revive"
     )
     assert rows[0][2] == "on_shelf"
 
@@ -377,9 +403,12 @@ def test_catch_all_ingress_stamps_session_id_from_catch_all_pointer(tmp_path):
 
 
 def test_live_shelf_mint_still_writes_shelf_id_live_shelf(tmp_path):
-    """Regression guard: the same apply-helper signature change must NOT
-    break the pre-catch-all live-shelf ADD path. When called with the
-    default shelf_id (live_shelf), the mint inherits that value."""
+    """**2026-04-27 (decisions.md #42):** apply path no longer mints
+    lots. With NO existing lot for the product, the apply-path picker
+    returns None and the call is a no-op (warning logged). Test the
+    default shelf_id path with an existing live_shelf lot — the
+    revive must preserve the lot's existing shelf_id.
+    """
     conn = init_db(":memory:")
     handler = _make_handler(conn, tmp_path)
 
@@ -395,8 +424,24 @@ def test_live_shelf_mint_still_writes_shelf_id_live_shelf(tmp_path):
             certified=1,
         ),
     )
+    from datetime import datetime, timezone
+    now_iso = datetime.now(tz=timezone.utc).isoformat(
+        timespec="milliseconds"
+    ).replace("+00:00", "Z")
+    storage_repo.create_lot(
+        conn,
+        LotIn(
+            product_id=product.product_id,
+            status="out",
+            current_weight_g=0.0,
+            initial_weight_g=300.0,
+            total_consumed_g=300.0,
+            last_out_at=now_iso,
+            shelf_id="live_shelf",
+        ),
+    )
 
-    event_ts = "2026-04-18T09:00:00.000Z"
+    event_ts = now_iso
     ev = storage_repo.record_scale_event(
         conn,
         ScaleEventIn(
@@ -419,8 +464,9 @@ def test_live_shelf_mint_still_writes_shelf_id_live_shelf(tmp_path):
         "candidate_pool_used": [
             {
                 "candidate_id": product.product_id,
+                "product_id": product.product_id,
                 "expected_weight_g": 300.0,
-                "why_candidate": "catalog_not_on_shelf",
+                "why_candidate": "recently_out",
             },
         ],
     }

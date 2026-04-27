@@ -47,7 +47,6 @@ from ..storage import lifecycle
 from ..storage.lifecycle import ReasonCode
 from ..storage.models import (
     AppStatePatch,
-    LotIn,
     ReviewQueueIn,
     ScaleEventIn,
     SessionResolutionIn,
@@ -1409,6 +1408,70 @@ class ScaleHandler:
         )
         return True
 
+    def _pick_best_lot_for_product(
+        self,
+        *,
+        product_id: str,
+        direction: str,
+        shelf_id: Optional[str] = None,
+    ) -> Optional[Any]:
+        """Deterministic lot picker for a classifier-returned product_id.
+
+        **2026-04-27 design (decisions.md #42):** the classifier sees
+        products only and returns a ``product_id``. This helper is the
+        sole programmatic mapper from ``product_id → lot`` on the
+        apply path. The tier ordering reflects the user's mental model:
+
+          1. ``in_flight`` — the user just lifted this lot off the
+             shelf and is putting it back. Almost certainly the same
+             instance returning, possibly partially consumed. ALWAYS
+             preferred for ADD events regardless of weight match.
+          2. ``out`` — recently consumed; a place-back means revive
+             the same lot rather than mint a new one. Preferred over
+             ``on_shelf`` because the user's intent of "putting this
+             back" matches the on-shelf-then-out-then-on-shelf cycle.
+          3. ``on_shelf`` — already-present lot of this product. ADD
+             becomes a top-up; REMOVE becomes a normal pickup.
+
+        Tolerance: weight is INTENTIONALLY NOT a filter. Items often
+        arrive on the live-shelf weighing significantly less than the
+        original tracked weight (consumed untracked between purchase
+        and shelf-pairing), and the user has explicitly directed that
+        weight mismatches must NOT reject a match (decisions.md #42).
+        Within a tier, the picker uses placed_at DESC as a stable
+        secondary sort.
+
+        For REMOVE events on a product with multiple on-shelf lots,
+        this returns the freshest lot — there is no FEFO information
+        in the Pi-side ``lots`` table (cloud-only field). FEFO-aware
+        callers must consult ``CloudCandidateSource`` directly.
+
+        Returns ``None`` when the product has no inventory whatsoever.
+        Caller (the apply path) treats that as a terminal "skip lot
+        update" decision — minting from a place event is forbidden.
+        """
+        try:
+            lots = storage_repo.list_lots_by_product(
+                self._conn,
+                product_id=product_id,
+                shelf_id=shelf_id,
+            )
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "_pick_best_lot_for_product: list_lots_by_product raised "
+                "for product_id=%s shelf=%s",
+                product_id, shelf_id,
+            )
+            return None
+        if not lots:
+            return None
+        # ``list_lots_by_product`` already orders in_flight → out →
+        # on_shelf → others; the first row is the right pick. We don't
+        # filter by direction — the apply path's downstream branching
+        # (in_flight_return vs out→on_shelf revive vs top_up) handles
+        # the per-status semantics.
+        return lots[0]
+
     def _maybe_reunite_with_in_flight_lot(
         self,
         *,
@@ -1666,6 +1729,29 @@ class ScaleHandler:
                 [p[:8] for p in picked_ids],
             )
 
+        # **2026-04-27 weight-tolerance loosening (decisions.md #42):**
+        # the user has explicitly directed that weight mismatches are
+        # EXPECTED — items normally arrive on the live-shelf weighing
+        # less than the original tracked mass because consumption
+        # happens untracked between purchase and shelf-pairing. The
+        # confidence gate stays in place for defense against truly
+        # malformed picks, but the weight-fit override expands: if the
+        # classifier picked a candidate the inventory has any lot for,
+        # we trust the visual identity even when arithmetic says
+        # otherwise.
+        #
+        # Implementation note: the inventory presence check is
+        # conservatively delegated to ``_pick_best_lot_for_product``
+        # below — if the picker returns None for every matched_id, the
+        # apply loop logs the inventory-only warning and effectively
+        # drops the event. So we do NOT need a separate "is the
+        # picked candidate in inventory" gate here; the existing
+        # confidence threshold + weight_match_ok continues to gate
+        # only "obvious garbage" picks (confidence < 0.75 AND no
+        # weight fit). The weight-fit threshold remains 3% but is no
+        # longer the primary acceptance signal — most ADD events under
+        # the new contract bypass the weight check entirely because
+        # the picked product's lot exists.
         if confidence < LOW_CONFIDENCE_THRESHOLD and not weight_match_ok:
             return
 
@@ -1729,12 +1815,39 @@ class ScaleHandler:
         # after-scale reading.
         lot_weight_g = abs(float(delta_g)) if delta_g is not None else 0.0
 
-        # Resolve each id. The classifier may return either a lot_id (when a
-        # `recently_out` / `top_up_target` / `currently_on_shelf` candidate was
-        # picked) or a product_id (when a `catalog_not_on_shelf` candidate was
-        # picked — the lot doesn't exist yet and we must mint it here).
+        # Resolve each id. **2026-04-27 inventory-only matching
+        # (decisions.md #42):** the classifier sees products only, so
+        # ``cid`` is a ``product_id`` for every non-sentinel pick. We
+        # translate it to the most-likely existing lot via
+        # :meth:`_pick_best_lot_for_product` BEFORE the apply path runs.
+        # If no lot exists for the product, we surface a review row
+        # rather than minting — minting from a place event is forbidden
+        # under the inventory-only rule.
+        #
+        # Backwards-compat: if ``cid`` happens to match a lot_id directly
+        # (legacy test fixtures, or a user-review apply that supplies a
+        # raw lot_id), we honour that and skip the product lookup. This
+        # keeps existing tests passing while production traffic flows
+        # through the product-keyed path.
         for cid in matched_ids:
             lot = storage_repo.get_lot(self._conn, cid)
+            if lot is None:
+                # Product-keyed pick (the new invariant). Resolve to the
+                # best existing lot programmatically.
+                resolved_lot = self._pick_best_lot_for_product(
+                    product_id=str(cid),
+                    direction=direction,
+                    shelf_id=shelf_id,
+                )
+                if resolved_lot is not None:
+                    log.info(
+                        "lot picker: product %s → lot %s (status=%s) "
+                        "for %s event %s",
+                        cid, resolved_lot.lot_id, resolved_lot.status,
+                        direction, event_id,
+                    )
+                    lot = resolved_lot
+                    cid = resolved_lot.lot_id  # downstream code uses cid as lot_id
             if lot is not None:
                 # Fix 3: guard against the lot_id-vs-product_id ambiguity.
                 # If get_lot(cid) succeeded but that lot's product_id was
@@ -2037,93 +2150,33 @@ class ScaleHandler:
                             )
                 continue
 
-            # No lot with this id. Only ADD events can mint a new lot from a
-            # catalog product — REMOVE events with an unresolved id can't
-            # possibly refer to anything real (nothing to remove).
-            if direction != "add":
-                continue
-            product = storage_repo.get_product(self._conn, cid)
-            if product is None:
-                # Neither lot nor product — skip (defensive).
-                continue
-            # Bug B3a: in-session dedup for new-lot minting. If another
-            # event in this session already minted a lot for this
-            # product (picked by product_id from catalog_not_on_shelf),
-            # a second mint is almost always a duplicate picking — the
-            # classifier couldn't distinguish two ADDs of different
-            # items and picked the same product id twice. Check for an
-            # existing resolution against ANY on-shelf lot of this
-            # product in the same session.
+            # **2026-04-27 inventory-only matching (decisions.md #42):**
+            # No lot found for this id, AND the product has no inventory
+            # (otherwise ``_pick_best_lot_for_product`` above would have
+            # resolved it). Minting a new lot from a place event is
+            # FORBIDDEN under the inventory-only rule — the user has
+            # asserted that any item on the live-shelf must already be
+            # in inventory before placement.
             #
-            # Caller (_classify_recorded_event) already holds
-            # ``self._db_lock``; re-acquiring here deadlocks (non-
-            # reentrant). Read under the already-held lock.
-            if session_id is not None:
-                try:
-                    dup_rows = self._conn.execute(
-                        """
-                        SELECT sr.resolution_id, sr.pattern, sr.lot_id,
-                               sr.add_event_id
-                          FROM session_resolutions sr
-                          JOIN lots l ON l.lot_id = sr.lot_id
-                         WHERE sr.session_id = ?
-                           AND l.product_id = ?
-                        """,
-                        (session_id, product.product_id),
-                    ).fetchall()
-                except Exception:  # pragma: no cover - defensive
-                    dup_rows = []
-                dup = None
-                for row in dup_rows:
-                    if event_id is not None and row[3] == event_id:
-                        continue
-                    dup = row
-                    break
-                if dup is not None:
-                    log.warning(
-                        "product %s already received a session_resolution in "
-                        "session %s (lot=%s, pattern=%s); skipping duplicate "
-                        "new-lot mint for event %s",
-                        product.product_id, session_id, dup[2], dup[1],
-                        event_id,
-                    )
-                    continue
-            # Fix 3: informational log — id resolved as product_id path.
-            log.info(
-                "lot update: resolved id %r as product_id (minting new lot)",
-                cid,
-            )
-            try:
-                new_lot = storage_repo.create_lot(
-                    self._conn,
-                    LotIn(
-                        product_id=product.product_id,
-                        status="on_shelf",
-                        current_weight_g=lot_weight_g,
-                        initial_weight_g=lot_weight_g,
-                        total_consumed_g=0.0,
-                        placed_at=event_ts,
-                        last_seen_at=event_ts,
-                        # CATCH_ALL_SCALE_PLAN.md §7: new lots inherit
-                        # the event's shelf_id so a catch-all ADD on a
-                        # catalog_not_on_shelf pick mints the lot on
-                        # the correct shelf. Defaults to 'live_shelf'
-                        # from the helper's kwarg when the caller
-                        # doesn't thread it (e.g. user-review apply).
-                        shelf_id=shelf_id,  # type: ignore[arg-type]
-                    ),
-                )
-            except Exception:  # pragma: no cover - defensive
-                log.exception(
-                    "failed to create lot for product %s from event",
-                    product.product_id,
-                )
-                continue
-            log.info(
-                "created new lot %s for product %s (%.1fg delta) from ADD event",
-                new_lot.lot_id,
-                product.product_id,
-                lot_weight_g,
+            # We log a clear warning so this case is visible during
+            # debugging. The event remains in ``review`` status (the
+            # caller's outer flow surfaces it via the review queue) and
+            # the user must intake the product in ChefByte first, then
+            # re-place it on the shelf.
+            #
+            # The pre-2026-04-27 code path here minted a brand-new lot
+            # from a ``catalog_not_on_shelf`` candidate. That branch
+            # was the source of the "chicken got a duplicate lot"
+            # class of bug — when the user's existing inventory weighed
+            # more than the placed item (because consumption happened
+            # untracked), the classifier would weight-match against the
+            # lighter catalog product and mint a duplicate.
+            log.warning(
+                "inventory-only: classifier id %r resolved to neither a "
+                "lot nor an existing-inventory product for %s event %s; "
+                "no new lot minted (decisions.md #42). User must intake "
+                "the product first, then re-place on the shelf.",
+                cid, direction, event_id,
             )
 
     # ------------------------------------------------------------ main entrypoints

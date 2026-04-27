@@ -92,6 +92,12 @@ def _ctx(conn, tmp_path, shelf_id):
     return ClassifierContext(source=source, shelf_id=shelf_id)
 
 
+# **2026-04-27 (decisions.md #42):** ``Candidate.candidate_id`` is the
+# product_id, not the lot_id. These tests assert shelf scoping is
+# preserved by checking that the product_id of the right-shelf lot
+# appears in the pool while the wrong-shelf product_id does not.
+
+
 def test_remove_pool_catch_all_excludes_live_shelf_lots(tmp_path):
     conn = init_db(":memory:")
     live_lot, catch_lot = _seed_two_shelves(conn)
@@ -100,10 +106,10 @@ def test_remove_pool_catch_all_excludes_live_shelf_lots(tmp_path):
     pool = pool_for_remove(-150.0, ctx)
 
     pool_ids = {c.candidate_id for c in pool}
-    assert catch_lot.lot_id in pool_ids, (
+    assert catch_lot.product_id in pool_ids, (
         "REMOVE pool for catch_all must include catch_all on-shelf lots"
     )
-    assert live_lot.lot_id not in pool_ids, (
+    assert live_lot.product_id not in pool_ids, (
         "REMOVE pool scoped to catch_all leaked a live_shelf lot"
     )
 
@@ -116,8 +122,8 @@ def test_remove_pool_live_shelf_excludes_catch_all_lots(tmp_path):
     pool = pool_for_remove(-300.0, ctx)
 
     pool_ids = {c.candidate_id for c in pool}
-    assert live_lot.lot_id in pool_ids
-    assert catch_lot.lot_id not in pool_ids
+    assert live_lot.product_id in pool_ids
+    assert catch_lot.product_id not in pool_ids
 
 
 def test_candidate_pool_scoped_to_shelf_excludes_other_shelves(tmp_path):
@@ -141,18 +147,18 @@ def test_candidate_pool_scoped_to_shelf_excludes_other_shelves(tmp_path):
     ctx = _ctx(conn, tmp_path, shelf_id="catch_all")
 
     # ADD pool on the catch-all: in-flight branch must NOT surface the
-    # live_shelf lot even though its weight matches the delta.
+    # live_shelf lot's product even though its weight matches the delta.
     add_pool = pool_for_add(300.0, ctx)
     add_ids = {c.candidate_id for c in add_pool}
-    assert live_lot.lot_id not in add_ids, (
+    assert live_lot.product_id not in add_ids, (
         "ADD pool scoped to catch_all leaked a live_shelf in_flight lot"
     )
 
-    # REMOVE pool on the catch-all: only the catch-all on-shelf lot.
+    # REMOVE pool on the catch-all: only the catch-all product visible.
     rem_pool = pool_for_remove(-150.0, ctx)
     rem_ids = {c.candidate_id for c in rem_pool}
-    assert catch_lot.lot_id in rem_ids
-    assert live_lot.lot_id not in rem_ids
+    assert catch_lot.product_id in rem_ids
+    assert live_lot.product_id not in rem_ids
 
 
 def test_unspecified_shelf_id_is_backward_compatible(tmp_path):
@@ -164,6 +170,6 @@ def test_unspecified_shelf_id_is_backward_compatible(tmp_path):
     ctx = _ctx(conn, tmp_path, shelf_id=None)
     pool = pool_for_remove(-200.0, ctx)
     pool_ids = {c.candidate_id for c in pool}
-    # Both shelves' on-shelf lots visible to the unscoped pool.
-    assert live_lot.lot_id in pool_ids
-    assert catch_lot.lot_id in pool_ids
+    # Both shelves' on-shelf products visible to the unscoped pool.
+    assert live_lot.product_id in pool_ids
+    assert catch_lot.product_id in pool_ids
