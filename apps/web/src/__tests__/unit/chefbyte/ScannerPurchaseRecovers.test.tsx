@@ -152,6 +152,15 @@ vi.mock('@/shared/supabase', () => {
       };
 
       builder.maybeSingle = vi.fn(() => {
+        if (table === 'products' && state.filters.barcode != null) {
+          // Real PostgREST: maybeSingle returns null+null on 0 rows
+          // (no PGRST116). Mirror that so the scanner's null-handling
+          // branch exercises correctly.
+          return Promise.resolve({
+            data: state.filters.barcode === productKnown.barcode ? productKnown : null,
+            error: null,
+          });
+        }
         if (table === 'stock_lots' && state.op === 'select') {
           const rows = resolveStockLotsSelect();
           return Promise.resolve({ data: rows[0] ?? null, error: null });
@@ -182,8 +191,14 @@ vi.mock('@/shared/supabase', () => {
       // Awaitable on .update(...).eq(...) — a few callers await without
       // .single(); resolve to no-op success.
       builder.then = (resolve: (v: unknown) => void) => {
-        if (state.op === 'update') {
+        if (state.op === 'update' && table === 'stock_lots') {
           resolve(finishUpdate());
+        } else if (state.op === 'update' && table === 'products') {
+          // products.update on this mock isn't authoritative — the test
+          // doesn't simulate the products table state; just acknowledge
+          // success so the scanner's nutrition push-back path doesn't
+          // surface a bogus "Nutrition update failed".
+          resolve({ data: null, error: null });
         } else {
           resolve({ data: null, error: null });
         }

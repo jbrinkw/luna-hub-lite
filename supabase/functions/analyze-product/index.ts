@@ -134,12 +134,19 @@ async function checkQuota(supabase: any, userId: string): Promise<boolean> {
 
   if (count >= DAILY_QUOTA) return false;
 
-  // Upsert incremented counter
+  // Upsert incremented counter. If the write fails we MUST refuse the
+  // request — otherwise the counter never advances and the same user can
+  // burn through unlimited LLM calls (RLS rejection / outage / etc would
+  // silently degrade quota enforcement).
   const newValue = JSON.stringify({ date: today, count: count + 1 });
-  await supabase
+  const { error: quotaErr } = await supabase
     .schema('chefbyte')
     .from('user_config')
     .upsert({ user_id: userId, key, value: newValue }, { onConflict: 'user_id,key' });
+  if (quotaErr) {
+    console.error('analyze-product: quota upsert failed', quotaErr);
+    return false;
+  }
 
   return true;
 }

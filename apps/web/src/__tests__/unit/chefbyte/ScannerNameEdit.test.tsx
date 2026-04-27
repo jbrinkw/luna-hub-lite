@@ -39,7 +39,9 @@ vi.mock('@/shared/supabase', () => {
       if (table === 'products') {
         // SELECT (product lookup by barcode)
         tableBuilder.select = vi.fn(() => tableBuilder);
-        tableBuilder.single = vi.fn(() => Promise.resolve({ data: productLookupResult, error: null }));
+        const productLookup = vi.fn(() => Promise.resolve({ data: productLookupResult, error: null }));
+        tableBuilder.single = productLookup;
+        tableBuilder.maybeSingle = productLookup;
 
         // UPDATE (name save)
         tableBuilder.update = vi.fn((data: any) => {
@@ -52,21 +54,29 @@ vi.mock('@/shared/supabase', () => {
           return updateChain;
         });
       } else if (table === 'stock_lots') {
-        tableBuilder.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
+        const empty = vi.fn(() => Promise.resolve({ data: null, error: null }));
+        tableBuilder.single = empty;
+        tableBuilder.maybeSingle = empty;
         tableBuilder.insert = vi.fn(() => {
           const c: any = {};
           c.select = vi.fn(() => c);
           c.single = vi.fn(() => Promise.resolve({ data: { lot_id: 'lot-1' }, error: null }));
+          c.maybeSingle = vi.fn(() => Promise.resolve({ data: { lot_id: 'lot-1' }, error: null }));
           return c;
         });
       } else if (table === 'locations') {
-        tableBuilder.single = vi.fn(() => Promise.resolve({ data: { location_id: 'loc-1' }, error: null }));
+        const loc = vi.fn(() => Promise.resolve({ data: { location_id: 'loc-1' }, error: null }));
+        tableBuilder.single = loc;
+        tableBuilder.maybeSingle = loc;
       } else {
-        tableBuilder.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
+        const empty = vi.fn(() => Promise.resolve({ data: null, error: null }));
+        tableBuilder.single = empty;
+        tableBuilder.maybeSingle = empty;
         tableBuilder.insert = vi.fn(() => {
           const c: any = {};
           c.select = vi.fn(() => c);
           c.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
+          c.maybeSingle = vi.fn(() => Promise.resolve({ data: null, error: null }));
           return c;
         });
       }

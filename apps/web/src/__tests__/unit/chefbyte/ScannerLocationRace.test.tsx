@@ -155,6 +155,13 @@ vi.mock('@/shared/supabase', () => {
       };
 
       builder.maybeSingle = vi.fn(() => {
+        if (table === 'products' && state.filters.barcode != null) {
+          // PostgREST maybeSingle returns null+null on 0 rows (no PGRST116).
+          return Promise.resolve({
+            data: state.filters.barcode === productKnown.barcode ? productKnown : null,
+            error: null,
+          });
+        }
         if (table === 'stock_lots' && state.op === 'select') {
           // No existing lot — insert path.
           return Promise.resolve({ data: null, error: null });

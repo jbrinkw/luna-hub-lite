@@ -321,15 +321,18 @@ export function ScannerPage() {
       }
 
       try {
-        // Look up product by barcode
-        const { data: product } = await chefbyte()
+        // Look up product by barcode. Use maybeSingle() because "0 rows" is
+        // the normal first-scan case — single() would raise PGRST116 and
+        // throw us into the catch, blocking the analyze-product fallback.
+        const { data: product, error: lookupErr } = await chefbyte()
           .from('products')
           .select(
             'product_id, name, barcode, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container',
           )
           .eq('user_id', user.id)
           .eq('barcode', barcode)
-          .single();
+          .maybeSingle();
+        if (lookupErr) throw new Error(lookupErr.message);
 
         // A placeholder row (from a previously failed scan) MUST fall through
         // to analyze-product so we can upgrade it to a real product, not
@@ -735,7 +738,7 @@ export function ScannerPage() {
         }
         // Update product nutrition if changed
         if (nutData.calories || nutData.protein || nutData.carbs || nutData.fat) {
-          await chefbyte()
+          const { error: nutErr } = await chefbyte()
             .from('products')
             .update({
               calories_per_serving: parseFloat(nutData.calories) || null,
@@ -745,6 +748,13 @@ export function ScannerPage() {
               servings_per_container: parseFloat(nutData.servingsPerContainer) || 1,
             })
             .eq('product_id', product.product_id);
+          // Don't abort the whole scan on a nutrition write failure (the
+          // stock_lot insert above is the load-bearing part), but DO surface
+          // it via writeError so the row turns red and the user knows the
+          // edited macros didn't actually persist.
+          if (nutErr && !writeError) {
+            writeError = `Nutrition update failed: ${nutErr.message}`;
+          }
         }
 
         // Invalidate the InventoryPage caches BEFORE returning. Previously
@@ -779,7 +789,9 @@ export function ScannerPage() {
         const spc = product.servings_per_container ?? 1;
         const qtyContainers = unitType === 'serving' ? qty / Math.max(spc, 0.001) : qty;
 
-        // Find the food_log that was just created (most recent for this product+date)
+        // Find the food_log that was just created (most recent for this product+date).
+        // maybeSingle() because the first scan of the day legitimately has no
+        // prior row — single() would throw PGRST116 and abort the consume flow.
         const { data: recentLog } = await chefbyte()
           .from('food_logs')
           .select('log_id')
@@ -789,7 +801,7 @@ export function ScannerPage() {
           .is('meal_id', null)
           .order('created_at', { ascending: false })
           .limit(1)
-          .single();
+          .maybeSingle();
 
         queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user.id) });
         queryClient.invalidateQueries({ queryKey: queryKeys.products(user.id) });
@@ -916,20 +928,27 @@ export function ScannerPage() {
             if (info.recordId) {
               if (info.wasNewLot) {
                 // New lot — delete it entirely
-                await chefbyte().from('stock_lots').delete().eq('lot_id', info.recordId);
+                const { error: delErr } = await chefbyte().from('stock_lots').delete().eq('lot_id', info.recordId);
+                if (delErr) throw new Error(delErr.message);
               } else {
                 // Merged lot — decrement qty by the amount added in this scan
-                const { data: lot } = await chefbyte()
+                const { data: lot, error: selErr } = await chefbyte()
                   .from('stock_lots')
                   .select('qty_containers')
                   .eq('lot_id', info.recordId)
-                  .single();
+                  .maybeSingle();
+                if (selErr) throw new Error(selErr.message);
                 if (lot) {
                   const newQty = Number((lot as any).qty_containers) - (info.purchaseQty ?? 1);
                   if (newQty <= 0) {
-                    await chefbyte().from('stock_lots').delete().eq('lot_id', info.recordId);
+                    const { error: delErr } = await chefbyte().from('stock_lots').delete().eq('lot_id', info.recordId);
+                    if (delErr) throw new Error(delErr.message);
                   } else {
-                    await chefbyte().from('stock_lots').update({ qty_containers: newQty }).eq('lot_id', info.recordId);
+                    const { error: updErr } = await chefbyte()
+                      .from('stock_lots')
+                      .update({ qty_containers: newQty })
+                      .eq('lot_id', info.recordId);
+                    if (updErr) throw new Error(updErr.message);
                   }
                 }
               }
@@ -938,27 +957,50 @@ export function ScannerPage() {
           case 'consume':
             // Re-add the consumed stock as a new lot
             if (info.productId && info.locationId && info.qtyContainers && user) {
-              await chefbyte().from('stock_lots').insert({
+              const { error: insErr } = await chefbyte().from('stock_lots').insert({
                 user_id: user.id,
                 product_id: info.productId,
                 location_id: info.locationId,
                 qty_containers: info.qtyContainers,
               });
+              if (insErr) throw new Error(insErr.message);
             }
             // Delete the food_log if one was created
             if (info.logId) {
-              await chefbyte().from('food_logs').delete().eq('log_id', info.logId);
+              const { error: delErr } = await chefbyte().from('food_logs').delete().eq('log_id', info.logId);
+              if (delErr) throw new Error(delErr.message);
             }
             break;
           case 'shopping':
             // Delete the shopping list item
             if (info.recordId) {
-              await chefbyte().from('shopping_list').delete().eq('cart_item_id', info.recordId);
+              const { error: delErr } = await chefbyte()
+                .from('shopping_list')
+                .delete()
+                .eq('cart_item_id', info.recordId);
+              if (delErr) throw new Error(delErr.message);
             }
             break;
         }
-      } catch {
-        // Undo failed — still remove from queue UI so user isn't stuck
+      } catch (err: any) {
+        // Undo failed — surface the error so the user knows the mutation
+        // wasn't actually reverted. Mark the queue row as errored and KEEP
+        // it so the user can retry; previously we silently ate the failure
+        // and removed the row, leaving the user thinking the scan was
+        // undone when it wasn't.
+        setQueue((prev) =>
+          prev.map((item) =>
+            item.id === target.id
+              ? {
+                  ...item,
+                  status: 'error' as const,
+                  confirmed: false,
+                  errorMsg: `Undo failed: ${err?.message ?? 'unknown error'}`,
+                }
+              : item,
+          ),
+        );
+        return;
       }
     }
     setQueue((prev) => prev.filter((item) => item.id !== target.id));
@@ -1059,10 +1101,30 @@ export function ScannerPage() {
   const saveName = async () => {
     const trimmed = editingName.trim();
     if (!trimmed || !activeItem?.productId || !nameEdited || trimmed === activeItem.name) return;
-    await chefbyte()
+    const { error: nameErr } = await chefbyte()
       .from('products')
       .update({ name: trimmed, is_placeholder: false })
       .eq('product_id', activeItem.productId);
+    if (nameErr) {
+      // Surface the failure on the queue row instead of silently leaving
+      // the editor showing the new name while the DB still has the old one.
+      // Also un-confirm so the row's bg flips to danger (the bg-color
+      // logic at render time is driven by `item.confirmed`).
+      const failedItemId = activeItem.id;
+      setQueue((prev) =>
+        prev.map((item) =>
+          item.id === failedItemId
+            ? {
+                ...item,
+                status: 'error' as const,
+                confirmed: false,
+                errorMsg: `Name save failed: ${nameErr.message}`,
+              }
+            : item,
+        ),
+      );
+      return;
+    }
     setQueue((prev) =>
       prev.map((item) => (item.id === activeItem.id ? { ...item, name: trimmed, isNew: false } : item)),
     );

@@ -30,6 +30,7 @@ vi.mock('@/shared/supabase', () => {
         tb[m] = vi.fn(() => tb);
       }
       tb.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
+      tb.maybeSingle = vi.fn(() => Promise.resolve({ data: null, error: null }));
       return tb;
     });
     builder.rpc = vi.fn(() => Promise.resolve({ data: null, error: null }));

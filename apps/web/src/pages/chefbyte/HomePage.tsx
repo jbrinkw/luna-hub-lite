@@ -574,7 +574,7 @@ export function HomePage() {
         const roundedQty = Math.ceil(qty);
         if (roundedQty <= 0) continue;
 
-        await chefbyte().from('shopping_list').upsert(
+        const { error: upsertErr } = await chefbyte().from('shopping_list').upsert(
           {
             user_id: user.id,
             product_id: productId,
@@ -583,6 +583,7 @@ export function HomePage() {
           },
           { onConflict: 'user_id,product_id' },
         );
+        if (upsertErr) throw new Error(upsertErr.message);
       }
 
       invalidateHome();

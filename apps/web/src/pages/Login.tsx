@@ -78,8 +78,12 @@ export function Login() {
       if (signInError) {
         setError('Demo account unavailable. Please create an account.');
       } else {
-        // Shift all date-relative demo data to be relative to today
-        await (supabase.schema('hub') as any).rpc('reset_demo_dates');
+        // Shift all date-relative demo data to be relative to today.
+        // If the RPC fails the demo experience is degraded (dates won't
+        // shift) but the session is valid — log and continue rather than
+        // bouncing the user back to the login screen.
+        const { error: resetErr } = await (supabase.schema('hub') as any).rpc('reset_demo_dates');
+        if (resetErr) console.warn('Login: reset_demo_dates failed', resetErr);
         navigate(redirectTo);
       }
     } finally {

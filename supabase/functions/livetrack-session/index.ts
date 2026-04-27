@@ -216,11 +216,17 @@ async function handlePiUpdate(supabase: SupabaseClient, device: Device, body: an
     // Flip the row to expired so the browser sees it, then 410. Best-
     // effort: ignore any write error since the 410 is the authoritative
     // signal for the Pi.
-    await supabase
+    const { error: expireErr } = await supabase
       .schema('chefbyte')
       .from('livetrack_import_sessions')
       .update({ state: 'expired', updated_at: new Date().toISOString() })
       .eq('session_id', sessionId);
+    if (expireErr) {
+      // Logged for debugging only — the 410 below is the authoritative
+      // signal and we don't want to mask it with a 500 if Postgres is
+      // momentarily unhappy.
+      console.warn('livetrack-session/pi-update: expire flip failed', expireErr);
+    }
     return jsonResponse({ error: 'session expired' }, 410);
   }
 

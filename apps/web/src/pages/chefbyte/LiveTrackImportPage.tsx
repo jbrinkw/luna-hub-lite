@@ -618,7 +618,7 @@ export function LiveTrackImportPage() {
           tareG,
           netWeightG: effectiveNetWeightG,
         });
-        await chefbyte().from('stock_lots').insert({
+        const { error: lotInsErr } = await chefbyte().from('stock_lots').insert({
           user_id: user.id,
           product_id: product.product_id,
           location_id: defaultLocationId,
@@ -626,6 +626,7 @@ export function LiveTrackImportPage() {
           last_update_source: 'manual',
           last_update_ts: new Date().toISOString(),
         });
+        if (lotInsErr) throw new Error(lotInsErr.message);
       }
 
       // Re-arm: clear Pi-written fields and flip state back.

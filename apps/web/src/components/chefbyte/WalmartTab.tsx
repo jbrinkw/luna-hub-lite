@@ -241,11 +241,12 @@ export function WalmartTab() {
       for (const product of products) {
         if (product.notWalmart) {
           // Mark as NOT_ON_WALMART sentinel
-          await chefbyte()
+          const { error: updErr } = await chefbyte()
             .from('products')
             .update({ walmart_link: 'NOT_ON_WALMART' })
             .eq('product_id', product.product_id)
             .eq('user_id', userId);
+          if (updErr) throw new Error(updErr.message);
         } else if (product.selectedOption) {
           // Save selected option's URL + price
           const updates: Record<string, any> = {
@@ -254,14 +255,20 @@ export function WalmartTab() {
           if (product.selectedOption.price != null) {
             updates.price = product.selectedOption.price;
           }
-          await chefbyte().from('products').update(updates).eq('product_id', product.product_id).eq('user_id', userId);
+          const { error: updErr } = await chefbyte()
+            .from('products')
+            .update(updates)
+            .eq('product_id', product.product_id)
+            .eq('user_id', userId);
+          if (updErr) throw new Error(updErr.message);
         } else if (product.customUrl.trim()) {
           // Save custom URL without price
-          await chefbyte()
+          const { error: updErr } = await chefbyte()
             .from('products')
             .update({ walmart_link: cleanWalmartUrl(product.customUrl) })
             .eq('product_id', product.product_id)
             .eq('user_id', userId);
+          if (updErr) throw new Error(updErr.message);
         }
       }
 
@@ -323,8 +330,20 @@ export function WalmartTab() {
             const best = match || data.results[0];
             const price = best?.price ?? null;
 
+            let saved = false;
             if (price != null) {
-              await chefbyte().from('products').update({ price }).eq('product_id', p.product_id).eq('user_id', userId);
+              const { error: priceErr } = await chefbyte()
+                .from('products')
+                .update({ price })
+                .eq('product_id', p.product_id)
+                .eq('user_id', userId);
+              if (priceErr) {
+                // Log but keep going — surface as not-saved in the UI
+                // results table rather than aborting the whole batch.
+                console.warn('WalmartTab: price update failed', priceErr);
+              } else {
+                saved = true;
+              }
             }
 
             results.push({
@@ -332,7 +351,7 @@ export function WalmartTab() {
               name: p.name,
               price,
               source: best?.title || null,
-              saved: price != null,
+              saved,
             });
           } else {
             results.push({
@@ -413,7 +432,16 @@ export function WalmartTab() {
           const price = match?.price ?? data.results[0]?.price;
 
           if (price != null) {
-            await chefbyte().from('products').update({ price }).eq('product_id', p.product_id).eq('user_id', userId);
+            const { error: priceErr } = await chefbyte()
+              .from('products')
+              .update({ price })
+              .eq('product_id', p.product_id)
+              .eq('user_id', userId);
+            if (priceErr) {
+              // Log and continue — refreshAllPrices is a bulk job and we
+              // don't want one bad row to abort the rest of the batch.
+              console.warn('WalmartTab: refresh price update failed', priceErr);
+            }
           }
         }
         done++;

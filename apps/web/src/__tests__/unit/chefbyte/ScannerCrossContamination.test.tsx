@@ -110,6 +110,25 @@ vi.mock('@/shared/supabase', () => {
         }
         return Promise.resolve({ data: null, error: null });
       });
+      // maybeSingle differs from single in that 0-row results return
+      // { data: null, error: null } rather than PGRST116. Match real
+      // PostgREST semantics so the scanner's null-handling branch
+      // exercises correctly.
+      b.maybeSingle = vi.fn(() => {
+        if (table === 'products' && state.filters.barcode != null) {
+          const barcode = String(state.filters.barcode);
+          const hit = Object.values(productsById).find((p) => p.barcode === barcode);
+          return Promise.resolve({ data: hit ?? null, error: null });
+        }
+        if (table === 'products' && state.filters.product_id != null) {
+          const id = String(state.filters.product_id);
+          return Promise.resolve({ data: productsById[id] ?? null, error: null });
+        }
+        if (table === 'stock_lots') {
+          return Promise.resolve({ data: null, error: null });
+        }
+        return Promise.resolve({ data: null, error: null });
+      });
       b.then = (resolve: (v: unknown) => void) => {
         resolve({ data: null, error: null });
       };
