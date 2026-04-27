@@ -23,7 +23,7 @@ on:
 
 permissions:
   contents: read
-  issues: write  # create/update/close drift-nightly issues
+  issues: write # create/update/close drift-nightly issues
 
 jobs:
   ast-diff:

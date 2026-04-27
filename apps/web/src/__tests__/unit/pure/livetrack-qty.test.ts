@@ -174,7 +174,7 @@ describe('computeQtyContainersFromScale (item #30 / 91550dd)', () => {
     ).toBe(1);
   });
 
-  it('null netWeightG → qty = 1 (fallback, can\'t normalize)', () => {
+  it("null netWeightG → qty = 1 (fallback, can't normalize)", () => {
     // Without a declared net_weight_g, we can't express the reading as
     // a fraction of containers — fall back to 1 so the lot at least lands.
     expect(

@@ -72,10 +72,10 @@ async function main() {
 
   try {
     console.log(`[2] activate chefbyte for user`);
-    await admin.schema('hub').from('user_apps').upsert(
-      { user_id: userId, app_name: 'chefbyte', active: true },
-      { onConflict: 'user_id,app_name' },
-    );
+    await admin
+      .schema('hub')
+      .from('user_apps')
+      .upsert({ user_id: userId, app_name: 'chefbyte', active: true }, { onConflict: 'user_id,app_name' });
 
     console.log(`[3] seed a live_shelf_device (prereq for livetrack-session/create)`);
     const rawKey = `test-key-${suffix}`;
@@ -184,22 +184,19 @@ async function main() {
 
     console.log(`[9] simulate Pi pi-update with scale_reading`);
     const simulatedReading = 500.0; // grams
-    const piUpdateResp = await fetch(
-      `${SUPABASE_URL}/functions/v1/livetrack-session/pi-update`,
-      {
-        method: 'POST',
-        headers: {
-          'x-api-key': rawKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          session_id: sessionId,
-          scale_reading_g: simulatedReading,
-          scale_reading_ts: new Date().toISOString(),
-          state: 'scale_reading_received',
-        }),
+    const piUpdateResp = await fetch(`${SUPABASE_URL}/functions/v1/livetrack-session/pi-update`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': rawKey,
+        'Content-Type': 'application/json',
       },
-    );
+      body: JSON.stringify({
+        session_id: sessionId,
+        scale_reading_g: simulatedReading,
+        scale_reading_ts: new Date().toISOString(),
+        state: 'scale_reading_received',
+      }),
+    });
     const piUpdateBody = await piUpdateResp.json();
     console.log(`    pi-update status=${piUpdateResp.status}  body=${JSON.stringify(piUpdateBody).slice(0, 200)}`);
     if (piUpdateResp.status !== 200) throw new Error(`pi-update failed`);
@@ -230,7 +227,9 @@ async function main() {
       .select('tare_weight_g, calories_per_serving')
       .eq('product_id', productId)
       .single();
-    console.log(`    ✓ products.tare_weight_g=${afterProd?.tare_weight_g}  calories=${afterProd?.calories_per_serving}`);
+    console.log(
+      `    ✓ products.tare_weight_g=${afterProd?.tare_weight_g}  calories=${afterProd?.calories_per_serving}`,
+    );
     if (afterProd?.tare_weight_g == null) throw new Error(`auto-tare did not persist`);
 
     console.log(`[11] AI TARE path — patch state=awaiting_ai_tare`);
@@ -252,23 +251,20 @@ async function main() {
 
     console.log(`[12] simulate Pi posting AI-tare result`);
     const aiTareG = 55.0;
-    const aiUpdateResp = await fetch(
-      `${SUPABASE_URL}/functions/v1/livetrack-session/pi-update`,
-      {
-        method: 'POST',
-        headers: {
-          'x-api-key': rawKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          session_id: sessionId,
-          ai_tare_g: aiTareG,
-          ai_tare_confidence: 'medium',
-          ai_tare_reasoning: 'E2E stub',
-          state: 'ai_tare_ready',
-        }),
+    const aiUpdateResp = await fetch(`${SUPABASE_URL}/functions/v1/livetrack-session/pi-update`, {
+      method: 'POST',
+      headers: {
+        'x-api-key': rawKey,
+        'Content-Type': 'application/json',
       },
-    );
+      body: JSON.stringify({
+        session_id: sessionId,
+        ai_tare_g: aiTareG,
+        ai_tare_confidence: 'medium',
+        ai_tare_reasoning: 'E2E stub',
+        state: 'ai_tare_ready',
+      }),
+    });
     const aiUpdateBody = await aiUpdateResp.json();
     console.log(`    pi-update(AI) status=${aiUpdateResp.status}  body=${JSON.stringify(aiUpdateBody).slice(0, 200)}`);
     if (aiUpdateResp.status !== 200) throw new Error(`pi-update AI failed`);

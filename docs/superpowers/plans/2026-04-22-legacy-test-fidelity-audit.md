@@ -73,7 +73,7 @@ blindspot already documented in the wave reaudit.
   (test-inline implementation).
 - **Concrete realistic regression:** a developer replaces TodayPage's
   pause button handler with `coachbyte.from('timers').update({ state:
-  'paused', paused_at: now }).eq('user_id', userId)` (drops the
+'paused', paused_at: now }).eq('user_id', userId)` (drops the
   required `.eq('state', 'running')` guard). A user double-clicks
   pause on an expired timer and transitions expired→paused. Timer DB
   row is corrupted. `timer_states.test.sql` still passes — because
@@ -174,7 +174,7 @@ blindspot already documented in the wave reaudit.
 - **Concrete realistic regression:** publication config drops
   `chefbyte.stock_lots` from the realtime publication (the same bug
   that `9011487 fix(realtime): add live_shelf_devices + scale_pairings
-  to realtime publication` fixed). No realtime subscriptions test
+to realtime publication` fixed). No realtime subscriptions test
   catches this — the browser-side e2e realtime.spec.ts does, but
   that's the WAVE addition being protected AGAINST here.
 - **Recommended fix:** the probe pattern used in
@@ -193,7 +193,7 @@ blindspot already documented in the wave reaudit.
   handler level. The wave-1-2-3 reaudit §2.4 already flagged
   `test_cloud_contract.py` for structural-only testing; the gap is
   present here too. `test_heartbeat_regression.py` (line 69) is a
-  genuine two-call test but it's for a *different* property (stale
+  genuine two-call test but it's for a _different_ property (stale
   heartbeats not regressing weight) — it doesn't exercise the
   livetrack state machine.
 - **Class of blindspot:** #1 (single-call where multi-call sequence
@@ -289,8 +289,7 @@ blindspot already documented in the wave reaudit.
   file).
 - **Original audit's grade:** HIGH
 - **Actual fidelity:** the SELECT-as-UserB pattern is
-  `(SELECT count(*) FROM table WHERE user_id = user_a_uid)` expects
-  0. A broken RLS policy that silently returns empty for all queries
+  `(SELECT count(*) FROM table WHERE user_id = user_a_uid)` expects 0. A broken RLS policy that silently returns empty for all queries
   (including user A's own) would ALSO make this test pass. The test
   doesn't confirm user B could SELECT their own row first to prove
   the query machinery works.
@@ -525,6 +524,7 @@ describe block.
 ### 4.4 Test-tests-the-mock patterns
 
 Three distinct variants:
+
 - Inline helper (keypad-logic.test.ts — mitigated by real-component
   ScannerKeypad.test.tsx)
 - Test SQL implements the guard (timer_states.test.sql — CRITICAL)
@@ -549,6 +549,7 @@ already has access.
 
 Wave 1-2-3 (per reaudit doc) added 7 tests with the same-class-as-
 livetrack blindspot. This legacy audit finds:
+
 - §4.1 "UI emulated via direct DB" — wave introduced 18 new cases
   (parity.spec.ts expansion). Legacy had ~30 from the page-query-
   replica files. **Wave did not introduce a novel class — it
@@ -583,8 +584,8 @@ generous.
 3. **[S]** Delete `keypad-logic.test.ts` (§2.14) — ScannerKeypad.test.tsx
    covers it properly.
 4. **[S]** Delete or rename the 15 `__tests__/integration/pages/chef-*`
-   + `coach-*` files to drop the "PageName queries" framing and
-   acknowledge they're DB-contract tests (§2.3, §4.1).
+   - `coach-*` files to drop the "PageName queries" framing and
+     acknowledge they're DB-contract tests (§2.3, §4.1).
 
 ### Short-term (M — this week)
 
@@ -598,7 +599,7 @@ generous.
 8. **[M]** Add the 2-line positive-probe preamble to every pgTAP
    RLS test block (§2.10, §4.3).
 9. **[M]** Fix `today.spec.ts::summary textarea` — use waitForResponse
-   + DB assertion BEFORE reload (§2.9).
+   - DB assertion BEFORE reload (§2.9).
 10. **[M]** Delete `chef-scanner.test.ts` integration-pages file —
     scanner.spec.ts E2E already covers it (§2.8).
 11. **[M]** Tighten `shelf-ingest` idempotency test to include a
@@ -672,22 +673,22 @@ Walked `git log --before=2026-04-18 --grep="^fix" --oneline -50`.
 For each of the 14 most impactful fixes, would the current legacy
 suite (excluding wave 1-2-3 additions) catch a regression?
 
-| Commit | Description | Caught? | Why |
-|---|---|---|---|
-| `3de4ee5` | mcp: round 4 — empty tool blocks, null content | PARTIAL | `mcp-worker.test.ts` covers the JSON-RPC happy paths; empty-tool-block edge case not pinned by any test |
-| `d9752e9` | hub: prevent encrypted key leak + AgentPage UX + HA SSRF | NO | The HA SSRF fix is covered by wave SSRF guard; pre-wave encryption-leak risk has no direct test. |
-| `0d67f66` | mcp: remove legacy DO routes + error handling | NO | Legacy-route removal isn't pinned; tests check current routes only. |
-| `7ede713` | obsidian: UTF-8 encoding, path separators, blob cap | PARTIAL | `extensions.test.ts` Obsidian mocks cover basic shape; blob-size cap regression invisible. |
-| `c265c4e` | mcp: disable GET /sse | NO | No test asserts `GET /sse → 405`. |
-| `b98fb3f` | mcp: POST /sse stateless | NO | `mcp-worker.test.ts` happy-path; stateful regression invisible per wave reaudit §2.13. |
-| `0b2f2b5` | ActivationGuard spinner + auth timeout | NO | No test exercises the auth timeout branch. |
-| `2e2e5d7` | chef: duplicate-key error in auto-add below min stock | YES | `chef-shopping.test.ts` + shopping.spec.ts cover below-min + duplicate scenarios. |
-| `dc28f37` | stale closure in TodayPage notes/summary blur | PARTIAL | today.spec.ts summary test exists but has the waitForTimeout hack (§2.9); stale-closure would surface if timing aligned unluckily. |
-| `0891127` | deep audit — stock lot merges + stale realtime + fetch timeouts | PARTIAL | Stock lot merge is covered by realtime.spec.ts + scanner.spec.ts SCN7-like logic; fetch timeouts aren't tested explicitly. |
-| `4cfb434` | remove hardcoded JWTs | n/a | Static analysis concern — not a behavioral regression. |
-| `6ea5243` | prod deployment: ES256 + edge fn hardening | PARTIAL | OAuth tests (wave) cover some; edge-fn hardening is partially covered by wave failure-path tests. |
-| `edc5981` | Walmart deep link + seed date spread + demo reset | YES | `demo-contamination.spec.ts` + shopping.spec.ts + walmart.spec.ts. |
-| `f369bb3` | scanner: confirm (red→green) only on click-away | YES | scanner.spec.ts::SCN7 pins this exactly. |
+| Commit    | Description                                                     | Caught? | Why                                                                                                                                |
+| --------- | --------------------------------------------------------------- | ------- | ---------------------------------------------------------------------------------------------------------------------------------- |
+| `3de4ee5` | mcp: round 4 — empty tool blocks, null content                  | PARTIAL | `mcp-worker.test.ts` covers the JSON-RPC happy paths; empty-tool-block edge case not pinned by any test                            |
+| `d9752e9` | hub: prevent encrypted key leak + AgentPage UX + HA SSRF        | NO      | The HA SSRF fix is covered by wave SSRF guard; pre-wave encryption-leak risk has no direct test.                                   |
+| `0d67f66` | mcp: remove legacy DO routes + error handling                   | NO      | Legacy-route removal isn't pinned; tests check current routes only.                                                                |
+| `7ede713` | obsidian: UTF-8 encoding, path separators, blob cap             | PARTIAL | `extensions.test.ts` Obsidian mocks cover basic shape; blob-size cap regression invisible.                                         |
+| `c265c4e` | mcp: disable GET /sse                                           | NO      | No test asserts `GET /sse → 405`.                                                                                                  |
+| `b98fb3f` | mcp: POST /sse stateless                                        | NO      | `mcp-worker.test.ts` happy-path; stateful regression invisible per wave reaudit §2.13.                                             |
+| `0b2f2b5` | ActivationGuard spinner + auth timeout                          | NO      | No test exercises the auth timeout branch.                                                                                         |
+| `2e2e5d7` | chef: duplicate-key error in auto-add below min stock           | YES     | `chef-shopping.test.ts` + shopping.spec.ts cover below-min + duplicate scenarios.                                                  |
+| `dc28f37` | stale closure in TodayPage notes/summary blur                   | PARTIAL | today.spec.ts summary test exists but has the waitForTimeout hack (§2.9); stale-closure would surface if timing aligned unluckily. |
+| `0891127` | deep audit — stock lot merges + stale realtime + fetch timeouts | PARTIAL | Stock lot merge is covered by realtime.spec.ts + scanner.spec.ts SCN7-like logic; fetch timeouts aren't tested explicitly.         |
+| `4cfb434` | remove hardcoded JWTs                                           | n/a     | Static analysis concern — not a behavioral regression.                                                                             |
+| `6ea5243` | prod deployment: ES256 + edge fn hardening                      | PARTIAL | OAuth tests (wave) cover some; edge-fn hardening is partially covered by wave failure-path tests.                                  |
+| `edc5981` | Walmart deep link + seed date spread + demo reset               | YES     | `demo-contamination.spec.ts` + shopping.spec.ts + walmart.spec.ts.                                                                 |
+| `f369bb3` | scanner: confirm (red→green) only on click-away                 | YES     | scanner.spec.ts::SCN7 pins this exactly.                                                                                           |
 
 **Pre-wave catch rate: ~40% (5 partial + 2 yes out of 14).** The
 wave-1-2-3 reaudit measured a similar rate (~50%). The legacy suite
@@ -705,17 +706,17 @@ code. Direct consequence of §2.1.
 
 ## 7. Comparison to wave-1-2-3 reaudit
 
-| Metric | Wave additions (reaudit) | Pre-existing (this doc) |
-|---|---|---|
-| Total tests | ~160 new | ~1,200 |
-| Flagged CRITICAL | 2 | 2 |
-| Flagged HIGH | 5 | 7 |
-| Flagged MEDIUM | 5 | 11 |
-| Flagged LOW (rename/cosmetic) | 2 | 3 |
-| Green count | 11 | 16 |
-| Regression-retrospective catch rate | ~50% | ~40% |
-| Blindspot classes introduced | 0 new | 4 pre-existing |
-| Regrade | B- | C+ |
+| Metric                              | Wave additions (reaudit) | Pre-existing (this doc) |
+| ----------------------------------- | ------------------------ | ----------------------- |
+| Total tests                         | ~160 new                 | ~1,200                  |
+| Flagged CRITICAL                    | 2                        | 2                       |
+| Flagged HIGH                        | 5                        | 7                       |
+| Flagged MEDIUM                      | 5                        | 11                      |
+| Flagged LOW (rename/cosmetic)       | 2                        | 3                       |
+| Green count                         | 11                       | 16                      |
+| Regression-retrospective catch rate | ~50%                     | ~40%                    |
+| Blindspot classes introduced        | 0 new                    | 4 pre-existing          |
+| Regrade                             | B-                       | C+                      |
 
 **Interpretation:** the wave additions introduced almost no novel
 blindspots — they inherited and expanded existing ones. The

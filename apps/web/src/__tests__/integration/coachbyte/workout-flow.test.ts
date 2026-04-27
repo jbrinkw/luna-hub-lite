@@ -130,8 +130,8 @@ describe('CoachByte workout flow (real Supabase)', () => {
     // Complete set 1 → should return rest_seconds of set 2 (120)
     const { data: result1, error: err1 } = await (client.schema('coachbyte') as any).rpc('complete_next_set', {
       p_plan_id: planId,
-      p_reps: 5,
-      p_load: 135,
+      p_actual_reps: 5,
+      p_actual_load: 135,
     });
     expect(err1).toBeNull();
     expect(result1).toHaveLength(1);
@@ -140,8 +140,8 @@ describe('CoachByte workout flow (real Supabase)', () => {
     // Complete set 2 → should return rest_seconds of set 3 (90)
     const { data: result2, error: err2 } = await (client.schema('coachbyte') as any).rpc('complete_next_set', {
       p_plan_id: planId,
-      p_reps: 5,
-      p_load: 155,
+      p_actual_reps: 5,
+      p_actual_load: 155,
     });
     expect(err2).toBeNull();
     expect(result2).toHaveLength(1);
@@ -150,8 +150,8 @@ describe('CoachByte workout flow (real Supabase)', () => {
     // Complete set 3 → should return null rest_seconds (no more sets)
     const { data: result3, error: err3 } = await (client.schema('coachbyte') as any).rpc('complete_next_set', {
       p_plan_id: planId,
-      p_reps: 8,
-      p_load: 95,
+      p_actual_reps: 8,
+      p_actual_load: 95,
     });
     expect(err3).toBeNull();
     expect(result3).toHaveLength(1);
@@ -208,8 +208,8 @@ describe('CoachByte workout flow (real Supabase)', () => {
     // Complete one set
     const { error: completeError } = await (client.schema('coachbyte') as any).rpc('complete_next_set', {
       p_plan_id: planId,
-      p_reps: 5,
-      p_load: 135,
+      p_actual_reps: 5,
+      p_actual_load: 135,
     });
     expect(completeError).toBeNull();
 

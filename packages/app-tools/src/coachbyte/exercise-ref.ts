@@ -16,11 +16,7 @@ export type ResolveResult = {
   unresolved: string[];
 };
 
-export async function resolveExerciseRefs(
-  supabase: any,
-  userId: string,
-  refs: string[],
-): Promise<ResolveResult> {
+export async function resolveExerciseRefs(supabase: any, userId: string, refs: string[]): Promise<ResolveResult> {
   const neededLower = new Set<string>();
   for (const r of refs) {
     if (r && !UUID_RE.test(r)) neededLower.add(r.toLowerCase());

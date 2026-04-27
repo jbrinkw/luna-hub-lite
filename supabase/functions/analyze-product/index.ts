@@ -55,12 +55,7 @@ function testForceFailure(req: Request): string | null {
   if (!isLocalDev()) return null;
   const h = req.headers.get('x-test-force-failure');
   if (!h) return null;
-  const allowed = new Set([
-    'off_503',
-    'off_malformed',
-    'anthropic_timeout',
-    'anthropic_malformed',
-  ]);
+  const allowed = new Set(['off_503', 'off_malformed', 'anthropic_timeout', 'anthropic_malformed']);
   return allowed.has(h) ? h : null;
 }
 
@@ -96,12 +91,12 @@ const CANNED_OFF_PRODUCT = {
   nutriments: {
     'energy-kcal_100g': 539,
     'energy-kcal_serving': 80.8,
-    'carbohydrates_100g': 57.5,
-    'carbohydrates_serving': 8.62,
-    'proteins_100g': 6.3,
-    'proteins_serving': 0.95,
-    'fat_100g': 30.9,
-    'fat_serving': 4.64,
+    carbohydrates_100g: 57.5,
+    carbohydrates_serving: 8.62,
+    proteins_100g: 6.3,
+    proteins_serving: 0.95,
+    fat_100g: 30.9,
+    fat_serving: 4.64,
   },
 };
 
@@ -187,7 +182,7 @@ async function fetchOpenFoodFacts(barcode: string, forceFailure: string | null =
   let json: any;
   try {
     json = await resp.json();
-  } catch (err) {
+  } catch (_err) {
     // OFF returned a 2xx with a body we can't parse — treat as upstream
     // unavailable, not as "product not found". Preserves the user's
     // quota and lets the UI retry.
@@ -395,10 +390,7 @@ Deno.serve(async (req) => {
           bad_key: 'AI service auth failed — check ANTHROPIC_API_KEY',
           billing: 'AI service has no credits — top up billing and try again',
         };
-        return jsonResponse(
-          { error: REASON_COPY[reason], ai_reason: reason, off: offProduct },
-          503,
-        );
+        return jsonResponse({ error: REASON_COPY[reason], ai_reason: reason, off: offProduct }, 503);
       }
       // Soft failure — degrade to OFF-only and let the scanner use its
       // nutriments fallback. Record the reason so the UI can still hint

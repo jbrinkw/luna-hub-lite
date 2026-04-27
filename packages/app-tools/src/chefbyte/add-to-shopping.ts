@@ -22,13 +22,11 @@ export const addToShopping: ToolDefinition = {
     // Use the additive RPC: INSERT ... ON CONFLICT DO UPDATE SET qty = existing + EXCLUDED.
     // The previous PostgREST upsert was REPLACE-on-conflict, which violated the
     // "additive upsert" spec and caused the 2026-04-22 E2E audit's Bug 2.
-    const { data, error } = await ctx.supabase
-      .schema('chefbyte')
-      .rpc('add_to_shopping_admin', {
-        p_user_id: ctx.userId,
-        p_product_id: product_id,
-        p_qty: qty_containers,
-      });
+    const { data, error } = await ctx.supabase.schema('chefbyte').rpc('add_to_shopping_admin', {
+      p_user_id: ctx.userId,
+      p_product_id: product_id,
+      p_qty: qty_containers,
+    });
 
     if (error) return toolError(`Failed to add to shopping list: ${error.message}`);
     const row: any = Array.isArray(data) ? data[0] : data;

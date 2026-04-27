@@ -258,7 +258,11 @@ describe('Auth lifecycle', () => {
 
     // To-address round-trip: if the auth endpoint silently sends to the
     // wrong recipient this caught-in-flight assertion fails.
-    expect(message!.To.map((t) => t.Address).join(',').toLowerCase()).toContain(email.toLowerCase());
+    expect(
+      message!.To.map((t) => t.Address)
+        .join(',')
+        .toLowerCase(),
+    ).toContain(email.toLowerCase());
 
     // Body must contain the verify endpoint + a recovery type flag —
     // a mis-templated email without a token/type would slip through a

@@ -24,6 +24,7 @@ shelf.
 ## 2. Goals / non-goals
 
 **Goals**
+
 - Track items the user consumes that never go on the live shelf (snacks
   from the pantry, portions from a bulk container, etc.).
 - Reuse the existing `in_flight` status, `usage_log` table, and classifier
@@ -32,6 +33,7 @@ shelf.
 - Single-item events only — the catch-all is for "one thing at a time."
 
 **Non-goals**
+
 - No multi-item classification on the catch-all (no `multi_match` logic).
 - No door / brightness gating — the catch-all is always "open" to events.
 - No cross-shelf matching — a live-shelf item placed on the catch-all is
@@ -43,6 +45,7 @@ shelf.
 ## 3. Hardware
 
 **ESP unit:**
+
 - Wemos D1 Mini (same board as scale-01) with ONE HX711 load cell instead
   of four. Device id `scale-02`. Static IP `192.168.0.198` (or DHCP with
   mDNS — either works, Pi is the authoritative resolver).
@@ -53,12 +56,14 @@ shelf.
   the onboard web UI).
 
 **USB camera:**
+
 - Second USB webcam → plugs into any free Pi port. Maps to `/dev/video2`
   (0 = live-shelf cam, 1 is often the /dev/video0 format device, 2 is the
   next free) — verify with `v4l2-ctl --list-devices` after plug-in.
 - Resolution + fps: same as the live-shelf cam (1280x720 @ 10 fps).
 
 **Physical placement:**
+
 - The catch-all sits next to the fridge on a flat surface. The camera
   mounts above (desk-arm, small tripod, or wall shelf) pointing down at
   the scale surface. No enclosure — lighting comes from ambient kitchen
@@ -73,6 +78,7 @@ Minimal additions — reuse everything.
 ### 4.1 `shelf_id` discriminator column
 
 Add `shelf_id TEXT NOT NULL DEFAULT 'live_shelf'` to:
+
 - `lots`
 - `sessions`
 - `scale_events`
@@ -100,6 +106,7 @@ as a new column.
 ### 4.3 Shelf-identity lookup
 
 A small module-level dict `SHELF_REGISTRY` maps `shelf_id` → config:
+
 ```py
 SHELF_REGISTRY = {
     "live_shelf": {
@@ -116,6 +123,7 @@ SHELF_REGISTRY = {
     },
 }
 ```
+
 Loaded from config + optionally overridden by env vars.
 
 ### 4.4 No usage_log changes
@@ -181,6 +189,7 @@ Scale state: weight == 0   (idle)
 
 Key point: the catch-all reuses the existing `on_shelf ↔ in_flight`
 transitions from the in-flight tracker. The only novelty is:
+
 1. Weight-triggered session open/close (vs. brightness).
 2. 1.5 s photo delay on the ADD event (vs. frame-picker settle).
 3. Single-item-only pool.
@@ -224,6 +233,7 @@ after 4 h and records the full pickup weight as consumption.
 ### 6.1 New: `WeightHandler` (brightness analog)
 
 `server/handlers/weight.py`:
+
 ```py
 class WeightHandler:
     def __init__(self, *, conn, db_lock, shelf_id, onscale_threshold_g=5.0, ...):
@@ -260,10 +270,12 @@ pick reads from the catch-all daemon's ring buffer at
 ### 6.3 Extended: `ScaleHandler` routing by `device_id`
 
 `handle_scale_event` already receives `device_id` in the payload. Route:
+
 - `device_id == 'scale-01'` → live-shelf session lookup (brightness-backed)
 - `device_id == 'scale-02'` → catch-all session lookup (weight-backed)
 
 At the apply stage:
+
 - Candidate source is shelf-aware (§6.5).
 - Frame picker uses the right camera daemon (§6.2).
 - `session_id` back-stamps use the shelf's `current_*_session_id`.
@@ -274,6 +286,7 @@ One handler; two routes internally. Keeps the HTTP surface simple (one
 ### 6.4 Extended: session-capture module
 
 `session_capture` is currently brightness-bound. Split into:
+
 - `session_capture_brightness` (existing logic, live-shelf only)
 - `session_capture_weight` (new, catch-all — simpler: no lit-frame
   archive, just pass-through from the catch-all camera daemon for
@@ -313,6 +326,7 @@ Add `shelf_id` parameter to `get_on_shelf_lots`, `get_in_flight_lots`,
 ```
 
 **Dashboard** — two live preview tiles side-by-side:
+
 ```
   live shelf preview      catch-all preview
   [ /live.mjpg?shelf=      [ /live.mjpg?shelf=
@@ -333,6 +347,7 @@ shelf.
 
 Single-load-cell variant: `firmware/scale-catch-all.ino`. 95 % copy of
 `scale-live.ino` with:
+
 - 1 × HX711 instead of 4 (one DOUT pin).
 - Same stability logic, same stability thresholds (tune per scale as
   needed via the onboard web UI).
@@ -346,13 +361,13 @@ Heartbeat cadence: 500 ms, same as scale-01.
 Three new values in `config.py` `DEFAULTS`, all runtime-tunable via
 `/api/config`:
 
-| Name                               | Default | Purpose                                      |
-| ---------------------------------- | ------- | -------------------------------------------- |
-| `CATCH_ALL_CAMERA_DEVICE`          | `/dev/video2` | USB device for the catch-all camera.   |
-| `CATCH_ALL_PHOTO_DELAY_S`          | 1.5     | Delay between first weight detection and the photo. |
-| `CATCH_ALL_ONSCALE_THRESHOLD_G`    | 5.0     | Weight above which a catch-all session opens. |
-| `CATCH_ALL_DEVICE_ID`              | `scale-02` | ESP `device_id` expected on ingress.   |
-| `CATCH_ALL_ENABLED`                | false   | Feature flag — off for boot until we flip it after deploy. |
+| Name                            | Default       | Purpose                                                    |
+| ------------------------------- | ------------- | ---------------------------------------------------------- |
+| `CATCH_ALL_CAMERA_DEVICE`       | `/dev/video2` | USB device for the catch-all camera.                       |
+| `CATCH_ALL_PHOTO_DELAY_S`       | 1.5           | Delay between first weight detection and the photo.        |
+| `CATCH_ALL_ONSCALE_THRESHOLD_G` | 5.0           | Weight above which a catch-all session opens.              |
+| `CATCH_ALL_DEVICE_ID`           | `scale-02`    | ESP `device_id` expected on ingress.                       |
+| `CATCH_ALL_ENABLED`             | false         | Feature flag — off for boot until we flip it after deploy. |
 
 The live shelf's existing `EVENT_DELTA_THRESHOLD_G` (15 g) governs the
 scale-event minimum delta for BOTH shelves. A future knob can split
@@ -429,6 +444,7 @@ Each step independently committable + testable:
 ### 11.2 Integration
 
 `server/tests/test_catch_all_end_to_end.py`:
+
 - **New placement:** catch-all session opens, UNKNOWN mint path fires,
   lot exists with shelf_id='catch_all', status='on_shelf', reference
   image written.
@@ -456,6 +472,7 @@ Each step independently committable + testable:
 ### 11.5 Hardware smoke (Pi)
 
 Ad-hoc, no automated test — document the manual steps:
+
 1. Plug in second camera. Confirm `v4l2-ctl --list-devices` sees it at
    `/dev/video2`.
 2. Flash scale-02 firmware. Confirm it heartbeats on the Pi.
@@ -468,6 +485,7 @@ Ad-hoc, no automated test — document the manual steps:
 ## 12. Observability
 
 New `ReasonCode` entries in `storage/lifecycle.py`:
+
 - `CATCH_ALL_SESSION_OPENED`
 - `CATCH_ALL_SESSION_CLOSED`
 - `CATCH_ALL_PHOTO_CAPTURED`
@@ -513,4 +531,4 @@ timeline works unchanged.
 
 ---
 
-*End of plan.*
+_End of plan._

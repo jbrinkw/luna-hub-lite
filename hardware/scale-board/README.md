@@ -25,36 +25,36 @@ inputs streamed over WiFi.
 
 ## What's in this directory
 
-| Path | What it is |
-|---|---|
-| `design.py` | The circuit-synth Python source. Edit this to change the design. |
-| `kicad/scale_carrier_board.kicad_pro` | KiCad project file. Open this in KiCad. |
-| `kicad/scale_carrier_board.kicad_sch` | Schematic (placed + wired). |
-| `kicad/scale_carrier_board.net` | KiCad netlist (input for Quilter.ai). |
-| `kicad/scale_carrier_board.json` | Canonical JSON netlist (circuit-synth source-of-truth). |
-| `bom.csv` | Bill of materials with LCSC part numbers (input for JLCPCB assembly). |
-| `.venv/` | Python venv with circuit-synth installed (re-run `design.py` from here). |
+| Path                                  | What it is                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------ |
+| `design.py`                           | The circuit-synth Python source. Edit this to change the design.         |
+| `kicad/scale_carrier_board.kicad_pro` | KiCad project file. Open this in KiCad.                                  |
+| `kicad/scale_carrier_board.kicad_sch` | Schematic (placed + wired).                                              |
+| `kicad/scale_carrier_board.net`       | KiCad netlist (input for Quilter.ai).                                    |
+| `kicad/scale_carrier_board.json`      | Canonical JSON netlist (circuit-synth source-of-truth).                  |
+| `bom.csv`                             | Bill of materials with LCSC part numbers (input for JLCPCB assembly).    |
+| `.venv/`                              | Python venv with circuit-synth installed (re-run `design.py` from here). |
 
 ## Pinout summary
 
-| Wemos pin | KiCad pin # | GPIO   | Connected to       |
-|-----------|-------------|--------|--------------------|
-| 3V3       | 8           | —      | All HX711 power, bulk caps, LED rail |
+| Wemos pin | KiCad pin # | GPIO   | Connected to                               |
+| --------- | ----------- | ------ | ------------------------------------------ |
+| 3V3       | 8           | —      | All HX711 power, bulk caps, LED rail       |
 | GND       | 10          | —      | All grounds, RATE pins (10 SPS), BASE pins |
-| D7 (MOSI) | 6           | GPIO13 | Shared `PD_SCK` to all four HX711s |
-| D6 (MISO) | 5           | GPIO12 | HX711 #0 `DOUT` |
-| D1 (SCL)  | 14          | GPIO5  | HX711 #1 `DOUT` |
-| D2 (SDA)  | 13          | GPIO4  | HX711 #2 `DOUT` |
-| D5 (SCK)  | 4           | GPIO14 | HX711 #3 `DOUT` |
+| D7 (MOSI) | 6           | GPIO13 | Shared `PD_SCK` to all four HX711s         |
+| D6 (MISO) | 5           | GPIO12 | HX711 #0 `DOUT`                            |
+| D1 (SCL)  | 14          | GPIO5  | HX711 #1 `DOUT`                            |
+| D2 (SDA)  | 13          | GPIO4  | HX711 #2 `DOUT`                            |
+| D5 (SCK)  | 4           | GPIO14 | HX711 #3 `DOUT`                            |
 
 Per-channel 4-pin connector pinout (J1..J4):
 
-| Pin | Net | Wire color (typical) | Function |
-|---|---|---|---|
-| 1 | 3V3 | red   | E+ (excitation positive)  |
-| 2 | GND | black | E− (excitation negative)  |
-| 3 | LCx_A+ | green | A+ (signal positive)  |
-| 4 | LCx_A− | white | A− (signal negative)  |
+| Pin | Net    | Wire color (typical) | Function                 |
+| --- | ------ | -------------------- | ------------------------ |
+| 1   | 3V3    | red                  | E+ (excitation positive) |
+| 2   | GND    | black                | E− (excitation negative) |
+| 3   | LCx_A+ | green                | A+ (signal positive)     |
+| 4   | LCx_A− | white                | A− (signal negative)     |
 
 ## Important note on the HX711 pinout
 
@@ -87,11 +87,11 @@ and it places + routes the board for you in minutes.
 3. **Open the schematic** (Eeschema). You should see the Wemos, the four
    HX711s, all caps, the LED, the resistor, and the four connectors,
    already wired. Verify the rats-nest in `Tools → Electrical Rules
-   Checker` (ERC).
+Checker` (ERC).
 
 4. **Generate the PCB skeleton**: in the project manager open Pcbnew (or
    `File → New Board From Schematic` from Eeschema). Then `Tools →
-   Update PCB from Schematic` (F8). This loads every footprint into
+Update PCB from Schematic` (F8). This loads every footprint into
    the PCB editor, all stacked at the origin, with net assignments
    intact. Save (`Ctrl+S`) so the `.kicad_pcb` file lands next to the
    schematic.
@@ -181,7 +181,7 @@ JLCPCB is the bare-fab + assembly house. Two uploads are needed:
      `File → Fabrication Outputs → Component Placement (.pos)` after
      Quilter has placed the components. Save it as a CSV with the
      header row JLCPCB expects (`Designator,Mid X,Mid Y,Layer,
-     Rotation`).
+Rotation`).
 4. Review the parts match: every line with an LCSC like `C24951` should
    resolve to a real JLCPCB part. Lines without LCSC (the Wemos itself,
    and the female pin sockets if you choose to mount them yourself)
@@ -193,22 +193,22 @@ JLCPCB is the bare-fab + assembly house. Two uploads are needed:
 
 # Estimated cost (April 2026 prices, ballpark)
 
-| Line item | Qty | Cost |
-|---|---:|---:|
-| 5× bare PCB, ~50×60 mm, 2-layer, HASL, green | 5 | **$2 – $5** |
-| PCBA setup fee (one-time per order) | 1 | **$8** |
-| HX711 SOIC-16 (LCSC C24951) | 4 × 5 boards = 20 | **$8** (~$0.40/ea) |
-| 100nF 0603 (C14663) | 20 | **$0.20** |
-| 10µF radial electrolytic (C68116) | 20 | **$3** |
-| 100µF radial electrolytic (C16133) | 5 | **$1** |
-| 1k 0603 (C21190) | 5 | **$0.10** |
-| LED 0603 green (C72043) | 5 | **$0.40** |
-| JST-XH 4-pin connector (C144394) | 20 | **$2** |
-| **Subtotal (PCB + PCBA)** |  | **~$25** |
-| Shipping to US (DHL Express, ~5 days) |  | **$15 – $25** |
-| **Wemos D1 Mini × 5** (Amazon / AliExpress, user-supplied) | 5 | **$15 – $20** |
-| **Female pin sockets, 1×8 2.54mm × 10** (user-supplied) | 10 | **$3 – $5** |
-| **Total all-in for 5 fully populated boards** |  | **~$60 – $75** |
+| Line item                                                  |               Qty |               Cost |
+| ---------------------------------------------------------- | ----------------: | -----------------: |
+| 5× bare PCB, ~50×60 mm, 2-layer, HASL, green               |                 5 |        **$2 – $5** |
+| PCBA setup fee (one-time per order)                        |                 1 |             **$8** |
+| HX711 SOIC-16 (LCSC C24951)                                | 4 × 5 boards = 20 | **$8** (~$0.40/ea) |
+| 100nF 0603 (C14663)                                        |                20 |          **$0.20** |
+| 10µF radial electrolytic (C68116)                          |                20 |             **$3** |
+| 100µF radial electrolytic (C16133)                         |                 5 |             **$1** |
+| 1k 0603 (C21190)                                           |                 5 |          **$0.10** |
+| LED 0603 green (C72043)                                    |                 5 |          **$0.40** |
+| JST-XH 4-pin connector (C144394)                           |                20 |             **$2** |
+| **Subtotal (PCB + PCBA)**                                  |                   |           **~$25** |
+| Shipping to US (DHL Express, ~5 days)                      |                   |      **$15 – $25** |
+| **Wemos D1 Mini × 5** (Amazon / AliExpress, user-supplied) |                 5 |      **$15 – $20** |
+| **Female pin sockets, 1×8 2.54mm × 10** (user-supplied)    |                10 |        **$3 – $5** |
+| **Total all-in for 5 fully populated boards**              |                   |     **~$60 – $75** |
 
 If you skip PCBA and hand-solder everything, drop ~$8 setup + ~$15 in
 parts → **~$10–$15 for 5 bare boards + your time**. The 0603 SMD

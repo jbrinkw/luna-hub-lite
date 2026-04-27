@@ -837,9 +837,7 @@ describe('ChefByte HomePage queries', () => {
     const data = assertQuerySucceeds(result, 'stock_lots for expired card') as any[];
 
     const today = todayDate();
-    const expired = data.filter(
-      (l: any) => l.expires_on && l.expires_on < today && Number(l.qty_containers) > 0,
-    );
+    const expired = data.filter((l: any) => l.expires_on && l.expires_on < today && Number(l.qty_containers) > 0);
 
     expect(expired.length).toBe(2);
 

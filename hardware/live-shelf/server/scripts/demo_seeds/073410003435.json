@@ -8,11 +8,7 @@
     "serving_size": "1 portion (49 g)",
     "packaging": null,
     "image_front_url": "https://images.openfoodfacts.org/images/products/007/341/000/3435/front_en.6.400.jpg",
-    "categories_tags": [
-      "en:plant-based-foods",
-      "en:cereals-and-potatoes",
-      "en:breads"
-    ],
+    "categories_tags": ["en:plant-based-foods", "en:cereals-and-potatoes", "en:breads"],
     "raw_response_fetched_at": "2026-04-15T15:42:41Z"
   },
   "form_suggested": {

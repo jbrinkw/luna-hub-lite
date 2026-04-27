@@ -167,7 +167,7 @@ export function SettingsPage() {
   const saveProductMutation = useMutation({
     mutationFn: async () => {
       if (!user || !editingId) throw new Error('Missing user or editing target');
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
       const { product_id: _pid, user_id: _uid, ...updates } = editForm as Product;
       const { error: updateErr } = await chefbyte().from('products').update(updates).eq('product_id', editingId);
       if (updateErr) throw updateErr;
@@ -433,7 +433,9 @@ export function SettingsPage() {
             <div>
               <label className={labelCls}>Price</label>
               <div className="relative">
-                <span className="absolute inset-y-0 left-3 flex items-center text-text-tertiary pointer-events-none">$</span>
+                <span className="absolute inset-y-0 left-3 flex items-center text-text-tertiary pointer-events-none">
+                  $
+                </span>
                 <input
                   type="number"
                   min="0"
@@ -587,87 +589,87 @@ export function SettingsPage() {
               {filteredProducts.map((p) => {
                 const isEditing = editingId === p.product_id;
                 return (
-                <div
-                  key={p.product_id}
-                  data-testid={`product-${p.product_id}`}
-                  className={`${productCardCls}${isEditing ? ' col-span-full ring-2 ring-emerald-500/40 shadow-md' : ''}`}
-                >
-                  {isEditing ? (
-                    /* Editing mode — escapes the card grid to use full row width */
-                    <div>
-                      <div className="flex items-baseline justify-between mb-4 pb-2 border-b border-border-light">
-                        <h4 className="m-0 text-base font-semibold">Editing: {p.name}</h4>
-                        <span className="text-xs text-text-tertiary">{p.barcode ?? 'no barcode'}</span>
-                      </div>
-                      {renderProductFields(
-                        editForm,
-                        (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
-                        'edit',
-                      )}
-                      <div className="flex gap-2 mt-5 pt-4 border-t border-border-light">
-                        <button
-                          className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700"
-                          onClick={() => saveProductMutation.mutate()}
-                          data-testid="save-edit-product"
-                        >
-                          Save
-                        </button>
-                        <button
-                          className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
-                          onClick={cancelEdit}
-                          data-testid="cancel-edit-product"
-                        >
-                          Cancel
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    /* Display mode */
-                    <div className="flex flex-col flex-1">
-                      <div className="flex items-start justify-between gap-2 mb-2">
-                        <h4 className="m-0 text-base font-semibold">{p.name}</h4>
-                        {p.tare_weight_g != null && (
-                          <span
-                            className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
-                            title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
-                            data-testid={`livetrack-enrolled-${p.product_id}`}
-                          >
-                            <span aria-hidden="true">✓</span>
-                            LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
-                          </span>
+                  <div
+                    key={p.product_id}
+                    data-testid={`product-${p.product_id}`}
+                    className={`${productCardCls}${isEditing ? ' col-span-full ring-2 ring-emerald-500/40 shadow-md' : ''}`}
+                  >
+                    {isEditing ? (
+                      /* Editing mode — escapes the card grid to use full row width */
+                      <div>
+                        <div className="flex items-baseline justify-between mb-4 pb-2 border-b border-border-light">
+                          <h4 className="m-0 text-base font-semibold">Editing: {p.name}</h4>
+                          <span className="text-xs text-text-tertiary">{p.barcode ?? 'no barcode'}</span>
+                        </div>
+                        {renderProductFields(
+                          editForm,
+                          (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
+                          'edit',
                         )}
+                        <div className="flex gap-2 mt-5 pt-4 border-t border-border-light">
+                          <button
+                            className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700"
+                            onClick={() => saveProductMutation.mutate()}
+                            data-testid="save-edit-product"
+                          >
+                            Save
+                          </button>
+                          <button
+                            className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
+                            onClick={cancelEdit}
+                            data-testid="cancel-edit-product"
+                          >
+                            Cancel
+                          </button>
+                        </div>
                       </div>
-                      {p.barcode && (
-                        <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>
-                      )}
-                      <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-text-secondary flex-1">
-                        <span>Srv/Ctn: {Number(p.servings_per_container)}</span>
-                        <span>Cal: {Number(p.calories_per_serving)}</span>
-                        <span>C: {Number(p.carbs_per_serving)}g</span>
-                        <span>P: {Number(p.protein_per_serving)}g</span>
-                        <span>F: {Number(p.fat_per_serving)}g</span>
-                        <span>Min Stock: {Number(p.min_stock_amount)}</span>
-                        {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
+                    ) : (
+                      /* Display mode */
+                      <div className="flex flex-col flex-1">
+                        <div className="flex items-start justify-between gap-2 mb-2">
+                          <h4 className="m-0 text-base font-semibold">{p.name}</h4>
+                          {p.tare_weight_g != null && (
+                            <span
+                              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
+                              title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
+                              data-testid={`livetrack-enrolled-${p.product_id}`}
+                            >
+                              <span aria-hidden="true">✓</span>
+                              LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
+                            </span>
+                          )}
+                        </div>
+                        {p.barcode && (
+                          <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>
+                        )}
+                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-text-secondary flex-1">
+                          <span>Srv/Ctn: {Number(p.servings_per_container)}</span>
+                          <span>Cal: {Number(p.calories_per_serving)}</span>
+                          <span>C: {Number(p.carbs_per_serving)}g</span>
+                          <span>P: {Number(p.protein_per_serving)}g</span>
+                          <span>F: {Number(p.fat_per_serving)}g</span>
+                          <span>Min Stock: {Number(p.min_stock_amount)}</span>
+                          {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
+                        </div>
+                        <div className="flex gap-2 mt-3 pt-2 border-t border-border-light">
+                          <button
+                            className="bg-emerald-600 text-white border-none px-3.5 py-1.5 rounded-md cursor-pointer font-semibold text-[13px] hover:bg-emerald-700"
+                            onClick={() => startEdit(p)}
+                            data-testid={`edit-product-${p.product_id}`}
+                          >
+                            Edit
+                          </button>
+                          <button
+                            onClick={() => setDeleteTarget(p.product_id)}
+                            data-testid={`delete-product-${p.product_id}`}
+                            className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:text-red-700"
+                          >
+                            Delete
+                          </button>
+                        </div>
                       </div>
-                      <div className="flex gap-2 mt-3 pt-2 border-t border-border-light">
-                        <button
-                          className="bg-emerald-600 text-white border-none px-3.5 py-1.5 rounded-md cursor-pointer font-semibold text-[13px] hover:bg-emerald-700"
-                          onClick={() => startEdit(p)}
-                          data-testid={`edit-product-${p.product_id}`}
-                        >
-                          Edit
-                        </button>
-                        <button
-                          onClick={() => setDeleteTarget(p.product_id)}
-                          data-testid={`delete-product-${p.product_id}`}
-                          className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:text-red-700"
-                        >
-                          Delete
-                        </button>
-                      </div>
-                    </div>
-                  )}
-                </div>
+                    )}
+                  </div>
                 );
               })}
             </div>

@@ -10,8 +10,7 @@ const corsHeaders = {
   // `x-test-force-failure` is LOCAL-ONLY (see isLocalDev()) — ignored in
   // production. Required by the walmart failure-path integration tests
   // (SerpApi 503, SerpApi malformed JSON).
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-test-force-failure',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-test-force-failure',
 };
 
 /**
@@ -85,7 +84,7 @@ async function searchWalmart(query: string, storeId?: string, forceFailure: stri
   let json: any;
   try {
     json = await resp.json();
-  } catch (err) {
+  } catch (_err) {
     // SerpApi returned a 2xx with a body we can't parse. Treat as
     // upstream unavailable so the client sees a retriable 503 rather
     // than a generic 500.

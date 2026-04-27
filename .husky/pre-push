@@ -1,0 +1,74 @@
+#!/usr/bin/env sh
+# .husky/pre-push - Phase 5 of docs/test-system-fix-plan.md.
+#
+# CI is lint+typecheck only. This hook is the real test gate. It runs
+# every push and routes to one of two suites:
+#
+#   - verify:fast (~30s)  - typecheck, lint, format:check, vitest
+#                           Used when only docs/markdown/yaml changed.
+#   - verify:full (3-5m)  - fast + integration + pgTAP + Pi pytest +
+#                           harness + e2e (when present).
+#                           Used when any code file changed.
+#
+# Bypass for emergency fixes only:
+#
+#   git push --no-verify
+#
+# That works but is intentionally noisy. The convention for tracking
+# deliberate bypasses is to add a footer to the offending commit:
+#
+#   Verify-skipped: <reason>
+#
+# That footer is honor-system but visible in `git log`.
+
+set -e
+
+upstream_range() {
+  if git rev-parse --abbrev-ref --symbolic-full-name '@{u}' >/dev/null 2>&1; then
+    echo "@{u}..HEAD"
+    return
+  fi
+  if git rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    echo "origin/main..HEAD"
+    return
+  fi
+  echo "$(git hash-object -t tree --stdin </dev/null)..HEAD"
+}
+
+RANGE="$(upstream_range)"
+CHANGED="$(git diff --name-only "$RANGE" 2>/dev/null || true)"
+
+if [ -z "$CHANGED" ]; then
+  printf '\033[0;33m[pre-push] Nothing to push (range: %s). Skipping verify.\033[0m\n' "$RANGE"
+  exit 0
+fi
+
+DOCS_ONLY=1
+while IFS= read -r f; do
+  [ -z "$f" ] && continue
+  case "$f" in
+    *.md|*.markdown|*.txt|*.yml|*.yaml)
+      ;;
+    docs/*|*/docs/*)
+      ;;
+    README|CHANGELOG|LICENSE|README.md|CHANGELOG.md|LICENSE.md)
+      ;;
+    *)
+      DOCS_ONLY=0
+      break
+      ;;
+  esac
+done <<EOF
+$CHANGED
+EOF
+
+if [ "$DOCS_ONLY" = "1" ]; then
+  printf '\033[1;36m[pre-push] Docs/markdown only - running verify:fast.\033[0m\n'
+  printf '[pre-push] Range: %s\n' "$RANGE"
+  pnpm verify:fast
+else
+  printf '\033[1;36m[pre-push] Code change detected - running verify:full.\033[0m\n'
+  printf '[pre-push] Range: %s\n' "$RANGE"
+  printf '[pre-push] (To skip in an emergency: git push --no-verify)\n'
+  pnpm verify:full
+fi

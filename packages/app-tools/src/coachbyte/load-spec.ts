@@ -55,11 +55,11 @@ export const loadSpecInputSchema = {
     type: 'number',
     minimum: 0,
     description:
-      'If relative=false (default), absolute load in lbs. If relative=true, percentage of the user\'s estimated 1RM (0 for no load).',
+      "If relative=false (default), absolute load in lbs. If relative=true, percentage of the user's estimated 1RM (0 for no load).",
   },
   relative: {
     type: 'boolean',
     description:
-      'When true, `load` is a percentage of the user\'s estimated 1RM for that exercise. Defaults to false. Percentages are resolved to absolute lbs when the daily plan is materialized.',
+      "When true, `load` is a percentage of the user's estimated 1RM for that exercise. Defaults to false. Percentages are resolved to absolute lbs when the daily plan is materialized.",
   },
 } as const;

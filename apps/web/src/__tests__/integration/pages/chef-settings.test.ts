@@ -326,5 +326,4 @@ describe('ChefByte SettingsPage queries', () => {
     // Verify other products ARE in results
     expect((data ?? []).length).toBeGreaterThan(0);
   });
-
 });

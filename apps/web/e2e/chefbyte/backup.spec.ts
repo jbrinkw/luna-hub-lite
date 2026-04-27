@@ -67,34 +67,26 @@ test.describe('ChefByte Backup & Restore', () => {
   });
 
   test('restore flow: upload → preview → consent → restore wipes-and-replaces', async ({ page }) => {
-    const { userId, cleanup, client, email, password } = await seedFullAndLogin(
-      page,
-      'backup-restore-flow',
-    );
+    const { userId, cleanup, client, email, password } = await seedFullAndLogin(page, 'backup-restore-flow');
     try {
       await seedChefByteData(client, userId);
 
       // Build a snapshot via the RPC directly (server-side is the source of truth;
       // using the UI download in the same test would require chaining two downloads).
-      const { data: snapshot, error: snapErr } = await (client as any)
-        .schema('chefbyte')
-        .rpc('export_chefbyte_backup');
+      const { data: snapshot, error: snapErr } = await (client as any).schema('chefbyte').rpc('export_chefbyte_backup');
       expect(snapErr).toBeNull();
       expect(snapshot).toBeTruthy();
 
       // Mutate the server state AFTER taking the snapshot: add a new product
       // that should be wiped by the upcoming restore.
-      const { error: addErr } = await (client as any)
-        .schema('chefbyte')
-        .from('products')
-        .insert({
-          user_id: userId,
-          name: 'Should Be Wiped',
-          calories_per_serving: 1,
-          carbs_per_serving: 0,
-          protein_per_serving: 0,
-          fat_per_serving: 0,
-        });
+      const { error: addErr } = await (client as any).schema('chefbyte').from('products').insert({
+        user_id: userId,
+        name: 'Should Be Wiped',
+        calories_per_serving: 1,
+        carbs_per_serving: 0,
+        protein_per_serving: 0,
+        fat_per_serving: 0,
+      });
       expect(addErr).toBeNull();
 
       // Navigate to Backup tab.

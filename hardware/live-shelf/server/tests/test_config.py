@@ -44,7 +44,9 @@ def test_default_event_delta_threshold_is_15g():
 
 def test_apply_config_patch_accepts_in_flight_knobs():
     cfg = AppConfig()
-    assert cfg.in_flight_ttl_seconds == 14_400
+    # 21,600 = 6h. Bumped from 4h on 2026-04-26 (commit 591e4b4) — the TTL
+    # window must comfortably span a Costco grocery run.
+    assert cfg.in_flight_ttl_seconds == 21_600
     assert cfg.new_item_weight_ratio == 1.15
     assert cfg.consumption_noise_floor_g == 2.0
 

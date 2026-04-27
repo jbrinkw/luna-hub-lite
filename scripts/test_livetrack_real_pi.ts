@@ -75,7 +75,9 @@ function computeWithOffFallback(s: any, off: any) {
   };
 }
 
-async function sleep(ms: number) { return new Promise((r) => setTimeout(r, ms)); }
+async function sleep(ms: number) {
+  return new Promise((r) => setTimeout(r, ms));
+}
 
 async function waitForState(sessionId: string, target: string | string[], timeoutMs: number): Promise<any> {
   const targets = Array.isArray(target) ? target : [target];
@@ -121,15 +123,20 @@ async function main() {
   // ------ 3. probe analyze-product ------
   console.log(`[2] analyze-product probe`);
   const { data: tmpUser } = await admin.auth.admin.createUser({
-    email: `probe-${Date.now()}@test.com`, password: 'x', email_confirm: true,
+    email: `probe-${Date.now()}@test.com`,
+    password: 'x',
+    email_confirm: true,
   });
-  const probeCleanup = async () => { if (tmpUser?.user) await admin.auth.admin.deleteUser(tmpUser.user.id); };
+  const probeCleanup = async () => {
+    if (tmpUser?.user) await admin.auth.admin.deleteUser(tmpUser.user.id);
+  };
   try {
     const user = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
       auth: { autoRefreshToken: false, persistSession: false },
     });
     const { data: signIn } = await user.auth.signInWithPassword({
-      email: tmpUser!.user!.email!, password: 'x',
+      email: tmpUser!.user!.email!,
+      password: 'x',
     });
     const token = signIn!.session!.access_token;
     const resp = await fetch(`${SUPABASE_URL}/functions/v1/analyze-product`, {
@@ -143,7 +150,9 @@ async function main() {
     const computed = computeWithOffFallback(efData.suggestion, efData.off);
     console.log(`    computed (AI→OFF→0 fallback):`);
     console.log(`      name=${computed.name}`);
-    console.log(`      s/c=${computed.servings_per_container}  cal=${computed.calories_per_serving}  c=${computed.carbs_per_serving}  p=${computed.protein_per_serving}  f=${computed.fat_per_serving}`);
+    console.log(
+      `      s/c=${computed.servings_per_container}  cal=${computed.calories_per_serving}  c=${computed.carbs_per_serving}  p=${computed.protein_per_serving}  f=${computed.fat_per_serving}`,
+    );
     const expected = EXPECTED[BARCODE];
     if (expected) {
       const ok =
@@ -218,16 +227,30 @@ async function main() {
     // ------ 7. AUTO TARE PATH — user clicks Next ------
     console.log(`[6] AUTO TARE: compute + write tare_weight_g`);
     const net = Number(product.net_weight_g ?? 0);
-    const tareG = net > 0 ? Math.max(0, Number(readingSession.scale_reading_g) - net) : Number(readingSession.scale_reading_g);
+    const tareG =
+      net > 0 ? Math.max(0, Number(readingSession.scale_reading_g) - net) : Number(readingSession.scale_reading_g);
     console.log(`    scale=${readingSession.scale_reading_g}g  net_weight=${net}g  computed tare=${tareG}g`);
-    await admin.schema('chefbyte').from('products').update({ tare_weight_g: tareG }).eq('product_id', product.product_id);
-    const { data: after1 } = await admin.schema('chefbyte').from('products').select('tare_weight_g').eq('product_id', product.product_id).single();
+    await admin
+      .schema('chefbyte')
+      .from('products')
+      .update({ tare_weight_g: tareG })
+      .eq('product_id', product.product_id);
+    const { data: after1 } = await admin
+      .schema('chefbyte')
+      .from('products')
+      .select('tare_weight_g')
+      .eq('product_id', product.product_id)
+      .single();
     console.log(`    ✓ persisted tare_weight_g=${after1?.tare_weight_g}g`);
 
     // ------ 8. AI TARE PATH — arm it, wait for Pi to respond ------
     console.log(`[7] AI TARE: patch state=awaiting_ai_tare`);
     // Reset tare for the AI path to verify it writes
-    await admin.schema('chefbyte').from('products').update({ tare_weight_g: null }).eq('product_id', product.product_id);
+    await admin
+      .schema('chefbyte')
+      .from('products')
+      .update({ tare_weight_g: null })
+      .eq('product_id', product.product_id);
     await admin
       .schema('chefbyte')
       .from('livetrack_import_sessions')
@@ -268,7 +291,9 @@ async function main() {
     console.log('');
     console.log('=== ALL PATHS PASSED ===');
     console.log(`Barcode ${BARCODE} (${computed.name}):`);
-    console.log(`  OFF-nutriments fallback: ${expected ? `matches owner-verified truth (${JSON.stringify(expected)})` : 'no expectation defined'}`);
+    console.log(
+      `  OFF-nutriments fallback: ${expected ? `matches owner-verified truth (${JSON.stringify(expected)})` : 'no expectation defined'}`,
+    );
     console.log(`  Auto tare path: scale=${readingSession.scale_reading_g}g → tare=${tareG}g  ✓ persisted`);
     console.log(`  AI tare path: ai_tare_g=${aiSession.ai_tare_g}g  ✓ persisted`);
   } finally {

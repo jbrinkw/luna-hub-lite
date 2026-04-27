@@ -251,9 +251,7 @@ test.describe('ChefByte Macros page', () => {
     // frozen instants below are interpreted the same in CI and locally.
     test.use({ timezoneId: 'America/New_York' });
 
-    test('macros date label at 01:30 EDT (before fall-back) + after the 02:00 snap to EST', async ({
-      page,
-    }) => {
+    test('macros date label at 01:30 EDT (before fall-back) + after the 02:00 snap to EST', async ({ page }) => {
       test.setTimeout(90_000);
       const { userId, cleanup, client } = await seedFullAndLogin(page, 'macro-dst');
       try {

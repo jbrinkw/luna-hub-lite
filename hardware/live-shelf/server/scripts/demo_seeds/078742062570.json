@@ -8,12 +8,7 @@
     "serving_size": "1 ONZ (28 g)",
     "packaging": null,
     "image_front_url": "https://images.openfoodfacts.org/images/products/007/874/206/2570/front_en.5.400.jpg",
-    "categories_tags": [
-      "en:dairies",
-      "en:fermented-foods",
-      "en:cheeses",
-      "en:cheddar-cheese"
-    ],
+    "categories_tags": ["en:dairies", "en:fermented-foods", "en:cheeses", "en:cheddar-cheese"],
     "raw_response_fetched_at": "2026-04-15T15:42:41Z"
   },
   "form_suggested": {

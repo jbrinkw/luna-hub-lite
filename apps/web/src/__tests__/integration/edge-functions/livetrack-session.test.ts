@@ -93,7 +93,7 @@ describe('livetrack-session Edge Function', () => {
       .from('live_shelf_devices')
       .insert({
         user_id: userA.userId, // userA owns this too — but we'll delete
-                                // the fresh device before the 409 test.
+        // the fresh device before the 409 test.
         device_name: 'Stale Pi',
         import_key_hash: createHash('sha256').update(staleImportKey).digest('hex'),
         is_active: true,
@@ -365,7 +365,7 @@ describe('livetrack-session Edge Function', () => {
           scale_reading_ts: new Date().toISOString(),
           state: 'scale_reading_received',
           // Disallowed fields — must be silently ignored, NOT 400.
-          user_id: userB.userId,           // Pi cannot re-owner a row.
+          user_id: userB.userId, // Pi cannot re-owner a row.
           current_barcode: 'evil-barcode', // browser territory.
         }),
       });

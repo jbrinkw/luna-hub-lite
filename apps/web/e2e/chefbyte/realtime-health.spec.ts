@@ -68,9 +68,7 @@ test.describe('ChefByte Realtime — silent-death detection', () => {
   // workers cannot race on the DROP/ADD pair.
   test.describe.configure({ mode: 'serial' });
 
-  test('publication DROP surfaces degraded banner within 45s; restore + Reconnect clears it', async ({
-    page,
-  }) => {
+  test('publication DROP surfaces degraded banner within 45s; restore + Reconnect clears it', async ({ page }) => {
     test.setTimeout(120_000);
     const { cleanup } = await seedFullAndLogin(page, 'rt-health-drop');
     try {

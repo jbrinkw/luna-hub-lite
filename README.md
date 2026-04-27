@@ -183,4 +183,48 @@ extensions/
 4. **Drift** — Nightly schema AST diff vs linked Supabase. Opens a GitHub issue on material drift.
 5. **Reviewer** — Mechanical script: parses JUnit XML vs commit message claims, flags mismatches.
 
-CI runs lint + typecheck on every push. Integration tests run locally (`pnpm test`, `supabase test db`, `pnpm harness`).
+### Local Test Gate
+
+CI runs lint + typecheck on every push. The real test gate is **local**, enforced
+by a `pre-push` git hook that routes to one of two suites depending on what is
+about to be pushed:
+
+| Script             | Runtime | Covers                                                      |
+| ------------------ | ------- | ----------------------------------------------------------- |
+| `pnpm verify:fast` | ~30 s   | typecheck + lint + format:check + Vitest                    |
+| `pnpm verify:full` | 3-5 min | fast + integration + pgTAP + Pi pytest + harness + e2e (P2) |
+
+The pre-push hook (`.husky/pre-push`) selects mode automatically:
+
+- **Docs / markdown / yaml only** → `verify:fast`
+- **Any code file (`*.ts/.tsx/.py/.sql/.json/.toml/...`)** → `verify:full`
+
+`verify:full` requires the local Supabase stack to be running. If it isn't, the
+script fails fast with an actionable message:
+
+```
+ERROR: Supabase local stack is not running.
+Start it with:  supabase start
+Then re-run:    pnpm verify:full
+```
+
+#### Bypassing in an emergency
+
+```bash
+git push --no-verify
+```
+
+This works but the convention is to track it: add a footer to the offending
+commit so the bypass is visible in `git log`:
+
+```
+fix(scanner): emergency hot-fix for prod-only crash
+
+Verify-skipped: prod outage; full suite to run on follow-up
+```
+
+The `commit-msg` hook prints a yellow warning when this footer is present so
+the operator (or anyone reviewing the log) sees the bypass at commit time.
+
+See [`docs/testing-workflow.md`](docs/testing-workflow.md) for the full picture
+of how each suite layer is wired and what each one catches.

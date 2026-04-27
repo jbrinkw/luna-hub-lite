@@ -145,10 +145,7 @@ export type RetryAction =
  * private.apply_shelf_event (scale not paired / scale paired but product
  * unset / product missing net_weight_g / no lot with stock to decrement).
  */
-export function retryActionForReason(
-  reason: string | null,
-  productId: string | null,
-): RetryAction {
+export function retryActionForReason(reason: string | null, productId: string | null): RetryAction {
   const r = (reason ?? '').toLowerCase();
   if (r.includes('scale not paired') || r.includes('scale paired but product unset')) {
     return { kind: 'configure_pairing', label: 'Configure pairing' };
@@ -185,43 +182,31 @@ interface EventView {
   retryAction: RetryAction | null;
 }
 
-function deriveEventView(
-  event: EventRow,
-  override: OverrideRow | null,
-  product: ProductLite | null,
-): EventView {
+function deriveEventView(event: EventRow, override: OverrideRow | null, product: ProductLite | null): EventView {
   const payload = event.payload ?? {};
   const deltaG = Number(payload.delta_g ?? 0);
   const piKindRaw = payload.event_kind ?? 'consumed';
-  const piKind: EventKind = (EVENT_KINDS as string[]).includes(piKindRaw)
-    ? (piKindRaw as EventKind)
-    : 'consumed';
+  const piKind: EventKind = (EVENT_KINDS as string[]).includes(piKindRaw) ? (piKindRaw as EventKind) : 'consumed';
   const netG = product?.net_weight_g ?? null;
   const svgPer = product?.servings_per_container ?? 0;
 
-  const effectiveKind: EventKind =
-    (override?.event_kind_override as EventKind | null | undefined) ?? piKind;
+  const effectiveKind: EventKind = (override?.event_kind_override as EventKind | null | undefined) ?? piKind;
 
   const magnitudeC = netG && netG > 0 ? Math.abs(deltaG / netG) : 0;
-  const signedByKindC =
-    effectiveKind === 'consumed' || effectiveKind === 'depleted'
-      ? -magnitudeC
-      : +magnitudeC;
+  const signedByKindC = effectiveKind === 'consumed' || effectiveKind === 'depleted' ? -magnitudeC : +magnitudeC;
 
   const overrideServings = override?.macros_servings_override ?? null;
   const overrideStockC = override?.stock_qty_override ?? null;
   const isVoided = Boolean(override?.is_voided);
   const macroLoggingEnabled = override?.macro_logging_enabled ?? true;
 
-  const effectiveStockDeltaContainers = isVoided
-    ? 0
-    : overrideStockC ?? signedByKindC;
+  const effectiveStockDeltaContainers = isVoided ? 0 : (overrideStockC ?? signedByKindC);
 
   const isConsumptionKind = effectiveKind === 'consumed' || effectiveKind === 'depleted';
   const effectiveServings =
     isVoided || !macroLoggingEnabled || !isConsumptionKind
       ? 0
-      : overrideServings ?? Math.abs(effectiveStockDeltaContainers) * svgPer;
+      : (overrideServings ?? Math.abs(effectiveStockDeltaContainers) * svgPer);
   const perServingCal = product?.calories_per_serving ?? 0;
   const perServingP = product?.protein_per_serving ?? 0;
   const perServingC = product?.carbs_per_serving ?? 0;
@@ -234,22 +219,20 @@ function deriveEventView(
 
   const hasEdit = Boolean(
     override &&
-      (override.stock_qty_override !== null ||
-        override.macros_servings_override !== null ||
-        override.calories_override !== null ||
-        override.protein_override !== null ||
-        override.carbs_override !== null ||
-        override.fat_override !== null ||
-        override.event_kind_override !== null ||
-        override.is_voided ||
-        !override.macro_logging_enabled),
+    (override.stock_qty_override !== null ||
+      override.macros_servings_override !== null ||
+      override.calories_override !== null ||
+      override.protein_override !== null ||
+      override.carbs_override !== null ||
+      override.fat_override !== null ||
+      override.event_kind_override !== null ||
+      override.is_voided ||
+      !override.macro_logging_enabled),
   );
 
   const needsReview = event.classifier_status === 'review' && !isVoided;
   const needsAction = !event.applied && !isVoided;
-  const retryAction = needsAction
-    ? retryActionForReason(event.reason, payload.product_id ?? null)
-    : null;
+  const retryAction = needsAction ? retryActionForReason(event.reason, payload.product_id ?? null) : null;
 
   return {
     event,
@@ -314,9 +297,7 @@ export function EventViewerPage() {
       // Keep rows that have either a classifier payload OR an explicit
       // classifier_status so the review/rejected queues never filter out
       // rows with a NULL product_id (e.g. multi_match awaiting triage).
-      return (data ?? []).filter(
-        (r: EventRow) => !!r.payload?.product_id || !!r.classifier_status,
-      );
+      return (data ?? []).filter((r: EventRow) => !!r.payload?.product_id || !!r.classifier_status);
     },
     enabled: !!user,
     staleTime: 30_000,
@@ -392,7 +373,7 @@ export function EventViewerPage() {
         deriveEventView(
           ev,
           overridesByClient[ev.client_event_id] ?? null,
-          ev.payload?.product_id ? productsById[ev.payload.product_id] ?? null : null,
+          ev.payload?.product_id ? (productsById[ev.payload.product_id] ?? null) : null,
         ),
       ),
     [events, overridesByClient, productsById],
@@ -524,10 +505,7 @@ export function EventViewerPage() {
     { id: 'voided', label: 'Voided' },
   ];
 
-  const attentionCount = useMemo(
-    () => allRows.filter((r) => r.needsAction || r.needsReview).length,
-    [allRows],
-  );
+  const attentionCount = useMemo(() => allRows.filter((r) => r.needsAction || r.needsReview).length, [allRows]);
 
   return (
     <ChefLayout title="Events">
@@ -735,14 +713,13 @@ function EventCard(props: EventCardProps) {
   } = row;
   const occurredAt = event.payload?.occurred_at ?? event.created_at;
   const piEventId = event.pi_event_id;
-  const imgBase =
-    lanIp && piEventId ? `http://${lanIp}:8000/event/${encodeURIComponent(piEventId)}` : null;
+  const imgBase = lanIp && piEventId ? `http://${lanIp}:8000/event/${encodeURIComponent(piEventId)}` : null;
 
   const borderCls = needsAction
     ? 'border-warning-subtle ring-1 ring-warning-subtle'
     : needsReview
-    ? 'border-warning-subtle'
-    : 'border-border';
+      ? 'border-warning-subtle'
+      : 'border-border';
 
   return (
     <li
@@ -837,25 +814,16 @@ function EventCard(props: EventCardProps) {
             )}
           </div>
           <div className="text-xs text-text-tertiary mt-0.5">
-            {new Date(occurredAt).toLocaleString()} ·{' '}
-            <span data-testid="event-effective-kind">{effectiveKind}</span>
+            {new Date(occurredAt).toLocaleString()} · <span data-testid="event-effective-kind">{effectiveKind}</span>
           </div>
           {needsAction && event.reason && (
-            <div
-              className="text-xs text-warning-text mt-1"
-              data-testid="event-reason"
-              title={event.reason}
-            >
+            <div className="text-xs text-warning-text mt-1" data-testid="event-reason" title={event.reason}>
               Reason: {event.reason}
             </div>
           )}
           <div className="text-sm text-text-secondary mt-1 flex flex-wrap gap-x-4 gap-y-0.5">
-            <span data-testid="event-stock-delta">
-              Stock: {row.effectiveStockDeltaContainers.toFixed(1)} ctn
-            </span>
-            <span data-testid="event-cal">
-              {row.effectiveCalories.toFixed(0)} cal
-            </span>
+            <span data-testid="event-stock-delta">Stock: {row.effectiveStockDeltaContainers.toFixed(1)} ctn</span>
+            <span data-testid="event-cal">{row.effectiveCalories.toFixed(0)} cal</span>
             <span data-testid="event-pcf">
               P {row.effectiveProtein.toFixed(0)}g · C {row.effectiveCarbs.toFixed(0)}g · F{' '}
               {row.effectiveFat.toFixed(0)}g
@@ -934,12 +902,7 @@ function EventCard(props: EventCardProps) {
       {expanded && !isVoided && (
         <Fragment>
           {needsReview && (
-            <ReviewPanel
-              row={row}
-              products={products}
-              onAcceptClassifier={onAcceptClassifier}
-              saving={saving}
-            />
+            <ReviewPanel row={row} products={products} onAcceptClassifier={onAcceptClassifier} saving={saving} />
           )}
           <EditorPanel row={row} onSave={onSave} saving={saving} />
         </Fragment>
@@ -964,15 +927,10 @@ function ReviewPanel({ row, products, onAcceptClassifier, saving }: ReviewPanelP
   const classification = row.event.classification ?? {};
   const multiMatch = Array.isArray(classification.multi_match) ? classification.multi_match : [];
   const classifierPick = classification.item_id ?? row.event.payload?.product_id ?? null;
-  const classifierPickProduct = classifierPick
-    ? products.find((p) => p.product_id === classifierPick)
-    : null;
+  const classifierPickProduct = classifierPick ? products.find((p) => p.product_id === classifierPick) : null;
 
   return (
-    <div
-      className="border-t border-warning-subtle p-4 bg-warning-subtle/10 space-y-3"
-      data-testid="review-panel"
-    >
+    <div className="border-t border-warning-subtle p-4 bg-warning-subtle/10 space-y-3" data-testid="review-panel">
       <div className="flex items-center gap-2">
         <HelpCircle className="h-4 w-4 text-warning-text" />
         <span className="text-sm font-semibold text-warning-text">
@@ -989,9 +947,7 @@ function ReviewPanel({ row, products, onAcceptClassifier, saving }: ReviewPanelP
             className="px-3 py-1.5 rounded-lg text-sm font-semibold bg-chef-accent text-white hover:opacity-90 disabled:opacity-50"
           >
             Accept classifier pick
-            {classifierPickProduct && (
-              <span className="ml-1 opacity-80">({classifierPickProduct.name})</span>
-            )}
+            {classifierPickProduct && <span className="ml-1 opacity-80">({classifierPickProduct.name})</span>}
           </button>
         )}
         {multiMatch.map((alt) => {
@@ -1008,9 +964,7 @@ function ReviewPanel({ row, products, onAcceptClassifier, saving }: ReviewPanelP
             >
               {alt.label ?? altProduct.name}
               {typeof alt.confidence === 'number' && (
-                <span className="ml-1 text-xs text-text-tertiary">
-                  ({Math.round(alt.confidence * 100)}%)
-                </span>
+                <span className="ml-1 text-xs text-text-tertiary">({Math.round(alt.confidence * 100)}%)</span>
               )}
             </button>
           );
@@ -1069,13 +1023,9 @@ interface EditorPanelProps {
 }
 
 function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
-  const [stockQty, setStockQty] = useState<string>(
-    row.effectiveStockDeltaContainers.toFixed(3).replace(/\.?0+$/, ''),
-  );
+  const [stockQty, setStockQty] = useState<string>(row.effectiveStockDeltaContainers.toFixed(3).replace(/\.?0+$/, ''));
   const [servings, setServings] = useState<string>(
-    row.effectiveServings === 0
-      ? '0'
-      : row.effectiveServings.toFixed(2).replace(/\.?0+$/, ''),
+    row.effectiveServings === 0 ? '0' : row.effectiveServings.toFixed(2).replace(/\.?0+$/, ''),
   );
   const [macrosEnabled, setMacrosEnabled] = useState<boolean>(row.macroLoggingEnabled);
   const [eventKind, setEventKind] = useState<EventKind>(row.effectiveKind);
@@ -1120,20 +1070,10 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
   };
 
   return (
-    <div
-      className="border-t border-border p-4 bg-surface-sunken space-y-4"
-      data-testid="edit-panel"
-    >
+    <div className="border-t border-border p-4 bg-surface-sunken space-y-4" data-testid="edit-panel">
       <div>
-        <label className="block text-sm font-medium text-text-secondary mb-1">
-          Event kind
-        </label>
-        <div
-          className="flex gap-2 flex-wrap"
-          role="radiogroup"
-          aria-label="Event kind"
-          data-testid="event-kind-group"
-        >
+        <label className="block text-sm font-medium text-text-secondary mb-1">Event kind</label>
+        <div className="flex gap-2 flex-wrap" role="radiogroup" aria-label="Event kind" data-testid="event-kind-group">
           {EVENT_KINDS.map((k) => (
             <button
               key={k}
@@ -1169,9 +1109,7 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
             data-testid="stock-qty-input"
             className="mt-1 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-text"
           />
-          <div className="text-xs text-text-tertiary mt-1">
-            Negative = consumed, positive = added
-          </div>
+          <div className="text-xs text-text-tertiary mt-1">Negative = consumed, positive = added</div>
         </label>
 
         <label className="block text-sm font-medium text-text-secondary">
@@ -1207,16 +1145,16 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
             {!isConsumption
               ? 'No macros for added/refilled events.'
               : macrosEnabled
-              ? `Product: ${svgPer || 0} svg/ctn`
-              : 'Stock will change but no food log entry will be written.'}
+                ? `Product: ${svgPer || 0} svg/ctn`
+                : 'Stock will change but no food log entry will be written.'}
           </div>
         </label>
       </div>
 
       {isConsumption && macrosEnabled && (
         <div className="text-sm text-text-secondary">
-          Derived macros: <span data-testid="derived-cal">{derivedCal.toFixed(0)}</span> cal · P{' '}
-          {derivedP.toFixed(0)}g · C {derivedC.toFixed(0)}g · F {derivedF.toFixed(0)}g
+          Derived macros: <span data-testid="derived-cal">{derivedCal.toFixed(0)}</span> cal · P {derivedP.toFixed(0)}g
+          · C {derivedC.toFixed(0)}g · F {derivedF.toFixed(0)}g
         </div>
       )}
 

@@ -114,18 +114,20 @@ async function seedShelfEvent(
   await chef(admin).from('stock_lots').update({ qty_containers: 3 }).eq('lot_id', lotId);
 
   // Food log tagged to the event
-  const { error: flErr } = await chef(admin).from('food_logs').insert({
-    user_id: userId,
-    product_id: productId,
-    logical_date: occurred.slice(0, 10),
-    qty_consumed: 2,
-    unit: 'serving',
-    calories: 400,
-    carbs: 20,
-    protein: 40,
-    fat: 10,
-    source_client_event_id: opts.clientEventId,
-  });
+  const { error: flErr } = await chef(admin)
+    .from('food_logs')
+    .insert({
+      user_id: userId,
+      product_id: productId,
+      logical_date: occurred.slice(0, 10),
+      qty_consumed: 2,
+      unit: 'serving',
+      calories: 400,
+      carbs: 20,
+      protein: 40,
+      fat: 10,
+      source_client_event_id: opts.clientEventId,
+    });
   if (flErr) throw new Error(`seedFoodLog failed: ${flErr.message}`);
 
   return { deviceId: dev.device_id as string };
@@ -417,9 +419,7 @@ test.describe('Event Viewer', () => {
   // ────────────────────────────────────────────────────────────
   // Feature: rejected events get a retry-action badge + deep-link.
   // ────────────────────────────────────────────────────────────
-  test('8. applied=false event shows needs-action badge + Configure pairing deep-link', async ({
-    page,
-  }) => {
+  test('8. applied=false event shows needs-action badge + Configure pairing deep-link', async ({ page }) => {
     const { userId, cleanup } = await seedFullAndLogin(page, 'event-viewer-8');
     try {
       const { productId } = await seedProductAndLot(userId, {
@@ -464,9 +464,7 @@ test.describe('Event Viewer', () => {
       const row = page.getByTestId(`event-row-${clientEventId}`);
       await expect(row).toBeVisible({ timeout: 15_000 });
       await expect(row.getByTestId('needs-action-badge')).toBeVisible();
-      await expect(row.getByTestId('event-reason')).toContainText(
-        'scale paired but product unset',
-      );
+      await expect(row.getByTestId('event-reason')).toContainText('scale paired but product unset');
 
       const retryBtn = row.getByTestId('retry-action-btn');
       await expect(retryBtn).toHaveAttribute('data-retry-kind', 'configure_pairing');

@@ -12,19 +12,8 @@
 
 import { assert, assertEquals, assertStringIncludes } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 
-import {
-  SLIM_NUTRIMENT_KEYS,
-  buildSystemPrompt,
-  buildUserPrompt,
-  proposedName,
-  slimNutriments,
-} from './_prompt.ts';
-import {
-  calorieDrift,
-  isCalorieDriftImplausible,
-  parseAIResponse,
-  validateSuggestion,
-} from './_normalize.ts';
+import { SLIM_NUTRIMENT_KEYS, buildSystemPrompt, buildUserPrompt, proposedName, slimNutriments } from './_prompt.ts';
+import { calorieDrift, isCalorieDriftImplausible, parseAIResponse, validateSuggestion } from './_normalize.ts';
 
 // ─────────────────────────────────────────────────────────────────────────
 // Fixtures
@@ -43,18 +32,18 @@ const OFF_NUTELLA = {
   nutriments: {
     'energy-kcal_100g': 539,
     'energy-kcal_serving': 80.8,
-    'carbohydrates_100g': 57.5,
-    'carbohydrates_serving': 8.62,
-    'proteins_100g': 6.3,
-    'proteins_serving': 0.95,
-    'fat_100g': 30.9,
-    'fat_serving': 4.64,
+    carbohydrates_100g: 57.5,
+    carbohydrates_serving: 8.62,
+    proteins_100g: 6.3,
+    proteins_serving: 0.95,
+    fat_100g: 30.9,
+    fat_serving: 4.64,
     // Fields that SHOULD be dropped by slimNutriments
-    'sugars_100g': 56.3,
-    'sodium_100g': 0.04,
+    sugars_100g: 56.3,
+    sodium_100g: 0.04,
     'vitamin-e_100g': 4.3,
-    'iron_100g': 0.003,
-    'salt_100g': 0.107,
+    iron_100g: 0.003,
+    salt_100g: 0.107,
   },
 };
 
@@ -343,11 +332,7 @@ Deno.test('validateSuggestion: default_shelf_life_days out-of-range → null', (
     });
     assertEquals(result.ok, true);
     if (result.ok) {
-      assertEquals(
-        result.suggestion.default_shelf_life_days,
-        null,
-        `expected ${bad} clamped to null`,
-      );
+      assertEquals(result.suggestion.default_shelf_life_days, null, `expected ${bad} clamped to null`);
     }
   }
 });

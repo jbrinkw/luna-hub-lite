@@ -10,12 +10,7 @@
     "serving_size": "2 patties (57 g)",
     "packaging": null,
     "image_front_url": "https://images.openfoodfacts.org/images/products/002/265/530/6306/front_en.51.400.jpg",
-    "categories_tags": [
-      "en:meats",
-      "en:sausages",
-      "en:frozen-meats",
-      "en:turkey-sausages"
-    ],
+    "categories_tags": ["en:meats", "en:sausages", "en:frozen-meats", "en:turkey-sausages"],
     "raw_response_fetched_at": "2026-04-15T15:42:41Z"
   },
   "form_suggested": {

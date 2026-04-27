@@ -1111,10 +1111,7 @@ describe('CoachByte Tool Integration Tests', () => {
         name: 'Bulgarian Split Squat',
       });
 
-      const result = await logSet.handler(
-        { exercise_id: 'Bulgarian Split Squat', reps: 5, load: 40 },
-        ctx,
-      );
+      const result = await logSet.handler({ exercise_id: 'Bulgarian Split Squat', reps: 5, load: 40 }, ctx);
       const data = parseToolResult(result);
 
       const { data: row } = await admin
@@ -1135,10 +1132,7 @@ describe('CoachByte Tool Integration Tests', () => {
     });
 
     it('returns a toolError for an unknown exercise name', async () => {
-      const result = await logSet.handler(
-        { exercise_id: 'Frog Jumps Supreme', reps: 10, load: 0 },
-        ctx,
-      );
+      const result = await logSet.handler({ exercise_id: 'Frog Jumps Supreme', reps: 10, load: 0 }, ctx);
       expect(result.isError).toBe(true);
       expect(result.content[0].text).toContain('Unknown exercise');
     });
@@ -1216,22 +1210,16 @@ describe('CoachByte Tool Integration Tests', () => {
       expect(result.content[0].text).toContain('not found');
     });
 
-    it('refuses to delete another user\'s completed set (RLS scope)', async () => {
+    it("refuses to delete another user's completed set (RLS scope)", async () => {
       // Set up a second user with their own completed set
       const otherUser = await createTestUser('coachbyte-delete-iso');
       const otherCtx = createToolContext(otherUser.userId);
       try {
-        const otherLog = await logSet.handler(
-          { exercise_id: 'Squat', reps: 5, load: 100 },
-          otherCtx,
-        );
+        const otherLog = await logSet.handler({ exercise_id: 'Squat', reps: 5, load: 100 }, otherCtx);
         const otherCs = parseToolResult(otherLog);
 
         // ctx (jeremy's test user) tries to delete it — must fail as not-found
-        const result = await deleteCompletedSet.handler(
-          { completed_set_id: otherCs.completed_set_id },
-          ctx,
-        );
+        const result = await deleteCompletedSet.handler({ completed_set_id: otherCs.completed_set_id }, ctx);
         expect(result.isError).toBe(true);
         expect(result.content[0].text).toContain('not found');
 

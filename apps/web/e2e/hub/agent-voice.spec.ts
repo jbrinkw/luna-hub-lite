@@ -154,9 +154,7 @@ test.describe('Hub Voice Assist — backend endpoint', () => {
     expect(body.object).toBe('list');
     expect(Array.isArray(body.data)).toBe(true);
     expect(body.data.length).toBeGreaterThanOrEqual(1);
-    const hasHaiku = body.data.some((m: any) =>
-      typeof m.id === 'string' && m.id.includes('haiku'),
-    );
+    const hasHaiku = body.data.some((m: any) => typeof m.id === 'string' && m.id.includes('haiku'));
     expect(hasHaiku).toBe(true);
   });
 
@@ -234,7 +232,7 @@ test.describe('Hub Voice Assist — backend endpoint', () => {
       // Error envelope shape still matches the pinned contract above.
       const body2 = await res2.json();
       expect(body2.error).toBeTruthy();
-      expect(typeof body2.error.type ?? body2.error.message).toBe('string');
+      expect(typeof (body2.error.type ?? body2.error.message)).toBe('string');
     } finally {
       await cleanup();
     }
@@ -267,7 +265,10 @@ test.describe('Hub Voice Assist — UI settings flow', () => {
       // Save via the "Save" button that lives inside the Voice Assist card.
       // Both cards (System Prompt + Voice Assist) render their own Save button;
       // pick the one adjacent to the Voice Assist content.
-      await page.getByRole('button', { name: /^save$/i }).last().click();
+      await page
+        .getByRole('button', { name: /^save$/i })
+        .last()
+        .click();
 
       await expect(page.getByText(/voice assist saved/i)).toBeVisible({ timeout: 30000 });
 

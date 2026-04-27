@@ -127,10 +127,7 @@ export async function loadExercisesForPrs(
 
 /** Load the saved pr_tracked_exercise_ids from user_settings; null when
  * the user hasn't opted in yet (the UI then defaults to tracking all). */
-export async function loadPrTrackedExerciseIds(
-  userId: string,
-  client?: SupabaseClient<any>,
-): Promise<string[] | null> {
+export async function loadPrTrackedExerciseIds(userId: string, client?: SupabaseClient<any>): Promise<string[] | null> {
   const { data } = await asCoachbyte(client)
     .from('user_settings')
     .select('pr_tracked_exercise_ids')

@@ -1,38 +1,46 @@
-{% extends "_base.html" %}
-{% block title %}{{ event_id }} - fridge-cam{% endblock %}
-{% block content %}
+{% extends "_base.html" %} {% block title %}{{ event_id }} - fridge-cam{% endblock %} {% block content %}
 <h1>event {{ event_id }}</h1>
 <p><a href="/events">&larr; all events</a></p>
 
 <div class="panel">
   <h3>session video</h3>
   {% if event.has_video %}
-    <video controls preload="metadata" playsinline>
-      <source src="/event/{{ event_id }}/session.mp4" type="video/mp4">
-      your browser does not support mp4 playback.
-    </video>
+  <video controls preload="metadata" playsinline>
+    <source src="/event/{{ event_id }}/session.mp4" type="video/mp4" />
+    your browser does not support mp4 playback.
+  </video>
   {% else %}
-    <p class="muted">no video recorded (session may be in progress or recording failed).</p>
+  <p class="muted">no video recorded (session may be in progress or recording failed).</p>
   {% endif %}
 </div>
 
 <div class="panel">
   <h3>before / after</h3>
-  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px">
     <div>
-      <div class="muted" style="font-size: 11px; margin-bottom: 4px;">BEFORE (~{{ event.fps | default(0, true) | float | round(1) }} fps × offset)</div>
+      <div class="muted" style="font-size: 11px; margin-bottom: 4px">
+        BEFORE (~{{ event.fps | default(0, true) | float | round(1) }} fps × offset)
+      </div>
       {% if event.has_before %}
-        <img src="/event/{{ event_id }}/before.jpg" alt="before" style="width: 100%; border: 1px solid var(--border); border-radius: 3px;">
+      <img
+        src="/event/{{ event_id }}/before.jpg"
+        alt="before"
+        style="width: 100%; border: 1px solid var(--border); border-radius: 3px"
+      />
       {% else %}
-        <p class="muted">(not available)</p>
+      <p class="muted">(not available)</p>
       {% endif %}
     </div>
     <div>
-      <div class="muted" style="font-size: 11px; margin-bottom: 4px;">AFTER (last frame)</div>
+      <div class="muted" style="font-size: 11px; margin-bottom: 4px">AFTER (last frame)</div>
       {% if event.has_after %}
-        <img src="/event/{{ event_id }}/after.jpg" alt="after" style="width: 100%; border: 1px solid var(--border); border-radius: 3px;">
+      <img
+        src="/event/{{ event_id }}/after.jpg"
+        alt="after"
+        style="width: 100%; border: 1px solid var(--border); border-radius: 3px"
+      />
       {% else %}
-        <p class="muted">(not available)</p>
+      <p class="muted">(not available)</p>
       {% endif %}
     </div>
   </div>
@@ -42,20 +50,63 @@
   <h3>metadata</h3>
   <table>
     <tbody>
-      <tr><th>event_id</th><td>{{ event.event_id | default(event_id) }}</td></tr>
-      <tr><th>started_at</th><td>{{ event.started_at | default('&mdash;', true) }}</td></tr>
-      <tr><th>ended_at</th><td>{{ event.ended_at | default('&mdash;', true) }}</td></tr>
-      <tr><th>duration_s</th><td>{% if event.duration_s is defined and event.duration_s is not none %}{{ event.duration_s }}{% else %}&mdash;{% endif %}</td></tr>
-      <tr><th>frame_count</th><td>{{ event.frame_count | default('&mdash;', true) }}</td></tr>
-      <tr><th>avg_brightness_during</th><td>{{ event.avg_brightness_during | default('&mdash;', true) }}</td></tr>
-      <tr><th>resolution</th><td>{% if event.resolution %}{{ event.resolution[0] }}x{{ event.resolution[1] }}{% else %}&mdash;{% endif %}</td></tr>
-      <tr><th>fps</th><td>{{ event.fps | default('&mdash;', true) }}</td></tr>
-      <tr><th>cause</th><td>{{ event.cause | default('&mdash;', true) }}</td></tr>
+      <tr>
+        <th>event_id</th>
+        <td>{{ event.event_id | default(event_id) }}</td>
+      </tr>
+      <tr>
+        <th>started_at</th>
+        <td>{{ event.started_at | default('&mdash;', true) }}</td>
+      </tr>
+      <tr>
+        <th>ended_at</th>
+        <td>{{ event.ended_at | default('&mdash;', true) }}</td>
+      </tr>
+      <tr>
+        <th>duration_s</th>
+        <td>
+          {% if event.duration_s is defined and event.duration_s is not none %}{{ event.duration_s }}{% else %}&mdash;{%
+          endif %}
+        </td>
+      </tr>
+      <tr>
+        <th>frame_count</th>
+        <td>{{ event.frame_count | default('&mdash;', true) }}</td>
+      </tr>
+      <tr>
+        <th>avg_brightness_during</th>
+        <td>{{ event.avg_brightness_during | default('&mdash;', true) }}</td>
+      </tr>
+      <tr>
+        <th>resolution</th>
+        <td>
+          {% if event.resolution %}{{ event.resolution[0] }}x{{ event.resolution[1] }}{% else %}&mdash;{% endif %}
+        </td>
+      </tr>
+      <tr>
+        <th>fps</th>
+        <td>{{ event.fps | default('&mdash;', true) }}</td>
+      </tr>
+      <tr>
+        <th>cause</th>
+        <td>{{ event.cause | default('&mdash;', true) }}</td>
+      </tr>
     </tbody>
   </table>
-  <details style="margin-top: 10px;">
-    <summary class="muted" style="cursor: pointer;">raw meta.json</summary>
-    <pre style="background: var(--panel-2); padding: 8px; border: 1px solid var(--border); border-radius: 3px; overflow: auto; font-size: 11px;">{{ event | tojson(indent=2) }}</pre>
+  <details style="margin-top: 10px">
+    <summary class="muted" style="cursor: pointer">raw meta.json</summary>
+    <pre
+      style="
+        background: var(--panel-2);
+        padding: 8px;
+        border: 1px solid var(--border);
+        border-radius: 3px;
+        overflow: auto;
+        font-size: 11px;
+      "
+    >
+{{ event | tojson(indent=2) }}</pre
+    >
   </details>
 </div>
 {% endblock %}

@@ -62,9 +62,7 @@ export async function clearMailboxFor(email: string): Promise<void> {
   if (!res.ok) {
     // Per-id fallback — ignore errors, they're best-effort cleanup.
     await Promise.all(
-      ids.map((id) =>
-        fetch(`${MAILPIT_URL}/api/v1/message/${id}`, { method: 'DELETE' }).catch(() => undefined),
-      ),
+      ids.map((id) => fetch(`${MAILPIT_URL}/api/v1/message/${id}`, { method: 'DELETE' }).catch(() => undefined)),
     );
   }
 }
@@ -77,10 +75,7 @@ export async function clearMailboxFor(email: string): Promise<void> {
  * The caller is expected to have cleared the mailbox for this address
  * before triggering the action (see `clearMailboxFor`).
  */
-export async function waitForResetEmail(
-  email: string,
-  timeoutMs: number,
-): Promise<MailpitMessage | null> {
+export async function waitForResetEmail(email: string, timeoutMs: number): Promise<MailpitMessage | null> {
   const deadline = Date.now() + timeoutMs;
   const pollMs = 200;
 

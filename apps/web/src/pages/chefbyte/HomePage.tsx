@@ -269,10 +269,7 @@ export function HomePage() {
           .eq('user_id', userId!)
           .eq('logical_date', today),
         // 10. All stock lots — also fetch expires_on for the expired-count card.
-        chefbyte()
-          .from('stock_lots')
-          .select('product_id, qty_containers, expires_on')
-          .eq('user_id', userId!),
+        chefbyte().from('stock_lots').select('product_id, qty_containers, expires_on').eq('user_id', userId!),
       ]);
 
       // Check for errors

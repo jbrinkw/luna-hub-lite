@@ -28,10 +28,10 @@ python3 -m server.app
 
 Options:
 
-* `--host`, `--port` — override WEB_HOST / WEB_PORT from `.env`.
-* `--no-v4l2` — skip applying the locked camera settings (useful off-Pi).
-* `--no-camera` — don't start the capture thread (debug only).
-* `--data-dir PATH` — override the DATA_DIR root.
+- `--host`, `--port` — override WEB_HOST / WEB_PORT from `.env`.
+- `--no-v4l2` — skip applying the locked camera settings (useful off-Pi).
+- `--no-camera` — don't start the capture thread (debug only).
+- `--data-dir PATH` — override the DATA_DIR root.
 
 The web UI is then at `http://<host>:8000/`.
 
@@ -86,11 +86,11 @@ the regular ChefByte UI. The full contract lives in
 
 **What it enables:**
 
-* Pi posts every reconciler-committed mutation to
+- Pi posts every reconciler-committed mutation to
   `<CLOUD_URL>/event` so cloud stock and macros stay in sync.
-* Local inventory syncs from the cloud catalog per-event (pull, not push) —
+- Local inventory syncs from the cloud catalog per-event (pull, not push) —
   no background sync loop, no cache staleness.
-* ChefByte Settings → Scales tab shows the device heartbeat and per-scale
+- ChefByte Settings → Scales tab shows the device heartbeat and per-scale
   pairings; Inventory pages render lot rows with a source tag (manual /
   live_shelf / live_scale / catch_all) and a "Review (N)" deep-link to the
   Pi's local review queue.
@@ -117,7 +117,7 @@ curl http://192.168.0.181:8000/healthz
 
 `cloud_worker_alive=true` and `cloud_outbox_pending=0` means the Pi is
 successfully talking to the cloud. Any non-zero pending count that is
-*draining* is normal; a count that stays flat under load points to an
+_draining_ is normal; a count that stays flat under load points to an
 auth or network issue.
 
 **Offline behavior:** when the cloud is unreachable, events queue in the
@@ -127,13 +127,13 @@ cloud state — the cloud is a mirror, not a gate.
 
 **Troubleshooting:**
 
-* `401` in `server.log` → wrong `CLOUD_IMPORT_KEY` (regenerate from
+- `401` in `server.log` → wrong `CLOUD_IMPORT_KEY` (regenerate from
   ChefByte → Settings → Scales).
-* `cloud_outbox_permanent_failures > 0` → rows the cloud rejected with a
+- `cloud_outbox_permanent_failures > 0` → rows the cloud rejected with a
   4xx that isn't retryable (invalid payload, deleted device, etc.).
   Operator intervention: inspect the rows in the outbox table, fix the
   root cause, then clear them manually.
-* `cloud_outbox_pending` climbs but never drops → network or auth
+- `cloud_outbox_pending` climbs but never drops → network or auth
   problem; check the worker thread's log lines for the last error.
 
 ## Architecture
@@ -154,20 +154,20 @@ Bundles D/E/F/G to the concrete `storage.repo` CRUD.
 
 ## Troubleshooting
 
-* **Camera fails to open** — check the device path in `.env`
+- **Camera fails to open** — check the device path in `.env`
   (`CAMERA_DEVICE=/dev/video0`) and that the process has permission.
   `--no-v4l2` skips the exposure/WB locks if `v4l2-ctl` isn't installed.
-* **Frames missing during an event** — the ring buffer holds ~30s @ 10fps
+- **Frames missing during an event** — the ring buffer holds ~30s @ 10fps
   by default; if the scale event references a `ts` older than that window
   we log `FrameNotAvailableError` and enqueue a `sensor_anomaly` review
   row. Shorten `FRAME_LOOKBACK_SECONDS` or increase the ring size in
   `DaemonConfig` to recover.
-* **Classifier keeps returning unknown** — ensure `ANTHROPIC_API_KEY` is
+- **Classifier keeps returning unknown** — ensure `ANTHROPIC_API_KEY` is
   set and your product actually has `certified=1` + reference images.
   Without references the model sees metadata only.
-* **Session never closes** — the brightness watcher uses hysteresis +
+- **Session never closes** — the brightness watcher uses hysteresis +
   a 2s debounce. Tune `BRIGHTNESS_THRESHOLD` / `BRIGHTNESS_HYSTERESIS`
   in `.env` or via `POST /api/config`.
-* **SQLite locked** — the orchestrator funnels DB writes through a single
+- **SQLite locked** — the orchestrator funnels DB writes through a single
   mutex; if you attach another writer (e.g. the `sqlite3` CLI) during a
   live session, sessions may stall. Stop the app first.

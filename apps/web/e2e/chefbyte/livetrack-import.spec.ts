@@ -40,9 +40,10 @@ async function seedDevice(params: {
     .join('');
   const keyHash = await sha256Hex(rawKey);
 
-  const lastHeartbeat = params.freshHeartbeat === false
-    ? new Date(Date.now() - (params.staleMinutes ?? 5) * 60_000).toISOString()
-    : new Date(Date.now() - FRESH_HEARTBEAT_S * 1000).toISOString();
+  const lastHeartbeat =
+    params.freshHeartbeat === false
+      ? new Date(Date.now() - (params.staleMinutes ?? 5) * 60_000).toISOString()
+      : new Date(Date.now() - FRESH_HEARTBEAT_S * 1000).toISOString();
 
   const { data, error } = await chef(admin)
     .from('live_shelf_devices')

@@ -32,8 +32,7 @@ export const queryKeys = {
   tempItems: (userId: string, date: string) => ['temp-items', userId, date] as const,
   liveShelfDevices: (userId: string) => ['live-shelf-devices', userId] as const,
   liveShelfDevice: (userId: string) => ['live-shelf-device', userId] as const,
-  livetrackSession: (userId: string, sessionId: string | null) =>
-    ['livetrack-session', userId, sessionId] as const,
+  livetrackSession: (userId: string, sessionId: string | null) => ['livetrack-session', userId, sessionId] as const,
   scalePairings: (userId: string) => ['scale-pairings', userId] as const,
   userConfig: (userId: string, key: string) => ['user-config', userId, key] as const,
   chefSettings: (userId: string) => ['chef-settings', userId] as const,

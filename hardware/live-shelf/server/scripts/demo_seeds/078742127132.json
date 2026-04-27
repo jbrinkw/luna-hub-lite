@@ -10,11 +10,7 @@
     "serving_size": "1 egg (56 g)",
     "packaging": "Container,Styrofoam",
     "image_front_url": "https://images.openfoodfacts.org/images/products/007/874/212/7132/front_en.40.400.jpg",
-    "categories_tags": [
-      "en:farming-products",
-      "en:eggs",
-      "en:chicken-eggs"
-    ],
+    "categories_tags": ["en:farming-products", "en:eggs", "en:chicken-eggs"],
     "raw_response_fetched_at": "2026-04-15T15:42:41Z"
   },
   "form_suggested": {

@@ -10,12 +10,7 @@
 
 import { assert, assertEquals } from 'https://deno.land/std@0.224.0/assert/mod.ts';
 
-import {
-  buildSearchParams,
-  buildSerpApiUrl,
-  normalizeResultItem,
-  normalizeSerpApiResponse,
-} from './_normalize.ts';
+import { buildSearchParams, buildSerpApiUrl, normalizeResultItem, normalizeSerpApiResponse } from './_normalize.ts';
 
 // ─────────────────────────────────────────────────────────────────────────
 // SerpApi URL builder
@@ -50,10 +45,7 @@ Deno.test('buildSearchParams: api_key with special characters is URL-encoded', (
   const params = buildSearchParams({ apiKey: 'abc+123/def=xyz', query: 'q' });
   const serialized = params.toString();
   // `+`, `/`, `=` must all be encoded so the upstream parses the key correctly
-  assert(
-    serialized.includes('api_key=abc%2B123%2Fdef%3Dxyz'),
-    `expected api_key encoded, got: ${serialized}`,
-  );
+  assert(serialized.includes('api_key=abc%2B123%2Fdef%3Dxyz'), `expected api_key encoded, got: ${serialized}`);
 });
 
 Deno.test('buildSerpApiUrl: returns a full https URL on serpapi.com/search.json', () => {
@@ -137,10 +129,7 @@ Deno.test('normalizeResultItem: title falls back to name, then null', () => {
     normalizeResultItem({ name: 'Alt Name', product_page_url: 'https://walmart.com/ip/x/1' }).title,
     'Alt Name',
   );
-  assertEquals(
-    normalizeResultItem({ product_page_url: 'https://walmart.com/ip/x/1' }).title,
-    null,
-  );
+  assertEquals(normalizeResultItem({ product_page_url: 'https://walmart.com/ip/x/1' }).title, null);
 });
 
 Deno.test('normalizeResultItem: url falls back to link, then empty string', () => {
@@ -198,12 +187,7 @@ Deno.test('normalizeSerpApiResponse: null / primitive body → []', () => {
 
 Deno.test('normalizeSerpApiResponse: skips non-object items within the array', () => {
   const body = {
-    organic_results: [
-      null,
-      'string-item',
-      42,
-      { title: 'Real', product_page_url: 'https://walmart.com/ip/r/1' },
-    ],
+    organic_results: [null, 'string-item', 42, { title: 'Real', product_page_url: 'https://walmart.com/ip/r/1' }],
   };
   const results = normalizeSerpApiResponse(body);
   assertEquals(results.length, 1, 'only real objects are kept');

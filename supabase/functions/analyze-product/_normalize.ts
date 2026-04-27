@@ -16,9 +16,7 @@ export interface Suggestion {
 }
 
 /** Result of validateSuggestion: ok | a list of missing required fields. */
-export type SuggestionValidation =
-  | { ok: true; suggestion: Suggestion }
-  | { ok: false; missing: string[] };
+export type SuggestionValidation = { ok: true; suggestion: Suggestion } | { ok: false; missing: string[] };
 
 /**
  * Parse a Claude Haiku response into a structured suggestion.
@@ -121,13 +119,7 @@ export function validateSuggestion(raw: Record<string, unknown> | null): Suggest
     return { ok: false, missing: ['*'] };
   }
 
-  const required = [
-    'name',
-    'calories_per_serving',
-    'protein_per_serving',
-    'carbs_per_serving',
-    'fat_per_serving',
-  ];
+  const required = ['name', 'calories_per_serving', 'protein_per_serving', 'carbs_per_serving', 'fat_per_serving'];
   const missing = required.filter((k) => raw[k] == null);
   if (missing.length > 0) return { ok: false, missing };
 
@@ -153,8 +145,7 @@ export function validateSuggestion(raw: Record<string, unknown> | null): Suggest
   // or nullify — never surface a 422 for this field.
   if (coerced.default_shelf_life_days != null) {
     const n = Math.round(Number(coerced.default_shelf_life_days));
-    coerced.default_shelf_life_days =
-      Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
+    coerced.default_shelf_life_days = Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
   } else {
     coerced.default_shelf_life_days = null;
   }
@@ -174,12 +165,7 @@ export function validateSuggestion(raw: Record<string, unknown> | null): Suggest
  * helper is the yardstick the test uses to assert the prompt rule is
  * correctly applied.
  */
-export function calorieDrift(macros: {
-  protein: number;
-  carbs: number;
-  fat: number;
-  calories: number;
-}): number | null {
+export function calorieDrift(macros: { protein: number; carbs: number; fat: number; calories: number }): number | null {
   const derived = macros.protein * 4 + macros.carbs * 4 + macros.fat * 9;
   if (derived <= 0) return null;
   if (!Number.isFinite(macros.calories)) return null;

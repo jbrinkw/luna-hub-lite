@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'fs';
 const env: any = {};
-for (const l of readFileSync('/home/jeremy/luna-hub-lite/.env','utf-8').split('\n')) {
+for (const l of readFileSync('/home/jeremy/luna-hub-lite/.env', 'utf-8').split('\n')) {
   const m = l.match(/^([A-Z_]+)=(.*)$/);
   if (m) env[m[1]] = m[2];
 }
@@ -12,7 +12,9 @@ async function main() {
   const barcode = process.argv[2] ?? '073731004197';
   const email = `e2e-probe-${Date.now()}@test.com`;
   const { data: u, error: ue } = await admin.auth.admin.createUser({
-    email, password: 'testpass123', email_confirm: true,
+    email,
+    password: 'testpass123',
+    email_confirm: true,
   });
   if (ue || !u.user) throw new Error(`createUser: ${ue?.message}`);
   const userId = u.user.id;
@@ -38,4 +40,7 @@ async function main() {
     await admin.auth.admin.deleteUser(userId);
   }
 }
-main().catch((e) => { console.error(e); process.exit(1); });
+main().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

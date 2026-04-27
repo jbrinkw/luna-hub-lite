@@ -102,9 +102,7 @@ export function isValidLanIp(value: string): boolean {
   // range 0–255. This closes the "999.999.999.999 slips through as a hostname"
   // gap — the plain hostname regex below is permissive about all-digit labels.
   if (/^\d+(\.\d+){3}$/.test(trimmed)) {
-    return /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(
-      trimmed,
-    );
+    return /^((25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$/.test(trimmed);
   }
   // Otherwise: alphanumeric hostname with dots and hyphens (no leading dash).
   // The DB CHECK constraint uses the matching regex so client + server agree.
@@ -392,7 +390,7 @@ export function ScalesTab() {
       setEditingIpValue('');
       setIpError((prev) => {
         if (!(variables.deviceId in prev)) return prev;
-        // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
         const { [variables.deviceId]: _removed, ...rest } = prev;
         return rest;
       });
@@ -404,7 +402,7 @@ export function ScalesTab() {
   const clearIpError = (deviceId: string) => {
     setIpError((prev) => {
       if (!(deviceId in prev)) return prev;
-      // eslint-disable-next-line @typescript-eslint/no-unused-vars
+
       const { [deviceId]: _removed, ...rest } = prev;
       return rest;
     });
@@ -468,14 +466,10 @@ export function ScalesTab() {
           className="flex items-start gap-3 p-4 mb-4 rounded-lg border-2 border-danger bg-danger-subtle"
         >
           <div className="flex-1 min-w-0">
-            <h3 className="m-0 text-base font-bold text-danger-text">
-              Your Pi key was deactivated
-            </h3>
+            <h3 className="m-0 text-base font-bold text-danger-text">Your Pi key was deactivated</h3>
             <p className="m-0 mt-1 text-sm text-text">
-              <span className="font-semibold">{silentRevokeDevice.device_name}</span>{' '}
-              is the only device on this account and is currently inactive, so
-              it can no longer post shelf events. Click Reactivate to restore
-              it.
+              <span className="font-semibold">{silentRevokeDevice.device_name}</span> is the only device on this account
+              and is currently inactive, so it can no longer post shelf events. Click Reactivate to restore it.
             </p>
           </div>
           <button
@@ -876,8 +870,8 @@ export function ScalesTab() {
                                       className="mt-1.5 text-xs text-warning-text bg-warning-subtle border border-warning rounded px-2 py-1 m-0"
                                       data-testid={`unpaired-scale-warning-${s.pairing_id}`}
                                     >
-                                      Unpaired — weight events from this scale will be ignored until
-                                      a product is selected.
+                                      Unpaired — weight events from this scale will be ignored until a product is
+                                      selected.
                                     </p>
                                   )}
                                 </>

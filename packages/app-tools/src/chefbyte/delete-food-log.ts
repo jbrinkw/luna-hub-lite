@@ -4,7 +4,7 @@ import { toolSuccess, toolError } from '../shared';
 export const deleteFoodLog: ToolDefinition = {
   name: 'CHEFBYTE_delete_food_log',
   description:
-    "Delete a single food log entry by log_id. Used to undo accidental `consume` calls or remove a mistaken macro entry. RLS enforces ownership.",
+    'Delete a single food log entry by log_id. Used to undo accidental `consume` calls or remove a mistaken macro entry. RLS enforces ownership.',
   inputSchema: {
     type: 'object',
     properties: {

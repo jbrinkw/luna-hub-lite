@@ -135,8 +135,7 @@ vi.mock('@/shared/supabase', () => {
           } else {
             // Mutate the server row on a successful update so a
             // post-`onSettled` invalidation doesn't reset the state.
-            shoppingListRow.purchased =
-              (state.patch?.purchased as boolean | undefined) ?? shoppingListRow.purchased;
+            shoppingListRow.purchased = (state.patch?.purchased as boolean | undefined) ?? shoppingListRow.purchased;
             resolve({ error: null });
           }
           return;
@@ -239,10 +238,7 @@ describe('ShoppingPage optimistic rollback on toggle-purchased', () => {
       if (!row) return;
       // Only record distinct transitions so an n-query-refetch storm
       // doesn't explode the sequence.
-      if (
-        purchasedSequence.length === 0 ||
-        purchasedSequence[purchasedSequence.length - 1] !== row.purchased
-      ) {
+      if (purchasedSequence.length === 0 || purchasedSequence[purchasedSequence.length - 1] !== row.purchased) {
         purchasedSequence.push(row.purchased);
       }
     });

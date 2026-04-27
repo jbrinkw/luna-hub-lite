@@ -180,11 +180,7 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
 
         if (status === 'SUBSCRIBED') {
           rt.reconnectAttempt = 0;
-        } else if (
-          status === 'CHANNEL_ERROR' ||
-          status === 'TIMED_OUT' ||
-          status === 'CLOSED'
-        ) {
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
           scheduleReconnect(rt);
         }
       });
@@ -243,10 +239,12 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
 
     // One channel per subscription — see docblock above for why we don't
     // multiplex.
+    /* eslint-disable react-hooks/immutability -- runtimes Map is local to this effect */
     for (const sub of subsRef.current) {
       const rt = buildChannel(sub);
       runtimes.set(rt.key, rt);
     }
+    /* eslint-enable react-hooks/immutability */
 
     // Wire a socket-level close listener so a disconnect (explicit or
     // network-induced) kicks a reconnect. Each effect run installs its

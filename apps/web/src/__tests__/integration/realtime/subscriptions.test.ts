@@ -76,7 +76,12 @@ function captureNextEvent(
     const timer = setTimeout(() => reject(new Error(`event timeout: ${opts.schema}.${opts.table}`)), timeout);
     channel.on(
       'postgres_changes',
-      { event: opts.event ?? '*', schema: opts.schema, table: opts.table, ...(opts.filter ? { filter: opts.filter } : {}) },
+      {
+        event: opts.event ?? '*',
+        schema: opts.schema,
+        table: opts.table,
+        ...(opts.filter ? { filter: opts.filter } : {}),
+      },
       (payload: any) => {
         if (opts.predicate && !opts.predicate(payload)) return;
         clearTimeout(timer);
@@ -179,11 +184,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       expect(payload.new.device_name).toBe('Test Shelf');
 
       // Cleanup
-      await adminClient
-        .schema('chefbyte')
-        .from('live_shelf_devices')
-        .delete()
-        .eq('device_id', inserted!.device_id);
+      await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', inserted!.device_id);
     } finally {
       probe.cleanup();
     }
@@ -229,11 +230,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       expect(payload.new.device_name).toBe('Renamed Shelf');
     } finally {
       probe.cleanup();
-      await adminClient
-        .schema('chefbyte')
-        .from('live_shelf_devices')
-        .delete()
-        .eq('device_id', seeded!.device_id);
+      await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', seeded!.device_id);
     }
   }, 20_000);
 
@@ -286,11 +283,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       expect(payload.new.scale_id).toBe('scale_test_1');
     } finally {
       probe.cleanup();
-      await adminClient
-        .schema('chefbyte')
-        .from('live_shelf_devices')
-        .delete()
-        .eq('device_id', device!.device_id); // CASCADE deletes pairings
+      await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', device!.device_id); // CASCADE deletes pairings
     }
   }, 20_000);
 
@@ -330,11 +323,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       expect(payload.new.override_id).toBe(inserted!.override_id);
       expect(payload.new.client_event_id).toBe(clientEventId);
 
-      await adminClient
-        .schema('chefbyte')
-        .from('event_overrides')
-        .delete()
-        .eq('override_id', inserted!.override_id);
+      await adminClient.schema('chefbyte').from('event_overrides').delete().eq('override_id', inserted!.override_id);
     } finally {
       probe.cleanup();
     }
@@ -387,11 +376,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       expect(payload.new.state).toBe('waiting_barcode');
     } finally {
       probe.cleanup();
-      await adminClient
-        .schema('chefbyte')
-        .from('live_shelf_devices')
-        .delete()
-        .eq('device_id', device!.device_id);
+      await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', device!.device_id);
     }
   }, 20_000);
 
@@ -441,11 +426,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       expect(deliveredForOther).toBe(false);
 
       userClient.removeChannel(channel);
-      await adminClient
-        .schema('chefbyte')
-        .from('live_shelf_devices')
-        .delete()
-        .eq('device_id', otherDevice!.device_id);
+      await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', otherDevice!.device_id);
     } finally {
       otherUser.client.removeAllChannels();
       await cleanupUser(otherUser.userId);

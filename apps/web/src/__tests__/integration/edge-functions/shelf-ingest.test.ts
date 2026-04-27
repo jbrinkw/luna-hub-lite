@@ -631,7 +631,12 @@ describe('shelf-ingest Edge Function', () => {
 
     // Cleanup
     await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('product_id', prod.product_id);
-    await (adminClient as any).schema('chefbyte').from('shelf_event_log').delete().eq('user_id', userId).eq('client_event_id', clientEventId);
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('shelf_event_log')
+      .delete()
+      .eq('user_id', userId)
+      .eq('client_event_id', clientEventId);
     await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', prod.product_id);
   });
 
@@ -1147,13 +1152,14 @@ describe('shelf-ingest Edge Function', () => {
 
     // Fresh state for this product: clear existing food_logs + zero lot
     // mid-flight so the delta is unambiguous.
-    await (adminClient as any).schema('chefbyte').from('food_logs').delete().eq('user_id', userId).eq('product_id', productId);
-    // Reset lot to a known qty.
     await (adminClient as any)
       .schema('chefbyte')
-      .from('stock_lots')
-      .update({ qty_containers: 3 })
-      .eq('lot_id', lotId);
+      .from('food_logs')
+      .delete()
+      .eq('user_id', userId)
+      .eq('product_id', productId);
+    // Reset lot to a known qty.
+    await (adminClient as any).schema('chefbyte').from('stock_lots').update({ qty_containers: 3 }).eq('lot_id', lotId);
 
     const payload = {
       scale_id: 'scale-idem',
@@ -1285,11 +1291,7 @@ describe('shelf-ingest Edge Function', () => {
   it('POST /event dedup replay returns cached applied=true with same resolved_lot_id', async () => {
     const clientEventId = crypto.randomUUID();
 
-    await (adminClient as any)
-      .schema('chefbyte')
-      .from('stock_lots')
-      .update({ qty_containers: 5 })
-      .eq('lot_id', lotId);
+    await (adminClient as any).schema('chefbyte').from('stock_lots').update({ qty_containers: 5 }).eq('lot_id', lotId);
 
     const payload = {
       scale_id: 'scale-dedup-cached',
@@ -1500,16 +1502,14 @@ describe('shelf-ingest Edge Function', () => {
       .update({ deleted_at: new Date().toISOString() })
       .eq('product_id', doomed.product_id);
 
-    const res = await fetch(
-      `${BASE_URL}/catalog?updated_since=${encodeURIComponent(watermark)}`,
-      { method: 'GET', headers: authHeaders(importKey) },
-    );
+    const res = await fetch(`${BASE_URL}/catalog?updated_since=${encodeURIComponent(watermark)}`, {
+      method: 'GET',
+      headers: authHeaders(importKey),
+    });
     expect(res.status).toBe(200);
     const body = await res.json();
 
-    const doomedRow = body.products.find(
-      (p: any) => p.product_id === doomed.product_id,
-    );
+    const doomedRow = body.products.find((p: any) => p.product_id === doomed.product_id);
     expect(doomedRow).toBeTruthy();
     expect(doomedRow.deleted_at).toBeTruthy();
 
@@ -1575,14 +1575,11 @@ describe('shelf-ingest Edge Function', () => {
       });
     expect(logErr).toBeNull();
 
-    const { error: ovErr } = await (adminClient as any)
-      .schema('chefbyte')
-      .from('event_overrides')
-      .insert({
-        user_id: userId,
-        client_event_id: clientEventId,
-        macros_servings_override: 1.0,
-      });
+    const { error: ovErr } = await (adminClient as any).schema('chefbyte').from('event_overrides').insert({
+      user_id: userId,
+      client_event_id: clientEventId,
+      macros_servings_override: 1.0,
+    });
     expect(ovErr).toBeNull();
 
     // Full pull (no watermark): override + lot state both present.
@@ -1615,10 +1612,10 @@ describe('shelf-ingest Edge Function', () => {
   it('GET /overrides?updated_since=<future> returns empty overrides + empty lots', async () => {
     // Watermark in the future → no rows qualify.
     const future = new Date(Date.now() + 60_000).toISOString();
-    const res = await fetch(
-      `${BASE_URL}/overrides?updated_since=${encodeURIComponent(future)}`,
-      { method: 'GET', headers: authHeaders(importKey) },
-    );
+    const res = await fetch(`${BASE_URL}/overrides?updated_since=${encodeURIComponent(future)}`, {
+      method: 'GET',
+      headers: authHeaders(importKey),
+    });
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.overrides).toEqual([]);
@@ -1682,9 +1679,7 @@ describe('shelf-ingest Edge Function', () => {
     });
     expect(res.status).toBe(200);
     const body = await res.json();
-    const leaked = body.overrides.find(
-      (o: any) => o.client_event_id === otherCeid,
-    );
+    const leaked = body.overrides.find((o: any) => o.client_event_id === otherCeid);
     expect(leaked).toBeUndefined();
     const leakedLot = body.lots.find((l: any) => l.lot_id === otherLot.lot_id);
     expect(leakedLot).toBeUndefined();

@@ -4,11 +4,11 @@ import { toolSuccess, toolError } from '../shared';
 export const deleteProduct: ToolDefinition = {
   name: 'CHEFBYTE_delete_product',
   description:
-    "Soft-delete a product by product_id (sets deleted_at timestamp). The product " +
-    "is hidden from inventory / product-list queries and propagates to the Live " +
+    'Soft-delete a product by product_id (sets deleted_at timestamp). The product ' +
+    'is hidden from inventory / product-list queries and propagates to the Live ' +
     "Shelf Pi (its local classifier won't propose the deleted product anymore). " +
-    "Existing stock_lots, food_logs, meal_plan_entries, and recipe_ingredients " +
-    "rows are preserved — historical records stay intact. RLS enforces ownership.",
+    'Existing stock_lots, food_logs, meal_plan_entries, and recipe_ingredients ' +
+    'rows are preserved — historical records stay intact. RLS enforces ownership.',
   inputSchema: {
     type: 'object',
     properties: {

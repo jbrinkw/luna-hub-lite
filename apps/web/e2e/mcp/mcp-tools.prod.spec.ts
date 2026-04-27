@@ -61,20 +61,20 @@ test.describe('MCP Worker — production smoke', () => {
       // 4. Initialize, then call a read-only tool. The deployed worker
       //    is stateless — each POST /sse is a self-contained JSON-RPC
       //    exchange.
-      const initResp = await mcpCall(apiKey, 'initialize', {
-        protocolVersion: '2025-03-26',
-        capabilities: {},
-        clientInfo: { name: 'e2e-prod-smoke', version: '1.0' },
-      }, 1);
+      const initResp = await mcpCall(
+        apiKey,
+        'initialize',
+        {
+          protocolVersion: '2025-03-26',
+          capabilities: {},
+          clientInfo: { name: 'e2e-prod-smoke', version: '1.0' },
+        },
+        1,
+      );
       expect(initResp.error).toBeUndefined();
       expect(initResp.result?.protocolVersion).toBeTruthy();
 
-      const toolResp = await mcpCall(
-        apiKey,
-        'tools/call',
-        { name: 'COACHBYTE_get_timer', arguments: {} },
-        2,
-      );
+      const toolResp = await mcpCall(apiKey, 'tools/call', { name: 'COACHBYTE_get_timer', arguments: {} }, 2);
       expect(toolResp.error).toBeUndefined();
       const result = toolResp.result;
       expect(result).toBeTruthy();

@@ -46,26 +46,26 @@ livetrack test should have been written.
 
 - **File:** `apps/web/e2e/chefbyte/offline.spec.ts:57-110`
 - **Commit claim:** "Actions disabled while offline via `pointerEvents:
-  none`; DB unchanged."
+none`; DB unchanged."
 - **Actual fidelity:** the test uses `click({ trial: true, timeout:
-  3000 })` with `.catch(() => {})`. `trial: true` does NOT actually
+3000 })` with `.catch(() => {})`. `trial: true` does NOT actually
   click — it only probes clickability. The subsequent DB check (3
   containers unchanged) passes regardless of whether pointer-events is
   disabled, because no click ever fires.
 - **Blindspot class:** #3 (asserts the mock/call-shape, not real state)
-  + variant of #1 (test structurally cannot exercise the protected
-  code path).
+  - variant of #1 (test structurally cannot exercise the protected
+    code path).
 - **Realistic regression:** remove `pointerEvents: none` and `opacity:
-  0.6` from `ChefLayout.tsx`. The "No connection" banner still
+0.6` from `ChefLayout.tsx`. The "No connection" banner still
   renders, `trial: true` still returns success, DB still at 3 ⇒ test
   passes. Users can now click buttons that will silently fail at the
   transport layer while showing "offline" banner. **Exactly the class
   of "visual banner up but guard removed" regression the test claims
   to pin.**
 - **Recommended fix:** replace `trial: true` with a real `click({
-  force: true })` and assert the DB still matches the pre-click state;
+force: true })` and assert the DB still matches the pre-click state;
   alternatively, assert `page.getByTestId('sub-ctn-...').evaluate(el
-  => getComputedStyle(el).pointerEvents)` equals `'none'`.
+=> getComputedStyle(el).pointerEvents)` equals `'none'`.
 
 ### 2.2 CRITICAL — `agent-voice.spec.ts::mid-stream disconnect`
 
@@ -98,8 +98,8 @@ livetrack test should have been written.
   /pi-update, /active routes including cross-user scoping."
 - **Actual fidelity:** single `pi-update` call. Asserts the ALLOWED
   fields wrote. But **never** does `pi-update (state=waiting_scale) →
-  pi-update (state now scale_reading_received) → assert second update
-  landed`. This is the **exact canonical livetrack blindspot**: the
+pi-update (state now scale_reading_received) → assert second update
+landed`. This is the **exact canonical livetrack blindspot**: the
   bug fixed in `a375b9d` required the state-flip-blocks-next-update
   sequence to surface.
 - **Blindspot class:** #1 (single-call where multi-call sequence is
@@ -134,7 +134,7 @@ livetrack test should have been written.
   state too early so second heartbeat's check fails. Was missed;
   would be missed again.
 - **Recommended fix:** a `pytest` in `hardware/live-shelf/server/tests/
-  test_livetrack_heartbeat.py`: instantiate `ScaleHandler`, seed
+test_livetrack_heartbeat.py`: instantiate `ScaleHandler`, seed
   `livetrack_poller.snapshot()` to return `state=waiting_scale`, post
   `handle_heartbeat(weight=100)`, flip snapshot to
   `scale_reading_received`, post `handle_heartbeat(weight=150)`, assert
@@ -172,7 +172,7 @@ livetrack test should have been written.
 - **Commit claim:** "MCP OAuth 2.1 + offline behavior + Voice Assist —
   closes audit item #13."
 - **Actual fidelity:** the entire `'MCP OAuth 2.1 — Supabase AS
-  endpoints'` describe block is gated by `asMetadataAvailable`, which
+endpoints'` describe block is gated by `asMetadataAvailable`, which
   requires Supabase local to have `auth.oauth_server.enabled = true`.
   That flag is OFF by default in `config.toml` (the docstring
   acknowledges this). In normal CI runs, the authorize/token/PKCE
@@ -201,8 +201,8 @@ livetrack test should have been written.
 - **Blindspot class:** #2 (emulates the scanner via direct DB write)
   and #3 (asserts the mock's write shape).
 - **Realistic regression:** the scanner's code changes from `update(
-  ...).eq('product_id', placeholderId)` to `upsert(..., {onConflict:
-  'barcode'})` with a bug where the placeholder's `product_id`
+...).eq('product_id', placeholderId)` to `upsert(..., {onConflict:
+'barcode'})` with a bug where the placeholder's `product_id`
   changes. The test still passes because the admin call it makes is
   still an update-by-id. Users see a duplicated placeholder in
   `Unknown Product` lists.
@@ -220,7 +220,7 @@ livetrack test should have been written.
 - **Commit claim:** "Cross-user isolation — User A failure does not
   affect User B."
 - **Actual fidelity:** B's assertion is `not.toBe(401) &&
-  not.toBe(400)`. Any 5xx passes (including internal 500 from missing
+not.toBe(400)`. Any 5xx passes (including internal 500 from missing
   SERPAPI_KEY, which the test comment ACKNOWLEDGES). Since the edge
   fn is stateless there's nothing to isolate — any stateless fn would
   pass this test.
@@ -243,7 +243,7 @@ livetrack test should have been written.
   day_start_hour (via ensure_daily_plan → get_logical_date)."
 - **Actual fidelity:** with `plan_date='2026-04-21'` and
   `day_start_hour=6`, `get_logical_date` computes from `plan_date
-  12:00 local`, which at noon is always past the 6am cutover ⇒
+12:00 local`, which at noon is always past the 6am cutover ⇒
   `logical_date = plan_date`. A regression where `ensure_daily_plan`
   stored `plan_date` directly instead of calling `get_logical_date`
   would produce an identical result (`logical_date = plan_date`).
@@ -466,7 +466,7 @@ reviewer artifact committed to `docs/superpowers/reviews/`.
    real `click({ force: true })` and DB assertion (2.1). Highest
    severity, trivial fix.
 2. **[S]** Remove or rescope `agent-voice.spec.ts::mid-stream
-   disconnect` (2.2). One-line delete + add TODO comment.
+disconnect` (2.2). One-line delete + add TODO comment.
 3. **[S]** Rename `mcp-worker.test.ts::reconnect with same sessionId`
    to drop the "resumption" framing (2.13).
 

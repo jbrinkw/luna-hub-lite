@@ -73,11 +73,7 @@ test.describe('Demo account reset leaves real users untouched', () => {
     // ── 1. Seed two real users with ChefByte data ──
     // `seedFullAndLogin` creates user A, signs the browser in, and
     // returns an authenticated client we can reuse to call the RPC.
-    const {
-      userId: userAId,
-      cleanup: cleanupA,
-      client: clientA,
-    } = await seedFullAndLogin(page, 'demo-contam-a');
+    const { userId: userAId, cleanup: cleanupA, client: clientA } = await seedFullAndLogin(page, 'demo-contam-a');
     const chefAdmin = (admin as any).schema('chefbyte');
 
     // Give user A a distinct stock row (on top of activation-seed data)

@@ -127,9 +127,7 @@ export async function patchLiveTrackSession(
  * Load a session by id. Returns null when the row is not found (covers
  * expired-and-purged as well as RLS misses).
  */
-export async function loadLiveTrackSession(
-  sessionId: string,
-): Promise<LiveTrackSession | null> {
+export async function loadLiveTrackSession(sessionId: string): Promise<LiveTrackSession | null> {
   const { data, error } = await chefbyte()
     .from('livetrack_import_sessions')
     .select('*')
@@ -201,13 +199,7 @@ export function computeQtyContainersFromScale(args: {
   const { scaleG, tareG, netWeightG } = args;
   const netWeight = Number(netWeightG ?? 0);
   let qty = 1;
-  if (
-    scaleG != null
-    && Number.isFinite(scaleG)
-    && tareG != null
-    && Number.isFinite(tareG)
-    && netWeight > 0
-  ) {
+  if (scaleG != null && Number.isFinite(scaleG) && tareG != null && Number.isFinite(tareG) && netWeight > 0) {
     const netProductG = Math.max(0, (scaleG as number) - (tareG as number));
     qty = Math.max(0, netProductG / netWeight);
   }

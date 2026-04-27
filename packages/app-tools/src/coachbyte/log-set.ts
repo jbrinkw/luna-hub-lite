@@ -31,11 +31,7 @@ export const logSet: ToolDefinition = {
       return toolError('load must be <= 2000 lbs (sanity cap; edit the DB row directly if you really did this)');
     }
 
-    const { id: resolvedExerciseId, unresolved } = await resolveExerciseRef(
-      ctx.supabase,
-      ctx.userId,
-      exercise_id,
-    );
+    const { id: resolvedExerciseId, unresolved } = await resolveExerciseRef(ctx.supabase, ctx.userId, exercise_id);
     if (unresolved.length > 0 || !resolvedExerciseId) {
       return toolError(`Unknown exercise: "${exercise_id}"`);
     }

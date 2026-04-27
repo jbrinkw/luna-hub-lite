@@ -38,6 +38,7 @@ A third source for completeness:
 ## 2. Goals / non-goals
 
 **Goals**
+
 - Answer "how much of X did I consume this week?" with a single SQL query.
 - Stable audit log: renaming a product later doesn't change history.
 - Cover both return-with-delta AND non-return (TTL / replaced) flows.
@@ -47,6 +48,7 @@ A third source for completeness:
   present at launch.
 
 **Non-goals**
+
 - No nutrition / calorie computation. Grams only. (Multiply outside.)
 - No cross-device aggregation (we're single-shelf).
 - No "correction" flow if a TTL-expired item is returned later — MVP treats
@@ -127,12 +129,12 @@ Both clear the in-flight columns, flip status to `out`, stamp
 
 ## 4. Emission sites (where usage_log rows are written)
 
-| Site                                              | `kind`                       | `consumed_g` formula                          |
-| ------------------------------------------------- | ---------------------------- | --------------------------------------------- |
-| `_apply_add_against_in_flight_lot` — return path  | `in_flight_return`           | `pickup − return`, clamped at noise floor; can be negative for topups |
-| `_apply_add_against_in_flight_lot` — replace path | `in_flight_replaced_new_item`| `pickup_weight_g` (whole item presumed gone) |
-| `_reap_expired_in_flight`                         | `in_flight_ttl_expired`      | `pickup_weight_g` (whole item presumed gone) |
-| reconciler `use_return_consumed` pass             | `reconciler_use_return`      | reconciler's computed `consumed`              |
+| Site                                              | `kind`                        | `consumed_g` formula                                                  |
+| ------------------------------------------------- | ----------------------------- | --------------------------------------------------------------------- |
+| `_apply_add_against_in_flight_lot` — return path  | `in_flight_return`            | `pickup − return`, clamped at noise floor; can be negative for topups |
+| `_apply_add_against_in_flight_lot` — replace path | `in_flight_replaced_new_item` | `pickup_weight_g` (whole item presumed gone)                          |
+| `_reap_expired_in_flight`                         | `in_flight_ttl_expired`       | `pickup_weight_g` (whole item presumed gone)                          |
+| reconciler `use_return_consumed` pass             | `reconciler_use_return`       | reconciler's computed `consumed`                                      |
 
 Emission is a side-effect AFTER the lot mutation commits. Wrapped in
 try/except (observability must not raise) but logged at WARNING on failure
@@ -202,6 +204,7 @@ class UsageLog(UsageLogIn):
 ### 5.3 HTTP routes (web/routes.py + api_routes.py)
 
 HTML:
+
 - `GET /usage` — paginated list, filters via query string
   (`?product=<id>&since=YYYY-MM-DD&until=YYYY-MM-DD&kind=<k>`). Default
   view: last 30 days, newest first.
@@ -209,6 +212,7 @@ HTML:
   summary.
 
 JSON:
+
 - `GET /api/usage` — same filters, returns `{items: [], total: N}`.
 - `GET /api/usage/summary?since=X&until=Y` — returns
   `[{product_id, product_name, total_g, rows}]`.
@@ -218,6 +222,7 @@ JSON:
 ### 6.1 `/usage` page (usage.html)
 
 Structure:
+
 ```
 [ summary banner ]  last 30 days: 1.2 kg consumed across 14 items
                     in-flight right now: 2 items (~430 g) not yet resolved
@@ -245,9 +250,11 @@ Add `/usage` to the top nav alongside registry / sessions / review.
 ### 6.3 Dashboard widget (bonus)
 
 Tiny "today so far" tile:
+
 ```
 today: 314 g consumed · 5 items
 ```
+
 Computed via `sum_usage_log_by_product(since=<today_start>)`.
 
 ## 7. Backfill
@@ -295,6 +302,7 @@ lots were minted before the in-flight columns existed) will have
 ## 8. Observability
 
 New lifecycle reason codes:
+
 - `USAGE_LOGGED` — emitted after each successful insert, payload includes
   `{usage_id, consumed_g, kind, product_id}`.
 - `USAGE_LOG_WRITE_FAILED` — ERROR-level, payload `{error, kind, lot_id}`.
@@ -364,7 +372,7 @@ Each step independently committable:
 
 ### 10.4 Integration
 
-- `test_full_cycle_return_writes_usage_log`  — same-session pickup then
+- `test_full_cycle_return_writes_usage_log` — same-session pickup then
   return, assert row exists with correct consumed_g.
 - `test_full_cycle_ttl_expiry_writes_usage_log` — pickup then wait past
   TTL, assert row.
@@ -383,10 +391,11 @@ Each step independently committable:
 ## 11. Schema invariants
 
 Enforced by the DB + tests:
+
 - Every `in_flight_return` / `in_flight_ttl_expired` /
   `in_flight_replaced_new_item` session_resolutions row has exactly one
   `usage_log` row with the matching `pickup_event_id` (after migration
-  + backfill).
+  - backfill).
 - `consumed_g` is never NULL.
 - `kind` is one of the four literals.
 - `occurred_at ≥ created_at` is false (occurred_at can be earlier); both
@@ -400,19 +409,19 @@ Enforced by the DB + tests:
    negative consumed_g renders as "topup" in the UI but stays kind=
    `in_flight_return`. Alternative: split into a distinct `kind='topup'`.
    Trade-off: simpler query for "consumption only" (`WHERE consumed_g >
-   0`) is nice to have, but two row shapes for what's fundamentally the
+0`) is nice to have, but two row shapes for what's fundamentally the
    same event type is clutter. Default: keep one kind; UI filters by
    sign.
 
 2. **Should cross-session reconciler returns still emit?** The reconciler
    can write `use_return_consumed` when fast-path didn't run. We should
-   emit a usage_log row to preserve coverage. But if the fast-path DID
+   emit a usage*log row to preserve coverage. But if the fast-path DID
    run, we MUST NOT double-log. The unique index on
    `(pickup_event_id, kind)` — with `kind` differing between fast-path
    and reconciler — doesn't naturally dedup. Mitigation: reconciler's
    usage_log emission checks "was there already a usage_log row with
    pickup_event_id = <this remove_event_id> and kind starting with
-   'in_flight_'?" and skips if so. Alternative: change the unique index
+   'in_flight*'?" and skips if so. Alternative: change the unique index
    to `(pickup_event_id)` without kind, so ANY duplicate is rejected —
    cleaner. Default: `(pickup_event_id)` alone, no `kind`.
 
@@ -425,4 +434,4 @@ Enforced by the DB + tests:
 
 ---
 
-*End of plan.*
+_End of plan._

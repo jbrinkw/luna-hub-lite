@@ -58,8 +58,7 @@ function assertClean(listener: Listener, route: string) {
   }
   if (listener.consoleErrors.length > 0) {
     throw new Error(
-      `[${route}] console errors on brand-new user:\n` +
-        listener.consoleErrors.map((e) => `  - ${e}`).join('\n'),
+      `[${route}] console errors on brand-new user:\n` + listener.consoleErrors.map((e) => `  - ${e}`).join('\n'),
     );
   }
 }

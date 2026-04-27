@@ -57,7 +57,7 @@ Each scenario lives in `scripts/harness/scenarios/<name>.py` and must:
 2. **Act** — drive the Pi via direct Python calls (e.g.,
    `handle_scale_event(...)`) not simulated HTTP from outside. Then tick
    the outbox drainer synchronously. No polling loops, no `time.sleep(>
-   0.5)` — use deterministic drainer-tick calls.
+0.5)` — use deterministic drainer-tick calls.
 3. **Assert** — verify end state in cloud DB (rows, columns) AND on Pi
    disk (JPEG file existence, SQLite rows).
 4. **Teardown** — stop Pi process; supabase stays running between

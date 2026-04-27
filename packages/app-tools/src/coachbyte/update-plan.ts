@@ -49,7 +49,9 @@ export const updatePlan: ToolDefinition = {
     const refs = (sets as any[]).map((s: any) => s.exercise_id);
     const { ids, unresolved } = await resolveExerciseRefs(ctx.supabase, ctx.userId, refs);
     if (unresolved.length > 0) {
-      return toolError(`Unknown exercise${unresolved.length === 1 ? '' : 's'}: ${unresolved.map((u) => `"${u}"`).join(', ')}`);
+      return toolError(
+        `Unknown exercise${unresolved.length === 1 ? '' : 's'}: ${unresolved.map((u) => `"${u}"`).join(', ')}`,
+      );
     }
 
     // Translate {load, relative} → {target_load, target_load_percentage}
@@ -73,9 +75,7 @@ export const updatePlan: ToolDefinition = {
     // Resolve percentages → absolute lbs at write time so resolved_load
     // shows up immediately in get_today_plan output. Same formula and
     // 5-lb rounding as private.ensure_daily_plan.
-    const relativeExerciseIds = rows
-      .filter((r) => r.target_load_percentage !== null)
-      .map((r) => r.exercise_id);
+    const relativeExerciseIds = rows.filter((r) => r.target_load_percentage !== null).map((r) => r.exercise_id);
     if (relativeExerciseIds.length > 0) {
       const e1rmByEx = await computeEstimated1RMs(ctx.supabase, ctx.userId, relativeExerciseIds);
       for (const r of rows) {
@@ -105,9 +105,7 @@ export const updatePlan: ToolDefinition = {
       .schema('coachbyte')
       .from('planned_sets')
       .insert(rows)
-      .select(
-        'planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, order',
-      );
+      .select('planned_set_id, exercise_id, target_reps, target_load, target_load_percentage, rest_seconds, order');
 
     if (insertError) return toolError(`Failed to insert new sets: ${insertError.message}`);
 

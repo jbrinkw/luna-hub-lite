@@ -43,7 +43,9 @@ export const updateSplit: ToolDefinition = {
     const refs = (template_sets as any[]).map((ts: any) => ts.exercise_id);
     const { ids, unresolved } = await resolveExerciseRefs(ctx.supabase, ctx.userId, refs);
     if (unresolved.length > 0) {
-      return toolError(`Unknown exercise${unresolved.length === 1 ? '' : 's'}: ${unresolved.map((u) => `"${u}"`).join(', ')}`);
+      return toolError(
+        `Unknown exercise${unresolved.length === 1 ? '' : 's'}: ${unresolved.map((u) => `"${u}"`).join(', ')}`,
+      );
     }
 
     // Translate {load, relative} → DB JSONB shape

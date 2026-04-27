@@ -4,7 +4,7 @@ import { toolSuccess, toolError } from '../shared';
 export const deleteTempItem: ToolDefinition = {
   name: 'CHEFBYTE_delete_temp_item',
   description:
-    "Delete a temporary (quick-add) macro entry by temp_id. Used to undo a stray `log_temp_item` call. RLS enforces ownership.",
+    'Delete a temporary (quick-add) macro entry by temp_id. Used to undo a stray `log_temp_item` call. RLS enforces ownership.',
   inputSchema: {
     type: 'object',
     properties: {

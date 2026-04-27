@@ -711,10 +711,7 @@ test.describe('CoachByte Today Page', () => {
 
       // DB: the set was persisted + the timer row is running.
       await expect(async () => {
-        const { data: cs } = await coach
-          .from('completed_sets')
-          .select('completed_set_id')
-          .eq('user_id', userId);
+        const { data: cs } = await coach.from('completed_sets').select('completed_set_id').eq('user_id', userId);
         expect(cs!.length).toBeGreaterThanOrEqual(1);
       }).toPass({ timeout: 15_000 });
       await expect(async () => {

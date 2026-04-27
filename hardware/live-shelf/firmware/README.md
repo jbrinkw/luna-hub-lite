@@ -12,21 +12,22 @@ firmware and adds everything on top of the same parallel-read core.
 
 ## 1. Board + pinout
 
-| Signal | Pin (Wemos D1 Mini) | GPIO | Notes |
-|---|---|---|---|
-| HX711 SCK (shared by all 4) | `D7` | GPIO13 | Output. Driven high/low in lockstep. |
-| HX711 #0 DOUT (cell 0) | `D6` | GPIO12 | Input. |
-| HX711 #1 DOUT (cell 1) | `D1` | GPIO5 | Input. |
-| HX711 #2 DOUT (cell 2) | `D2` | GPIO4 | Input. |
-| HX711 #3 DOUT (cell 3) | `D5` | GPIO14 | Input. |
-| WS2812B data | `D4` | GPIO2 | Output. 1 pixel. Series 330-470 Ω recommended. |
-| Power | 5 V USB | — | HX711 VCC and NeoPixel V+ both to 5 V. |
+| Signal                      | Pin (Wemos D1 Mini) | GPIO   | Notes                                          |
+| --------------------------- | ------------------- | ------ | ---------------------------------------------- |
+| HX711 SCK (shared by all 4) | `D7`                | GPIO13 | Output. Driven high/low in lockstep.           |
+| HX711 #0 DOUT (cell 0)      | `D6`                | GPIO12 | Input.                                         |
+| HX711 #1 DOUT (cell 1)      | `D1`                | GPIO5  | Input.                                         |
+| HX711 #2 DOUT (cell 2)      | `D2`                | GPIO4  | Input.                                         |
+| HX711 #3 DOUT (cell 3)      | `D5`                | GPIO14 | Input.                                         |
+| WS2812B data                | `D4`                | GPIO2  | Output. 1 pixel. Series 330-470 Ω recommended. |
+| Power                       | 5 V USB             | —      | HX711 VCC and NeoPixel V+ both to 5 V.         |
 
 All HX711 `VDD` and `VCC` pins tied to 5 V from USB.
 All HX711 `GND` and the WS2812B `GND` tied to the D1 Mini `GND`.
 Each HX711 `RATE` pin tied to GND for 10 Hz output (matches `SAMPLE_INTERVAL_MS`).
 
 ### WS2812B notes
+
 - GPIO2 (`D4`) is the **built-in LED pin** on the D1 Mini. The on-board LED is
   on the same line but is open-drain driven by the UART and does not interfere
   with NeoPixel output. During boot the serial port may blip the line; if you
@@ -42,26 +43,28 @@ Each HX711 `RATE` pin tied to GND for 10 Hz output (matches `SAMPLE_INTERVAL_MS`
 
 Install via **Arduino IDE → Library Manager** (names as they appear there):
 
-| Library | Manager name | Tested version |
-|---|---|---|
-| Adafruit NeoPixel | *Adafruit NeoPixel* | 1.12+ |
-| ArduinoJson | *ArduinoJson* | 7.x (also compiles on 6.x) |
-| NTPClient | *NTPClient* by Fabrice Weinberg | 3.2+ |
-| ESP8266 core | Board manager: *esp8266 by ESP8266 Community* | 3.1+ |
+| Library           | Manager name                                  | Tested version             |
+| ----------------- | --------------------------------------------- | -------------------------- |
+| Adafruit NeoPixel | _Adafruit NeoPixel_                           | 1.12+                      |
+| ArduinoJson       | _ArduinoJson_                                 | 7.x (also compiles on 6.x) |
+| NTPClient         | _NTPClient_ by Fabrice Weinberg               | 3.2+                       |
+| ESP8266 core      | Board manager: _esp8266 by ESP8266 Community_ | 3.1+                       |
 
 `ESP8266WiFi`, `ESP8266WebServer`, `ESP8266HTTPClient`, `WiFiClient`, `WiFiUdp`,
 and `EEPROM` ship with the ESP8266 core — no extra install needed.
 
 Board setup in Arduino IDE:
-- **Tools → Board** → *LOLIN(WEMOS) D1 R2 & mini*
-- **Tools → CPU Frequency** → *160 MHz* (improves parallel-read timing margin)
-- **Tools → Flash Size** → *4MB (FS:2MB OTA:~1019KB)*
+
+- **Tools → Board** → _LOLIN(WEMOS) D1 R2 & mini_
+- **Tools → CPU Frequency** → _160 MHz_ (improves parallel-read timing margin)
+- **Tools → Flash Size** → _4MB (FS:2MB OTA:~1019KB)_
 
 ---
 
 ## 3. Build / upload
 
 From the Arduino IDE:
+
 1. Open `hardware/live-shelf/firmware/scale-live.ino`.
 2. Edit the top-of-file `ssid` / `password` if your Wi-Fi is not
    `EmeraldDolphin / lil-flop`.
@@ -69,6 +72,7 @@ From the Arduino IDE:
 4. Open **Serial Monitor** at `115200` baud; first boot prints the IP address.
 
 From the CLI (optional):
+
 ```bash
 arduino-cli compile --fqbn esp8266:esp8266:d1_mini_clone hardware/live-shelf/firmware
 arduino-cli upload  --fqbn esp8266:esp8266:d1_mini_clone -p /dev/ttyUSB0 \
@@ -88,14 +92,14 @@ arduino-cli upload  --fqbn esp8266:esp8266:d1_mini_clone -p /dev/ttyUSB0 \
 Everything is editable from the web UI at `http://<esp-ip>/` and persisted to
 EEPROM. Defaults:
 
-| Field | Default | Notes |
-|---|---|---|
-| `pi_url` | `http://192.168.0.181:8000` | No trailing slash. |
-| `device_id` | `scale-01` | Echoed in every event/heartbeat. |
-| `delta_threshold_g` | `5.0` | Min absolute change between stable states to emit an event. |
-| `stability_window_g` | `2.0` | Max spread over the rolling window to count as stable. |
-| `stable_samples_required` | `8` | ~0.8 s at 10 Hz. Max 64 (see `MAX_WIN`). |
-| `near_stable_window_g` | `4.0` | Used only for the yellow "almost there" LED. |
+| Field                     | Default                     | Notes                                                       |
+| ------------------------- | --------------------------- | ----------------------------------------------------------- |
+| `pi_url`                  | `http://192.168.0.181:8000` | No trailing slash.                                          |
+| `device_id`               | `scale-01`                  | Echoed in every event/heartbeat.                            |
+| `delta_threshold_g`       | `5.0`                       | Min absolute change between stable states to emit an event. |
+| `stability_window_g`      | `2.0`                       | Max spread over the rolling window to count as stable.      |
+| `stable_samples_required` | `8`                         | ~0.8 s at 10 Hz. Max 64 (see `MAX_WIN`).                    |
+| `near_stable_window_g`    | `4.0`                       | Used only for the yellow "almost there" LED.                |
 
 Calibration (per cell `offset` + `scale_factor`) is preserved across firmware
 updates as long as the EEPROM layout version (`EEPROM_VERSION`) is unchanged.
@@ -117,6 +121,7 @@ force on each of the 4 corners. With per-cell calibration as above, each cell
 reports 125 g. Sum = 500 g ✓, average = 125 g ✗.
 
 The HTTP `/data` endpoint reports both fields (identical by construction):
+
 - `total` — sum across cells (used for event detection)
 - `sum` — kept as a duplicate for backward compatibility with earlier clients
 
@@ -131,14 +136,14 @@ correct aggregator becomes the average instead. In that case, change
 
 Per `docs/plan.md` §2:
 
-| LED | Meaning | Trigger |
-|---|---|---|
-| Off | Idle | >15 s since last movement (jitter > `stability_window_g`) or no readings yet |
-| Red solid | Settling **or warming up** | Rolling window spread ≥ `near_stable_window_g`, **or** the window has fewer than `stable_samples_required` samples (boot/reset). Green is never shown on a partial window. |
-| Yellow solid | Near-stable | Window full, spread between `stability_window_g` and `near_stable_window_g` |
-| Green solid | Stable | Window full, spread < `stability_window_g`, WiFi up, queue empty |
-| Blue flash (200 ms) | Event POSTed | Momentary on each successful POST to `/api/scale-event` |
-| Magenta solid | Network degraded | Retry queue non-empty **or** WiFi disconnected (overrides green/yellow/red). Shown at boot if WiFi fails to associate. |
+| LED                 | Meaning                    | Trigger                                                                                                                                                                    |
+| ------------------- | -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Off                 | Idle                       | >15 s since last movement (jitter > `stability_window_g`) or no readings yet                                                                                               |
+| Red solid           | Settling **or warming up** | Rolling window spread ≥ `near_stable_window_g`, **or** the window has fewer than `stable_samples_required` samples (boot/reset). Green is never shown on a partial window. |
+| Yellow solid        | Near-stable                | Window full, spread between `stability_window_g` and `near_stable_window_g`                                                                                                |
+| Green solid         | Stable                     | Window full, spread < `stability_window_g`, WiFi up, queue empty                                                                                                           |
+| Blue flash (200 ms) | Event POSTed               | Momentary on each successful POST to `/api/scale-event`                                                                                                                    |
+| Magenta solid       | Network degraded           | Retry queue non-empty **or** WiFi disconnected (overrides green/yellow/red). Shown at boot if WiFi fails to associate.                                                     |
 
 The Pi can also drive the LED directly via `POST /led?color=...` (see §4.3 of
 the plan). Colors: `off|red|yellow|green|blue|magenta`. `blue` triggers a
@@ -212,12 +217,15 @@ This prevents a long Pi outage from continuously burning ~400 ms out of every
 ## 8. Smoke test (no Pi)
 
 Run a mock endpoint on your laptop:
+
 ```bash
 python3 -m http.server 8000
 ```
+
 Point the ESP's `pi_url` field at your laptop, e.g. `http://192.168.0.50:8000`.
 `http.server` will 501 on POSTs, which counts as a failed post — good for
 exercising the retry queue. For a 200 OK response, use:
+
 ```python
 # tiny_mock.py
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -230,6 +238,7 @@ class H(BaseHTTPRequestHandler):
         self.end_headers(); self.wfile.write(b'{"ok":true,"event_id":"mock"}')
 HTTPServer(("0.0.0.0", 8000), H).serve_forever()
 ```
+
 Place and remove a weight; watch the POST logs and the LED transitions.
 
 ---

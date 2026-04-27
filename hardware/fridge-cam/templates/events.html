@@ -1,39 +1,45 @@
-{% extends "_base.html" %}
-{% block title %}events - fridge-cam{% endblock %}
-{% block content %}
+{% extends "_base.html" %} {% block title %}events - fridge-cam{% endblock %} {% block content %}
 <h1>events</h1>
 
 <div class="panel">
-  <p class="muted" style="margin-top: 0;">
-    {{ events|length }} session{{ '' if events|length == 1 else 's' }} on disk.
-    Click any card for the full video + metadata.
+  <p class="muted" style="margin-top: 0">
+    {{ events|length }} session{{ '' if events|length == 1 else 's' }} on disk. Click any card for the full video +
+    metadata.
   </p>
 
   {% if events %}
-    <div class="thumb-grid">
-      {% for ev in events %}
-        <a class="thumb-card" href="/event/{{ ev._dir }}">
-          <div class="thumbs">
-            {% if ev.has_before %}
-              <img src="/event/{{ ev._dir }}/before.jpg" alt="before">
-            {% else %}
-              <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='96'><rect width='100%25' height='100%25' fill='%23151d20'/><text x='50%25' y='54%25' text-anchor='middle' fill='%237f8c87' font-family='monospace' font-size='11'>(no before)</text></svg>" alt="no before">
-            {% endif %}
-            {% if ev.has_after %}
-              <img src="/event/{{ ev._dir }}/after.jpg" alt="after">
-            {% else %}
-              <img src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='96'><rect width='100%25' height='100%25' fill='%23151d20'/><text x='50%25' y='54%25' text-anchor='middle' fill='%237f8c87' font-family='monospace' font-size='11'>(no after)</text></svg>" alt="no after">
-            {% endif %}
-          </div>
-          <div class="caption">
-            <span class="id">{{ ev._dir }}</span>
-            <span class="dur">{% if ev.duration_s is defined and ev.duration_s is not none %}{{ '%.1fs'|format(ev.duration_s) }}{% else %}&hellip;{% endif %}</span>
-          </div>
-        </a>
-      {% endfor %}
-    </div>
+  <div class="thumb-grid">
+    {% for ev in events %}
+    <a class="thumb-card" href="/event/{{ ev._dir }}">
+      <div class="thumbs">
+        {% if ev.has_before %}
+        <img src="/event/{{ ev._dir }}/before.jpg" alt="before" />
+        {% else %}
+        <img
+          src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='96'><rect width='100%25' height='100%25' fill='%23151d20'/><text x='50%25' y='54%25' text-anchor='middle' fill='%237f8c87' font-family='monospace' font-size='11'>(no before)</text></svg>"
+          alt="no before"
+        />
+        {% endif %} {% if ev.has_after %}
+        <img src="/event/{{ ev._dir }}/after.jpg" alt="after" />
+        {% else %}
+        <img
+          src="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='220' height='96'><rect width='100%25' height='100%25' fill='%23151d20'/><text x='50%25' y='54%25' text-anchor='middle' fill='%237f8c87' font-family='monospace' font-size='11'>(no after)</text></svg>"
+          alt="no after"
+        />
+        {% endif %}
+      </div>
+      <div class="caption">
+        <span class="id">{{ ev._dir }}</span>
+        <span class="dur"
+          >{% if ev.duration_s is defined and ev.duration_s is not none %}{{ '%.1fs'|format(ev.duration_s) }}{% else
+          %}&hellip;{% endif %}</span
+        >
+      </div>
+    </a>
+    {% endfor %}
+  </div>
   {% else %}
-    <p class="muted">no events yet. return to the <a href="/">dashboard</a> to trigger one.</p>
+  <p class="muted">no events yet. return to the <a href="/">dashboard</a> to trigger one.</p>
   {% endif %}
 </div>
 {% endblock %}

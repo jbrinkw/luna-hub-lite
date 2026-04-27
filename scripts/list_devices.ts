@@ -1,7 +1,7 @@
 import { createClient } from '@supabase/supabase-js';
 import { readFileSync } from 'fs';
 const env: any = {};
-for (const l of readFileSync('/home/jeremy/luna-hub-lite/.env','utf-8').split('\n')) {
+for (const l of readFileSync('/home/jeremy/luna-hub-lite/.env', 'utf-8').split('\n')) {
   const m = l.match(/^([A-Z_]+)=(.*)$/);
   if (m) env[m[1]] = m[2];
 }

@@ -49,7 +49,11 @@ export function proposedName(offProduct: { brands?: unknown; product_name?: unkn
  * Build the Claude Haiku system prompt that tells the model how to return
  * normalized product data. Pure function of the OFF product — no I/O.
  */
-export function buildSystemPrompt(offProduct: { brands?: unknown; product_name?: unknown; generic_name?: unknown }): string {
+export function buildSystemPrompt(offProduct: {
+  brands?: unknown;
+  product_name?: unknown;
+  generic_name?: unknown;
+}): string {
   const proposed = proposedName(offProduct);
   return [
     'You normalize Open Food Facts product data into a structured JSON format.',

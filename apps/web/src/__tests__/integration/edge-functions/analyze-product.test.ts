@@ -624,9 +624,7 @@ describe('Analyze-Product Edge Function — failure paths', () => {
     // Quota consumed exactly once (OFF succeeded → quota charged).
     const quotaAfter = await getQuotaCount();
     expect(quotaAfter).toBe(quotaBefore + 1);
-  }, // 25s Anthropic timeout + buffer. We short-circuit so this resolves
-  // immediately in practice.
-  15_000);
+  }, 15_000); // immediately in practice. // 25s Anthropic timeout + buffer. We short-circuit so this resolves
 
   // ─── Anthropic returns malformed JSON — SOFT failure ─────
   it('Anthropic malformed JSON: does not 500, returns degraded state with OFF fallback', async () => {

@@ -61,10 +61,7 @@ type Device = { device_id: string; user_id: string };
  * device on success; null on any failure (caller responds 401 — leak no
  * detail to the client).
  */
-async function authenticatePi(
-  supabase: SupabaseClient,
-  apiKey: string | null,
-): Promise<Device | null> {
+async function authenticatePi(supabase: SupabaseClient, apiKey: string | null): Promise<Device | null> {
   if (!apiKey) return null;
   const hash = await sha256(apiKey);
   const { data, error } = await supabase
@@ -88,10 +85,7 @@ async function authenticatePi(
  * for the picked device is flipped to 'expired' before the insert, so only
  * the newest tab holds a live session per device.
  */
-async function handleCreate(
-  supabase: SupabaseClient,
-  req: Request,
-): Promise<Response> {
+async function handleCreate(supabase: SupabaseClient, req: Request): Promise<Response> {
   const authHeader = req.headers.get('Authorization');
   if (!authHeader?.startsWith('Bearer ')) {
     return jsonResponse({ error: 'Missing authorization header' }, 401);
@@ -100,11 +94,9 @@ async function handleCreate(
   // JWT-scoped client so we can call supabase.auth.getUser(); switching to
   // service_role for the writes lets us expire prior rows regardless of
   // RLS scoping (defense in depth — RLS would also allow it).
-  const userClient = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_ANON_KEY')!,
-    { global: { headers: { Authorization: authHeader } } },
-  );
+  const userClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    global: { headers: { Authorization: authHeader } },
+  });
   const {
     data: { user },
     error: authError,
@@ -191,11 +183,7 @@ const ALLOWED_PI_FIELDS = new Set([
   'last_error',
 ]);
 
-async function handlePiUpdate(
-  supabase: SupabaseClient,
-  device: Device,
-  body: any,
-): Promise<Response> {
+async function handlePiUpdate(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
   const sessionId: string | undefined = typeof body?.session_id === 'string' ? body.session_id : undefined;
   if (!sessionId) {
     return jsonResponse({ error: 'session_id required' }, 400);
@@ -273,10 +261,7 @@ async function handlePiUpdate(
  * session for the device, or `{ session: null }` (200) so the Pi always
  * gets a parseable body (a 204 would force branch-on-empty in the client).
  */
-async function handleActive(
-  supabase: SupabaseClient,
-  device: Device,
-): Promise<Response> {
+async function handleActive(supabase: SupabaseClient, device: Device): Promise<Response> {
   const { data, error } = await supabase
     .schema('chefbyte')
     .from('livetrack_import_sessions')
@@ -304,10 +289,7 @@ Deno.serve(async (req) => {
   try {
     // Service-role client — used by every route. JWT-scoped client is
     // only built inside handleCreate to call auth.getUser().
-    const supabase = createClient(
-      Deno.env.get('SUPABASE_URL')!,
-      Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-    );
+    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
 
     const url = new URL(req.url);
     const cleanedPath = url.pathname.replace(/\/+$/, '');

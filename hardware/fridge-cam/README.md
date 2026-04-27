@@ -95,18 +95,18 @@ immediately (list is read from disk each request).
 `config.json` is loaded on startup and merged with defaults. `POST /api/config`
 updates tunable keys at runtime (written back to `config.json`).
 
-| key                              | default | mutable at runtime | notes                                                |
-|----------------------------------|---------|--------------------|------------------------------------------------------|
-| `camera_index`                   | 0       | no (restart)       | USB camera index (`/dev/video0` on Linux)            |
-| `resolution_width`               | 1280    | no (restart)       |                                                      |
-| `resolution_height`              | 720     | no (restart)       |                                                      |
-| `capture_fps`                    | 5       | yes                | Low fps keeps Pi CPU load low                        |
-| `brightness_threshold`           | 60      | yes                | 0-255, higher = harder to trigger open               |
-| `brightness_hysteresis`          | 20      | yes                | Gap between open/close points; raise if chatter      |
-| `debounce_seconds`               | 2       | yes                | Minimum time between transitions                     |
-| `brightness_detection_enabled`   | true    | yes                | When false, only manual triggers fire events         |
-| `before_frame_offset_seconds`    | 1.5     | yes                | Where to grab the "before" frame                     |
-| `web_port`                       | 8000    | no (restart)       | CLI `--port` overrides this                          |
+| key                            | default | mutable at runtime | notes                                           |
+| ------------------------------ | ------- | ------------------ | ----------------------------------------------- |
+| `camera_index`                 | 0       | no (restart)       | USB camera index (`/dev/video0` on Linux)       |
+| `resolution_width`             | 1280    | no (restart)       |                                                 |
+| `resolution_height`            | 720     | no (restart)       |                                                 |
+| `capture_fps`                  | 5       | yes                | Low fps keeps Pi CPU load low                   |
+| `brightness_threshold`         | 60      | yes                | 0-255, higher = harder to trigger open          |
+| `brightness_hysteresis`        | 20      | yes                | Gap between open/close points; raise if chatter |
+| `debounce_seconds`             | 2       | yes                | Minimum time between transitions                |
+| `brightness_detection_enabled` | true    | yes                | When false, only manual triggers fire events    |
+| `before_frame_offset_seconds`  | 1.5     | yes                | Where to grab the "before" frame                |
+| `web_port`                     | 8000    | no (restart)       | CLI `--port` overrides this                     |
 
 ## Running on the Raspberry Pi Zero 2W
 

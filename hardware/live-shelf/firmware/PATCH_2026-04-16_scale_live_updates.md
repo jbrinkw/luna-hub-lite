@@ -17,9 +17,11 @@
 ## Patch 1 — static_assert on CalStorage size
 
 ### Location
+
 After the `struct CalStorage { ... };` block ending around **line 81**.
 
 ### Find
+
 ```cpp
 struct CalStorage {
   uint32_t magic;
@@ -32,6 +34,7 @@ const float DEFAULT_SCALE_FACTOR = 415.0;
 ```
 
 ### Replace with
+
 ```cpp
 struct CalStorage {
   uint32_t magic;
@@ -58,16 +61,19 @@ const float DEFAULT_SCALE_FACTOR = 415.0;
 ## Patch 2 — NTP-aligned sub-second component in `isoTimestampMs`
 
 ### Location
+
 **Two edits**: add a new global near the other NTP state (around **line 162** where `ntpEverSynced` is declared), and rewrite `isoTimestampMs` (around **line 387**). Also update the two NTP-sync sites (**line 1017** and **line 1147**) to record the alignment epoch.
 
 ### 2a — Add alignment globals
 
 **Find (around line 162):**
+
 ```cpp
 bool ntpEverSynced = false;
 ```
 
 **Replace with:**
+
 ```cpp
 bool ntpEverSynced = false;
 
@@ -83,6 +89,7 @@ unsigned long ntpMillisAtSync = 0;
 ### 2b — Record millis() at NTP sync (two sites)
 
 **Find (line ~1017, inside the resync branch):**
+
 ```cpp
       if (timeClient.update()) {
         ntpEverSynced = true;
@@ -91,6 +98,7 @@ unsigned long ntpMillisAtSync = 0;
 ```
 
 **Replace with:**
+
 ```cpp
       if (timeClient.update()) {
         ntpEverSynced = true;
@@ -100,6 +108,7 @@ unsigned long ntpMillisAtSync = 0;
 ```
 
 **Find (line ~1147, inside the initial `forceUpdate` branch):**
+
 ```cpp
     if (timeClient.forceUpdate()) {
       ntpEverSynced = true;
@@ -109,6 +118,7 @@ unsigned long ntpMillisAtSync = 0;
 ```
 
 **Replace with:**
+
 ```cpp
     if (timeClient.forceUpdate()) {
       ntpEverSynced = true;
@@ -122,6 +132,7 @@ unsigned long ntpMillisAtSync = 0;
 ### 2c — Rewrite `isoTimestampMs` to use the anchor
 
 **Find (line ~387):**
+
 ```cpp
 void isoTimestampMs(char* out, size_t outSize) {
   // Produces "YYYY-MM-DDTHH:MM:SS.mmmZ"
@@ -150,6 +161,7 @@ void isoTimestampMs(char* out, size_t outSize) {
 ```
 
 **Replace with:**
+
 ```cpp
 void isoTimestampMs(char* out, size_t outSize) {
   // Produces "YYYY-MM-DDTHH:MM:SS.mmmZ".

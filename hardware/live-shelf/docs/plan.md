@@ -16,6 +16,7 @@ A single physical "live shelf" consisting of:
 - The Pi runs a single Python process that owns all state, classification, reconciliation, and UI
 
 Normal use:
+
 1. User does a one-time "intake" for each product that's eligible to live on the shelf (barcode → profile + reference photos + certification)
 2. User places certified items on the shelf when the LED is green
 3. When door opens, the session starts. User can take items off (multi-item OK) and place items back (one at a time, LED-enforced)
@@ -28,22 +29,25 @@ The Pi does everything: scale event ingestion, frame extraction, candidate-pool 
 ## 2. Hardware layout
 
 ### ESP8266 scale node
+
 - Wemos D1 Mini
 - 4× HX711, shared SCK on D7, DOUTs on D6/D1/D2/D5 (existing spec)
 - **New:** 1× WS2812B RGB LED on D4 (GPIO2). Single addressable pixel. Requires `Adafruit_NeoPixel`.
 - Power: 5V USB
 
 ### LED protocol
-| Color | Meaning | Trigger |
-|---|---|---|
-| Off | Scale idle, no recent activity | >15s since last movement |
-| Red (solid) | Settling — weight is changing | Any sample outside the stability window |
-| Yellow (solid) | Settling but close to stable | Within 2× threshold and trending flat |
-| Green (solid) | Stable — OK to act | N consecutive samples within stability window |
-| Blue (flash) | Event posted to Pi | Momentary on each POST |
-| Magenta (solid) | Error / network down | Pi unreachable; events queued locally |
+
+| Color           | Meaning                        | Trigger                                       |
+| --------------- | ------------------------------ | --------------------------------------------- |
+| Off             | Scale idle, no recent activity | >15s since last movement                      |
+| Red (solid)     | Settling — weight is changing  | Any sample outside the stability window       |
+| Yellow (solid)  | Settling but close to stable   | Within 2× threshold and trending flat         |
+| Green (solid)   | Stable — OK to act             | N consecutive samples within stability window |
+| Blue (flash)    | Event posted to Pi             | Momentary on each POST                        |
+| Magenta (solid) | Error / network down           | Pi unreachable; events queued locally         |
 
 ### Pi + camera
+
 - Pi 4 at 192.168.0.181
 - USB camera on /dev/video0, locked settings (exposure 1600, focus 50, WB 4000 — already calibrated)
 - Existing `fridge-cam` daemon is the base for the Pi app
@@ -284,7 +288,7 @@ def save_product_from_intake(form: IntakeForm, ref_image_paths: list[str]) -> Pr
        "brand": "Heinz",
        "expected_weight_g": 340,
        "container_type": "bottle",
-       "why_candidate": "currently_on_shelf",  // or "recently_out", "in_catalog_not_on_shelf", "top_up_target", "from_other_shelf"
+       "why_candidate": "currently_on_shelf", // or "recently_out", "in_catalog_not_on_shelf", "top_up_target", "from_other_shelf"
        "reference_images": ["<inline base64 or URL>"]
      }
      ```
@@ -399,14 +403,14 @@ Similar to ADD, but candidates are constrained to currently on-shelf lots, and t
    a. Fetch all `scale_events` for this session, ordered by ts
    b. Pair REMOVE with ADD events by classifier-identified lot identity
    c. Emit `session_resolutions`:
-      - Matched pair: `pattern = use_return_{consumed|no_consumption|topped_up}`, `consumed_g = |remove_delta| - |add_delta|`, `lot_id`, `add_event_id`, `remove_event_id`
-      - Unpaired REMOVE: `pattern = consumed_or_removed`, lot stays `status='out'`
-      - Unpaired ADD (known candidate): `pattern = new_arrival`, lot created/incremented
-      - Unpaired ADD (unknown): already in review queue from step 5.3
-      - Swap pattern (REMOVE of A, ADD of B, similar timing, different identities): `pattern = swap_out` + `swap_in`
-      - Cross-shelf is out of scope for demo (single shelf)
-   d. Weight sanity: `Σ(resolution effects) ≈ (final - initial)` within ±10g tolerance. Discrepancy → enqueue `review_queue` kind='weight_mismatch' with the session ID
-   e. For each matched pair, update `lots.current_weight_g = after_weight_g_of_add_event`, increment `total_consumed_g`
+   - Matched pair: `pattern = use_return_{consumed|no_consumption|topped_up}`, `consumed_g = |remove_delta| - |add_delta|`, `lot_id`, `add_event_id`, `remove_event_id`
+   - Unpaired REMOVE: `pattern = consumed_or_removed`, lot stays `status='out'`
+   - Unpaired ADD (known candidate): `pattern = new_arrival`, lot created/incremented
+   - Unpaired ADD (unknown): already in review queue from step 5.3
+   - Swap pattern (REMOVE of A, ADD of B, similar timing, different identities): `pattern = swap_out` + `swap_in`
+   - Cross-shelf is out of scope for demo (single shelf)
+     d. Weight sanity: `Σ(resolution effects) ≈ (final - initial)` within ±10g tolerance. Discrepancy → enqueue `review_queue` kind='weight_mismatch' with the session ID
+     e. For each matched pair, update `lots.current_weight_g = after_weight_g_of_add_event`, increment `total_consumed_g`
 4. `sessions.reconciled=1`, `reconciled_at=ts`
 5. Dashboard refreshes
 
@@ -444,6 +448,7 @@ Union of the following, deduped by `product_id`:
 - **Sentinel**: always include `{"candidate_id": "UNKNOWN", "name": "Unknown/new item", "why_candidate": "sentinel"}` so the classifier has a clean escape hatch
 
 Ranking (applied to candidates before sending, keep top 10):
+
 1. `recently_out` items with matching weight first
 2. `top_up_target` items
 3. `catalog_not_on_shelf` items with matching weight
@@ -522,6 +527,7 @@ For MVP: start with Sonnet only. Caching keeps per-call cost around $0.003-0.01.
 ### 7.3 Prompt caching strategy
 
 Cache these together (they stay stable across events in a session):
+
 - System prompt
 - Reference images for the current shelf registry
 - Candidate list metadata
@@ -622,6 +628,7 @@ session.reconciled = True
 ```
 
 `classify_pair(consumed, remove_ev, add_ev)`:
+
 - `|consumed| < 5g` → `use_return_no_consumption`
 - `consumed > 5g` → `use_return_consumed`
 - `consumed < -5g` (item heavier on return) → `topped_up`
@@ -646,6 +653,7 @@ session.reconciled = True
 Two states: `SETTLING`, `STABLE`.
 
 Parameters (configurable via web UI, persisted to EEPROM):
+
 - `sample_rate_hz` = 10 (HX711 rate)
 - `stability_window_g` = 2.0
 - `stable_samples_required` = 8 (= 0.8s of continuous stability)
@@ -653,22 +661,24 @@ Parameters (configurable via web UI, persisted to EEPROM):
 - `delta_threshold_g` = 5.0 (min event magnitude)
 
 Logic per new reading `w`:
+
 1. Maintain rolling window of last `stable_samples_required` readings
 2. If `max - min < stability_window_g`:
-    - State = STABLE
-    - If state just transitioned from SETTLING to STABLE:
-        - Compute `mean_stable_weight`
-        - If `|mean_stable_weight - last_stable_weight| > delta_threshold_g`:
-            - Emit event: POST to Pi with before/after and delta
-            - Update `last_stable_weight`
+   - State = STABLE
+   - If state just transitioned from SETTLING to STABLE:
+     - Compute `mean_stable_weight`
+     - If `|mean_stable_weight - last_stable_weight| > delta_threshold_g`:
+       - Emit event: POST to Pi with before/after and delta
+       - Update `last_stable_weight`
 3. Else:
-    - State = SETTLING
-    - If `max - min < near_stable_window_g`: LED = yellow
-    - Else: LED = red
+   - State = SETTLING
+   - If `max - min < near_stable_window_g`: LED = yellow
+   - Else: LED = red
 
 ### 9.3 Event emission
 
 On stable transition (first reading where we entered STABLE and delta threshold met):
+
 1. Construct event JSON (§4.1)
 2. POST to `http://<pi_ip>:8000/api/scale-event` with timeout=2s
 3. Flash LED blue for 200ms
@@ -684,7 +694,7 @@ Use `NTPClient` library. Resync every 6 hours. All timestamps sent to Pi are ISO
 
 ### 9.6 Config via web UI
 
-The ESP's existing web UI gains fields for: `pi_url`, `delta_threshold_g`, `stability_window_g`, `stable_samples_required`. Saved to EEPROM. 
+The ESP's existing web UI gains fields for: `pi_url`, `delta_threshold_g`, `stability_window_g`, `stable_samples_required`. Saved to EEPROM.
 
 ---
 
@@ -759,46 +769,55 @@ hardware/live-shelf/
 Interfaces are defined. Each agent picks a bundle and works independently. No bundle depends on a sibling bundle's internals beyond the contracts in this document.
 
 ### Bundle A — Storage layer
+
 **Deliverables:** `server/storage/schema.sql`, `server/storage/migrations.py`, `server/storage/repo.py`
 **Dependencies:** None. Just §3 of this doc.
 **Definition of done:** CRUD tests pass for every table via `pytest server/storage/tests/` (tests included).
 
 ### Bundle B — ESP firmware
+
 **Deliverables:** `firmware/scale-live.ino`, `firmware/README.md`
 **Dependencies:** §4.1, §4.2, §9 of this doc; no Pi-side code needed.
 **Definition of done:** Compiles with Arduino IDE, posts events to a mock endpoint in a smoke test (agent can use `python -m http.server` as mock).
 
 ### Bundle C — Camera extensions
+
 **Deliverables:** `server/camera/` module with `frame_at(ts)`, `current_frame()`, `apply_locked_settings()`, extended MJPEG stream
 **Dependencies:** §4.6 (MJPEG route), existing fridge-cam daemon code
 **Definition of done:** Unit tests with synthetic camera prove frame-at-timestamp returns a frame within 200ms of the requested ts.
 
 ### Bundle D — Candidate pool + classifier
+
 **Deliverables:** `server/classifier/` module including prompt builder, Anthropic SDK wrapper with caching, end-to-end `classify_event()`
 **Dependencies:** Bundle A's repo interface, §6, §7
 **Definition of done:** Unit test with mocked Anthropic responses proves the prompt assembly is correct and response parsing handles valid + malformed outputs. Integration test (skippable if no API key) hits Anthropic with 3 synthetic before/after pairs and logs the output.
 
 ### Bundle E — Reconciler
+
 **Deliverables:** `server/reconciler/reconcile.py`, tests
 **Dependencies:** Bundle A's repo + the `ClassificationResult` shape from Bundle D
 **Definition of done:** Tests cover each of the 10 patterns in `session_resolutions.pattern` using synthetic event sequences.
 
 ### Bundle F — Intake
+
 **Deliverables:** `server/intake/` including OFF lookup, profile builder, Flask blueprint, and templates
 **Dependencies:** Bundle A's repo, Bundle C's `current_frame()` for reference captures
 **Definition of done:** End-to-end: given a mock OFF response + form input + 2 captured frames, creates a product + lot and verifies with direct DB read.
 
 ### Bundle G — Web UI (non-intake)
+
 **Deliverables:** All templates except `intake.html` (owned by F), routes in `server/web/`
 **Dependencies:** Bundle A for data reads
 **Definition of done:** Every route renders for a seeded database with at least one of each entity. Manual walkthrough script included.
 
 ### Bundle H — Orchestrator + glue
+
 **Deliverables:** `server/app.py`, `server/config.py`, deploy script, top-level README
 **Dependencies:** All other bundles (consumes their public interfaces)
 **Definition of done:** `python app.py` starts the full stack and the README's smoke test passes against a clean DB.
 
 ### Bundle I — Seed script (post-barcode)
+
 **Deliverables:** `server/scripts/seed_product.py` + a subagent's product profile JSON files in `server/scripts/demo_seeds/`
 **Dependencies:** Bundle A, Bundle F (for intake logic reuse), real barcodes from the user
 **Definition of done:** Running the script seeds the DB with the demo products and attaches reference images.
@@ -807,14 +826,14 @@ Interfaces are defined. Each agent picks a bundle and works independently. No bu
 
 ## 12. Open decisions (confirm before corresponding bundle starts)
 
-| # | Question | Default (if user doesn't answer) |
-|---|---|---|
-| 1 | Cloud inference OK (Anthropic API)? | Yes — use it |
-| 2 | LED type — single WS2812B or two discrete LEDs? | WS2812B on D4 |
-| 3 | Barcode input — typed or USB HID? | Typed, with optional USB HID later |
-| 4 | Shelf size / mount | Assume flat tray, camera overhead, ~300×200mm |
-| 5 | Pi Python version | 3.13 (already on Pi) |
-| 6 | Anthropic API key location | `hardware/live-shelf/server/.env`, gitignored |
+| #   | Question                                        | Default (if user doesn't answer)              |
+| --- | ----------------------------------------------- | --------------------------------------------- |
+| 1   | Cloud inference OK (Anthropic API)?             | Yes — use it                                  |
+| 2   | LED type — single WS2812B or two discrete LEDs? | WS2812B on D4                                 |
+| 3   | Barcode input — typed or USB HID?               | Typed, with optional USB HID later            |
+| 4   | Shelf size / mount                              | Assume flat tray, camera overhead, ~300×200mm |
+| 5   | Pi Python version                               | 3.13 (already on Pi)                          |
+| 6   | Anthropic API key location                      | `hardware/live-shelf/server/.env`, gitignored |
 
 ---
 

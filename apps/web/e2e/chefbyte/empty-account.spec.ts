@@ -40,7 +40,8 @@ function attachErrorListeners(page: Page): Listener {
 function assertClean(listener: Listener, route: string) {
   if (listener.pageErrors.length > 0) {
     throw new Error(
-      `[${route}] uncaught JS errors on empty account:\n` + listener.pageErrors.map((e) => `  - ${e.message}`).join('\n'),
+      `[${route}] uncaught JS errors on empty account:\n` +
+        listener.pageErrors.map((e) => `  - ${e.message}`).join('\n'),
     );
   }
   if (listener.consoleErrors.length > 0) {

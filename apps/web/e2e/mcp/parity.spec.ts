@@ -755,12 +755,10 @@ test.describe('MCP-UI Parity', () => {
       const { exerciseMap: uiExMap } = await seedCoachByteData(uiCtx.client, uiCtx.userId);
       const uiSquatId = uiExMap['Squat'];
       // Ensure plan exists (same as log_set handler does internally).
-      const { data: planRes } = await (uiCtx.client as any)
-        .schema('coachbyte')
-        .rpc('ensure_daily_plan_admin', {
-          p_user_id: uiCtx.userId,
-          p_day: new Date().toISOString().slice(0, 10),
-        });
+      const { data: planRes } = await (uiCtx.client as any).schema('coachbyte').rpc('ensure_daily_plan_admin', {
+        p_user_id: uiCtx.userId,
+        p_day: new Date().toISOString().slice(0, 10),
+      });
       const planId = planRes?.plan_id;
       // UI Today page calls the same supabase-js insert when the user clicks
       // "Log ad-hoc set" from the UI.
@@ -802,12 +800,10 @@ test.describe('MCP-UI Parity', () => {
       const { exerciseMap } = await seedCoachByteData(ctx.client, ctx.userId);
       const squatId = exerciseMap['Squat'];
       // Seed two completed sets so Epley has something to compute.
-      const { data: planRes } = await (ctx.client as any)
-        .schema('coachbyte')
-        .rpc('ensure_daily_plan_admin', {
-          p_user_id: ctx.userId,
-          p_day: new Date().toISOString().slice(0, 10),
-        });
+      const { data: planRes } = await (ctx.client as any).schema('coachbyte').rpc('ensure_daily_plan_admin', {
+        p_user_id: ctx.userId,
+        p_day: new Date().toISOString().slice(0, 10),
+      });
       const planId = planRes?.plan_id;
       await (ctx.client as any)
         .schema('coachbyte')
@@ -859,12 +855,10 @@ test.describe('MCP-UI Parity', () => {
         const { exerciseMap } = await seedCoachByteData(c.client, c.userId);
         const squatId = exerciseMap['Squat'];
         // Ensure plan.
-        const { data: planRes } = await (c.client as any)
-          .schema('coachbyte')
-          .rpc('ensure_daily_plan_admin', {
-            p_user_id: c.userId,
-            p_day: new Date().toISOString().slice(0, 10),
-          });
+        const { data: planRes } = await (c.client as any).schema('coachbyte').rpc('ensure_daily_plan_admin', {
+          p_user_id: c.userId,
+          p_day: new Date().toISOString().slice(0, 10),
+        });
         const planId = planRes?.plan_id;
         const newSets = [
           { exercise_id: squatId, target_reps: 8, load: 185, rest_seconds: 120, order: 1 },
@@ -875,11 +869,7 @@ test.describe('MCP-UI Parity', () => {
         } else {
           // UI path: the Today/Plan editor calls the same MCP tool handler
           // through the supabase-js client-side delete+insert.
-          await (c.client as any)
-            .schema('coachbyte')
-            .from('planned_sets')
-            .delete()
-            .eq('plan_id', planId);
+          await (c.client as any).schema('coachbyte').from('planned_sets').delete().eq('plan_id', planId);
           await (c.client as any)
             .schema('coachbyte')
             .from('planned_sets')
@@ -1166,15 +1156,12 @@ test.describe('MCP-UI Parity', () => {
               .update({ qty_containers: Number(existing.qty_containers) + 2 })
               .eq('lot_id', existing.lot_id);
           } else {
-            await (c.client as any)
-              .schema('chefbyte')
-              .from('stock_lots')
-              .insert({
-                user_id: c.userId,
-                product_id: chickenId,
-                location_id: locationId,
-                qty_containers: 2,
-              });
+            await (c.client as any).schema('chefbyte').from('stock_lots').insert({
+              user_id: c.userId,
+              product_id: chickenId,
+              location_id: locationId,
+              qty_containers: 2,
+            });
           }
           await (c.client as any)
             .schema('chefbyte')
@@ -1224,11 +1211,7 @@ test.describe('MCP-UI Parity', () => {
         if (viaMcp) {
           await c.mcp.callTool('CHEFBYTE_delete_meal_entry', { meal_id: meal.meal_id });
         } else {
-          await (c.client as any)
-            .schema('chefbyte')
-            .from('meal_plan_entries')
-            .delete()
-            .eq('meal_id', meal.meal_id);
+          await (c.client as any).schema('chefbyte').from('meal_plan_entries').delete().eq('meal_id', meal.meal_id);
         }
         return await fetchRows(c.client, 'chefbyte', 'meal_plan_entries', { meal_id: meal.meal_id });
       } finally {
@@ -1480,18 +1463,15 @@ test.describe('MCP-UI Parity', () => {
       const { productMap } = await seedChefByteData(c.client, c.userId);
       // Insert a synthetic [MEAL] placeholder (mirrors what mark_meal_done
       // creates for meal-prep entries).
-      await (c.client as any)
-        .schema('chefbyte')
-        .from('products')
-        .insert({
-          user_id: c.userId,
-          name: '[MEAL] Parity Placeholder',
-          servings_per_container: 1,
-          calories_per_serving: 500,
-          protein_per_serving: 30,
-          carbs_per_serving: 50,
-          fat_per_serving: 15,
-        });
+      await (c.client as any).schema('chefbyte').from('products').insert({
+        user_id: c.userId,
+        name: '[MEAL] Parity Placeholder',
+        servings_per_container: 1,
+        calories_per_serving: 500,
+        protein_per_serving: 30,
+        carbs_per_serving: 50,
+        fat_per_serving: 15,
+      });
 
       const mcpResp = parseResult(await c.mcp.callTool('CHEFBYTE_get_products', {}));
       // UI Settings products list reads via a filter that excludes [MEAL]

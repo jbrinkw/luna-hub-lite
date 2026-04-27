@@ -210,10 +210,7 @@ async function readInventoryForProduct(chef: any, userId: string, productId: str
     .eq('product_id', productId);
   expect(lErr).toBeNull();
 
-  const totalContainers = (lots ?? []).reduce(
-    (acc: number, l: any) => acc + Number(l.qty_containers),
-    0,
-  );
+  const totalContainers = (lots ?? []).reduce((acc: number, l: any) => acc + Number(l.qty_containers), 0);
 
   return {
     spc,

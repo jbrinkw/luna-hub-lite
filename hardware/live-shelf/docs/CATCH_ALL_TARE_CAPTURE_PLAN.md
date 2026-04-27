@@ -116,15 +116,19 @@ In each catalog row add a `<td>` with:
   class="arm-tare"
   data-product-id="{{ p.product_id }}"
   data-product-name="{{ p.name }}"
-  {% if tare_arm and tare_arm.product_id == p.product_id %}
-    data-armed="1"
-  {% endif %}
+  {%
+  if
+  tare_arm
+  and
+  tare_arm.product_id=""
+  ="p.product_id"
+  %}
+  data-armed="1"
+  {%
+  endif
+  %}
 >
-  {% if tare_arm and tare_arm.product_id == p.product_id %}
-    ARMED — place container...
-  {% else %}
-    Tare
-  {% endif %}
+  {% if tare_arm and tare_arm.product_id == p.product_id %} ARMED — place container... {% else %} Tare {% endif %}
 </button>
 ```
 
@@ -138,14 +142,14 @@ A sticky top banner (inserted above the catalog `<div class="panel">`) renders w
 
 ### 5.3 Visual states
 
-| State       | Button label              | Banner |
-|-------------|---------------------------|--------|
-| disarmed    | "Tare"                    | none |
-| armed (this row) | "ARMED — place container" | sticky |
-| armed (other row) | "Tare" (dimmed)           | sticky (for the other product) |
-| success     | "Tare" (row refreshes with new tare column value) | toast + banner clears |
-| timeout     | "Tare"                    | error toast |
-| error       | "Tare"                    | error toast with `last_error` |
+| State             | Button label                                      | Banner                         |
+| ----------------- | ------------------------------------------------- | ------------------------------ |
+| disarmed          | "Tare"                                            | none                           |
+| armed (this row)  | "ARMED — place container"                         | sticky                         |
+| armed (other row) | "Tare" (dimmed)                                   | sticky (for the other product) |
+| success           | "Tare" (row refreshes with new tare column value) | toast + banner clears          |
+| timeout           | "Tare"                                            | error toast                    |
+| error             | "Tare"                                            | error toast with `last_error`  |
 
 ## 6. State machine for the arming lifecycle
 
@@ -212,7 +216,7 @@ Add `hardware/live-shelf/server/tests/test_tare_capture.py` (following `test_cat
 1. **Cloud sync direction.** The existing sync is cloud → Pi (`cloud.integration.sync_products_from_cloud`). There is no Pi → cloud product-field push. Should a locally-captured tare propagate back to `chefbyte.products.tare_weight_g` in Supabase? Column exists in `packages/db-types/src/database.ts`. Flagged — out of scope per owner's instruction.
 2. **TTL.** Plan uses 60 s default. Is this enough? The AI-tare flow has no analogous TTL because it's wizard-synchronous.
 3. **Which weight to use: `after_weight_g` vs `delta_g`?** Plan uses `after_weight_g` (absolute). Rationale: if the user has been recently using the catch-all scale, `before_weight_g` may be non-zero drift but the HX711 auto-zero is slow; `after_weight_g` reflects the ESP's zero-referenced reading when the container is sitting stable. Needs owner confirm: for repeatable results, should the UX banner instruct "clear the scale, wait for zero-stable, then place the container" to guarantee `before_weight_g ≈ 0` and `delta_g ≈ after_weight_g`?
-4. **Remove-direction events during arming.** If the user places the container *before* arming (so the scale is already non-zero), then clicks arm, then removes the container, the next event is a `remove` with `before_weight_g=container, after_weight_g≈0`. Should we use `before_weight_g` in that case, or require user to lift-then-replace? Plan uses `after_weight_g` unconditionally, which gets this wrong. Options: (a) document the lift-then-replace flow; (b) detect `direction=="remove"` and use `before_weight_g`.
+4. **Remove-direction events during arming.** If the user places the container _before_ arming (so the scale is already non-zero), then clicks arm, then removes the container, the next event is a `remove` with `before_weight_g=container, after_weight_g≈0`. Should we use `before_weight_g` in that case, or require user to lift-then-replace? Plan uses `after_weight_g` unconditionally, which gets this wrong. Options: (a) document the lift-then-replace flow; (b) detect `direction=="remove"` and use `before_weight_g`.
 5. **Multi-worker Flask.** Current app is single-process Gunicorn-less Flask (from reading `app.py`). If that ever changes to multi-worker, the SQLite-backed state works unchanged; an in-memory dict would not. Worth confirming the deploy model stays single-process.
 
 ## 9. Out of scope
@@ -223,4 +227,4 @@ Add `hardware/live-shelf/server/tests/test_tare_capture.py` (following `test_cat
 - Replacing or deprecating `intake/ai_tare.py` — this is an alternative entry point, not a replacement.
 - UI polish (icon, colors, animations) beyond the state-to-label table in §5.3.
 - Auto-retry or debounce logic on implausible readings — the arm row keeps `last_error`, user reads it and re-places the container or cancels.
-- Reset-to-null for a product's existing tare (owner asked about *capture*, not edit/clear).
+- Reset-to-null for a product's existing tare (owner asked about _capture_, not edit/clear).

@@ -2,12 +2,12 @@
 
 ## Schema Layout
 
-| Schema      | Owner     | Purpose                                                                                                                                                                  |
-| ----------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `hub`       | Luna Hub  | User profiles (including `day_start_hour`, timezone), app activation records, MCP API keys (SHA-256 hashed), user tool toggles, extension settings (encrypted via Vault) |
-| `coachbyte` | CoachByte | Exercises, daily logs, planned/completed sets, splits, timers                                                                                                            |
+| Schema      | Owner     | Purpose                                                                                                                                                                   |
+| ----------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `hub`       | Luna Hub  | User profiles (including `day_start_hour`, timezone), app activation records, MCP API keys (SHA-256 hashed), user tool toggles, extension settings (encrypted via Vault)  |
+| `coachbyte` | CoachByte | Exercises, daily logs, planned/completed sets, splits, timers                                                                                                             |
 | `chefbyte`  | ChefByte  | Products, `stock_lots` (lot-based inventory + expiration), recipes, meal plans, shopping lists, macros, LiveTrack scale devices (`live_shelf_devices` + `scale_pairings`) |
-| `private`   | Platform  | All SECURITY DEFINER functions (not exposed via API). Each function includes `SET search_path = ''`.                                                                     |
+| `private`   | Platform  | All SECURITY DEFINER functions (not exposed via API). Each function includes `SET search_path = ''`.                                                                      |
 
 The `private` schema is **not exposed via PostgREST** — it has no REST API endpoints. The `authenticated` role has no USAGE on `private`; only `service_role` does. Functions in `private` are called only by triggers, other DB functions, and the MCP Worker (which uses `service_role`).
 

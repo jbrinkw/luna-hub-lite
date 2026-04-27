@@ -38,9 +38,7 @@ describe('computeReviewState — pending count totalling', () => {
   });
 
   it('treats null pending_review_count as 0 (??0 must be present)', () => {
-    const res = computeReviewState([
-      { lan_ip: null, pending_review_count: null, last_heartbeat_ts: null },
-    ]);
+    const res = computeReviewState([{ lan_ip: null, pending_review_count: null, last_heartbeat_ts: null }]);
     expect(res.pendingReviewTotal).toBe(0);
     expect(Number.isNaN(res.pendingReviewTotal)).toBe(false);
   });
@@ -107,9 +105,7 @@ describe('computeReviewState — URL construction & guard', () => {
   it('builds the exact expected URL format (http scheme, :8000 port, #review fragment)', () => {
     // Catches mutations to any of: scheme (http → https), port (8000 → 80),
     // path (/inventory → /), fragment (#review → #new).
-    const res = computeReviewState([
-      { lan_ip: '192.168.1.1', pending_review_count: 0, last_heartbeat_ts: null },
-    ]);
+    const res = computeReviewState([{ lan_ip: '192.168.1.1', pending_review_count: 0, last_heartbeat_ts: null }]);
     expect(res.reviewUrl).toBe('http://192.168.1.1:8000/inventory#review');
   });
 
@@ -161,9 +157,7 @@ describe('pickLatestAutomatedSource', () => {
     // A mutation that accepted 'manual' would light up the pill for
     // user-edited lots and clobber the UI invariant that manual entries
     // have no badge.
-    const res = pickLatestAutomatedSource([
-      { last_update_source: 'manual', last_update_ts: '2026-04-10T00:00:00Z' },
-    ]);
+    const res = pickLatestAutomatedSource([{ last_update_source: 'manual', last_update_ts: '2026-04-10T00:00:00Z' }]);
     expect(res.latestSource).toBeNull();
   });
 

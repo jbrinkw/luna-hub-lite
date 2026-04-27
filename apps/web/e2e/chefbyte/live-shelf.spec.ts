@@ -10,9 +10,9 @@
  */
 
 import { test, expect, type Page } from '@playwright/test';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import { type SupabaseClient } from '@supabase/supabase-js';
 import { seedFullAndLogin } from '../helpers/seed';
-import { SUPABASE_URL, SERVICE_ROLE_KEY, admin } from '../helpers/constants';
+import { SUPABASE_URL, admin } from '../helpers/constants';
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                            */
@@ -429,10 +429,7 @@ test.describe('Live Shelf Scales tab', () => {
     try {
       // Seed an already-inactive device (simulating the post-migration state).
       const { deviceId } = await seedDeviceAdmin({ userId, name: 'Silent Revoke Pi' });
-      await chef(client)
-        .from('live_shelf_devices')
-        .update({ is_active: false })
-        .eq('device_id', deviceId);
+      await chef(client).from('live_shelf_devices').update({ is_active: false }).eq('device_id', deviceId);
 
       await gotoScalesTab(page);
 
@@ -471,10 +468,7 @@ test.describe('Live Shelf Scales tab', () => {
     try {
       await seedDeviceAdmin({ userId, name: 'Primary Active Pi' });
       const { deviceId: secondaryId } = await seedDeviceAdmin({ userId, name: 'Retired Pi' });
-      await chef(client)
-        .from('live_shelf_devices')
-        .update({ is_active: false })
-        .eq('device_id', secondaryId);
+      await chef(client).from('live_shelf_devices').update({ is_active: false }).eq('device_id', secondaryId);
 
       await gotoScalesTab(page);
 

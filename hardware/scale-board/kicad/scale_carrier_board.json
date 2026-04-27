@@ -3238,20 +3238,9 @@
     {
       "type": "TextBox",
       "text": "Wemos D1 Mini + 4x HX711 carrier board (Luna scale-board).",
-      "position": [
-        184.0,
-        110.0
-      ],
-      "size": [
-        80.0,
-        30.0
-      ],
-      "margins": [
-        1.0,
-        1.0,
-        1.0,
-        1.0
-      ],
+      "position": [184.0, 110.0],
+      "size": [80.0, 30.0],
+      "margins": [1.0, 1.0, 1.0, 1.0],
       "text_size": 1.2,
       "bold": true,
       "italic": false,

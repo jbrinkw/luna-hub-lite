@@ -1043,8 +1043,7 @@ test.describe('ChefByte Scanner', () => {
       // Carbs may be 0 for some real products (e.g. pure fats), so check
       // that the nutriment pipeline populated at least ONE macro besides
       // calories — this rules out the placeholder path definitively.
-      const someMacro =
-        Number(product.carbs_per_serving ?? 0) + Number(product.protein_per_serving ?? 0);
+      const someMacro = Number(product.carbs_per_serving ?? 0) + Number(product.protein_per_serving ?? 0);
       expect(someMacro).toBeGreaterThan(0);
 
       // The queue name must NOT be the placeholder format "Unknown (xxx)".
@@ -1402,9 +1401,9 @@ test.describe('ChefByte Scanner', () => {
             product_name: 'Test Fallback Product',
             nutriments: {
               'energy-kcal_serving': 100,
-              'proteins_serving': 10,
-              'carbohydrates_serving': 5,
-              'fat_serving': 2,
+              proteins_serving: 10,
+              carbohydrates_serving: 5,
+              fat_serving: 2,
             },
           },
         },
@@ -1626,10 +1625,9 @@ test.describe('ChefByte Scanner', () => {
       // --- Scan A → row A appears, active + red (unconfirmed) ---------
       await page.getByTestId('barcode-input').fill('111111100001');
       await page.getByTestId('barcode-input').press('Enter');
-      await expect(page.getByTestId('queue-list')).toContainText(
-        'Great Value Boneless Skinless Chicken Breasts',
-        { timeout: 30_000 },
-      );
+      await expect(page.getByTestId('queue-list')).toContainText('Great Value Boneless Skinless Chicken Breasts', {
+        timeout: 30_000,
+      });
       const rowA = page
         .locator('[data-testid^="queue-item-"]')
         .filter({ hasText: 'Great Value Boneless Skinless Chicken Breasts' })

@@ -289,9 +289,9 @@ export function LiveTrackImportPage() {
     if (!session) return;
     // Scale reading arrived.
     if (
-      session.state === 'scale_reading_received'
-      && session.scale_reading_g != null
-      && session.scale_reading_ts !== lastScaleReadingTs.current
+      session.state === 'scale_reading_received' &&
+      session.scale_reading_g != null &&
+      session.scale_reading_ts !== lastScaleReadingTs.current
     ) {
       lastScaleReadingTs.current = session.scale_reading_ts;
       setAriaAnnouncement(`scale reading received: ${Math.round(session.scale_reading_g)} grams`);
@@ -304,11 +304,7 @@ export function LiveTrackImportPage() {
       // (auto-tare, AI-tare, or manual entry) to advance.
     }
     // AI tare arrived.
-    if (
-      session.state === 'ai_tare_ready'
-      && session.ai_tare_g != null
-      && session.updated_at !== lastAiTareTs.current
-    ) {
+    if (session.state === 'ai_tare_ready' && session.ai_tare_g != null && session.updated_at !== lastAiTareTs.current) {
       lastAiTareTs.current = session.updated_at;
       setAriaAnnouncement(`AI tare ready: ${Math.round(session.ai_tare_g)} grams`);
       if (state.kind === 'product_loaded') {
@@ -469,8 +465,7 @@ export function LiveTrackImportPage() {
         // AI outputs where OFF carried serving_size but no product_quantity).
         const spcN = Number(product.servings_per_container ?? 0);
         const swN = Number(product.serving_weight_g ?? 0);
-        const derivedNet =
-          spcN > 0 && swN > 0 ? Math.round(spcN * swN * 100) / 100 : null;
+        const derivedNet = spcN > 0 && swN > 0 ? Math.round(spcN * swN * 100) / 100 : null;
         const netW = product.net_weight_g ?? derivedNet;
 
         const nut: NutritionData = {
@@ -575,8 +570,7 @@ export function LiveTrackImportPage() {
         fat_per_serving: parseFloat(nutrition.fat) || 0,
         protein_per_serving: parseFloat(nutrition.protein) || 0,
         net_weight_g: Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null,
-        serving_weight_g:
-          Number.isFinite(servingWeightParsed) && servingWeightParsed > 0 ? servingWeightParsed : null,
+        serving_weight_g: Number.isFinite(servingWeightParsed) && servingWeightParsed > 0 ? servingWeightParsed : null,
       };
       if (promotedCertified !== undefined) updatePayload.certified = promotedCertified;
       const { error: prodUpdErr } = await chefbyte()
@@ -600,25 +594,20 @@ export function LiveTrackImportPage() {
       const scaleG = state.scaleG;
       // Use the EDITED net weight (already written back to products above)
       // rather than the possibly-stale product.net_weight_g snapshot.
-      const effectiveNetWeightG =
-        Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null;
+      const effectiveNetWeightG = Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null;
       const netProductG =
-        scaleG != null
-        && Number.isFinite(scaleG)
-        && Number.isFinite(tareG)
-        && effectiveNetWeightG != null
+        scaleG != null && Number.isFinite(scaleG) && Number.isFinite(tareG) && effectiveNetWeightG != null
           ? Math.max(0, (scaleG as number) - (tareG as number))
           : null;
 
       if (netProductG != null && netProductG > 0) {
-        const { error: rpcErr } = await (chefbyte() as any)
-          .rpc('resolve_add_to_shelf_lot_admin', {
-            p_product_id: product.product_id,
-            p_shelf_source: 'live_scale',
-            p_fallback_location: defaultLocationId ?? null,
-            p_placed_weight_g: netProductG,
-            p_occurred_at: new Date().toISOString(),
-          });
+        const { error: rpcErr } = await (chefbyte() as any).rpc('resolve_add_to_shelf_lot_admin', {
+          p_product_id: product.product_id,
+          p_shelf_source: 'live_scale',
+          p_fallback_location: defaultLocationId ?? null,
+          p_placed_weight_g: netProductG,
+          p_occurred_at: new Date().toISOString(),
+        });
         if (rpcErr) throw new Error(rpcErr.message);
       } else if (defaultLocationId) {
         // Legacy fallback — qty=1, source=manual, location=default.
@@ -629,16 +618,14 @@ export function LiveTrackImportPage() {
           tareG,
           netWeightG: effectiveNetWeightG,
         });
-        await chefbyte()
-          .from('stock_lots')
-          .insert({
-            user_id: user.id,
-            product_id: product.product_id,
-            location_id: defaultLocationId,
-            qty_containers: qtyContainers,
-            last_update_source: 'manual',
-            last_update_ts: new Date().toISOString(),
-          });
+        await chefbyte().from('stock_lots').insert({
+          user_id: user.id,
+          product_id: product.product_id,
+          location_id: defaultLocationId,
+          qty_containers: qtyContainers,
+          last_update_source: 'manual',
+          last_update_ts: new Date().toISOString(),
+        });
       }
 
       // Re-arm: clear Pi-written fields and flip state back.
@@ -695,12 +682,7 @@ export function LiveTrackImportPage() {
       <div className="max-w-3xl mx-auto p-4 space-y-4" data-testid="livetrack-page">
         <div className="flex items-center justify-between">
           <h2 className="text-xl font-semibold">LiveTrack Import Wizard</h2>
-          <div
-            className="text-sm"
-            data-testid="livetrack-device-status"
-            role="status"
-            aria-live="polite"
-          >
+          <div className="text-sm" data-testid="livetrack-device-status" role="status" aria-live="polite">
             {device
               ? deviceOnline
                 ? `Pi: ${device.device_name} (online, last hb ${heartbeatAge ?? '?'}s ago)`
@@ -710,20 +692,27 @@ export function LiveTrackImportPage() {
         </div>
 
         {/* aria-live for scale-reading announcements */}
-        <div className="sr-only" aria-live="polite" data-testid="livetrack-aria">{ariaAnnouncement}</div>
+        <div className="sr-only" aria-live="polite" data-testid="livetrack-aria">
+          {ariaAnnouncement}
+        </div>
 
-        {state.kind === 'idle' && (
-          <p className="text-slate-500">Starting…</p>
-        )}
+        {state.kind === 'idle' && <p className="text-slate-500">Starting…</p>}
 
         {state.kind === 'creating_session' && (
-          <p className="text-slate-500" data-testid="livetrack-creating">Creating session…</p>
+          <p className="text-slate-500" data-testid="livetrack-creating">
+            Creating session…
+          </p>
         )}
 
         {state.kind === 'offline' && (
-          <section className="rounded-md border border-amber-300 bg-amber-50 p-4 space-y-3" data-testid="livetrack-offline">
+          <section
+            className="rounded-md border border-amber-300 bg-amber-50 p-4 space-y-3"
+            data-testid="livetrack-offline"
+          >
             <h3 className="font-semibold text-amber-900">Pi offline</h3>
-            <p className="text-sm text-amber-800">{state.reason}. Scale reading disabled; manual tare entry still works.</p>
+            <p className="text-sm text-amber-800">
+              {state.reason}. Scale reading disabled; manual tare entry still works.
+            </p>
             <button
               type="button"
               onClick={createSession}
@@ -756,7 +745,9 @@ export function LiveTrackImportPage() {
         )}
 
         {state.kind === 'analyzing' && (
-          <p className="text-slate-500" data-testid="livetrack-analyzing">Analyzing barcode {state.barcode}…</p>
+          <p className="text-slate-500" data-testid="livetrack-analyzing">
+            Analyzing barcode {state.barcode}…
+          </p>
         )}
 
         {state.kind === 'product_loaded' && (
@@ -789,22 +780,17 @@ export function LiveTrackImportPage() {
         )}
 
         {state.kind === 'review' && (
-          <ReviewPanel
-            state={state}
-            onSave={doSave}
-            onBack={() => dispatch({ type: 'saved_reset' })}
-          />
+          <ReviewPanel state={state} onSave={doSave} onBack={() => dispatch({ type: 'saved_reset' })} />
         )}
 
         {state.kind === 'saving' && (
-          <p className="text-slate-500" data-testid="livetrack-saving">Saving…</p>
+          <p className="text-slate-500" data-testid="livetrack-saving">
+            Saving…
+          </p>
         )}
 
         {state.kind === 'error' && (
-          <section
-            className="rounded-md border border-red-300 bg-red-50 p-4 space-y-3"
-            data-testid="livetrack-error"
-          >
+          <section className="rounded-md border border-red-300 bg-red-50 p-4 space-y-3" data-testid="livetrack-error">
             <p className="text-red-800">{state.message}</p>
             <button
               type="button"
@@ -864,17 +850,31 @@ function ProductEditor({
     <section className="rounded-md border border-slate-200 p-4 space-y-4" data-testid="livetrack-product-loaded">
       <header>
         <h3 className="font-semibold text-lg">{product.name}</h3>
-        {product.barcode ? (
-          <p className="text-xs text-slate-500 font-mono">{product.barcode}</p>
-        ) : null}
+        {product.barcode ? <p className="text-xs text-slate-500 font-mono">{product.barcode}</p> : null}
       </header>
 
       <div className="grid grid-cols-2 gap-2">
-        <Field id="lt-servings" label="Srv/Ctn" value={nutrition.servingsPerContainer} inputRef={servingsInputRef} onChange={(v) => onNutritionChange({ servingsPerContainer: v })} />
-        <Field id="lt-calories" label="Calories" value={nutrition.calories} onChange={(v) => onNutritionChange({ calories: v })} />
+        <Field
+          id="lt-servings"
+          label="Srv/Ctn"
+          value={nutrition.servingsPerContainer}
+          inputRef={servingsInputRef}
+          onChange={(v) => onNutritionChange({ servingsPerContainer: v })}
+        />
+        <Field
+          id="lt-calories"
+          label="Calories"
+          value={nutrition.calories}
+          onChange={(v) => onNutritionChange({ calories: v })}
+        />
         <Field id="lt-carbs" label="Carbs" value={nutrition.carbs} onChange={(v) => onNutritionChange({ carbs: v })} />
         <Field id="lt-fat" label="Fat" value={nutrition.fat} onChange={(v) => onNutritionChange({ fat: v })} />
-        <Field id="lt-protein" label="Protein" value={nutrition.protein} onChange={(v) => onNutritionChange({ protein: v })} />
+        <Field
+          id="lt-protein"
+          label="Protein"
+          value={nutrition.protein}
+          onChange={(v) => onNutritionChange({ protein: v })}
+        />
         <Field
           id="lt-serving-weight"
           label="Serving wt (g)"
@@ -891,8 +891,7 @@ function ProductEditor({
             if (Number.isFinite(newSw) && newSw > 0 && Number.isFinite(spc) && spc > 0) {
               const curNet = parseFloat(nutrition.netWeightG);
               const oldSw = parseFloat(nutrition.servingWeightG);
-              const derivedFromOld =
-                Number.isFinite(oldSw) && oldSw > 0 ? Math.round(spc * oldSw * 100) / 100 : null;
+              const derivedFromOld = Number.isFinite(oldSw) && oldSw > 0 ? Math.round(spc * oldSw * 100) / 100 : null;
               const currentNetMatchesDerived =
                 !Number.isFinite(curNet) ||
                 curNet <= 0 ||
@@ -925,9 +924,7 @@ function ProductEditor({
           />
           <span>
             Full + sealed
-            {!hasNet ? (
-              <span className="text-xs text-slate-500"> (unavailable — no net weight on file)</span>
-            ) : null}
+            {!hasNet ? <span className="text-xs text-slate-500"> (unavailable — no net weight on file)</span> : null}
           </span>
         </label>
         <label className="flex items-center gap-2 text-sm">
@@ -946,26 +943,21 @@ function ProductEditor({
         <div className="space-y-2" data-testid="livetrack-auto-tare-block">
           {currentScaleReadingG == null ? (
             <p className="rounded bg-slate-50 p-3 text-sm text-slate-700" data-testid="livetrack-waiting-scale-hint">
-              Place container on the catch-all scale. Tare will auto-compute
-              from {netG}g net.
+              Place container on the catch-all scale. Tare will auto-compute from {netG}g net.
             </p>
           ) : (
             <>
               <div className="rounded bg-slate-50 p-3 text-sm text-slate-700" data-testid="livetrack-scale-reading">
                 <div>
-                  Current reading:{' '}
-                  <span className="font-mono">{Number(currentScaleReadingG).toFixed(1)}g</span>
+                  Current reading: <span className="font-mono">{Number(currentScaleReadingG).toFixed(1)}g</span>
                 </div>
                 <div className="text-xs text-slate-500 mt-1">
-                  If the container isn't settled yet, wait — the reading refreshes
-                  as the scale sends heartbeats.
+                  If the container isn't settled yet, wait — the reading refreshes as the scale sends heartbeats.
                 </div>
                 <div className="text-xs text-slate-500">
                   Auto tare ={' '}
-                  <span className="font-mono">
-                    {Math.max(0, Number(currentScaleReadingG) - netG).toFixed(1)}g
-                  </span>
-                  {' '}(reading − {netG}g net)
+                  <span className="font-mono">{Math.max(0, Number(currentScaleReadingG) - netG).toFixed(1)}g</span>{' '}
+                  (reading − {netG}g net)
                 </div>
               </div>
               <button
@@ -1027,8 +1019,7 @@ function ReviewPanel({ state, onSave, onBack }: ReviewPanelProps) {
     <section className="rounded-md border border-green-300 bg-green-50 p-4 space-y-3" data-testid="livetrack-review">
       <h3 className="font-semibold text-green-900">Review & save</h3>
       <p className="text-sm text-green-900">
-        Tare: <strong data-testid="livetrack-tare-g">{state.tareG.toFixed(1)} g</strong>
-        {' '}from{' '}
+        Tare: <strong data-testid="livetrack-tare-g">{state.tareG.toFixed(1)} g</strong> from{' '}
         <span data-testid="livetrack-tare-source">{state.tareSource}</span>
       </p>
       <p className="text-sm text-green-900">Product: {state.product.name}</p>

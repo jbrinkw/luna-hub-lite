@@ -1,220 +1,363 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>{% block title %}fridge-cam{% endblock %}</title>
-  <style>
-    :root {
-      --bg:       #0b0f0d;
-      --panel:    #11171a;
-      --panel-2:  #151d20;
-      --border:   #1f2a2d;
-      --text:     #d8e2dc;
-      --muted:    #7f8c87;
-      --accent:   #39ff88;
-      --accent-d: #2ecf6c;
-      --warn:     #ffb347;
-      --danger:   #ff5c6c;
-    }
-    * { box-sizing: border-box; }
-    html, body {
-      margin: 0; padding: 0;
-      background: var(--bg);
-      color: var(--text);
-      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
-                   "Liberation Mono", monospace;
-      font-size: 13px;
-      line-height: 1.45;
-    }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
-    header.nav {
-      padding: 10px 16px;
-      background: var(--panel);
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; gap: 18px;
-    }
-    header.nav .brand {
-      color: var(--accent);
-      font-weight: 700;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-    }
-    header.nav a.nlink { color: var(--muted); }
-    header.nav a.nlink:hover { color: var(--text); }
-    header.nav .spacer { flex: 1; }
-    header.nav .meta { color: var(--muted); font-size: 12px; }
-    main { padding: 16px; max-width: 1200px; margin: 0 auto; }
-    h1, h2, h3 { margin: 0 0 10px 0; font-weight: 600; }
-    h1 { font-size: 18px; color: var(--accent); letter-spacing: 0.06em; text-transform: uppercase; }
-    h2 { font-size: 15px; color: var(--text); margin-top: 18px; }
-    h3 { font-size: 13px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.07em; }
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      padding: 12px;
-      margin-bottom: 12px;
-    }
-    .row { display: flex; gap: 12px; flex-wrap: wrap; }
-    .col { flex: 1; min-width: 280px; }
-    button, .btn {
-      background: var(--panel-2);
-      color: var(--text);
-      border: 1px solid var(--border);
-      padding: 6px 12px;
-      font-family: inherit;
-      font-size: 12px;
-      cursor: pointer;
-      border-radius: 3px;
-    }
-    button:hover, .btn:hover { border-color: var(--accent); color: var(--accent); }
-    button.primary { border-color: var(--accent-d); color: var(--accent); }
-    button.primary:hover { background: var(--accent); color: #041108; }
-    button.danger { border-color: var(--danger); color: var(--danger); }
-    .dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; vertical-align: middle; }
-    .dot.on  { background: var(--accent); box-shadow: 0 0 8px var(--accent-d); }
-    .dot.off { background: #3a4543; }
-    kbd, code, .mono { font-family: inherit; color: var(--accent); }
-    table { width: 100%; border-collapse: collapse; font-size: 12px; }
-    th, td {
-      text-align: left; padding: 6px 8px;
-      border-bottom: 1px solid var(--border);
-    }
-    th { color: var(--muted); font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em; font-size: 11px; }
-    tr:hover td { background: var(--panel-2); }
-    .muted { color: var(--muted); }
-    .stat {
-      display: inline-flex; align-items: center; gap: 6px;
-      margin-right: 18px;
-      font-size: 13px;
-    }
-    .stat .label { color: var(--muted); }
-    .stat .value { color: var(--accent); font-weight: 600; }
-    .preview-wrap {
-      background: #000;
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-      display: inline-block;
-      max-width: 100%;
-    }
-    .preview-wrap img { display: block; width: 100%; height: auto; }
-    .thumb-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
-      gap: 10px;
-    }
-    .thumb-card {
-      background: var(--panel-2);
-      border: 1px solid var(--border);
-      border-radius: 4px;
-      overflow: hidden;
-      color: inherit;
-    }
-    .thumb-card:hover { border-color: var(--accent); }
-    .thumb-card .thumbs {
-      display: grid; grid-template-columns: 1fr 1fr; gap: 2px;
-      background: #000;
-    }
-    .thumb-card .thumbs img { width: 100%; height: 96px; object-fit: cover; display: block; }
-    .thumb-card .caption {
-      padding: 6px 8px;
-      font-size: 12px;
-      display: flex; justify-content: space-between;
-    }
-    .thumb-card .caption .id { color: var(--accent); }
-    .thumb-card .caption .dur { color: var(--muted); }
-    .form-grid {
-      display: grid; grid-template-columns: max-content 1fr; gap: 6px 10px;
-      align-items: center;
-    }
-    input[type=number], input[type=text], select {
-      background: var(--panel-2);
-      color: var(--text);
-      border: 1px solid var(--border);
-      padding: 4px 6px;
-      font-family: inherit;
-      font-size: 12px;
-      border-radius: 3px;
-      width: 120px;
-    }
-    input[type=checkbox] { accent-color: var(--accent); }
-    .toast {
-      position: fixed; right: 16px; bottom: 16px;
-      background: var(--panel-2);
-      border: 1px solid var(--border);
-      border-left: 3px solid var(--accent);
-      padding: 8px 12px;
-      border-radius: 3px;
-      font-size: 12px;
-      color: var(--text);
-      display: none;
-      z-index: 10;
-    }
-    .toast.err { border-left-color: var(--danger); }
-    footer.foot {
-      padding: 10px 16px;
-      color: var(--muted);
-      font-size: 11px;
-      border-top: 1px solid var(--border);
-      margin-top: 20px;
-    }
-    video { max-width: 100%; background: #000; border: 1px solid var(--border); border-radius: 4px; }
-  </style>
-</head>
-<body>
-  <header class="nav">
-    <span class="brand">&gt; fridge-cam</span>
-    <a class="nlink" href="/">dashboard</a>
-    <a class="nlink" href="/events">events</a>
-    <span class="spacer"></span>
-    <span class="meta" id="nav-meta">connecting&hellip;</span>
-  </header>
-  <main>
-    {% block content %}{% endblock %}
-  </main>
-  <footer class="foot">
-    fridge-cam daemon &middot; luna-hub-lite hardware
-  </footer>
-  <div class="toast" id="toast"></div>
-  <script>
-    function showToast(msg, isErr) {
-      const t = document.getElementById('toast');
-      if (!t) return;
-      t.textContent = msg;
-      t.className = 'toast' + (isErr ? ' err' : '');
-      t.style.display = 'block';
-      clearTimeout(window.__toastTimer);
-      window.__toastTimer = setTimeout(() => { t.style.display = 'none'; }, 2500);
-    }
-    async function fetchJSON(url, opts) {
-      const r = await fetch(url, opts);
-      const text = await r.text();
-      let body;
-      try { body = text ? JSON.parse(text) : null; } catch (_) { body = null; }
-      if (!r.ok) throw new Error((body && body.error) || ('http ' + r.status));
-      return body;
-    }
-    async function refreshNav() {
-      try {
-        const s = await fetchJSON('/api/state');
-        const m = document.getElementById('nav-meta');
-        if (m) {
-          const door = s.door_open ? 'OPEN' : 'closed';
-          m.innerHTML = 'door: <span style="color:' + (s.door_open ? 'var(--accent)' : 'var(--muted)') +
-                        '">' + door + '</span> &middot; brightness ' + s.current_brightness +
-                        ' &middot; events ' + s.total_events;
-        }
-      } catch (_) {
-        const m = document.getElementById('nav-meta');
-        if (m) m.textContent = 'offline';
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>{% block title %}fridge-cam{% endblock %}</title>
+    <style>
+      :root {
+        --bg: #0b0f0d;
+        --panel: #11171a;
+        --panel-2: #151d20;
+        --border: #1f2a2d;
+        --text: #d8e2dc;
+        --muted: #7f8c87;
+        --accent: #39ff88;
+        --accent-d: #2ecf6c;
+        --warn: #ffb347;
+        --danger: #ff5c6c;
       }
-    }
-    refreshNav();
-    setInterval(refreshNav, 2000);
-  </script>
-  {% block scripts %}{% endblock %}
-</body>
+      * {
+        box-sizing: border-box;
+      }
+      html,
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--text);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, 'Liberation Mono', monospace;
+        font-size: 13px;
+        line-height: 1.45;
+      }
+      a {
+        color: var(--accent);
+        text-decoration: none;
+      }
+      a:hover {
+        text-decoration: underline;
+      }
+      header.nav {
+        padding: 10px 16px;
+        background: var(--panel);
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        gap: 18px;
+      }
+      header.nav .brand {
+        color: var(--accent);
+        font-weight: 700;
+        letter-spacing: 0.08em;
+        text-transform: uppercase;
+      }
+      header.nav a.nlink {
+        color: var(--muted);
+      }
+      header.nav a.nlink:hover {
+        color: var(--text);
+      }
+      header.nav .spacer {
+        flex: 1;
+      }
+      header.nav .meta {
+        color: var(--muted);
+        font-size: 12px;
+      }
+      main {
+        padding: 16px;
+        max-width: 1200px;
+        margin: 0 auto;
+      }
+      h1,
+      h2,
+      h3 {
+        margin: 0 0 10px 0;
+        font-weight: 600;
+      }
+      h1 {
+        font-size: 18px;
+        color: var(--accent);
+        letter-spacing: 0.06em;
+        text-transform: uppercase;
+      }
+      h2 {
+        font-size: 15px;
+        color: var(--text);
+        margin-top: 18px;
+      }
+      h3 {
+        font-size: 13px;
+        color: var(--muted);
+        text-transform: uppercase;
+        letter-spacing: 0.07em;
+      }
+      .panel {
+        background: var(--panel);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        padding: 12px;
+        margin-bottom: 12px;
+      }
+      .row {
+        display: flex;
+        gap: 12px;
+        flex-wrap: wrap;
+      }
+      .col {
+        flex: 1;
+        min-width: 280px;
+      }
+      button,
+      .btn {
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        padding: 6px 12px;
+        font-family: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        border-radius: 3px;
+      }
+      button:hover,
+      .btn:hover {
+        border-color: var(--accent);
+        color: var(--accent);
+      }
+      button.primary {
+        border-color: var(--accent-d);
+        color: var(--accent);
+      }
+      button.primary:hover {
+        background: var(--accent);
+        color: #041108;
+      }
+      button.danger {
+        border-color: var(--danger);
+        color: var(--danger);
+      }
+      .dot {
+        display: inline-block;
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        vertical-align: middle;
+      }
+      .dot.on {
+        background: var(--accent);
+        box-shadow: 0 0 8px var(--accent-d);
+      }
+      .dot.off {
+        background: #3a4543;
+      }
+      kbd,
+      code,
+      .mono {
+        font-family: inherit;
+        color: var(--accent);
+      }
+      table {
+        width: 100%;
+        border-collapse: collapse;
+        font-size: 12px;
+      }
+      th,
+      td {
+        text-align: left;
+        padding: 6px 8px;
+        border-bottom: 1px solid var(--border);
+      }
+      th {
+        color: var(--muted);
+        font-weight: 500;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        font-size: 11px;
+      }
+      tr:hover td {
+        background: var(--panel-2);
+      }
+      .muted {
+        color: var(--muted);
+      }
+      .stat {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-right: 18px;
+        font-size: 13px;
+      }
+      .stat .label {
+        color: var(--muted);
+      }
+      .stat .value {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .preview-wrap {
+        background: #000;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+        display: inline-block;
+        max-width: 100%;
+      }
+      .preview-wrap img {
+        display: block;
+        width: 100%;
+        height: auto;
+      }
+      .thumb-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+        gap: 10px;
+      }
+      .thumb-card {
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-radius: 4px;
+        overflow: hidden;
+        color: inherit;
+      }
+      .thumb-card:hover {
+        border-color: var(--accent);
+      }
+      .thumb-card .thumbs {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 2px;
+        background: #000;
+      }
+      .thumb-card .thumbs img {
+        width: 100%;
+        height: 96px;
+        object-fit: cover;
+        display: block;
+      }
+      .thumb-card .caption {
+        padding: 6px 8px;
+        font-size: 12px;
+        display: flex;
+        justify-content: space-between;
+      }
+      .thumb-card .caption .id {
+        color: var(--accent);
+      }
+      .thumb-card .caption .dur {
+        color: var(--muted);
+      }
+      .form-grid {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 6px 10px;
+        align-items: center;
+      }
+      input[type='number'],
+      input[type='text'],
+      select {
+        background: var(--panel-2);
+        color: var(--text);
+        border: 1px solid var(--border);
+        padding: 4px 6px;
+        font-family: inherit;
+        font-size: 12px;
+        border-radius: 3px;
+        width: 120px;
+      }
+      input[type='checkbox'] {
+        accent-color: var(--accent);
+      }
+      .toast {
+        position: fixed;
+        right: 16px;
+        bottom: 16px;
+        background: var(--panel-2);
+        border: 1px solid var(--border);
+        border-left: 3px solid var(--accent);
+        padding: 8px 12px;
+        border-radius: 3px;
+        font-size: 12px;
+        color: var(--text);
+        display: none;
+        z-index: 10;
+      }
+      .toast.err {
+        border-left-color: var(--danger);
+      }
+      footer.foot {
+        padding: 10px 16px;
+        color: var(--muted);
+        font-size: 11px;
+        border-top: 1px solid var(--border);
+        margin-top: 20px;
+      }
+      video {
+        max-width: 100%;
+        background: #000;
+        border: 1px solid var(--border);
+        border-radius: 4px;
+      }
+    </style>
+  </head>
+  <body>
+    <header class="nav">
+      <span class="brand">&gt; fridge-cam</span>
+      <a class="nlink" href="/">dashboard</a>
+      <a class="nlink" href="/events">events</a>
+      <span class="spacer"></span>
+      <span class="meta" id="nav-meta">connecting&hellip;</span>
+    </header>
+    <main>{% block content %}{% endblock %}</main>
+    <footer class="foot">fridge-cam daemon &middot; luna-hub-lite hardware</footer>
+    <div class="toast" id="toast"></div>
+    <script>
+      function showToast(msg, isErr) {
+        const t = document.getElementById('toast');
+        if (!t) return;
+        t.textContent = msg;
+        t.className = 'toast' + (isErr ? ' err' : '');
+        t.style.display = 'block';
+        clearTimeout(window.__toastTimer);
+        window.__toastTimer = setTimeout(() => {
+          t.style.display = 'none';
+        }, 2500);
+      }
+      async function fetchJSON(url, opts) {
+        const r = await fetch(url, opts);
+        const text = await r.text();
+        let body;
+        try {
+          body = text ? JSON.parse(text) : null;
+        } catch (_) {
+          body = null;
+        }
+        if (!r.ok) throw new Error((body && body.error) || 'http ' + r.status);
+        return body;
+      }
+      async function refreshNav() {
+        try {
+          const s = await fetchJSON('/api/state');
+          const m = document.getElementById('nav-meta');
+          if (m) {
+            const door = s.door_open ? 'OPEN' : 'closed';
+            m.innerHTML =
+              'door: <span style="color:' +
+              (s.door_open ? 'var(--accent)' : 'var(--muted)') +
+              '">' +
+              door +
+              '</span> &middot; brightness ' +
+              s.current_brightness +
+              ' &middot; events ' +
+              s.total_events;
+          }
+        } catch (_) {
+          const m = document.getElementById('nav-meta');
+          if (m) m.textContent = 'offline';
+        }
+      }
+      refreshNav();
+      setInterval(refreshNav, 2000);
+    </script>
+    {% block scripts %}{% endblock %}
+  </body>
 </html>

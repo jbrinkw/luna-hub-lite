@@ -22,11 +22,7 @@ import { seedFullAndLogin, seedChefByteData, seedUser } from '../helpers/seed';
 import { admin } from '../helpers/constants';
 
 /** Install a browser-side probe that records postgres_changes events. */
-async function installProbe(
-  page: Page,
-  userId: string,
-  table: 'stock_lots' | 'products' | 'scale_pairings',
-) {
+async function installProbe(page: Page, userId: string, table: 'stock_lots' | 'products' | 'scale_pairings') {
   await page.evaluate(
     async ([uid, tbl]) => {
       const win = window as any;
@@ -340,9 +336,7 @@ test.describe('ChefByte Realtime — scale_pairings publication', () => {
     return (data as any).device_id as string;
   }
 
-  test('external scale_pairings INSERT/UPDATE/DELETE deliver via postgres_changes within 10s', async ({
-    page,
-  }) => {
+  test('external scale_pairings INSERT/UPDATE/DELETE deliver via postgres_changes within 10s', async ({ page }) => {
     test.setTimeout(90_000);
     const { userId, cleanup } = await seedFullAndLogin(page, 'rt-pair-probe');
     try {
@@ -407,9 +401,7 @@ test.describe('ChefByte Realtime — scale_pairings publication', () => {
       );
 
       // Final sanity check — all three event types present.
-      const events: Array<{ type: string }> = await page.evaluate(
-        () => (window as any).__rtEvents.scale_pairings,
-      );
+      const events: Array<{ type: string }> = await page.evaluate(() => (window as any).__rtEvents.scale_pairings);
       const types = new Set(events.map((e) => e.type));
       expect(types.has('INSERT')).toBe(true);
       expect(types.has('UPDATE')).toBe(true);
@@ -419,9 +411,7 @@ test.describe('ChefByte Realtime — scale_pairings publication', () => {
     }
   });
 
-  test('external scale_pairings INSERT → Show Scales counter updates without page.reload', async ({
-    page,
-  }) => {
+  test('external scale_pairings INSERT → Show Scales counter updates without page.reload', async ({ page }) => {
     test.setTimeout(90_000);
     const { userId, cleanup } = await seedFullAndLogin(page, 'rt-pair-ui');
     try {
@@ -455,9 +445,7 @@ test.describe('ChefByte Realtime — scale_pairings publication', () => {
     }
   });
 
-  test('scale_pairings INSERT for a DIFFERENT user is blocked by RLS — probe receives nothing', async ({
-    page,
-  }) => {
+  test('scale_pairings INSERT for a DIFFERENT user is blocked by RLS — probe receives nothing', async ({ page }) => {
     test.setTimeout(90_000);
     // Probe-owning user signs into the browser — our filter is scoped to
     // this user_id.
@@ -496,7 +484,7 @@ test.describe('ChefByte Realtime — scale_pairings publication', () => {
       // ~5x longer than every delivery observed in the other probe tests
       // above — if the event were going to reach user A, it would already
       // be in `__rtEvents.scale_pairings` by now.
-      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+
       await page.waitForTimeout(5_000);
       const events: Array<{ type: string }> = await page.evaluate(
         () => (window as any).__rtEvents?.scale_pairings ?? [],

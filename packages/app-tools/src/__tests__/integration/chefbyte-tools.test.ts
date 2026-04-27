@@ -559,12 +559,7 @@ describe('ChefByte Tool Integration Tests', () => {
       // Use productId (a fresh slot) — this product was stocked/consumed earlier
       // but never added to the shopping list in this test file.
       // Make sure we start from 0 on the shopping list for this product.
-      await admin
-        .schema('chefbyte')
-        .from('shopping_list')
-        .delete()
-        .eq('user_id', userId)
-        .eq('product_id', productId);
+      await admin.schema('chefbyte').from('shopping_list').delete().eq('user_id', userId).eq('product_id', productId);
 
       await addToShopping.handler({ product_id: productId, qty_containers: 3 }, ctx);
       const result2 = await addToShopping.handler({ product_id: productId, qty_containers: 2 }, ctx);
@@ -573,12 +568,7 @@ describe('ChefByte Tool Integration Tests', () => {
       expect(Number(data2.item.qty_containers)).toBe(5);
 
       // Cleanup so later tests that re-seed the shopping list behave normally.
-      await admin
-        .schema('chefbyte')
-        .from('shopping_list')
-        .delete()
-        .eq('user_id', userId)
-        .eq('product_id', productId);
+      await admin.schema('chefbyte').from('shopping_list').delete().eq('user_id', userId).eq('product_id', productId);
     });
 
     it('rejects zero qty_containers', async () => {
@@ -1119,22 +1109,14 @@ describe('ChefByte Tool Integration Tests', () => {
       const uctx = createToolContext(u.userId);
       try {
         // Two products: one with plenty of stock, one with almost none.
-        const plentyRes = parseToolResult(
-          await createProduct.handler({ name: 'AtomicChickenMCP' }, uctx),
-        );
-        const shortRes = parseToolResult(
-          await createProduct.handler({ name: 'AtomicRiceMCP' }, uctx),
-        );
+        const plentyRes = parseToolResult(await createProduct.handler({ name: 'AtomicChickenMCP' }, uctx));
+        const shortRes = parseToolResult(await createProduct.handler({ name: 'AtomicRiceMCP' }, uctx));
         const plentyId = plentyRes.product.product_id;
         const shortId = shortRes.product.product_id;
 
         // Plenty: 5 containers. Short: 0.1 container.
-        await addStock.handler(
-          { product_id: plentyId, qty_containers: 5 }, uctx,
-        );
-        await addStock.handler(
-          { product_id: shortId, qty_containers: 0.1 }, uctx,
-        );
+        await addStock.handler({ product_id: plentyId, qty_containers: 5 }, uctx);
+        await addStock.handler({ product_id: shortId, qty_containers: 0.1 }, uctx);
 
         // Recipe requires 1 container of each; base_servings=2, meal
         // servings=2 → scale_factor 1.0 → needs 1 short container
@@ -1156,10 +1138,7 @@ describe('ChefByte Tool Integration Tests', () => {
 
         const today = new Date().toISOString().slice(0, 10);
         const mealRes = parseToolResult(
-          await addMeal.handler(
-            { logical_date: today, recipe_id: recipeId, servings: 2 },
-            uctx,
-          ),
+          await addMeal.handler({ logical_date: today, recipe_id: recipeId, servings: 2 }, uctx),
         );
         const mealId = mealRes.meal.meal_id;
 
@@ -1170,32 +1149,18 @@ describe('ChefByte Tool Integration Tests', () => {
         expect(errMsg.toLowerCase()).toContain('insufficient stock');
 
         // (b) Plenty-stock ingredient is untouched.
-        const plentyLots = parseToolResult(
-          await getProductLots.handler({ product_id: plentyId }, uctx),
-        );
-        const plentyTotal = plentyLots.lots.reduce(
-          (sum: number, l: any) => sum + Number(l.qty_containers), 0,
-        );
+        const plentyLots = parseToolResult(await getProductLots.handler({ product_id: plentyId }, uctx));
+        const plentyTotal = plentyLots.lots.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
         expect(plentyTotal).toBeCloseTo(5, 3);
 
         // (c) Short-stock ingredient is also untouched (still 0.1).
-        const shortLots = parseToolResult(
-          await getProductLots.handler({ product_id: shortId }, uctx),
-        );
-        const shortTotal = shortLots.lots.reduce(
-          (sum: number, l: any) => sum + Number(l.qty_containers), 0,
-        );
+        const shortLots = parseToolResult(await getProductLots.handler({ product_id: shortId }, uctx));
+        const shortTotal = shortLots.lots.reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
         expect(shortTotal).toBeCloseTo(0.1, 3);
 
         // (d) Meal stays uncompleted.
-        const afterPlan = parseToolResult(
-          await getMealPlan.handler(
-            { start_date: today, end_date: today }, uctx,
-          ),
-        );
-        const entry = afterPlan.entries.find(
-          (e: any) => e.meal_id === mealId,
-        );
+        const afterPlan = parseToolResult(await getMealPlan.handler({ start_date: today, end_date: today }, uctx));
+        const entry = afterPlan.entries.find((e: any) => e.meal_id === mealId);
         expect(entry).toBeDefined();
         expect(entry.completed).toBe(false);
 
@@ -1800,10 +1765,7 @@ describe('ChefByte Tool Integration Tests', () => {
           .select('location_id')
           .eq('user_id', u.userId)
           .limit(1);
-        await addStock.handler(
-          { product_id: prodId, qty_containers: 2, location_id: locs![0].location_id },
-          uctx,
-        );
+        await addStock.handler({ product_id: prodId, qty_containers: 2, location_id: locs![0].location_id }, uctx);
         await consume.handler({ product_id: prodId, qty: 1, unit: 'container', log_macros: true }, uctx);
 
         const { data: logsBefore } = await admin
@@ -1841,9 +1803,7 @@ describe('ChefByte Tool Integration Tests', () => {
       const u = await createTestUser('chefbyte-delete-temp-item');
       const uctx = createToolContext(u.userId);
       try {
-        const logged = parseToolResult(
-          await logTempItem.handler({ name: 'Coffee', calories: 5 }, uctx),
-        );
+        const logged = parseToolResult(await logTempItem.handler({ name: 'Coffee', calories: 5 }, uctx));
         const tempId = logged.item.temp_id;
         expect(tempId).toBeTruthy();
 
@@ -1957,10 +1917,7 @@ describe('ChefByte Tool Integration Tests', () => {
           .select('location_id')
           .eq('user_id', u.userId)
           .limit(1);
-        await addStock.handler(
-          { product_id: prodId, qty_containers: 2, location_id: locs![0].location_id },
-          uctx,
-        );
+        await addStock.handler({ product_id: prodId, qty_containers: 2, location_id: locs![0].location_id }, uctx);
 
         const delRes = parseToolResult(await deleteProduct.handler({ product_id: prodId }, uctx));
         expect(delRes.success).toBe(true);
@@ -1986,10 +1943,7 @@ describe('ChefByte Tool Integration Tests', () => {
     });
 
     it('delete_product: non-existent product_id returns not-found error', async () => {
-      const res = await deleteProduct.handler(
-        { product_id: '00000000-0000-0000-0000-000000000000' },
-        ctx,
-      );
+      const res = await deleteProduct.handler({ product_id: '00000000-0000-0000-0000-000000000000' }, ctx);
       expect(res.isError).toBe(true);
       expect(res.content[0].text.toLowerCase()).toContain('not found');
     });
@@ -2007,9 +1961,7 @@ describe('ChefByte Tool Integration Tests', () => {
         const prod = parseToolResult(await createProduct.handler({ name: 'NoDateProd' }, uctx));
 
         // Call add_meal WITHOUT logical_date
-        const res = parseToolResult(
-          await addMeal.handler({ product_id: prod.product.product_id, servings: 1 }, uctx),
-        );
+        const res = parseToolResult(await addMeal.handler({ product_id: prod.product.product_id, servings: 1 }, uctx));
         expect(res.meal).toBeDefined();
         expect(res.meal.logical_date).toBeTruthy();
 
@@ -2061,10 +2013,7 @@ describe('ChefByte Tool Integration Tests', () => {
         const explicitDate = '2029-07-04';
 
         const res = parseToolResult(
-          await addMeal.handler(
-            { product_id: prod.product.product_id, logical_date: explicitDate, servings: 1 },
-            uctx,
-          ),
+          await addMeal.handler({ product_id: prod.product.product_id, logical_date: explicitDate, servings: 1 }, uctx),
         );
         expect(res.meal.logical_date).toBe(explicitDate);
       } finally {

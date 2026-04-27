@@ -84,8 +84,8 @@ describe('ResetPassword integration', () => {
     const mismatched: string = 'differentpassword';
     const matched: string = 'newpassword123';
 
-    expect(password !== mismatched).toBe(true);   // triggers the error branch
-    expect(password !== matched).toBe(false);     // validation passes
+    expect(password !== mismatched).toBe(true); // triggers the error branch
+    expect(password !== matched).toBe(false); // validation passes
     // Guard against accidental reference-equality assumptions — the component
     // uses `!==` on primitive strings, not Object.is.
     expect(password === matched).toBe(true);

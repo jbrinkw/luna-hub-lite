@@ -95,25 +95,28 @@ describe('ChefByte apply_event_override — classifier review + retry', () => {
       .single();
     deviceId = dev!.device_id;
 
-    await (adminClient as any).schema('chefbyte').from('shelf_event_log').insert({
-      user_id: ctx.userId,
-      device_id: deviceId,
-      client_event_id: clientEventId,
-      pi_event_id: 'pi-integration-001',
-      payload: {
-        scale_id: 'scale-int',
-        kind: 'live_shelf',
-        event_kind: 'consumed',
-        product_id: productId,
-        delta_g: -100,
-        occurred_at: new Date().toISOString(),
-      },
-      applied: true,
-      resolved_lot_id: lotId,
-      reason: 'decremented',
-      classifier_status: 'review',
-      classification: { item_id: productId, confidence: 0.45, multi_match: [] },
-    });
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('shelf_event_log')
+      .insert({
+        user_id: ctx.userId,
+        device_id: deviceId,
+        client_event_id: clientEventId,
+        pi_event_id: 'pi-integration-001',
+        payload: {
+          scale_id: 'scale-int',
+          kind: 'live_shelf',
+          event_kind: 'consumed',
+          product_id: productId,
+          delta_g: -100,
+          occurred_at: new Date().toISOString(),
+        },
+        applied: true,
+        resolved_lot_id: lotId,
+        reason: 'decremented',
+        classifier_status: 'review',
+        classification: { item_id: productId, confidence: 0.45, multi_match: [] },
+      });
   }, 60_000);
 
   afterAll(async () => {
@@ -121,21 +124,19 @@ describe('ChefByte apply_event_override — classifier review + retry', () => {
   });
 
   it('p_classifier_override_item_id routes food_log to the chosen product', async () => {
-    const { error } = await (ctx.client as any)
-      .schema('chefbyte')
-      .rpc('apply_event_override', {
-        p_client_event_id: clientEventId,
-        p_stock_qty_override: null,
-        p_macros_servings_override: 2,
-        p_calories_override: null,
-        p_protein_override: null,
-        p_carbs_override: null,
-        p_fat_override: null,
-        p_macro_logging_enabled: true,
-        p_is_voided: false,
-        p_event_kind: 'consumed',
-        p_classifier_override_item_id: altProductId,
-      });
+    const { error } = await (ctx.client as any).schema('chefbyte').rpc('apply_event_override', {
+      p_client_event_id: clientEventId,
+      p_stock_qty_override: null,
+      p_macros_servings_override: 2,
+      p_calories_override: null,
+      p_protein_override: null,
+      p_carbs_override: null,
+      p_fat_override: null,
+      p_macro_logging_enabled: true,
+      p_is_voided: false,
+      p_event_kind: 'consumed',
+      p_classifier_override_item_id: altProductId,
+    });
     expect(error).toBeNull();
 
     const { data: fl } = await chefbyte(ctx.client)
@@ -160,21 +161,19 @@ describe('ChefByte apply_event_override — classifier review + retry', () => {
       .update({ classifier_status: 'review' })
       .eq('client_event_id', clientEventId);
 
-    const { error } = await (ctx.client as any)
-      .schema('chefbyte')
-      .rpc('apply_event_override', {
-        p_client_event_id: clientEventId,
-        p_stock_qty_override: null,
-        p_macros_servings_override: 1,
-        p_calories_override: null,
-        p_protein_override: null,
-        p_carbs_override: null,
-        p_fat_override: null,
-        p_macro_logging_enabled: true,
-        p_is_voided: false,
-        p_event_kind: 'consumed',
-        p_classifier_override_item_id: null,
-      });
+    const { error } = await (ctx.client as any).schema('chefbyte').rpc('apply_event_override', {
+      p_client_event_id: clientEventId,
+      p_stock_qty_override: null,
+      p_macros_servings_override: 1,
+      p_calories_override: null,
+      p_protein_override: null,
+      p_carbs_override: null,
+      p_fat_override: null,
+      p_macro_logging_enabled: true,
+      p_is_voided: false,
+      p_event_kind: 'consumed',
+      p_classifier_override_item_id: null,
+    });
     expect(error).toBeNull();
 
     const { data } = await chefbyte(ctx.client)
@@ -192,21 +191,19 @@ describe('ChefByte apply_event_override — classifier review + retry', () => {
       .update({ classifier_status: 'review' })
       .eq('client_event_id', clientEventId);
 
-    const { error } = await (ctx.client as any)
-      .schema('chefbyte')
-      .rpc('apply_event_override', {
-        p_client_event_id: clientEventId,
-        p_stock_qty_override: null,
-        p_macros_servings_override: null,
-        p_calories_override: null,
-        p_protein_override: null,
-        p_carbs_override: null,
-        p_fat_override: null,
-        p_macro_logging_enabled: true,
-        p_is_voided: true,
-        p_event_kind: null,
-        p_classifier_override_item_id: null,
-      });
+    const { error } = await (ctx.client as any).schema('chefbyte').rpc('apply_event_override', {
+      p_client_event_id: clientEventId,
+      p_stock_qty_override: null,
+      p_macros_servings_override: null,
+      p_calories_override: null,
+      p_protein_override: null,
+      p_carbs_override: null,
+      p_fat_override: null,
+      p_macro_logging_enabled: true,
+      p_is_voided: true,
+      p_event_kind: null,
+      p_classifier_override_item_id: null,
+    });
     expect(error).toBeNull();
 
     const { data } = await chefbyte(ctx.client)

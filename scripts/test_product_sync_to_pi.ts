@@ -137,16 +137,13 @@ async function main() {
   const productId = `00000000-0000-0000-0000-${Date.now().toString(16).padStart(12, '0')}`;
   console.log(`[2] insert product ${marker} (id=${productId})`);
   const insertStartMs = Date.now();
-  const { error: insErr } = await admin
-    .schema('chefbyte')
-    .from('products')
-    .insert({
-      product_id: productId,
-      user_id: userId,
-      name: marker,
-      unit_type: 'solid',
-      certified: true,
-    });
+  const { error: insErr } = await admin.schema('chefbyte').from('products').insert({
+    product_id: productId,
+    user_id: userId,
+    name: marker,
+    unit_type: 'solid',
+    certified: true,
+  });
   if (insErr) throw new Error(`insert: ${insErr.message}`);
 
   try {
@@ -154,9 +151,7 @@ async function main() {
     const deadline = insertStartMs + VISIBILITY_TIMEOUT_MS;
     let piHitMs = 0;
     while (Date.now() < deadline) {
-      const stdout = piQuery(
-        `SELECT product_id FROM products WHERE product_id='${productId}'`,
-      );
+      const stdout = piQuery(`SELECT product_id FROM products WHERE product_id='${productId}'`);
       if (stdout.trim() === productId) {
         piHitMs = Date.now();
         break;
@@ -164,19 +159,13 @@ async function main() {
       await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
     }
     if (piHitMs === 0) {
-      throw new Error(
-        `Pi did not see product within ${VISIBILITY_TIMEOUT_MS / 1000}s`,
-      );
+      throw new Error(`Pi did not see product within ${VISIBILITY_TIMEOUT_MS / 1000}s`);
     }
     const elapsedS = ((piHitMs - insertStartMs) / 1000).toFixed(1);
     console.log(`[4] PASS — product visible on Pi in ${elapsedS}s`);
   } finally {
     console.log('[5] cleanup — delete cloud product');
-    const { error: delErr } = await admin
-      .schema('chefbyte')
-      .from('products')
-      .delete()
-      .eq('product_id', productId);
+    const { error: delErr } = await admin.schema('chefbyte').from('products').delete().eq('product_id', productId);
     if (delErr) console.warn(`cleanup warning: ${delErr.message}`);
     // Best-effort local cleanup — the next poll tick won't delete it
     // automatically (the sync is additive-only), so we tidy by hand.

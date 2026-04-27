@@ -5,17 +5,17 @@
 This plan was reviewed against the actual codebase before implementation. The items below supersede / clarify the original sections that follow. **Implementers: read this section FIRST.**
 
 1. **Edge-function JWT config.** Every existing edge fn in `supabase/config.toml` uses `verify_jwt = false` and verifies the JWT manually via `supabase.auth.getUser()` (this is a CLI 2.75 ES256 workaround — see the comment in config.toml L376). The new `livetrack-session` function must follow the same pattern: `verify_jwt = false`, one function, three routes dispatched by URL path:
-    - `POST /livetrack-session/create` — manual JWT verify (like `analyze-product`)
-    - `POST /livetrack-session/pi-update` — manual `x-api-key` check + SHA-256 lookup (like `shelf-ingest`)
-    - `GET /livetrack-session/active` — manual `x-api-key` check (same pattern)
+   - `POST /livetrack-session/create` — manual JWT verify (like `analyze-product`)
+   - `POST /livetrack-session/pi-update` — manual `x-api-key` check + SHA-256 lookup (like `shelf-ingest`)
+   - `GET /livetrack-session/active` — manual `x-api-key` check (same pattern)
 
 2. **Don't extend `shelf-ingest`.** The plan originally suggested extending shelf-ingest with the Pi GET route. Don't — keep the new session flow in its own function so its failures/logs stay isolated.
 
 3. **`ai_tare.estimate()` takes image PATHS, not frames.** Signature is `estimate(*, ref_image_paths: list[str], product_form: AiTareProductForm, measured_gross_g: Optional[float] = None, is_partial: Optional[bool] = None, ...)`. The Pi subscriber must:
-    - Grab a current camera frame from the daemon's ring buffer
-    - Write it to `/home/jeremy/live-shelf/data/tmp/livetrack-<session_id>.jpg` (or similar)
-    - Call `estimate(ref_image_paths=[path], product_form=AiTareProductForm(...), measured_gross_g=float|None, is_partial=True)`
-    - Clean up the temp file
+   - Grab a current camera frame from the daemon's ring buffer
+   - Write it to `/home/jeremy/live-shelf/data/tmp/livetrack-<session_id>.jpg` (or similar)
+   - Call `estimate(ref_image_paths=[path], product_form=AiTareProductForm(...), measured_gross_g=float|None, is_partial=True)`
+   - Clean up the temp file
 
 4. **`AiTareProductForm` fields** (from `intake/models.py:177`): `name`, `brand`, `variant`, `net_weight_g`, `serving_weight_g`, `servings_per_container`, `unit_type` (UnitType enum), `container_type`. The session row's `ai_tare_product_form` JSONB must be shaped to match these keys.
 
@@ -110,11 +110,11 @@ One row in `chefbyte.livetrack_import_sessions` IS the protocol. Cloud writes co
 
 **Pi subscribe.** Add `hardware/live-shelf/server/cloud/realtime.py`: a thread using the `realtime` Python package (supabase-py ships with it) that connects to `wss://<project>.supabase.co/realtime/v1/websocket` with the device's service-role-less channel. Authentication: the Pi already has `CLOUD_IMPORT_KEY` (x-api-key). Realtime, however, requires a JWT or anon key. **Blocker**: Supabase Realtime doesn't natively accept x-api-key style auth. Two options:
 
-  (a) Ship the Supabase **anon key** to the Pi via env var + rely on RLS for isolation. The new session RLS policies let the Pi's anon-key client read/write sessions filtered by `device_id` matching its active device row (joining on `live_shelf_devices.import_key_hash = sha256($PI_IMPORT_KEY)`). Requires a SECURITY DEFINER helper RPC `livetrack_session_for_device(p_import_key text)` that the Pi calls to authenticate and get its own session slice.
+(a) Ship the Supabase **anon key** to the Pi via env var + rely on RLS for isolation. The new session RLS policies let the Pi's anon-key client read/write sessions filtered by `device_id` matching its active device row (joining on `live_shelf_devices.import_key_hash = sha256($PI_IMPORT_KEY)`). Requires a SECURITY DEFINER helper RPC `livetrack_session_for_device(p_import_key text)` that the Pi calls to authenticate and get its own session slice.
 
-  (b) Pi **polls** `GET /functions/v1/shelf-ingest/livetrack-sessions` every 500ms when waiting, every 2s idle. Existing `x-api-key` auth works unchanged. Simpler; 500ms poll adds ~250ms average to the arm→event latency but fits the 2s budget.
+(b) Pi **polls** `GET /functions/v1/shelf-ingest/livetrack-sessions` every 500ms when waiting, every 2s idle. Existing `x-api-key` auth works unchanged. Simpler; 500ms poll adds ~250ms average to the arm→event latency but fits the 2s budget.
 
-  **Recommendation: (b) polling** for the session-command direction (cloud → Pi) because the Pi never needs sub-500ms command latency (user is physically placing a container). For the result direction (Pi → cloud) the Pi POSTs to a new edge function `livetrack-session-update` using existing x-api-key auth. Cloud UI gets the UPDATE via Realtime, which it already has working. This avoids shipping the anon key to the Pi and keeps auth consistent with existing Pi→cloud code.
+**Recommendation: (b) polling** for the session-command direction (cloud → Pi) because the Pi never needs sub-500ms command latency (user is physically placing a container). For the result direction (Pi → cloud) the Pi POSTs to a new edge function `livetrack-session-update` using existing x-api-key auth. Cloud UI gets the UPDATE via Realtime, which it already has working. This avoids shipping the anon key to the Pi and keeps auth consistent with existing Pi→cloud code.
 
 ### Rejected alternatives
 
@@ -199,20 +199,21 @@ Request/response TS types live alongside in `apps/web/src/pages/chefbyte/livetra
 - `hardware/live-shelf/server/cloud/livetrack_poller.py` (new): background thread (started from `app.py` alongside `CloudWorker`). 500ms poll `GET /functions/v1/shelf-ingest/livetrack-session/active` (extend `shelf-ingest` with one GET route that returns the Pi's active session via x-api-key lookup; cheaper than the full session edge fn). Sets a thread-safe `import_arm.state` dict. Handles `awaiting_ai_tare` by calling `intake.ai_tare.estimate()` against the latest `CameraDaemon` ring-buffer frame and posting the result.
 - `hardware/live-shelf/server/handlers/scale_events.py` in `handle_scale_event` — insert a short-circuit BEFORE dedup, AFTER `shelf_id` resolution (mirrors §3 of CATCH_ALL_TARE_CAPTURE_PLAN.md, but the state source is the poller instead of the SQLite `tare_arm` table):
 
-    ```python
-    if shelf_id == "catch_all" and direction != "noise":
-        arm = self._import_arm.get()  # thread-safe snapshot
-        if arm is not None and arm.state == "waiting_scale":
-            self._cloud_client.post_livetrack_session_update(
-                arm.session_id,
-                scale_reading_g=after_weight_g,
-                scale_reading_ts=pi_received_ts,
-                state="scale_reading_received",
-            )
-            return {"ok": True, "intercepted": "livetrack_import"}, 200
-    ```
+  ```python
+  if shelf_id == "catch_all" and direction != "noise":
+      arm = self._import_arm.get()  # thread-safe snapshot
+      if arm is not None and arm.state == "waiting_scale":
+          self._cloud_client.post_livetrack_session_update(
+              arm.session_id,
+              scale_reading_g=after_weight_g,
+              scale_reading_ts=pi_received_ts,
+              state="scale_reading_received",
+          )
+          return {"ok": True, "intercepted": "livetrack_import"}, 200
+  ```
 
   This short-circuits BEFORE `record_scale_event` fires so the catch-all delta pipeline does NOT see the event. Noise events are ignored. `direction == 'remove'` is ignored for v1 (same constraint as CATCH_ALL_TARE_CAPTURE_PLAN.md open question #4).
+
 - `app.py` startup: after `_apply_idempotent_migrations`, query the cloud for the Pi's active session and seed `_import_arm` so a reboot mid-wizard doesn't lose state. Symmetric to `clear_stale_tare_arm` in the local-only plan.
 
 Shared with `CATCH_ALL_TARE_CAPTURE_PLAN.md`: the `shelf_id == "catch_all" and direction != "noise"` guard location. **Diverges**: state is held in cloud Postgres (not `tare_arm` SQLite table); response is an async UPDATE via Realtime (not a synchronous DB write to `products.tare_weight_g`). A future refactor could collapse both behind a `self._import_handlers` list.
@@ -222,28 +223,45 @@ Shared with `CATCH_ALL_TARE_CAPTURE_PLAN.md`: the `shelf_id == "catch_all" and d
 **Decision: new route `/chef/livetrack-import`.** Justification: the existing `ScannerPage` has four modes (purchase/consume_macros/consume_no_macros/shopping) with a dense state machine; adding a fifth mode that hijacks `useScannerDetection`, blocks on the Pi, and owns a session row would double the file's complexity. Extracting shared pieces into a hook is cheaper than inlining.
 
 Files to create:
+
 - `apps/web/src/pages/chefbyte/LiveTrackImportPage.tsx` — main page.
 - `apps/web/src/pages/chefbyte/livetrackSession.ts` — session CRUD helpers (supabase-js direct + edge fn invoke).
 - `apps/web/src/hooks/useLiveTrackSession.ts` — wraps the session row as TanStack Query + `useRealtimeInvalidation` + UPDATE mutations.
 
 Files to modify:
+
 - `apps/web/src/modules/chefbyte/routes.tsx` — add `<Route path="livetrack-import" element={<LiveTrackImportPage/>} />`.
 - `apps/web/src/shared/queryKeys.ts` — add `livetrackSession: (userId, sessionId) => ['livetrack-session', userId, sessionId] as const` and `liveShelfDevice: (userId) => ['live-shelf-device', userId] as const`.
 
 State shape (single reducer):
+
 ```ts
 type WizardState =
   | { kind: 'idle' }
   | { kind: 'creating_session' }
   | { kind: 'waiting_barcode'; session: LiveTrackSession }
   | { kind: 'analyzing'; session: LiveTrackSession; barcode: string }
-  | { kind: 'waiting_scale'; session: LiveTrackSession; product: Product; nutrition: NutritionData; tareSource: 'awaiting_scale' | 'ai_tare' }
-  | { kind: 'review'; session: LiveTrackSession; product: Product; nutrition: NutritionData; tare_g: number; tareSource: 'scale' | 'ai' | 'manual' }
+  | {
+      kind: 'waiting_scale';
+      session: LiveTrackSession;
+      product: Product;
+      nutrition: NutritionData;
+      tareSource: 'awaiting_scale' | 'ai_tare';
+    }
+  | {
+      kind: 'review';
+      session: LiveTrackSession;
+      product: Product;
+      nutrition: NutritionData;
+      tare_g: number;
+      tareSource: 'scale' | 'ai' | 'manual';
+    }
   | { kind: 'saving' }
   | { kind: 'error'; message: string };
 ```
 
 Realtime wiring:
+
 ```ts
 useRealtimeInvalidation('livetrack-session', [
   {
@@ -263,6 +281,7 @@ useRealtimeInvalidation('livetrack-session', [
 The `filter` override deviates from the default `user_id=eq.${user.id}` — important because `session_id` lets us scope to exactly one row even if two tabs start wizards concurrently. `useRealtimeInvalidation` already supports custom filter.
 
 UX:
+
 - Same keypad as ScannerPage (extract `KeypadPanel` into `apps/web/src/components/chefbyte/KeypadPanel.tsx` if not already).
 - Auto-focus `servingsPerContainer` on analyze-product completion: `focusField('servingsPerContainer')` in the `analyzing → waiting_scale` reducer transition.
 - Full-vs-partial branch: after analyze-product, show "Container full + sealed?" toggle. Full path: wait for scale, compute `tare_g = scale_reading_g - product.net_weight_g` (using OFF `net_weight_g`/`product_quantity_g`). Partial path: "Place container on scale THEN click AI tare" — UPDATE `state='awaiting_ai_tare'` + `ai_tare_product_form={name,brand,variant,net_weight_g,unit_type,container_type,measured_gross_g:scale_reading_g,is_partial:true}`.

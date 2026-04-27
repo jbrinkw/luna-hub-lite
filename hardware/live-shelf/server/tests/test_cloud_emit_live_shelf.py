@@ -281,9 +281,16 @@ def test_self_heal_replays_stuck_in_flight_return(tmp_path):
         pickup_session_id=None,
         in_flight_since="2026-04-22T03:01:39.205Z",
     )
+    # Use a current timestamp (within self_heal's default 72h window).
+    # The hardcoded 2026-04-22 date elsewhere in the setup is the
+    # real-world bug repro point, but the heal scan filters on
+    # ts >= now-72h, so the ADD event must be stamped "now" or the
+    # row falls out of the window and the heal is a no-op.
+    from datetime import datetime, timezone
+    _now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     e_add = _record_event(
         conn, direction="add", delta_g=472.1,
-        ts="2026-04-22T04:03:54.000Z", session_id=session_id,
+        ts=_now_iso, session_id=session_id,
     )
     # Stamp the event 'classified' with the real event's classification JSON.
     import json as _json

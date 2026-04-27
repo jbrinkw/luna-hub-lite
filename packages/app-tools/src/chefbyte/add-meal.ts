@@ -5,15 +5,14 @@ export const addMeal: ToolDefinition = {
   name: 'CHEFBYTE_add_meal',
   description:
     'Add a meal plan entry. Must specify at least one of recipe_id or product_id. ' +
-    'logical_date is OPTIONAL — if omitted, defaults to the user\'s current logical date ' +
+    "logical_date is OPTIONAL — if omitted, defaults to the user's current logical date " +
     '(derived from profile timezone + day_start_hour), matching consume/log_temp_item semantics.',
   inputSchema: {
     type: 'object',
     properties: {
       logical_date: {
         type: 'string',
-        description:
-          'Plan date YYYY-MM-DD. Optional — defaults to the user\'s current logical date when omitted.',
+        description: "Plan date YYYY-MM-DD. Optional — defaults to the user's current logical date when omitted.",
       },
       meal_prep: { type: 'boolean', description: 'Whether this is a meal prep entry (default: false)' },
       recipe_id: { type: 'string', description: 'Recipe UUID (optional if product_id given)' },

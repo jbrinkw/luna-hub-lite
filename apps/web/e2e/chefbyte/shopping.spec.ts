@@ -315,10 +315,7 @@ test.describe('ChefByte Shopping', () => {
       // DB: two stock_lots exist matching the imported qty
       await expect(async () => {
         const chef = (client as any).schema('chefbyte');
-        const { data: lots } = await chef
-          .from('stock_lots')
-          .select('product_id, qty_containers')
-          .eq('user_id', userId);
+        const { data: lots } = await chef.from('stock_lots').select('product_id, qty_containers').eq('user_id', userId);
         // Two seeded during seedChefByteData already + 2 imported
         const imported = (lots ?? []).filter(
           (l: any) =>

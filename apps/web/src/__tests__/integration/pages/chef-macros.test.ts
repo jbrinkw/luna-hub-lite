@@ -3,7 +3,6 @@ import {
   createPageTestContext,
   chefbyte,
   seedAllChefByte,
-  assertQuerySucceeds,
   todayDate,
   type PageTestContext,
   type ChefByteSeeds,

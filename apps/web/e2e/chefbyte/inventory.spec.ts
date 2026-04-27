@@ -399,9 +399,7 @@ test.describe('ChefByte Inventory', () => {
       await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });
 
       // Badge visible on the Chicken Breast row (assert visibility, NOT trial-click).
-      const chickenRow = page.getByTestId(
-        `inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`,
-      );
+      const chickenRow = page.getByTestId(`inv-product-${productMap['Great Value Boneless Skinless Chicken Breasts']}`);
       await expect(chickenRow.getByTestId('inflight-badge')).toBeVisible({ timeout: 30000 });
       await expect(chickenRow.getByTestId('inflight-badge')).toContainText('In-flight', { timeout: 30000 });
 
@@ -524,7 +522,9 @@ test.describe('ChefByte Inventory', () => {
       await expect(expiredSection).toBeVisible({ timeout: 30000 });
       await expect(expiredSection).toContainText('Expired — discard', { timeout: 30000 });
       await expect(page.getByTestId(`expired-lot-${expiredLotId}`)).toBeVisible({ timeout: 30000 });
-      await expect(page.getByTestId(`expired-chip-${expiredLotId}`)).toContainText('3 days expired', { timeout: 30000 });
+      await expect(page.getByTestId(`expired-chip-${expiredLotId}`)).toContainText('3 days expired', {
+        timeout: 30000,
+      });
 
       // Fresh items still rendered in the grouped view below
       await expect(page.getByTestId('grouped-view')).toBeVisible({ timeout: 30000 });

@@ -158,9 +158,7 @@ describe('CoachByte PrsPage loaders', () => {
     // have identical PR cards. The important thing is the 9999 branch
     // didn't fail and produced the same shape.
     expect(unboundedPrs).toHaveLength(boundedPrs.length);
-    expect(
-      unboundedPrs.map((p) => p.exercise_name).sort(),
-    ).toEqual(boundedPrs.map((p) => p.exercise_name).sort());
+    expect(unboundedPrs.map((p) => p.exercise_name).sort()).toEqual(boundedPrs.map((p) => p.exercise_name).sort());
   });
 
   // -------------------------------------------------------------------

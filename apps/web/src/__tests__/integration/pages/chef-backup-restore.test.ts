@@ -1,11 +1,5 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import {
-  createPageTestContext,
-  chefbyte,
-  seedAllChefByte,
-  type PageTestContext,
-  type ChefByteSeeds,
-} from './helpers';
+import { createPageTestContext, chefbyte, seedAllChefByte, type PageTestContext, type ChefByteSeeds } from './helpers';
 
 /**
  * Integration tests for chefbyte.export_chefbyte_backup /
@@ -89,10 +83,7 @@ describe('ChefByte Backup & Restore RPCs', () => {
     const targetProductId = seeds.productMap['Birds Eye Sweet Peas'];
     expect(targetProductId).toBeTruthy();
 
-    const { error: delErr } = await chefbyte(ctx.client)
-      .from('products')
-      .delete()
-      .eq('product_id', targetProductId);
+    const { error: delErr } = await chefbyte(ctx.client).from('products').delete().eq('product_id', targetProductId);
     expect(delErr).toBeNull();
 
     // Verify delete actually happened (products cascades to dependents).
@@ -103,10 +94,9 @@ describe('ChefByte Backup & Restore RPCs', () => {
     expect(postDelete!.length).toBe(4);
 
     // Restore.
-    const { data: result, error: restoreErr } = await chefbyte(ctx.client).rpc(
-      'restore_chefbyte_backup',
-      { p_backup: snapshot },
-    );
+    const { data: result, error: restoreErr } = await chefbyte(ctx.client).rpc('restore_chefbyte_backup', {
+      p_backup: snapshot,
+    });
     expect(restoreErr).toBeNull();
     expect(result).toBeTruthy();
 
@@ -136,16 +126,14 @@ describe('ChefByte Backup & Restore RPCs', () => {
     const { data: snapshot } = await chefbyte(ctx.client).rpc('export_chefbyte_backup');
 
     // Insert a new product that is NOT in the snapshot.
-    const { error: insertErr } = await chefbyte(ctx.client)
-      .from('products')
-      .insert({
-        user_id: ctx.userId,
-        name: 'Post-Snapshot Product',
-        calories_per_serving: 100,
-        carbs_per_serving: 0,
-        protein_per_serving: 0,
-        fat_per_serving: 0,
-      });
+    const { error: insertErr } = await chefbyte(ctx.client).from('products').insert({
+      user_id: ctx.userId,
+      name: 'Post-Snapshot Product',
+      calories_per_serving: 100,
+      carbs_per_serving: 0,
+      protein_per_serving: 0,
+      fat_per_serving: 0,
+    });
     expect(insertErr).toBeNull();
 
     // Verify we now have 6 products.
@@ -162,10 +150,7 @@ describe('ChefByte Backup & Restore RPCs', () => {
     expect(restoreErr).toBeNull();
 
     // Post-restore: back to 5. The post-snapshot product is gone.
-    const { data: backToFive } = await chefbyte(ctx.client)
-      .from('products')
-      .select('name')
-      .eq('user_id', ctx.userId);
+    const { data: backToFive } = await chefbyte(ctx.client).from('products').select('name').eq('user_id', ctx.userId);
     expect(backToFive!.length).toBe(5);
     expect(backToFive!.find((p: any) => p.name === 'Post-Snapshot Product')).toBeFalsy();
   });

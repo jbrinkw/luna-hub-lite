@@ -10,12 +10,7 @@
     "serving_size": "1 portion (28 g)",
     "packaging": null,
     "image_front_url": "https://images.openfoodfacts.org/images/products/003/114/252/3850/front_en.66.400.jpg",
-    "categories_tags": [
-      "en:dairies",
-      "en:cheeses",
-      "en:italian-cheeses",
-      "en:parmigiano-reggiano"
-    ],
+    "categories_tags": ["en:dairies", "en:cheeses", "en:italian-cheeses", "en:parmigiano-reggiano"],
     "raw_response_fetched_at": "2026-04-15T15:42:41Z"
   },
   "form_suggested": {

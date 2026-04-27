@@ -1,0 +1,24 @@
+#!/usr/bin/env sh
+# .husky/commit-msg - Phase 5 of docs/test-system-fix-plan.md.
+#
+# Lightweight observability hook. Prints a warning when a commit message
+# carries a `Verify-skipped:` footer so the operator (or a code reviewer
+# scrolling the log) can see verification was bypassed on this commit.
+#
+# Does NOT block - the test gate is the pre-push hook (.husky/pre-push).
+# This hook just makes a deliberate bypass visible in the terminal at
+# commit time.
+
+MSG_FILE="$1"
+if [ -z "$MSG_FILE" ] || [ ! -r "$MSG_FILE" ]; then
+  exit 0
+fi
+
+if grep -qE '^Verify-skipped:' "$MSG_FILE"; then
+  REASON="$(grep -E '^Verify-skipped:' "$MSG_FILE" | head -n1 | sed 's/^Verify-skipped:[[:space:]]*//')"
+  printf '\n\033[1;33m[commit-msg] WARNING: this commit declares Verify-skipped.\033[0m\n'
+  printf '\033[0;33m  reason: %s\033[0m\n' "$REASON"
+  printf '\033[0;33m  The pre-push hook will still run unless you also pass --no-verify.\033[0m\n\n'
+fi
+
+exit 0

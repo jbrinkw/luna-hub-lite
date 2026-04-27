@@ -25,18 +25,21 @@ interface ProductUpdate {
   patch: Record<string, unknown>;
 }
 
-const productsById: Record<string, {
-  product_id: string;
-  barcode: string;
-  name: string;
-  is_placeholder: boolean;
-  servings_per_container: number;
-  calories_per_serving: number;
-  protein_per_serving: number;
-  carbs_per_serving: number;
-  fat_per_serving: number;
-  default_shelf_life_days: number | null;
-}> = {};
+const productsById: Record<
+  string,
+  {
+    product_id: string;
+    barcode: string;
+    name: string;
+    is_placeholder: boolean;
+    servings_per_container: number;
+    calories_per_serving: number;
+    protein_per_serving: number;
+    carbs_per_serving: number;
+    fat_per_serving: number;
+    default_shelf_life_days: number | null;
+  }
+> = {};
 
 const productUpdates: ProductUpdate[] = [];
 
@@ -65,7 +68,11 @@ vi.mock('@/shared/supabase', () => {
     const rootBuilder: any = {};
     rootBuilder.from = vi.fn((table: string) => {
       const b: any = {};
-      const state: { mode: 'select' | 'update'; patch: Record<string, unknown> | null; filters: Record<string, unknown> } = {
+      const state: {
+        mode: 'select' | 'update';
+        patch: Record<string, unknown> | null;
+        filters: Record<string, unknown>;
+      } = {
         mode: 'select',
         patch: null,
         filters: {},

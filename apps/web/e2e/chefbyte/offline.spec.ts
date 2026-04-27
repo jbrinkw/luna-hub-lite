@@ -85,8 +85,9 @@ test.describe('ChefByte — offline behavior', () => {
       // passes as long as the effective pointer-events is `none`.
       const contentPointerEvents = await page
         .locator('[data-testid="offline-banner"]')
-        .locator('..')  // parent — the flex column
-        .locator('> div').last()  // the content wrapper (last sibling after banner)
+        .locator('..') // parent — the flex column
+        .locator('> div')
+        .last() // the content wrapper (last sibling after banner)
         .evaluate((el) => getComputedStyle(el).pointerEvents);
       // Scope check is brittle to DOM reshuffles; fall back to explicitly
       // locating the content area via a deeper query on the chef root.
@@ -97,19 +98,17 @@ test.describe('ChefByte — offline behavior', () => {
       // grouped-view's nearest positioned ancestor that carries the
       // pointer-events style. ChefLayout applies the inline style to a
       // single wrapper so inspecting any descendant works.
-      const effectivePE = await page
-        .getByTestId('grouped-view')
-        .evaluate((el) => {
-          // Walk up until we find a node with a non-'auto' pointer-events,
-          // or hit body. If none found, return 'auto'.
-          let n: HTMLElement | null = el as HTMLElement;
-          while (n && n !== document.body) {
-            const pe = getComputedStyle(n).pointerEvents;
-            if (pe && pe !== 'auto') return pe;
-            n = n.parentElement;
-          }
-          return 'auto';
-        });
+      const effectivePE = await page.getByTestId('grouped-view').evaluate((el) => {
+        // Walk up until we find a node with a non-'auto' pointer-events,
+        // or hit body. If none found, return 'auto'.
+        let n: HTMLElement | null = el as HTMLElement;
+        while (n && n !== document.body) {
+          const pe = getComputedStyle(n).pointerEvents;
+          if (pe && pe !== 'auto') return pe;
+          n = n.parentElement;
+        }
+        return 'auto';
+      });
       expect(effectivePE).toBe('none');
 
       // Now issue a REAL click with { force: true } to bypass Playwright's
@@ -134,10 +133,7 @@ test.describe('ChefByte — offline behavior', () => {
         .select('qty_containers')
         .eq('product_id', chickenId)
         .eq('user_id', userId);
-      const totalStock = (lots ?? []).reduce(
-        (sum: number, l: any) => sum + Number(l.qty_containers),
-        0,
-      );
+      const totalStock = (lots ?? []).reduce((sum: number, l: any) => sum + Number(l.qty_containers), 0);
       expect(totalStock).toBe(3);
 
       // App did not crash while offline
@@ -187,9 +183,7 @@ test.describe('ChefByte — offline behavior', () => {
       await page.getByTestId(`sub-ctn-${chickenId}`).click();
 
       // Poll for the stock decrement (server confirms the mutation landed)
-      await expect
-        .poll(read, { timeout: 15000 })
-        .toBeLessThan(3);
+      await expect.poll(read, { timeout: 15000 }).toBeLessThan(3);
     } finally {
       await page.context().setOffline(false);
       await cleanup();

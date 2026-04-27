@@ -10,11 +10,7 @@
     "serving_size": "1 portion (85 g)",
     "packaging": "",
     "image_front_url": "https://images.openfoodfacts.org/images/products/007/874/236/3127/front_en.61.400.jpg",
-    "categories_tags": [
-      "en:meats",
-      "en:chicken-and-its-products",
-      "en:cooked-chicken"
-    ],
+    "categories_tags": ["en:meats", "en:chicken-and-its-products", "en:cooked-chicken"],
     "raw_response_fetched_at": "2026-04-15T15:42:41Z"
   },
   "form_suggested": {

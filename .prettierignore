@@ -5,6 +5,37 @@ legacy/
 pnpm-lock.yaml
 packages/db-types/src/
 supabase/.temp/
+supabase/.branches/
+.claude/
+.stryker-tmp/
+.stryker-tmp-*/
+.verify/
+.worktrees/
+reports/
+coverage/
+playwright-report/
+test-results/
+test-results-e2e/
+.pytest_cache/
+.vercel/
+.wrangler/
+hardware/live-shelf/mutants/
+hardware/live-shelf/.mutmut-cache/
+**/.testmondata
+*.tsbuildinfo
+**/.venv/
+playwright-report-e2e/
+mutants/
+hardware/live-shelf/data/
+**/__pycache__/
+# Phase 2 e2e harness territory; the e2e agent owns these files.
+tests/e2e/
+
+# JSON/markdown that's intentionally hand-formatted
+Journal.json
+# planned-work.md is an intentionally-untracked agent scratchpad.
+planned-work.md
+
 # Jinja templates use {% ... %} / {{ ... }} which prettier's HTML
 # parser misreads as malformed tags (e.g. {% endif %} between two
 # <td>s makes it think the first <td> wasn't closed).

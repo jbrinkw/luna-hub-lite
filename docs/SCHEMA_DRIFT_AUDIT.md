@@ -26,19 +26,19 @@ Lows are cosmetic observability gaps, not data-loss bugs.
 Two tables share the name `scale_pairings` but have entirely different
 schemas and domains.
 
-| Col | Pi-local (`storage/schema.sql`) | Cloud (`chefbyte.scale_pairings`) |
-| --- | --- | --- |
-| `device_id` | TEXT PRIMARY KEY | UUID, FK → live_shelf_devices |
-| `pairing_id` | — | UUID PRIMARY KEY |
-| `scale_id` | — | TEXT |
-| `kind` | — | TEXT CHECK IN (...) |
-| `shelf_id` | TEXT CHECK (...) | — |
-| `user_id` | — | UUID, FK → auth.users |
-| `lot_id` | TEXT FK → lots | — |
-| `product_id` | TEXT FK → products | UUID FK → chefbyte.products |
-| `first_seen_at` | TEXT | TIMESTAMPTZ |
-| `last_heartbeat_ts` | TEXT | TIMESTAMPTZ |
-| `notes` | TEXT | — |
+| Col                 | Pi-local (`storage/schema.sql`) | Cloud (`chefbyte.scale_pairings`) |
+| ------------------- | ------------------------------- | --------------------------------- |
+| `device_id`         | TEXT PRIMARY KEY                | UUID, FK → live_shelf_devices     |
+| `pairing_id`        | —                               | UUID PRIMARY KEY                  |
+| `scale_id`          | —                               | TEXT                              |
+| `kind`              | —                               | TEXT CHECK IN (...)               |
+| `shelf_id`          | TEXT CHECK (...)                | —                                 |
+| `user_id`           | —                               | UUID, FK → auth.users             |
+| `lot_id`            | TEXT FK → lots                  | —                                 |
+| `product_id`        | TEXT FK → products              | UUID FK → chefbyte.products       |
+| `first_seen_at`     | TEXT                            | TIMESTAMPTZ                       |
+| `last_heartbeat_ts` | TEXT                            | TIMESTAMPTZ                       |
+| `notes`             | TEXT                            | —                                 |
 
 **Impact.** A developer grepping for `scale_pairings` in this repo
 will hit both schemas. The Pi-local table is keyed by `device_id`

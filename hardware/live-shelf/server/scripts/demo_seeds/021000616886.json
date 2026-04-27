@@ -10,11 +10,7 @@
     "serving_size": "2 thsp (31 g)",
     "packaging": "",
     "image_front_url": "https://images.openfoodfacts.org/images/products/002/100/061/6886/front_en.40.400.jpg",
-    "categories_tags": [
-      "en:dairies",
-      "en:fermented-foods",
-      "en:cheeses"
-    ],
+    "categories_tags": ["en:dairies", "en:fermented-foods", "en:cheeses"],
     "raw_response_fetched_at": "2026-04-15T15:42:41Z"
   },
   "form_suggested": {

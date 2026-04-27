@@ -576,10 +576,7 @@ describe('ChefByte InventoryPage queries', () => {
     expect(riceEarliest).toBeNull();
 
     // 6. Clear in-flight to keep later tests deterministic.
-    await chefbyte(ctx.client)
-      .from('stock_lots')
-      .update({ in_flight_since: null })
-      .eq('lot_id', lotBefore.lot_id);
+    await chefbyte(ctx.client).from('stock_lots').update({ in_flight_since: null }).eq('lot_id', lotBefore.lot_id);
   });
 
   // -----------------------------------------------------------------------

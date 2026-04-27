@@ -117,7 +117,9 @@ describe('ApiKeyGenerator', () => {
 
   it('revoke shows confirm modal and calls onRevoke on confirm', async () => {
     const onRevoke = vi.fn();
-    const activeKeys = [{ id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z', last_used_at: null }];
+    const activeKeys = [
+      { id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z', last_used_at: null },
+    ];
     render(<ApiKeyGenerator {...defaultProps} activeKeys={activeKeys} onRevoke={onRevoke} />);
 
     // Click Revoke — should open confirm modal
@@ -142,7 +144,9 @@ describe('ApiKeyGenerator', () => {
 
   it('revoke cancel does not call onRevoke', async () => {
     const onRevoke = vi.fn();
-    const activeKeys = [{ id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z', last_used_at: null }];
+    const activeKeys = [
+      { id: 'key-abc-123', label: 'Test Key', created_at: '2026-01-01T00:00:00Z', last_used_at: null },
+    ];
     render(<ApiKeyGenerator {...defaultProps} activeKeys={activeKeys} onRevoke={onRevoke} />);
 
     await userEvent.click(screen.getByText('Revoke'));

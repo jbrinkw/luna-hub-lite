@@ -23,11 +23,7 @@ export interface WalmartResult {
  *   - store_id only appears when supplied
  *   - query gets encoded (spaces → +/%20 depending on user-agent)
  */
-export function buildSearchParams(opts: {
-  apiKey: string;
-  query: string;
-  storeId?: string;
-}): URLSearchParams {
+export function buildSearchParams(opts: { apiKey: string; query: string; storeId?: string }): URLSearchParams {
   const params = new URLSearchParams({
     api_key: opts.apiKey,
     engine: 'walmart',
@@ -43,11 +39,7 @@ export function buildSearchParams(opts: {
  * buildSearchParams — exists so callers and tests see the same final URL
  * string.
  */
-export function buildSerpApiUrl(opts: {
-  apiKey: string;
-  query: string;
-  storeId?: string;
-}): string {
+export function buildSerpApiUrl(opts: { apiKey: string; query: string; storeId?: string }): string {
   return `https://serpapi.com/search.json?${buildSearchParams(opts).toString()}`;
 }
 
@@ -89,16 +81,14 @@ export function normalizeResultItem(item: Record<string, unknown>): WalmartResul
   const offer = (item.primary_offer as Record<string, unknown> | undefined) ?? {};
   const pricePerUnit = item.price_per_unit;
 
-  const price = offer.offer_price != null
-    ? parseFloat(String(offer.offer_price))
-    : item.price != null
-      ? parseFloat(String(item.price))
-      : null;
+  const price =
+    offer.offer_price != null
+      ? parseFloat(String(offer.offer_price))
+      : item.price != null
+        ? parseFloat(String(item.price))
+        : null;
 
-  const ppuObj =
-    pricePerUnit && typeof pricePerUnit === 'object'
-      ? (pricePerUnit as Record<string, unknown>)
-      : null;
+  const ppuObj = pricePerUnit && typeof pricePerUnit === 'object' ? (pricePerUnit as Record<string, unknown>) : null;
   const ppuAmount = ppuObj?.amount != null ? Number(ppuObj.amount) : null;
 
   const urlCandidate = (item.product_page_url ?? item.link ?? '') as unknown;

@@ -96,10 +96,7 @@ export async function loadHistoryPage(
 
 /** Fetch the total number of history plans for the user. Used for the
  * "Showing 1–N of TOTAL workouts" summary at the top of the list. */
-export async function loadHistoryTotalCount(
-  userId: string,
-  client?: SupabaseClient<any>,
-): Promise<number | null> {
+export async function loadHistoryTotalCount(userId: string, client?: SupabaseClient<any>): Promise<number | null> {
   const { count } = await asCoachbyte(client)
     .from('daily_plans')
     .select('plan_id', { count: 'exact', head: true })

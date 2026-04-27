@@ -4,9 +4,9 @@ import { toolSuccess, toolError } from '../shared';
 export const deleteRecipe: ToolDefinition = {
   name: 'CHEFBYTE_delete_recipe',
   description:
-    "Delete a recipe by recipe_id. Cascades to recipe_ingredients. " +
-    "Fails if any meal_plan_entries still reference the recipe — delete those first. " +
-    "RLS enforces ownership.",
+    'Delete a recipe by recipe_id. Cascades to recipe_ingredients. ' +
+    'Fails if any meal_plan_entries still reference the recipe — delete those first. ' +
+    'RLS enforces ownership.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -33,9 +33,7 @@ export const deleteRecipe: ToolDefinition = {
 
     if (refErr) return toolError(`Failed to check meal plan references: ${refErr.message}`);
     if (refs && refs.length > 0) {
-      return toolError(
-        'Cannot delete recipe: meal plan entries still reference it. Delete those meal entries first.',
-      );
+      return toolError('Cannot delete recipe: meal plan entries still reference it. Delete those meal entries first.');
     }
 
     const { data, error } = await ctx.supabase

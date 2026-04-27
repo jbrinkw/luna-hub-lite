@@ -290,5 +290,4 @@ test.describe('ChefByte Settings', () => {
       await cleanup();
     }
   });
-
 });

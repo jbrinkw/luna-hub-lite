@@ -142,7 +142,7 @@ test.describe('MCP OAuth 2.1 — Worker surface', () => {
 // ---------------------------------------------------------------------------
 
 test.describe('MCP OAuth 2.1 — Supabase AS endpoints', () => {
-  test.beforeEach(({}, testInfo) => {
+  test.beforeEach((_, testInfo) => {
     if (!asMetadataAvailable) {
       testInfo.skip(
         true,
@@ -154,8 +154,7 @@ test.describe('MCP OAuth 2.1 — Supabase AS endpoints', () => {
   });
 
   test('dynamic client registration — POST /oauth/clients returns client_id (or 4xx if disabled)', async () => {
-    const regEndpoint =
-      asMetadata?.registration_endpoint ?? `${SUPABASE_URL}/auth/v1/oauth/clients`;
+    const regEndpoint = asMetadata?.registration_endpoint ?? `${SUPABASE_URL}/auth/v1/oauth/clients`;
 
     const res = await fetch(regEndpoint, {
       method: 'POST',
@@ -194,8 +193,7 @@ test.describe('MCP OAuth 2.1 — Supabase AS endpoints', () => {
   });
 
   test('authorize endpoint requires client_id + redirect_uri (rejects malformed requests)', async () => {
-    const authorizeEndpoint =
-      asMetadata?.authorization_endpoint ?? `${SUPABASE_URL}/auth/v1/oauth/authorize`;
+    const authorizeEndpoint = asMetadata?.authorization_endpoint ?? `${SUPABASE_URL}/auth/v1/oauth/authorize`;
 
     // No params → must not 500, must not silently 302 to a random place
     const res = await fetch(authorizeEndpoint, { redirect: 'manual' });

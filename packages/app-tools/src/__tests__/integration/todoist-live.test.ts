@@ -366,9 +366,7 @@ describe.skipIf(skip)('Todoist Live Integration Tests', () => {
       expect(p.name.length).toBeGreaterThan(0);
     }
     // Exactly one inbox across all projects — inbox lookup uses either flag.
-    const inboxes = projects.filter(
-      (p: any) => p.inbox_project === true || p.is_inbox_project === true,
-    );
+    const inboxes = projects.filter((p: any) => p.inbox_project === true || p.is_inbox_project === true);
     expect(inboxes.length).toBe(1);
 
     // --- Tasks contract ---

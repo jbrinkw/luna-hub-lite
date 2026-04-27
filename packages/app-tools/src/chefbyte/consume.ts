@@ -48,9 +48,7 @@ export const consume: ToolDefinition = {
 
     if (!Number.isFinite(qty) || qty <= 0) return toolError('qty must be a positive finite number');
     if (qty > QTY_MAX) {
-      return toolError(
-        `qty ${qty} exceeds hard ceiling of ${QTY_MAX}. Value is outside any plausible consumption.`,
-      );
+      return toolError(`qty ${qty} exceeds hard ceiling of ${QTY_MAX}. Value is outside any plausible consumption.`);
     }
 
     const logicalDate = await getLogicalDate(ctx.supabase, ctx.userId);

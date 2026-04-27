@@ -12,11 +12,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
-import {
-  loadLiveTrackSession,
-  patchLiveTrackSession,
-  type LiveTrackSession,
-} from '@/pages/chefbyte/livetrackSession';
+import { loadLiveTrackSession, patchLiveTrackSession, type LiveTrackSession } from '@/pages/chefbyte/livetrackSession';
 
 export interface UseLiveTrackSessionResult {
   session: LiveTrackSession | null | undefined;
