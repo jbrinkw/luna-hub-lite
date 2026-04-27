@@ -57,6 +57,7 @@ from pathlib import Path
 from typing import Any, Callable, Optional, Union
 
 from .client import CloudError
+from .settings_cache import ClassifierSettings, ClassifierSettingsCache
 
 log = logging.getLogger(__name__)
 
@@ -97,6 +98,16 @@ def _default_fetch_lot_snapshot(
     if updated_since:
         return client.get("/lot-snapshot", params={"updated_since": updated_since})
     return client.get("/lot-snapshot")
+
+
+def _default_fetch_settings(client: Any) -> dict:
+    """Thin wrapper around ``CloudClient.get('/settings')``.
+
+    Returns ``{ chefbyte_classifier_fallback_enabled: bool, ... }`` from
+    the shelf-ingest edge function. Extracted so tests can stub it
+    without monkey-patching the HTTP layer.
+    """
+    return client.get("/settings")
 
 
 @dataclass
@@ -196,6 +207,8 @@ class LotSnapshotPoller(threading.Thread):
         poll_interval_s: float = POLL_INTERVAL_S,
         shutdown_event: Optional[threading.Event] = None,
         fetch_snapshot_fn: Optional[Callable[..., Any]] = None,
+        settings_cache: Optional[ClassifierSettingsCache] = None,
+        fetch_settings_fn: Optional[Callable[..., Any]] = None,
     ) -> None:
         super().__init__(daemon=True, name=self.name)
         self._client = client
@@ -207,6 +220,13 @@ class LotSnapshotPoller(threading.Thread):
         self._fetch_snapshot = fetch_snapshot_fn or _default_fetch_lot_snapshot
         self._backoff_s: float = INITIAL_BACKOFF_S
         self._state = _SyncState.from_file(self._state_path)
+        # Per-user classifier toggles (fallback flag, etc.). The cache is
+        # refreshed on each tick alongside the lot-snapshot pull — same
+        # cadence, same cloud round-trip pattern. ``None`` disables the
+        # settings-pull side entirely (kept for tests + back-compat with
+        # callers that don't wire the cache).
+        self._settings_cache = settings_cache
+        self._fetch_settings = fetch_settings_fn or _default_fetch_settings
 
     # ------------------------------------------------------------------
     # Public control
@@ -308,6 +328,43 @@ class LotSnapshotPoller(threading.Thread):
             self._state.high_watermark or "boot",
             max_updated_at or "<none>",
         )
+
+        # Pull classifier settings on the same cadence. Best-effort: a
+        # failure here MUST NOT impact the lot-snapshot result the
+        # caller cares about (the watermark + mutation count). Log +
+        # continue. The cache stays at its previous value (or default
+        # FALSE on cold start) so the classifier sees a stable view.
+        if self._settings_cache is not None:
+            try:
+                payload_s = self._fetch_settings(self._client)
+                if isinstance(payload_s, dict):
+                    self._settings_cache.update(
+                        ClassifierSettings(
+                            chefbyte_classifier_fallback_enabled=bool(
+                                payload_s.get(
+                                    "chefbyte_classifier_fallback_enabled",
+                                    False,
+                                )
+                            ),
+                        )
+                    )
+                else:
+                    log.warning(
+                        "lot_snapshot: settings payload type %s — keeping cache",
+                        type(payload_s).__name__,
+                    )
+            except CloudError as err:
+                log.warning(
+                    "lot_snapshot: /settings fetch failed HTTP %d %s — "
+                    "keeping previous cache",
+                    err.status_code, str(err.body)[:200],
+                )
+            except Exception:  # noqa: BLE001 - never kill the thread
+                log.warning(
+                    "lot_snapshot: /settings fetch raised — keeping previous cache",
+                    exc_info=True,
+                )
+
         return applied
 
     # ------------------------------------------------------------------

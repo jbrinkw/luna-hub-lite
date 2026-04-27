@@ -1545,6 +1545,7 @@ export type Database = {
       }
       profiles: {
         Row: {
+          chefbyte_classifier_fallback_enabled: boolean
           created_at: string
           day_start_hour: number
           display_name: string | null
@@ -1554,6 +1555,7 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          chefbyte_classifier_fallback_enabled?: boolean
           created_at?: string
           day_start_hour?: number
           display_name?: string | null
@@ -1563,6 +1565,7 @@ export type Database = {
           user_id: string
         }
         Update: {
+          chefbyte_classifier_fallback_enabled?: boolean
           created_at?: string
           day_start_hour?: number
           display_name?: string | null

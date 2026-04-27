@@ -71,6 +71,11 @@ class ReasonCode:
     CLASSIFIER_PARSE_RETRY = "classifier_parse_retry"
     CLASSIFIER_MALFORMED_OUTPUT = "classifier_malformed_output"
     CLASSIFIER_PROMOTED_UNKNOWN_WEIGHT_FIT = "classifier_promoted_unknown_weight_fit"
+    # Emitted when the user has opted into classifier fallback and
+    # the second pass actually fires (regardless of whether it
+    # ultimately overrides pass-1). Lets operators correlate the
+    # frequency of fallback triggers with primary-path failures.
+    CLASSIFIER_FALLBACK_ATTEMPT = "classifier_fallback_attempt"
 
     # -- apply decision --------------------------------------------------
     APPLY_ACCEPTED = "apply_accepted"

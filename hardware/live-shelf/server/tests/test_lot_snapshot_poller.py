@@ -371,6 +371,48 @@ def test_unreadable_state_file_degrades_to_full_resync(conn, tmp_path):
     assert state["high_watermark"] == "2026-04-22T15:00:00Z"
 
 
+def test_settings_cache_refreshed_each_tick(conn, tmp_path):
+    """When wired with a settings_cache, the poller fetches /settings on
+    every tick and updates the cache. Failures on /settings must NOT
+    affect the lot-snapshot return value or watermark."""
+    from server.cloud.settings_cache import (
+        ClassifierSettings,
+        ClassifierSettingsCache,
+    )
+
+    state_path = tmp_path / "last_lot_sync.json"
+    client = MagicMock()
+    fake_fetch_lots = MagicMock(return_value=_payload())  # empty lots
+    cache = ClassifierSettingsCache()
+    # First tick: cloud returns fallback_enabled=true.
+    fake_fetch_settings = MagicMock(
+        return_value={"chefbyte_classifier_fallback_enabled": True}
+    )
+    poller = LotSnapshotPoller(
+        client,
+        conn,
+        state_path=state_path,
+        fetch_snapshot_fn=fake_fetch_lots,
+        settings_cache=cache,
+        fetch_settings_fn=fake_fetch_settings,
+    )
+    poller.tick_once()
+    assert fake_fetch_settings.call_count == 1
+    assert cache.get() == ClassifierSettings(
+        chefbyte_classifier_fallback_enabled=True
+    )
+
+    # Second tick: cloud returns false → cache flips back.
+    fake_fetch_settings.return_value = {"chefbyte_classifier_fallback_enabled": False}
+    poller.tick_once()
+    assert cache.get().chefbyte_classifier_fallback_enabled is False
+
+    # Third tick: cloud /settings raises → cache keeps last good value.
+    fake_fetch_settings.side_effect = CloudError(500, "boom")
+    poller.tick_once()
+    assert cache.get().chefbyte_classifier_fallback_enabled is False  # last good
+
+
 def test_apply_one_handles_non_numeric_qty_as_zero(conn, tmp_path):
     """If cloud sends a non-numeric qty_containers (shouldn't happen in
     practice, but NUMERIC → JSON conversion can misbehave), fall back

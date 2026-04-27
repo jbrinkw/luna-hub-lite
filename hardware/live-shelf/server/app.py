@@ -2214,15 +2214,22 @@ def create_app(
             # startup: log + continue on failure, same pattern as the
             # product-sync and event-overrides pollers above.
             try:
+                # Wire the per-user classifier-settings cache into the
+                # lot-snapshot poller. The cache is the global so the
+                # classifier (which doesn't get a direct reference to
+                # the poller) can read the same instance.
+                from .cloud.settings_cache import get_global_cache  # noqa: WPS433
+                _settings_cache = get_global_cache()
                 lot_snapshot_poller = LotSnapshotPoller(
                     cloud_client,
                     conn,
                     state_path=cfg.data_root / "last_lot_sync.json",
                     db_lock=db_lock,
+                    settings_cache=_settings_cache,
                 )
                 lot_snapshot_poller.start()
                 cloud_pollers_started.append(lot_snapshot_poller)
-                log.info("lot-snapshot poller started (interval=60s)")
+                log.info("lot-snapshot poller started (interval=60s, settings=on)")
             except Exception:  # pragma: no cover - defensive
                 log.exception(
                     "failed to start lot-snapshot poller; "

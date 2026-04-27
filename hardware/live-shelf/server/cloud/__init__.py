@@ -22,10 +22,17 @@ from .livetrack_poller import LiveTrackPoller
 from .lot_snapshot_poller import LotSnapshotPoller
 from .outbox import enqueue_event
 from .product_sync_poller import ProductSyncPoller
+from .settings_cache import (
+    ClassifierSettings,
+    ClassifierSettingsCache,
+    get_global_cache as get_classifier_settings_cache,
+)
 from .worker import CloudWorker
 
 __all__ = [
     "Catalog",
+    "ClassifierSettings",
+    "ClassifierSettingsCache",
     "CloudClient",
     "CloudError",
     "CloudEventEmitter",
@@ -36,5 +43,6 @@ __all__ = [
     "ProductSyncPoller",
     "enqueue_event",
     "fetch_catalog",
+    "get_classifier_settings_cache",
     "null_emitter",
 ]

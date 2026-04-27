@@ -251,5 +251,37 @@ class RepoCandidateSource:
                 )
             return out
 
+    def get_certified_livetrack_tracked(self) -> Sequence[ProductCandidate]:
+        """Fallback pool — all certified LiveTrack-tracked products.
+
+        Used by the opt-in classifier fallback pass (see
+        :mod:`server.classifier.fallback`). The classifier only consults
+        this pool when pass-1 returns UNKNOWN / low confidence AND the
+        per-user toggle ``chefbyte_classifier_fallback_enabled`` is on.
+
+        "LiveTrack-tracked" = ``products.tare_weight_g IS NOT NULL``.
+        The web UI's "LiveTrack" badge keys off the same predicate.
+        """
+        with self._db_lock:
+            rows = storage_repo.get_certified_livetrack_tracked_products(
+                self._conn,
+            )
+            out: list[ProductCandidate] = []
+            for product in rows:
+                out.append(
+                    ProductCandidate(
+                        product_id=product.product_id,
+                        name=product.name,
+                        brand=product.brand,
+                        expected_weight_g=product.gross_weight_g
+                        or product.net_weight_g,
+                        container_type=product.container_type,
+                        reference_image_paths=self._absolute_refs(
+                            product.product_id
+                        ),
+                    )
+                )
+            return out
+
 
 __all__ = ["RepoCandidateSource"]

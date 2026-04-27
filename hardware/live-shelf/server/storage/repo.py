@@ -1165,6 +1165,37 @@ def get_all_certified_products(
     return [_row_to_product(r) for r in rows]
 
 
+def get_certified_livetrack_tracked_products(
+    conn: sqlite3.Connection,
+) -> list[Product]:
+    """All certified products that are LiveTrack-tracked (have a tare).
+
+    Used by the classifier's opt-in fallback pass: when the inventory-only
+    pass-1 pool returns UNKNOWN / low confidence and the user has flipped
+    ``hub.profiles.chefbyte_classifier_fallback_enabled``, we run a
+    second pass against this expanded pool.
+
+    Definition of "LiveTrack-tracked" matches the web UI's badge:
+    ``products.tare_weight_g IS NOT NULL`` (the LiveTrack Import wizard
+    captures container tare and writes this column on success). The
+    classifier's prompt builder still keys off ``certified=1`` so we
+    never offer non-certified items as fallback candidates.
+
+    Ordering: ``products.created_at ASC`` for a stable test order;
+    matches :func:`get_all_certified_products`.
+    """
+    rows = conn.execute(
+        """
+        SELECT p.*
+          FROM products p
+         WHERE p.certified = 1
+           AND p.tare_weight_g IS NOT NULL
+         ORDER BY p.created_at ASC
+        """
+    ).fetchall()
+    return [_row_to_product(r) for r in rows]
+
+
 def list_inventory_only_products(
     conn: sqlite3.Connection,
     *,
