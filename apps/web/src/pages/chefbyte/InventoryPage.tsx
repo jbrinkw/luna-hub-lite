@@ -155,6 +155,25 @@ export function pickEarliestInFlight(lots: ReadonlyArray<{ in_flight_since: stri
 }
 
 /**
+ * Whether a lot's `last_update_source` should produce a visible pill in the
+ * lots-view table. Mirrors `pickLatestAutomatedSource`'s gate so the per-row
+ * lots view and the per-product grouped view agree on what counts as a
+ * tracked source. Manual + null are always hidden; `live_scale` requires the
+ * product to be currently paired in `chefbyte.scale_pairings`.
+ *
+ * Exported for unit testing.
+ */
+export function shouldShowLotSourcePill(
+  source: 'manual' | 'live_shelf' | 'live_scale' | 'catch_all' | null,
+  productId: string,
+  liveScalePairedProductIds: ReadonlySet<string>,
+): source is 'live_shelf' | 'live_scale' | 'catch_all' {
+  if (!source || source === 'manual') return false;
+  if (source === 'live_scale' && !liveScalePairedProductIds.has(productId)) return false;
+  return true;
+}
+
+/**
  * Pick the most-recently-updated automated source tag across a product's lots.
  *
  * Manual-source rows are intentionally excluded — the pill is reserved for
@@ -162,20 +181,43 @@ export function pickEarliestInFlight(lots: ReadonlyArray<{ in_flight_since: stri
  * source but a null ts falls back to "first non-manual seen" so we still
  * show something sensible for legacy data written before `last_update_ts`
  * was populated.
+ *
+ * `live_scale` is special-cased: the badge means "this product is currently
+ * paired to a live scale," not "a live_scale event ever touched a lot of this
+ * product." `last_update_source='live_scale'` is a per-lot historical tag that
+ * persists forever after the pairing is torn down — so we must additionally
+ * require the product be present in `liveScalePairedProductIds`, which is the
+ * live truth-source from `chefbyte.scale_pairings WHERE kind='live_scale'`.
+ *
+ * When a lot's tag is `live_scale` but the product is no longer paired, the
+ * lot is skipped (treated as if its tag were null) so a still-valid older
+ * `live_shelf` or `catch_all` tag on a sibling lot can still surface.
+ *
+ * `productId` is only consulted to look up the paired-set; pass any string
+ * (including the empty string) when calling with a lot collection where every
+ * lot belongs to the same product.
  */
 export function pickLatestAutomatedSource(
   lots: ReadonlyArray<{
     last_update_source: 'manual' | 'live_shelf' | 'live_scale' | 'catch_all' | null;
     last_update_ts: string | null;
   }>,
+  productId: string = '',
+  liveScalePairedProductIds: ReadonlySet<string> = new Set(),
 ): {
   latestSource: 'live_shelf' | 'live_scale' | 'catch_all' | null;
   latestSourceTs: string | null;
 } {
   let latestSource: 'live_shelf' | 'live_scale' | 'catch_all' | null = null;
   let latestSourceTs: string | null = null;
+  const liveScalePaired = liveScalePairedProductIds.has(productId);
   for (const l of lots) {
     if (!l.last_update_source || l.last_update_source === 'manual') continue;
+    // Suppress stale live_scale tags when no scale_pairings row currently
+    // pairs this product. Without this guard, a product that was once on a
+    // scale shows the "live scale" pill indefinitely after the pairing is
+    // removed — see fix(chefbyte/inventory) commit history.
+    if (l.last_update_source === 'live_scale' && !liveScalePaired) continue;
     if (!l.last_update_ts) {
       if (latestSource === null) latestSource = l.last_update_source;
       continue;
@@ -271,6 +313,34 @@ export function InventoryPage() {
     refetchInterval: 15_000,
   });
 
+  /* Live-scale pairings — drives the "live scale" badge gating. The badge
+     means "currently paired to a live scale," not "ever touched by a
+     live_scale event." We only need product_ids of live_scale-kind pairings;
+     `live_shelf` + `catch_all` rows are tied to the device, not a product, and
+     the badge logic for those keys off `last_update_source` directly. */
+  const { data: liveScalePairings = [] } = useQuery({
+    queryKey: queryKeys.scalePairings(user!.id),
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
+        .from('scale_pairings')
+        .select('product_id,kind')
+        .eq('user_id', user!.id)
+        .eq('kind', 'live_scale')
+        .not('product_id', 'is', null);
+      if (error) throw error;
+      return (data ?? []) as Array<{ product_id: string; kind: string }>;
+    },
+    enabled: !!user,
+    refetchInterval: 15_000,
+  });
+
+  // Memoise to keep `===` stable between renders so downstream `useMemo`
+  // dependencies don't churn — re-derives only when the rows actually change.
+  const liveScalePairedProductIds = useMemo(
+    () => new Set(liveScalePairings.map((p) => p.product_id)),
+    [liveScalePairings],
+  );
+
   const { data: locationId = null } = useQuery({
     queryKey: queryKeys.defaultLocationId(user!.id),
     queryFn: async () => {
@@ -301,6 +371,14 @@ export function InventoryPage() {
       table: 'live_shelf_devices',
       queryKeys: [queryKeys.liveShelfDevices(user!.id)],
     },
+    // scale_pairings drives the "live scale" badge gating; subscribe so an
+    // unpair (or new pair) flips the badge on the inventory page within
+    // realtime latency without a full refetch cycle.
+    {
+      schema: 'chefbyte',
+      table: 'scale_pairings',
+      queryKeys: [queryKeys.scalePairings(user!.id)],
+    },
   ]);
 
   /* ---------------------------------------------------------------- */
@@ -327,8 +405,14 @@ export function InventoryPage() {
       const nearestExpiry = expiries[0] ?? null;
 
       // Pick the most-recently-updated automated source tag for the pill.
-      // See `pickLatestAutomatedSource` for the full rationale.
-      const { latestSource, latestSourceTs } = pickLatestAutomatedSource(productLots);
+      // The paired-set gates `live_scale` so a stale tag from a torn-down
+      // pairing doesn't keep the pill lit. See `pickLatestAutomatedSource`
+      // for the full rationale.
+      const { latestSource, latestSourceTs } = pickLatestAutomatedSource(
+        productLots,
+        product.product_id,
+        liveScalePairedProductIds,
+      );
 
       // Earliest outstanding pickup across this product's lots (null when none).
       const inFlightSince = pickEarliestInFlight(productLots);
@@ -343,7 +427,7 @@ export function InventoryPage() {
         inFlightSince,
       };
     });
-  }, [products, lots]);
+  }, [products, lots, liveScalePairedProductIds]);
 
   /* ---------------------------------------------------------------- */
   /*  Expired lots — rendered as their own "discard" section at the   */
@@ -1082,12 +1166,12 @@ export function InventoryPage() {
                   >
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="font-semibold text-sm text-text">{lot.productName}</span>
-                      {lot.last_update_source && lot.last_update_source !== 'manual' && (
+                      {shouldShowLotSourcePill(lot.last_update_source, lot.product_id, liveScalePairedProductIds) && (
                         <span
                           data-testid={`lot-source-pill-${lot.lot_id}`}
-                          className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(lot.last_update_source)}`}
+                          className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(lot.last_update_source as NonNullable<GroupedProduct['latestSource']>)}`}
                         >
-                          {sourceLabel[lot.last_update_source]}
+                          {sourceLabel[lot.last_update_source as NonNullable<GroupedProduct['latestSource']>]}
                         </span>
                       )}
                       {lot.in_flight_since && (
@@ -1141,12 +1225,16 @@ export function InventoryPage() {
                         <td className="p-3">
                           <span className="inline-flex items-center gap-2 flex-wrap">
                             {lot.productName}
-                            {lot.last_update_source && lot.last_update_source !== 'manual' && (
+                            {shouldShowLotSourcePill(
+                              lot.last_update_source,
+                              lot.product_id,
+                              liveScalePairedProductIds,
+                            ) && (
                               <span
                                 data-testid={`lot-source-pill-${lot.lot_id}`}
-                                className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(lot.last_update_source)}`}
+                                className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(lot.last_update_source as NonNullable<GroupedProduct['latestSource']>)}`}
                               >
-                                {sourceLabel[lot.last_update_source]}
+                                {sourceLabel[lot.last_update_source as NonNullable<GroupedProduct['latestSource']>]}
                               </span>
                             )}
                             {lot.in_flight_since && (

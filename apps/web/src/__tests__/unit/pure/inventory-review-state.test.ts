@@ -10,7 +10,7 @@
  * would ship silently otherwise.
  */
 import { describe, it, expect } from 'vitest';
-import { computeReviewState, pickLatestAutomatedSource } from '@/pages/chefbyte/InventoryPage';
+import { computeReviewState, pickLatestAutomatedSource, shouldShowLotSourcePill } from '@/pages/chefbyte/InventoryPage';
 
 /* ================================================================== */
 /*  computeReviewState                                                  */
@@ -164,11 +164,17 @@ describe('pickLatestAutomatedSource', () => {
   it('picks the max-ts automated source (not the first seen)', () => {
     // A mutation to the `l.last_update_ts > latestSourceTs` comparator
     // (e.g. flipped to <) would pick the oldest lot's source instead.
-    const res = pickLatestAutomatedSource([
-      { last_update_source: 'live_shelf', last_update_ts: '2026-01-01T00:00:00Z' },
-      { last_update_source: 'live_scale', last_update_ts: '2026-04-01T00:00:00Z' },
-      { last_update_source: 'catch_all', last_update_ts: '2026-02-15T00:00:00Z' },
-    ]);
+    // The product must be passed as paired so the live_scale row isn't
+    // suppressed by the post-2026-04-27 stale-tag gate.
+    const res = pickLatestAutomatedSource(
+      [
+        { last_update_source: 'live_shelf', last_update_ts: '2026-01-01T00:00:00Z' },
+        { last_update_source: 'live_scale', last_update_ts: '2026-04-01T00:00:00Z' },
+        { last_update_source: 'catch_all', last_update_ts: '2026-02-15T00:00:00Z' },
+      ],
+      'p1',
+      new Set(['p1']),
+    );
     expect(res.latestSource).toBe('live_scale');
     expect(res.latestSourceTs).toBe('2026-04-01T00:00:00Z');
   });
@@ -201,5 +207,109 @@ describe('pickLatestAutomatedSource', () => {
     // Manual is newer but excluded → latestSource is live_shelf w/ its own ts.
     expect(res.latestSource).toBe('live_shelf');
     expect(res.latestSourceTs).toBe('2026-04-05T00:00:00Z');
+  });
+
+  // -----------------------------------------------------------------------
+  // live_scale gating against scale_pairings — root cause C / B from the
+  // 2026-04-27 fix(chefbyte/inventory) bug. A lot's last_update_source can
+  // remain 'live_scale' indefinitely after the device pairing is removed.
+  // Without the paired-set gate the badge fires forever; with it, the badge
+  // disappears as soon as the pairing row goes away (or never existed).
+  // -----------------------------------------------------------------------
+
+  it('suppresses live_scale tag when product is NOT in the live-scale paired set', () => {
+    // Mutation that dropped the gate (`return source !== 'manual'`) would
+    // resurrect the stale-tag bug — chicken with last_update_source=live_scale
+    // from 5 days ago, but no current scale_pairings row, would still light
+    // up the badge.
+    const res = pickLatestAutomatedSource(
+      [{ last_update_source: 'live_scale', last_update_ts: '2026-04-22T14:39:00Z' }],
+      'product-chicken',
+      new Set(), // no pairings — the badge MUST go away
+    );
+    expect(res.latestSource).toBeNull();
+    expect(res.latestSourceTs).toBeNull();
+  });
+
+  it('keeps live_scale tag when product IS in the live-scale paired set', () => {
+    // The legitimate path: chocolate milk has a fresh scale_pairings row and
+    // a live_scale lot tag — badge SHOULD fire.
+    const res = pickLatestAutomatedSource(
+      [{ last_update_source: 'live_scale', last_update_ts: '2026-04-27T19:59:05Z' }],
+      'product-choco-milk',
+      new Set(['product-choco-milk']),
+    );
+    expect(res.latestSource).toBe('live_scale');
+    expect(res.latestSourceTs).toBe('2026-04-27T19:59:05Z');
+  });
+
+  it('falls through to a still-valid live_shelf tag when live_scale is suppressed', () => {
+    // A product can have BOTH a stale live_scale lot tag AND a current
+    // live_shelf tag (it sits on the multi-item shelf now). The stale
+    // live_scale must be skipped and the live_shelf badge must surface,
+    // not "no badge."
+    const res = pickLatestAutomatedSource(
+      [
+        { last_update_source: 'live_scale', last_update_ts: '2026-04-22T00:00:00Z' }, // stale, suppressed
+        { last_update_source: 'live_shelf', last_update_ts: '2026-04-26T00:00:00Z' }, // newer, kept
+      ],
+      'product-id',
+      new Set(), // not paired to any live scale right now
+    );
+    expect(res.latestSource).toBe('live_shelf');
+    expect(res.latestSourceTs).toBe('2026-04-26T00:00:00Z');
+  });
+
+  it('does NOT suppress live_shelf or catch_all when the product is unpaired', () => {
+    // Defence against a mutation that broadens the gate beyond live_scale.
+    // Only live_scale is per-product; the other two are device-level so the
+    // paired-set check must never apply to them.
+    const res = pickLatestAutomatedSource(
+      [{ last_update_source: 'catch_all', last_update_ts: '2026-04-27T00:00:00Z' }],
+      'product-id',
+      new Set(), // empty paired set — must NOT suppress catch_all
+    );
+    expect(res.latestSource).toBe('catch_all');
+  });
+
+  it('default args: empty paired set treats every live_scale tag as stale', () => {
+    // Backwards-compat sanity check on the default-arg behavior. Callers
+    // that haven't been updated to pass the paired-set get strict gating
+    // (no badge), which is the safe-by-default direction.
+    const res = pickLatestAutomatedSource([
+      { last_update_source: 'live_scale', last_update_ts: '2026-04-27T00:00:00Z' },
+    ]);
+    expect(res.latestSource).toBeNull();
+  });
+});
+
+/* ================================================================== */
+/*  shouldShowLotSourcePill                                             */
+/* ================================================================== */
+
+describe('shouldShowLotSourcePill', () => {
+  it('hides null sources', () => {
+    expect(shouldShowLotSourcePill(null, 'p', new Set())).toBe(false);
+  });
+
+  it('hides manual sources', () => {
+    expect(shouldShowLotSourcePill('manual', 'p', new Set())).toBe(false);
+  });
+
+  it('shows live_shelf and catch_all unconditionally', () => {
+    // Device-level sources are not gated by per-product pairings.
+    expect(shouldShowLotSourcePill('live_shelf', 'p', new Set())).toBe(true);
+    expect(shouldShowLotSourcePill('catch_all', 'p', new Set())).toBe(true);
+  });
+
+  it('hides live_scale when product is NOT in the paired set', () => {
+    // The lots-view counterpart of the grouped-view live_scale gate. A
+    // mutation that dropped this guard would resurrect the per-row stale-tag
+    // pill seen in the 2026-04-27 bug.
+    expect(shouldShowLotSourcePill('live_scale', 'product-chicken', new Set())).toBe(false);
+  });
+
+  it('shows live_scale when product IS in the paired set', () => {
+    expect(shouldShowLotSourcePill('live_scale', 'product-choco-milk', new Set(['product-choco-milk']))).toBe(true);
   });
 });
