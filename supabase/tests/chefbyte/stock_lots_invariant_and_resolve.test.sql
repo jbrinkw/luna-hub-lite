@@ -343,26 +343,41 @@ SELECT is(
 );
 
 ------------------------------------------------------------
--- 7. Weight-mismatch → MINT even when a pantry lot exists
+-- 7. Weight-mismatch → PROMOTE the existing untracked lot (decision #45).
+--
+-- BEFORE 2026-04-27 (migration 20260427050000): a weight-mismatched
+-- placement on a single untracked qty>0 lot would mint a fresh
+-- live_shelf lot, leaving the pantry row stranded. This caused the
+-- "Gatorade placed but never gets live-scale tracked badge" symptom
+-- when the user's existing inventory weight (full container) didn't
+-- match the placed weight (consumed container).
+--
+-- AFTER: step 2.5 of resolve_add_to_shelf_lot promotes any single
+-- untracked qty>0 lot regardless of weight, mirroring the Pi-side
+-- "weight mismatches are EXPECTED on live-shelf transfers" rule
+-- (decision #45). Multi-lot ambiguity still falls through to the
+-- weight-match arbiter in step 3.
+--
+-- Alice has ONE untracked pantry lot (aaaa0020) at qty=1.0,
+-- net_weight_g=1672g (mass=1672g). A 400g placement is way below
+-- the 50g tolerance — pre-fix this would mint, post-fix this
+-- promotes the existing lot.
 ------------------------------------------------------------
--- Alice already has a pantry lot (aaaa0020) with current weight 1672g.
--- A resolver call with 400g (far outside the tolerance of max(50, 83.6))
--- must NOT move the pantry lot. It must MINT a fresh lot.
 
 SET LOCAL role postgres;
 
-SELECT isnt(
+SELECT is(
   private.resolve_add_to_shelf_lot(
     tests.get_supabase_uid('shelf_alice'),
     'aaaa0001-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
     'live_shelf',
     :'alice_fridge',
-    400.0,   -- far from pantry's 1672g + tolerance
+    400.0,   -- way below pantry's 1672g; pre-fix would mint, post-fix promotes
     NULL,
     now()
   ),
   'aaaa0020-0000-0000-0000-000000000001'::UUID,
-  'weight mismatch does NOT move the pantry lot — returns a NEW lot'
+  'weight mismatch on a single untracked lot now PROMOTES it (decision #45)'
 );
 
 RESET role;
@@ -371,16 +386,16 @@ SELECT tests.authenticate_as('shelf_alice');
 SELECT is(
   (SELECT last_update_source FROM chefbyte.stock_lots
     WHERE lot_id = 'aaaa0020-0000-0000-0000-000000000001'),
-  'manual',
-  'pantry lot untouched when weights do not match'
+  'live_shelf',
+  'untracked lot was promoted to live_shelf (was: manual)'
 );
 
 SELECT is(
   (SELECT COUNT(*)::INTEGER FROM chefbyte.stock_lots
     WHERE user_id = tests.get_supabase_uid('shelf_alice')
       AND product_id = 'aaaa0001-aaaa-aaaa-aaaa-aaaaaaaaaaaa'),
-  2,
-  'weight-mismatch branch minted a fresh lot (pantry + new shelf)'
+  1,
+  'no fresh lot minted — single untracked lot promoted in place'
 );
 
 SELECT * FROM finish();

@@ -32,6 +32,16 @@ CandidateReason = Literal[
     # picked up from the shelf and is expected back. Ranked above
     # ``recently_out`` on the ADD pool.
     "in_flight",
+    # 2026-04-27 fix: product has at least one cloud-side stock_lot with
+    # qty_containers>0 (mirrored to the Pi's ``cloud_lots`` table) but no
+    # Pi-local ``lots`` row on this shelf yet. This is the
+    # "general-inventory → live-shelf" case that decision #45 referred to
+    # when it said "the user must intake the product first" — once intaked
+    # (cloud lot exists), placing it on the shelf must match against that
+    # cloud inventory, not return UNKNOWN. Ranked below top_up_target
+    # because the cloud lot has not been physically observed on the shelf
+    # before, but above the dropped catalog branch.
+    "inventory_only",
 ]
 
 
@@ -235,6 +245,36 @@ class CandidateSource(Protocol):
         stub this to ``return []`` without implementing a real backing
         store, and pre-feature callers that don't implement it at all
         fall back via ``getattr`` in the candidate_pool module.
+        """
+
+        ...
+
+    def get_inventory_only_products(
+        self, shelf_id: str | None = None
+    ) -> Sequence[ProductCandidate]:
+        """Products with cloud-mirror inventory but no Pi lots on this shelf.
+
+        Returns one ``ProductCandidate`` per (user, product) that has at
+        least one row in the Pi's ``cloud_lots`` mirror table with
+        ``qty_containers > 0`` AND has no live ``lots`` row scoped to
+        ``shelf_id`` (in_flight / recently_out / on_shelf — these are
+        already covered by the other branches). When ``shelf_id`` is
+        ``None``, the absence-check covers every shelf.
+
+        Rationale (decisions.md #45 + 2026-04-27 regression fix): the
+        inventory-only matching rule is "product must be in inventory."
+        Inventory means cloud ``stock_lots`` (mirrored as ``cloud_lots``
+        on the Pi), NOT Pi-local ``lots``. A product the user intaked
+        through the inventory page (creating a cloud stock_lot) but has
+        not yet placed on the shelf must still be a valid ADD candidate
+        — otherwise the very first place event for any newly-intaked
+        product hits an empty pool and returns UNKNOWN.
+
+        Returns an empty sequence when no cloud_lots rows exist or when
+        every cloud_lots row has a corresponding Pi lot already.
+        Implementations that don't support cloud mirroring (test stubs)
+        may return ``[]``; the candidate_pool module's ``getattr``
+        fallback treats a missing method as an empty result.
         """
 
         ...

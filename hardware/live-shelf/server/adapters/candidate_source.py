@@ -175,6 +175,52 @@ class RepoCandidateSource:
                 )
             return out
 
+    def get_inventory_only_products(
+        self, shelf_id: str | None = None
+    ) -> Sequence[ProductCandidate]:
+        """Products with cloud_lots inventory but no Pi lot on this shelf.
+
+        Closes the regression introduced by commit ``3b99043`` (decision
+        #45 / 2026-04-27): the ADD candidate pool was reading the
+        Pi-local ``lots`` table only, which is empty until the user has
+        physically placed a product on this shelf at least once. The
+        intended invariant is "product must be in inventory" — and
+        inventory means cloud ``stock_lots`` (mirrored as ``cloud_lots``
+        on the Pi), NOT the Pi's physical-shelf ``lots`` table.
+
+        Returns ``ProductCandidate`` rows whose underlying lot is the
+        cloud-side stock_lot — there is no Pi ``lot_id`` to attach.
+        The apply path handles this case in
+        :meth:`scale_events._apply_lot_update_from_classification` by
+        minting a Pi-local ``lots`` row to mirror the cloud lot when
+        the classifier picks the product.
+        """
+        with self._db_lock:
+            rows = storage_repo.list_inventory_only_products(
+                self._conn, shelf_id=shelf_id,
+            )
+            out: list[ProductCandidate] = []
+            for product in rows:
+                out.append(
+                    ProductCandidate(
+                        product_id=product.product_id,
+                        name=product.name,
+                        brand=product.brand,
+                        # Prefer gross weight (full container) over net
+                        # — matches get_certified_not_on_shelf's choice.
+                        # The classifier uses this only as a tiebreaker
+                        # for ranking; weight is no longer a gate
+                        # (decision #45).
+                        expected_weight_g=product.gross_weight_g
+                        or product.net_weight_g,
+                        container_type=product.container_type,
+                        reference_image_paths=self._absolute_refs(
+                            product.product_id
+                        ),
+                    )
+                )
+            return out
+
     def get_certified_not_on_shelf(self) -> Sequence[ProductCandidate]:
         # Fix: query ALL certified products, not just those lacking an
         # on-shelf lot. The method name is kept for protocol compatibility,

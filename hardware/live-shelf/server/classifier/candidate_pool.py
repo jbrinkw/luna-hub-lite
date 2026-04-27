@@ -78,19 +78,26 @@ def _tier_rank(why: str) -> int:
        stronger evidence than a loose weight match to an older lot.
     1. recently_out with matching weight
     2. top_up_target
-    3. catalog_not_on_shelf with matching weight
-    4. remaining items by weight proximity
-    5. UNKNOWN always last
+    3. inventory_only — cloud-mirror product with no Pi shelf history.
+       Ranked below top_up_target because the user has never placed
+       this lot on the shelf before (no on-shelf evidence to lean on),
+       but above the dropped catalog branch because the product IS in
+       inventory (decision #45 + 2026-04-27 regression fix).
+    4. catalog_not_on_shelf with matching weight (DROPPED in pool_for_add
+       per decision #45; tier kept for backwards-compat with tests)
+    5. remaining items by weight proximity
+    6. UNKNOWN always last
     """
 
     return {
         "in_flight": 0,
         "recently_out": 1,
         "top_up_target": 2,
-        "catalog_not_on_shelf": 3,
-        "currently_on_shelf": 4,
-        "sentinel": 5,
-    }.get(why, 4)
+        "inventory_only": 3,
+        "catalog_not_on_shelf": 4,
+        "currently_on_shelf": 5,
+        "sentinel": 6,
+    }.get(why, 5)
 
 
 def _matches_weight(candidate: Candidate, observed_abs_delta: float) -> bool:
@@ -135,10 +142,10 @@ def _rank_candidates(candidates: list[Candidate], observed_abs_delta: float) -> 
         # recently_out (catalog_not_on_shelf is dropped per the
         # inventory-only rule).
         if c.why_candidate == "recently_out":
-            tier = 1 if _matches_weight(c, observed_abs_delta) else 4
+            tier = 1 if _matches_weight(c, observed_abs_delta) else 5
 
         # Sort key: (tier ascending, score descending). UNKNOWN is forced to
-        # tier 5 above so it always ends up last.
+        # tier 6 above so it always ends up last.
         scored.append(((tier, -score), c))
 
     scored.sort(key=lambda pair: pair[0])
@@ -190,6 +197,29 @@ def _from_product(product: ProductCandidate) -> Candidate:
     )
 
 
+def _from_inventory_only_product(product: ProductCandidate) -> Candidate:
+    """Build a ``why_candidate='inventory_only'`` candidate from a cloud-only product.
+
+    Identical projection to :func:`_from_product` except the reason
+    code differs. Kept as a separate helper so the call sites read
+    intent-clearly (``inventory_only`` vs the deprecated catalog
+    branch).
+    """
+    return Candidate(
+        candidate_id=product.product_id,
+        name=product.name,
+        brand=product.brand,
+        expected_weight_g=product.expected_weight_g,
+        container_type=product.container_type,
+        why_candidate="inventory_only",
+        reference_image_paths=product.reference_image_paths,
+        product_id=product.product_id,
+        # No Pi-local lot_id — the cloud lot lives in cloud_lots, the
+        # apply path mints a Pi shadow lot when the classifier picks.
+        lot_id=None,
+    )
+
+
 # Tier preference for collapsing multiple lots of the same product into one
 # Candidate. Lower index = stronger evidence the lot is "the one" the user
 # is interacting with. Mirrors ``_tier_rank`` but split out so the collapser
@@ -200,8 +230,12 @@ _PRODUCT_COLLAPSE_PRIORITY = {
     "recently_out": 1,
     "top_up_target": 2,
     "currently_on_shelf": 3,
-    "catalog_not_on_shelf": 4,
-    "sentinel": 5,
+    # inventory_only is the lowest-priority real signal — the product
+    # is in cloud inventory but has no Pi shelf history, so any other
+    # branch with shelf evidence wins the collapse.
+    "inventory_only": 4,
+    "catalog_not_on_shelf": 5,
+    "sentinel": 6,
 }
 
 
@@ -290,14 +324,24 @@ def pool_for_add(
 ) -> list[Candidate]:
     """Assemble the ADD candidate pool for an add-direction event.
 
-    **2026-04-27 inventory-only matching (decisions.md #42):** the ADD
-    pool is restricted to products that already have at least one lot
-    in inventory (in_flight, recently_out, on_shelf). The
-    ``catalog_not_on_shelf`` branch is INTENTIONALLY dropped — minting
-    a brand-new lot from a place event is no longer allowed. If the
-    user places a product on the shelf that has zero inventory, the
-    classifier returns UNKNOWN and the event surfaces in the review
-    queue (the user must intake the product first).
+    **2026-04-27 inventory-only matching (decisions.md #42 + regression
+    fix):** the ADD pool is restricted to products that already have
+    at least one lot **in inventory** — defined as either:
+
+    1. A Pi-local ``lots`` row (``in_flight``, ``recently_out`` /
+       ``out``, or ``on_shelf``) on this shelf, OR
+    2. A cloud-mirror ``cloud_lots`` row with ``qty_containers > 0``
+       and no Pi-local lot on this shelf yet (the ``inventory_only``
+       branch).
+
+    The ``catalog_not_on_shelf`` branch is INTENTIONALLY dropped —
+    minting a brand-new cloud stock_lot from a place event is no
+    longer allowed. The ``inventory_only`` branch is NOT a regression
+    of that rule: the cloud stock_lot already exists (the user
+    intaked the product); the apply path mints only a Pi-local
+    ``lots`` row to track this shelf's view of an existing cloud lot,
+    while the cloud-side ``resolve_add_to_shelf_lot`` step 2/3
+    promotes the existing cloud lot to live_shelf-tracked status.
 
     Why: items normally arrive on the live-shelf weighing LESS than
     the original tracked weight (consumed untracked between purchase
@@ -305,6 +349,15 @@ def pool_for_add(
     duplicate lots when the user actually meant "this is my existing
     chicken, transferred from general inventory." The fix is to make
     inventory presence the matching gate, not catalog membership.
+
+    Why was a regression fix needed: commit 3b99043 dropped the
+    catalog branch but left the pool reading ONLY the Pi-local
+    ``lots`` table. Users who intaked a product to cloud (creating
+    a cloud stock_lot) but had not yet placed it on the live-shelf
+    saw an empty pool on the first place event — the classifier
+    returned UNKNOWN even though the product was in their inventory.
+    The ``inventory_only`` branch surfaces the cloud-mirror state
+    so the very-first-placement case works.
 
     Args:
         delta_g: Positive scale delta in grams.
@@ -352,14 +405,44 @@ def pool_for_add(
             continue
         top_up_targets.append(_from_lot(lot, "top_up_target"))
 
-    # Branch 3 (catalog_not_on_shelf) is INTENTIONALLY DROPPED. See the
+    # Branch 3: inventory_only — products whose only inventory is in the
+    # cloud_lots mirror (no Pi-local lots row on this shelf). This is
+    # the regression fix from 2026-04-27: decision #45's "must be in
+    # inventory" rule was being read as "must be in Pi local lots,"
+    # which made every first-place-on-this-shelf event return UNKNOWN
+    # because the user's cloud inventory wasn't visible to the pool
+    # builder. The cloud-side resolver (``resolve_add_to_shelf_lot``
+    # step 2/3) then promotes the existing cloud stock_lot to
+    # live_shelf-tracked when the apply path emits the cloud event —
+    # this is NOT minting a new cloud lot, just promoting an existing
+    # one to "shelf-tracked" status.
+    inventory_only_lots: list[Candidate] = []
+    get_inventory_only = getattr(source, "get_inventory_only_products", None)
+    if callable(get_inventory_only):
+        try:
+            inventory_only_rows = list(
+                _call_source(get_inventory_only, shelf_id=shelf_id)
+            )
+        except Exception:  # noqa: BLE001 - defensive: pool must never crash
+            # Stub or DB error — degrade gracefully (legacy single-shelf
+            # behavior with cloud-only products invisible). Caller will
+            # see the empty branch in the union and the existing
+            # in_flight / recently_out / top_up branches still apply.
+            inventory_only_rows = []
+        inventory_only_lots = [
+            _from_inventory_only_product(p) for p in inventory_only_rows
+        ]
+
+    # Branch 4 (catalog_not_on_shelf) is INTENTIONALLY DROPPED. See the
     # docstring above + decisions.md #42. If a user places an item with
     # no existing lot, the classifier sees only UNKNOWN and we surface
     # the event for review rather than minting a duplicate.
 
     # In-flight first so it wins duplicate-id collisions (same lot listed
     # as in_flight AND recently_out when the status just flipped).
-    union = in_flight_lots + recently_out + top_up_targets
+    # inventory_only LAST so any branch with shelf history wins the
+    # _dedupe_by_product collapse for the same product_id.
+    union = in_flight_lots + recently_out + top_up_targets + inventory_only_lots
     deduped = _dedupe_by_product(union)
 
     ranked = _rank_candidates(deduped, observed_abs)

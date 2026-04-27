@@ -47,6 +47,7 @@ from ..storage import lifecycle
 from ..storage.lifecycle import ReasonCode
 from ..storage.models import (
     AppStatePatch,
+    LotIn,
     ReviewQueueIn,
     ScaleEventIn,
     SessionResolutionIn,
@@ -1503,6 +1504,89 @@ class ScaleHandler:
         # the per-status semantics.
         return lots[0]
 
+    def _mint_pi_lot_for_inventory_only_pick(
+        self,
+        *,
+        product_id: str,
+        weight_g: float,
+        event_ts: str,
+        shelf_id: str,
+    ) -> Optional[Any]:
+        """Mint a Pi-local ``lots`` row for an inventory_only-branch pick.
+
+        2026-04-27 regression fix: when the classifier picks a product
+        whose only inventory is a cloud-mirror ``cloud_lots`` row (no
+        Pi ``lots`` row yet — i.e. first physical placement of an
+        intaked product on this shelf), we need a Pi-local lot to
+        track shelf state going forward. The cloud-side
+        ``resolve_add_to_shelf_lot`` step 2/3 promotes the existing
+        cloud stock_lot to live_shelf-tracked status when the apply
+        path emits the ``new_arrival`` cloud event below — this
+        helper is **only** about Pi-local bookkeeping.
+
+        Defensive: requires that the product has at least one
+        ``cloud_lots`` row with ``qty_containers > 0``. This is the
+        same gate the candidate_pool's ``inventory_only`` branch
+        applies — refusing to mint here when the gate fails preserves
+        decision #45's "minting from a place event is forbidden"
+        invariant. (Without this gate, a hallucinated classifier pick
+        could mint a Pi lot for a product the user never intaked,
+        which would then desync from cloud.)
+
+        Returns the minted ``Lot`` row, or ``None`` if the cloud
+        inventory check fails. Caller treats None as "skip this
+        match."
+        """
+        # Cross-check cloud_lots inventory before minting. The pool
+        # builder already filtered for this, but a stale snapshot or
+        # racing tombstone could sneak through.
+        try:
+            row = self._conn.execute(
+                """
+                SELECT 1 FROM cloud_lots
+                 WHERE product_id = ?
+                   AND qty_containers > 0
+                   AND deleted_at IS NULL
+                 LIMIT 1
+                """,
+                (product_id,),
+            ).fetchone()
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "_mint_pi_lot_for_inventory_only_pick: cloud_lots check "
+                "raised for product_id=%s",
+                product_id,
+            )
+            return None
+        if row is None:
+            log.warning(
+                "_mint_pi_lot_for_inventory_only_pick: refusing to mint "
+                "Pi lot for product %s — no cloud_lots inventory "
+                "(decision #45: minting from a place event is forbidden)",
+                product_id,
+            )
+            return None
+        try:
+            return storage_repo.create_lot(
+                self._conn,
+                LotIn(
+                    product_id=product_id,
+                    status="on_shelf",
+                    current_weight_g=float(weight_g) if weight_g else 0.0,
+                    initial_weight_g=float(weight_g) if weight_g else 0.0,
+                    placed_at=event_ts,
+                    last_seen_at=event_ts,
+                    shelf_id=shelf_id,  # type: ignore[arg-type]
+                ),
+            )
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "_mint_pi_lot_for_inventory_only_pick: create_lot raised "
+                "for product_id=%s shelf=%s",
+                product_id, shelf_id,
+            )
+            return None
+
     def _maybe_reunite_with_in_flight_lot(
         self,
         *,
@@ -1879,6 +1963,7 @@ class ScaleHandler:
         # through the product-keyed path.
         for cid in matched_ids:
             lot = storage_repo.get_lot(self._conn, cid)
+            inventory_only_mint = False
             if lot is None:
                 # Product-keyed pick (the new invariant). Resolve to the
                 # best existing lot programmatically.
@@ -1896,6 +1981,36 @@ class ScaleHandler:
                     )
                     lot = resolved_lot
                     cid = resolved_lot.lot_id  # downstream code uses cid as lot_id
+                elif direction == "add":
+                    # 2026-04-27 inventory-only branch: no Pi-local lot
+                    # exists for this product but the classifier picked
+                    # it from the candidate pool — meaning the product
+                    # had a cloud_lots row at pool-build time
+                    # (``inventory_only`` branch in candidate_pool.py).
+                    # This is the "general-inventory → live-shelf"
+                    # transfer case: the user intaked a product to
+                    # cloud, then placed it on the shelf for the first
+                    # time. We mint a Pi-local ``lots`` row to track
+                    # the shelf state going forward; the cloud emit
+                    # below promotes the existing cloud stock_lot via
+                    # ``resolve_add_to_shelf_lot`` step 2/3 (NOT step 5
+                    # which would mint a duplicate cloud lot).
+                    minted_lot = self._mint_pi_lot_for_inventory_only_pick(
+                        product_id=str(cid),
+                        weight_g=lot_weight_g,
+                        event_ts=event_ts,
+                        shelf_id=shelf_id,
+                    )
+                    if minted_lot is not None:
+                        log.info(
+                            "inventory-only mint: product %s → Pi lot %s "
+                            "(weight %.1fg) for ADD event %s on %s",
+                            cid, minted_lot.lot_id, lot_weight_g,
+                            event_id, shelf_id,
+                        )
+                        lot = minted_lot
+                        cid = minted_lot.lot_id
+                        inventory_only_mint = True
             if lot is not None:
                 # Fix 3: guard against the lot_id-vs-product_id ambiguity.
                 # If get_lot(cid) succeeded but that lot's product_id was
@@ -2030,6 +2145,17 @@ class ScaleHandler:
                     # resolve_add_to_shelf_lot's empty-lot-reuse step
                     # (migration 20260425070000).
                     was_out = lot.status == "out"
+                    # 2026-04-27 inventory-only first-placement: a freshly
+                    # minted Pi lot for a cloud-only inventory product
+                    # ALSO needs the new_arrival cloud emit so the
+                    # cloud-side ``resolve_add_to_shelf_lot`` step 2/3
+                    # promotes the existing cloud stock_lot to
+                    # live_shelf-tracked. Without this emit, the Pi
+                    # records the placement but the cloud lot stays in
+                    # "general inventory" forever — observable as the
+                    # inventory page row not picking up its
+                    # "live-scale tracked" badge.
+                    needs_new_arrival_emit = was_out or inventory_only_mint
                     storage_repo.update_lot(
                         self._conn,
                         cid,
@@ -2037,7 +2163,7 @@ class ScaleHandler:
                         current_weight_g=lot_weight_g,
                         last_seen_at=event_ts,
                     )
-                    if was_out:
+                    if needs_new_arrival_emit:
                         revive_resolution_id: Optional[str] = None
                         if session_id is not None:
                             try:
@@ -2079,13 +2205,17 @@ class ScaleHandler:
                                 )
                         except Exception:  # pragma: no cover - defensive
                             log.warning(
-                                "cloud emit failed for out→on_shelf revive "
-                                "of lot %s", lot.lot_id, exc_info=True,
+                                "cloud emit failed for new_arrival on "
+                                "lot %s (was_out=%s inventory_only_mint=%s)",
+                                lot.lot_id, was_out, inventory_only_mint,
+                                exc_info=True,
                             )
                         log.info(
-                            "out→on_shelf revive: lot %s (product %s) "
-                            "placed back (weight %.1fg) — emitted new_arrival",
+                            "new_arrival: lot %s (product %s) placed "
+                            "(weight %.1fg, was_out=%s, "
+                            "inventory_only_mint=%s) — emitted new_arrival",
                             lot.lot_id, lot.product_id, lot_weight_g,
+                            was_out, inventory_only_mint,
                         )
                 elif direction == "remove":
                     # Bug B3b: don't double-flip an already-out lot. If

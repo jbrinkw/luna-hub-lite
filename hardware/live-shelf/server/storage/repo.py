@@ -1165,6 +1165,69 @@ def get_all_certified_products(
     return [_row_to_product(r) for r in rows]
 
 
+def list_inventory_only_products(
+    conn: sqlite3.Connection,
+    *,
+    shelf_id: Optional[str] = None,
+) -> list[Product]:
+    """Products with cloud-mirror inventory (qty>0) but no Pi lots on this shelf.
+
+    Joins the Pi's ``cloud_lots`` mirror (populated by the
+    LotSnapshotPoller) against the local ``products`` table and excludes
+    any product that already has at least one row in ``lots`` for the
+    given shelf. The excluded products are surfaced through the other
+    candidate-pool branches (``in_flight`` / ``recently_out`` / on-shelf
+    top-up); this method covers the gap that decision #45 regressed:
+    products that exist in cloud inventory but have never been
+    physically placed on this Pi shelf.
+
+    The cloud mirror rows are filtered to ``qty_containers > 0`` —
+    empty/tombstoned lots are not inventory. Soft-deleted products
+    (``products.deleted_at IS NOT NULL``) are also excluded.
+
+    When ``shelf_id`` is None, the "no Pi lot" filter looks across every
+    shelf — useful for tests that don't care about the multi-shelf
+    distinction. Production callsites always pass a definite shelf_id.
+
+    Ordering: ``products.created_at ASC`` for a stable test order.
+    """
+    if shelf_id is not None:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT p.*
+              FROM products p
+              JOIN cloud_lots cl ON cl.product_id = p.product_id
+             WHERE p.deleted_at IS NULL
+               AND cl.qty_containers > 0
+               AND cl.deleted_at IS NULL
+               AND NOT EXISTS (
+                     SELECT 1 FROM lots l
+                      WHERE l.product_id = p.product_id
+                        AND l.shelf_id = ?
+                   )
+             ORDER BY p.created_at ASC
+            """,
+            (shelf_id,),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT p.*
+              FROM products p
+              JOIN cloud_lots cl ON cl.product_id = p.product_id
+             WHERE p.deleted_at IS NULL
+               AND cl.qty_containers > 0
+               AND cl.deleted_at IS NULL
+               AND NOT EXISTS (
+                     SELECT 1 FROM lots l
+                      WHERE l.product_id = p.product_id
+                   )
+             ORDER BY p.created_at ASC
+            """
+        ).fetchall()
+    return [_row_to_product(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # sessions
 # ---------------------------------------------------------------------------
