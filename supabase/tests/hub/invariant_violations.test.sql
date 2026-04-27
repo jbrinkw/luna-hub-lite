@@ -69,32 +69,35 @@ SELECT is(
   'mcp_tool_log: user_id NULL accepted (global / unattributed alert)'
 );
 
--- 4. coachbyte_timer_no_stale_active
+-- 4. coachbyte_timer_running_not_stale
+--    (post-2026-04-27 reconcile: was coachbyte_timer_no_stale_active —
+--     same predicate intent, renamed to align with Phase 3 runtime.)
 SELECT private.upsert_alert(
-  'coachbyte_timer_no_stale_active', 'warning', 'coachbyte_timer',
+  'coachbyte_timer_running_not_stale', 'warning', 'coachbyte_timer',
   '00000000-0000-0000-0000-00000000d001',
   tests.get_supabase_uid('inv_user'),
   '{"state": "running", "end_time": "2026-04-26T22:00:00Z"}'::jsonb
 );
 SELECT is(
   (SELECT count(*)::integer FROM hub.alerts
-    WHERE invariant_name = 'coachbyte_timer_no_stale_active'),
+    WHERE invariant_name = 'coachbyte_timer_running_not_stale'),
   1,
-  'coachbyte_timer: violation persisted'
+  'coachbyte_timer_running_not_stale: violation persisted'
 );
 
--- 5. product_no_macro_drift
+-- 5. product_macro_drift_4_4_9
+--    (post-2026-04-27 reconcile: was product_no_macro_drift.)
 SELECT private.upsert_alert(
-  'product_no_macro_drift', 'warning', 'product',
+  'product_macro_drift_4_4_9', 'warning', 'product',
   '11111111-1111-1111-1111-111111111111',
   tests.get_supabase_uid('inv_user'),
   '{"name": "Mystery Bar", "drift_pct": 0.18}'::jsonb
 );
 SELECT is(
   (SELECT (details->>'drift_pct')::numeric FROM hub.alerts
-    WHERE invariant_name = 'product_no_macro_drift' LIMIT 1),
+    WHERE invariant_name = 'product_macro_drift_4_4_9' LIMIT 1),
   0.18,
-  'product_no_macro_drift: details.drift_pct round-trips through JSONB'
+  'product_macro_drift_4_4_9: details.drift_pct round-trips through JSONB'
 );
 
 ------------------------------------------------------------

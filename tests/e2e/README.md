@@ -129,20 +129,21 @@ offending predicate. The hook only runs on PASS — invariant
 assertions on top of an already-failing scenario just confuse the
 report.
 
-The 10 invariants:
+The 11 invariants (post-2026-04-27 reconcile with Phase 4 monitor):
 
-| #  | Name                                  | Severity | Catches                                                                              |
-| -- | ------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
-| 1  | `qty_non_negative`                    | critical | a scenario somehow leaving a `stock_lots.qty_containers < 0` for the test user       |
-| 2  | `food_logs_4_4_9_within_tolerance`    | warning  | per-row macro drift — `cal != 4c+4p+9f ± 10 kcal` on any food_logs row created during the scenario |
-| 3  | `stock_lots_in_flight_consistent`     | error    | a lot with `in_flight_since` set but no `pickup_event_id` (orphan in-flight state)   |
-| 4  | `pi_cloud_lot_id_match`               | error    | (skipped unless simulator tracks lots) Pi knows about a lot the cloud doesn't have   |
-| 5  | `mcp_tool_log_user_id_present`        | error    | `hub.mcp_tool_logs` row with NULL user_id (column is NOT NULL — catches drop)        |
-| 6  | `shelf_event_log_no_orphan_lots`      | error    | event references a lot_id that doesn't exist (soft-delete-races-event-write)         |
-| 7  | `livetrack_session_no_zombie_active`  | warning  | LiveTrack session still in non-terminal state > 5 min after creation                 |
-| 8  | `coachbyte_timer_consistent`          | error    | timer.state='running' AND end_time IS NULL                                           |
-| 9  | `product_macro_drift_4_4_9`           | warning  | products updated during the scenario have `cal != 4c+4p+9f ± 5%`                     |
-| 10 | `cloud_outbox_no_permanent_failed`    | critical | (skipped unless simulator exposes outbox) Pi outbox has permanent-failed rows        |
+| #  | Name                                       | Severity | Catches                                                                                            |
+| -- | ------------------------------------------ | -------- | -------------------------------------------------------------------------------------------------- |
+| 1  | `qty_non_negative`                         | critical | a scenario somehow leaving a `stock_lots.qty_containers < 0` for the test user                     |
+| 2  | `food_logs_4_4_9_within_tolerance`         | warning  | per-row macro drift — `cal != 4c+4p+9f ± 10 kcal` on any food_logs row created during the scenario |
+| 3  | `stock_lots_in_flight_consistent`          | error    | a lot with `in_flight_since` set but no `pickup_event_id` (orphan in-flight state)                 |
+| 4  | `pi_cloud_lot_id_match`                    | error    | (skipped unless simulator tracks lots) Pi knows about a lot the cloud doesn't have                 |
+| 5  | `mcp_tool_log_user_id_present`             | error    | `hub.mcp_tool_logs` row with NULL user_id (column is NOT NULL — catches drop)                      |
+| 6  | `shelf_event_log_no_orphan_lots`           | error    | event references a lot_id that doesn't exist (soft-delete-races-event-write)                       |
+| 7  | `livetrack_session_no_zombie_active`       | warning  | LiveTrack session still in non-terminal state > 5 min after creation                               |
+| 8  | `coachbyte_timer_running_has_end_time`     | error    | timer.state='running' AND end_time IS NULL (partial-write canary)                                  |
+| 9  | `coachbyte_timer_running_not_stale`        | warning  | timer.state='running' AND end_time > 4h in the past (forgotten timer)                              |
+| 10 | `product_macro_drift_4_4_9`                | warning  | products updated during the scenario have `cal != 4c+4p+9f ± 5%`                                   |
+| 11 | `cloud_outbox_no_permanent_failed`         | critical | (skipped unless simulator exposes outbox) Pi outbox has permanent-failed rows                      |
 
 All predicates are scoped to the test user (and where applicable a
 scenario-start timestamp) so cross-scenario data doesn't trip them.

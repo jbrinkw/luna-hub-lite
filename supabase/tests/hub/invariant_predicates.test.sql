@@ -37,7 +37,8 @@ SELECT has_column('chefbyte', 'food_logs', 'logical_date',
   'food_logs.logical_date present (per-day aggregation key)');
 
 ------------------------------------------------------------
--- Invariant 3: stock_lots_lifecycle_invariant
+-- Invariant 3: stock_lots_in_flight_consistent
+--   (post-2026-04-27 reconcile: was stock_lots_lifecycle_invariant)
 -- The predicate looks for stock_lots where in_flight_since is older than
 -- 24h. Verify the column + partial index exist.
 ------------------------------------------------------------
@@ -55,7 +56,8 @@ SELECT col_not_null('hub', 'mcp_tool_logs', 'user_id',
   'mcp_tool_logs.user_id is NOT NULL (constraint defends the invariant)');
 
 ------------------------------------------------------------
--- Invariant 6: stock_lots_match_4_4_9_at_food_log_write
+-- Invariant 6: food_logs_4_4_9_within_tolerance
+--   (post-2026-04-27 reconcile: was stock_lots_match_4_4_9_at_food_log_write)
 -- Predicate scans food_logs.calories vs 4*c + 4*p + 9*f. Schema check.
 ------------------------------------------------------------
 SELECT has_column('chefbyte', 'food_logs', 'calories',
@@ -74,7 +76,8 @@ SELECT has_column('chefbyte', 'shelf_event_log', 'resolved_lot_id',
   'shelf_event_log.resolved_lot_id present');
 
 ------------------------------------------------------------
--- Invariant 8: livetrack_session_no_stale_active
+-- Invariant 8: livetrack_session_no_zombie_active
+--   (post-2026-04-27 reconcile: was livetrack_session_no_stale_active)
 ------------------------------------------------------------
 SELECT has_column('chefbyte', 'livetrack_import_sessions', 'state',
   'livetrack_import_sessions.state present');
@@ -82,7 +85,12 @@ SELECT has_column('chefbyte', 'livetrack_import_sessions', 'expires_at',
   'livetrack_import_sessions.expires_at present');
 
 ------------------------------------------------------------
--- Invariant 9: coachbyte_timer_no_stale_active
+-- Invariants 9 + 9b: coachbyte_timer_running_has_end_time +
+--                    coachbyte_timer_running_not_stale
+--   (post-2026-04-27 reconcile: was the single ambiguous
+--    coachbyte_timer_no_stale_active. Split into two predicates so the
+--    null-end_time and stale-end_time bug-classes each have their own
+--    invariant at both the Phase 3 + Phase 4 layers.)
 ------------------------------------------------------------
 SELECT has_column('coachbyte', 'timers', 'state',
   'coachbyte.timers.state present');
@@ -90,7 +98,8 @@ SELECT has_column('coachbyte', 'timers', 'end_time',
   'coachbyte.timers.end_time present');
 
 ------------------------------------------------------------
--- Invariant 10: product_no_macro_drift
+-- Invariant 10: product_macro_drift_4_4_9
+--   (post-2026-04-27 reconcile: was product_no_macro_drift)
 -- Requires updated_at (set by 20260421030000_products_updated_at).
 ------------------------------------------------------------
 SELECT has_column('chefbyte', 'products', 'updated_at',

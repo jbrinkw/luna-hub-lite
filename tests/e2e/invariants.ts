@@ -31,6 +31,20 @@
  * an invariant has no good time-window predicate (e.g. NOT NULL constraint
  * on user_id) the scope is "rows owned by this test user" — same effect
  * because each scenario uses a fresh user.
+ *
+ * ─── Cross-layer reconcile (2026-04-27) ────────────────────────────
+ *
+ * Audit B 2026-04-27 found 6 of 11 predicates differed from Phase 4 in
+ * name, threshold, or semantics. This module is now name-aligned with the
+ * production monitor and the timer invariant is SPLIT into two checks
+ * (running_has_end_time + running_not_stale) so Phase 3 + Phase 4 each
+ * run BOTH bug-class predicates instead of catching orthogonal issues
+ * under a single confusing name. See `decisions.md #45` for rationale.
+ *
+ * The canonical predicate name list is the source of truth — DO NOT
+ * rename without simultaneously renaming in
+ * `supabase/functions/invariant-monitor/index.ts`. The drift-check meta
+ * tests in this suite assert the names match exactly.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -85,7 +99,7 @@ const LIVETRACK_TERMINAL_STATES = new Set(['closed', 'expired']);
 type PredicateResult = InvariantViolation | null;
 type Predicate = (opts: AssertSystemInvariantsOpts) => Promise<PredicateResult>;
 
-// ─── 10 invariants ──────────────────────────────────────────────────
+// ─── Invariants ─────────────────────────────────────────────────────
 
 /**
  * 1. qty_non_negative — no chefbyte.stock_lots with qty_containers < 0
@@ -317,6 +331,11 @@ const shelfEventLogNoOrphanLots: Predicate = async ({
  *    chefbyte.livetrack_import_sessions for the test user in a
  *    non-terminal state older than 5 min. Scenarios that open sessions
  *    must close them.
+ *
+ *    Cross-layer note: Phase 4 monitor uses the same name (post-2026-04-27
+ *    rename) but a 1h cutoff (production tolerates a longer wizard
+ *    timeout). Phase 3 here uses 5min because scenarios should NEVER
+ *    leave a session open even briefly.
  */
 const livetrackSessionNoZombieActive: Predicate = async ({ supabase, testUserId }) => {
   const cutoff = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -337,12 +356,17 @@ const livetrackSessionNoZombieActive: Predicate = async ({ supabase, testUserId 
 };
 
 /**
- * 8. coachbyte_timer_consistent — no coachbyte.timers row for the test
- *    user with state='running' AND end_time IS NULL. A running timer
- *    must always have an end_time set; missing end_time means the
+ * 8. coachbyte_timer_running_has_end_time — no coachbyte.timers row for
+ *    the test user with state='running' AND end_time IS NULL. A running
+ *    timer must always have an end_time set; missing end_time means the
  *    state machine wrote a partial row.
+ *
+ *    Pre-2026-04-27 this lived under `coachbyte_timer_consistent`. Renamed
+ *    + split as part of the Phase 3 ↔ Phase 4 reconcile so the two
+ *    orthogonal timer bug-classes (NULL end_time vs stale end_time) each
+ *    have their own predicate at both layers. See decisions.md #45.
  */
-const coachbyteTimerConsistent: Predicate = async ({ supabase, testUserId }) => {
+const coachbyteTimerRunningHasEndTime: Predicate = async ({ supabase, testUserId }) => {
   const { data, error } = await (supabase as any)
     .schema('coachbyte')
     .from('timers')
@@ -350,20 +374,46 @@ const coachbyteTimerConsistent: Predicate = async ({ supabase, testUserId }) => 
     .eq('user_id', testUserId)
     .eq('state', 'running')
     .is('end_time', null);
-  if (error) throw new Error(`coachbyte_timer_consistent query failed: ${error.message}`);
+  if (error) throw new Error(`coachbyte_timer_running_has_end_time query failed: ${error.message}`);
   if (!data || data.length === 0) return null;
   return {
-    name: 'coachbyte_timer_consistent',
+    name: 'coachbyte_timer_running_has_end_time',
     severity: 'error',
     details: { running_timers_without_end_time: data },
   };
 };
 
 /**
- * 9. product_macro_drift_4_4_9 — products updated during the scenario
- *    maintain |stored_calories - (4c + 4p + 9f)| <= 5%. Catches a
- *    paste-error in the chef UI, an AI normalize step that wrote
- *    inconsistent macros, or a migration that recomputed wrong.
+ * 9. coachbyte_timer_running_not_stale — no coachbyte.timers row for the
+ *    test user with state='running' AND end_time more than 4h in the
+ *    past. A timer that's still running 4h after its scheduled end is
+ *    a forgotten timer (user closed app mid-rest, auto-expire never
+ *    fired). Mirrors the production monitor's same-named predicate.
+ */
+const coachbyteTimerRunningNotStale: Predicate = async ({ supabase, testUserId }) => {
+  const cutoff = new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString();
+  const { data, error } = await (supabase as any)
+    .schema('coachbyte')
+    .from('timers')
+    .select('timer_id, state, end_time')
+    .eq('user_id', testUserId)
+    .eq('state', 'running')
+    .not('end_time', 'is', null)
+    .lt('end_time', cutoff);
+  if (error) throw new Error(`coachbyte_timer_running_not_stale query failed: ${error.message}`);
+  if (!data || data.length === 0) return null;
+  return {
+    name: 'coachbyte_timer_running_not_stale',
+    severity: 'warning',
+    details: { stale_running_timers: data },
+  };
+};
+
+/**
+ * 10. product_macro_drift_4_4_9 — products updated during the scenario
+ *     maintain |stored_calories - (4c + 4p + 9f)| <= 5%. Catches a
+ *     paste-error in the chef UI, an AI normalize step that wrote
+ *     inconsistent macros, or a migration that recomputed wrong.
  */
 const productMacroDrift449: Predicate = async ({ supabase, testUserId, scenarioStartTime }) => {
   const { data, error } = await (supabase as any)
@@ -407,7 +457,7 @@ const productMacroDrift449: Predicate = async ({ supabase, testUserId, scenarioS
 };
 
 /**
- * 10. cloud_outbox_no_permanent_failed — no cloud_outbox rows with
+ * 11. cloud_outbox_no_permanent_failed — no cloud_outbox rows with
  *     status='permanent-failed' for the test user. Permanent failures
  *     during a scenario indicate a real bug — the Pi gave up on a
  *     payload the cloud refused.
@@ -453,7 +503,8 @@ export const PREDICATES: Record<string, Predicate> = {
   mcp_tool_log_user_id_present: mcpToolLogUserIdPresent,
   shelf_event_log_no_orphan_lots: shelfEventLogNoOrphanLots,
   livetrack_session_no_zombie_active: livetrackSessionNoZombieActive,
-  coachbyte_timer_consistent: coachbyteTimerConsistent,
+  coachbyte_timer_running_has_end_time: coachbyteTimerRunningHasEndTime,
+  coachbyte_timer_running_not_stale: coachbyteTimerRunningNotStale,
   product_macro_drift_4_4_9: productMacroDrift449,
   cloud_outbox_no_permanent_failed: cloudOutboxNoPermanentFailed,
 };
@@ -479,7 +530,7 @@ export class InvariantViolationError extends Error {
 }
 
 /**
- * Run all 10 invariants sequentially against the supplied Supabase
+ * Run all invariants sequentially against the supplied Supabase
  * client + (optional) Pi simulator state, scoped to the given test
  * user. Throws {@link InvariantViolationError} on any violation,
  * naming every offending predicate.
