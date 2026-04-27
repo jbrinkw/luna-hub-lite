@@ -60,7 +60,13 @@ failure-path regressions before they reach production.
 
 ---
 
-## Phase 2 — End-to-end harness (1-2 days)
+## Phase 2 — End-to-end harness (1-2 days) ✅
+
+**Status (2026-04-27):** Shipped. 15 scenarios live under `tests/e2e/`,
+all green locally in ~45 s wall. Pi simulator chose option (b) (in-process
+TypeScript that POSTs to shelf-ingest with x-api-key) — see
+`tests/e2e/README.md` "Why an in-process Pi simulator" for the rationale.
+Run: `pnpm test:e2e` (must have `supabase start` running).
 
 **Goal:** A single suite that boots Supabase + a Pi simulator + the React
 SPA in a headless browser, runs realistic user flows, and asserts state
@@ -87,7 +93,17 @@ only way to catch this class.
   helpers directly (already used by the existing harness scenarios).
   Reuses `scripts/harness/orchestrator.py`.
 
-### 10 scenarios to cover
+### Scenarios shipped (15, not the original 10)
+
+The user expanded the scope to 15 to cover the actively-biting bug
+classes (chocolate milk, scanner mode-switch, in-flight badge race,
+TTL reap, place-back revival, meal-prep [MEAL] mint,
+LiveTrack-wizard suppression contract). The full list lives in
+`tests/e2e/README.md` "Coverage matrix" — every scenario references
+the boundary it exercises and the bug class it catches. The original
+10 below is preserved as historical context.
+
+### Original 10 scenarios (planning doc — superseded by 15 shipped)
 
 Each scenario asserts state convergence at every layer (DB row, edge fn
 response, realtime broadcast received, React component rendered).
@@ -303,10 +319,22 @@ Production data corruption that local testing missed.
 
 ---
 
-## Phase 5 — Process changes
+## Phase 5 — Process changes ✅
 
 **Goal:** No more autonomous agent commit+push without verifying test
 pass. Every push runs the suite locally first.
+
+**Status:** Done 2026-04-27. Two-tier `verify:fast` / `verify:full` driver
+(`scripts/verify/run.sh`) wired through `package.json`. Husky 9 pre-push
+hook (`.husky/pre-push`) auto-routes docs-only changes to `verify:fast`
+and code changes to `verify:full`. Honor-system bypass via
+`git push --no-verify` + `Verify-skipped:` footer; `commit-msg` hook
+prints a warning when the footer is present. Lint and prettier ignore
+lists were fixed during Phase 5 dogfooding (lint dropped from 81k errors
+on artifact dirs to 0; format from 232 dirty files to 0). Full picture
+in `docs/testing-workflow.md`. CI workflow already lint+typecheck only
+(commit `7b45ee3`); Phase 5 is the local enforcement that makes the lean
+CI safe.
 
 ### Deliverables
 
@@ -371,7 +399,7 @@ hit. Procedural gate, not a code-coverage gate.
 | 2     | 24 h   | Sync-boundary bugs Pi ↔ cloud ↔ realtime ↔ render          |
 | 3     | 8 h    | Slow-burn corruption invisible to per-test assertions      |
 | 4     | 8 h    | Production data corruption                                 |
-| 5     | 4 h    | Procedural gate (agents pushing unverified work)           |
+| 5     | 4 h ✅ | Procedural gate (agents pushing unverified work)           |
 | Total | ~46 h  |                                                            |
 
 Phases 2-5 can run in parallel after Phase 1 lands. Suggested order if
