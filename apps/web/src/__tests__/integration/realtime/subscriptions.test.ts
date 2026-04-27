@@ -22,11 +22,13 @@
  *   3. Assert the event payload is delivered to the subscriber within
  *      a reasonable timeout.
  *
- * Tables in the publication today (migrations grepped 2026-04-25):
+ * Tables in the publication today (migrations grepped 2026-04-27):
  *   - chefbyte.live_shelf_devices
  *   - chefbyte.scale_pairings
  *   - chefbyte.event_overrides
  *   - chefbyte.livetrack_import_sessions
+ *   - chefbyte.food_logs    (added 20260427070000 — MacroPage realtime)
+ *   - chefbyte.temp_items   (added 20260427070000 — MacroPage realtime)
  *
  * If a new table joins the publication, add it here. If a table is
  * DROPPED from the publication the corresponding test here will time
@@ -472,6 +474,134 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
     } finally {
       probe.cleanup();
       await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', device!.device_id);
+    }
+  }, 35_000);
+
+  // ---------------------------------------------------------------
+  // food_logs — MacroPage realtime path
+  //
+  // Regression target: 2026-04-27 — Pi shelf-event-driven food_logs
+  // INSERTs (apply_shelf_event for `consumed`) landed in the cloud DB
+  // but the user's MacroPage tab never updated because food_logs
+  // wasn't in the realtime publication. Migration
+  // 20260427070000_food_logs_realtime_publication.sql added the
+  // table; this test fails if a future migration drops it.
+  // ---------------------------------------------------------------
+
+  it('delivers INSERT events on chefbyte.food_logs', async () => {
+    // food_logs FKs to a chefbyte.products row owned by the user.
+    const { data: product, error: productErr } = await adminClient
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Realtime Probe Product',
+        servings_per_container: 1,
+        calories_per_serving: 100,
+        protein_per_serving: 10,
+        carbs_per_serving: 15,
+        fat_per_serving: 3,
+      })
+      .select('product_id')
+      .single();
+    expect(productErr).toBeNull();
+
+    const userClient = await makeRealtimeClient();
+    const probe = captureNextEvent(userClient, {
+      channelName: `rt-cdc-foodlogs-${crypto.randomUUID()}`,
+      schema: 'chefbyte',
+      table: 'food_logs',
+      event: 'INSERT',
+      filter: `user_id=eq.${userId}`,
+      timeoutMs: 30_000,
+    });
+
+    let insertedLogId: string | null = null;
+    try {
+      await probe.ready;
+
+      const clientEventId = `food-rt-${crypto.randomUUID()}`;
+      const { data: inserted, error } = await adminClient
+        .schema('chefbyte')
+        .from('food_logs')
+        .insert({
+          user_id: userId,
+          product_id: product!.product_id,
+          logical_date: '2026-04-27',
+          qty_consumed: 0.5,
+          unit: 'serving',
+          calories: 50,
+          carbs: 7.5,
+          protein: 5,
+          fat: 1.5,
+          source_client_event_id: clientEventId,
+        })
+        .select('log_id')
+        .single();
+      expect(error).toBeNull();
+      insertedLogId = inserted!.log_id;
+
+      const payload = await probe.received;
+      expect(payload.eventType).toBe('INSERT');
+      expect(payload.new.log_id).toBe(inserted!.log_id);
+      expect(payload.new.user_id).toBe(userId);
+      expect(payload.new.product_id).toBe(product!.product_id);
+      expect(Number(payload.new.calories)).toBe(50);
+    } finally {
+      probe.cleanup();
+      if (insertedLogId) {
+        await adminClient.schema('chefbyte').from('food_logs').delete().eq('log_id', insertedLogId);
+      }
+      await adminClient.schema('chefbyte').from('products').delete().eq('product_id', product!.product_id);
+    }
+  }, 35_000);
+
+  // ---------------------------------------------------------------
+  // temp_items — MacroPage realtime path (manual quick-add macros)
+  // ---------------------------------------------------------------
+
+  it('delivers INSERT events on chefbyte.temp_items', async () => {
+    const userClient = await makeRealtimeClient();
+    const probe = captureNextEvent(userClient, {
+      channelName: `rt-cdc-tempitems-${crypto.randomUUID()}`,
+      schema: 'chefbyte',
+      table: 'temp_items',
+      event: 'INSERT',
+      filter: `user_id=eq.${userId}`,
+      timeoutMs: 30_000,
+    });
+
+    let insertedTempId: string | null = null;
+    try {
+      await probe.ready;
+
+      const { data: inserted, error } = await adminClient
+        .schema('chefbyte')
+        .from('temp_items')
+        .insert({
+          user_id: userId,
+          name: 'Realtime Probe Snack',
+          logical_date: '2026-04-27',
+          calories: 200,
+          carbs: 25,
+          protein: 8,
+          fat: 6,
+        })
+        .select('temp_id')
+        .single();
+      expect(error).toBeNull();
+      insertedTempId = inserted!.temp_id;
+
+      const payload = await probe.received;
+      expect(payload.eventType).toBe('INSERT');
+      expect(payload.new.temp_id).toBe(inserted!.temp_id);
+      expect(payload.new.name).toBe('Realtime Probe Snack');
+      expect(Number(payload.new.calories)).toBe(200);
+    } finally {
+      probe.cleanup();
+      if (insertedTempId) {
+        await adminClient.schema('chefbyte').from('temp_items').delete().eq('temp_id', insertedTempId);
+      }
     }
   }, 35_000);
 

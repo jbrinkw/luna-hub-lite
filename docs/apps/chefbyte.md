@@ -86,7 +86,7 @@ AI-powered nutrition system: meal planning, inventory management, macro tracking
 - Day summary with progress bars (Calories, Protein, Carbs, Fats)
 - Consumed items list: regular meal plan completions, Consume+Macros events (including `[MEAL]` lot consumption), and temp items. Includes a **TOTAL row** showing aggregate macros across all consumed items.
 - **Delete consumed items:** Individual food logs and temp items can be deleted from the consumed items table.
-- **Realtime subscriptions:** Macro page subscribes to Supabase Realtime on `food_logs` and `temp_items` tables for live updates.
+- **Realtime subscriptions:** Macro page subscribes to Supabase Realtime on `food_logs` and `temp_items` tables for live updates. Both tables are members of the `supabase_realtime` publication (added by `20260427070000_food_logs_realtime_publication.sql` after a 2026-04-27 regression where Pi shelf-event-driven food_logs INSERTs landed in the cloud DB but never reached open MacroPage tabs because the publication didn't broadcast them).
 - Planned items preview: upcoming regular plan entries (meal-prep entries excluded because prep execution creates inventory rather than direct macro logs)
 - Temp items: log off-inventory meals by name + macros (coffee, restaurant food, snacks)
 - Target macros editor: set goals, calories auto-calculate via `(carbs×4) + (protein×4) + (fats×9)`

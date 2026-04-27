@@ -190,6 +190,8 @@ The frontend uses the `useRealtimeInvalidation` hook to subscribe to Supabase Re
 
 All subscriptions filter on `user_id = auth.uid()` via RLS. Channels are cleaned up on page unmount. Query keys are defined in `src/shared/queryKeys.ts`.
 
+**Required: tables MUST be members of the `supabase_realtime` publication** for `postgres_changes` to deliver events. Tables created without an explicit `ALTER PUBLICATION supabase_realtime ADD TABLE …` will silently no-op — `useRealtimeInvalidation` falls into per-channel `CHANNEL_ERROR` and the user keeps seeing stale data until manual refresh. The integration test `apps/web/src/__tests__/integration/realtime/subscriptions.test.ts` and pgTAP test `supabase/tests/chefbyte/food_logs_realtime_publication.test.sql` pin the current membership; add cases there when adding new realtime-bound tables.
+
 ## Environment Validation
 
 Production builds enforce hard errors on missing critical environment variables:
