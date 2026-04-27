@@ -684,6 +684,98 @@ class CloudEventEmitter:
             payload["pi_event_id"] = pi_event_id
         return self._enqueue(payload)
 
+    def emit_catch_all_first_measurement(
+        self,
+        *,
+        scale_id: str,
+        product_id: str,
+        measured_weight_g: float,
+        pi_event_id: str,
+        occurred_at: Optional[str] = None,
+    ) -> Optional[str]:
+        """Emit a ``catch_all_first_measurement`` cloud event.
+
+        Catch-all delta-capture flow (migration
+        20260427130000_catch_all_delta_apply.sql). The cloud handler
+        snapshots the measured weight into ``stock_lots.pickup_weight_g``,
+        reconciles ``qty_containers = measured_weight_g / net_weight_g``,
+        stamps ``in_flight_since`` + ``in_flight_kind='catch_all'`` +
+        ``pickup_event_id``. NO food_logs row (this is reconciliation,
+        not consumption).
+
+        ``pi_event_id`` is the Pi's scale_events.event_id for THIS first
+        event; the cloud stamps it onto stock_lots.pickup_event_id so
+        the second-measurement event can find this row.
+
+        Protocol note: ``delta_g`` is repurposed for this event_kind to
+        mean ABSOLUTE measured weight in grams (not a delta). Must be
+        positive; cloud rejects ``≤ 0``.
+        """
+        if not product_id:
+            return None
+        if measured_weight_g is None or measured_weight_g <= 0:
+            return None
+        if not pi_event_id:
+            return None
+        payload: dict[str, Any] = {
+            "scale_id": scale_id,
+            "kind": "catch_all",
+            "event_kind": "catch_all_first_measurement",
+            "product_id": product_id,
+            "delta_g": float(measured_weight_g),
+            "occurred_at": occurred_at or _iso_utc_ms(),
+            "pi_event_id": pi_event_id,
+        }
+        return self._enqueue(payload)
+
+    def emit_catch_all_second_measurement(
+        self,
+        *,
+        scale_id: str,
+        product_id: str,
+        measured_weight_g: float,
+        first_event_pi_event_id: str,
+        occurred_at: Optional[str] = None,
+    ) -> Optional[str]:
+        """Emit a ``catch_all_second_measurement`` cloud event.
+
+        Catch-all delta-capture flow (migration
+        20260427130000_catch_all_delta_apply.sql). The cloud handler
+        looks up the in-flight catch_all lot by ``(user_id, product_id,
+        in_flight_kind='catch_all', pickup_event_id =
+        first_event_pi_event_id::uuid)``, computes
+        ``consumption_g = pickup_weight_g - measured_weight_g``,
+        updates qty to match the new measured weight, clears the in-
+        flight markers, and writes food_logs for the consumed delta.
+
+        Inconsistent delta (``measured_weight_g >= pickup_weight_g``)
+        causes the cloud to return ``applied=false`` and KEEP the in-
+        flight markers — the Pi review queue then takes over.
+
+        Protocol note: ``delta_g`` is repurposed to mean ABSOLUTE
+        measured weight at the second reading (not a delta).
+        ``first_event_pi_event_id`` MUST be the Pi event_id from the
+        FIRST measurement (i.e. the pickup_event_id stamp).
+        """
+        if not product_id:
+            return None
+        if measured_weight_g is None or measured_weight_g < 0:
+            return None
+        if not first_event_pi_event_id:
+            return None
+        payload: dict[str, Any] = {
+            "scale_id": scale_id,
+            "kind": "catch_all",
+            "event_kind": "catch_all_second_measurement",
+            "product_id": product_id,
+            "delta_g": float(measured_weight_g),
+            "occurred_at": occurred_at or _iso_utc_ms(),
+            # The cloud uses pi_event_id to find the matching first
+            # event's in-flight stamp — NOT this second event's id.
+            "pi_event_id": first_event_pi_event_id,
+        }
+        return self._enqueue(payload)
+
 
 def backfill_missing_outbox_events(
     conn: sqlite3.Connection,

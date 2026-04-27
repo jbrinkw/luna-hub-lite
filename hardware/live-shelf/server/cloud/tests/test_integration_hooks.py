@@ -1084,6 +1084,13 @@ class TestEmitHandleMatrixSync:
         "in_flight_pickup",
         "in_flight_return",
         "discarded",
+        # Catch-all delta-capture pair (added 2026-04-27, migration
+        # 20260427130000_catch_all_delta_apply.sql). The Pi emits these
+        # via emit_catch_all_first_measurement /
+        # emit_catch_all_second_measurement (added in this same change
+        # to server/cloud/integration.py).
+        "catch_all_first_measurement",
+        "catch_all_second_measurement",
     })
 
     # Event kinds emitted by dedicated helper methods that bypass
@@ -1099,6 +1106,9 @@ class TestEmitHandleMatrixSync:
         "in_flight_return",
         # emit_manual_discard → always discarded
         "discarded",
+        # emit_catch_all_first_measurement / _second_measurement
+        "catch_all_first_measurement",
+        "catch_all_second_measurement",
     })
 
     def test_every_pattern_map_value_is_a_valid_cloud_event_kind(self):
