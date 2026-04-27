@@ -13,10 +13,13 @@ describe('useRealtimeHealth', () => {
     expect(result.current.degraded).toBe(false);
   });
 
-  it('re-renders from degraded=true to false when a channel reaches SUBSCRIBED', () => {
+  it('does not flash degraded=true immediately after register (initial-connect grace window)', () => {
+    // Bug fix: previously this hook reported degraded=true the moment a
+    // channel was registered, causing a "Live updates paused" banner to
+    // flash on every page load before the channel reached SUBSCRIBED.
     realtimeHealth.register('a', () => {});
     const { result } = renderHook(() => useRealtimeHealth());
-    expect(result.current.degraded).toBe(true);
+    expect(result.current.degraded).toBe(false);
 
     act(() => {
       realtimeHealth.setStatus('a', 'SUBSCRIBED');
