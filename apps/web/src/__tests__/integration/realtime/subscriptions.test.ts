@@ -37,13 +37,44 @@ import { createClient } from '@supabase/supabase-js';
 import { createTestUser, cleanupUser } from '../../test-helpers';
 import { adminClient, SUPABASE_URL, SUPABASE_ANON_KEY } from '../../setup.integration';
 
-/** Wait for a channel to reach SUBSCRIBED status. */
-function waitForSubscription(channel: any, timeoutMs = 10_000): Promise<string> {
+/**
+ * Wait for a channel to reach SUBSCRIBED status, then yield the event
+ * loop briefly so the realtime server has a chance to commit the
+ * subscription registration.
+ *
+ * Why the post-SUBSCRIBED settle delay: SUBSCRIBED fires when the
+ * `phx_join` ok-reply lands, but the WAL position the realtime server
+ * uses for delivery is captured slightly after the reply. Insert events
+ * fired in the same microtask as the SUBSCRIBED resolve can race ahead
+ * of that capture and never deliver. A 100ms yield is well below the
+ * insert-to-delivery latency budget (typically <1s on the local stack)
+ * and large enough to absorb scheduler jitter under verify:full load
+ * (vitest unit suite running in adjacent steps drives ~100% CPU).
+ *
+ * Why the bumped per-test timeoutMs (30s, callers): the FIRST realtime
+ * subscription per fresh client requires a full websocket handshake +
+ * `phx_join` reply, which can take >15s under verify:full load when the
+ * preceding step (vitest unit suite) saturated CPU. Subsequent
+ * subscriptions on the same client warm up the socket and complete in
+ * <500ms. 30s is a defensible upper bound (3-5x slow handshake) without
+ * masking a genuinely-broken realtime stack — the e2e harness's similar
+ * checks complete in <2s on warm stacks.
+ *
+ * The flake this guards against: chefbyte.event_overrides /
+ * live_shelf_devices intermittently times out at 15s under load. Local
+ * repro is rare in isolation but surfaces inside `pnpm verify:full`
+ * step 5 after step 4 saturates the machine. Caught it on a verify:full
+ * dry-run 2026-04-27 (commit 34895f0~..) — first INSERT timed out at
+ * 15.178s; the four subsequent tests each completed in <300ms.
+ */
+function waitForSubscription(channel: any, timeoutMs = 30_000): Promise<string> {
   return new Promise<string>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('Subscribe timeout')), timeoutMs);
-    channel.subscribe((status: string, err?: Error) => {
+    channel.subscribe(async (status: string, err?: Error) => {
       if (status === 'SUBSCRIBED') {
         clearTimeout(timer);
+        // Settle delay — see fn-level comment.
+        await new Promise((r) => setTimeout(r, 100));
         resolve(status);
       } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
         clearTimeout(timer);
@@ -70,7 +101,7 @@ function captureNextEvent(
   },
 ): { ready: Promise<void>; received: Promise<any>; cleanup: () => void } {
   const channel = client.channel(opts.channelName);
-  const timeout = opts.timeoutMs ?? 10_000;
+  const timeout = opts.timeoutMs ?? 30_000;
 
   const received = new Promise<any>((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`event timeout: ${opts.schema}.${opts.table}`)), timeout);
@@ -129,7 +160,64 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
     userId = user.userId;
     userEmail = user.email;
     userPassword = 'test-password-123';
-  });
+
+    // Pre-warm the realtime server. The very first websocket connection
+    // to a cold Supabase realtime stack (Phoenix + Elixir + Postgres
+    // replication slot allocation) can take >30s under verify:full load
+    // because step 4 (`pnpm test`) saturates CPU and the realtime server
+    // hasn't had to open any postgres_changes binding yet. Subsequent
+    // connections reuse the pool and complete in <500ms.
+    //
+    // Pre-warming here pays the cold-start cost upfront in beforeAll so
+    // the first per-test subscribe doesn't blow its 30s probe timeout.
+    //
+    // Retry tolerance: a `supabase db reset` immediately before
+    // verify:full triggers a realtime container restart + tenant
+    // migrations. During that window:
+    //   * /api/ping returns 200 (the HTTP plug is up)
+    //   * websocket /socket fails with CHANNEL_ERROR (tenants_loader
+    //     can't query the still-migrating realtime schema)
+    //
+    // The window is 5-15s typical, occasionally up to 60s when the host
+    // is also running step 4 of verify:full. Five retries with
+    // exponential backoff (1, 2, 4, 8, 16s = 31s total backoff) covers
+    // the window without masking a permanently-broken stack.
+    const warmClient = user.client;
+    let lastErr: Error | null = null;
+    const backoffMs = [1000, 2000, 4000, 8000, 16000];
+    for (let attempt = 0; attempt < backoffMs.length; attempt++) {
+      const warmChannel = warmClient.channel(`rt-warmup-${crypto.randomUUID()}`);
+      warmChannel.on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'chefbyte', table: 'live_shelf_devices', filter: `user_id=eq.${userId}` },
+        () => {
+          /* discard — we just want the binding registered */
+        },
+      );
+      try {
+        await waitForSubscription(warmChannel, 20_000);
+        warmClient.removeChannel(warmChannel);
+        lastErr = null;
+        break;
+      } catch (err: any) {
+        warmClient.removeChannel(warmChannel);
+        lastErr = err;
+        // Force-disconnect so the next attempt opens a fresh socket
+        // (otherwise supabase-js will reuse the dead one).
+        try {
+          (warmClient as any).realtime?.disconnect?.();
+        } catch {
+          /* ignore */
+        }
+        if (attempt < backoffMs.length - 1) {
+          await new Promise((r) => setTimeout(r, backoffMs[attempt]));
+        }
+      }
+    }
+    if (lastErr) {
+      throw new Error(`realtime pre-warm failed after ${backoffMs.length} attempts: ${lastErr.message}`);
+    }
+  }, 180_000);
 
   afterEach(async () => {
     for (const c of activeClients) {
@@ -154,14 +242,15 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
   it('delivers INSERT events on chefbyte.live_shelf_devices', async () => {
     const userClient = await makeRealtimeClient();
     const probe = captureNextEvent(userClient, {
-      channelName: `rt-cdc-shelf-${Date.now()}`,
+      channelName: `rt-cdc-shelf-${crypto.randomUUID()}`,
       schema: 'chefbyte',
       table: 'live_shelf_devices',
       event: 'INSERT',
       filter: `user_id=eq.${userId}`,
-      timeoutMs: 15_000,
+      timeoutMs: 30_000,
     });
 
+    let insertedDeviceId: string | null = null;
     try {
       await probe.ready;
 
@@ -176,19 +265,22 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
         .select('device_id, device_name')
         .single();
       expect(error).toBeNull();
+      insertedDeviceId = inserted!.device_id;
 
       const payload = await probe.received;
       expect(payload.eventType).toBe('INSERT');
       expect(payload.new.device_id).toBe(inserted!.device_id);
       expect(payload.new.user_id).toBe(userId);
       expect(payload.new.device_name).toBe('Test Shelf');
-
-      // Cleanup
-      await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', inserted!.device_id);
     } finally {
       probe.cleanup();
+      // Delete the seeded row even if the assertion above failed, so a
+      // flake doesn't leave WAL noise the next run has to wade through.
+      if (insertedDeviceId) {
+        await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', insertedDeviceId);
+      }
     }
-  }, 20_000);
+  }, 35_000);
 
   it('delivers UPDATE events on chefbyte.live_shelf_devices', async () => {
     // Seed a row first, then open the probe, then update.
@@ -205,12 +297,12 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
 
     const userClient = await makeRealtimeClient();
     const probe = captureNextEvent(userClient, {
-      channelName: `rt-cdc-shelf-upd-${Date.now()}`,
+      channelName: `rt-cdc-shelf-upd-${crypto.randomUUID()}`,
       schema: 'chefbyte',
       table: 'live_shelf_devices',
       event: 'UPDATE',
       filter: `user_id=eq.${userId}`,
-      timeoutMs: 15_000,
+      timeoutMs: 30_000,
       // Event may fire for other rows — filter to the seeded device.
       predicate: (payload) => payload.new?.device_id === seeded!.device_id,
     });
@@ -232,7 +324,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       probe.cleanup();
       await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', seeded!.device_id);
     }
-  }, 20_000);
+  }, 35_000);
 
   // ---------------------------------------------------------------
   // scale_pairings — pairs to a device row via FK
@@ -253,12 +345,12 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
 
     const userClient = await makeRealtimeClient();
     const probe = captureNextEvent(userClient, {
-      channelName: `rt-cdc-pairings-${Date.now()}`,
+      channelName: `rt-cdc-pairings-${crypto.randomUUID()}`,
       schema: 'chefbyte',
       table: 'scale_pairings',
       event: 'INSERT',
       filter: `user_id=eq.${userId}`,
-      timeoutMs: 15_000,
+      timeoutMs: 30_000,
     });
 
     try {
@@ -285,7 +377,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       probe.cleanup();
       await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', device!.device_id); // CASCADE deletes pairings
     }
-  }, 20_000);
+  }, 35_000);
 
   // ---------------------------------------------------------------
   // event_overrides — no FK requirements, user-scoped
@@ -294,14 +386,15 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
   it('delivers INSERT events on chefbyte.event_overrides', async () => {
     const userClient = await makeRealtimeClient();
     const probe = captureNextEvent(userClient, {
-      channelName: `rt-cdc-overrides-${Date.now()}`,
+      channelName: `rt-cdc-overrides-${crypto.randomUUID()}`,
       schema: 'chefbyte',
       table: 'event_overrides',
       event: 'INSERT',
       filter: `user_id=eq.${userId}`,
-      timeoutMs: 15_000,
+      timeoutMs: 30_000,
     });
 
+    let insertedOverrideId: string | null = null;
     try {
       await probe.ready;
 
@@ -317,17 +410,19 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
         .select('override_id')
         .single();
       expect(error).toBeNull();
+      insertedOverrideId = inserted!.override_id;
 
       const payload = await probe.received;
       expect(payload.eventType).toBe('INSERT');
       expect(payload.new.override_id).toBe(inserted!.override_id);
       expect(payload.new.client_event_id).toBe(clientEventId);
-
-      await adminClient.schema('chefbyte').from('event_overrides').delete().eq('override_id', inserted!.override_id);
     } finally {
       probe.cleanup();
+      if (insertedOverrideId) {
+        await adminClient.schema('chefbyte').from('event_overrides').delete().eq('override_id', insertedOverrideId);
+      }
     }
-  }, 20_000);
+  }, 35_000);
 
   // ---------------------------------------------------------------
   // livetrack_import_sessions — needs parent device FK
@@ -347,12 +442,12 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
 
     const userClient = await makeRealtimeClient();
     const probe = captureNextEvent(userClient, {
-      channelName: `rt-cdc-lti-${Date.now()}`,
+      channelName: `rt-cdc-lti-${crypto.randomUUID()}`,
       schema: 'chefbyte',
       table: 'livetrack_import_sessions',
       event: 'INSERT',
       filter: `user_id=eq.${userId}`,
-      timeoutMs: 15_000,
+      timeoutMs: 30_000,
     });
 
     try {
@@ -378,7 +473,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       probe.cleanup();
       await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', device!.device_id);
     }
-  }, 20_000);
+  }, 35_000);
 
   // ---------------------------------------------------------------
   // RLS filter — user A cannot receive user B's events
@@ -390,7 +485,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
 
     try {
       // Subscribe userClient (user A) filtered by their own user_id.
-      const channel = userClient.channel(`rt-cdc-rls-${Date.now()}`);
+      const channel = userClient.channel(`rt-cdc-rls-${crypto.randomUUID()}`);
       let deliveredForOther = false;
       channel.on(
         'postgres_changes',
@@ -406,7 +501,7 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
           }
         },
       );
-      await waitForSubscription(channel, 15_000);
+      await waitForSubscription(channel, 30_000);
 
       // Insert a row for userB — should NOT arrive on userA's channel.
       const { data: otherDevice } = await adminClient
@@ -428,8 +523,17 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       userClient.removeChannel(channel);
       await adminClient.schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', otherDevice!.device_id);
     } finally {
+      // otherUser.client may not have an open websocket (no subscribe()
+      // was called on it in this test) but defensively close it like the
+      // active-clients afterEach does, in case future edits add a probe
+      // through it.
       otherUser.client.removeAllChannels();
+      try {
+        (otherUser.client as any).realtime?.disconnect?.();
+      } catch {
+        /* ignore */
+      }
       await cleanupUser(otherUser.userId);
     }
-  }, 20_000);
+  }, 35_000);
 });
