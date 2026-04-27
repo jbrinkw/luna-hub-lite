@@ -454,6 +454,114 @@ _TERMINAL_CLASSIFIER_STATUSES: tuple[str, ...] = (
 OUTBOX_RETENTION_DAYS: int = 7
 
 
+def _delete_lot_impl(
+    conn: sqlite3.Connection,
+    db_lock: threading.RLock,
+    cloud_emitter: "CloudEventEmitter",
+    lot_id: str,
+    *,
+    log_: Optional[logging.Logger] = None,
+) -> dict[str, Any]:
+    """Module-level body of the ``_delete_lot`` route handler.
+
+    Extracted from the ``create_app`` closure so unit tests can exercise
+    THIS function (the actual production code path) instead of building
+    a parallel re-implementation. The closure in :func:`create_app`
+    forwards directly here; the route binding in
+    :func:`server.web.api_bp.make_api_bp` calls the closure which calls
+    this.
+
+    Why a module-level function: see Audit B 2026-04-27. The previous
+    ``test_manual_discard.py`` had a ``_make_delete_lot_fn`` helper that
+    rebuilt this body inline. A bug in this body (missing
+    ``with db_lock``, wrong shelf_id mapping, dropped cloud emit) would
+    NOT have tripped that test because the test exercised its own copy.
+    Extracting to module scope makes the production glue testable.
+
+    Behavior — DELETEs the local SQLite lot row, captures product_id +
+    shelf_id BEFORE the DELETE drops them, then enqueues a
+    ``manual_discard`` cloud_outbox row when the emitter is enabled.
+    Best-effort cloud emit: a raise from ``emit_manual_discard`` is
+    swallowed + logged so the local DELETE remains committed regardless.
+
+    Args:
+        conn: open SQLite connection (the same one create_app holds).
+        db_lock: app-wide RLock guarding ``conn``. We hold it for the
+            entire (lookup, DELETE, emit) sequence so a concurrent
+            ESP scale event can't race with the discard.
+        cloud_emitter: typically the production
+            :class:`CloudEventEmitter`. Pass ``null_emitter()`` (or any
+            object with ``.enabled = False``) to disable cloud propagation.
+        lot_id: the lot UUIDv7 to delete.
+        log_: optional logger override (defaults to module logger).
+            Tests can pass a captured logger to assert on warning text.
+
+    Returns:
+        ``{"lot_id", "rows_deleted", "cloud_event_enqueued"}``.
+        ``rows_deleted`` is the per-table count map from
+        :func:`storage_repo.delete_lot`.
+
+    Raises:
+        LookupError: if the lot doesn't exist. Route handler maps this
+            to 404. Tests assert the LookupError shape so a future
+            refactor can't silently change the exception class.
+    """
+    log_ = log_ or log
+    with db_lock:
+        existing = storage_repo.get_lot(conn, lot_id)
+        if existing is None:
+            raise LookupError(f"lot not found: {lot_id!r}")
+        # Capture product_id + shelf_id BEFORE the DELETE — we need
+        # them for the cloud emit and they're gone post-DELETE.
+        product_id = existing.product_id
+        shelf_id = existing.shelf_id
+        counts = storage_repo.delete_lot(conn, lot_id)
+
+        # Map the Pi shelf_id to the cloud ``kind`` discriminator.
+        # live_shelf + catch_all both map 1:1; single_item is a
+        # live_scale variant in cloud terminology.
+        if shelf_id == "single_item":
+            cloud_kind = "live_scale"
+        elif shelf_id == "catch_all":
+            cloud_kind = "catch_all"
+        else:  # 'live_shelf' (default — covers any other shelf_id too)
+            cloud_kind = "live_shelf"
+
+        # Best-effort cloud emit. Wrapped in try/except so a bad
+        # product_id (e.g. catalog_not_on_shelf temp lot) or a
+        # disabled emitter never blocks the local DELETE response.
+        cloud_event_id: Optional[str] = None
+        if cloud_emitter.enabled and product_id:
+            try:
+                cloud_event_id = cloud_emitter.emit_manual_discard(
+                    scale_id="scale-01",
+                    product_id=product_id,
+                    kind=cloud_kind,
+                    # pi_event_id=lot_id makes the outbox row
+                    # cross-referenceable to the deleted lot in
+                    # logs / shelf_event_log.pi_event_id (which
+                    # accepts a UUID — the Pi lot_id is UUIDv7
+                    # so the cloud handler's parse path accepts
+                    # it directly).
+                    pi_event_id=lot_id,
+                )
+            except Exception:  # noqa: BLE001 - observability best-effort
+                log_.warning(
+                    "lot delete: cloud emit_manual_discard raised "
+                    "for lot_id=%s product_id=%s",
+                    lot_id, product_id, exc_info=True,
+                )
+    log_.warning(
+        "lot delete: id=%s rows=%s cloud_event_id=%s product_id=%s",
+        lot_id, counts, cloud_event_id, product_id,
+    )
+    return {
+        "lot_id": lot_id,
+        "rows_deleted": counts,
+        "cloud_event_enqueued": cloud_event_id is not None,
+    }
+
+
 def _dir_size_bytes(root: Path) -> int:
     """Sum of every regular file's size under ``root``. Best-effort — any
     unreadable entries are silently skipped."""
@@ -1475,77 +1583,12 @@ def create_app(
 
     def _delete_lot(lot_id: str) -> dict[str, Any]:
         """Delete a single lot (inventory row) + propagate as cloud
-        ``discarded`` event. The underlying product stays in the catalog.
-        Raises LookupError if the lot doesn't exist.
-
-        Cloud propagation (2026-04-27): when ``cloud_emitter.enabled``,
-        we enqueue a ``manual_discard`` outbox event AFTER the local
-        DELETE, scoped by the lot's ``product_id`` + ``shelf_id``. The
-        cloud handler zeros qty_containers + clears in_flight_since /
-        pickup_event_id WITHOUT writing food_logs (no macro tracking by
-        design — manual user discard from the /inventory remove button).
-
-        If the lot has no matching cloud row (product was never synced,
-        ``cloud_emitter.enabled=False``, or the emit raises), we log
-        and return the local-DELETE summary. The cloud emit is
-        best-effort: a worker retry handles transient failures via the
-        outbox; a permanent failure is acceptable because the local
-        state is the user's authoritative intent and the cloud will
-        reconcile on the next snapshot poll.
+        ``discarded`` event. Thin wrapper around :func:`_delete_lot_impl`
+        — the body lives at module scope so unit tests can import +
+        exercise the actual production code rather than a re-implemented
+        copy. See Audit B 2026-04-27 (decisions.md #46).
         """
-        with db_lock:
-            existing = storage_repo.get_lot(conn, lot_id)
-            if existing is None:
-                raise LookupError(f"lot not found: {lot_id!r}")
-            # Capture the product_id + shelf_id BEFORE the DELETE drops
-            # the row — we still need them for the cloud emit below.
-            product_id = existing.product_id
-            shelf_id = existing.shelf_id
-            counts = storage_repo.delete_lot(conn, lot_id)
-
-            # Map the Pi shelf_id to the cloud ``kind`` discriminator.
-            # live_shelf + catch_all both map 1:1; single_item is a
-            # live_scale variant in cloud terminology.
-            if shelf_id == "single_item":
-                cloud_kind = "live_scale"
-            elif shelf_id == "catch_all":
-                cloud_kind = "catch_all"
-            else:  # 'live_shelf' (default)
-                cloud_kind = "live_shelf"
-
-            # Best-effort cloud emit. Wrapped in try/except so a bad
-            # product_id (e.g. catalog_not_on_shelf temp lot) or a
-            # disabled emitter never blocks the local DELETE response.
-            cloud_event_id: Optional[str] = None
-            if cloud_emitter.enabled and product_id:
-                try:
-                    cloud_event_id = cloud_emitter.emit_manual_discard(
-                        scale_id="scale-01",
-                        product_id=product_id,
-                        kind=cloud_kind,
-                        # pi_event_id=lot_id makes the outbox row
-                        # cross-referenceable to the deleted lot in
-                        # logs / shelf_event_log.pi_event_id (which
-                        # accepts a UUID — the Pi lot_id is UUIDv7
-                        # so the cloud handler's parse path accepts
-                        # it directly).
-                        pi_event_id=lot_id,
-                    )
-                except Exception:  # noqa: BLE001 - observability best-effort
-                    log.warning(
-                        "lot delete: cloud emit_manual_discard raised "
-                        "for lot_id=%s product_id=%s",
-                        lot_id, product_id, exc_info=True,
-                    )
-        log.warning(
-            "lot delete: id=%s rows=%s cloud_event_id=%s product_id=%s",
-            lot_id, counts, cloud_event_id, product_id,
-        )
-        return {
-            "lot_id": lot_id,
-            "rows_deleted": counts,
-            "cloud_event_enqueued": cloud_event_id is not None,
-        }
+        return _delete_lot_impl(conn, db_lock, cloud_emitter, lot_id)
 
     def _delete_usage(usage_id: str) -> dict[str, Any]:
         """Delete a single usage_log row + revert consumption on the lot.

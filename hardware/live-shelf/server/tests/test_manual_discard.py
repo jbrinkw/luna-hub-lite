@@ -1,6 +1,6 @@
 """Manual-discard remove-button handler — Pi-side coverage.
 
-Validates the cloud-propagating ``_delete_lot`` path wired in
+Validates the cloud-propagating ``_delete_lot_impl`` path wired in
 ``server/app.py`` (2026-04-27). The handler must:
 
   1. DELETE the lot row from local SQLite (existing behaviour).
@@ -11,16 +11,18 @@ Validates the cloud-propagating ``_delete_lot`` path wired in
   4. Survive an emit raise: local DELETE remains committed, no
      exception bubbles out of the route.
 
-These tests exercise the helper as a pure unit — they reach into
-``app.py``'s closure indirectly by reproducing its code shape on a
-fresh test DB. We don't spin up the full Flask app because the
-handler's contract with the rest of the system is the (delete + emit)
-pair, which is fully observable on the SQLite + outbox tables.
+These tests import :func:`server.app._delete_lot_impl` — the actual
+production code path used by the route handler — so a regression in
+``app.py`` is caught here. (Pre-2026-04-27 this test rebuilt the body
+inline as ``_make_delete_lot_fn`` and was a shadow re-implementation;
+Audit B caught + fixed the gap by extracting ``_delete_lot_impl`` to
+module scope.)
 """
 
 from __future__ import annotations
 
 import json
+import logging
 import sys
 import threading
 from pathlib import Path
@@ -32,6 +34,7 @@ _ROOT = Path(__file__).resolve().parents[2]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from server.app import _delete_lot_impl  # noqa: E402
 from server.cloud.integration import CloudEventEmitter  # noqa: E402
 from server.storage import init_db  # noqa: E402
 from server.storage import repo as storage_repo  # noqa: E402
@@ -68,54 +71,6 @@ def _seed_lot(conn, *, shelf_id="live_shelf", barcode=None):
     return product.product_id, lot.lot_id
 
 
-def _make_delete_lot_fn(conn, db_lock, cloud_emitter):
-    """Reconstruct the ``_delete_lot`` closure from app.py inline.
-
-    Mirrors the production wiring so we exercise the same code shape.
-    Keeps the test isolated from Flask routing / blueprint construction.
-    """
-    import logging
-    log = logging.getLogger("test_manual_discard")
-
-    def _delete_lot(lot_id):
-        with db_lock:
-            existing = storage_repo.get_lot(conn, lot_id)
-            if existing is None:
-                raise LookupError(f"lot not found: {lot_id!r}")
-            product_id = existing.product_id
-            shelf_id = existing.shelf_id
-            counts = storage_repo.delete_lot(conn, lot_id)
-
-            if shelf_id == "single_item":
-                cloud_kind = "live_scale"
-            elif shelf_id == "catch_all":
-                cloud_kind = "catch_all"
-            else:
-                cloud_kind = "live_shelf"
-
-            cloud_event_id = None
-            if cloud_emitter.enabled and product_id:
-                try:
-                    cloud_event_id = cloud_emitter.emit_manual_discard(
-                        scale_id="scale-01",
-                        product_id=product_id,
-                        kind=cloud_kind,
-                        pi_event_id=lot_id,
-                    )
-                except Exception:
-                    log.warning(
-                        "lot delete: cloud emit raised", exc_info=True,
-                    )
-
-        return {
-            "lot_id": lot_id,
-            "rows_deleted": counts,
-            "cloud_event_enqueued": cloud_event_id is not None,
-        }
-
-    return _delete_lot
-
-
 def _outbox_rows(conn):
     return [
         dict(row)
@@ -134,13 +89,22 @@ def db(tmp_path):
     conn.close()
 
 
+@pytest.fixture
+def silent_log():
+    """A captured logger so the warning emitted on emit-raise doesn't
+    pollute test output. Tests can also assert on .records if desired,
+    but today we only use it as a quiet sink."""
+    log_ = logging.getLogger("test_manual_discard")
+    log_.setLevel(logging.CRITICAL)
+    return log_
+
+
 def test_delete_lot_emits_discarded_event(db):
     """Happy path: delete + enqueue cloud manual_discard event."""
     product_id, lot_id = _seed_lot(db)
     emitter = CloudEventEmitter(db, enabled=True)
-    delete_lot = _make_delete_lot_fn(db, threading.RLock(), emitter)
 
-    summary = delete_lot(lot_id)
+    summary = _delete_lot_impl(db, threading.RLock(), emitter, lot_id)
 
     assert summary["rows_deleted"]["lots"] == 1, (
         f"local lot DELETE must succeed; got {summary!r}"
@@ -181,9 +145,8 @@ def test_delete_lot_with_disabled_emitter_is_local_only(db):
     """When cloud is disabled, local DELETE still happens; no outbox row."""
     _, lot_id = _seed_lot(db, barcode="bc-disabled")
     emitter = CloudEventEmitter(db, enabled=False)
-    delete_lot = _make_delete_lot_fn(db, threading.RLock(), emitter)
 
-    summary = delete_lot(lot_id)
+    summary = _delete_lot_impl(db, threading.RLock(), emitter, lot_id)
 
     assert summary["rows_deleted"]["lots"] == 1
     assert summary["cloud_event_enqueued"] is False, (
@@ -195,7 +158,7 @@ def test_delete_lot_with_disabled_emitter_is_local_only(db):
     )
 
 
-def test_delete_lot_emit_raise_does_not_break_local_delete(db):
+def test_delete_lot_emit_raise_does_not_break_local_delete(db, silent_log):
     """A raising emit must NOT roll back the local DELETE.
 
     Regression guard: cloud observability is best-effort. If the
@@ -211,10 +174,11 @@ def test_delete_lot_emit_raise_does_not_break_local_delete(db):
     emitter.emit_manual_discard.side_effect = RuntimeError(
         "synthetic emit failure"
     )
-    delete_lot = _make_delete_lot_fn(db, threading.RLock(), emitter)
 
     # No exception bubbles out.
-    summary = delete_lot(lot_id)
+    summary = _delete_lot_impl(
+        db, threading.RLock(), emitter, lot_id, log_=silent_log,
+    )
 
     assert summary["rows_deleted"]["lots"] == 1, (
         "local DELETE must succeed even when cloud emit raises"
@@ -231,10 +195,9 @@ def test_delete_lot_unknown_id_raises_lookup_error(db):
     exception class.
     """
     emitter = CloudEventEmitter(db, enabled=True)
-    delete_lot = _make_delete_lot_fn(db, threading.RLock(), emitter)
 
     with pytest.raises(LookupError):
-        delete_lot("never-existed-lot-id")
+        _delete_lot_impl(db, threading.RLock(), emitter, "never-existed-lot-id")
 
     # No outbox row should be enqueued for a lot that never existed.
     assert _outbox_rows(db) == []
@@ -244,9 +207,8 @@ def test_delete_lot_catch_all_shelf_emits_with_catch_all_kind(db):
     """Shelf-id mapping: catch_all lot → kind='catch_all' on the emit."""
     _, lot_id = _seed_lot(db, shelf_id="catch_all", barcode="bc-catch")
     emitter = CloudEventEmitter(db, enabled=True)
-    delete_lot = _make_delete_lot_fn(db, threading.RLock(), emitter)
 
-    delete_lot(lot_id)
+    _delete_lot_impl(db, threading.RLock(), emitter, lot_id)
 
     rows = _outbox_rows(db)
     assert len(rows) == 1
@@ -265,9 +227,8 @@ def test_delete_lot_default_shelf_id_emits_live_shelf(db):
     so the cloud emit always carries a recognised ``kind`` value."""
     _, lot_id = _seed_lot(db, barcode="bc-default")
     emitter = CloudEventEmitter(db, enabled=True)
-    delete_lot = _make_delete_lot_fn(db, threading.RLock(), emitter)
 
-    delete_lot(lot_id)
+    _delete_lot_impl(db, threading.RLock(), emitter, lot_id)
 
     rows = _outbox_rows(db)
     assert len(rows) == 1
