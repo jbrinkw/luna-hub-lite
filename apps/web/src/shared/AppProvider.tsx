@@ -16,9 +16,11 @@ interface AppContextType {
   // True iff any tracked Supabase Realtime channel has lost its SUBSCRIBED
   // status or missed 3 heartbeats — see `realtimeHealth.ts`.
   realtimeDegraded: boolean;
-  // Force-reconnect every tracked realtime channel. Wired to the "Reconnect"
-  // button in `OfflineIndicator`.
-  reconnectRealtime: () => void;
+  // Force-reconnect every tracked realtime channel AND hard-reset the
+  // underlying Supabase Realtime WebSocket. Wired to the "Reconnect" button
+  // in `OfflineIndicator`. Returns a Promise so the UI can show a brief
+  // "Reconnecting…" state while it runs.
+  reconnectRealtime: () => Promise<void>;
 }
 
 const AppContext = createContext<AppContextType>({
@@ -29,7 +31,7 @@ const AppContext = createContext<AppContextType>({
   dayStartHour: 0,
   refreshActivations: async () => {},
   realtimeDegraded: false,
-  reconnectRealtime: () => {},
+  reconnectRealtime: async () => {},
 });
 
 export function useAppContext() {

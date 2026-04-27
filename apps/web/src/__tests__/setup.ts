@@ -29,7 +29,7 @@ vi.mock('@/shared/AppProvider', () => ({
     dayStartHour: 0,
     refreshActivations: vi.fn(),
     realtimeDegraded: false,
-    reconnectRealtime: vi.fn(),
+    reconnectRealtime: vi.fn(async () => {}),
   })),
   AppProvider: ({ children }: any) => children,
 }));
