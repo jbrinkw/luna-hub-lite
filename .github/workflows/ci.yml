@@ -34,13 +34,90 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
 
-  # Unit + integration test jobs removed 2026-04-22 — run them locally
-  # (`pnpm test` / `pnpm test:integration` / `supabase test db`). CI spent
-  # most of its wall-clock on ubuntu + pnpm + supabase setup for tests
-  # that are fast locally, and the integration suite was flaky against
-  # the live OpenFoodFacts API. The `lint` + `typecheck` jobs above stay
-  # (clean-install catches missing deps and stale tsbuildinfo hides).
-  # Drift, deploy, and nightly-audit workflows are unaffected.
+  # Unit tests — Vitest across web/app-tools/mcp-worker. No external
+  # services; jsdom + mocks only. Restored 2026-04-27 after being
+  # disabled in c932227. Catches regressions the lint/typecheck pair
+  # cannot — broken AppProvider mocks, drift between component logic
+  # and unit-test fixtures, runtime errors in pure helpers, etc.
+  unit-tests:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test
+
+  # Integration tests — Vitest against a fresh local Supabase + edge
+  # runtime. The suite hits the real DB (RLS, triggers, RPCs) and the
+  # real edge functions over HTTP, so a working stack is required. The
+  # known-flaky live-OFF assertions in analyze-product.test.ts are
+  # gated behind RUN_LIVE_OFF=1 (skipped here, opt-in for the nightly
+  # audit job). Everything else — auth, validation, quota, CORS,
+  # upstream-failure paths via x-test-force-failure — runs here.
+  #
+  # Restored 2026-04-27 after being disabled in c932227. The c932227
+  # rationale ("flaky against live OpenFoodFacts API") is addressed by
+  # the RUN_LIVE_OFF gate; the rest of the suite is deterministic.
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: supabase/setup-cli@v1
+        with:
+          version: 2.76.15
+      - run: pnpm install --frozen-lockfile
+
+      - name: Start Supabase (db + auth + storage + edge runtime)
+        # `supabase start` boots the full local stack including the edge
+        # runtime that serves functions defined under supabase/functions/
+        # via Kong. The default JWTs in .env.test are wired into the
+        # local stack, so SUPABASE_URL/anon/service_role from .env.test
+        # work out of the box.
+        run: supabase start
+
+      - name: Apply pgTAP migrations + run DB tests
+        # `supabase test db` runs the pgTAP suites under supabase/tests/
+        # against the local stack started above. Catches schema +
+        # RLS regressions before the integration suite hits them.
+        run: pnpm test:db
+
+      - name: Run integration tests (RUN_LIVE_OFF unset → live-OFF skipped)
+        # The seven OFF-dependent assertions in analyze-product.test.ts
+        # are gated by `it.skipIf(!process.env.RUN_LIVE_OFF)` and skip
+        # silently here. Everything else exercises the full edge fn +
+        # DB round-trip.
+        env:
+          # Default JWTs from .env.test — match local supabase stack.
+          SUPABASE_URL: http://127.0.0.1:54321
+        run: pnpm test:integration
+
+      - name: Stop Supabase
+        if: always()
+        run: supabase stop --no-backup
+        continue-on-error: true
+
+      - name: Upload supabase logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: supabase-logs
+          path: |
+            supabase/.temp/
+            supabase/.branches/
+          if-no-files-found: ignore
+          retention-days: 7
 
   # e2e-tests:
   #   name: E2E Tests

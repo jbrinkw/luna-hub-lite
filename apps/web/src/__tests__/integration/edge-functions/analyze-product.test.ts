@@ -14,6 +14,22 @@ import { createTestUser, cleanupUser } from '../../test-helpers';
 
 const EDGE_URL = `${SUPABASE_URL}/functions/v1/analyze-product`;
 
+// Live-OpenFoodFacts gate. The handful of tests below assert against the
+// real OFF API response shape (Coca-Cola Zero, Nutella, Pringles, etc.).
+// They flake under OFF rate limiting and intermittent 5xx, which is the
+// reason the unit + integration CI jobs were disabled in commit c932227.
+//
+// Restoration plan (2026-04-27): keep the assertions as-is, gate them
+// behind RUN_LIVE_OFF=1 so CI skips by default. Local devs and the
+// nightly audit runner can opt in with `RUN_LIVE_OFF=1 pnpm test:integration`.
+//
+// The non-OFF tests (auth, validation, quota, CORS, failure paths via
+// `x-test-force-failure`) keep running unconditionally — they exercise
+// the edge function + Supabase + DB + RLS chain without depending on
+// any live external API.
+const RUN_LIVE_OFF = process.env.RUN_LIVE_OFF === '1';
+const skipLiveOff = !RUN_LIVE_OFF;
+
 describe('Analyze-Product Edge Function', () => {
   let userId: string;
   let userJwt: string;
@@ -195,7 +211,7 @@ describe('Analyze-Product Edge Function', () => {
 
   // ─── OpenFoodFacts lookup ──────────────────────────────────
 
-  it('returns 404 for barcode not found in OpenFoodFacts', async () => {
+  it.skipIf(skipLiveOff)('returns 404 for barcode not found in OpenFoodFacts', async () => {
     // Reset quota
     await (adminClient as any)
       .schema('chefbyte')
@@ -218,157 +234,181 @@ describe('Analyze-Product Edge Function', () => {
     expect(body.error).toMatch(/not found/i);
   });
 
-  it('looks up a real barcode from OpenFoodFacts', async () => {
-    const res = await fetch(EDGE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${userJwt}`,
-      },
-      body: JSON.stringify({ barcode: '5000159484695' }),
-    });
+  it.skipIf(skipLiveOff)(
+    'looks up a real barcode from OpenFoodFacts',
+    async () => {
+      const res = await fetch(EDGE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userJwt}`,
+        },
+        body: JSON.stringify({ barcode: '5000159484695' }),
+      });
 
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe('ai');
-    expect(body.off).toBeDefined();
-    expect(body.off.product_name).toBeTruthy();
-    // suggestion may be null if ANTHROPIC_API_KEY isn't configured
-  }, 30_000);
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.source).toBe('ai');
+      expect(body.off).toBeDefined();
+      expect(body.off.product_name).toBeTruthy();
+      // suggestion may be null if ANTHROPIC_API_KEY isn't configured
+    },
+    30_000,
+  );
 
   // ─── Real barcode data verification ──────────────────────
 
-  it('Coca-Cola Zero (049000042566) returns correct OFF data', async () => {
-    const res = await fetch(EDGE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${userJwt}`,
-      },
-      body: JSON.stringify({ barcode: '049000042566' }),
-    });
+  it.skipIf(skipLiveOff)(
+    'Coca-Cola Zero (049000042566) returns correct OFF data',
+    async () => {
+      const res = await fetch(EDGE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userJwt}`,
+        },
+        body: JSON.stringify({ barcode: '049000042566' }),
+      });
 
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe('ai');
-    expect(body.off).toBeDefined();
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.source).toBe('ai');
+      expect(body.off).toBeDefined();
 
-    // OFF data shape verification
-    expect(body.off.product_name).toBeTruthy();
-    expect(body.off.brands).toMatch(/coca.cola/i);
+      // OFF data shape verification
+      expect(body.off.product_name).toBeTruthy();
+      expect(body.off.brands).toMatch(/coca.cola/i);
 
-    // Coca-Cola Zero has ~0 calories — the OFF data should reflect this
-    // (The AI suggestion may normalize differently, but raw OFF brands must match)
-  }, 30_000);
+      // Coca-Cola Zero has ~0 calories — the OFF data should reflect this
+      // (The AI suggestion may normalize differently, but raw OFF brands must match)
+    },
+    30_000,
+  );
 
-  it('Nutella (3017620422003) returns correct OFF data with nutriments', async () => {
-    const res = await fetch(EDGE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${userJwt}`,
-      },
-      body: JSON.stringify({ barcode: '3017620422003' }),
-    });
+  it.skipIf(skipLiveOff)(
+    'Nutella (3017620422003) returns correct OFF data with nutriments',
+    async () => {
+      const res = await fetch(EDGE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userJwt}`,
+        },
+        body: JSON.stringify({ barcode: '3017620422003' }),
+      });
 
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe('ai');
-    expect(body.off).toBeDefined();
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.source).toBe('ai');
+      expect(body.off).toBeDefined();
 
-    // Nutella is a very stable product in OFF
-    expect(body.off.product_name).toMatch(/nutella/i);
-    expect(body.off.brands).toMatch(/nutella/i);
+      // Nutella is a very stable product in OFF
+      expect(body.off.product_name).toMatch(/nutella/i);
+      expect(body.off.brands).toMatch(/nutella/i);
 
-    // Verify the image_url is returned (Nutella always has images in OFF)
-    expect(body.off.image_url).toBeTruthy();
-  }, 30_000);
+      // Verify the image_url is returned (Nutella always has images in OFF)
+      expect(body.off.image_url).toBeTruthy();
+    },
+    30_000,
+  );
 
-  it('Coca-Cola Original EU (5449000000996) returns correct OFF data', async () => {
-    const res = await fetch(EDGE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${userJwt}`,
-      },
-      body: JSON.stringify({ barcode: '5449000000996' }),
-    });
+  it.skipIf(skipLiveOff)(
+    'Coca-Cola Original EU (5449000000996) returns correct OFF data',
+    async () => {
+      const res = await fetch(EDGE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userJwt}`,
+        },
+        body: JSON.stringify({ barcode: '5449000000996' }),
+      });
 
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe('ai');
-    expect(body.off).toBeDefined();
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.source).toBe('ai');
+      expect(body.off).toBeDefined();
 
-    expect(body.off.product_name).toMatch(/coca.cola/i);
-    expect(body.off.brands).toMatch(/coca.cola/i);
-    // Categories should be present for well-known products
-    expect(body.off.categories).toBeTruthy();
-  }, 30_000);
+      expect(body.off.product_name).toMatch(/coca.cola/i);
+      expect(body.off.brands).toMatch(/coca.cola/i);
+      // Categories should be present for well-known products
+      expect(body.off.categories).toBeTruthy();
+    },
+    30_000,
+  );
 
   // ─── Response shape assertions for OFF fallback path ──────
 
-  it('real barcode returns suggestion=null and valid OFF data when no API key', async () => {
-    // Without ANTHROPIC_API_KEY configured, the edge function returns
-    // suggestion=null but still returns valid OFF data
-    const res = await fetch(EDGE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${userJwt}`,
-      },
-      body: JSON.stringify({ barcode: '0055577421024' }),
-    });
+  it.skipIf(skipLiveOff)(
+    'real barcode returns suggestion=null and valid OFF data when no API key',
+    async () => {
+      // Without ANTHROPIC_API_KEY configured, the edge function returns
+      // suggestion=null but still returns valid OFF data
+      const res = await fetch(EDGE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userJwt}`,
+        },
+        body: JSON.stringify({ barcode: '0055577421024' }),
+      });
 
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe('ai');
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.source).toBe('ai');
 
-    // suggestion may be null (no ANTHROPIC_API_KEY) or an object (with key)
-    // Either way, off must be present with valid product data
-    expect(body.off).toBeDefined();
-    expect(body.off.product_name).toBeTruthy();
-    expect(body.off.nutriments).toBeDefined();
-    expect(typeof body.off.nutriments).toBe('object');
+      // suggestion may be null (no ANTHROPIC_API_KEY) or an object (with key)
+      // Either way, off must be present with valid product data
+      expect(body.off).toBeDefined();
+      expect(body.off.product_name).toBeTruthy();
+      expect(body.off.nutriments).toBeDefined();
+      expect(typeof body.off.nutriments).toBe('object');
 
-    // At least one calorie field must exist
-    const n = body.off.nutriments;
-    const hasCalories = n['energy-kcal_serving'] !== undefined || n['energy-kcal_100g'] !== undefined;
-    expect(hasCalories).toBe(true);
-  }, 30_000);
+      // At least one calorie field must exist
+      const n = body.off.nutriments;
+      const hasCalories = n['energy-kcal_serving'] !== undefined || n['energy-kcal_100g'] !== undefined;
+      expect(hasCalories).toBe(true);
+    },
+    30_000,
+  );
 
-  it('OFF response includes serving_size and nutriments fields', async () => {
-    // Use Pringles Original (US barcode) — a well-known product with stable OFF data
-    // (different barcode from other tests to avoid existing-product detection)
-    const res = await fetch(EDGE_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${userJwt}`,
-      },
-      body: JSON.stringify({ barcode: '038000845512' }),
-    });
+  it.skipIf(skipLiveOff)(
+    'OFF response includes serving_size and nutriments fields',
+    async () => {
+      // Use Pringles Original (US barcode) — a well-known product with stable OFF data
+      // (different barcode from other tests to avoid existing-product detection)
+      const res = await fetch(EDGE_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userJwt}`,
+        },
+        body: JSON.stringify({ barcode: '038000845512' }),
+      });
 
-    expect(res.status).toBe(200);
-    const body = await res.json();
-    expect(body.source).toBe('ai');
-    expect(body.off).toBeDefined();
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.source).toBe('ai');
+      expect(body.off).toBeDefined();
 
-    // Verify the off object has all required fields
-    expect(body.off).toHaveProperty('product_name');
-    expect(body.off).toHaveProperty('brands');
-    expect(body.off).toHaveProperty('image_url');
-    expect(body.off).toHaveProperty('categories');
-    expect(body.off).toHaveProperty('serving_size');
-    expect(body.off).toHaveProperty('nutriments');
+      // Verify the off object has all required fields
+      expect(body.off).toHaveProperty('product_name');
+      expect(body.off).toHaveProperty('brands');
+      expect(body.off).toHaveProperty('image_url');
+      expect(body.off).toHaveProperty('categories');
+      expect(body.off).toHaveProperty('serving_size');
+      expect(body.off).toHaveProperty('nutriments');
 
-    // Verify nutriments is a populated object
-    expect(typeof body.off.nutriments).toBe('object');
-    expect(Object.keys(body.off.nutriments).length).toBeGreaterThan(0);
+      // Verify nutriments is a populated object
+      expect(typeof body.off.nutriments).toBe('object');
+      expect(Object.keys(body.off.nutriments).length).toBeGreaterThan(0);
 
-    // Pringles should have product_name and brands
-    expect(body.off.product_name).toBeTruthy();
-    expect(body.off.brands).toMatch(/pringles/i);
-  }, 30_000);
+      // Pringles should have product_name and brands
+      expect(body.off.product_name).toBeTruthy();
+      expect(body.off.brands).toMatch(/pringles/i);
+    },
+    30_000,
+  );
 
   // ─── HTTP method tests ──────────────────────────────────
 
@@ -406,29 +446,33 @@ describe('Analyze-Product Edge Function', () => {
   // Verifies raw OFF data for a known barcode. Uses a single well-known
   // product to minimize rate limiting from the OFF API.
 
-  it('OFF API returns correct nutriment data for Nutella (3017620422003)', async () => {
-    // Small delay to avoid rate limiting from prior edge function OFF calls
-    await new Promise((r) => setTimeout(r, 1000));
+  it.skipIf(skipLiveOff)(
+    'OFF API returns correct nutriment data for Nutella (3017620422003)',
+    async () => {
+      // Small delay to avoid rate limiting from prior edge function OFF calls
+      await new Promise((r) => setTimeout(r, 1000));
 
-    const resp = await fetch('https://world.openfoodfacts.org/api/v0/product/3017620422003.json', {
-      headers: { 'User-Agent': 'LunaHub/1.0 (test)' },
-    });
-    expect(resp.ok).toBe(true);
-    const json = await resp.json();
-    expect(json.status).toBe(1);
+      const resp = await fetch('https://world.openfoodfacts.org/api/v0/product/3017620422003.json', {
+        headers: { 'User-Agent': 'LunaHub/1.0 (test)' },
+      });
+      expect(resp.ok).toBe(true);
+      const json = await resp.json();
+      expect(json.status).toBe(1);
 
-    const p = json.product;
-    expect(p.product_name).toMatch(/nutella/i);
+      const p = json.product;
+      expect(p.product_name).toMatch(/nutella/i);
 
-    // Nutella nutriments per 100g — stable values
-    const n = p.nutriments;
-    expect(n).toBeDefined();
-    expect(n['fat_100g']).toBeGreaterThan(25); // ~30.9g
-    expect(n['carbohydrates_100g']).toBeGreaterThan(50); // ~57.5g
-    expect(n['proteins_100g']).toBeGreaterThan(4); // ~6.3g
-    expect(n['sugars_100g']).toBeGreaterThan(50);
-    expect(p.serving_size).toBeTruthy();
-  }, 15_000);
+      // Nutella nutriments per 100g — stable values
+      const n = p.nutriments;
+      expect(n).toBeDefined();
+      expect(n['fat_100g']).toBeGreaterThan(25); // ~30.9g
+      expect(n['carbohydrates_100g']).toBeGreaterThan(50); // ~57.5g
+      expect(n['proteins_100g']).toBeGreaterThan(4); // ~6.3g
+      expect(n['sugars_100g']).toBeGreaterThan(50);
+      expect(p.serving_size).toBeTruthy();
+    },
+    15_000,
+  );
 });
 
 /**
@@ -548,83 +592,75 @@ describe('Analyze-Product Edge Function — failure paths', () => {
   // `x-test-force-failure: anthropic_timeout` header triggers the
   // simulated timeout in normalizeWithAI(). Together these exercise the
   // exact soft-degrade branch the production scanner falls through to.
-  it(
-    'Anthropic timeout: returns 200 with ai_degraded=true + OFF data; quota consumed once',
-    async () => {
-      await resetQuota();
-      const quotaBefore = await getQuotaCount();
+  it('Anthropic timeout: returns 200 with ai_degraded=true + OFF data; quota consumed once', async () => {
+    await resetQuota();
+    const quotaBefore = await getQuotaCount();
 
-      const res = await fetch(EDGE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${userJwt}`,
-          'x-test-force-failure': 'anthropic_timeout',
-          'x-test-off-mode': 'canned',
-        },
-        body: JSON.stringify({ barcode: 'TESTTIMEOUT0001' }),
-      });
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+        'x-test-force-failure': 'anthropic_timeout',
+        'x-test-off-mode': 'canned',
+      },
+      body: JSON.stringify({ barcode: 'TESTTIMEOUT0001' }),
+    });
 
-      expect(res.status).toBe(200);
-      expect(res.status).not.toBe(500);
-      const body = await res.json();
-      expect(body.source).toBe('ai');
-      expect(body.ai_degraded).toBe(true);
-      expect(body.ai_reason).toBe('timeout');
-      expect(body.suggestion).toBeNull();
+    expect(res.status).toBe(200);
+    expect(res.status).not.toBe(500);
+    const body = await res.json();
+    expect(body.source).toBe('ai');
+    expect(body.ai_degraded).toBe(true);
+    expect(body.ai_reason).toBe('timeout');
+    expect(body.suggestion).toBeNull();
 
-      // OFF fallback data must be present so the scanner can still
-      // build a product from nutriments. Canned shape matches Nutella.
-      expect(body.off).toBeDefined();
-      expect(body.off.product_name).toMatch(/nutella/i);
-      expect(body.off.nutriments).toBeDefined();
+    // OFF fallback data must be present so the scanner can still
+    // build a product from nutriments. Canned shape matches Nutella.
+    expect(body.off).toBeDefined();
+    expect(body.off.product_name).toMatch(/nutella/i);
+    expect(body.off.nutriments).toBeDefined();
 
-      // Quota consumed exactly once (OFF succeeded → quota charged).
-      const quotaAfter = await getQuotaCount();
-      expect(quotaAfter).toBe(quotaBefore + 1);
-    },
-    // 25s Anthropic timeout + buffer. We short-circuit so this resolves
-    // immediately in practice.
-    15_000,
-  );
+    // Quota consumed exactly once (OFF succeeded → quota charged).
+    const quotaAfter = await getQuotaCount();
+    expect(quotaAfter).toBe(quotaBefore + 1);
+  }, // 25s Anthropic timeout + buffer. We short-circuit so this resolves
+  // immediately in practice.
+  15_000);
 
   // ─── Anthropic returns malformed JSON — SOFT failure ─────
-  it(
-    'Anthropic malformed JSON: does not 500, returns degraded state with OFF fallback',
-    async () => {
-      await resetQuota();
-      const quotaBefore = await getQuotaCount();
+  it('Anthropic malformed JSON: does not 500, returns degraded state with OFF fallback', async () => {
+    await resetQuota();
+    const quotaBefore = await getQuotaCount();
 
-      const res = await fetch(EDGE_URL, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${userJwt}`,
-          'x-test-force-failure': 'anthropic_malformed',
-          'x-test-off-mode': 'canned',
-        },
-        body: JSON.stringify({ barcode: 'TESTMALFORM0001' }),
-      });
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+        'x-test-force-failure': 'anthropic_malformed',
+        'x-test-off-mode': 'canned',
+      },
+      body: JSON.stringify({ barcode: 'TESTMALFORM0001' }),
+    });
 
-      expect(res.status).toBe(200);
-      expect(res.status).not.toBe(500);
-      const body = await res.json();
-      expect(body.source).toBe('ai');
-      // `anthropic_malformed` mirrors the real JSON.parse-failure branch
-      // which returns null suggestion. The main handler only sets
-      // ai_degraded when the function THREW; a returned null counts as
-      // a successful (but useless) suggestion. Either way the shape
-      // must include valid OFF data so the scanner keeps working.
-      expect(body.suggestion).toBeNull();
-      expect(body.off).toBeDefined();
-      expect(body.off.nutriments).toBeDefined();
+    expect(res.status).toBe(200);
+    expect(res.status).not.toBe(500);
+    const body = await res.json();
+    expect(body.source).toBe('ai');
+    // `anthropic_malformed` mirrors the real JSON.parse-failure branch
+    // which returns null suggestion. The main handler only sets
+    // ai_degraded when the function THREW; a returned null counts as
+    // a successful (but useless) suggestion. Either way the shape
+    // must include valid OFF data so the scanner keeps working.
+    expect(body.suggestion).toBeNull();
+    expect(body.off).toBeDefined();
+    expect(body.off.nutriments).toBeDefined();
 
-      // Quota consumed (OFF succeeded).
-      const quotaAfter = await getQuotaCount();
-      expect(quotaAfter).toBe(quotaBefore + 1);
-    },
-    15_000,
-  );
+    // Quota consumed (OFF succeeded).
+    const quotaAfter = await getQuotaCount();
+    expect(quotaAfter).toBe(quotaBefore + 1);
+  }, 15_000);
 
   // ─── Placeholder resurrection (audit item #31) ───────────
   // A placeholder row from an earlier FAILED analyze call must be UPDATED
