@@ -1,5 +1,5 @@
 BEGIN;
-SELECT plan(12);
+SELECT plan(15);
 
 ------------------------------------------------------------
 -- Setup: two users, each with a shelf device.
@@ -48,14 +48,14 @@ SELECT has_table(
 SELECT columns_are(
   'chefbyte', 'livetrack_import_sessions',
   ARRAY[
-    'session_id','user_id','device_id','state',
+    'session_id','user_id','device_id','scale_id','state',
     'current_barcode','current_product_id',
     'scale_reading_g','scale_reading_ts',
     'ai_tare_product_form','ai_tare_g',
     'ai_tare_confidence','ai_tare_reasoning','last_error',
     'created_at','updated_at','expires_at'
   ],
-  'livetrack_import_sessions has expected columns'
+  'livetrack_import_sessions has expected columns (incl. scale_id)'
 );
 
 ------------------------------------------------------------
@@ -224,6 +224,60 @@ SELECT has_index(
   'chefbyte', 'livetrack_import_sessions', 'lti_active_idx',
   'lti_active_idx partial index exists'
 );
+
+------------------------------------------------------------
+-- 12. lti_active_device_scale_idx partial index exists (2026-04-27)
+------------------------------------------------------------
+
+SELECT has_index(
+  'chefbyte', 'livetrack_import_sessions', 'lti_active_device_scale_idx',
+  'lti_active_device_scale_idx (device, scale) partial index exists'
+);
+
+------------------------------------------------------------
+-- 13. scale_id is nullable (legacy backfill) but writable
+------------------------------------------------------------
+
+SET ROLE service_role;
+
+INSERT INTO chefbyte.live_shelf_devices (user_id, device_name, import_key_hash)
+VALUES (:'_owner_uid'::uuid, 'owner-pi-2', 'hash_owner2_' || gen_random_uuid());
+
+SELECT device_id AS owner_device2
+  FROM chefbyte.live_shelf_devices
+  WHERE user_id = :'_owner_uid'::uuid
+    AND device_name = 'owner-pi-2' LIMIT 1 \gset
+
+INSERT INTO chefbyte.livetrack_import_sessions (user_id, device_id, scale_id, state)
+VALUES
+  (:'_owner_uid'::uuid, :'owner_device2'::uuid, 'scale-01', 'waiting_barcode'),
+  (:'_owner_uid'::uuid, :'owner_device2'::uuid, 'scale-03', 'waiting_barcode');
+
+SELECT is(
+  (SELECT count(*)::int
+     FROM chefbyte.livetrack_import_sessions
+     WHERE device_id = :'owner_device2'::uuid
+       AND state = 'waiting_barcode'),
+  2,
+  'two sessions on the same device, different scale_ids, coexist'
+);
+
+------------------------------------------------------------
+-- 14. Per-(device, scale) lookup returns the correct row
+------------------------------------------------------------
+
+SELECT is(
+  (SELECT scale_id
+     FROM chefbyte.livetrack_import_sessions
+     WHERE device_id = :'owner_device2'::uuid
+       AND scale_id = 'scale-01'
+       AND state NOT IN ('closed','expired')
+     LIMIT 1),
+  'scale-01',
+  'per-(device, scale) lookup matches scale-01 only'
+);
+
+SET ROLE postgres;
 
 SELECT * FROM finish();
 ROLLBACK;

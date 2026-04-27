@@ -250,7 +250,16 @@ export function LiveTrackImportPage() {
   const createSession = useCallback(async () => {
     dispatch({ type: 'start_session' });
     try {
-      const fresh = await createLiveTrackSession();
+      // 2026-04-27 scoping: pass deviceId + scaleId explicitly so the Pi
+      // only suppresses events from THIS scale. The wizard always targets
+      // the catch-all rig (scale-02) — that's the scale the operator
+      // physically places containers on for the import flow. Other scales
+      // (scale-01 live_shelf, scale-03 single_item) keep flowing events
+      // while the wizard is open.
+      const fresh = await createLiveTrackSession({
+        deviceId: device?.device_id,
+        scaleId: 'scale-02',
+      });
       setSessionId(fresh.session_id);
       dispatch({ type: 'session_ready', session: fresh });
     } catch (err: any) {
@@ -261,7 +270,7 @@ export function LiveTrackImportPage() {
         dispatch({ type: 'error', message: err?.message ?? 'Could not create session' });
       }
     }
-  }, []);
+  }, [device?.device_id]);
 
   // Close session on unmount or when the user navigates away. Best-
   // effort; a failed close is fine — the row expires in 10 min.

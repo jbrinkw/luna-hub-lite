@@ -7,7 +7,7 @@
 -- The [MEAL] helper gets layered collision tests.
 
 BEGIN;
-SELECT plan(33);
+SELECT plan(34);
 
 ------------------------------------------------------------
 -- Setup
@@ -426,19 +426,24 @@ SET ROLE postgres;
 
 SET ROLE service_role;
 
+-- 2026-04-27: invariant relaxed from "one active per user" to
+-- "one active per (user, scale_id)" so multi-scale wizards on the same
+-- device coexist (smell #8 fix). Index renamed to
+-- livetrack_sessions_one_active_per_user_scale.
 SELECT has_index(
   'chefbyte', 'livetrack_import_sessions',
-  'livetrack_sessions_one_active_per_user',
-  'invariant 6: partial unique index livetrack_sessions_one_active_per_user exists'
+  'livetrack_sessions_one_active_per_user_scale',
+  'invariant 6: partial unique index livetrack_sessions_one_active_per_user_scale exists'
 );
 
--- Happy path: first active session for alice.
+-- Happy path: first active session for alice on scale-02.
 INSERT INTO chefbyte.livetrack_import_sessions (
-  session_id, user_id, device_id, state
+  session_id, user_id, device_id, scale_id, state
 ) VALUES (
   '66666666-6666-6666-6666-666666666601',
   :'alice_uid'::uuid,
   '22222222-2222-2222-2222-222222222201',
+  'scale-02',
   'waiting_barcode'
 );
 
@@ -448,30 +453,51 @@ SELECT ok(
   'invariant 6: first active session inserted'
 );
 
--- Violation: a second active session for alice rejected.
+-- Violation: a second active session for alice on the SAME scale rejected.
 SELECT throws_ok(
   format(
     $sql$INSERT INTO chefbyte.livetrack_import_sessions (
-           session_id, user_id, device_id, state
+           session_id, user_id, device_id, scale_id, state
          ) VALUES (
            '66666666-6666-6666-6666-666666666602', %L,
            '22222222-2222-2222-2222-222222222201',
+           'scale-02',
            'waiting_scale'
          )$sql$,
     :'alice_uid'
   ),
   '23505',
   NULL,
-  'invariant 6: second active livetrack session rejected'
+  'invariant 6: second active livetrack session on same scale rejected'
+);
+
+-- Happy path: a SECOND active session for alice on a DIFFERENT scale
+-- IS allowed (the very fix). Multi-scale wizards coexist.
+INSERT INTO chefbyte.livetrack_import_sessions (
+  session_id, user_id, device_id, scale_id, state
+) VALUES (
+  '66666666-6666-6666-6666-666666666602',
+  :'alice_uid'::uuid,
+  '22222222-2222-2222-2222-222222222201',
+  'scale-01',
+  'waiting_barcode'
+);
+
+SELECT ok(
+  EXISTS (SELECT 1 FROM chefbyte.livetrack_import_sessions
+          WHERE session_id = '66666666-6666-6666-6666-666666666602'
+            AND scale_id = 'scale-01'),
+  'invariant 6: active session on a different scale_id IS permitted'
 );
 
 -- Happy path: a closed session alongside an active one is fine.
 INSERT INTO chefbyte.livetrack_import_sessions (
-  session_id, user_id, device_id, state
+  session_id, user_id, device_id, scale_id, state
 ) VALUES (
   '66666666-6666-6666-6666-666666666603',
   :'alice_uid'::uuid,
   '22222222-2222-2222-2222-222222222201',
+  'scale-02',
   'closed'
 );
 
@@ -484,11 +510,12 @@ SELECT ok(
 
 -- Multiple closed/expired rows coexist (partial WHERE excludes them).
 INSERT INTO chefbyte.livetrack_import_sessions (
-  session_id, user_id, device_id, state
+  session_id, user_id, device_id, scale_id, state
 ) VALUES (
   '66666666-6666-6666-6666-666666666604',
   :'alice_uid'::uuid,
   '22222222-2222-2222-2222-222222222201',
+  'scale-02',
   'expired'
 );
 
@@ -502,11 +529,12 @@ SELECT is(
 
 -- Cross-user: bob may have his own active session.
 INSERT INTO chefbyte.livetrack_import_sessions (
-  session_id, user_id, device_id, state
+  session_id, user_id, device_id, scale_id, state
 ) VALUES (
   '66666666-6666-6666-6666-666666666b01',
   :'bob_uid'::uuid,
   '22222222-2222-2222-2222-22222222220b',
+  'scale-02',
   'waiting_barcode'
 );
 
@@ -585,18 +613,23 @@ SELECT is(
   'post-migration: zero (user, source_client_event_id) duplicates in food_logs'
 );
 
--- Post-migration invariant 6 count
+-- Post-migration invariant 6 count: 2026-04-27 scoping relaxed the
+-- invariant from per-user to per-(user, scale_id). The query checks
+-- the new scope — at most one active session per (user, scale) tuple.
+-- Pre-fix this query checked per-user; the relaxed assertion catches
+-- the actual constraint we still enforce.
 SELECT is(
   (SELECT COUNT(*)::int
      FROM (
-       SELECT user_id
+       SELECT user_id, scale_id
          FROM chefbyte.livetrack_import_sessions
         WHERE state NOT IN ('closed','expired')
-        GROUP BY user_id
+          AND scale_id IS NOT NULL
+        GROUP BY user_id, scale_id
        HAVING COUNT(*) > 1
      ) AS dup),
   0,
-  'post-migration: zero users have multiple active livetrack sessions'
+  'post-migration: zero (user, scale_id) tuples have multiple active livetrack sessions'
 );
 
 SELECT * FROM finish();

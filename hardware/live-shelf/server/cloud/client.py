@@ -303,14 +303,11 @@ class CloudClient:
     def get_active_livetrack_session(self) -> dict | None:
         """Poll for the active LiveTrack Import session for this device.
 
-        Targets the ``livetrack-session`` edge function (sibling to the
-        ``shelf-ingest`` base_url) — intentional separation so the
-        session-polling path's logs/failures stay distinct from the
-        event-drain path's.
-
-        Returns the session row on success, or ``None`` when the cloud
-        reports no active session. Raises :class:`CloudError` for any
-        non-2xx response so the poller can decide whether to backoff.
+        Legacy single-session form. Returns the newest active session row
+        across every scale on this device, or ``None``. Kept for
+        backwards compatibility with callers that don't yet honor the
+        per-scale scoping. New callers should prefer
+        :meth:`get_active_livetrack_sessions`.
         """
         url = f"{self._functions_root_url}/livetrack-session/active"
         resp = self._session.get(url, timeout=self._timeout_s)
@@ -319,6 +316,35 @@ class CloudClient:
         if not isinstance(session, dict):
             return None
         return session
+
+    def get_active_livetrack_sessions(self) -> list[dict]:
+        """Poll for ALL active LiveTrack Import sessions on this device.
+
+        Used by :class:`LiveTrackPoller` to maintain a set of
+        ``(device_id, scale_id)`` tuples currently being calibrated by
+        the browser wizard. The Pi gates events per-tuple so unrelated
+        scales keep flowing while one is being calibrated.
+
+        Returns a list of session dicts (possibly empty) — never raises
+        on "no sessions"; only on transport/HTTP errors via the inherited
+        :class:`CloudError` path.
+
+        The edge function returns ``{ sessions: [...], session: <newest> }``
+        from 2026-04-27. This method tolerates the legacy single-session
+        body shape (``{ session: <row> }``) by collapsing it to a 1-item
+        list when the new ``sessions`` key is absent.
+        """
+        url = f"{self._functions_root_url}/livetrack-session/active"
+        resp = self._session.get(url, timeout=self._timeout_s)
+        parsed = self._parse_or_raise(resp)
+        if not isinstance(parsed, dict):
+            return []
+        sessions = parsed.get("sessions")
+        if isinstance(sessions, list):
+            return [s for s in sessions if isinstance(s, dict)]
+        # Legacy shape — server hasn't been redeployed yet.
+        legacy = parsed.get("session")
+        return [legacy] if isinstance(legacy, dict) else []
 
     def post_livetrack_session_update(
         self, session_id: str, **fields: Any,

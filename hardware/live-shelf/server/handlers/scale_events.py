@@ -467,36 +467,17 @@ class ScaleHandler:
     # timer in the happy path.
     _LIVETRACK_MAX_SUPPRESSION_SECONDS = 15 * 60
 
-    def _is_wizard_active(self) -> tuple[bool, Optional[str], Optional[str]]:
-        """Return (suppress, session_id, state) from the LiveTrack snapshot.
+    def _validate_active_snapshot(
+        self, snap: Optional[dict[str, Any]],
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """Apply state + age checks to a candidate snapshot row.
 
-        Called at the top of ``handle_scale_event`` to decide whether to
-        short-circuit the full event pipeline (no scale_events row, no
-        classifier, no cloud_outbox emission) because the user is mid-
-        wizard on the cloud UI.
-
-        Returns ``(True, session_id, state)`` when the snapshot reports
-        an ACTIVE (non-terminal) session whose ``created_at`` is within
-        :attr:`_LIVETRACK_MAX_SUPPRESSION_SECONDS`. Returns
-        ``(False, None, None)`` otherwise — no poller attached, no
-        snapshot, terminal state, unknown state, or the defensive
-        Pi-side timeout has fired.
-
-        The defensive timeout exists for the rare case where the poll
-        thread dies or blocks: without it, a stuck snapshot would
-        permanently silence the event pipeline.
+        Returns ``(True, session_id, state)`` when the snapshot is in a
+        non-terminal state and within the defensive Pi-side timeout.
+        ``(False, None, None)`` otherwise. Extracted from the legacy
+        ``_is_wizard_active`` so both the per-tuple gate and the legacy
+        global gate share the same checks.
         """
-        poller = self._livetrack_poller
-        if poller is None:
-            return False, None, None
-        try:
-            snap = poller.snapshot()
-        except Exception:  # noqa: BLE001 — never let the gate raise
-            log.warning(
-                "livetrack: poller.snapshot() raised; treating as inactive",
-                exc_info=True,
-            )
-            return False, None, None
         if not isinstance(snap, dict):
             return False, None, None
         state = str(snap.get("state", ""))
@@ -524,6 +505,88 @@ class ScaleHandler:
                     return False, None, None
         session_id = snap.get("session_id")
         return True, (str(session_id) if session_id else None), state
+
+    def _is_wizard_active_for(
+        self,
+        device_id: Optional[str],
+        scale_id: Optional[str],
+    ) -> tuple[bool, Optional[str], Optional[str]]:
+        """Return (suppress, session_id, state) for THIS (device, scale) tuple.
+
+        Pre-2026-04-27 the wizard suppression gate was global per-user:
+        any active session anywhere blocked every scale's events. Now the
+        Pi tracks active sessions per ``(device_id, scale_id)`` tuple —
+        unrelated scales keep flowing while one is being calibrated.
+
+        Lookup order:
+          1. Per-tuple lookup via :meth:`LiveTrackPoller.is_active_for` —
+             the targeted-suppression mode introduced by the 2026-04-27
+             fix. Returns the matching session row if present, or None
+             on a miss (no scoped session for THIS scale → don't suppress).
+          2. Legacy fallback: when ``scale_id`` is unknown / missing
+             AND the global snapshot says wizard active, suppress with
+             a warning so a misbehaving event source doesn't slip past
+             the gate. Removing this fallback would make any event
+             missing scale_id bypass suppression entirely — riskier than
+             over-suppression for the rare unknown-scale case.
+
+        Returns ``(False, None, None)`` when no poller is attached, the
+        poller raises, or no matching active session is in scope.
+        """
+        poller = self._livetrack_poller
+        if poller is None:
+            return False, None, None
+
+        # Path 1: per-tuple match. Fast path for the common case.
+        per_tuple_lookup = getattr(poller, "is_active_for", None)
+        if callable(per_tuple_lookup) and device_id and scale_id:
+            try:
+                snap = per_tuple_lookup(device_id, scale_id)
+            except Exception:  # noqa: BLE001
+                log.warning(
+                    "livetrack: poller.is_active_for(%s, %s) raised; "
+                    "falling back to legacy snapshot",
+                    device_id, scale_id, exc_info=True,
+                )
+                snap = None
+            if isinstance(snap, dict):
+                return self._validate_active_snapshot(snap)
+            # Per-tuple miss → no scoped session for THIS scale → don't
+            # suppress (the very fix this method is implementing). Other
+            # scales calibrating do NOT block this event.
+            return False, None, None
+
+        # Path 2: legacy global fallback when scale_id is unknown.
+        # Preserves pre-2026-04-27 over-suppression behavior so a buggy
+        # event missing scale_id still gets blocked during a wizard
+        # session — safer than letting it leak through.
+        try:
+            legacy = poller.snapshot()
+        except Exception:  # noqa: BLE001 — never let the gate raise
+            log.warning(
+                "livetrack: poller.snapshot() raised; treating as inactive",
+                exc_info=True,
+            )
+            return False, None, None
+        if isinstance(legacy, dict):
+            log.warning(
+                "livetrack: device_id=%s scale_id=%s missing — "
+                "falling back to legacy global suppression",
+                device_id, scale_id,
+            )
+            return self._validate_active_snapshot(legacy)
+        return False, None, None
+
+    def _is_wizard_active(self) -> tuple[bool, Optional[str], Optional[str]]:
+        """Legacy global-gate, retained for callers that don't pass the tuple.
+
+        New call sites use :meth:`_is_wizard_active_for` with the incoming
+        event's device_id + scale_id. Kept as a thin wrapper around the
+        legacy snapshot path so existing tests
+        (``test_wizard_suppress_events.py`` parametrized cases) keep
+        exercising the same defensive timeout / state check semantics.
+        """
+        return self._is_wizard_active_for(None, None)
 
     def _push_tare_to_cloud(self, product_id: str, tare_g: float) -> None:
         """Fire-and-forget cloud push of a captured tare value.
@@ -2733,20 +2796,27 @@ class ScaleHandler:
                 }, 200
             # No arm active → fall through to the normal pipeline.
 
-        # LiveTrack wizard suppression gate (2026-04-22).
+        # LiveTrack wizard suppression gate (2026-04-22; scoped 2026-04-27).
         # While the browser-side LiveTrack Import wizard is running
-        # (any non-terminal session state), the user is placing items
-        # on the scale for calibration / pairing / initial inventory —
-        # those placements are intentional human actions already handled
-        # by the wizard flow. Let them through to the normal event
-        # pipeline and they spawn phantom pickup/remove/add sessions,
-        # bogus in-flight states, and spurious Anthropic classifier
-        # calls. This gate short-circuits every downstream branch:
+        # against THIS scale (matching (device_id, scale_id) tuple),
+        # the user is placing items on it for calibration / pairing /
+        # initial inventory — those placements are intentional human
+        # actions already handled by the wizard flow. Letting them
+        # through spawns phantom pickup/remove/add sessions, bogus
+        # in-flight states, and spurious Anthropic classifier calls.
+        # This gate short-circuits every downstream branch:
         #   * no scale_events row
         #   * no classifier invocation
         #   * no cloud_outbox emit
-        # Applies to ALL shelves (live_shelf, catch_all, single_item)
-        # because any of them can be "the scale being calibrated".
+        #
+        # 2026-04-27 scoping fix: previously the gate suppressed ANY
+        # event from this user when the wizard was open against any
+        # scale. That killed throughput on unrelated scales (e.g.
+        # live_shelf events were blocked while the user calibrated a
+        # separate catch_all scale). Now suppression keys on the
+        # (device_id, scale_id) tuple — only events from the targeted
+        # scale are suppressed; unrelated scales on the same device
+        # keep flowing.
         #
         # Placement rationale: runs AFTER the existing waiting_scale
         # and tare-arm branches so those more-specific catch-all
@@ -2763,11 +2833,15 @@ class ScaleHandler:
         # an app_state update + a scale_events row with direction=noise
         # + a new cloud_outbox entry; none of that is useful during a
         # wizard session either.
-        wizard_active, wiz_session_id, wiz_state = self._is_wizard_active()
+        scale_id_for_gate = str(payload.get("scale_id") or device_id)
+        wizard_active, wiz_session_id, wiz_state = self._is_wizard_active_for(
+            device_id, scale_id_for_gate,
+        )
         if wizard_active:
             _append_weight_trace({
                 "kind": "event_suppressed",
                 "device_id": device_id,
+                "scale_id": scale_id_for_gate,
                 "esp_ts": ts,
                 "pi_ts": pi_received_ts,
                 "event_seq": event_seq,
@@ -2780,9 +2854,9 @@ class ScaleHandler:
             })
             log.info(
                 "livetrack: wizard_active suppressed event — "
-                "device_id=%s event_seq=%s delta_g=%.1fg "
+                "device_id=%s scale_id=%s event_seq=%s delta_g=%.1fg "
                 "session_id=%s state=%s shelf=%s",
-                device_id, event_seq, delta_g,
+                device_id, scale_id_for_gate, event_seq, delta_g,
                 wiz_session_id, wiz_state, shelf_id,
             )
             return {
@@ -2791,6 +2865,7 @@ class ScaleHandler:
                 "livetrack_session_id": wiz_session_id,
                 "livetrack_state": wiz_state,
                 "shelf_id": shelf_id,
+                "scale_id": scale_id_for_gate,
                 "direction": direction,
                 "delta_g": delta_g,
             }, 200

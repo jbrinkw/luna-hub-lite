@@ -151,6 +151,7 @@ describe('livetrack-session Edge Function', () => {
       const res = await fetch(`${BASE_URL}/create`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${userA.jwt}` },
+        body: JSON.stringify({}),
       });
       expect(res.status).toBe(200);
       const body = await res.json();
@@ -159,12 +160,16 @@ describe('livetrack-session Edge Function', () => {
       expect(body.session.user_id).toBe(userA.userId);
       expect(body.session.device_id).toBe(deviceA);
       expect(body.session.state).toBe('waiting_barcode');
+      // 2026-04-27 scoping: scale_id defaults server-side to scale-02
+      // (legacy catch-all) when the body doesn't supply one.
+      expect(body.session.scale_id).toBe('scale-02');
 
       // Cross-user isolation: user B calling /create must get userB's
       // device, never userA's.
       const resB = await fetch(`${BASE_URL}/create`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${userB.jwt}` },
+        body: JSON.stringify({}),
       });
       expect(resB.status).toBe(200);
       const bodyB = await resB.json();
@@ -172,6 +177,73 @@ describe('livetrack-session Edge Function', () => {
       expect(bodyB.session.device_id).toBe(deviceB);
       // User B must NOT see userA's session in the response.
       expect(bodyB.session.device_id).not.toBe(deviceA);
+    });
+
+    it('valid JWT + explicit device_id + scale_id → row scoped to (device, scale)', async () => {
+      const res = await fetch(`${BASE_URL}/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userA.jwt}`,
+        },
+        body: JSON.stringify({ device_id: deviceA, scale_id: 'scale-01' }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.session.device_id).toBe(deviceA);
+      expect(body.session.scale_id).toBe('scale-01');
+    });
+
+    it('valid JWT + cross-user device_id → 404 (ownership enforced)', async () => {
+      const res = await fetch(`${BASE_URL}/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userA.jwt}`,
+        },
+        body: JSON.stringify({ device_id: deviceB, scale_id: 'scale-01' }),
+      });
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toMatch(/device/i);
+    });
+
+    it('multi-scale: two sessions for the same device on different scales coexist', async () => {
+      // Session for scale-01.
+      const r1 = await fetch(`${BASE_URL}/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userA.jwt}`,
+        },
+        body: JSON.stringify({ device_id: deviceA, scale_id: 'scale-01' }),
+      });
+      expect(r1.status).toBe(200);
+      const s1 = (await r1.json()).session;
+
+      // Session for scale-03 — should NOT expire the scale-01 session.
+      const r2 = await fetch(`${BASE_URL}/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userA.jwt}`,
+        },
+        body: JSON.stringify({ device_id: deviceA, scale_id: 'scale-03' }),
+      });
+      expect(r2.status).toBe(200);
+      const s2 = (await r2.json()).session;
+      expect(s2.scale_id).toBe('scale-03');
+
+      // The scale-01 session must still be live — it targets a different
+      // scale and is independent.
+      const { data: row1 } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('livetrack_import_sessions')
+        .select('state, scale_id')
+        .eq('session_id', s1.session_id)
+        .single();
+      expect(row1!.state).not.toBe('expired');
+      expect(row1!.state).not.toBe('closed');
     });
 
     it('expires prior live session on re-create (single live session per device)', async () => {
@@ -408,6 +480,7 @@ describe('livetrack-session Edge Function', () => {
       await fetch(`${BASE_URL}/create`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${userA.jwt}` },
+        body: JSON.stringify({}),
       });
 
       const res = await fetch(`${BASE_URL}/active`, {
@@ -416,9 +489,53 @@ describe('livetrack-session Edge Function', () => {
       });
       expect(res.status).toBe(200);
       const body = await res.json();
+      // Body shape includes the new ``sessions`` list AND the legacy
+      // ``session`` field (newest row) for back-compat.
+      expect(Array.isArray(body.sessions)).toBe(true);
+      expect(body.sessions.length).toBeGreaterThanOrEqual(1);
       expect(body.session).toBeDefined();
       expect(body.session.device_id).toBe(deviceA);
       expect(body.session.user_id).toBe(userA.userId);
+    });
+
+    it('?scale_id query param → returns single scoped session', async () => {
+      // Ensure userA has a fresh heartbeat.
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('live_shelf_devices')
+        .update({ last_heartbeat_ts: new Date().toISOString() })
+        .eq('device_id', deviceA);
+      // Open a session targeting scale-01 specifically.
+      await fetch(`${BASE_URL}/create`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userA.jwt}`,
+        },
+        body: JSON.stringify({ device_id: deviceA, scale_id: 'scale-01' }),
+      });
+
+      // Query for scale-01 → should return the matching row.
+      const r1 = await fetch(`${BASE_URL}/active?scale_id=scale-01`, {
+        method: 'GET',
+        headers: { 'x-api-key': importKeyA },
+      });
+      expect(r1.status).toBe(200);
+      const b1 = await r1.json();
+      expect(b1.session).toBeDefined();
+      expect(b1.session).not.toBeNull();
+      expect(b1.session.scale_id).toBe('scale-01');
+
+      // Query for scale-99 (no session) → must return null, not the
+      // scale-01 row. This is the regression assertion: pre-fix the
+      // /active route ignored scale_id entirely.
+      const r2 = await fetch(`${BASE_URL}/active?scale_id=scale-99`, {
+        method: 'GET',
+        headers: { 'x-api-key': importKeyA },
+      });
+      expect(r2.status).toBe(200);
+      const b2 = await r2.json();
+      expect(b2.session).toBeNull();
     });
 
     it('cross-user isolation: device B key returns only device B sessions, never device A', async () => {

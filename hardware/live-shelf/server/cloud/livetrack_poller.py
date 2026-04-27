@@ -83,7 +83,16 @@ class LiveTrackPoller:
         self._ai_tare_fn = ai_tare_fn or ai_tare_estimate
 
         self._snapshot_lock = threading.Lock()
+        # Legacy single-session snapshot — kept for callers that haven't
+        # been migrated to the per-(device, scale) lookup. Mirrors the
+        # newest active session across every scale on the device, same
+        # value as before the 2026-04-27 scoping refactor.
         self._snapshot: Optional[dict[str, Any]] = None
+        # New: per-(device_id, scale_id) tuple → session-row map. The
+        # scale-event handler queries this via :meth:`is_active_for` so
+        # only the targeted scale's events are suppressed; unrelated
+        # scales on the same device keep flowing events.
+        self._snapshots_by_tuple: dict[tuple[str, str], dict[str, Any]] = {}
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -114,11 +123,81 @@ class LiveTrackPoller:
         Thread-safe. Returns ``None`` when the last poll returned no
         active session OR when the poller hasn't started yet. Callers
         treat a missing / None snapshot as "not import-armed".
+
+        Legacy single-session view — returns the newest active session
+        across every scale on the device. New callers that need per-scale
+        scoping should use :meth:`is_active_for` or
+        :meth:`active_tuples` instead. Kept stable for the scale-event
+        handler's catch-all interception branch (which only ever cares
+        about the ``waiting_scale`` row, of which there's at most one
+        at a time per device).
         """
         with self._snapshot_lock:
             if self._snapshot is None:
                 return None
             return dict(self._snapshot)
+
+    def is_active_for(
+        self, device_id: Optional[str], scale_id: Optional[str],
+    ) -> Optional[dict[str, Any]]:
+        """Return the active session row for this (device, scale) tuple, or None.
+
+        The Pi's wizard-suppression gate (in
+        :meth:`ScaleHandler._is_wizard_active_for`) calls this with the
+        ESP-provided device_id ("scale-01", "scale-02", "scale-03") and
+        scale_id from the incoming event.
+
+        Important: the cloud's ``livetrack_import_sessions.device_id``
+        column is the UUID of the live_shelf_devices row — NOT the ESP
+        device id. Every session row reaching THIS poller belongs to
+        THIS Pi's cloud device by construction (the Pi authenticates
+        with its own import_key, and the edge function scopes /active
+        to that device). So the gate's only meaningful filter is
+        scale_id. The ``device_id`` argument is accepted for symmetry
+        with the call site but ignored when computing the match;
+        instead we look up by scale_id alone within this Pi's snapshots.
+
+        Mismatched scale_id → return None → event flows through.
+        Matching scale_id → return the session row → event is suppressed.
+
+        Both args must be non-None and non-empty — defensive: an empty
+        scale_id from a corrupt event must NOT match arbitrarily,
+        otherwise we'd recreate the global-suppression bug. Callers fall
+        back to :meth:`snapshot` when keys are missing.
+
+        Returns a shallow copy so caller mutation doesn't bleed back.
+        """
+        if not device_id or not scale_id:
+            return None
+        scale_str = str(scale_id)
+        with self._snapshot_lock:
+            # Linear scan — at most a handful of active sessions per Pi
+            # (one per scale; 3 today). Faster than a defensive UUID-vs-
+            # ESP-id mapping table.
+            for (_d, sid), row in self._snapshots_by_tuple.items():
+                if sid == scale_str:
+                    return dict(row)
+            return None
+
+    def active_tuples(self) -> set[tuple[str, str]]:
+        """Return the set of (device_id, scale_id) tuples with active sessions.
+
+        ``device_id`` here is the cloud UUID (from
+        ``livetrack_import_sessions.device_id``), NOT the ESP device id.
+        Useful for diagnostic / observability surfaces (e.g. ``/api/state``)
+        — the gate predicate uses :meth:`is_active_for` directly.
+        """
+        with self._snapshot_lock:
+            return set(self._snapshots_by_tuple.keys())
+
+    def active_scale_ids(self) -> set[str]:
+        """Return the set of scale_ids currently being calibrated on this Pi.
+
+        Convenience wrapper for the gate predicate's lookup; also used
+        by ``/api/state`` to render the active-wizard summary line.
+        """
+        with self._snapshot_lock:
+            return {sid for (_d, sid) in self._snapshots_by_tuple.keys()}
 
     def maybe_set_baseline(self, weight_g: float) -> float:
         """Return the baseline weight for the current waiting_scale session.
@@ -210,13 +289,60 @@ class LiveTrackPoller:
         tick).
         """
         try:
-            session = self._client.get_active_livetrack_session()
+            sessions = self._fetch_sessions()
         except Exception:  # pragma: no cover - defensive
             log.exception("livetrack poller: seed poll failed; snapshot left empty")
             return
-        self._maybe_clear_baseline(session)
+        newest = sessions[0] if sessions else None
+        self._maybe_clear_baseline(newest)
+        self._update_snapshots(sessions)
+
+    def _fetch_sessions(self) -> list[dict[str, Any]]:
+        """Fetch the active-session list, with a legacy single-session fallback.
+
+        Newer cloud edge function returns a list via
+        :meth:`CloudClient.get_active_livetrack_sessions`. If the client
+        method is missing (test stubs constructed pre-refactor) we fall
+        back to the single-session shape and wrap it in a list — same
+        behavior as a server returning the legacy body shape.
+        """
+        getter = getattr(self._client, "get_active_livetrack_sessions", None)
+        if callable(getter):
+            sessions = getter()
+            return list(sessions) if isinstance(sessions, list) else []
+        # Test-stub fallback: client only implements the single-session API.
+        single = self._client.get_active_livetrack_session()
+        return [single] if isinstance(single, dict) else []
+
+    def _update_snapshots(self, sessions: list[dict[str, Any]]) -> None:
+        """Atomically replace both legacy + per-tuple snapshots.
+
+        Sessions list order: server returns newest-first (ORDER BY
+        created_at DESC). The legacy snapshot mirrors the newest row
+        (or None) — equivalent to the pre-refactor "what is the newest
+        active session for this device?". The per-tuple map keys on
+        (device_id, scale_id) and points to the row.
+
+        Rows missing either key are dropped from the per-tuple map but
+        still considered for the legacy snapshot (matches the cloud
+        edge function's response shape — every row carries device_id,
+        scale_id is nullable for legacy backfill).
+        """
+        legacy = sessions[0] if sessions else None
+        by_tuple: dict[tuple[str, str], dict[str, Any]] = {}
+        for row in sessions:
+            d = row.get("device_id")
+            s = row.get("scale_id")
+            if not d or not s:
+                continue
+            key = (str(d), str(s))
+            # Newest-first means the first row we see for a given tuple
+            # wins; ignore older overlaps. (The edge function expires
+            # priors on /create, so collisions should be rare.)
+            by_tuple.setdefault(key, row)
         with self._snapshot_lock:
-            self._snapshot = session
+            self._snapshot = legacy
+            self._snapshots_by_tuple = by_tuple
 
     # ------------------------------------------------------------------
     # Internal loop
@@ -247,32 +373,37 @@ class LiveTrackPoller:
             self._stop.wait(sleep_s)
 
     def _poll_once(self) -> bool:
-        """Poll once, update snapshot, dispatch AI-tare if needed.
+        """Poll once, update snapshots, dispatch AI-tare if needed.
 
-        Returns True iff the poll returned an active session (used by
-        the loop to pick the next sleep interval).
+        Returns True iff the poll returned at least one active session
+        (used by the loop to pick the next sleep interval).
         """
-        session = self._client.get_active_livetrack_session()
+        sessions = self._fetch_sessions()
         # Clear any stale baseline before swapping the snapshot — the
         # heartbeat handler's baseline cache is scoped to one waiting_scale
-        # session, so transitions out of that state must reset it.
-        self._maybe_clear_baseline(session)
-        with self._snapshot_lock:
-            self._snapshot = session
-        if session is None:
+        # session, so transitions out of that state must reset it. We use
+        # the newest row (legacy semantics) for the baseline check.
+        legacy = sessions[0] if sessions else None
+        self._maybe_clear_baseline(legacy)
+        self._update_snapshots(sessions)
+        if not sessions:
             return False
 
         # Fire AI-tare asynchronously on the same thread — it's a blocking
         # Anthropic call (~5s), which is acceptable because the user has
         # nothing to do while it runs anyway. Single-flight per
         # (session_id, state) so repeated polls during the call don't
-        # spawn duplicates.
-        if session.get("state") == "awaiting_ai_tare":
+        # spawn duplicates. Iterate every active session — multi-scale
+        # users can have AI-tare requests on more than one scale
+        # simultaneously (rare but plausible).
+        for session in sessions:
+            if session.get("state") != "awaiting_ai_tare":
+                continue
             session_id = str(session.get("session_id", ""))
             flight_key = f"{session_id}:awaiting_ai_tare"
             with self._ai_tare_lock:
                 if flight_key in self._ai_tare_inflight:
-                    return True
+                    continue
                 self._ai_tare_inflight.add(flight_key)
             try:
                 self._handle_ai_tare(session)

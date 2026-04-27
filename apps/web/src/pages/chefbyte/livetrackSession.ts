@@ -29,6 +29,14 @@ export interface LiveTrackSession {
   session_id: string;
   user_id: string;
   device_id: string;
+  /**
+   * Physical scale targeted by this session (e.g. ``scale-01``,
+   * ``scale-02``, ``scale-03``). Added 2026-04-27 — nullable while
+   * legacy rows backfill, set on every fresh /create from the wizard.
+   * The Pi's suppression gate keys on this so unrelated scales keep
+   * flowing events while one is being calibrated.
+   */
+  scale_id: string | null;
   state: LiveTrackState;
   current_barcode: string | null;
   current_product_id: string | null;
@@ -61,15 +69,35 @@ export interface AiTareProductFormJson {
 }
 
 /**
- * Create a fresh session for the calling user's most-recently-heartbeated
- * device. Wraps the `/livetrack-session/create` edge function. Throws on
- * non-2xx so callers can render a typed error banner.
+ * Create a fresh session for the calling user, scoped to ONE physical
+ * scale on a specific device. Wraps the `/livetrack-session/create` edge
+ * function. Throws on non-2xx so callers can render a typed error banner.
  *
  * 409 = no fresh device → caller shows the "Pi offline" branch.
+ *
+ * 2026-04-27 scoping: ``device_id`` and ``scale_id`` are now part of the
+ * payload so the Pi's wizard-suppression gate only blocks events from
+ * the targeted scale (e.g. calibrating scale-03 no longer freezes
+ * scale-01 / live_shelf events). Both default on the server side when
+ * omitted — see the edge function's DEFAULT_LEGACY_SCALE_ID rationale —
+ * but new callers should always pass them explicitly so the over-
+ * suppression bug doesn't reintroduce silently.
+ *
+ * Argument fallbacks:
+ *   * ``opts.deviceId`` omitted → server picks freshest active device
+ *     for the calling user (legacy auto-pick).
+ *   * ``opts.scaleId`` omitted → server defaults to ``scale-02`` (the
+ *     legacy catch-all, which is what the wizard was always targeting
+ *     before this fix).
  */
-export async function createLiveTrackSession(): Promise<LiveTrackSession> {
+export async function createLiveTrackSession(
+  opts: { deviceId?: string; scaleId?: string } = {},
+): Promise<LiveTrackSession> {
+  const body: Record<string, unknown> = {};
+  if (opts.deviceId) body.device_id = opts.deviceId;
+  if (opts.scaleId) body.scale_id = opts.scaleId;
   const { data, error } = await supabase.functions.invoke('livetrack-session/create', {
-    body: {},
+    body,
   });
   if (error) {
     // supabase-js wraps non-2xx as FunctionsHttpError. Surface a helpful

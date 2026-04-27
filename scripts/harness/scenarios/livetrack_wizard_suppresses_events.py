@@ -83,9 +83,17 @@ def _now_iso(offset_s: float = 0.0) -> str:
 @scenario("livetrack_wizard_suppresses_events")
 def _livetrack_wizard_suppresses_events(ctx: HarnessContext) -> None:
     # 1. Seed cloud state: user + device + active wizard session.
+    # 2026-04-27 scoping: the wizard session must target the same
+    # scale_id that the test event will be fired from, so the per-tuple
+    # gate matches. The event below uses device_id='scale-01' so we
+    # scope the wizard there too. Pre-scoping this scenario implicitly
+    # used the legacy global gate; post-scoping the explicit scale_id
+    # is required.
     ctx.seed_cloud_user()
     ctx.seed_device()
-    session_id = ctx.seed_livetrack_session(state="waiting_barcode")
+    session_id = ctx.seed_livetrack_session(
+        state="waiting_barcode", scale_id="scale-01",
+    )
     ctx.check(
         "cloud_session_seeded_waiting_barcode",
         bool(session_id),

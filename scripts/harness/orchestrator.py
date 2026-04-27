@@ -429,19 +429,26 @@ class HarnessContext:
         state: str = "waiting_scale",
         barcode: Optional[str] = None,
         product_id: Optional[str] = None,
+        scale_id: Optional[str] = "scale-02",
     ) -> str:
-        """Insert a livetrack_import_sessions row. Returns session_id."""
+        """Insert a livetrack_import_sessions row. Returns session_id.
+
+        ``scale_id`` defaults to ``scale-02`` (the legacy catch-all
+        target the wizard always used pre-2026-04-27 scoping refactor).
+        Pass an explicit value to test per-scale suppression scenarios.
+        Pass ``None`` to test the legacy null-scale_id rows.
+        """
         assert self.user_id and self.device_id
         sid = str(uuid.uuid4())
         with self.db.cursor() as cur:
             cur.execute(
                 """
                 INSERT INTO chefbyte.livetrack_import_sessions (
-                    session_id, user_id, device_id, state,
+                    session_id, user_id, device_id, scale_id, state,
                     current_barcode, current_product_id
-                ) VALUES (%s, %s, %s, %s, %s, %s)
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
                 """,
-                (sid, self.user_id, self.device_id, state, barcode, product_id),
+                (sid, self.user_id, self.device_id, scale_id, state, barcode, product_id),
             )
         return sid
 

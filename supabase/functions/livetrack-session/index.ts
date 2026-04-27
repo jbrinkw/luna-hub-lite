@@ -77,13 +77,33 @@ async function authenticatePi(supabase: SupabaseClient, apiKey: string | null): 
 // ─── Route: POST /create (browser, user JWT) ─────────────────────────
 
 /**
- * Create a fresh session for the calling user's most-recently-heartbeated
- * device. Returns 409 when no fresh device is available — the UI uses this
- * signal to render the "Pi offline" branch.
+ * Default scale_id when the caller doesn't supply one. Legacy clients
+ * (pre-2026-04-27) target the catch-all by convention, since that was
+ * the only scale the wizard ever calibrated. New callers MUST send an
+ * explicit scale_id; the default keeps the legacy path working with a
+ * warning for one release cycle.
+ */
+const DEFAULT_LEGACY_SCALE_ID = 'scale-02';
+
+/**
+ * Create a fresh session scoped to (device_id, scale_id). Returns 409 when
+ * the picked device's heartbeat is stale — the UI uses this signal to
+ * render the "Pi offline" branch.
  *
- * Multi-tab ergonomics: any prior row with state NOT IN ('closed','expired')
- * for the picked device is flipped to 'expired' before the insert, so only
- * the newest tab holds a live session per device.
+ * Body shape:
+ *   {
+ *     device_id?: uuid,    // optional; defaults to user's freshest device
+ *     scale_id?: string,   // optional; defaults to scale-02 (legacy catch-all)
+ *   }
+ *
+ * device_id verification: when supplied, the row is loaded + checked to
+ * belong to the calling user (cross-user device ids → 404). When omitted
+ * we pick the user's freshest active device (same as before this fix).
+ *
+ * Multi-tab + multi-scale ergonomics: any prior row with state NOT IN
+ * ('closed','expired') for THIS (device_id, scale_id) pair is flipped to
+ * 'expired' before the insert. Sessions for OTHER scales on the same
+ * device are left alone — they're independent calibrations.
  */
 async function handleCreate(supabase: SupabaseClient, req: Request): Promise<Response> {
   const authHeader = req.headers.get('Authorization');
@@ -105,39 +125,84 @@ async function handleCreate(supabase: SupabaseClient, req: Request): Promise<Res
     return jsonResponse({ error: 'Invalid token' }, 401);
   }
 
+  // Parse + validate body. Body is optional today (legacy clients send
+  // `{}`); when present, validate the shape so a malformed device_id
+  // doesn't slip past as null.
+  let body: Record<string, unknown> = {};
+  try {
+    body = (await req.json()) ?? {};
+  } catch {
+    body = {};
+  }
+  const requestedDeviceId = typeof body.device_id === 'string' && body.device_id.length > 0 ? body.device_id : null;
+  const requestedScaleId = typeof body.scale_id === 'string' && body.scale_id.length > 0 ? body.scale_id : null;
+  // Fallback to legacy scale_id when omitted. Logged so a stuck legacy
+  // client is visible in operator logs but doesn't break.
+  const scaleId = requestedScaleId ?? DEFAULT_LEGACY_SCALE_ID;
+  if (!requestedScaleId) {
+    console.warn('livetrack-session/create: scale_id not supplied; defaulting to legacy %s', DEFAULT_LEGACY_SCALE_ID);
+  }
+
   // Service-role client for the subsequent writes (bypasses RLS).
   const supabaseSR = supabase;
 
-  // Find the most-recently-heartbeated active device for this user, within
-  // the freshness window. Multi-device per user is a real case; we pick
-  // the hottest one so the owner doesn't have to choose.
+  // Resolve the device. Two paths:
+  //   1. Caller specified device_id → look it up + assert ownership.
+  //   2. Caller didn't → pick the freshest active device for this user.
+  // Either way the row is checked against the freshness window before we
+  // arm a session — a wizard against a dead Pi makes no sense.
   const cutoff = new Date(Date.now() - DEVICE_FRESH_WINDOW_MS).toISOString();
-  const { data: device, error: deviceError } = await supabaseSR
-    .schema('chefbyte')
-    .from('live_shelf_devices')
-    .select('device_id, last_heartbeat_ts, is_active')
-    .eq('user_id', user.id)
-    .eq('is_active', true)
-    .gt('last_heartbeat_ts', cutoff)
-    .order('last_heartbeat_ts', { ascending: false })
-    .limit(1)
-    .maybeSingle();
-
-  if (deviceError) {
-    console.error('livetrack-session/create: device lookup failed', deviceError);
-    return jsonResponse({ error: 'device lookup failed' }, 500);
+  let device: { device_id: string; last_heartbeat_ts: string | null; is_active: boolean } | null = null;
+  if (requestedDeviceId) {
+    const { data: row, error: lookupErr } = await supabaseSR
+      .schema('chefbyte')
+      .from('live_shelf_devices')
+      .select('device_id, last_heartbeat_ts, is_active, user_id')
+      .eq('device_id', requestedDeviceId)
+      .maybeSingle();
+    if (lookupErr) {
+      console.error('livetrack-session/create: device lookup failed', lookupErr);
+      return jsonResponse({ error: 'device lookup failed' }, 500);
+    }
+    // 404 (not 403) on cross-user device_ids — leak no detail about whether
+    // a row exists at all.
+    if (!row || row.user_id !== user.id || !row.is_active) {
+      return jsonResponse({ error: 'device not found' }, 404);
+    }
+    if (!row.last_heartbeat_ts || new Date(row.last_heartbeat_ts).getTime() < new Date(cutoff).getTime()) {
+      return jsonResponse({ error: 'no fresh live shelf device (heartbeat stale or missing)' }, 409);
+    }
+    device = { device_id: row.device_id, last_heartbeat_ts: row.last_heartbeat_ts, is_active: row.is_active };
+  } else {
+    const { data: row, error: deviceError } = await supabaseSR
+      .schema('chefbyte')
+      .from('live_shelf_devices')
+      .select('device_id, last_heartbeat_ts, is_active')
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .gt('last_heartbeat_ts', cutoff)
+      .order('last_heartbeat_ts', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (deviceError) {
+      console.error('livetrack-session/create: device lookup failed', deviceError);
+      return jsonResponse({ error: 'device lookup failed' }, 500);
+    }
+    if (!row) {
+      return jsonResponse({ error: 'no fresh live shelf device (heartbeat stale or missing)' }, 409);
+    }
+    device = row;
   }
-  if (!device) {
-    return jsonResponse({ error: 'no fresh live shelf device (heartbeat stale or missing)' }, 409);
-  }
 
-  // Expire any prior live sessions for this device. Idempotent — zero
-  // matches is a no-op.
+  // Expire any prior live sessions for THIS (device, scale) pair only.
+  // Sessions targeting other scales on the same device are independent
+  // calibrations and must not be touched. Idempotent.
   const { error: expireError } = await supabaseSR
     .schema('chefbyte')
     .from('livetrack_import_sessions')
     .update({ state: 'expired', updated_at: new Date().toISOString() })
     .eq('device_id', device.device_id)
+    .eq('scale_id', scaleId)
     .not('state', 'in', '(closed,expired)');
   if (expireError) {
     console.error('livetrack-session/create: prior-session expire failed', expireError);
@@ -152,6 +217,7 @@ async function handleCreate(supabase: SupabaseClient, req: Request): Promise<Res
     .insert({
       user_id: user.id,
       device_id: device.device_id,
+      scale_id: scaleId,
       state: 'waiting_barcode',
     })
     .select('*')
@@ -263,26 +329,74 @@ async function handlePiUpdate(supabase: SupabaseClient, device: Device, body: an
 // ─── Route: GET /active (Pi, x-api-key) ──────────────────────────────
 
 /**
- * Pi poller's "what should I be doing?" query. Returns the single active
- * session for the device, or `{ session: null }` (200) so the Pi always
- * gets a parseable body (a 204 would force branch-on-empty in the client).
+ * Pi poller's "what should I be doing?" query.
+ *
+ * Two modes:
+ *   * ``?scale_id=<id>`` — return the single active session for THIS
+ *     (device, scale) tuple. This is the targeted-suppression mode the
+ *     Pi uses post-2026-04-27 to keep unrelated scales flowing events
+ *     while one is being calibrated.
+ *   * No query params — return ``{ sessions: [{device_id, scale_id, ...}] }``
+ *     for every active session on the device. The Pi caches this set
+ *     of tuples and matches incoming events against it.
+ *
+ * Both modes always return 200 with a parseable body (never 204) so the
+ * Pi client doesn't have to branch on empty.
+ *
+ * Backwards compatibility: legacy Pi callers that don't know about the
+ * scoping receive the multi-session shape and treat ANY non-empty list
+ * as "wizard active for this user/device" — same behavior as before
+ * the fix (over-suppression). New callers that pass scale_id get the
+ * scoped behavior.
  */
-async function handleActive(supabase: SupabaseClient, device: Device): Promise<Response> {
+async function handleActive(supabase: SupabaseClient, device: Device, req: Request): Promise<Response> {
+  const url = new URL(req.url);
+  const scaleId = url.searchParams.get('scale_id');
+
+  if (scaleId) {
+    // Scoped lookup — single session for this (device, scale) pair.
+    const { data, error } = await supabase
+      .schema('chefbyte')
+      .from('livetrack_import_sessions')
+      .select('*')
+      .eq('device_id', device.device_id)
+      .eq('scale_id', scaleId)
+      .not('state', 'in', '(closed,expired)')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (error) {
+      console.error('livetrack-session/active: scoped lookup failed', error);
+      return jsonResponse({ error: 'lookup failed' }, 500);
+    }
+    return jsonResponse({ session: data ?? null });
+  }
+
+  // Unscoped — list every active session on this device. Pi caches the
+  // (device_id, scale_id) tuples and gates events per-tuple. Also keeps
+  // the legacy ``session`` field (newest row) so old Pi binaries that
+  // ignore ``sessions`` keep their pre-fix behavior — they over-suppress
+  // but never under-suppress, which is the safer drift direction.
   const { data, error } = await supabase
     .schema('chefbyte')
     .from('livetrack_import_sessions')
     .select('*')
     .eq('device_id', device.device_id)
     .not('state', 'in', '(closed,expired)')
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle();
+    .order('created_at', { ascending: false });
 
   if (error) {
-    console.error('livetrack-session/active: lookup failed', error);
+    console.error('livetrack-session/active: list lookup failed', error);
     return jsonResponse({ error: 'lookup failed' }, 500);
   }
-  return jsonResponse({ session: data ?? null });
+
+  const sessions = data ?? [];
+  return jsonResponse({
+    sessions,
+    // Legacy field — newest row, or null. Pre-fix Pi binaries read this.
+    session: sessions[0] ?? null,
+  });
 }
 
 // ─── Entrypoint ──────────────────────────────────────────────────────
@@ -316,7 +430,7 @@ Deno.serve(async (req) => {
     if (req.method === 'GET' && leaf === 'active') {
       const device = await authenticatePi(supabase, req.headers.get('x-api-key'));
       if (!device) return jsonResponse({ error: 'unauthorized' }, 401);
-      return await handleActive(supabase, device);
+      return await handleActive(supabase, device, req);
     }
 
     return jsonResponse({ error: 'not found' }, 404);
