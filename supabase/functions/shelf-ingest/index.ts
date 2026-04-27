@@ -50,6 +50,14 @@ const VALID_EVENT_KINDS = [
   // tracking by design — spilled / fed-to-pet / given-away). See
   // migration 20260427020000_shelf_event_discarded.sql.
   'discarded',
+  // Catch-all delta-capture pair (added 2026-04-27). The first event
+  // snapshots the measured weight and reconciles stock_lots.qty_containers
+  // (no macros). The second event references the first via pi_event_id,
+  // computes consumption from the snapshotted pickup_weight_g, and writes
+  // food_logs for the consumed delta. See migration
+  // 20260427130000_catch_all_delta_apply.sql.
+  'catch_all_first_measurement',
+  'catch_all_second_measurement',
 ] as const;
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
