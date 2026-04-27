@@ -388,6 +388,13 @@ verify_jwt = false
 [functions.livetrack-session]
 verify_jwt = false
 
+# invariant-monitor is service-role only. We disable Supabase's JWT relay
+# (it expects anon/authenticated tokens) and do the service-role bearer
+# check inside the handler. Schedule via pg_cron — see migration
+# 20260427040000_invariant_monitor_cron.sql.
+[functions.invariant-monitor]
+verify_jwt = false
+
 [analytics]
 enabled = true
 port = 54327

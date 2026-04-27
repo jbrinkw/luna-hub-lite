@@ -1,6 +1,7 @@
 import { useLocation, useNavigate } from 'react-router-dom';
-import { User, LayoutGrid, Wrench, Puzzle, KeyRound, Bot } from 'lucide-react';
+import { User, LayoutGrid, Wrench, Puzzle, KeyRound, Bot, Shield } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
+import { useIsAdmin } from '@/hooks/useIsAdmin';
 
 interface NavItem {
   label: string;
@@ -8,7 +9,7 @@ interface NavItem {
   icon: LucideIcon;
 }
 
-const navItems: NavItem[] = [
+const baseItems: NavItem[] = [
   { label: 'Account', path: '/hub/account', icon: User },
   { label: 'Apps', path: '/hub/apps', icon: LayoutGrid },
   { label: 'Tools', path: '/hub/tools', icon: Wrench },
@@ -17,9 +18,13 @@ const navItems: NavItem[] = [
   { label: 'AI Agent', path: '/hub/agent', icon: Bot },
 ];
 
+const adminItem: NavItem = { label: 'Alerts', path: '/hub/alerts', icon: Shield };
+
 export function SideNav() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { isAdmin } = useIsAdmin();
+  const navItems = isAdmin ? [...baseItems, adminItem] : baseItems;
 
   return (
     <nav aria-label="Hub navigation" className="py-2">

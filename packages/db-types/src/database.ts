@@ -594,6 +594,7 @@ export type Database = {
         Row: {
           cart_item_id: string
           created_at: string
+          imported_at: string | null
           product_id: string
           purchased: boolean
           qty_containers: number
@@ -602,6 +603,7 @@ export type Database = {
         Insert: {
           cart_item_id?: string
           created_at?: string
+          imported_at?: string | null
           product_id: string
           purchased?: boolean
           qty_containers: number
@@ -610,6 +612,7 @@ export type Database = {
         Update: {
           cart_item_id?: string
           created_at?: string
+          imported_at?: string | null
           product_id?: string
           purchased?: boolean
           qty_containers?: number
@@ -628,6 +631,7 @@ export type Database = {
       stock_lots: {
         Row: {
           created_at: string
+          deleted_at: string | null
           expires_on: string | null
           in_flight_since: string | null
           last_update_source: string | null
@@ -637,10 +641,12 @@ export type Database = {
           pickup_event_id: string | null
           product_id: string
           qty_containers: number
+          updated_at: string
           user_id: string
         }
         Insert: {
           created_at?: string
+          deleted_at?: string | null
           expires_on?: string | null
           in_flight_since?: string | null
           last_update_source?: string | null
@@ -650,10 +656,12 @@ export type Database = {
           pickup_event_id?: string | null
           product_id: string
           qty_containers?: number
+          updated_at?: string
           user_id: string
         }
         Update: {
           created_at?: string
+          deleted_at?: string | null
           expires_on?: string | null
           in_flight_since?: string | null
           last_update_source?: string | null
@@ -663,6 +671,7 @@ export type Database = {
           pickup_event_id?: string | null
           product_id?: string
           qty_containers?: number
+          updated_at?: string
           user_id?: string
         }
         Relationships: [
@@ -846,10 +855,28 @@ export type Database = {
         Args: { p_device_id: string; p_scales: Json; p_user_id: string }
         Returns: undefined
       }
+      import_shopping_to_inventory: {
+        Args: { p_location_id?: string }
+        Returns: Json
+      }
       mark_meal_done: { Args: { p_meal_id: string }; Returns: Json }
       mark_meal_done_admin: {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: Json
+      }
+      recipe_changed_since: {
+        Args: { p_recipe_id: string; p_ts: string }
+        Returns: boolean
+      }
+      resolve_add_to_shelf_lot_admin: {
+        Args: {
+          p_fallback_location: string
+          p_occurred_at?: string
+          p_placed_weight_g: number
+          p_product_id: string
+          p_shelf_source: string
+        }
+        Returns: string
       }
       restore_chefbyte_backup: { Args: { p_backup: Json }; Returns: Json }
       retry_shelf_event: {
@@ -1156,6 +1183,157 @@ export type Database = {
         Args: { p_day: string; p_user_id: string }
         Returns: Json
       }
+      expire_timer:
+        | {
+            Args: never
+            Returns: {
+              duration_seconds: number
+              elapsed_before_pause: number
+              end_time: string | null
+              paused_at: string | null
+              state: string
+              timer_id: string
+              user_id: string
+            }
+            SetofOptions: {
+              from: "*"
+              to: "timers"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+        | {
+            Args: { p_user_id: string }
+            Returns: {
+              duration_seconds: number
+              elapsed_before_pause: number
+              end_time: string | null
+              paused_at: string | null
+              state: string
+              timer_id: string
+              user_id: string
+            }
+            SetofOptions: {
+              from: "*"
+              to: "timers"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+      pause_timer:
+        | {
+            Args: never
+            Returns: {
+              duration_seconds: number
+              elapsed_before_pause: number
+              end_time: string | null
+              paused_at: string | null
+              state: string
+              timer_id: string
+              user_id: string
+            }
+            SetofOptions: {
+              from: "*"
+              to: "timers"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+        | {
+            Args: { p_user_id: string }
+            Returns: {
+              duration_seconds: number
+              elapsed_before_pause: number
+              end_time: string | null
+              paused_at: string | null
+              state: string
+              timer_id: string
+              user_id: string
+            }
+            SetofOptions: {
+              from: "*"
+              to: "timers"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+      reset_timer:
+        | { Args: never; Returns: number }
+        | { Args: { p_user_id: string }; Returns: number }
+      resume_timer:
+        | {
+            Args: never
+            Returns: {
+              duration_seconds: number
+              elapsed_before_pause: number
+              end_time: string | null
+              paused_at: string | null
+              state: string
+              timer_id: string
+              user_id: string
+            }
+            SetofOptions: {
+              from: "*"
+              to: "timers"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+        | {
+            Args: { p_user_id: string }
+            Returns: {
+              duration_seconds: number
+              elapsed_before_pause: number
+              end_time: string | null
+              paused_at: string | null
+              state: string
+              timer_id: string
+              user_id: string
+            }
+            SetofOptions: {
+              from: "*"
+              to: "timers"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+      start_timer:
+        | {
+            Args: { p_duration_seconds: number }
+            Returns: {
+              duration_seconds: number
+              elapsed_before_pause: number
+              end_time: string | null
+              paused_at: string | null
+              state: string
+              timer_id: string
+              user_id: string
+            }
+            SetofOptions: {
+              from: "*"
+              to: "timers"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
+        | {
+            Args: { p_duration_seconds: number; p_user_id: string }
+            Returns: {
+              duration_seconds: number
+              elapsed_before_pause: number
+              end_time: string | null
+              paused_at: string | null
+              state: string
+              timer_id: string
+              user_id: string
+            }
+            SetofOptions: {
+              from: "*"
+              to: "timers"
+              isOneToOne: true
+              isSetofReturn: false
+            }
+          }
     }
     Enums: {
       [_ in never]: never
@@ -1196,6 +1374,51 @@ export type Database = {
           voice_ack_delay_ms?: number
           voice_ack_enabled?: boolean
           voice_ack_text?: string
+        }
+        Relationships: []
+      }
+      alerts: {
+        Row: {
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          acknowledged_note: string | null
+          alert_id: string
+          created_at: string
+          dedup_key: string | null
+          details: Json
+          invariant_name: string
+          severity: string
+          subject_id: string | null
+          subject_type: string
+          user_id: string | null
+        }
+        Insert: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          acknowledged_note?: string | null
+          alert_id?: string
+          created_at?: string
+          dedup_key?: string | null
+          details?: Json
+          invariant_name: string
+          severity: string
+          subject_id?: string | null
+          subject_type: string
+          user_id?: string | null
+        }
+        Update: {
+          acknowledged_at?: string | null
+          acknowledged_by?: string | null
+          acknowledged_note?: string | null
+          alert_id?: string
+          created_at?: string
+          dedup_key?: string | null
+          details?: Json
+          invariant_name?: string
+          severity?: string
+          subject_id?: string | null
+          subject_type?: string
+          user_id?: string | null
         }
         Relationships: []
       }
@@ -1312,6 +1535,7 @@ export type Database = {
           created_at: string
           day_start_hour: number
           display_name: string | null
+          is_admin: boolean
           revoke_keys_on_logout: boolean
           timezone: string
           user_id: string
@@ -1320,6 +1544,7 @@ export type Database = {
           created_at?: string
           day_start_hour?: number
           display_name?: string | null
+          is_admin?: boolean
           revoke_keys_on_logout?: boolean
           timezone?: string
           user_id: string
@@ -1328,6 +1553,7 @@ export type Database = {
           created_at?: string
           day_start_hour?: number
           display_name?: string | null
+          is_admin?: boolean
           revoke_keys_on_logout?: boolean
           timezone?: string
           user_id?: string
@@ -1360,6 +1586,29 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      acknowledge_alert: {
+        Args: { p_alert_id: string; p_note?: string }
+        Returns: {
+          acknowledged_at: string | null
+          acknowledged_by: string | null
+          acknowledged_note: string | null
+          alert_id: string
+          created_at: string
+          dedup_key: string | null
+          details: Json
+          invariant_name: string
+          severity: string
+          subject_id: string | null
+          subject_type: string
+          user_id: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "alerts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       activate_app: { Args: { p_app_name: string }; Returns: undefined }
       bump_api_key_used_admin: {
         Args: { p_api_key_hash: string }
@@ -1455,48 +1704,27 @@ export type Database = {
         }
         Returns: string
       }
-      apply_shelf_event:
-        | {
-            Args: {
-              p_client_event_id: string
-              p_delta_g: number
-              p_device_id: string
-              p_event_kind: string
-              p_kind: string
-              p_occurred_at: string
-              p_product_id: string
-              p_scale_id: string
-              p_user_id: string
-            }
-            Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
-            SetofOptions: {
-              from: "*"
-              to: "shelf_event_result"
-              isOneToOne: true
-              isSetofReturn: false
-            }
-          }
-        | {
-            Args: {
-              p_client_event_id: string
-              p_delta_g: number
-              p_device_id: string
-              p_event_kind: string
-              p_kind: string
-              p_occurred_at: string
-              p_pi_event_id?: string
-              p_product_id: string
-              p_scale_id: string
-              p_user_id: string
-            }
-            Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
-            SetofOptions: {
-              from: "*"
-              to: "shelf_event_result"
-              isOneToOne: true
-              isSetofReturn: false
-            }
-          }
+      apply_shelf_event: {
+        Args: {
+          p_client_event_id: string
+          p_delta_g: number
+          p_device_id: string
+          p_event_kind: string
+          p_kind: string
+          p_occurred_at: string
+          p_pi_event_id?: string
+          p_product_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       bump_api_key_used: {
         Args: { p_api_key_hash: string }
         Returns: undefined
@@ -1533,7 +1761,21 @@ export type Database = {
         Args: { p_day: string; p_user_id: string }
         Returns: Json
       }
+      expire_timer: {
+        Args: { p_user_id: string }
+        Returns: Database["coachbyte"]["Tables"]["timers"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "timers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       export_chefbyte_backup: { Args: never; Returns: Json }
+      generate_meal_product_name: {
+        Args: { p_base_name: string; p_logical_date: string; p_user_id: string }
+        Returns: string
+      }
       get_daily_macros: {
         Args: { p_logical_date: string; p_user_id: string }
         Returns: Json
@@ -1546,12 +1788,50 @@ export type Database = {
         Args: { day_start_hour: number; ts: string; tz: string }
         Returns: string
       }
+      import_shopping_to_inventory: {
+        Args: { p_location_id?: string; p_user_id: string }
+        Returns: Json
+      }
+      invariant_monitor_invoke: { Args: never; Returns: number }
       mark_meal_done: {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: Json
       }
+      pause_timer: {
+        Args: { p_user_id: string }
+        Returns: Database["coachbyte"]["Tables"]["timers"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "timers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       reset_demo_dates: { Args: never; Returns: undefined }
+      reset_timer: { Args: { p_user_id: string }; Returns: number }
+      resolve_add_to_shelf_lot: {
+        Args: {
+          p_event_id: string
+          p_fallback_location: string
+          p_occurred_at: string
+          p_placed_weight_g: number
+          p_product_id: string
+          p_shelf_source: string
+          p_user_id: string
+        }
+        Returns: string
+      }
       restore_chefbyte_backup: { Args: { p_backup: Json }; Returns: Json }
+      resume_timer: {
+        Args: { p_user_id: string }
+        Returns: Database["coachbyte"]["Tables"]["timers"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "timers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       retry_shelf_event: {
         Args: { p_client_event_id: string }
         Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
@@ -1575,9 +1855,40 @@ export type Database = {
         Args: { p_ingredients: Json; p_recipe_id: string; p_user_id: string }
         Returns: undefined
       }
+      start_timer: {
+        Args: { p_duration_seconds: number; p_user_id: string }
+        Returns: Database["coachbyte"]["Tables"]["timers"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "timers"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      test_alter_publication: {
+        Args: { p_action: string; p_table_name: string }
+        Returns: undefined
+      }
       unmark_meal_done: {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: Json
+      }
+      upsert_alert: {
+        Args: {
+          p_details: Json
+          p_invariant_name: string
+          p_severity: string
+          p_subject_id: string
+          p_subject_type: string
+          p_user_id: string
+        }
+        Returns: Database["hub"]["Tables"]["alerts"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "alerts"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
     }
     Enums: {
