@@ -3198,6 +3198,8 @@ class ScaleHandler:
         # show placeholder tiles. Best-effort; failures never block the
         # ingress response (the row is already committed).
         if shelf_id == "catch_all" and self._catch_all_camera is not None:
+            ca_before: Optional[str] = None
+            ca_after: Optional[str] = None
             try:
                 ca_before, ca_after = self._capture_catch_all_frames(
                     event_id, pi_received_ts,
@@ -3220,6 +3222,78 @@ class ScaleHandler:
                 log.exception(
                     "catch_all frames: unexpected raise for %s", event_id,
                 )
+            # Persist the captured frame paths back onto the
+            # scale_events row so:
+            #   1. The /event/<id>/before.jpg + /after.jpg routes can
+            #      serve the JPEGs (they read from these columns).
+            #   2. The sweeper-recovery branch can detect
+            #      already-captured frames and re-dispatch the classifier
+            #      after a transient failure.
+            #   3. _classify_recorded_event can read the frames directly
+            #      off the row instead of going through session_capture
+            #      (which is brightness-only and never registered for
+            #      catch-all).
+            #
+            # Without this UPDATE, the inline capture wrote files to disk
+            # but the row stayed at before_frame_path/after_frame_path =
+            # NULL — a documented dead code path the redesign now fixes
+            # (see /tmp/catch-all-analysis.md §A.5 + the redesign brief).
+            if ca_before is not None or ca_after is not None:
+                try:
+                    with self._db_lock, self._conn:
+                        self._conn.execute(
+                            """
+                            UPDATE scale_events
+                               SET before_frame_path = ?,
+                                   after_frame_path = ?
+                             WHERE event_id = ?
+                            """,
+                            (ca_before, ca_after, event_id),
+                        )
+                except Exception:  # pragma: no cover - defensive
+                    log.warning(
+                        "catch_all frames: failed to persist paths on "
+                        "scale_events for %s", event_id, exc_info=True,
+                    )
+
+            # Inline classifier dispatch for catch-all events.
+            #
+            # Catch-all has no brightness-driven session_capture → the
+            # session lookup below ALWAYS misses for shelf_id='catch_all'
+            # and the event sits at classifier_status='pending' until
+            # the sweeper marks it failed ~62s later. Instead we build
+            # a synthetic session dict with the inline-captured frames
+            # and dispatch on the same fast path the live-shelf uses.
+            #
+            # Best-effort: if the capture didn't produce both frames,
+            # let the sweeper's catch-all recovery branch try again.
+            if ca_before is not None and ca_after is not None:
+                synthetic_session = {
+                    "open_ts": pi_received_ts,
+                    "close_ts": pi_received_ts,
+                    "before_path": ca_before,
+                    "after_path": ca_after,
+                    "video_path": None,
+                    "shelf_id": "catch_all",
+                }
+                self._lc_event(
+                    event_id,
+                    actor="fast_path",
+                    reason_code=ReasonCode.CLASSIFIER_DISPATCHED,
+                    payload={
+                        "dispatch_path": "catch_all_inline",
+                        "session_open_ts": pi_received_ts,
+                        "session_close_ts": pi_received_ts,
+                    },
+                )
+                self._dispatch_classification(event_id, synthetic_session)
+                # Don't fall through to the session_capture lookup below.
+                return {
+                    "ok": True,
+                    "event_id": event_id,
+                    "direction": direction,
+                    "classifier_status": "pending",
+                }, 200
 
         # If a matching closed session is ALREADY available at record
         # time (post-close event: scale stabilized after the door already
@@ -3644,7 +3718,11 @@ class ScaleHandler:
                        strftime('%Y-%m-%dT%H:%M:%SZ', created_at) AS created_iso,
                        direction,
                        delta_g,
-                       classifier_status
+                       classifier_status,
+                       shelf_id,
+                       before_frame_path,
+                       after_frame_path,
+                       pi_received_ts
                   FROM scale_events
                  WHERE classifier_status = 'pending'
                    AND direction != 'noise'
@@ -3680,6 +3758,10 @@ class ScaleHandler:
             created_at_iso = row[2]  # Pi clock, strftime'd to T...Z
             direction = row[3]
             delta_g = row[4]
+            row_shelf_id = row[6] if row[6] else "live_shelf"
+            row_before_frame = row[7]
+            row_after_frame = row[8]
+            row_pi_received_ts = row[9]
             # Age by created_at (Pi receipt time), not ESP ts.
             try:
                 created_dt = datetime.fromisoformat(
@@ -3690,6 +3772,55 @@ class ScaleHandler:
             age_s = (now - created_dt).total_seconds()
             if age_s < min_age_seconds:
                 continue  # too fresh; let fast-path handle it
+
+            # Catch-all recovery branch: when an event has frame paths
+            # persisted but is still pending, the inline classifier
+            # dispatch in handle_scale_event missed (e.g. because the
+            # capture happened but the dispatch threw, or a Pi restart
+            # interrupted the dispatch). Re-dispatch with the persisted
+            # paths instead of going through session_capture.
+            if (
+                row_shelf_id == "catch_all"
+                and row_before_frame
+                and row_after_frame
+            ):
+                synthetic_session = {
+                    "open_ts": row_pi_received_ts or created_at_iso,
+                    "close_ts": row_pi_received_ts or created_at_iso,
+                    "before_path": row_before_frame,
+                    "after_path": row_after_frame,
+                    "video_path": None,
+                    "shelf_id": "catch_all",
+                }
+                self._lc_event(
+                    event_id,
+                    actor="sweeper",
+                    reason_code=ReasonCode.CLASSIFIER_DISPATCHED,
+                    payload={
+                        "dispatch_path": "sweeper_catch_all_recovery",
+                        "age_s": age_s,
+                    },
+                )
+                try:
+                    self._classify_recorded_event(
+                        event_id, synthetic_session,
+                    )
+                    touched += 1
+                    self._lc_event(
+                        event_id,
+                        actor="sweeper",
+                        reason_code=ReasonCode.SWEEPER_CLASSIFIED,
+                        payload={
+                            "age_s": age_s,
+                            "via": "catch_all_recovery",
+                        },
+                    )
+                except Exception:
+                    log.exception(
+                        "sweeper: catch_all recovery dispatch threw "
+                        "for %s", event_id,
+                    )
+                continue
 
             # Try to find a matching session now. Pass the Pi-clock
             # created_at, not the ESP ts (see bug note above).
@@ -4482,25 +4613,49 @@ class ScaleHandler:
         # introduced ±500ms of noise — enough for tightly-spaced
         # events to land in neighbour-event frame territory. See
         # 2026-04-16 root-cause investigation.
-        prior_event_pi_ts = self._find_prior_event_pi_ts_in_session(
-            session_id, event_ts,
-        )
-        pe_before_ts, pe_before_path, pe_after_ts, pe_after_path = (
-            session_capture.pick_event_frames(
-                session, pi_received_ts, prior_event_pi_ts,
-            )
-        )
-        before_src = pe_before_path or session.get("before_path")
-        after_src = pe_after_path or session.get("after_path")
-        video_src = session.get("video_path")
-        # Method: per_event = anchored to this event's ts, session_wide = fell
-        # back to the session boundary frames, fallback = neither available.
-        if pe_before_path or pe_after_path:
-            pick_method = "per_event"
-        elif session.get("before_path") or session.get("after_path"):
-            pick_method = "session_wide"
+        # Catch-all shortcut: skip session_capture.pick_event_frames
+        # entirely. The catch-all camera daemon is constructed with
+        # ``brightness_detection_enabled=False`` and is not registered
+        # with session_capture, so the frame-pick lookup ALWAYS returns
+        # (None, None). Instead use the inline-captured frames from
+        # _capture_catch_all_frames (already written to scale_events.
+        # before_frame_path / .after_frame_path at ingress, and also
+        # passed in via the synthetic session dict).
+        if event_shelf_id == "catch_all":
+            pe_before_ts = None
+            pe_after_ts = None
+            before_src = session.get("before_path")
+            after_src = session.get("after_path")
+            video_src = None
+            # Defense in depth: when called from the sweeper-recovery
+            # path the session dict is freshly built from the row, so
+            # before/after_path are populated. When called from the
+            # inline fast-path the dict is the synthetic session built
+            # in handle_scale_event. Either way, the paths come in via
+            # the dict — no session_capture round-trip.
+            pick_method = "catch_all_inline"
+            prior_event_pi_ts = None
         else:
-            pick_method = "fallback"
+            prior_event_pi_ts = self._find_prior_event_pi_ts_in_session(
+                session_id, event_ts,
+            )
+            pe_before_ts, pe_before_path, pe_after_ts, pe_after_path = (
+                session_capture.pick_event_frames(
+                    session, pi_received_ts, prior_event_pi_ts,
+                )
+            )
+            before_src = pe_before_path or session.get("before_path")
+            after_src = pe_after_path or session.get("after_path")
+            video_src = session.get("video_path")
+            # Method: per_event = anchored to this event's ts,
+            # session_wide = fell back to the session boundary frames,
+            # fallback = neither available.
+            if pe_before_path or pe_after_path:
+                pick_method = "per_event"
+            elif session.get("before_path") or session.get("after_path"):
+                pick_method = "session_wide"
+            else:
+                pick_method = "fallback"
         self._lc_event(
             event_id,
             actor="classifier",
