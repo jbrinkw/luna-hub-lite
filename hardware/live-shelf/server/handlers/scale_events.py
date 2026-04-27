@@ -404,6 +404,29 @@ class ScaleHandler:
         # import-arm interception branch in handle_scale_event. Duck-typed
         # so tests can pass a stub with a single ``snapshot()`` method.
         self._livetrack_poller = None
+        # Shutdown coordination for background threads spawned by this
+        # handler (sweeper, fire-and-forget classification workers,
+        # post-close reconciler workers). A leak surfaced as a Python
+        # interpreter segfault during pytest teardown when a previous
+        # test's bundle was discarded with these threads still actively
+        # running queries against ``self._conn``: the test process's
+        # next test (e.g. test_lifecycle.py) closed its own
+        # ``init_db(":memory:")`` connection while the leaked threads
+        # raced to use ``self._conn`` post-close, corrupting interpreter
+        # state.
+        #
+        # The shutdown_event flips from clear → set in :meth:`stop`; the
+        # sweeper loop and classify workers wait on it (instead of a bare
+        # ``time.sleep``) so they exit promptly when the bundle is torn
+        # down, and ``stop()`` joins the tracked threads before returning
+        # so the caller's subsequent ``conn.close()`` is safe.
+        self._shutdown_event = threading.Event()
+        self._sweeper_thread: Optional[threading.Thread] = None
+        # Track every background worker we spawn so ``stop()`` can join
+        # them. List access is guarded by ``_workers_lock`` because
+        # spawn-and-join can race a request thread spawning a new worker.
+        self._workers: list[threading.Thread] = []
+        self._workers_lock = threading.Lock()
 
     def set_livetrack_poller(self, poller: Any) -> None:
         """Attach a LiveTrack session poller.
@@ -2888,12 +2911,19 @@ class ScaleHandler:
                             reason_code=ReasonCode.RECONCILER_COMPLETED,
                             payload={"ok": False, "error": repr(exc)},
                         )
-                t = threading.Thread(
-                    target=_run_reconciler,
-                    name=f"reconciler-{session_id[:8]}",
-                    daemon=True,
-                )
-                t.start()
+                if self._shutdown_event.is_set():
+                    log.debug(
+                        "session %s: skip reconciler dispatch; handler stopping",
+                        session_id,
+                    )
+                else:
+                    t = threading.Thread(
+                        target=_run_reconciler,
+                        name=f"reconciler-{session_id[:8]}",
+                        daemon=True,
+                    )
+                    self._track_worker(t)
+                    t.start()
             else:
                 log.warning(
                     "process_session_events: no DB session row matched "
@@ -3679,9 +3709,16 @@ class ScaleHandler:
 
     def start_sweeper(self, interval_s: float = 5.0) -> None:
         """Launch a daemon thread that runs ``sweep_orphans`` on a fixed
-        interval. Call once at app startup."""
+        interval. Call once at app startup.
+
+        The loop sleeps via :attr:`_shutdown_event` rather than
+        ``time.sleep`` so :meth:`stop` can wake it immediately at
+        teardown. Without that, the sweeper held ``self._conn`` past the
+        end of a test's bundle lifetime and segfaulted Python on the
+        next test's ``conn.close()``.
+        """
         def _loop() -> None:
-            while True:
+            while not self._shutdown_event.is_set():
                 try:
                     self.sweep_orphans()
                 except Exception:
@@ -3690,12 +3727,55 @@ class ScaleHandler:
                     self._reap_expired_in_flight()
                 except Exception:
                     log.exception("in_flight reaper: iteration threw")
-                time.sleep(interval_s)
+                # ``Event.wait`` returns True if the event was set during
+                # the wait, breaking the loop on the next iteration.
+                if self._shutdown_event.wait(interval_s):
+                    return
         t = threading.Thread(
             target=_loop, name="scale-events-sweeper", daemon=True,
         )
+        self._sweeper_thread = t
         t.start()
         log.info("scale_events sweeper started (interval=%.1fs)", interval_s)
+
+    def stop(self, *, join_timeout: float = 5.0) -> None:
+        """Signal every background thread spawned by this handler to
+        exit and wait for them to finish.
+
+        Safe to call multiple times. Idempotent on the event flag, and
+        the worker list is consumed under the lock so a second caller
+        sees an empty list.
+        """
+        self._shutdown_event.set()
+        # Snapshot + clear the worker list under the lock so a late
+        # spawn doesn't race the join.
+        with self._workers_lock:
+            workers = list(self._workers)
+            self._workers.clear()
+        sweeper = self._sweeper_thread
+        self._sweeper_thread = None
+        for t in workers:
+            try:
+                t.join(timeout=join_timeout)
+            except Exception:  # pragma: no cover - defensive
+                log.exception("scale_events stop: worker join threw")
+        if sweeper is not None:
+            try:
+                sweeper.join(timeout=join_timeout)
+            except Exception:  # pragma: no cover - defensive
+                log.exception("scale_events stop: sweeper join threw")
+
+    def _track_worker(self, t: threading.Thread) -> None:
+        """Add a freshly-started worker thread to the join list and
+        reap any already-finished entries.
+
+        Used by every fire-and-forget spawn (classification dispatch,
+        reconciler dispatch). The reap keeps the list bounded over long
+        Pi uptimes; ``stop()`` joins whatever's still alive at teardown.
+        """
+        with self._workers_lock:
+            self._workers = [w for w in self._workers if w.is_alive()]
+            self._workers.append(t)
 
     def _dispatch_classification(
         self, event_id: str, session: dict[str, Any],
@@ -3732,11 +3812,20 @@ class ScaleHandler:
             finally:
                 if acquired:
                     self._classify_semaphore.release()
+        # Bail early if we're tearing down — don't add to the work
+        # backlog when ``stop()`` has already been called.
+        if self._shutdown_event.is_set():
+            log.debug(
+                "event %s: skip classify dispatch; handler stopping",
+                event_id,
+            )
+            return
         t = threading.Thread(
             target=_run,
             name=f"classify-{event_id[:8]}",
             daemon=True,
         )
+        self._track_worker(t)
         t.start()
 
     def _classify_recorded_event(

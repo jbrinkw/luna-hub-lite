@@ -17,6 +17,7 @@ Responsibilities:
 from __future__ import annotations
 
 import argparse
+import inspect
 import logging
 import os
 import shutil
@@ -95,6 +96,9 @@ class AppBundle:
         weight_handler: Optional[WeightHandler] = None,
         cloud_worker: Optional[CloudWorker] = None,
         cloud_emitter: Optional[CloudEventEmitter] = None,
+        background_threads: Optional[list[threading.Thread]] = None,
+        background_shutdown_event: Optional[threading.Event] = None,
+        cloud_pollers: Optional[list[Any]] = None,
     ) -> None:
         self.app = app
         self.config = config
@@ -115,15 +119,41 @@ class AppBundle:
         # introspection can observe their state.
         self.cloud_worker = cloud_worker
         self.cloud_emitter = cloud_emitter
+        # Background sweepers (lifecycle-retention, system-health-snapshot,
+        # disk-retention-sweeper) and their shared cancellation event.
+        # Tracked here so ``shutdown()`` can stop them before closing
+        # ``conn``. Without this, daemon threads ran queries against a
+        # closed connection, which segfaulted the Python interpreter at
+        # the next test's teardown (regression observed by the verify:full
+        # pre-push hook).
+        self._background_threads = list(background_threads or [])
+        self._background_shutdown_event = background_shutdown_event
+        # Cloud-side pollers (LiveTrack / product-sync / event-overrides /
+        # lot-snapshot). Each is a Thread subclass with its own .stop()
+        # method. Only populated when cloud is enabled — None / empty list
+        # is the test-suite default.
+        self._cloud_pollers: list[Any] = list(cloud_pollers or [])
 
     def shutdown(self) -> None:
-        """Graceful shutdown: stop camera thread(s) + cloud worker + commit DB.
+        """Graceful shutdown: stop every background thread and commit
+        the DB.
+
+        Order matters — every thread that may touch ``self.conn`` MUST
+        finish before ``conn.close()`` runs, otherwise the daemon
+        thread's pending statement hits a closed connection and
+        segfaults Python at process exit. Stop order:
+
+          1. Cloud worker (drain pending outbox writes).
+          2. Cloud-side pollers (LiveTrack / product / overrides / lots).
+          3. Scale handler — sweeper + classify workers + reconciler
+             workers all share ``self.conn``.
+          4. App-level sweepers (lifecycle-retention,
+             system-health-snapshot, disk-retention-sweeper).
+          5. Camera daemons.
+          6. Close DB.
 
         Each step logs INFO at entry and exit so a hung shutdown shows
-        up in the log with the specific step that stalled. After the
-        cloud-worker join, we check ``is_alive()`` — a still-alive
-        thread means the 5s join timed out, which is an operator signal
-        (Wi-Fi hung indefinitely, runaway retry loop, etc.).
+        up in the log with the specific step that stalled.
         """
         log.info("shutdown: starting")
         # Stop the cloud worker first so it doesn't attempt writes
@@ -147,6 +177,55 @@ class AppBundle:
                 )
             except Exception:  # pragma: no cover - defensive
                 log.exception("cloud worker shutdown failed")
+        # Cloud-side pollers (LiveTrack / product-sync / event-overrides /
+        # lot-snapshot). Each exposes a .stop() that sets an internal
+        # flag. ProductSync/EventOverrides/LotSnapshot are Thread
+        # subclasses (have .join()/.is_alive() directly); LiveTrackPoller
+        # owns its thread and its .stop() blocks until joined.
+        for poller in self._cloud_pollers:
+            name = type(poller).__name__
+            try:
+                log.info("shutdown: stopping %s", name)
+                stop_signature = inspect.signature(poller.stop).parameters
+                if "timeout" in stop_signature:
+                    poller.stop(timeout=5.0)
+                else:
+                    poller.stop()
+                if hasattr(poller, "join"):
+                    poller.join(timeout=5.0)
+                if hasattr(poller, "is_alive") and poller.is_alive():
+                    log.warning(
+                        "shutdown: %s did not stop within timeout", name,
+                    )
+            except Exception:  # pragma: no cover - defensive
+                log.exception("%s shutdown failed", name)
+        # Stop the scale handler's threads (sweeper + classify workers +
+        # reconciler workers). All of them hold ``self.conn``; if they're
+        # still running when we close the DB below the process segfaults.
+        try:
+            log.info("shutdown: stopping scale handler workers")
+            self.scale_handler.stop(join_timeout=5.0)
+            log.info("shutdown: scale handler workers stopped")
+        except Exception:  # pragma: no cover - defensive
+            log.exception("scale handler stop failed")
+        # Signal the app-level sweepers (lifecycle-retention,
+        # system-health-snapshot, disk-retention-sweeper) and join them.
+        if self._background_shutdown_event is not None:
+            try:
+                log.info("shutdown: signaling background sweepers")
+                self._background_shutdown_event.set()
+            except Exception:  # pragma: no cover - defensive
+                log.exception("background shutdown signal failed")
+        for t in self._background_threads:
+            try:
+                t.join(timeout=5.0)
+                if t.is_alive():
+                    log.warning(
+                        "shutdown: background thread %s did not stop",
+                        t.name,
+                    )
+            except Exception:  # pragma: no cover - defensive
+                log.exception("background thread join failed: %s", t.name)
         try:
             log.info("shutdown: setting camera shutdown")
             self.camera.shutdown_event.set()
@@ -555,10 +634,20 @@ def start_lifecycle_retention_sweeper(
     *,
     retention_days: int = LIFECYCLE_RETENTION_DAYS,
     interval_seconds: int = LIFECYCLE_RETENTION_INTERVAL_SECONDS,
+    shutdown_event: Optional[threading.Event] = None,
 ) -> threading.Thread:
-    """Daily cleanup of lifecycle tables — delete rows older than N days."""
+    """Daily cleanup of lifecycle tables — delete rows older than N days.
+
+    When ``shutdown_event`` is provided the loop sleeps via
+    ``Event.wait`` and exits as soon as it's set — required so
+    :meth:`AppBundle.shutdown` can stop this thread before closing the
+    DB. Without it the daemon thread kept running queries against a
+    closed connection and segfaulted Python at process exit (observed
+    when pytest ran ``test_integration.py`` (which builds + tears down
+    several AppBundles) before ``test_lifecycle.py``).
+    """
     def _loop() -> None:
-        while True:
+        while shutdown_event is None or not shutdown_event.is_set():
             try:
                 deleted = lifecycle_storage.purge_older_than(
                     conn, db_lock, days=retention_days,
@@ -569,7 +658,11 @@ def start_lifecycle_retention_sweeper(
                 )
             except Exception:
                 log.exception("lifecycle retention iteration threw")
-            time.sleep(interval_seconds)
+            if shutdown_event is not None:
+                if shutdown_event.wait(interval_seconds):
+                    return
+            else:
+                time.sleep(interval_seconds)
 
     t = threading.Thread(
         target=_loop, name="lifecycle-retention", daemon=True,
@@ -587,6 +680,7 @@ def start_system_health_snapshot_thread(
     db_lock: threading.RLock,
     *,
     interval_seconds: int = SYSTEM_HEALTH_INTERVAL_SECONDS,
+    shutdown_event: Optional[threading.Event] = None,
 ) -> threading.Thread:
     """Every ``interval_seconds``: compute + persist a health snapshot.
 
@@ -650,7 +744,7 @@ def start_system_health_snapshot_thread(
         return snap
 
     def _loop() -> None:
-        while True:
+        while shutdown_event is None or not shutdown_event.is_set():
             try:
                 snap = _snapshot()
                 lifecycle_storage.log_system_health_snapshot(
@@ -658,7 +752,11 @@ def start_system_health_snapshot_thread(
                 )
             except Exception:
                 log.exception("system_health snapshot iteration threw")
-            time.sleep(interval_seconds)
+            if shutdown_event is not None:
+                if shutdown_event.wait(interval_seconds):
+                    return
+            else:
+                time.sleep(interval_seconds)
 
     t = threading.Thread(
         target=_loop, name="system-health-snapshot", daemon=True,
@@ -679,6 +777,7 @@ def start_disk_retention_sweeper(
     conn: Optional[sqlite3.Connection] = None,
     db_lock: Optional[threading.RLock] = None,
     outbox_retention_days: int = OUTBOX_RETENTION_DAYS,
+    shutdown_event: Optional[threading.Event] = None,
 ) -> threading.Thread:
     """Run ``_sweep_old_run_artifacts`` + ``_prune_cloud_outbox``
     immediately, then every ``interval_seconds`` from a daemon thread.
@@ -696,7 +795,7 @@ def start_disk_retention_sweeper(
     it never races with a drain cycle.
     """
     def _loop() -> None:
-        while True:
+        while shutdown_event is None or not shutdown_event.is_set():
             try:
                 summary = _sweep_old_run_artifacts(
                     data_root,
@@ -724,7 +823,11 @@ def start_disk_retention_sweeper(
                     )
             except Exception:
                 log.exception("cloud_outbox prune: iteration threw")
-            time.sleep(interval_seconds)
+            if shutdown_event is not None:
+                if shutdown_event.wait(interval_seconds):
+                    return
+            else:
+                time.sleep(interval_seconds)
 
     t = threading.Thread(
         target=_loop,
@@ -1224,19 +1327,41 @@ def create_app(
     # events whose session landed after handle_scale_event returned.
     scale_handler.start_sweeper()
 
+    # Shared cancellation event for app-level sweeper threads. Allows
+    # ``AppBundle.shutdown`` to wake the loops promptly so they don't
+    # outlive the DB connection (regression: bare ``time.sleep`` daemon
+    # threads survived ``conn.close`` and segfaulted Python at process
+    # exit when pytest stitched test_integration.py before
+    # test_lifecycle.py).
+    background_shutdown_event = threading.Event()
+    background_threads: list[threading.Thread] = []
+
     # Daily disk-retention sweeper. ``data/events/``, ``data/sessions/``
     # and ``data/diag/`` accumulate per-run directories forever without
     # intervention; this trims anything older than 14 days. The same
     # loop also prunes the cloud_outbox table (7d retention on sent
     # rows) so the SQLite file doesn't grow unbounded on long-lived
     # Pis — see bug fix 2026-04-22.
-    start_disk_retention_sweeper(
-        cfg.data_root, conn=conn, db_lock=db_lock,
+    background_threads.append(
+        start_disk_retention_sweeper(
+            cfg.data_root, conn=conn, db_lock=db_lock,
+            shutdown_event=background_shutdown_event,
+        )
     )
 
     # Lifecycle tables + system_health: 30-day retention; snapshot every 60s.
-    start_lifecycle_retention_sweeper(conn, db_lock)
-    start_system_health_snapshot_thread(conn, db_lock)
+    background_threads.append(
+        start_lifecycle_retention_sweeper(
+            conn, db_lock,
+            shutdown_event=background_shutdown_event,
+        )
+    )
+    background_threads.append(
+        start_system_health_snapshot_thread(
+            conn, db_lock,
+            shutdown_event=background_shutdown_event,
+        )
+    )
 
     # --- Flask -----------------------------------------------------------
     app = Flask(__name__)
@@ -1788,6 +1913,10 @@ def create_app(
     # is on AND both URL + import key are populated. Any of those
     # missing → log and skip startup; the app still runs standalone.
     cloud_worker: Optional[CloudWorker] = None
+    # Track every cloud-side poller started in this branch so
+    # AppBundle.shutdown can stop them at teardown. Empty when cloud
+    # is disabled (the default in tests).
+    cloud_pollers_started: list[Any] = []
     if (
         cfg.cloud_enabled
         and cfg.cloud_url
@@ -1952,6 +2081,7 @@ def create_app(
                 livetrack_poller.seed_snapshot()
                 scale_handler.set_livetrack_poller(livetrack_poller)
                 livetrack_poller.start()
+                cloud_pollers_started.append(livetrack_poller)
                 log.info("livetrack import poller started")
             except Exception:  # pragma: no cover - defensive
                 log.exception(
@@ -1974,6 +2104,7 @@ def create_app(
                     db_lock=db_lock,
                 )
                 product_sync_poller.start()
+                cloud_pollers_started.append(product_sync_poller)
                 log.info("product-sync poller started (interval=30s)")
             except Exception:  # pragma: no cover - defensive
                 log.exception(
@@ -1998,6 +2129,7 @@ def create_app(
                     db_lock=db_lock,
                 )
                 event_overrides_poller.start()
+                cloud_pollers_started.append(event_overrides_poller)
                 log.info("event-overrides poller started (interval=30s)")
             except Exception:  # pragma: no cover - defensive
                 log.exception(
@@ -2024,6 +2156,7 @@ def create_app(
                     db_lock=db_lock,
                 )
                 lot_snapshot_poller.start()
+                cloud_pollers_started.append(lot_snapshot_poller)
                 log.info("lot-snapshot poller started (interval=60s)")
             except Exception:  # pragma: no cover - defensive
                 log.exception(
@@ -2056,6 +2189,9 @@ def create_app(
         weight_handler=weight_handler,
         cloud_worker=cloud_worker,
         cloud_emitter=cloud_emitter,
+        background_threads=background_threads,
+        background_shutdown_event=background_shutdown_event,
+        cloud_pollers=cloud_pollers_started,
     )
 
 

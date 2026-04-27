@@ -107,12 +107,14 @@ run_pi_pytest() {
   fi
   (
     cd "$REPO_ROOT/hardware/live-shelf"
-    # --ignore test_integration.py: those tests pass fine alone but leak
-    # threads + DB handles that segfault Python at interpreter exit when
-    # combined with the rest of the suite. Same reason mutmut runs with
-    # the same ignore (see setup.cfg).
+    # test_integration.py used to be excluded here because the integration
+    # suite leaked threads + DB handles that segfaulted Python at
+    # interpreter exit when combined with the rest of the suite. The
+    # 2026-04-27 fix wired AppBundle.shutdown to stop the four background
+    # sweepers (lifecycle-retention, system-health-snapshot, disk-retention,
+    # scale-events-sweeper) and join classify/reconciler workers; the
+    # ignore is no longer needed.
     "$pytest_bin" -x \
-      --ignore=server/tests/test_integration.py \
       server/tests/ \
       server/cloud/tests/ \
       server/classifier/tests/

@@ -265,6 +265,12 @@ def test_invariant_pending_event_old(conn):
 
 
 def _make_handler(conn, lock, events_root):
+    """Construct a handler. Caller is responsible for calling
+    ``handler.stop()`` before ``conn`` closes. Use the ``handler_factory``
+    fixture below to get auto-cleanup on test teardown — leaving classify
+    threads alive past ``conn.close()`` segfaulted Python on later test
+    files in the same process (root-cause for the
+    test_integration.py/test_lifecycle.py teardown crash)."""
     from server.handlers.scale_events import ScaleHandler
 
     class _StubCamera:
@@ -293,10 +299,36 @@ def _make_handler(conn, lock, events_root):
     )
 
 
-def test_scale_event_ingress_writes_lifecycle(conn, lock, tmp_path):
+@pytest.fixture
+def handler_factory(conn, lock, tmp_path):
+    """Yield a factory that builds ScaleHandler instances and stops
+    them all on teardown.
+
+    Without this, classify-dispatch threads (fired by
+    ``handle_scale_event``) survive past the ``conn`` fixture's
+    ``c.close()`` and segfault Python during later test files'
+    teardown.
+    """
+    handlers: list[Any] = []
+
+    def _factory():
+        h = _make_handler(conn, lock, tmp_path)
+        handlers.append(h)
+        return h
+
+    yield _factory
+
+    for h in handlers:
+        try:
+            h.stop()
+        except Exception:
+            pass
+
+
+def test_scale_event_ingress_writes_lifecycle(handler_factory, conn, lock, tmp_path):
     """An event into handle_scale_event should log event_ingress with
     identifying payload."""
-    handler = _make_handler(conn, lock, tmp_path)
+    handler = handler_factory()
 
     # Recent ts (post-NTP) that the handler will accept.
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
@@ -320,8 +352,8 @@ def test_scale_event_ingress_writes_lifecycle(conn, lock, tmp_path):
     assert ingress["payload"]["delta_g"] == pytest.approx(25.0)
 
 
-def test_dedup_hit_logs_dedup_event(conn, lock, tmp_path):
-    handler = _make_handler(conn, lock, tmp_path)
+def test_dedup_hit_logs_dedup_event(handler_factory, conn, lock, tmp_path):
+    handler = handler_factory()
     ts = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     payload = {
         "ts": ts,
