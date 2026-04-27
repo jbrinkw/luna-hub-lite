@@ -11,6 +11,7 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  *   GET  /shelf-ingest/catalog       — products + stock + pairings + locations
  *   GET  /shelf-ingest/overrides     — event_overrides since watermark (+ lot state)
  *   GET  /shelf-ingest/lot-snapshot  — stock_lots delta since watermark (full row + tombstones)
+ *   GET  /shelf-ingest/settings      — per-user classifier toggles (chefbyte_classifier_fallback_enabled, …)
  *   POST /shelf-ingest/event         — apply one scale event via private.apply_shelf_event
  *   POST /shelf-ingest/intake        — upsert a product (barcode flow)
  *   POST /shelf-ingest/heartbeat     — update device + scale_pairings rows
@@ -167,7 +168,7 @@ async function handleCatalog(supabase: SupabaseClient, device: Device, url: URL)
     supabase
       .schema('chefbyte')
       .from('scale_pairings')
-      .select('scale_id, kind, product_id')
+      .select('scale_id, kind, product_id, lot_id')
       .eq('user_id', userId)
       .eq('device_id', device.device_id),
     supabase.schema('chefbyte').from('locations').select('location_id, name').eq('user_id', userId),
@@ -394,6 +395,39 @@ async function handleLotSnapshot(supabase: SupabaseClient, device: Device, url: 
   if (error) throw error;
 
   return jsonResponse({ lots: data ?? [] });
+}
+
+/**
+ * GET /settings
+ *
+ * Return per-user classifier toggles for the authenticated device's
+ * user. Currently a single flag — `chefbyte_classifier_fallback_enabled`
+ * — but shaped as an object so future toggles land additively.
+ *
+ * The Pi polls this endpoint on the same 60s cadence as
+ * /lot-snapshot and caches the result in-memory. When the flag is
+ * TRUE and the classifier's first pass returns UNKNOWN / low
+ * confidence, the Pi runs a SECOND pass against ALL certified
+ * LiveTrack-tracked products as a recovery fallback.
+ *
+ * RLS: we filter explicitly on user_id (defense-in-depth — service
+ * role bypasses RLS but we still scope so a future schema change
+ * can't leak cross-user toggles by accident). Returns the default
+ * (FALSE) for any user that somehow lacks a profiles row, so the Pi
+ * never crashes on a missing profile.
+ */
+async function handleSettings(supabase: SupabaseClient, device: Device): Promise<Response> {
+  const userId = device.user_id;
+  const { data, error } = await supabase
+    .schema('hub')
+    .from('profiles')
+    .select('chefbyte_classifier_fallback_enabled')
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  return jsonResponse({
+    chefbyte_classifier_fallback_enabled: Boolean(data?.chefbyte_classifier_fallback_enabled ?? false),
+  });
 }
 
 async function handleEvent(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
@@ -781,6 +815,10 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET' && leaf === 'lot-snapshot') {
       return await handleLotSnapshot(supabase, device, url);
+    }
+
+    if (req.method === 'GET' && leaf === 'settings') {
+      return await handleSettings(supabase, device);
     }
 
     if (req.method === 'POST') {

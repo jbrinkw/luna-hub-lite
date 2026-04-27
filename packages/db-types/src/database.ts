@@ -177,6 +177,7 @@ export type Database = {
           device_id: string
           expires_at: string
           last_error: string | null
+          scale_id: string | null
           scale_reading_g: number | null
           scale_reading_ts: string | null
           session_id: string
@@ -195,6 +196,7 @@ export type Database = {
           device_id: string
           expires_at?: string
           last_error?: string | null
+          scale_id?: string | null
           scale_reading_g?: number | null
           scale_reading_ts?: string | null
           session_id?: string
@@ -213,6 +215,7 @@ export type Database = {
           device_id?: string
           expires_at?: string
           last_error?: string | null
+          scale_id?: string | null
           scale_reading_g?: number | null
           scale_reading_ts?: string | null
           session_id?: string
@@ -495,6 +498,7 @@ export type Database = {
           first_seen_at: string
           kind: string
           last_heartbeat_ts: string | null
+          lot_id: string | null
           pairing_id: string
           product_id: string | null
           scale_id: string
@@ -505,6 +509,7 @@ export type Database = {
           first_seen_at?: string
           kind: string
           last_heartbeat_ts?: string | null
+          lot_id?: string | null
           pairing_id?: string
           product_id?: string | null
           scale_id: string
@@ -515,6 +520,7 @@ export type Database = {
           first_seen_at?: string
           kind?: string
           last_heartbeat_ts?: string | null
+          lot_id?: string | null
           pairing_id?: string
           product_id?: string | null
           scale_id?: string
@@ -527,6 +533,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "live_shelf_devices"
             referencedColumns: ["device_id"]
+          },
+          {
+            foreignKeyName: "scale_pairings_lot_id_fkey"
+            columns: ["lot_id"]
+            isOneToOne: false
+            referencedRelation: "stock_lots"
+            referencedColumns: ["lot_id"]
           },
           {
             foreignKeyName: "scale_pairings_product_id_fkey"
@@ -1843,6 +1856,10 @@ export type Database = {
         }
       }
       revoke_all_api_keys: { Args: { p_user_id: string }; Returns: number }
+      rotate_pairing_after_depletion: {
+        Args: { p_lot_id: string }
+        Returns: string
+      }
       save_extension_credentials: {
         Args: {
           p_credentials_json: string

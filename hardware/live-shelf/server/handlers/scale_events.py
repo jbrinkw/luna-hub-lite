@@ -35,6 +35,7 @@ from ..camera import session_capture
 from ..camera.daemon import CameraDaemon, now_iso_utc_ms, parse_iso_utc
 from ..camera.extract import FrameNotAvailableError, frame_at_with
 from ..classifier.classify import classify_event
+from ..classifier.fallback import classify_event_with_fallback
 from ..classifier.models import (
     CandidateSource,
     ClassifierContext,
@@ -42,6 +43,10 @@ from ..classifier.models import (
     UNKNOWN_CANDIDATE_ID,
 )
 from ..cloud.integration import CloudEventEmitter, null_emitter
+from ..cloud.settings_cache import (
+    ClassifierSettingsCache,
+    get_global_cache as _get_classifier_settings_cache,
+)
 from ..storage import repo as storage_repo
 from ..storage import lifecycle
 from ..storage.lifecycle import ReasonCode
@@ -1575,7 +1580,16 @@ class ScaleHandler:
         event_ts: str,
         shelf_id: str,
     ) -> Optional[Any]:
-        """Mint a Pi-local ``lots`` row for an inventory_only-branch pick.
+        """Populate a Pi-local ``lots`` row mirroring an existing cloud lot.
+
+        IMPORTANT: this is a **Pi-local cache populate**, NOT a "create
+        new product/lot" mint. The catalog-mint code path was removed in
+        commit 3b99043; this helper exists strictly to give the Pi a
+        local row that mirrors the (already-existing) cloud
+        ``stock_lots`` entry so the shelf state machine has something
+        to operate on going forward. Renamed 2026-04-27 from
+        ``_mint_pi_lot_for_inventory_only_pick`` because the old name
+        falsely suggested a creation/mint operation.
 
         2026-04-27 regression fix: when the classifier picks a product
         whose only inventory is a cloud-mirror ``cloud_lots`` row (no
@@ -1590,17 +1604,17 @@ class ScaleHandler:
         Defensive: requires that the product has at least one
         ``cloud_lots`` row with ``qty_containers > 0``. This is the
         same gate the candidate_pool's ``inventory_only`` branch
-        applies — refusing to mint here when the gate fails preserves
-        decision #45's "minting from a place event is forbidden"
-        invariant. (Without this gate, a hallucinated classifier pick
-        could mint a Pi lot for a product the user never intaked,
-        which would then desync from cloud.)
+        applies — refusing to populate here when the gate fails
+        preserves decision #45's "minting from a place event is
+        forbidden" invariant. (Without this gate, a hallucinated
+        classifier pick could create a Pi lot for a product the user
+        never intaked, which would then desync from cloud.)
 
-        Returns the minted ``Lot`` row, or ``None`` if the cloud
+        Returns the populated ``Lot`` row, or ``None`` if the cloud
         inventory check fails. Caller treats None as "skip this
         match."
         """
-        # Cross-check cloud_lots inventory before minting. The pool
+        # Cross-check cloud_lots inventory before populating. The pool
         # builder already filtered for this, but a stale snapshot or
         # racing tombstone could sneak through.
         try:
@@ -1623,8 +1637,8 @@ class ScaleHandler:
             return None
         if row is None:
             log.warning(
-                "_populate_pi_lot_mirror_from_cloud: refusing to mint "
-                "Pi lot for product %s — no cloud_lots inventory "
+                "_populate_pi_lot_mirror_from_cloud: refusing to populate "
+                "Pi lot mirror for product %s — no cloud_lots inventory "
                 "(decision #45: minting from a place event is forbidden)",
                 product_id,
             )
@@ -2178,26 +2192,27 @@ class ScaleHandler:
                     # This is the "general-inventory → live-shelf"
                     # transfer case: the user intaked a product to
                     # cloud, then placed it on the shelf for the first
-                    # time. We mint a Pi-local ``lots`` row to track
-                    # the shelf state going forward; the cloud emit
-                    # below promotes the existing cloud stock_lot via
+                    # time. We populate a Pi-local ``lots`` row mirroring
+                    # the existing cloud stock_lot to track shelf state
+                    # going forward; the cloud emit below promotes the
+                    # existing cloud stock_lot via
                     # ``resolve_add_to_shelf_lot`` step 2/3 (NOT step 5
                     # which would mint a duplicate cloud lot).
-                    minted_lot = self._populate_pi_lot_mirror_from_cloud(
+                    mirrored_lot = self._populate_pi_lot_mirror_from_cloud(
                         product_id=str(cid),
                         weight_g=lot_weight_g,
                         event_ts=event_ts,
                         shelf_id=shelf_id,
                     )
-                    if minted_lot is not None:
+                    if mirrored_lot is not None:
                         log.info(
-                            "inventory-only mint: product %s → Pi lot %s "
+                            "inventory-only mirror: product %s → Pi lot %s "
                             "(weight %.1fg) for ADD event %s on %s",
-                            cid, minted_lot.lot_id, lot_weight_g,
+                            cid, mirrored_lot.lot_id, lot_weight_g,
                             event_id, shelf_id,
                         )
-                        lot = minted_lot
-                        cid = minted_lot.lot_id
+                        lot = mirrored_lot
+                        cid = mirrored_lot.lot_id
                         inventory_only_mint = True
             if lot is not None:
                 # Fix 3: guard against the lot_id-vs-product_id ambiguity.
@@ -4520,8 +4535,28 @@ class ScaleHandler:
             # after the migration runs.
             shelf_id=event_shelf_id,
         )
+        # Per-user opt-in classifier fallback: when the user has flipped
+        # ``hub.profiles.chefbyte_classifier_fallback_enabled`` and pass-1
+        # returns UNKNOWN / low confidence, run a second pass against ALL
+        # certified LiveTrack-tracked products. The flag is mirrored to
+        # the Pi via the lot-snapshot poller's settings cache; we read
+        # the latest cached value here. Default FALSE → identical
+        # behaviour to the pre-feature codepath.
         try:
-            result = classify_event(cls_event, ctx)
+            _settings = _get_classifier_settings_cache().get()
+            _fallback_enabled = bool(
+                _settings.chefbyte_classifier_fallback_enabled
+            )
+        except Exception:  # noqa: BLE001 - defensive: never crash classifier
+            _fallback_enabled = False
+
+        try:
+            if _fallback_enabled:
+                result = classify_event_with_fallback(
+                    cls_event, ctx, fallback_enabled=True,
+                )
+            else:
+                result = classify_event(cls_event, ctx)
         except Exception as exc:
             log.exception("event %s: classifier threw", event_id)
             self._lc_event(
@@ -4560,6 +4595,39 @@ class ScaleHandler:
 
         # Pack classification JSON.
         classification_dict = _classification_to_dict(result)
+
+        # Telemetry: when the opt-in fallback orchestrator actually
+        # invoked pass-2, emit a lifecycle event so operators can see
+        # how often the primary path is failing. The fallback module
+        # stamps ``meta["fallback_pass_attempted"] = True`` whenever
+        # pass-2 fired (even if it didn't ultimately override pass-1).
+        _result_meta = result.meta or {}
+        if _result_meta.get("fallback_pass_attempted"):
+            self._lc_event(
+                event_id,
+                actor="classifier",
+                reason_code=ReasonCode.CLASSIFIER_FALLBACK_ATTEMPT,
+                payload={
+                    "fallback_pass_used": bool(
+                        _result_meta.get("fallback_pass_used", False)
+                    ),
+                    "pass1_item_id": _result_meta.get(
+                        "fallback_pass1_item_id"
+                    ),
+                    "pass1_confidence": _result_meta.get(
+                        "fallback_pass1_confidence"
+                    ),
+                    "pass2_item_id": _result_meta.get(
+                        "fallback_pass2_item_id"
+                    ),
+                    "pass2_confidence": _result_meta.get(
+                        "fallback_pass2_confidence"
+                    ),
+                    "pass2_reason": _result_meta.get(
+                        "fallback_pass2_reason"
+                    ),
+                },
+            )
 
         # Defense-in-depth reunite guard for in-flight returns. When the
         # classifier picked a product_id (catalog branch) even though the

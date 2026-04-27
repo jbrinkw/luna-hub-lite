@@ -204,7 +204,8 @@ class TestInventoryOnlyMint:
         This preserves decision #45's "minting from a place event is
         forbidden" rule for the no-inventory case. The pool builder
         already filters; this test pins the second-line defense in
-        ``_mint_pi_lot_for_inventory_only_pick``.
+        ``_populate_pi_lot_mirror_from_cloud`` (renamed 2026-04-27 from
+        ``_mint_pi_lot_for_inventory_only_pick``).
         """
         conn = init_db(":memory:")
         try:
