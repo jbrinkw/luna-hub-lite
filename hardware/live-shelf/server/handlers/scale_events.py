@@ -2911,18 +2911,33 @@ class ScaleHandler:
                             reason_code=ReasonCode.RECONCILER_COMPLETED,
                             payload={"ok": False, "error": repr(exc)},
                         )
-                if self._shutdown_event.is_set():
-                    log.debug(
-                        "session %s: skip reconciler dispatch; handler stopping",
-                        session_id,
-                    )
-                else:
-                    t = threading.Thread(
-                        target=_run_reconciler,
-                        name=f"reconciler-{session_id[:8]}",
-                        daemon=True,
-                    )
-                    self._track_worker(t)
+                # Spawn + track must be atomic under ``_workers_lock`` with
+                # a shutdown re-check inside the lock. Otherwise ``stop()``
+                # may snapshot+clear ``_workers`` between our shutdown
+                # check and ``_track_worker``, leaving a worker that
+                # touches ``self._conn`` after ``conn.close()`` — exactly
+                # the segfault class that commit 34895f0 was supposed to
+                # eliminate. ``t.start()`` is intentionally outside the
+                # lock to avoid holding it through OS thread startup.
+                t: Optional[threading.Thread] = None
+                with self._workers_lock:
+                    if self._shutdown_event.is_set():
+                        log.debug(
+                            "session %s: skip reconciler dispatch; "
+                            "handler stopping",
+                            session_id,
+                        )
+                    else:
+                        t = threading.Thread(
+                            target=_run_reconciler,
+                            name=f"reconciler-{session_id[:8]}",
+                            daemon=True,
+                        )
+                        self._workers = [
+                            w for w in self._workers if w.is_alive()
+                        ]
+                        self._workers.append(t)
+                if t is not None:
                     t.start()
             else:
                 log.warning(
@@ -3765,17 +3780,28 @@ class ScaleHandler:
             except Exception:  # pragma: no cover - defensive
                 log.exception("scale_events stop: sweeper join threw")
 
-    def _track_worker(self, t: threading.Thread) -> None:
+    def _track_worker(self, t: threading.Thread) -> bool:
         """Add a freshly-started worker thread to the join list and
         reap any already-finished entries.
 
-        Used by every fire-and-forget spawn (classification dispatch,
-        reconciler dispatch). The reap keeps the list bounded over long
-        Pi uptimes; ``stop()`` joins whatever's still alive at teardown.
+        Returns True if the worker was tracked, False if the handler is
+        shutting down (caller MUST NOT start the thread in that case —
+        ``stop()`` has already snapshotted+cleared the worker list and
+        any thread we add now would never be joined).
+
+        Both spawn sites in this module use the inline ``with
+        self._workers_lock:`` pattern directly because they need to
+        decide whether to construct the ``Thread`` at all under the
+        lock. This helper exists so future fire-and-forget spawn sites
+        (and any external test hook) get the shutdown re-check for
+        free.
         """
         with self._workers_lock:
+            if self._shutdown_event.is_set():
+                return False
             self._workers = [w for w in self._workers if w.is_alive()]
             self._workers.append(t)
+            return True
 
     def _dispatch_classification(
         self, event_id: str, session: dict[str, Any],
@@ -3813,19 +3839,29 @@ class ScaleHandler:
                 if acquired:
                     self._classify_semaphore.release()
         # Bail early if we're tearing down — don't add to the work
-        # backlog when ``stop()`` has already been called.
-        if self._shutdown_event.is_set():
-            log.debug(
-                "event %s: skip classify dispatch; handler stopping",
-                event_id,
+        # backlog when ``stop()`` has already been called. Spawn + track
+        # must be atomic under ``_workers_lock`` with the shutdown
+        # re-check *inside* the lock; otherwise ``stop()`` can snapshot
+        # and clear ``_workers`` between the check and the append,
+        # leaving a worker that touches ``self._conn`` after the caller
+        # closes it (segfault regression of commit 34895f0).
+        # ``t.start()`` stays outside the lock so we don't hold it
+        # through OS thread startup.
+        t: Optional[threading.Thread] = None
+        with self._workers_lock:
+            if self._shutdown_event.is_set():
+                log.debug(
+                    "event %s: skip classify dispatch; handler stopping",
+                    event_id,
+                )
+                return
+            t = threading.Thread(
+                target=_run,
+                name=f"classify-{event_id[:8]}",
+                daemon=True,
             )
-            return
-        t = threading.Thread(
-            target=_run,
-            name=f"classify-{event_id[:8]}",
-            daemon=True,
-        )
-        self._track_worker(t)
+            self._workers = [w for w in self._workers if w.is_alive()]
+            self._workers.append(t)
         t.start()
 
     def _classify_recorded_event(
