@@ -1,0 +1,12 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "types": ["@playwright/test", "node"],
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": false,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false
+  },
+  "include": ["scenarios/**/*.ts", "fixtures/**/*.ts", "helpers/**/*.ts", "playwright.config.ts"]
+}

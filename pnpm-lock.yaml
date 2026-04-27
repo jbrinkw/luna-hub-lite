@@ -202,6 +202,18 @@ importers:
         specifier: ~5.7.0
         version: 5.7.3
 
+  tests/e2e:
+    devDependencies:
+      '@playwright/test':
+        specifier: ^1.58.2
+        version: 1.58.2
+      '@supabase/supabase-js':
+        specifier: ^2.98.0
+        version: 2.98.0
+      '@types/node':
+        specifier: ^22.0.0
+        version: 22.19.13
+
 packages:
 
   '@acemir/cssom@0.9.31':

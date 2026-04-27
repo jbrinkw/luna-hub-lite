@@ -16,6 +16,8 @@ supabase/.branches/
 coverage/
 playwright-report/
 test-results/
+playwright-report-e2e/
+test-results-e2e/
 
 # Mutation-testing artifacts (scripts/mutation/, Stryker)
 .stryker-tmp/
