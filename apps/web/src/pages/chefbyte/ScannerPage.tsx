@@ -622,8 +622,7 @@ export function ScannerPage() {
         );
       }
     },
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- executeAction is stable (only uses user + defaultLocationId, both in outer scope)
-    [user, mode, screenValue, unit, nutrition],
+    [user, mode, screenValue, unit, nutrition, defaultLocationId],
   );
 
   // Keep ref in sync so hardware scanner detection can call the latest version

@@ -319,8 +319,8 @@ export function TodayPage() {
     mutationFn: async ({ reps, load }: { reps: number; load: number }) => {
       const { data, error: err } = await coachbyte().rpc('complete_next_set', {
         p_plan_id: planId,
-        p_reps: reps,
-        p_load: load,
+        p_actual_reps: reps,
+        p_actual_load: load,
       });
       if (err) throw err;
       return data as { rest_seconds: number | null }[] | null;
