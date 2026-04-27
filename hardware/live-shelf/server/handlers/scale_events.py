@@ -690,13 +690,21 @@ class ScaleHandler:
 
         # Validate the user's pick against the candidate pool the
         # classifier saw — prevents a malformed UI payload from applying
-        # a lot id that wasn't actually offered for this event.
+        # a lot id that wasn't actually offered for this event. Under
+        # the inventory-only contract (decisions.md #42), pool entries
+        # carry both a ``candidate_id`` (product_id) and a separate
+        # ``lot_id``; either is a legitimate user pick.
         pool = classification.get("candidate_pool_used") or []
-        valid_ids = {
-            str(c.get("candidate_id"))
-            for c in pool
-            if isinstance(c, dict) and c.get("candidate_id")
-        }
+        valid_ids: set[str] = set()
+        for c in pool:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("candidate_id")
+            if cid:
+                valid_ids.add(str(cid))
+            lid = c.get("lot_id")
+            if lid:
+                valid_ids.add(str(lid))
         if valid_ids and str(candidate_id) not in valid_ids:
             return {
                 "applied": False,
@@ -1760,11 +1768,28 @@ class ScaleHandler:
         # trusted to invent ids — if an item_id / multi_match entry
         # isn't in the pool, the model hallucinated it and we skip
         # rather than mutating a random lot.
-        valid_ids: set[str] = {
-            str(c.get("candidate_id"))
-            for c in (classification.get("candidate_pool_used") or [])
-            if isinstance(c, dict) and c.get("candidate_id")
-        }
+        #
+        # **2026-04-27 fix (chocolate-milk reunite bug):** under the
+        # inventory-only contract (decisions.md #42), each pool entry's
+        # ``candidate_id`` is a ``product_id`` and the underlying
+        # ``lot_id`` rides on a separate field. The reunite guard
+        # legitimately rewrites ``item_id`` from product_id → lot_id
+        # before this validation runs (so the in-flight return branch
+        # can fire). We must therefore accept BOTH the candidate_id and
+        # the lot_id from each pool entry as valid — otherwise the
+        # guard's rewritten lot_id looks like a hallucination, the
+        # apply path bails, and the in-flight lot stays stuck while no
+        # cloud event is emitted (0be70564 placeback, 2026-04-27).
+        valid_ids: set[str] = set()
+        for c in classification.get("candidate_pool_used") or []:
+            if not isinstance(c, dict):
+                continue
+            cid = c.get("candidate_id")
+            if cid:
+                valid_ids.add(str(cid))
+            lid = c.get("lot_id")
+            if lid:
+                valid_ids.add(str(lid))
 
         # Fix 3: also collect any product_ids referenced by the pool so
         # we can cross-check after lot resolution. ``catalog_not_on_shelf``

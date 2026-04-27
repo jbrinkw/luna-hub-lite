@@ -1108,3 +1108,157 @@ class TestChickenCaseInventoryOnly:
             shelf_id="live_shelf",
         )
         assert picked is None
+
+
+# ---------------------------------------------------------------------------
+# 2026-04-27: post-`3b99043` regression — under the inventory-only contract,
+# candidate_pool_used entries carry candidate_id=product_id with the
+# underlying lot_id on a separate field. The reunite guard rewrites
+# item_id → lot_id; the apply-path hallucination guard must accept the
+# lot_id as a legitimate pool member or the in-flight lot stays stuck
+# and no cloud event is emitted (real event 0be70564, chocolate milk).
+# ---------------------------------------------------------------------------
+
+
+class TestReuniteRewriteSurvivesPoolValidationProductKeyedShape:
+    """Bug from 2026-04-27 user event 0be70564:
+
+      * candidate_pool_used = [{candidate_id: product_id, lot_id: in_flight_lot_id,
+        why_candidate: "in_flight"}, {candidate_id: UNKNOWN}]
+      * classifier returns item_id = product_id (catalog pick), action="added"
+      * reunite guard rewrites item_id → in_flight_lot_id
+      * previously: valid_ids = {product_id, UNKNOWN} → lot_id treated as
+        hallucination → apply bails → in-flight lot stays stuck, NO cloud
+        emit → cloud chefbyte.stock_lots.in_flight_since stays NOT NULL
+        forever.
+
+    The fix: include each pool entry's ``lot_id`` field in valid_ids.
+    """
+
+    def test_rewritten_lot_id_passes_pool_validation_and_emits_marker(
+        self, tmp_path
+    ):
+        conn = init_db(":memory:")
+        handler = _make_handler(conn, tmp_path)
+        product, lot = _setup_chocolate_milk(conn)
+        session_id = _open_session(conn)
+
+        # Stage the in-flight pickup against the lot.
+        e_remove = _record_remove(
+            conn, session_id,
+            delta_g=-1672.0,
+            ts="2026-04-27T15:08:44.000Z",
+            weight_before=1672.0,
+        )
+        handler._apply_lot_update_from_classification(
+            direction="remove",
+            classification={
+                "item_id": lot.lot_id,
+                "action": "removed",
+                "confidence": 0.98,
+                "multi_match": [],
+                "candidate_pool_used": [{"candidate_id": lot.lot_id}],
+            },
+            event_ts="2026-04-27T15:08:44.000Z",
+            delta_g=-1672.0,
+            session_id=session_id,
+            event_id=e_remove,
+        )
+        assert storage_repo.get_lot(conn, lot.lot_id).status == "in_flight"
+
+        # Spy on cloud emitters — both reconciler_resolution AND
+        # in_flight_return_marker must fire.
+        emit_calls: list[tuple[str, dict]] = []
+
+        def _spy_resolution(**kwargs):
+            emit_calls.append(("reconciler_resolution", kwargs))
+
+        def _spy_marker(**kwargs):
+            emit_calls.append(("in_flight_return_marker", kwargs))
+
+        handler._cloud_emitter.emit_reconciler_resolution = _spy_resolution  # type: ignore[assignment]
+        handler._cloud_emitter.emit_in_flight_return_marker = _spy_marker  # type: ignore[assignment]
+
+        # Place back at 468.6g (the actual user delta from event 0be70564).
+        # Classifier returns the PRODUCT_ID (catalog pick under
+        # inventory-only contract); pool entry has product_id as
+        # candidate_id and lot_id as a separate field — the EXACT shape
+        # the production candidate_pool builder emits today.
+        e_add = _record_add(
+            conn, session_id,
+            delta_g=468.6,
+            ts="2026-04-27T15:33:30.980Z",
+            weight_before=323.1,
+        )
+        classification = {
+            "item_id": product.product_id,  # classifier picked product
+            "action": "added",
+            "confidence": 0.82,
+            "multi_match": [],
+            "candidate_pool_used": [
+                {
+                    "candidate_id": product.product_id,
+                    "lot_id": lot.lot_id,  # <-- the underlying lot
+                    "product_id": product.product_id,
+                    "why_candidate": "in_flight",
+                    "expected_weight_g": 1672.0,
+                },
+                {
+                    "candidate_id": UNKNOWN_CANDIDATE_ID,
+                    "why_candidate": "sentinel",
+                },
+            ],
+        }
+        handler._apply_lot_update_from_classification(
+            direction="add",
+            classification=classification,
+            event_ts="2026-04-27T15:33:30.980Z",
+            delta_g=468.6,
+            session_id=session_id,
+            event_id=e_add,
+            shelf_id="live_shelf",
+        )
+
+        # The in-flight lot must be closed back to on_shelf — this is
+        # the symptom that was observed broken in the production event.
+        lot_now = storage_repo.get_lot(conn, lot.lot_id)
+        assert lot_now.status == "on_shelf", (
+            f"in-flight lot still stuck (status={lot_now.status}). The "
+            f"hallucination guard must accept the rewritten lot_id from "
+            f"the reunite guard."
+        )
+        assert lot_now.in_flight_since is None
+        assert lot_now.pickup_weight_g is None
+        assert lot_now.current_weight_g == pytest.approx(468.6)
+
+        # No new lot minted.
+        on_shelf = _on_shelf_lots_for_product(conn, product.product_id)
+        assert len(on_shelf) == 1
+        assert on_shelf[0]["lot_id"] == lot.lot_id
+
+        # Resolution row written: in_flight_return.
+        resolutions = _resolutions_for(conn, session_id)
+        patterns = [r["pattern"] for r in resolutions]
+        assert "in_flight_return" in patterns
+
+        # Both cloud emits fired:
+        #  1. emit_reconciler_resolution(pattern=in_flight_return) —
+        #     decrements cloud qty by consumption.
+        #  2. emit_in_flight_return_marker(...) — clears
+        #     stock_lots.in_flight_since on cloud. WITHOUT THIS the cloud
+        #     UI shows the lot stuck in-flight forever after a return.
+        kinds = [c[0] for c in emit_calls]
+        assert "reconciler_resolution" in kinds, (
+            f"reconciler_resolution emit missing — got {kinds}"
+        )
+        assert "in_flight_return_marker" in kinds, (
+            f"in_flight_return_marker emit missing — without this the "
+            f"cloud stock_lot stays stuck in_flight. Got emits: {kinds}"
+        )
+
+        marker_call = next(
+            kw for kind, kw in emit_calls if kind == "in_flight_return_marker"
+        )
+        assert marker_call["product_id"] == product.product_id
+        assert marker_call["kind"] == "live_shelf"
+        assert marker_call["pi_event_id"] == e_add
