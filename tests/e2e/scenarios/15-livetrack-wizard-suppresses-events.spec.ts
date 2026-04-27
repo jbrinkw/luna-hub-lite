@@ -37,7 +37,7 @@
  * suppressed AFTER closure, e.g. if the gate stops checking the
  * terminal-state list — by emitting post-close and asserting it lands.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   countUserRows,

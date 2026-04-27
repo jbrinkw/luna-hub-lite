@@ -8,7 +8,7 @@
  * Catches: regressions in the auto-add path (rounding, products with
  * min_stock_amount=0 wrongly included, [MEAL] prefix exclusion drift).
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   loginViaUi,

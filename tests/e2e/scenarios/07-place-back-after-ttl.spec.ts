@@ -8,7 +8,7 @@
  * Catches: revival path that incorrectly creates a duplicate lot or fails
  * to populate qty after a reap.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   loginViaUi,

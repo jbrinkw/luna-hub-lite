@@ -119,17 +119,68 @@ Trace + video + screenshot are retained on failure under
 
 ---
 
+## Runtime Invariants (Phase 3)
+
+After every passing scenario, a shared `afterEach` hook in
+`fixtures/test-base.ts` runs `assertSystemInvariants` from
+`invariants.ts` against each user the scenario seeded. Violation =
+the scenario fails with `InvariantViolationError` listing every
+offending predicate. The hook only runs on PASS — invariant
+assertions on top of an already-failing scenario just confuse the
+report.
+
+The 10 invariants:
+
+| #  | Name                                  | Severity | Catches                                                                              |
+| -- | ------------------------------------- | -------- | ------------------------------------------------------------------------------------ |
+| 1  | `qty_non_negative`                    | critical | a scenario somehow leaving a `stock_lots.qty_containers < 0` for the test user       |
+| 2  | `food_logs_4_4_9_within_tolerance`    | warning  | per-row macro drift — `cal != 4c+4p+9f ± 10 kcal` on any food_logs row created during the scenario |
+| 3  | `stock_lots_in_flight_consistent`     | error    | a lot with `in_flight_since` set but no `pickup_event_id` (orphan in-flight state)   |
+| 4  | `pi_cloud_lot_id_match`               | error    | (skipped unless simulator tracks lots) Pi knows about a lot the cloud doesn't have   |
+| 5  | `mcp_tool_log_user_id_present`        | error    | `hub.mcp_tool_logs` row with NULL user_id (column is NOT NULL — catches drop)        |
+| 6  | `shelf_event_log_no_orphan_lots`      | error    | event references a lot_id that doesn't exist (soft-delete-races-event-write)         |
+| 7  | `livetrack_session_no_zombie_active`  | warning  | LiveTrack session still in non-terminal state > 5 min after creation                 |
+| 8  | `coachbyte_timer_consistent`          | error    | timer.state='running' AND end_time IS NULL                                           |
+| 9  | `product_macro_drift_4_4_9`           | warning  | products updated during the scenario have `cal != 4c+4p+9f ± 5%`                     |
+| 10 | `cloud_outbox_no_permanent_failed`    | critical | (skipped unless simulator exposes outbox) Pi outbox has permanent-failed rows        |
+
+All predicates are scoped to the test user (and where applicable a
+scenario-start timestamp) so cross-scenario data doesn't trip them.
+
+The unit suite at `__tests__/invariants.test.ts` covers each
+predicate's logic in isolation (mocked Supabase). Runs as part of
+`pnpm verify:fast` automatically. The 15 e2e scenarios cover the
+end-to-end "real Supabase, real data, real afterEach hook" path.
+
+Manual sanity verification: see Phase 3 of
+`docs/test-system-fix-plan.md`. Drop the `stock_lots_qty_nonneg`
+CHECK, plant a `qty_containers = -1` row, run any scenario — the
+afterEach must throw `InvariantViolationError` naming
+`qty_non_negative`.
+
+Phase 4's production monitor (`supabase/functions/invariant-monitor`)
+runs the same class of invariants against live cloud data every 30
+min. The two share intent but not code; the e2e module also reads
+local-only state (e.g. simulator-side fields) where Phase 4 cannot.
+
+---
+
 ## Layout
 
 ```
 tests/e2e/
 ├── README.md                # this file
 ├── playwright.config.ts     # config, web-server boot, output dirs
+├── vitest.config.ts         # vitest config for invariant unit tests
 ├── package.json             # @luna-hub/e2e workspace
 ├── tsconfig.json            # extends repo base
+├── invariants.ts            # 10 system invariant predicates (Phase 3)
+├── __tests__/
+│   └── invariants.test.ts   # 25 unit tests for the predicates (vitest)
 ├── fixtures/
 │   ├── env.ts               # SUPABASE_* env loader, admin/anon clients, sha256
 │   ├── pi-simulator.ts      # in-process Pi → shelf-ingest emitter
+│   ├── test-base.ts         # extended `test` with afterEach invariant hook
 │   └── test-db.ts           # per-scenario seeding + UI-driven login + cleanup
 ├── helpers/                 # shared cross-scenario helpers (currently empty)
 └── scenarios/

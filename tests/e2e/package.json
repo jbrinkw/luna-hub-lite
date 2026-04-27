@@ -4,6 +4,8 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
+    "test": "vitest run",
+    "test:watch": "vitest",
     "test:e2e": "playwright test --config playwright.config.ts",
     "test:e2e:ui": "playwright test --config playwright.config.ts --ui",
     "typecheck": "tsc --noEmit"
@@ -11,6 +13,7 @@
   "devDependencies": {
     "@playwright/test": "^1.58.2",
     "@supabase/supabase-js": "^2.98.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "vitest": "^4.0.18"
   }
 }

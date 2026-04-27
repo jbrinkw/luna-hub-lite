@@ -17,7 +17,7 @@
  * captured executeAction sees a populated `defaultLocationId`. Mirrors how
  * a human user types qty before scanning.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   countUserRows,

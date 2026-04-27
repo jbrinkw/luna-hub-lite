@@ -9,7 +9,7 @@
  * Catches the chocolate-milk-class bug at a different layer: cloud receives
  * Pi event but the React inventory query never reflects the in-flight state.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import { loginViaUi, seedProduct, seedStockLot, seedUserAndActivate } from '../fixtures/test-db';
 import { postPiEvent, seedPiDevice, seedScalePairing, waitForCloudState } from '../fixtures/pi-simulator';

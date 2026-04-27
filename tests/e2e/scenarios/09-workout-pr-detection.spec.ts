@@ -20,7 +20,7 @@
  * fail in production. This scenario uses the deployed param names; flag in
  * decisions.md.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import { loginViaUi, seedUserAndActivate } from '../fixtures/test-db';
 

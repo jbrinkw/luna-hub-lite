@@ -9,7 +9,7 @@
  * Catches: meal-prep flow regressions where the [MEAL] lot fails to mint or
  * the snapshot of nutrition drifts.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   loginViaUi,

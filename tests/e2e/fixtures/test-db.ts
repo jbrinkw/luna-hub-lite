@@ -11,6 +11,7 @@
  */
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { adminClient, anonClient, SUPABASE_URL, SUPABASE_ANON_KEY } from './env';
+import { recordSeededUser } from './test-base';
 
 export interface SeededUser {
   userId: string;
@@ -38,6 +39,10 @@ export async function seedUser(slug: string): Promise<SeededUser> {
     throw new Error(`seedUser: admin.createUser failed: ${error?.message ?? 'no user'}`);
   }
   const userId = data.user.id;
+  // Phase 3: register the user with the active scenario so the
+  // shared afterEach can run system invariants scoped to it. No-op
+  // outside a test context.
+  recordSeededUser(userId);
   return {
     userId,
     email,

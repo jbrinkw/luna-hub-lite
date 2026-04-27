@@ -7,7 +7,7 @@
  * Catches: pickup → return chain where realtime delivers the lot update but
  * the React component fails to re-render (e.g. stale TanStack Query cache).
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import { loginViaUi, seedProduct, seedStockLot, seedUserAndActivate } from '../fixtures/test-db';
 import { postPiEvent, seedPiDevice, seedScalePairing, waitForCloudState } from '../fixtures/pi-simulator';

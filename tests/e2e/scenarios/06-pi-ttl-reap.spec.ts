@@ -14,7 +14,7 @@
  * Catches: TTL reaper landing on cloud → inventory shows the lot still at
  * its old qty (chocolate-milk-class but for the reap path).
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   loginViaUi,

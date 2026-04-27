@@ -6,7 +6,7 @@
  *   1. `chefbyte.food_logs` row exists for today's logical_date
  *   2. The MacroPage daily total reflects the new calorie delta
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import {
   countUserRows,
   loginViaUi,

@@ -10,7 +10,7 @@
  * but doesn't want to track (off-plan snacks, etc). Slipping a food_logs row
  * here is a regression that shifts macro totals for the day.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   countUserRows,

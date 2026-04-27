@@ -8,5 +8,13 @@
     "noUnusedLocals": false,
     "noUnusedParameters": false
   },
-  "include": ["scenarios/**/*.ts", "fixtures/**/*.ts", "helpers/**/*.ts", "playwright.config.ts"]
+  "include": [
+    "scenarios/**/*.ts",
+    "fixtures/**/*.ts",
+    "helpers/**/*.ts",
+    "__tests__/**/*.ts",
+    "invariants.ts",
+    "playwright.config.ts",
+    "vitest.config.ts"
+  ]
 }

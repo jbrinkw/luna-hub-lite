@@ -9,7 +9,7 @@
  * stale TanStack Query cache keys (the "ShoppingPage" bug class from the
  * audit) AND the import RPC's idempotency.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import {
   countUserRows,
   loginViaUi,

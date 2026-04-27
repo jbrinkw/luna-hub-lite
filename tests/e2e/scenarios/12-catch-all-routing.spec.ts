@@ -8,7 +8,7 @@
  * Catches: catch-all scale routing where event payloads sent on
  * unrecognized scale_id can be silently dropped.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   loginViaUi,

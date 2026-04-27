@@ -9,7 +9,7 @@
  * Catches: a "discarded" leak that mirrors discarded items as consumed and
  * inflates the user's daily macro total.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   countUserRows,

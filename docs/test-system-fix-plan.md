@@ -180,7 +180,20 @@ classes from the audit's "What is NOT catchable" list.
 
 ---
 
-## Phase 3 — Invariant predicates (1 day)
+## Phase 3 — Invariant predicates (1 day) ✅
+
+**Status (2026-04-27):** Shipped. 10 predicates in
+`tests/e2e/invariants.ts`, scoped per-scenario via the shared
+`fixtures/test-base.ts` `afterEach` hook. 25 vitest unit tests in
+`tests/e2e/__tests__/invariants.test.ts` (10 invariants × 2 cases +
+registry-shape check + 4 aggregate-behavior tests). All 15 e2e
+scenarios still green with invariants enabled (~36 s wall). Sanity
+verification confirmed: planting `qty_containers = -1` after dropping
+the CHECK constraint causes the afterEach hook to throw
+`InvariantViolationError` naming `qty_non_negative`. The 10 chosen
+invariants overlap with the Phase-4 production monitor by name but
+the implementations live separately — Phase 4 reads cloud only,
+Phase 3 can also consult Pi simulator state and is scoped per-test.
 
 **Goal:** A set of standalone Python or TypeScript functions that assert
 system invariants are true. Run after every E2E scenario and as part of
@@ -393,14 +406,14 @@ hit. Procedural gate, not a code-coverage gate.
 
 ## Total effort
 
-| Phase | Effort | Bug class caught                                           |
-| ----- | ------ | ---------------------------------------------------------- |
-| 1     | 2 h ✅ | Regressions in unit-tested code; CORS / auth / quota drift |
-| 2     | 24 h   | Sync-boundary bugs Pi ↔ cloud ↔ realtime ↔ render          |
-| 3     | 8 h    | Slow-burn corruption invisible to per-test assertions      |
-| 4     | 8 h    | Production data corruption                                 |
-| 5     | 4 h ✅ | Procedural gate (agents pushing unverified work)           |
-| Total | ~46 h  |                                                            |
+| Phase | Effort  | Bug class caught                                           |
+| ----- | ------- | ---------------------------------------------------------- |
+| 1     | 2 h ✅  | Regressions in unit-tested code; CORS / auth / quota drift |
+| 2     | 24 h ✅ | Sync-boundary bugs Pi ↔ cloud ↔ realtime ↔ render          |
+| 3     | 8 h ✅  | Slow-burn corruption invisible to per-test assertions      |
+| 4     | 8 h     | Production data corruption                                 |
+| 5     | 4 h ✅  | Procedural gate (agents pushing unverified work)           |
+| Total | ~46 h   |                                                            |
 
 Phases 2-5 can run in parallel after Phase 1 lands. Suggested order if
 sequential: 1 → 2 → 3 → 4 → 5.

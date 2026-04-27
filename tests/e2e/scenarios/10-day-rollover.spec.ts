@@ -17,7 +17,7 @@
  * Catches: day_start_hour-driven UI shifts that desync the macro view from
  * the underlying food_logs.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from '../fixtures/test-base';
 import { adminClient } from '../fixtures/env';
 import {
   loginViaUi,
