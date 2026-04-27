@@ -59,6 +59,96 @@
   </div>
 </div>
 
+{# -- Classifier candidates (debug affordance) ----------------------- #}
+{# Live snapshot of what ``pool_for_add`` would return RIGHT NOW for the
+   live_shelf. Collapsed by default so the page stays uncluttered;
+   click to expand. The empty-pool red banner is the smoking-gun
+   indicator: if it fires, the next ADD event will be unmatchable and
+   the operator should check the cloud_lots sync. #}
+{% if classifier_candidates is not none %}
+{% set _is_empty_pool = (classifier_candidates|length == 1 and classifier_candidates[0].why_candidate == 'sentinel') %}
+<div class="panel">
+  {% if _is_empty_pool %}
+    <div
+      style="border: 1px solid var(--danger); background: rgba(255, 64, 64, 0.08); color: var(--danger); padding: 10px 12px; border-radius: 4px; margin-bottom: 8px;"
+    >
+      <strong>&#x26A0; Pool empty (UNKNOWN-only).</strong>
+      Next ADD event will be unmatchable. Likely cause: no products with
+      <code>qty &gt; 0</code> in <code>cloud_lots</code> for this shelf.
+    </div>
+  {% endif %}
+  <details {% if _is_empty_pool %}open{% endif %}>
+    <summary style="cursor: pointer; user-select: none;">
+      <strong>Classifier candidates</strong>
+      <span class="muted">({{ classifier_candidates|length }} item{{ '' if classifier_candidates|length == 1 else 's' }} — what the next ADD event would see on the live shelf)</span>
+    </summary>
+    <p class="muted" style="margin: 8px 0 6px 0; font-size: 0.9em;">
+      Live snapshot of <code>pool_for_add</code>. Reflects current Pi
+      lots + <code>cloud_lots</code> mirror. Re-computed on every
+      page refresh. If a product you expect to be tracked is missing,
+      check <code>cloud_lots.qty_containers</code> + the
+      <code>shelf_id</code> scope.
+    </p>
+    {% if classifier_candidates %}
+    <table style="width: 100%;">
+      <thead>
+        <tr>
+          <th style="text-align: left;">#</th>
+          <th style="text-align: left;">product</th>
+          <th style="text-align: left;">tier</th>
+          <th style="text-align: left;">why</th>
+          <th style="text-align: left;">expected</th>
+          <th style="text-align: left;">lot id</th>
+          <th style="text-align: left;">product id</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for c in classifier_candidates %}
+          {% if c.why_candidate == 'in_flight' %}
+            {% set _tier = 'in_flight' %}
+          {% elif c.why_candidate == 'recently_out' %}
+            {% set _tier = 'out' %}
+          {% elif c.why_candidate == 'top_up_target' or c.why_candidate == 'currently_on_shelf' %}
+            {% set _tier = 'on_shelf' %}
+          {% elif c.why_candidate == 'inventory_only' %}
+            {% set _tier = 'inventory_only' %}
+          {% elif c.why_candidate == 'sentinel' %}
+            {% set _tier = 'sentinel' %}
+          {% else %}
+            {% set _tier = c.why_candidate %}
+          {% endif %}
+          <tr {% if c.why_candidate == 'sentinel' %}style="opacity: 0.7;"{% endif %}>
+            <td class="mono muted">{{ loop.index }}</td>
+            <td>
+              {% if c.why_candidate == 'sentinel' %}
+                <em class="muted">(UNKNOWN sentinel)</em>
+              {% else %}
+                <strong>{{ c.name }}</strong>
+                {% if c.brand %}<div class="muted" style="font-size: 11px;">{{ c.brand }}</div>{% endif %}
+              {% endif %}
+            </td>
+            <td><span class="pill muted">{{ _tier }}</span></td>
+            <td class="mono" style="font-size: 11px;">{{ c.why_candidate }}</td>
+            <td class="mono">
+              {% if c.expected_weight_g is not none %}{{ '%.1f g'|format(c.expected_weight_g) }}{% else %}<span class="muted">&mdash;</span>{% endif %}
+            </td>
+            <td class="mono" style="font-size: 11px;">
+              {% if c.lot_id %}{{ c.lot_id[:8] }}{% else %}<span class="muted">&mdash;</span>{% endif %}
+            </td>
+            <td class="mono" style="font-size: 11px;">
+              {% if c.product_id %}{{ c.product_id[:8] }}{% else %}<span class="muted">&mdash;</span>{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+      <p class="muted">Empty pool — provider returned no candidates at all (not even the UNKNOWN sentinel). Likely a bug; check Pi logs.</p>
+    {% endif %}
+  </details>
+</div>
+{% endif %}
+
 {# Reusable macros for the per-shelf sections. Declared once so the
    Live Shelf + Catch-all blocks share identical rendering — anything
    that diverges in the future should get a dedicated macro, not an

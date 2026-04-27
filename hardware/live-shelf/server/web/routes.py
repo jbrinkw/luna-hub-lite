@@ -211,6 +211,7 @@ def make_html_bp(
     data_dir: Path,
     templates_dir: Optional[Path] = None,
     catch_all_enabled: Optional[Callable[[], bool]] = None,
+    classifier_pool_provider: Optional[Callable[[], list]] = None,
 ) -> Blueprint:
     """Build an HTML blueprint bound to ``repo``.
 
@@ -226,6 +227,17 @@ def make_html_bp(
             dashboard templates can hide catch-all sections when the
             hardware isn't attached. Defaults to a constant ``False``
             callable — single-shelf deployments keep the page clean.
+        classifier_pool_provider: zero-arg callable returning the current
+            ``pool_for_add`` output for the live_shelf — a list of
+            :class:`server.classifier.models.Candidate`. Used to render
+            the "Classifier candidates" debug section on /inventory so
+            the operator can see at a glance what the classifier would
+            consider for the next ADD event without having to query
+            SQLite or read ``session_resolutions``. ``None`` skips the
+            section entirely (e.g. tests that don't care). The provider
+            MUST be re-callable; the route invokes it on every page
+            render to capture live state. Failures are swallowed and
+            logged — the inventory page must never crash on this.
     """
     data_dir = Path(data_dir)
     events_root = data_dir / "events"
@@ -374,6 +386,26 @@ def make_html_bp(
             ).isoformat(timespec="seconds").replace("+00:00", "Z")
             summary = repo.usage_summary_by_product(since=since_7d)
 
+        # Classifier candidate pool — live snapshot of what the next
+        # ADD event would see. Debug affordance for the user: when
+        # classification goes sideways (UNKNOWN-only events, mismatched
+        # picks, etc.) they can immediately see whether the pool is
+        # empty, missing the expected product, or mis-tiered. The
+        # template renders this collapsed-by-default so it doesn't
+        # dominate the page when not needed.
+        #
+        # Failure mode: if the provider raises (e.g. the classifier
+        # source can't reach SQLite, or no provider is wired in tests),
+        # we surface ``None`` to the template so the entire section
+        # quietly disappears — the inventory page must never 500 on
+        # this. Real production wiring sets the provider in app.py.
+        classifier_candidates: Optional[list] = None
+        if classifier_pool_provider is not None:
+            try:
+                classifier_candidates = list(classifier_pool_provider())
+            except Exception:  # noqa: BLE001 - debug UI must never crash the page
+                classifier_candidates = None
+
         return render_template(
             "inventory.html",
             on_shelf=on_shelf,
@@ -390,6 +422,7 @@ def make_html_bp(
             usage_page=page,
             usage_total_pages=usage_total_pages,
             summary=summary,
+            classifier_candidates=classifier_candidates,
             filters={
                 "product": product_id or "",
                 "kind": kind_filter or "",

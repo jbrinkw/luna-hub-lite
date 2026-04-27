@@ -1778,6 +1778,27 @@ def create_app(
     )
     app.register_blueprint(intake_bp)
 
+    # Classifier candidate-pool snapshot for the /inventory debug section.
+    # Builds an ADD-direction pool against the live_shelf using the same
+    # source the production classifier path uses (RepoCandidateSource ->
+    # SQLite + cloud_lots mirror). Re-evaluated on every /inventory
+    # render so the operator sees the live state, not a startup snapshot.
+    #
+    # delta_g is a placeholder (the inventory page has no event context):
+    # 50g is large enough that weight-fit ranking is meaningful but small
+    # enough that any reasonable lot remains in-tier. The pool composition
+    # (which products surface, which tier they're in) is what the user
+    # cares about for debugging, not the rank score within tier.
+    def _live_shelf_classifier_pool() -> list[Any]:
+        from .classifier.candidate_pool import pool_for_add as _pool_for_add
+        from .classifier.models import ClassifierContext as _ClassifierContext
+        ctx = _ClassifierContext(
+            source=candidate_source,
+            shelf_id="live_shelf",
+            recently_out_window_seconds=cfg.recently_out_window_seconds,
+        )
+        return list(_pool_for_add(50.0, ctx))
+
     # Web HTML + API
     html_bp = make_html_bp(
         web_repo,
@@ -1786,6 +1807,7 @@ def create_app(
         # catch_all_enabled takes effect on the next page render without
         # a restart.
         catch_all_enabled=lambda: bool(getattr(cfg, "catch_all_enabled", False)),
+        classifier_pool_provider=_live_shelf_classifier_pool,
     )
     api_bp = make_api_bp(
         web_repo,
