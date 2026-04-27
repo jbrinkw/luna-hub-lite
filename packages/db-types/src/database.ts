@@ -646,12 +646,14 @@ export type Database = {
           created_at: string
           deleted_at: string | null
           expires_on: string | null
+          in_flight_kind: string | null
           in_flight_since: string | null
           last_update_source: string | null
           last_update_ts: string | null
           location_id: string
           lot_id: string
           pickup_event_id: string | null
+          pickup_weight_g: number | null
           product_id: string
           qty_containers: number
           updated_at: string
@@ -661,12 +663,14 @@ export type Database = {
           created_at?: string
           deleted_at?: string | null
           expires_on?: string | null
+          in_flight_kind?: string | null
           in_flight_since?: string | null
           last_update_source?: string | null
           last_update_ts?: string | null
           location_id: string
           lot_id?: string
           pickup_event_id?: string | null
+          pickup_weight_g?: number | null
           product_id: string
           qty_containers?: number
           updated_at?: string
@@ -676,12 +680,14 @@ export type Database = {
           created_at?: string
           deleted_at?: string | null
           expires_on?: string | null
+          in_flight_kind?: string | null
           in_flight_since?: string | null
           last_update_source?: string | null
           last_update_ts?: string | null
           location_id?: string
           lot_id?: string
           pickup_event_id?: string | null
+          pickup_weight_g?: number | null
           product_id?: string
           qty_containers?: number
           updated_at?: string
