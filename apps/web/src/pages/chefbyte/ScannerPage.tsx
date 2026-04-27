@@ -47,11 +47,34 @@ interface QueueItem {
   errorMsg?: string;
   undoInfo?: UndoInfo;
   /**
-   * True once the user has moved on from this item (clicked another queue
-   * row OR scanned a new barcode). Drives the red → green row color:
-   * red = still being edited / never touched, green = committed.
+   * True when the queue row should render in the green "committed" treatment
+   * instead of the red "needs attention" treatment. Set to true automatically
+   * for known products on a successful scan (no edits required from the
+   * user); set true on click-away for everything else; left false for
+   * placeholders (truly NEW items the user must finish describing).
+   *
+   * The user-facing rule is "red = something the system doesn't know yet",
+   * not "red = un-clicked": a barcode the catalog already knows in full
+   * shouldn't demand attention just because the user hasn't navigated away.
    */
   confirmed: boolean;
+}
+
+/**
+ * Predicate behind the queue row's red-vs-green treatment.
+ *
+ * Returns true when the row represents a NEW (placeholder) product that the
+ * system doesn't fully know yet — the user has to finish entering its
+ * macros / name / s-per-c. False once the product is known + the action
+ * succeeded (so a re-scanned regular item lands as green immediately) AND
+ * for explicit error/pending states (those have their own border color).
+ *
+ * Exported for unit testing the predicate against the user-reported case
+ * "scanned a known product, it shouldn't have shown up red".
+ */
+export function isQueueItemNew(item: { status: 'success' | 'pending' | 'error'; isNew: boolean }): boolean {
+  if (item.status !== 'success') return false; // pending = amber, error = red-error (separate)
+  return item.isNew === true;
 }
 
 /**
@@ -68,10 +91,7 @@ interface QueueItem {
  * (for the merge-key lookup AND the insert row) and we want one mutation-
  * tested implementation instead of two inline copies that can drift.
  */
-export function computeExpiresOn(
-  shelfLifeDays: number | null | undefined,
-  purchaseDate: Date,
-): string | null {
+export function computeExpiresOn(shelfLifeDays: number | null | undefined, purchaseDate: Date): string | null {
   if (shelfLifeDays == null) return null;
   const n = Number(shelfLifeDays);
   if (!Number.isFinite(n) || n <= 0) return null;
@@ -340,7 +360,7 @@ export function ScannerPage() {
             fat: String(product.fat_per_serving ?? ''),
             protein: String(product.protein_per_serving ?? ''),
           };
-          const undoInfo = await executeAction(mode, product, qty, unit, freshNutrition);
+          const result = await executeAction(mode, product, qty, unit, freshNutrition);
 
           setQueue((prev) =>
             prev.map((item) =>
@@ -349,9 +369,21 @@ export function ScannerPage() {
                     ...item,
                     name: product.name,
                     productId: product.product_id,
-                    status: 'success',
+                    // If the DB write silently failed (no undoInfo + an error
+                    // surfaced), reflect that in the queue row so the user
+                    // doesn't think a non-existent lot was created. Without
+                    // this surfacing, a failed Purchase mode UPDATE would
+                    // present as a green/red row with "Purchased N" subtitle
+                    // and no trace of the underlying problem.
+                    status: result.error ? 'error' : 'success',
                     isNew: product.is_placeholder,
-                    undoInfo,
+                    undoInfo: result.undoInfo,
+                    errorMsg: result.error ?? undefined,
+                    // Known product + successful action = no work left for
+                    // the user → auto-confirm to the green treatment. Avoids
+                    // the user-reported "scanned a product I already have, it
+                    // showed up red as if new" complaint.
+                    confirmed: !result.error && !product.is_placeholder,
                   }
                 : item,
             ),
@@ -359,9 +391,7 @@ export function ScannerPage() {
         } else {
           // No product OR stale-placeholder row — call analyze-product and
           // either INSERT a new row or UPDATE the placeholder in place.
-          const existingPlaceholderId: string | undefined = product?.is_placeholder
-            ? product.product_id
-            : undefined;
+          const existingPlaceholderId: string | undefined = product?.is_placeholder ? product.product_id : undefined;
 
           let analyzedProduct: any = null;
           let hardAiError: { message: string; reason: string } | null = null;
@@ -423,10 +453,7 @@ export function ScannerPage() {
                 // suggestions; the OFF fallback path doesn't suggest one.
                 // null means "non-perishable / unknown" → scanner leaves
                 // expires_on unset for lots of this product.
-                const shelfLife =
-                  s?.default_shelf_life_days != null
-                    ? Number(s.default_shelf_life_days) || null
-                    : null;
+                const shelfLife = s?.default_shelf_life_days != null ? Number(s.default_shelf_life_days) || null : null;
                 const productFields = {
                   barcode,
                   name: productName,
@@ -519,7 +546,7 @@ export function ScannerPage() {
             setNutrition(mergedNut);
             setOriginalNutrition(aiNut); // AI values are the "reset" baseline for 4-4-9 scaling
 
-            const undoInfo = await executeAction(mode, analyzedProduct, qty, unit, mergedNut);
+            const result = await executeAction(mode, analyzedProduct, qty, unit, mergedNut);
 
             setQueue((prev) =>
               prev.map((item) =>
@@ -528,9 +555,15 @@ export function ScannerPage() {
                       ...item,
                       name: analyzedProduct.name,
                       productId: analyzedProduct.product_id,
-                      status: 'success',
+                      status: result.error ? 'error' : 'success',
                       isNew: false,
-                      undoInfo,
+                      undoInfo: result.undoInfo,
+                      errorMsg: result.error ?? undefined,
+                      // Newly-AI-imported product is "known" the moment the
+                      // analyze-product call succeeds + the side-effect commit
+                      // succeeds. Auto-confirm so the user sees the same green
+                      // treatment as a returning known product.
+                      confirmed: !result.error,
                     }
                   : item,
               ),
@@ -600,32 +633,54 @@ export function ScannerPage() {
   /*  Execute action based on mode                                     */
   /* ---------------------------------------------------------------- */
 
+  /**
+   * Execute the post-scan side-effect for the active mode.
+   *
+   * Returns `{ undoInfo, error }` instead of bare undoInfo so the caller can
+   * surface a DB write failure in the queue UI. Prior shape collapsed
+   * "succeeded but nothing to undo" and "failed silently" into the same
+   * `undefined`, which reproduced the user-reported "scanned properly but
+   * the lot never showed up in inventory" silent fault.
+   *
+   * Cache invalidation is now scoped per-branch BEFORE the early return —
+   * the prior placement at the bottom of the function was unreachable for
+   * Purchase / Consume (those branches `return` inside the case), so the
+   * Inventory page would not refresh after a Purchase write succeeded.
+   */
   const executeAction = async (
     actionMode: ScanMode,
     product: any,
     qty: number,
     unitType: 'serving' | 'container',
     nutData: NutritionData,
-  ): Promise<UndoInfo | undefined> => {
-    if (!user) return undefined;
+  ): Promise<{ undoInfo: UndoInfo | undefined; error: string | null }> => {
+    if (!user) return { undoInfo: undefined, error: null };
 
     switch (actionMode) {
       case 'purchase': {
         const locId = defaultLocationId;
-        if (!locId) break; // No locations — can't add stock
+        if (!locId) {
+          // No locations — can't add stock. Surface this as an error so the
+          // queue row turns red rather than silently appearing successful.
+          return { undoInfo: undefined, error: 'No location configured. Add one in Settings.' };
+        }
 
         // Auto-populate expires_on from product.default_shelf_life_days
         // (LLM-suggested on first import). Non-perishable / unknown
         // products leave default_shelf_life_days NULL → lot gets NULL
         // expires_on and sorts last in consumption order.
-        const computedExpiresOn = computeExpiresOn(
-          product.default_shelf_life_days,
-          new Date(),
-        );
+        const computedExpiresOn = computeExpiresOn(product.default_shelf_life_days, new Date());
 
         // Check for existing lot with matching merge key
         // (product + location + same expires_on). Different expires_on
         // values split into separate lots per the DB docs.
+        //
+        // `.maybeSingle()` instead of `.single()` so the "0 rows" case
+        // returns null + null-error (the natural insert path) rather than
+        // PGRST116 + null-data — `.single()` errors on 0-row results, and
+        // we'd previously been treating both that error and a real RLS
+        // failure as "no row, fall through to insert", which masked
+        // legitimate failures.
         let existingQuery = chefbyte()
           .from('stock_lots')
           .select('lot_id, qty_containers')
@@ -635,17 +690,31 @@ export function ScannerPage() {
         existingQuery = computedExpiresOn
           ? existingQuery.eq('expires_on', computedExpiresOn)
           : existingQuery.is('expires_on', null);
-        const { data: existingLot } = await existingQuery.single();
+        const { data: existingLot, error: lookupError } = await existingQuery.maybeSingle();
+        if (lookupError) {
+          return { undoInfo: undefined, error: `Lot lookup failed: ${lookupError.message}` };
+        }
 
         let newLot: { lot_id: string } | null = null;
+        let writeError: string | null = null;
         if (existingLot) {
-          const { data: updated } = await chefbyte()
+          // Coerce qty_containers to a number — Postgres NUMERIC can deserialize
+          // as a string under some PostgREST configurations and `string + number`
+          // would silently concatenate (e.g. "0.000" + 1 = "0.0001"). Even when
+          // PostgREST returns numeric we want the explicit Number() so unit
+          // tests and integration tests can't drift around the JS coercion rules.
+          const currentQty = Number((existingLot as any).qty_containers) || 0;
+          const { data: updated, error: updErr } = await chefbyte()
             .from('stock_lots')
-            .update({ qty_containers: (existingLot as any).qty_containers + qty })
+            .update({ qty_containers: currentQty + qty })
             .eq('lot_id', (existingLot as any).lot_id)
             .select('lot_id')
             .single();
-          newLot = updated as any;
+          if (updErr) {
+            writeError = `Stock merge failed: ${updErr.message}`;
+          } else {
+            newLot = updated as any;
+          }
         } else {
           const insertRow: Record<string, unknown> = {
             user_id: user.id,
@@ -654,12 +723,16 @@ export function ScannerPage() {
             location_id: locId,
           };
           if (computedExpiresOn) insertRow.expires_on = computedExpiresOn;
-          const { data: inserted } = await chefbyte()
+          const { data: inserted, error: insErr } = await chefbyte()
             .from('stock_lots')
             .insert(insertRow)
             .select('lot_id')
             .single();
-          newLot = inserted as any;
+          if (insErr) {
+            writeError = `Stock insert failed: ${insErr.message}`;
+          } else {
+            newLot = inserted as any;
+          }
         }
         // Update product nutrition if changed
         if (nutData.calories || nutData.protein || nutData.carbs || nutData.fat) {
@@ -674,13 +747,26 @@ export function ScannerPage() {
             })
             .eq('product_id', product.product_id);
         }
-        return newLot
-          ? { type: 'purchase', recordId: (newLot as any).lot_id, purchaseQty: qty, wasNewLot: !existingLot }
-          : undefined;
+
+        // Invalidate the InventoryPage caches BEFORE returning. Previously
+        // this lived at the end of executeAction, after the switch — but the
+        // Purchase branch returns inside its case, so the invalidation never
+        // ran for the most common scan flow. Result: lot was created in DB
+        // but the Inventory tab kept showing the old (zero-stock or absent)
+        // state until a manual refresh.
+        queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user.id) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.products(user.id) });
+
+        return {
+          undoInfo: newLot
+            ? { type: 'purchase', recordId: (newLot as any).lot_id, purchaseQty: qty, wasNewLot: !existingLot }
+            : undefined,
+          error: writeError,
+        };
       }
       case 'consume_macros': {
         const logicalDate = todayStr(dayStartHour);
-        await (chefbyte() as any).rpc('consume_product', {
+        const { error: rpcErr } = await (chefbyte() as any).rpc('consume_product', {
           p_product_id: product.product_id,
           p_qty: qty,
           p_unit: unitType,
@@ -706,16 +792,22 @@ export function ScannerPage() {
           .limit(1)
           .single();
 
+        queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user.id) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.products(user.id) });
+
         return {
-          type: 'consume',
-          productId: product.product_id,
-          locationId: defaultLocId ?? undefined,
-          qtyContainers,
-          logId: (recentLog as any)?.log_id ?? undefined,
+          undoInfo: {
+            type: 'consume',
+            productId: product.product_id,
+            locationId: defaultLocId ?? undefined,
+            qtyContainers,
+            logId: (recentLog as any)?.log_id ?? undefined,
+          },
+          error: rpcErr ? `Consume failed: ${rpcErr.message}` : null,
         };
       }
       case 'consume_no_macros': {
-        await (chefbyte() as any).rpc('consume_product', {
+        const { error: rpcErr } = await (chefbyte() as any).rpc('consume_product', {
           p_product_id: product.product_id,
           p_qty: qty,
           p_unit: unitType,
@@ -728,15 +820,21 @@ export function ScannerPage() {
         const cSpc = product.servings_per_container ?? 1;
         const cQtyContainers = unitType === 'serving' ? qty / Math.max(cSpc, 0.001) : qty;
 
+        queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user.id) });
+        queryClient.invalidateQueries({ queryKey: queryKeys.products(user.id) });
+
         return {
-          type: 'consume',
-          productId: product.product_id,
-          locationId: cLocId ?? undefined,
-          qtyContainers: cQtyContainers,
+          undoInfo: {
+            type: 'consume',
+            productId: product.product_id,
+            locationId: cLocId ?? undefined,
+            qtyContainers: cQtyContainers,
+          },
+          error: rpcErr ? `Consume failed: ${rpcErr.message}` : null,
         };
       }
       case 'shopping': {
-        const { data: newCartItem } = await chefbyte()
+        const { data: newCartItem, error: insErr } = await chefbyte()
           .from('shopping_list')
           .insert({
             user_id: user.id,
@@ -748,13 +846,13 @@ export function ScannerPage() {
           .single();
         // Invalidate shopping list cache
         queryClient.invalidateQueries({ queryKey: queryKeys.shoppingList(user.id) });
-        return newCartItem ? { type: 'shopping', recordId: (newCartItem as any).cart_item_id } : undefined;
+        return {
+          undoInfo: newCartItem ? { type: 'shopping', recordId: (newCartItem as any).cart_item_id } : undefined,
+          error: insErr ? `Shopping list insert failed: ${insErr.message}` : null,
+        };
       }
     }
-    // Invalidate stock + product caches after purchase/consume actions
-    queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user.id) });
-    queryClient.invalidateQueries({ queryKey: queryKeys.products(user.id) });
-    return undefined;
+    return { undoInfo: undefined, error: null };
   };
 
   /* ---------------------------------------------------------------- */
@@ -796,7 +894,6 @@ export function ScannerPage() {
       });
     }
   };
-
 
   /* ---------------------------------------------------------------- */
   /*  Nutrition change handler                                         */
