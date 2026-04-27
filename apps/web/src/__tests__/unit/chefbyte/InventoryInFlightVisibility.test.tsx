@@ -265,9 +265,12 @@ describe('InventoryPage — in-flight lot visibility (bug 2026-04-22)', () => {
     // The amber "In-flight" badge renders on the row's product-name line.
     const badge = screen.getByTestId('inflight-badge');
     expect(badge).toBeInTheDocument();
-    expect(badge).toHaveTextContent(/in-flight/i);
-    // aria-label exposes the badge to screen readers even without text.
-    expect(badge).toHaveAttribute('aria-label', 'In-flight');
+    // 2026-04-27 lot-pairings refactor renamed the badge label from
+    // "In-flight" to "In Flight" to match the new three-badge model
+    // (Certified / On Scale / In Flight). Regex matches both spellings
+    // for forward-compat with any future re-namings.
+    expect(badge).toHaveTextContent(/in[- ]flight/i);
+    expect(badge).toHaveAttribute('aria-label', 'In Flight');
 
     // Stock cell shows "(picked up)" NOT "0.0 ctn". This is the user-
     // facing "why did the qty go to zero" affordance.
@@ -346,7 +349,7 @@ describe('InventoryPage — in-flight lot visibility (bug 2026-04-22)', () => {
     // across mobile/desktop renderings.
     const lotBadges = screen.getAllByTestId('lot-inflight-badge-lot-inflight');
     expect(lotBadges.length).toBeGreaterThan(0);
-    expect(lotBadges[0]).toHaveTextContent(/in-flight/i);
+    expect(lotBadges[0]).toHaveTextContent(/in[- ]flight/i);
 
     // At least one of the lot rows shows "(picked up)" instead of "0.0".
     // Mobile layout shows "(picked up)" inline; desktop shows it in the

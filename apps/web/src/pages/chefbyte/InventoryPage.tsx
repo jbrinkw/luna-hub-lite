@@ -1,7 +1,7 @@
 import { useState, useMemo, useEffect, useRef } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Activity, AlertTriangle } from 'lucide-react';
+import { ChevronDown, ChevronRight, Activity, AlertTriangle, Scale, CheckCircle2 } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ListSkeleton } from '@/components/ui/Skeleton';
@@ -30,6 +30,12 @@ interface Product {
    * the small ✓ LiveTrack badge next to the product name.
    */
   tare_weight_g: number | null;
+  /**
+   * True when the product has been calibrated through the LiveTrack /
+   * scale enrollment flow and is ready to participate in shelf events.
+   * Drives the per-product ✓ Certified badge.
+   */
+  certified: boolean | null;
 }
 
 interface StockLot {
@@ -80,6 +86,13 @@ interface GroupedProduct {
    * "how long has this product been off the shelf?" in the tooltip.
    */
   inFlightSince: string | null;
+  /**
+   * True when at least one of this product's lots is currently on a live
+   * scale (lot_id ∈ pairedLotIds, in_flight_since IS NULL). Drives the
+   * per-product ⚖ On Scale badge in the grouped view. Per-lot precision
+   * lives on the lots view; the grouped view collapses to "any lot".
+   */
+  anyLotOnScale: boolean;
 }
 
 type ViewMode = 'grouped' | 'lots';
@@ -171,6 +184,27 @@ export function shouldShowLotSourcePill(
   if (!source || source === 'manual') return false;
   if (source === 'live_scale' && !liveScalePairedProductIds.has(productId)) return false;
   return true;
+}
+
+/**
+ * Whether a specific lot is currently "On Scale" — i.e. paired AND not
+ * in-flight. Independent of the in-flight badge: a lot can be paired
+ * (in pairedLotIds) but currently in flight (in_flight_since != null);
+ * in that case "On Scale" is false because the bottle is physically
+ * elsewhere.
+ *
+ * After the 2026-04-27 lot-level pairings refactor this answers the
+ * precise question "is this exact ``stock_lots`` row pinned to a live
+ * scale right now?" — replacing the old per-product approximation.
+ *
+ * Exported for unit testing.
+ */
+export function isLotOnScale(
+  lot: { lot_id: string; in_flight_since: string | null },
+  pairedLotIds: ReadonlySet<string>,
+): boolean {
+  if (lot.in_flight_since !== null) return false;
+  return pairedLotIds.has(lot.lot_id);
 }
 
 /**
@@ -273,7 +307,7 @@ export function InventoryPage() {
     queryFn: async () => {
       const { data, error } = await chefbyte()
         .from('products')
-        .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount,tare_weight_g')
+        .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount,tare_weight_g,certified')
         .eq('user_id', user!.id)
         .order('name');
       if (error) throw error;
@@ -313,22 +347,25 @@ export function InventoryPage() {
     refetchInterval: 15_000,
   });
 
-  /* Live-scale pairings — drives the "live scale" badge gating. The badge
-     means "currently paired to a live scale," not "ever touched by a
-     live_scale event." We only need product_ids of live_scale-kind pairings;
-     `live_shelf` + `catch_all` rows are tied to the device, not a product, and
-     the badge logic for those keys off `last_update_source` directly. */
+  /* Live-scale pairings — drives the per-lot "On Scale" badge. After the
+     2026-04-27 lot-level pairings refactor (migration
+     20260427080000_scale_pairings_lot_level.sql), pairings carry
+     ``lot_id`` so the badge can pin to the exact lot rather than every
+     lot of the paired product. We still surface ``product_id`` so a
+     never-rotated pairing (lot_id NULL, FEFO fallback in cloud) keeps
+     showing the badge on the FEFO winner — preserves the user's mental
+     model that "this product is on the scale" until the cloud rotates. */
   const { data: liveScalePairings = [] } = useQuery({
     queryKey: queryKeys.scalePairings(user!.id),
     queryFn: async () => {
       const { data, error } = await chefbyte()
         .from('scale_pairings')
-        .select('product_id,kind')
+        .select('product_id,lot_id,kind')
         .eq('user_id', user!.id)
         .eq('kind', 'live_scale')
         .not('product_id', 'is', null);
       if (error) throw error;
-      return (data ?? []) as Array<{ product_id: string; kind: string }>;
+      return (data ?? []) as Array<{ product_id: string; lot_id: string | null; kind: string }>;
     },
     enabled: !!user,
     refetchInterval: 15_000,
@@ -338,6 +375,17 @@ export function InventoryPage() {
   // dependencies don't churn — re-derives only when the rows actually change.
   const liveScalePairedProductIds = useMemo(
     () => new Set(liveScalePairings.map((p) => p.product_id)),
+    [liveScalePairings],
+  );
+
+  // Set of paired lot_ids — drives the per-lot "On Scale" badge.
+  // Empty when every pairing is rotation-pending (lot_id NULL); the
+  // product-level fallback above handles that case.
+  const pairedLotIds = useMemo(
+    () =>
+      new Set(
+        liveScalePairings.map((p) => p.lot_id).filter((id): id is string => typeof id === 'string' && id.length > 0),
+      ),
     [liveScalePairings],
   );
 
@@ -417,6 +465,11 @@ export function InventoryPage() {
       // Earliest outstanding pickup across this product's lots (null when none).
       const inFlightSince = pickEarliestInFlight(productLots);
 
+      // Per-product On-Scale roll-up: true iff at least one lot is paired
+      // AND not currently in-flight. Lot-level precision is enforced by
+      // ``isLotOnScale`` in the lots view.
+      const anyLotOnScale = productLots.some((l) => isLotOnScale(l, pairedLotIds));
+
       return {
         product,
         totalStock,
@@ -425,9 +478,10 @@ export function InventoryPage() {
         latestSource,
         latestSourceTs,
         inFlightSince,
+        anyLotOnScale,
       };
     });
-  }, [products, lots, liveScalePairedProductIds]);
+  }, [products, lots, liveScalePairedProductIds, pairedLotIds]);
 
   /* ---------------------------------------------------------------- */
   /*  Expired lots — rendered as their own "discard" section at the   */
@@ -531,7 +585,14 @@ export function InventoryPage() {
     const productMap = new Map(products.map((p) => [p.product_id, p]));
     return lots
       .filter((l) => Number(l.qty_containers) > 0 || l.in_flight_since !== null)
-      .map((lot) => ({ ...lot, productName: productMap.get(lot.product_id)?.name ?? 'Unknown' }))
+      .map((lot) => {
+        const product = productMap.get(lot.product_id);
+        return {
+          ...lot,
+          productName: product?.name ?? 'Unknown',
+          productCertified: product?.certified === true,
+        };
+      })
       .sort((a, b) => {
         // Primary: in-flight first (what's off the shelf right now is most
         // relevant for the user to see).
@@ -956,192 +1017,228 @@ export function InventoryPage() {
               </div>
 
               {/* Product rows */}
-              {filteredGrouped.map(({ product, totalStock, nearestExpiry, latestSource, inFlightSince }, idx) => {
-                const isZeroStock = totalStock <= 0;
-                // A zero-stock product that's currently in-flight is NOT really
-                // "missing" — it's off the shelf, waiting to be placed back.
-                // Skip the row dim (opacity-50 is the "out of stock reminder"
-                // treatment reserved for truly-empty products kept around as
-                // min-stock reminders) and replace the "0.0 ctn" numeric with
-                // a "(picked up)" label so the user immediately sees WHY the
-                // stock dropped to zero — the bottle is in their hand, not gone.
-                const isPickedUp = isZeroStock && inFlightSince !== null;
-                const servingsTotal = totalStock * Number(product.servings_per_container);
-                const isExpanded = expandedProductId === product.product_id;
-                const expiryLabel = nearestExpiry
-                  ? new Date(nearestExpiry + 'T00:00:00').toLocaleDateString('en-US', {
-                      month: 'short',
-                      day: 'numeric',
-                    })
-                  : '\u2014';
+              {filteredGrouped.map(
+                ({ product, totalStock, nearestExpiry, latestSource, inFlightSince, anyLotOnScale }, idx) => {
+                  const isZeroStock = totalStock <= 0;
+                  // A zero-stock product that's currently in-flight is NOT really
+                  // "missing" — it's off the shelf, waiting to be placed back.
+                  // Skip the row dim (opacity-50 is the "out of stock reminder"
+                  // treatment reserved for truly-empty products kept around as
+                  // min-stock reminders) and replace the "0.0 ctn" numeric with
+                  // a "(picked up)" label so the user immediately sees WHY the
+                  // stock dropped to zero — the bottle is in their hand, not gone.
+                  const isPickedUp = isZeroStock && inFlightSince !== null;
+                  const servingsTotal = totalStock * Number(product.servings_per_container);
+                  const isExpanded = expandedProductId === product.product_id;
+                  const expiryLabel = nearestExpiry
+                    ? new Date(nearestExpiry + 'T00:00:00').toLocaleDateString('en-US', {
+                        month: 'short',
+                        day: 'numeric',
+                      })
+                    : '\u2014';
 
-                return (
-                  <div
-                    key={product.product_id}
-                    data-testid={`inv-product-${product.product_id}`}
-                    className={`${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock && !isPickedUp ? 'opacity-50' : ''}`}
-                  >
-                    {/* Collapsed row — always visible, clickable to toggle */}
-                    <button
-                      type="button"
-                      className={`grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover transition-colors ${isExpanded ? 'bg-surface-hover' : ''}`}
-                      onClick={() => setExpandedProductId(isExpanded ? null : product.product_id)}
-                      aria-expanded={isExpanded}
-                      data-testid={`inv-row-toggle-${product.product_id}`}
+                  return (
+                    <div
+                      key={product.product_id}
+                      data-testid={`inv-product-${product.product_id}`}
+                      className={`${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock && !isPickedUp ? 'opacity-50' : ''}`}
                     >
-                      {/* Chevron indicator */}
-                      {isExpanded ? (
-                        <ChevronDown className="w-4 h-4 text-text-tertiary" />
-                      ) : (
-                        <ChevronRight className="w-4 h-4 text-text-tertiary" />
-                      )}
-
-                      {/* Product name + stock dot + source pill */}
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span
-                          className={`w-2.5 h-2.5 rounded-full shrink-0 ${stockDotColor(totalStock, Number(product.min_stock_amount))}`}
-                        />
-                        <span className="font-semibold sm:whitespace-nowrap sm:overflow-hidden sm:text-ellipsis">
-                          {product.name}
-                        </span>
-                        {product.tare_weight_g != null && (
-                          <span
-                            data-testid={`livetrack-enrolled-${product.product_id}`}
-                            title={`LiveTrack enrolled (container tare ${Number(product.tare_weight_g).toFixed(1)} g)`}
-                            className="inline-flex items-center shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200"
-                            aria-label="LiveTrack enrolled"
-                          >
-                            ✓
-                          </span>
-                        )}
-                        {latestSource && (
-                          <span
-                            data-testid={`source-pill-${product.product_id}`}
-                            className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(latestSource)}`}
-                          >
-                            {sourceLabel[latestSource]}
-                          </span>
-                        )}
-                        {inFlightSince && (
-                          <span
-                            data-testid="inflight-badge"
-                            title={`Picked up at ${new Date(inFlightSince).toLocaleTimeString([], {
-                              hour: '2-digit',
-                              minute: '2-digit',
-                            })} — not yet placed back`}
-                            className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
-                            aria-label="In-flight"
-                          >
-                            <Activity className="w-2.5 h-2.5" aria-hidden="true" />
-                            In-flight
-                          </span>
-                        )}
-                      </div>
-
-                      {/* Stock — "(picked up)" replaces the "0.0 ctn" numeric
-                          when the product is zero-stock BUT in-flight. Keeps
-                          the user from thinking the system lost the item. */}
-                      <span data-testid={`stock-badge-${product.product_id}`} className="font-semibold text-sm">
-                        {isPickedUp ? (
-                          <span className="text-amber-800 italic">(picked up)</span>
+                      {/* Collapsed row — always visible, clickable to toggle */}
+                      <button
+                        type="button"
+                        className={`grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover transition-colors ${isExpanded ? 'bg-surface-hover' : ''}`}
+                        onClick={() => setExpandedProductId(isExpanded ? null : product.product_id)}
+                        aria-expanded={isExpanded}
+                        data-testid={`inv-row-toggle-${product.product_id}`}
+                      >
+                        {/* Chevron indicator */}
+                        {isExpanded ? (
+                          <ChevronDown className="w-4 h-4 text-text-tertiary" />
                         ) : (
-                          `${totalStock.toFixed(1)} ctn`
+                          <ChevronRight className="w-4 h-4 text-text-tertiary" />
                         )}
-                      </span>
 
-                      {/* Expiry (hidden on small screens) */}
-                      <span
-                        data-testid={`expiry-${product.product_id}`}
-                        className="text-[13px] text-text-secondary hidden sm:block"
-                      >
-                        {expiryLabel}
-                      </span>
-                    </button>
-
-                    {/* Expanded detail panel */}
-                    {isExpanded && (
-                      <div
-                        className="px-4 pb-4 pt-1 bg-surface-sunken/50 border-t border-border-light"
-                        data-testid={`inv-detail-${product.product_id}`}
-                      >
-                        {/* Detail info — matches the collapsed row's treatment:
-                            in-flight zero-stock shows "(picked up)" instead of
-                            a misleading "0.0 containers (0.0 servings)". */}
-                        <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-text-secondary mb-3">
-                          <span data-testid={`stock-servings-${product.product_id}`}>
-                            {isPickedUp
-                              ? '(picked up — awaiting reunite)'
-                              : `${totalStock.toFixed(1)} containers (${servingsTotal.toFixed(1)} servings)`}
+                        {/* Product name + stock dot + source pill */}
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span
+                            className={`w-2.5 h-2.5 rounded-full shrink-0 ${stockDotColor(totalStock, Number(product.min_stock_amount))}`}
+                          />
+                          <span className="font-semibold sm:whitespace-nowrap sm:overflow-hidden sm:text-ellipsis">
+                            {product.name}
                           </span>
-                          <span data-testid={`min-stock-${product.product_id}`}>
-                            Min stock: {Number(product.min_stock_amount).toFixed(1)}
-                          </span>
-                          <span data-testid={`detail-expiry-${product.product_id}`}>Expires: {expiryLabel}</span>
-                          {product.barcode && (
-                            <span data-testid={`barcode-${product.product_id}`}>Barcode: {product.barcode}</span>
+                          {/* Certified — per-product. ``products.certified``
+                            flips true once the product completes calibration
+                            (LiveTrack enrollment / scale tare capture) and is
+                            ready for shelf events. Independent of On Scale +
+                            In Flight; a certified product can sit on a shelf
+                            (unpaired) just fine. */}
+                          {product.certified === true && (
+                            <span
+                              data-testid={`certified-badge-${product.product_id}`}
+                              title="Certified — calibrated and ready for live shelf tracking"
+                              className="inline-flex items-center gap-1 shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200"
+                              aria-label="Certified"
+                            >
+                              <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
+                              Certified
+                            </span>
+                          )}
+                          {/* On Scale — per-product roll-up of any qty>0 lot
+                            that is paired AND not in-flight. Independent of
+                            In Flight: a lot in flight pulls "on scale" off
+                            because the bottle is physically elsewhere. */}
+                          {anyLotOnScale && (
+                            <span
+                              data-testid={`on-scale-badge-${product.product_id}`}
+                              title="On Scale — a lot of this product is currently sitting on a paired live scale"
+                              className="inline-flex items-center gap-1 shrink-0 rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 border border-sky-200"
+                              aria-label="On Scale"
+                            >
+                              <Scale className="w-2.5 h-2.5" aria-hidden="true" />
+                              On Scale
+                            </span>
+                          )}
+                          {/* Source pill — informational about the most-recent
+                            automated source (live_shelf / live_scale / catch_all).
+                            Kept for continuity; the dedicated On Scale badge
+                            above is the precise paired-state signal now. */}
+                          {latestSource && (
+                            <span
+                              data-testid={`source-pill-${product.product_id}`}
+                              className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(latestSource)}`}
+                            >
+                              {sourceLabel[latestSource]}
+                            </span>
+                          )}
+                          {/* In Flight — per-product, lights when ANY lot is
+                            currently in-flight. Independent of On Scale +
+                            Certified; the bottle is physically off the
+                            shelf right now. */}
+                          {inFlightSince && (
+                            <span
+                              data-testid="inflight-badge"
+                              title={`In Flight — picked up at ${new Date(inFlightSince).toLocaleTimeString([], {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                              })}, not yet placed back`}
+                              className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
+                              aria-label="In Flight"
+                            >
+                              <Activity className="w-2.5 h-2.5" aria-hidden="true" />
+                              In Flight
+                            </span>
                           )}
                         </div>
 
-                        {/* Action buttons — clean grid layout */}
-                        <div className="grid grid-cols-2 gap-2 max-w-sm">
+                        {/* Stock — "(picked up)" replaces the "0.0 ctn" numeric
+                          when the product is zero-stock BUT in-flight. Keeps
+                          the user from thinking the system lost the item. */}
+                        <span data-testid={`stock-badge-${product.product_id}`} className="font-semibold text-sm">
+                          {isPickedUp ? (
+                            <span className="text-amber-800 italic">(picked up)</span>
+                          ) : (
+                            `${totalStock.toFixed(1)} ctn`
+                          )}
+                        </span>
+
+                        {/* Expiry (hidden on small screens) */}
+                        <span
+                          data-testid={`expiry-${product.product_id}`}
+                          className="text-[13px] text-text-secondary hidden sm:block"
+                        >
+                          {expiryLabel}
+                        </span>
+                      </button>
+
+                      {/* Expanded detail panel */}
+                      {isExpanded && (
+                        <div
+                          className="px-4 pb-4 pt-1 bg-surface-sunken/50 border-t border-border-light"
+                          data-testid={`inv-detail-${product.product_id}`}
+                        >
+                          {/* Detail info — matches the collapsed row's treatment:
+                            in-flight zero-stock shows "(picked up)" instead of
+                            a misleading "0.0 containers (0.0 servings)". */}
+                          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-text-secondary mb-3">
+                            <span data-testid={`stock-servings-${product.product_id}`}>
+                              {isPickedUp
+                                ? '(picked up — awaiting reunite)'
+                                : `${totalStock.toFixed(1)} containers (${servingsTotal.toFixed(1)} servings)`}
+                            </span>
+                            <span data-testid={`min-stock-${product.product_id}`}>
+                              Min stock: {Number(product.min_stock_amount).toFixed(1)}
+                            </span>
+                            <span data-testid={`detail-expiry-${product.product_id}`}>Expires: {expiryLabel}</span>
+                            {product.barcode && (
+                              <span data-testid={`barcode-${product.product_id}`}>Barcode: {product.barcode}</span>
+                            )}
+                          </div>
+
+                          {/* Action buttons — clean grid layout */}
+                          <div className="grid grid-cols-2 gap-2 max-w-sm">
+                            <button
+                              className="flex items-center justify-center gap-1.5 bg-success text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-success-hover transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAddStockModal(product.product_id, 1);
+                              }}
+                              data-testid={`add-ctn-${product.product_id}`}
+                            >
+                              Add Container
+                            </button>
+                            <button
+                              className="flex items-center justify-center gap-1.5 bg-danger text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-hover transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                consumeStockMutation.mutate({
+                                  productId: product.product_id,
+                                  qty: 1,
+                                  unit: 'container',
+                                });
+                              }}
+                              data-testid={`sub-ctn-${product.product_id}`}
+                            >
+                              Remove Container
+                            </button>
+                            <button
+                              className="flex items-center justify-center gap-1.5 bg-surface text-success-text border-2 border-success px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-success-subtle transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openAddStockModal(product.product_id, 1 / Number(product.servings_per_container));
+                              }}
+                              data-testid={`add-srv-${product.product_id}`}
+                            >
+                              Add Serving
+                            </button>
+                            <button
+                              className="flex items-center justify-center gap-1.5 bg-surface text-danger-text border-2 border-danger px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-subtle transition-colors"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                consumeStockMutation.mutate({ productId: product.product_id, qty: 1, unit: 'serving' });
+                              }}
+                              data-testid={`sub-srv-${product.product_id}`}
+                            >
+                              Remove Serving
+                            </button>
+                          </div>
+
+                          {/* Consume All — separate, text-style */}
                           <button
-                            className="flex items-center justify-center gap-1.5 bg-success text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-success-hover transition-colors"
+                            className="mt-2 bg-transparent text-text-secondary border-none px-0 py-1 cursor-pointer text-sm underline hover:text-text transition-colors"
                             onClick={(e) => {
                               e.stopPropagation();
-                              openAddStockModal(product.product_id, 1);
+                              handleConsumeAll(product.product_id);
                             }}
-                            data-testid={`add-ctn-${product.product_id}`}
+                            data-testid={`consume-all-${product.product_id}`}
                           >
-                            Add Container
-                          </button>
-                          <button
-                            className="flex items-center justify-center gap-1.5 bg-danger text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-hover transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              consumeStockMutation.mutate({ productId: product.product_id, qty: 1, unit: 'container' });
-                            }}
-                            data-testid={`sub-ctn-${product.product_id}`}
-                          >
-                            Remove Container
-                          </button>
-                          <button
-                            className="flex items-center justify-center gap-1.5 bg-surface text-success-text border-2 border-success px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-success-subtle transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openAddStockModal(product.product_id, 1 / Number(product.servings_per_container));
-                            }}
-                            data-testid={`add-srv-${product.product_id}`}
-                          >
-                            Add Serving
-                          </button>
-                          <button
-                            className="flex items-center justify-center gap-1.5 bg-surface text-danger-text border-2 border-danger px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-subtle transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              consumeStockMutation.mutate({ productId: product.product_id, qty: 1, unit: 'serving' });
-                            }}
-                            data-testid={`sub-srv-${product.product_id}`}
-                          >
-                            Remove Serving
+                            Consume All
                           </button>
                         </div>
-
-                        {/* Consume All — separate, text-style */}
-                        <button
-                          className="mt-2 bg-transparent text-text-secondary border-none px-0 py-1 cursor-pointer text-sm underline hover:text-text transition-colors"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleConsumeAll(product.product_id);
-                          }}
-                          data-testid={`consume-all-${product.product_id}`}
-                        >
-                          Consume All
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
+                      )}
+                    </div>
+                  );
+                },
+              )}
             </div>
           )}
         </div>
@@ -1166,6 +1263,31 @@ export function InventoryPage() {
                   >
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="font-semibold text-sm text-text">{lot.productName}</span>
+                      {/* ✓ Certified — per-product. */}
+                      {lot.productCertified && (
+                        <span
+                          data-testid={`lot-certified-badge-${lot.lot_id}`}
+                          title="Certified — calibrated and ready for live shelf tracking"
+                          className="inline-flex items-center gap-1 shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200"
+                          aria-label="Certified"
+                        >
+                          <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
+                          Certified
+                        </span>
+                      )}
+                      {/* ⚖ On Scale — per-lot, paired AND not in-flight. */}
+                      {isLotOnScale(lot, pairedLotIds) && (
+                        <span
+                          data-testid={`lot-on-scale-badge-${lot.lot_id}`}
+                          title="On Scale — this lot is currently sitting on a paired live scale"
+                          className="inline-flex items-center gap-1 shrink-0 rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 border border-sky-200"
+                          aria-label="On Scale"
+                        >
+                          <Scale className="w-2.5 h-2.5" aria-hidden="true" />
+                          On Scale
+                        </span>
+                      )}
+                      {/* Source pill — informational about last automated source. */}
                       {shouldShowLotSourcePill(lot.last_update_source, lot.product_id, liveScalePairedProductIds) && (
                         <span
                           data-testid={`lot-source-pill-${lot.lot_id}`}
@@ -1174,18 +1296,19 @@ export function InventoryPage() {
                           {sourceLabel[lot.last_update_source as NonNullable<GroupedProduct['latestSource']>]}
                         </span>
                       )}
+                      {/* ✋ In Flight — per-lot, off the shelf right now. */}
                       {lot.in_flight_since && (
                         <span
                           data-testid={`lot-inflight-badge-${lot.lot_id}`}
-                          title={`Picked up at ${new Date(lot.in_flight_since).toLocaleTimeString([], {
+                          title={`In Flight — picked up at ${new Date(lot.in_flight_since).toLocaleTimeString([], {
                             hour: '2-digit',
                             minute: '2-digit',
-                          })} — not yet placed back`}
+                          })}, not yet placed back`}
                           className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
-                          aria-label="In-flight"
+                          aria-label="In Flight"
                         >
                           <Activity className="w-2.5 h-2.5" aria-hidden="true" />
-                          In-flight
+                          In Flight
                         </span>
                       )}
                     </div>
@@ -1225,6 +1348,30 @@ export function InventoryPage() {
                         <td className="p-3">
                           <span className="inline-flex items-center gap-2 flex-wrap">
                             {lot.productName}
+                            {/* ✓ Certified */}
+                            {lot.productCertified && (
+                              <span
+                                data-testid={`lot-certified-badge-${lot.lot_id}`}
+                                title="Certified — calibrated and ready for live shelf tracking"
+                                className="inline-flex items-center gap-1 shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200"
+                                aria-label="Certified"
+                              >
+                                <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
+                                Certified
+                              </span>
+                            )}
+                            {/* ⚖ On Scale (per-lot) */}
+                            {isLotOnScale(lot, pairedLotIds) && (
+                              <span
+                                data-testid={`lot-on-scale-badge-${lot.lot_id}`}
+                                title="On Scale — this lot is currently sitting on a paired live scale"
+                                className="inline-flex items-center gap-1 shrink-0 rounded-full bg-sky-50 px-1.5 py-0.5 text-[10px] font-semibold text-sky-800 border border-sky-200"
+                                aria-label="On Scale"
+                              >
+                                <Scale className="w-2.5 h-2.5" aria-hidden="true" />
+                                On Scale
+                              </span>
+                            )}
                             {shouldShowLotSourcePill(
                               lot.last_update_source,
                               lot.product_id,
@@ -1237,18 +1384,22 @@ export function InventoryPage() {
                                 {sourceLabel[lot.last_update_source as NonNullable<GroupedProduct['latestSource']>]}
                               </span>
                             )}
+                            {/* ✋ In Flight (per-lot) */}
                             {lot.in_flight_since && (
                               <span
                                 data-testid={`lot-inflight-badge-${lot.lot_id}`}
-                                title={`Picked up at ${new Date(lot.in_flight_since).toLocaleTimeString([], {
-                                  hour: '2-digit',
-                                  minute: '2-digit',
-                                })} — not yet placed back`}
+                                title={`In Flight — picked up at ${new Date(lot.in_flight_since).toLocaleTimeString(
+                                  [],
+                                  {
+                                    hour: '2-digit',
+                                    minute: '2-digit',
+                                  },
+                                )}, not yet placed back`}
                                 className="inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide bg-amber-100 text-amber-800 border border-amber-200"
-                                aria-label="In-flight"
+                                aria-label="In Flight"
                               >
                                 <Activity className="w-2.5 h-2.5" aria-hidden="true" />
-                                In-flight
+                                In Flight
                               </span>
                             )}
                           </span>
