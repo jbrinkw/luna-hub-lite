@@ -145,13 +145,22 @@ describe('Analyze-Product Edge Function', () => {
         { onConflict: 'user_id,key' },
       );
 
+    // Use the canned OFF response so this test doesn't depend on OFF's
+    // behaviour for an obviously-fake barcode (`9999999999999`). On a
+    // happy day OFF returns 404 → the function 404s before reaching the
+    // quota check, and the assertion below fails. The 'reset quota on a
+    // new day' test below uses the same canned header for the same
+    // reason. Without this header the test was flaky under verify:full
+    // load when OFF rate-limited or the call timed out (caught locally
+    // 2026-04-27).
     const res = await fetch(EDGE_URL, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${userJwt}`,
+        'x-test-off-mode': 'canned',
       },
-      body: JSON.stringify({ barcode: '9999999999999' }),
+      body: JSON.stringify({ barcode: 'TESTQUOTAENFORCE' }),
     });
 
     expect(res.status).toBe(429);
