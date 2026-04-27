@@ -835,6 +835,10 @@ export type Database = {
               isSetofReturn: false
             }
           }
+      close_in_flight_lot: {
+        Args: { p_lot_id: string; p_note?: string; p_resolution: string }
+        Returns: string
+      }
       consume_product: {
         Args: {
           p_confirm_large_amount?: boolean
@@ -1744,6 +1748,15 @@ export type Database = {
       bump_api_key_used: {
         Args: { p_api_key_hash: string }
         Returns: undefined
+      }
+      close_in_flight_lot: {
+        Args: {
+          p_lot_id: string
+          p_note?: string
+          p_resolution: string
+          p_user_id: string
+        }
+        Returns: string
       }
       complete_next_set: {
         Args: {
