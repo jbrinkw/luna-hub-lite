@@ -4,6 +4,13 @@ import globals from 'globals';
 import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import prettier from 'eslint-config-prettier';
+import noUncheckedSupabaseMutation from './eslint-rules/no-unchecked-supabase-mutation.js';
+
+const localRulesPlugin = {
+  rules: {
+    'no-unchecked-supabase-mutation': noUncheckedSupabaseMutation,
+  },
+};
 
 export default tseslint.config(
   {
@@ -80,6 +87,19 @@ export default tseslint.config(
           destructuredArrayIgnorePattern: '^_',
         },
       ],
+    },
+  },
+  // Custom: surface silent supabase mutation errors. Scoped to production
+  // code paths that talk to Supabase. Tests legitimately fire-and-forget
+  // mocked builders, so they're excluded.
+  {
+    files: ['apps/web/src/**/*.{ts,tsx}', 'supabase/functions/**/*.ts'],
+    ignores: ['**/__tests__/**', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}', 'tests/**', 'apps/web/e2e/**'],
+    plugins: {
+      'local-rules': localRulesPlugin,
+    },
+    rules: {
+      'local-rules/no-unchecked-supabase-mutation': 'error',
     },
   },
 );
