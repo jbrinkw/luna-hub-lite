@@ -961,14 +961,14 @@ class TestChickenCaseInventoryOnly:
         assert on_shelf[0]["lot_id"] == lot.lot_id
 
     def test_chicken_no_inventory_emits_no_lot(self, tmp_path):
-        """Inventory-only rule: place event for a product with NO existing
-        lot (catalog only) must NOT mint a new lot.
+        """Inventory-only rule (decision #45): on the LiveTrack
+        (single_item) scale path, a place event for a product with NO
+        existing lot (catalog only) must NOT mint a new lot.
 
-        The classifier would not normally pick this product because the
-        ADD pool is now inventory-only, but if a malformed pool somehow
-        surfaced a catalog product (or a test fixture forces one), the
-        apply-path picker returns None and the event is dropped with
-        a warning — never a mint.
+        Updated 2026-04-27 (decision #54): the rule still applies to
+        ``shelf_id='single_item'`` — the LiveTrack scale path is
+        explicitly inventory-only. The ``live_shelf`` path now mints
+        from catalog (covered by the companion test below).
         """
         conn = init_db(":memory:")
         handler = _make_handler(conn, tmp_path)
@@ -1013,19 +1013,90 @@ class TestChickenCaseInventoryOnly:
             delta_g=300.0,
             session_id=session_id,
             event_id=e_add,
-            shelf_id="live_shelf",
+            shelf_id="single_item",
         )
 
-        # No lot exists for this product, period.
+        # No lot exists for this product on single_item.
         all_lots = conn.execute(
             "SELECT lot_id FROM lots WHERE product_id = ?",
             (product.product_id,),
         ).fetchall()
         assert len(all_lots) == 0, (
-            f"inventory-only rule violated: place event for a "
+            f"inventory-only rule violated: single_item place event for a "
             f"catalog-only product minted a new lot. Got {all_lots!r}. "
-            f"User must intake the product first per decisions.md #45."
+            f"Decision #45 holds for LiveTrack (single_item) — user must "
+            f"intake the product first."
         )
+
+    def test_live_shelf_no_inventory_mints_from_catalog(self, tmp_path):
+        """Decision #54: live_shelf place event for a catalog-only
+        product DOES mint a new Pi lot.
+
+        Mirror of the test above with shelf_id flipped to live_shelf —
+        the user's "general products to be matchable on the live_shelf
+        even if no stock_lots exist yet" expectation. The catalog
+        branch (re-introduced by decision #54) makes the apply path's
+        catalog mint helper fire instead of the dropped path.
+        """
+        conn = init_db(":memory:")
+        handler = _make_handler(conn, tmp_path)
+        product = storage_repo.create_product(
+            conn,
+            ProductIn(
+                name="Brand New Item (live_shelf)",
+                barcode="NEW-LS-1",
+                net_weight_g=300.0,
+                gross_weight_g=300.0,
+                unit_type="solid",
+                container_type="bottle",
+                certified=1,
+            ),
+        )
+        session_id = _open_session(conn)
+        e_add = _record_add(
+            conn, session_id,
+            delta_g=300.0,
+            ts="2026-04-27T13:00:00.000Z",
+            weight_before=0.0,
+        )
+
+        classification = {
+            "item_id": product.product_id,
+            "action": "added",
+            "confidence": 0.95,
+            "multi_match": [],
+            "candidate_pool_used": [
+                {"candidate_id": product.product_id,
+                 "product_id": product.product_id,
+                 "why_candidate": "catalog_not_on_shelf",
+                 "expected_weight_g": 300.0},
+            ],
+        }
+
+        handler._apply_lot_update_from_classification(
+            direction="add",
+            classification=classification,
+            event_ts="2026-04-27T13:00:00.000Z",
+            delta_g=300.0,
+            session_id=session_id,
+            event_id=e_add,
+            shelf_id="live_shelf",
+        )
+
+        # On live_shelf, the catalog mint fires (decision #54).
+        all_lots = conn.execute(
+            "SELECT lot_id, status, current_weight_g, shelf_id "
+            "FROM lots WHERE product_id = ?",
+            (product.product_id,),
+        ).fetchall()
+        assert len(all_lots) == 1, (
+            f"decision #54 not landed: live_shelf place event for a "
+            f"catalog-only product should mint exactly one Pi lot. "
+            f"Got {[(r['lot_id'][:8], r['status']) for r in all_lots]!r}."
+        )
+        assert all_lots[0]["status"] == "on_shelf"
+        assert all_lots[0]["shelf_id"] == "live_shelf"
+        assert abs(float(all_lots[0]["current_weight_g"]) - 300.0) < 1e-3
 
     def test_picker_prefers_in_flight_over_on_shelf_for_same_product(
         self, tmp_path

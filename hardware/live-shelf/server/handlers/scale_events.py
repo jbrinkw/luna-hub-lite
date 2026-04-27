@@ -1664,6 +1664,65 @@ class ScaleHandler:
             )
             return None
 
+    def _mint_pi_lot_for_catalog_pick(
+        self,
+        *,
+        product_id: str,
+        weight_g: float,
+        event_ts: str,
+        shelf_id: str,
+    ) -> Optional[Any]:
+        """Mint a Pi-local ``lots`` row for a ``catalog_not_on_shelf`` pick.
+
+        **2026-04-27 (decisions.md #54):** the live_shelf reintroduces
+        the catalog branch in :func:`pool_for_add` so a fresh placement
+        of a catalog product with NO existing inventory can match. When
+        the classifier picks such a product:
+
+        * No Pi-local ``lots`` row exists (the classifier knew this).
+        * No ``cloud_lots`` row exists either — otherwise we'd have
+          gone through the ``inventory_only`` branch upstream.
+
+        We mint a Pi lot at ``status='on_shelf'`` and rely on the
+        ``new_arrival`` cloud emit (issued by the apply path's
+        out→on_shelf branch when ``inventory_only_mint=True``) to
+        route through ``private.resolve_add_to_shelf_lot`` step 5,
+        which inserts a fresh ``chefbyte.stock_lots`` row server-side.
+
+        Defensive: refuse to mint when ``shelf_id != 'live_shelf'``.
+        Decision #45 still applies to the LiveTrack (single_item)
+        scale path and the catch_all path is owned by a separate
+        workstream — surfacing a catalog mint there would regress
+        either's contract.
+        """
+        if shelf_id != "live_shelf":
+            log.warning(
+                "_mint_pi_lot_for_catalog_pick: refusing mint on shelf %s "
+                "(decision #54 limits catalog mint to live_shelf only)",
+                shelf_id,
+            )
+            return None
+        try:
+            return storage_repo.create_lot(
+                self._conn,
+                LotIn(
+                    product_id=product_id,
+                    status="on_shelf",
+                    current_weight_g=float(weight_g) if weight_g else 0.0,
+                    initial_weight_g=float(weight_g) if weight_g else 0.0,
+                    placed_at=event_ts,
+                    last_seen_at=event_ts,
+                    shelf_id=shelf_id,  # type: ignore[arg-type]
+                ),
+            )
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "_mint_pi_lot_for_catalog_pick: create_lot raised "
+                "for product_id=%s shelf=%s",
+                product_id, shelf_id,
+            )
+            return None
+
     def _maybe_reunite_with_in_flight_lot(
         self,
         *,
@@ -2214,6 +2273,58 @@ class ScaleHandler:
                         lot = mirrored_lot
                         cid = mirrored_lot.lot_id
                         inventory_only_mint = True
+                    else:
+                        # 2026-04-27 catalog branch (decisions.md #54):
+                        # the inventory-only mirror refused to populate
+                        # because no ``cloud_lots`` row exists — but on
+                        # the live_shelf, the user wants ``catalog_not_on_shelf``
+                        # picks to mint fresh lots. Check whether the
+                        # classifier's pick was actually a catalog
+                        # candidate (vs. a hallucination), then mint.
+                        # The cloud emit below (out→on_shelf path with
+                        # ``inventory_only_mint=True``) routes through
+                        # ``resolve_add_to_shelf_lot`` step 5 which
+                        # inserts a fresh ``chefbyte.stock_lots`` row.
+                        was_catalog_pick = False
+                        for c in classification.get(
+                            "candidate_pool_used"
+                        ) or []:
+                            if not isinstance(c, dict):
+                                continue
+                            if (
+                                c.get("why_candidate")
+                                == "catalog_not_on_shelf"
+                                and (
+                                    c.get("candidate_id") == str(cid)
+                                    or c.get("product_id") == str(cid)
+                                )
+                            ):
+                                was_catalog_pick = True
+                                break
+                        if was_catalog_pick:
+                            catalog_lot = self._mint_pi_lot_for_catalog_pick(
+                                product_id=str(cid),
+                                weight_g=lot_weight_g,
+                                event_ts=event_ts,
+                                shelf_id=shelf_id,
+                            )
+                            if catalog_lot is not None:
+                                log.info(
+                                    "catalog mint: product %s → Pi lot %s "
+                                    "(weight %.1fg) for ADD event %s on %s "
+                                    "(decision #54)",
+                                    cid, catalog_lot.lot_id, lot_weight_g,
+                                    event_id, shelf_id,
+                                )
+                                lot = catalog_lot
+                                cid = catalog_lot.lot_id
+                                # Reuse inventory_only_mint flag so the
+                                # downstream new_arrival emit fires —
+                                # the field name is historical; it
+                                # gates "this is a fresh placement that
+                                # needs a new_arrival emit" which is
+                                # exactly what we want here too.
+                                inventory_only_mint = True
             if lot is not None:
                 # Fix 3: guard against the lot_id-vs-product_id ambiguity.
                 # If get_lot(cid) succeeded but that lot's product_id was

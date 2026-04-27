@@ -374,19 +374,23 @@ class TestInventoryOnlyDbBacked:
             conn.close()
 
     def test_pool_collapses_to_unknown_when_cloud_lots_empty(self, tmp_path):
-        """Mutation guard: empty cloud_lots → UNKNOWN-only pool.
+        """Mutation guard: empty cloud_lots → no inventory_only entries.
 
-        Mirror of the regression itself. If this test PASSED before
-        the fix (i.e. the prior code path reached the same outcome
-        when the cloud table was empty), then the positive test above
-        proves the fix is necessary: pre-fix code returned the same
-        UNKNOWN-only pool even WITH cloud inventory; post-fix code
-        returns UNKNOWN-only ONLY when cloud is empty.
+        Mirror of the inventory_only regression. Updated 2026-04-27
+        for decision #54: on the live_shelf, an UNCERTIFIED product
+        with no cloud_lots row must NOT surface in any branch — the
+        certified-product catalog branch (re-introduced by #54)
+        excludes uncertified rows, and the inventory_only branch
+        excludes products with no cloud_lots qty>0. Combined, a
+        bare uncertified product with no inventory yields the
+        UNKNOWN-only pool.
         """
         db_path = tmp_path / "inv_only_empty.db"
         conn = init_db(db_path)
         try:
-            # Product exists but no cloud_lots row → not in inventory.
+            # Uncertified product, no cloud_lots → invisible to both
+            # the inventory_only branch (no cloud lot) AND the catalog
+            # branch (catalog branch is certified-only).
             storage_repo.create_product(
                 conn,
                 ProductIn(
@@ -396,7 +400,7 @@ class TestInventoryOnlyDbBacked:
                     gross_weight_g=300.0,
                     unit_type="solid",
                     container_type="bag",
-                    certified=1,
+                    certified=0,
                 ),
             )
             ctx = _ctx_for(conn, tmp_path, shelf_id="live_shelf")
@@ -461,12 +465,19 @@ class TestInventoryOnlyDbBacked:
             conn.close()
 
     def test_zero_qty_cloud_lot_is_not_inventory(self, tmp_path):
-        """Empty (qty=0) cloud_lots rows must NOT count as inventory.
+        """Empty (qty=0) cloud_lots rows must NOT count as inventory_only.
 
         Empty lots represent already-consumed inventory. The
         cloud-side resolver's empty-lot-reuse path can promote them
-        on a refill, but they aren't candidates for matching a fresh
-        place event.
+        on a refill, but they aren't candidates for the inventory_only
+        branch.
+
+        Updated 2026-04-27 for decision #54: the certified product
+        STILL surfaces in the pool — but via the ``catalog_not_on_shelf``
+        branch (live_shelf only). The semantic this test pins is "the
+        inventory_only branch ignores qty=0 cloud lots" — when qty is
+        bumped to 1.0, the entry's why_candidate flips from
+        catalog_not_on_shelf to inventory_only.
         """
         db_path = tmp_path / "inv_only_zero_qty.db"
         conn = init_db(db_path)
@@ -483,17 +494,28 @@ class TestInventoryOnlyDbBacked:
                     certified=1,
                 ),
             )
-            # qty_containers=0 → not inventory
+            # qty_containers=0 → not inventory_only.
             _seed_cloud_lot(
                 conn, lot_id="cl-empty", product_id=p.product_id, qty=0.0,
             )
             ctx = _ctx_for(conn, tmp_path, shelf_id="live_shelf")
             pool = pool_for_add(300.0, ctx)
-            ids = [c.candidate_id for c in pool]
-            assert p.product_id not in ids
-            assert pool[0].candidate_id == UNKNOWN_CANDIDATE_ID
+            non_sentinel = [
+                c for c in pool if c.candidate_id != UNKNOWN_CANDIDATE_ID
+            ]
+            # Product appears via the catalog branch (decision #54).
+            assert any(c.product_id == p.product_id for c in non_sentinel)
+            # …but NOT via inventory_only — qty=0 disqualifies it.
+            inv_only = [
+                c for c in non_sentinel
+                if c.product_id == p.product_id
+                and c.why_candidate == "inventory_only"
+            ]
+            assert inv_only == []
 
-            # Now bump qty to 1.0 — same product must now surface.
+            # Now bump qty to 1.0 — same product surfaces with the
+            # stronger inventory_only tag (catalog branch loses the
+            # dedupe collapse).
             conn.execute(
                 "UPDATE cloud_lots SET qty_containers = 1.0 "
                 "WHERE lot_id = 'cl-empty'",
@@ -501,8 +523,12 @@ class TestInventoryOnlyDbBacked:
             conn.commit()
             ctx2 = _ctx_for(conn, tmp_path, shelf_id="live_shelf")
             pool2 = pool_for_add(300.0, ctx2)
-            ids2 = [c.candidate_id for c in pool2]
-            assert p.product_id in ids2
+            entries = [
+                c for c in pool2
+                if c.product_id == p.product_id
+            ]
+            assert len(entries) == 1
+            assert entries[0].why_candidate == "inventory_only"
         finally:
             conn.close()
 

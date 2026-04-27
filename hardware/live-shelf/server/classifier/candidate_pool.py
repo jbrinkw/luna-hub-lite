@@ -81,10 +81,14 @@ def _tier_rank(why: str) -> int:
     3. inventory_only — cloud-mirror product with no Pi shelf history.
        Ranked below top_up_target because the user has never placed
        this lot on the shelf before (no on-shelf evidence to lean on),
-       but above the dropped catalog branch because the product IS in
-       inventory (decision #45 + 2026-04-27 regression fix).
-    4. catalog_not_on_shelf with matching weight (DROPPED in pool_for_add
-       per decision #45; tier kept for backwards-compat with tests)
+       but above the catalog branch because the product IS in cloud
+       inventory (decision #45 + 2026-04-27 regression fix #53).
+    4. catalog_not_on_shelf — catalog products with no inventory at
+       all. Re-introduced 2026-04-27 for live_shelf only (decision
+       #54). Ranked LAST among real branches so a weight-coincident
+       catalog candidate can never beat an existing in_flight /
+       on_shelf / inventory_only entry for the same product —
+       _dedupe_by_product keeps the higher-tier representative.
     5. remaining items by weight proximity
     6. UNKNOWN always last
     """
@@ -324,40 +328,50 @@ def pool_for_add(
 ) -> list[Candidate]:
     """Assemble the ADD candidate pool for an add-direction event.
 
-    **2026-04-27 inventory-only matching (decisions.md #42 + regression
-    fix):** the ADD pool is restricted to products that already have
-    at least one lot **in inventory** — defined as either:
+    **2026-04-27 three-shelf-three-pool design (decisions.md #45 +
+    regression fix #53 + #54):** the ADD pool composition depends on
+    the shelf kind. The pool is the union of:
 
-    1. A Pi-local ``lots`` row (``in_flight``, ``recently_out`` /
-       ``out``, or ``on_shelf``) on this shelf, OR
-    2. A cloud-mirror ``cloud_lots`` row with ``qty_containers > 0``
-       and no Pi-local lot on this shelf yet (the ``inventory_only``
-       branch).
-
-    The ``catalog_not_on_shelf`` branch is INTENTIONALLY dropped —
-    minting a brand-new cloud stock_lot from a place event is no
-    longer allowed. The ``inventory_only`` branch is NOT a regression
-    of that rule: the cloud stock_lot already exists (the user
-    intaked the product); the apply path mints only a Pi-local
-    ``lots`` row to track this shelf's view of an existing cloud lot,
-    while the cloud-side ``resolve_add_to_shelf_lot`` step 2/3
-    promotes the existing cloud lot to live_shelf-tracked status.
+    1. ``in_flight`` lots — items the user just lifted, expected to
+       come back.
+    2. ``recently_out`` lots — items removed within the last 24h.
+    3. ``top_up_target`` lots — items currently on this shelf.
+    4. ``inventory_only`` products — cloud-mirror ``cloud_lots`` row
+       with ``qty_containers > 0`` and no Pi-local lot on this shelf
+       yet. The "intaked-but-not-yet-placed" case. Apply path only
+       mints a Pi-local lot mirroring the existing cloud lot; the
+       cloud lot itself is promoted via ``resolve_add_to_shelf_lot``
+       step 2/3, NOT minted.
+    5. ``catalog_not_on_shelf`` products — gated on
+       ``shelf_id == 'live_shelf'``. Re-introduced 2026-04-27 (decisions
+       #54): the live_shelf is the "open multi-item shelf" mental model
+       and the user expects fresh placements of catalog products to
+       match without a prior intake step. Apply path mints both a
+       Pi-local lot AND the cloud stock_lot via ``new_arrival`` →
+       ``resolve_add_to_shelf_lot`` step 5. **Decision #45's
+       inventory-only rule is preserved for the LiveTrack
+       (single_item) scale path** — its cloud-side resolver is
+       inventory-aware and that flow's user expectation is "one
+       container per scale, must be intaked first." The catch_all
+       path is owned by a separate workstream.
 
     Why: items normally arrive on the live-shelf weighing LESS than
     the original tracked weight (consumed untracked between purchase
-    and shelf-pairing). A weight-mismatched catalog match was creating
-    duplicate lots when the user actually meant "this is my existing
-    chicken, transferred from general inventory." The fix is to make
-    inventory presence the matching gate, not catalog membership.
+    and shelf-pairing). The product-keyed dedupe + tier collapse means
+    the lot picker prefers the in-flight / on-shelf / recently-out lot
+    over a stale catalog entry of the same SKU when both exist, so a
+    weight-mismatched catalog candidate cannot accidentally orphan a
+    legitimate inventory lot. The ``catalog_not_on_shelf`` branch only
+    wins when no other branch produced a candidate for that product.
 
-    Why was a regression fix needed: commit 3b99043 dropped the
-    catalog branch but left the pool reading ONLY the Pi-local
-    ``lots`` table. Users who intaked a product to cloud (creating
-    a cloud stock_lot) but had not yet placed it on the live-shelf
-    saw an empty pool on the first place event — the classifier
-    returned UNKNOWN even though the product was in their inventory.
-    The ``inventory_only`` branch surfaces the cloud-mirror state
-    so the very-first-placement case works.
+    Why decision #54 (this branch's reintroduction): users have
+    catalog products with no ``stock_lots`` rows (e.g. uncertified
+    items, or items intaked through paths that don't create a lot).
+    Without this branch on the live_shelf, a fresh placement returns
+    UNKNOWN even though the user has the product in their catalog.
+    The user's expectation: "general products to be matchable on the
+    live_shelf even if no stock_lots exist yet" — codified in
+    decisions.md #54.
 
     Args:
         delta_g: Positive scale delta in grams.
@@ -433,16 +447,43 @@ def pool_for_add(
             _from_inventory_only_product(p) for p in inventory_only_rows
         ]
 
-    # Branch 4 (catalog_not_on_shelf) is INTENTIONALLY DROPPED. See the
-    # docstring above + decisions.md #42. If a user places an item with
-    # no existing lot, the classifier sees only UNKNOWN and we surface
-    # the event for review rather than minting a duplicate.
+    # Branch 4: catalog_not_on_shelf — re-introduced 2026-04-27 for the
+    # ``live_shelf`` shelf kind only (decisions.md #54). The user's
+    # multi-item live-shelf is the "open shelf" mental model: any catalog
+    # product can be placed there even if there's no existing inventory
+    # lot. Decision #45's "must be in inventory" rule still applies to
+    # the LiveTrack (single_item) scale path (its cloud-side resolver
+    # was always inventory-aware), and the catch_all path is owned by a
+    # separate workstream — we explicitly leave both UNCHANGED. This
+    # branch is what lets a fresh container of a known catalog product
+    # (e.g. user has Tortillas in catalog with no stock_lots) match on
+    # the classifier without going through a barcode-scan first.
+    #
+    # The mint side is in
+    # ``scale_events._mint_pi_lot_for_catalog_pick`` — gated on
+    # ``shelf_id == 'live_shelf'`` defensively even if a non-live_shelf
+    # event somehow surfaces a catalog candidate.
+    catalog_lots: list[Candidate] = []
+    if shelf_id == "live_shelf":
+        get_certified = getattr(source, "get_certified_not_on_shelf", None)
+        if callable(get_certified):
+            try:
+                catalog_rows = list(get_certified())
+            except Exception:  # noqa: BLE001 - never crash the pool builder
+                catalog_rows = []
+            catalog_lots = [_from_product(p) for p in catalog_rows]
 
     # In-flight first so it wins duplicate-id collisions (same lot listed
     # as in_flight AND recently_out when the status just flipped).
-    # inventory_only LAST so any branch with shelf history wins the
-    # _dedupe_by_product collapse for the same product_id.
-    union = in_flight_lots + recently_out + top_up_targets + inventory_only_lots
+    # inventory_only / catalog_not_on_shelf LAST so any branch with shelf
+    # history wins the _dedupe_by_product collapse for the same product_id.
+    union = (
+        in_flight_lots
+        + recently_out
+        + top_up_targets
+        + inventory_only_lots
+        + catalog_lots
+    )
     deduped = _dedupe_by_product(union)
 
     ranked = _rank_candidates(deduped, observed_abs)
