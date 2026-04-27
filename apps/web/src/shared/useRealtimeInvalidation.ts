@@ -265,15 +265,40 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
         }
       }, 300);
     };
-    const rt = supabase.realtime as unknown as {
-      stateChangeCallbacks: { close: Array<(e: unknown) => void> };
+    // Private API access: `RealtimeClient.stateChangeCallbacks.close` is an
+    // undocumented internal of `@supabase/realtime-js`. There's no public
+    // socket-close hook on `RealtimeClient` (no `onClose()` method exists as
+    // of supabase-js current). If supabase renames or removes this in any
+    // patch/minor release, the assignment would silently no-op and the
+    // reconnect-on-close handler would never fire. Guard with a runtime
+    // shape check + loud `console.error` so we get a fingerprint instead of
+    // a silent regression. The companion canary test
+    // `apps/web/src/__tests__/unit/shared/realtime-private-api-canary.test.ts`
+    // pins the property shape so we catch breaks at CI time on dependency
+    // bump, before they ship.
+    type RealtimeWithCallbacks = {
+      stateChangeCallbacks?: {
+        close?: Array<(e: unknown) => void>;
+      };
     };
-    rt.stateChangeCallbacks.close.push(onSocketClose);
+    const rt = supabase.realtime as unknown as RealtimeWithCallbacks;
+    const closeCallbacks = rt?.stateChangeCallbacks?.close;
+    if (Array.isArray(closeCallbacks)) {
+      closeCallbacks.push(onSocketClose);
+    } else {
+      console.error(
+        '[useRealtimeInvalidation] supabase.realtime.stateChangeCallbacks.close is not an array — ' +
+          'the private API shape changed. Reconnect-on-close handler not registered. ' +
+          'Update useRealtimeInvalidation to use a supported event API.',
+      );
+    }
 
     return () => {
       cancelled = true;
-      const idx = rt.stateChangeCallbacks.close.indexOf(onSocketClose);
-      if (idx >= 0) rt.stateChangeCallbacks.close.splice(idx, 1);
+      if (Array.isArray(closeCallbacks)) {
+        const idx = closeCallbacks.indexOf(onSocketClose);
+        if (idx >= 0) closeCallbacks.splice(idx, 1);
+      }
       for (const runtime of runtimes.values()) {
         if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer);
         if (runtime.reconnectTimer) clearTimeout(runtime.reconnectTimer);
