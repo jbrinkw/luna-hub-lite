@@ -7,11 +7,23 @@ correctly with path traversal attempts.
 
 from __future__ import annotations
 
+import datetime as _dt
 from pathlib import Path
 from typing import Any, Optional
 
 import pytest
 from flask import Flask
+
+
+def _iso_days_ago(days: float) -> str:
+    """ISO-8601 UTC timestamp ``days`` days before now, with seconds
+    resolution and a Z suffix. Used for usage_log seed rows whose
+    visibility on the inventory page's "last 7 days" section depends
+    on relative recency. Hard-coded dates rot — switching to relative
+    timestamps means the test doesn't go red simply because the
+    calendar advanced."""
+    ts = _dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)
+    return ts.replace(microsecond=0).isoformat().replace("+00:00", "Z")
 
 from server.web import make_api_bp, make_html_bp
 from server.web.routes import WebRepo
@@ -158,6 +170,10 @@ def _seed() -> dict[str, Any]:
             "user_response": None,
         },
     }
+    # Usage log rows must fall inside the 7-day "summary" window so
+    # the ``{% if summary %}`` panel renders ("last 7 days" label).
+    # Use ~2 days ago for u1 and ~1 day ago for u2 — both inside the
+    # window across any timezone or DST transition.
     usage_log = [
         {
             "usage_id": "u1",
@@ -173,8 +189,8 @@ def _seed() -> dict[str, Any]:
             "session_id": "s1-abcdef01",
             "pickup_event_id": "e-pick-1",
             "return_event_id": "e-return-1",
-            "occurred_at": "2026-04-17T12:05:00Z",
-            "created_at": "2026-04-17T12:05:01Z",
+            "occurred_at": _iso_days_ago(2),
+            "created_at": _iso_days_ago(2),
         },
         {
             "usage_id": "u2",
@@ -190,8 +206,8 @@ def _seed() -> dict[str, Any]:
             "session_id": "s1-abcdef01",
             "pickup_event_id": "e-pick-2",
             "return_event_id": None,
-            "occurred_at": "2026-04-17T16:00:00Z",
-            "created_at": "2026-04-17T16:00:01Z",
+            "occurred_at": _iso_days_ago(1),
+            "created_at": _iso_days_ago(1),
         },
     ]
     return {

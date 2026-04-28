@@ -198,21 +198,29 @@ def test_migration_adds_shelf_id_and_backfills_live_shelf_on_lots():
 
 
 def test_migration_adds_shelf_id_check_via_rebuild():
+    """Migration must add a CHECK that constrains shelf_id to the
+    valid-shelf set. The set has grown over time (live_shelf, catch_all,
+    single_item — see migrations.py:310,503 etc.); we assert on the
+    individual literals, not the comma-joined string, so future
+    additions don't make the test brittle.
+    """
     conn = _make_pre_shelf_conn()
     _apply_column_additions(conn)
     ddl = conn.execute(
         "SELECT sql FROM sqlite_master WHERE type='table' AND name='lots'"
     ).fetchone()[0]
-    assert "shelf_id IN ('live_shelf','catch_all')" in ddl
+    assert "shelf_id IN " in ddl, "lots missing shelf_id CHECK"
+    assert "'live_shelf'" in ddl
+    assert "'catch_all'" in ddl
     # Same CHECK on sessions and scale_events after migration.
     for table in ("sessions", "scale_events"):
         t_ddl = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
             (table,),
         ).fetchone()[0]
-        assert "shelf_id IN ('live_shelf','catch_all')" in t_ddl, (
-            f"{table} missing shelf_id CHECK"
-        )
+        assert "shelf_id IN " in t_ddl, f"{table} missing shelf_id CHECK"
+        assert "'live_shelf'" in t_ddl, f"{table} missing live_shelf literal"
+        assert "'catch_all'" in t_ddl, f"{table} missing catch_all literal"
 
 
 def test_migration_preserves_existing_rows_when_adding_shelf_id():
@@ -264,17 +272,26 @@ def test_migration_adds_current_catch_all_session_id_on_app_state():
 
 
 def test_migration_is_idempotent():
+    """Re-applying the migration must not duplicate the shelf_id CHECK.
+    We assert that ``shelf_id IN `` appears exactly once in each table's
+    DDL — robust to schema drift adding more allowed literals.
+    """
     conn = _make_pre_shelf_conn()
     _apply_column_additions(conn)
     _apply_column_additions(conn)
     _apply_column_additions(conn)
-    # Shelf_id CHECK present once per table (sanity: DDL not duplicated).
     for table in ("lots", "sessions", "scale_events"):
         ddl = conn.execute(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name=?",
             (table,),
         ).fetchone()[0]
-        assert ddl.count("shelf_id IN ('live_shelf','catch_all')") == 1
+        assert ddl.count("shelf_id IN ") == 1, (
+            f"{table}: shelf_id CHECK appears {ddl.count('shelf_id IN ')} times, "
+            "expected exactly 1 (idempotent migration)"
+        )
+        # And the literal whitelist still includes the historical members.
+        assert "'live_shelf'" in ddl
+        assert "'catch_all'" in ddl
 
 
 def test_migration_catch_all_literal_accepted():

@@ -20,6 +20,21 @@ async function sha256(text: string): Promise<string> {
     .join('');
 }
 
+/**
+ * api_keys.api_key_hash carries a partial UNIQUE INDEX (idx_api_keys_hash_active)
+ * scoped to ``WHERE revoked_at IS NULL``. If two test runs hash the same
+ * literal plaintext (e.g. ``'key-1'``) and they overlap — same parallel
+ * worker re-running, leftover rows from a prior aborted run, the live
+ * Supabase stack still holding rows from a previous file run — the second
+ * insert fails with a 23505. Prefixing every plaintext with a fresh
+ * randomUUID() per ``describe`` invocation collapses the collision space
+ * to "this test process only" so a stale row can never block a fresh
+ * insert. Originally surfaced as a pre-existing flake forcing
+ * ``--no-verify`` pushes (audit 2026-04-28).
+ */
+const TEST_NONCE = crypto.randomUUID();
+const k = (label: string): string => `${TEST_NONCE}-${label}`;
+
 describe('API key lifecycle', () => {
   it('generate API key: plaintext returned, hash stored in DB', async () => {
     const { userId, client } = await createTestUser('key-gen');
@@ -107,7 +122,7 @@ describe('API key lifecycle', () => {
     const { userId, client } = await createTestUser('key-active');
     userIds.push(userId);
 
-    const hash = await sha256('key-1');
+    const hash = await sha256(k('key-1'));
     const { error: insertError } = await client
       .schema('hub')
       .from('api_keys')
@@ -129,7 +144,7 @@ describe('API key lifecycle', () => {
     const { userId, client } = await createTestUser('key-revoke');
     userIds.push(userId);
 
-    const hash = await sha256('key-to-revoke');
+    const hash = await sha256(k('key-to-revoke'));
     const { data: inserted, error: insertError } = await client
       .schema('hub')
       .from('api_keys')
@@ -161,7 +176,7 @@ describe('API key lifecycle', () => {
     const { userId, client } = await createTestUser('key-excl');
     userIds.push(userId);
 
-    const hash = await sha256('key-excluded');
+    const hash = await sha256(k('key-excluded'));
     const { data: inserted, error: insertError } = await client
       .schema('hub')
       .from('api_keys')
@@ -192,7 +207,7 @@ describe('API key lifecycle', () => {
     userIds.push(userId);
 
     for (let i = 0; i < 3; i++) {
-      const hash = await sha256(`multi-key-${i}`);
+      const hash = await sha256(k(`multi-key-${i}`));
       const { error: insertError } = await client
         .schema('hub')
         .from('api_keys')
@@ -216,7 +231,7 @@ describe('API key lifecycle', () => {
 
     const ids: string[] = [];
     for (let i = 0; i < 3; i++) {
-      const hash = await sha256(`partial-key-${i}`);
+      const hash = await sha256(k(`partial-key-${i}`));
       const { data, error: insertError } = await client
         .schema('hub')
         .from('api_keys')
@@ -258,7 +273,7 @@ describe('API key lifecycle', () => {
     const { error: insertError } = await clientA
       .schema('hub')
       .from('api_keys')
-      .insert({ user_id: userAId, api_key_hash: 'hash_rls_test', label: 'RLS test' });
+      .insert({ user_id: userAId, api_key_hash: k('hash_rls_test'), label: 'RLS test' });
     expect(insertError).toBeNull();
 
     const { data, error } = await clientB.schema('hub').from('api_keys').select('*').eq('user_id', userAId);
@@ -275,7 +290,7 @@ describe('API key lifecycle', () => {
     const { error: insertError } = await clientA
       .schema('hub')
       .from('api_keys')
-      .insert({ user_id: userAId, api_key_hash: 'hash_rls_revoke', label: 'Revoke test' });
+      .insert({ user_id: userAId, api_key_hash: k('hash_rls_revoke'), label: 'Revoke test' });
     expect(insertError).toBeNull();
 
     await clientB
@@ -288,7 +303,7 @@ describe('API key lifecycle', () => {
       .schema('hub')
       .from('api_keys')
       .select('revoked_at')
-      .eq('api_key_hash', 'hash_rls_revoke')
+      .eq('api_key_hash', k('hash_rls_revoke'))
       .single();
     expect(error).toBeNull();
     expect(data!.revoked_at).toBeNull();
@@ -310,7 +325,7 @@ describe('API key lifecycle', () => {
 
     // Insert 10 keys — all must succeed.
     for (let i = 0; i < 10; i++) {
-      const hash = await sha256(`max-key-${i}`);
+      const hash = await sha256(k(`max-key-${i}`));
       const { error: insertError } = await client
         .schema('hub')
         .from('api_keys')
@@ -331,7 +346,7 @@ describe('API key lifecycle', () => {
     // message comes from the RAISE EXCEPTION inside the trigger — we
     // assert on the "maximum of 10 active keys" substring so a future
     // rewording of the trigger message is a visible change.
-    const hash11 = await sha256('max-key-11');
+    const hash11 = await sha256(k('max-key-11'));
     const { error: insert11Error } = await client
       .schema('hub')
       .from('api_keys')
@@ -359,7 +374,7 @@ describe('API key lifecycle', () => {
     userIds.push(userId);
 
     for (let i = 0; i < 10; i++) {
-      const hash = await sha256(`admin-key-${i}`);
+      const hash = await sha256(k(`admin-key-${i}`));
       const { error: insertError } = await adminClient
         .schema('hub')
         .from('api_keys')
@@ -367,7 +382,7 @@ describe('API key lifecycle', () => {
       expect(insertError, `admin insert ${i} should succeed`).toBeNull();
     }
 
-    const hash11 = await sha256('admin-key-11');
+    const hash11 = await sha256(k('admin-key-11'));
     const { error } = await adminClient
       .schema('hub')
       .from('api_keys')
@@ -383,7 +398,7 @@ describe('API key lifecycle', () => {
 
     const insertedIds: string[] = [];
     for (let i = 0; i < 10; i++) {
-      const hash = await sha256(`revoke-key-${i}`);
+      const hash = await sha256(k(`revoke-key-${i}`));
       const { data, error: insertError } = await client
         .schema('hub')
         .from('api_keys')
@@ -402,7 +417,7 @@ describe('API key lifecycle', () => {
       .eq('id', insertedIds[0]);
 
     // Now an 11th (net: 10 active) insert must succeed.
-    const hash11 = await sha256('revoke-key-replacement');
+    const hash11 = await sha256(k('revoke-key-replacement'));
     const { error: replaceErr } = await client
       .schema('hub')
       .from('api_keys')

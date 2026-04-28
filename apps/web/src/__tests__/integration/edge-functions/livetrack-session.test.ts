@@ -246,18 +246,54 @@ describe('livetrack-session Edge Function', () => {
       expect(row1!.state).not.toBe('closed');
     });
 
-    it('expires prior live session on re-create (single live session per device)', async () => {
-      // Pre-check: user A has a live session from the previous test.
+    it('expires prior live session on re-create (single live session per (device, scale))', async () => {
+      // 2026-04-27 scoping (commit eb60575): /create only expires prior
+      // sessions that match the SAME (device, scale) tuple. Sessions on
+      // OTHER scales for the same device are independent calibrations
+      // and must NOT be touched.
+      //
+      // First /create call below sends an empty body, which defaults to
+      // scale_id='scale-02' server-side. Earlier tests in this describe
+      // block created sessions on scale-01 and scale-03; those must
+      // remain live after our re-create. Only the prior scale-02 row(s)
+      // must flip to expired.
+      //
+      // Seed a fresh scale-02 session so we have a definite "prior" to
+      // expire — relying on default-scale state from earlier tests
+      // makes the assertion order-dependent.
+      const seedRes = await fetch(`${BASE_URL}/create`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${userA.jwt}` },
+      });
+      expect(seedRes.status).toBe(200);
+      const seedBody = await seedRes.json();
+      expect(seedBody.session.scale_id).toBe('scale-02');
+
+      // Snapshot live scale-02 sessions on this device. There must be
+      // at least one (the seed we just created); there may be more if
+      // earlier tests left scale-02 rows behind.
       const { data: before } = await (adminClient as any)
         .schema('chefbyte')
         .from('livetrack_import_sessions')
-        .select('session_id, state')
+        .select('session_id, state, scale_id')
         .eq('device_id', deviceA)
+        .eq('scale_id', 'scale-02')
         .not('state', 'in', '(closed,expired)');
       expect(before!.length).toBeGreaterThanOrEqual(1);
-      const priorIds = before!.map((r: any) => r.session_id);
+      const priorIds: string[] = before!.map((r: any) => r.session_id);
 
-      // Re-create.
+      // Snapshot live sessions on OTHER scales — these must SURVIVE the
+      // re-create. Captured here so we can prove non-expiration after.
+      const { data: otherBefore } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('livetrack_import_sessions')
+        .select('session_id, scale_id, state')
+        .eq('device_id', deviceA)
+        .neq('scale_id', 'scale-02')
+        .not('state', 'in', '(closed,expired)');
+      const otherIds: string[] = (otherBefore ?? []).map((r: any) => r.session_id);
+
+      // Re-create — defaults to scale-02 again.
       const res = await fetch(`${BASE_URL}/create`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${userA.jwt}` },
@@ -265,16 +301,35 @@ describe('livetrack-session Edge Function', () => {
       expect(res.status).toBe(200);
       const body = await res.json();
       const newId: string = body.session.session_id;
+      expect(body.session.scale_id).toBe('scale-02');
       expect(priorIds).not.toContain(newId);
 
-      // Prior rows flipped to expired.
+      // All prior scale-02 rows flipped to expired.
       const { data: priorState } = await (adminClient as any)
         .schema('chefbyte')
         .from('livetrack_import_sessions')
-        .select('session_id, state')
+        .select('session_id, state, scale_id')
         .in('session_id', priorIds);
       for (const row of priorState ?? []) {
+        expect(row.scale_id).toBe('scale-02');
         expect(row.state).toBe('expired');
+      }
+
+      // Sessions on OTHER scales (scale-01, scale-03) must still be live.
+      // This is the regression assertion for the per-(device,scale) scope:
+      // pre-fix, /create unconditionally expired ALL non-closed/expired
+      // rows for the device, clobbering unrelated calibrations.
+      if (otherIds.length > 0) {
+        const { data: otherAfter } = await (adminClient as any)
+          .schema('chefbyte')
+          .from('livetrack_import_sessions')
+          .select('session_id, state, scale_id')
+          .in('session_id', otherIds);
+        for (const row of otherAfter ?? []) {
+          expect(row.state).not.toBe('expired');
+          expect(row.state).not.toBe('closed');
+          expect(row.scale_id).not.toBe('scale-02');
+        }
       }
     });
 

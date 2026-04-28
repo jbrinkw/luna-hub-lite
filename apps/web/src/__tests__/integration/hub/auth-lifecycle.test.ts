@@ -19,29 +19,65 @@ function anonClient() {
   });
 }
 
+/**
+ * Detects rate-limit errors from GoTrue. The local stack defaults to
+ * sign_in_sign_ups = 30 per 5 min per IP (supabase/config.toml:190).
+ * When this file runs in parallel with other integration suites that
+ * also mint users (e.g. livetrack-session.test.ts, api-key-lifecycle),
+ * the shared 30/5min budget is easy to exhaust on a busy machine.
+ *
+ * GoTrue returns rate-limit errors via several phrasings depending on
+ * which limiter tripped — match conservatively so we retry on all of
+ * them, not just the literal "rate limit" string. Also matches HTTP
+ * 429 surfaced as ``status`` on the error object. Fixes a 2026-04-28
+ * pre-existing flake reported as "auth-lifecycle rate-limited
+ * test-user creation on second invocation".
+ */
 function isRateLimitError(error: any): boolean {
-  const msg = error?.message ?? '';
-  return msg.includes('rate limit') || msg.includes('Rate limit');
+  if (!error) return false;
+  const msg = String(error.message ?? '').toLowerCase();
+  if (
+    msg.includes('rate limit') ||
+    msg.includes('rate_limit') ||
+    msg.includes('too many') ||
+    msg.includes('over_email_send_rate_limit') ||
+    msg.includes('over_request_rate_limit') ||
+    msg.includes('try again later')
+  ) {
+    return true;
+  }
+  // GoTrue surfaces 429 directly on the error object on some paths.
+  if (error.status === 429) return true;
+  return false;
 }
 
 async function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Retry an auth operation with exponential backoff on rate limits */
+/**
+ * Retry an auth operation with exponential backoff + jitter on rate
+ * limits. 7 attempts at 1s, 2s, 4s, 8s, 16s, 32s back-off — total worst
+ * case ~63s, well under the 5-minute rate window. Jitter prevents
+ * thundering-herd retries from concurrent parallel test files.
+ */
 async function withRetry<T extends { error: any }>(fn: () => Promise<T>): Promise<T> {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  const maxAttempts = 7;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const result = await fn();
     if (!result.error || !isRateLimitError(result.error)) return result;
-    if (attempt === 4) return result;
-    await sleep(1000 * Math.pow(2, attempt));
+    if (attempt === maxAttempts - 1) return result;
+    const base = 1000 * Math.pow(2, attempt);
+    const jitter = Math.floor(Math.random() * 250);
+    await sleep(base + jitter);
   }
   throw new Error('Unreachable');
 }
 
-/** Create user via admin API with retry */
+/** Create user via admin API with retry. Same backoff schedule as withRetry. */
 async function createUserWithRetry(email: string, password: string, opts?: { data?: Record<string, any> }) {
-  for (let attempt = 0; attempt < 5; attempt++) {
+  const maxAttempts = 7;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const { data, error } = await adminClient.auth.admin.createUser({
       email,
       password,
@@ -49,8 +85,10 @@ async function createUserWithRetry(email: string, password: string, opts?: { dat
       ...(opts?.data ? { user_metadata: opts.data } : {}),
     });
     if (!error) return { data, error: null };
-    if (!isRateLimitError(error) || attempt === 4) return { data, error };
-    await sleep(1000 * Math.pow(2, attempt));
+    if (!isRateLimitError(error) || attempt === maxAttempts - 1) return { data, error };
+    const base = 1000 * Math.pow(2, attempt);
+    const jitter = Math.floor(Math.random() * 250);
+    await sleep(base + jitter);
   }
   throw new Error('Unreachable');
 }

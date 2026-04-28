@@ -886,16 +886,30 @@ class TestCloseSessionRace:
         """If a newer session was opened before close lands, app_state's
         ``current_session_id`` will no longer match. The session row itself
         still closes correctly — we just log a warning and keep going.
+
+        Note: the partial unique index ``sessions_one_open_per_shelf``
+        (schema.sql:102) forbids two simultaneously-open sessions per
+        shelf, so we can't simulate the race by calling open_session
+        twice. Instead we directly NULL out ``app_state.current_session_id``
+        — the same end-state a wedged process or a half-applied close
+        would leave behind. The behavior under test (close_session
+        detects the mismatch + logs warning + still closes the row +
+        leaves app_state alone) is independent of HOW the mismatch
+        arose. NULL is the only safe alternative value because the
+        column has a FOREIGN KEY to sessions.session_id; setting it to
+        a fake UUID would fail the FK check.
         """
         s_old = repo.open_session(
             conn, ts="2026-04-15T10:00:00Z", initial_weight_g=1000.0
         )
-        # Simulate the race: a second, newer session is opened before we
-        # close the old one. `open_session` overwrites app_state.current_session_id.
-        s_new = repo.open_session(
-            conn, ts="2026-04-15T10:01:00Z", initial_weight_g=1000.0
-        )
-        assert repo.get_app_state(conn).current_session_id == s_new.session_id
+        # Simulate the post-race app_state state: pointer cleared while
+        # s_old is still the only OPEN row. close_session must still
+        # close s_old's row, leave app_state alone, and log a warning.
+        with conn:
+            conn.execute(
+                "UPDATE app_state SET current_session_id = NULL WHERE id = 1"
+            )
+        assert repo.get_app_state(conn).current_session_id is None
 
         with caplog.at_level(logging.WARNING, logger="server.storage.repo"):
             closed = repo.close_session(
@@ -907,10 +921,13 @@ class TestCloseSessionRace:
         # Session row itself was closed correctly.
         assert closed.session_id == s_old.session_id
         assert closed.ended_at is not None
-        # app_state was NOT touched (the newer session is still current).
+        # app_state was NOT touched (still NULL — close_session's
+        # ``WHERE current_session_id = ?`` clause matched no rows so
+        # the UPDATE was a no-op).
         state = repo.get_app_state(conn)
-        assert state.current_session_id == s_new.session_id
-        # And a warning was logged with both ids.
+        assert state.current_session_id is None
+        # And a warning was logged with both the closing session_id
+        # AND the post-race app_state value (None here).
         warnings = [
             r for r in caplog.records
             if r.levelno == logging.WARNING and "close_session" in r.getMessage()
@@ -918,7 +935,10 @@ class TestCloseSessionRace:
         assert warnings, "expected a warning about app_state mismatch"
         msg = warnings[-1].getMessage()
         assert s_old.session_id in msg
-        assert s_new.session_id in msg
+        # Repr of the post-race app_state value (None) appears in the
+        # log payload — proves the warning surfaces the mismatched
+        # current_session_id, not just the closing id.
+        assert "None" in msg
 
 
 # ---------------------------------------------------------------------------
@@ -1151,12 +1171,27 @@ class TestAppStatePatchCatchAll:
         assert repo.get_app_state(conn).current_catch_all_session_id is None
 
     def test_app_state_patch_sets_catch_all_session_id_explicit(self, conn):
-        """Plain string value writes verbatim (not a sentinel)."""
+        """Plain string value writes verbatim (not a sentinel).
+
+        The partial unique index ``sessions_one_open_per_shelf``
+        (schema.sql:102) forbids two simultaneously-open sessions per
+        shelf — so to open ``catch2`` we must first close ``catch``.
+        The close call shifts the app_state pointer to NULL, which is
+        the realistic post-close state; then the second open writes the
+        new pointer; then the patch API rewrites it again to verify
+        plain-string values write verbatim.
+        """
         catch = repo.open_session(
             conn, ts="2026-04-15T10:00:00Z",
             initial_weight_g=250.0, shelf_id="catch_all",
         )
-        # Point it at something else via the patch API.
+        # Close before reopening — required by the partial unique index.
+        repo.close_session(
+            conn, catch.session_id,
+            ts="2026-04-15T10:30:00Z",
+            final_weight_g=255.0,
+            shelf_id="catch_all",
+        )
         catch2 = repo.open_session(
             conn, ts="2026-04-15T11:00:00Z",
             initial_weight_g=260.0, shelf_id="catch_all",
