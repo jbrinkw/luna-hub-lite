@@ -189,23 +189,48 @@ export function shouldShowLotSourcePill(
 
 /**
  * Whether a specific lot is currently "On Scale" — i.e. paired AND not
- * in-flight. Independent of the in-flight badge: a lot can be paired
- * (in pairedLotIds) but currently in flight (in_flight_since != null);
- * in that case "On Scale" is false because the bottle is physically
+ * in-flight AND not at sub-display residual qty.
+ *
+ * Independent of the in-flight badge: a lot can be paired (in
+ * pairedLotIds) but currently in flight (in_flight_since != null); in
+ * that case "On Scale" is false because the bottle is physically
  * elsewhere.
+ *
+ * 2026-04-28 — qty-residual guard: a paired lot at qty < 0.01 ctn is
+ * treated as "not on scale" defensively. Cloud rotation is supposed
+ * to repoint scale_pairings.lot_id away from a depleted lot via
+ * private.rotate_pairing_after_depletion, but the trigger predicate
+ * historically required exactly qty=0; scale-noise residuals (≈0.001-
+ * 0.01 ctn) left some pairings stuck pointing at phantom-empty lots.
+ * The cloud predicate is now widened to < 0.01 too (migration
+ * 20260428010000), so this UI guard is belt-and-suspenders against
+ * realtime lag between the cloud rotation and the next
+ * scale_pairings refetch. The threshold MUST match the cloud
+ * threshold so the UI never disagrees with the source of truth.
  *
  * After the 2026-04-27 lot-level pairings refactor this answers the
  * precise question "is this exact ``stock_lots`` row pinned to a live
- * scale right now?" — replacing the old per-product approximation.
+ * scale right now and physically usable?" — replacing the old
+ * per-product approximation.
  *
  * Exported for unit testing.
  */
+export const ON_SCALE_QTY_EPSILON = 0.01;
 export function isLotOnScale(
-  lot: { lot_id: string; in_flight_since: string | null },
+  lot: { lot_id: string; in_flight_since: string | null; qty_containers?: number | string | null },
   pairedLotIds: ReadonlySet<string>,
 ): boolean {
   if (lot.in_flight_since !== null) return false;
-  return pairedLotIds.has(lot.lot_id);
+  if (!pairedLotIds.has(lot.lot_id)) return false;
+  // qty_containers is optional in the type so the older test seeds that
+  // don't carry it still work — those default to "non-empty paired"
+  // which preserves the prior assertion behaviour. When qty IS present
+  // we coerce + threshold-check against ON_SCALE_QTY_EPSILON.
+  if (lot.qty_containers != null) {
+    const q = Number(lot.qty_containers);
+    if (Number.isFinite(q) && q < ON_SCALE_QTY_EPSILON) return false;
+  }
+  return true;
 }
 
 /**
