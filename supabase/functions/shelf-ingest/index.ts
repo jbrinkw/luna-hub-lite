@@ -451,13 +451,6 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
   const eventKind: string | undefined = body?.event_kind;
   const rawDelta: unknown = body?.delta_g;
   const deltaG: number | undefined = typeof rawDelta === 'number' ? rawDelta : undefined;
-  // Absolute on-scale mass at commit time. Powers the cloud's SET
-  // semantics for live_scale ADD events (single_track-never-mints fix,
-  // migration 20260428060000). Optional — older Pi versions omit this
-  // field and the SQL apply branch falls back to delta_g.
-  const rawAfterWeight: unknown = body?.after_weight_g;
-  const afterWeightG: number | null =
-    typeof rawAfterWeight === 'number' && Number.isFinite(rawAfterWeight) ? rawAfterWeight : null;
   const occurredAt: string | undefined = body?.occurred_at;
   const clientEventId: string | undefined =
     typeof body?.client_event_id === 'string' && body.client_event_id.length > 0 ? body.client_event_id : undefined;
@@ -588,12 +581,7 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     // Hand off to the plpgsql function. It owns idempotency: if this
     // client_event_id was already processed, it replays the cached result
     // inside the same transaction (no race window).
-    //
-    // p_after_weight_g (added 2026-04-28) is forwarded only when the Pi
-    // includes it in the payload. The SQL function has a default value
-    // (NULL) for backwards compatibility; the live_scale ADD branch
-    // falls back to delta_g when after_weight_g is NULL.
-    const rpcArgs: Record<string, unknown> = {
+    ({ data, error } = await (supabase as any).schema('chefbyte').rpc('apply_shelf_event_admin', {
       p_user_id: device.user_id,
       p_device_id: device.device_id,
       p_scale_id: scaleId,
@@ -604,11 +592,7 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
       p_occurred_at: occurredAt,
       p_client_event_id: clientEventId,
       p_pi_event_id: piEventId,
-    };
-    if (afterWeightG !== null) {
-      rpcArgs.p_after_weight_g = afterWeightG;
-    }
-    ({ data, error } = await (supabase as any).schema('chefbyte').rpc('apply_shelf_event_admin', rpcArgs));
+    }));
   }
 
   if (error) {

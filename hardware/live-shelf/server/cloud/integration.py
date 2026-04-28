@@ -508,7 +508,6 @@ class CloudEventEmitter:
         depleted: bool,
         occurred_at: Optional[str] = None,
         pi_event_id: Optional[str] = None,
-        after_weight_g: Optional[float] = None,
     ) -> Optional[str]:
         """Emit a cloud event for a single-item scale delta commit.
 
@@ -523,11 +522,9 @@ class CloudEventEmitter:
           * everything in-between → noise; returns ``None`` without
             enqueuing.
 
-        ``after_weight_g`` (added 2026-04-28 for the single_track-never-
-        mints fix) carries the ABSOLUTE mass on the scale at commit
-        time. The cloud uses this for SET semantics on `refilled` /
-        `added` events (qty := after_weight_g / net_weight_g) so a
-        placement event never double-counts an existing lot.
+        The cloud applies the delta to the paired product's stock row
+        identified by ``product_id``; there is no lot concept on the
+        cloud for single-item scales.
         """
         if depleted:
             event_kind = "depleted"
@@ -556,12 +553,6 @@ class CloudEventEmitter:
             payload["product_id"] = product_id
         if pi_event_id:
             payload["pi_event_id"] = pi_event_id
-        # Absolute on-scale mass at commit time. Powers cloud's SET
-        # semantics for live_scale ADD events (single_track-never-mints
-        # fix, migration 20260428060000). Always include when the
-        # caller provides it; cloud ignores unknown fields gracefully.
-        if after_weight_g is not None:
-            payload["after_weight_g"] = float(after_weight_g)
         return self._enqueue(payload)
 
     def emit_in_flight_reap(
