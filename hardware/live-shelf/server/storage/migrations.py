@@ -833,7 +833,9 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
               qty_containers      REAL NOT NULL DEFAULT 0,
               expires_on          TEXT,
               in_flight_since     TEXT,
+              in_flight_kind      TEXT,
               pickup_event_id     TEXT,
+              created_at          TEXT,
               updated_at          TEXT NOT NULL,
               deleted_at          TEXT,
               synced_at           TEXT NOT NULL DEFAULT (datetime('now'))
@@ -847,6 +849,27 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_cloud_lots_updated_at "
             "ON cloud_lots(updated_at)"
+        )
+        # Catch-all delta-capture (2026-04-27): the new candidate-pool
+        # builder filters cloud_lots by in_flight_kind='catch_all' and
+        # by FEFO on created_at. Idempotent ALTER TABLE for DBs that
+        # were created before these columns existed.
+        cl_cols = [r[1] for r in conn.execute("PRAGMA table_info(cloud_lots)")]
+        if "in_flight_kind" not in cl_cols:
+            conn.execute(
+                "ALTER TABLE cloud_lots ADD COLUMN in_flight_kind TEXT"
+            )
+        if "created_at" not in cl_cols:
+            conn.execute(
+                "ALTER TABLE cloud_lots ADD COLUMN created_at TEXT"
+            )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_lots_in_flight_kind "
+            "ON cloud_lots(in_flight_kind) WHERE in_flight_kind IS NOT NULL"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_lots_created_at "
+            "ON cloud_lots(created_at)"
         )
 
     # --- Invariant 8 note (cloud batch 20260424090000): ----------------------

@@ -81,7 +81,9 @@ _CLOUD_LOT_COLUMNS: tuple[str, ...] = (
     "qty_containers",
     "expires_on",
     "in_flight_since",
+    "in_flight_kind",
     "pickup_event_id",
+    "created_at",
     "updated_at",
     "deleted_at",
 )
@@ -436,7 +438,9 @@ class LotSnapshotPoller(threading.Thread):
                     qty_f,
                     lot.get("expires_on"),
                     lot.get("in_flight_since"),
+                    lot.get("in_flight_kind"),
                     lot.get("pickup_event_id"),
+                    lot.get("created_at"),
                     updated_at,
                     None,  # deleted_at — we never persist tombstones locally
                 )
@@ -452,7 +456,9 @@ class LotSnapshotPoller(threading.Thread):
                         qty_containers = excluded.qty_containers,
                         expires_on = excluded.expires_on,
                         in_flight_since = excluded.in_flight_since,
+                        in_flight_kind = excluded.in_flight_kind,
                         pickup_event_id = excluded.pickup_event_id,
+                        created_at = excluded.created_at,
                         updated_at = excluded.updated_at,
                         deleted_at = excluded.deleted_at,
                         synced_at = datetime('now')

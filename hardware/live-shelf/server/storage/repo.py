@@ -1260,6 +1260,113 @@ def list_inventory_only_products(
 
 
 # ---------------------------------------------------------------------------
+# catch-all delta-capture candidate sources (CATCH_ALL_SCALE_PLAN.md
+# §"Pi catch-all candidate pool builder", 2026-04-27).
+#
+# The catch-all flow is fundamentally lot-level — multiple in-flight
+# lots can coexist on the catch-all scale concurrently, and the
+# "certified not on any shelf" tier is also lot-level (each lot has
+# its own pickup_weight_g / qty / FEFO position). These helpers serve
+# the dedicated ``pool_for_catch_all`` builder; they query
+# ``cloud_lots`` (cloud-mirrored stock_lots) joined to the local
+# ``products`` row for product metadata.
+# ---------------------------------------------------------------------------
+
+
+def list_cloud_in_flight_catch_all_lots(
+    conn: sqlite3.Connection,
+) -> list[tuple[Any, ...]]:
+    """Return cloud_lots rows where ``in_flight_kind='catch_all'``.
+
+    These are the lots currently mid-measurement on the catch-all scale
+    (Pi emitted ``catch_all_first_measurement``, cloud stamped
+    in_flight_kind='catch_all' + pickup_weight_g + pickup_event_id, and
+    the Pi mirrors the resulting state via the lot-snapshot poller).
+    The ``pool_for_catch_all`` builder ranks these as Tier 1.
+
+    Returns lightweight tuples ``(lot_id, product_id, qty_containers,
+    in_flight_since, pickup_event_id, created_at, p_name, p_brand,
+    p_net_weight_g, p_gross_weight_g, p_container_type)`` so the caller
+    can build LotCandidate objects without a second query per row.
+
+    Excludes tombstoned (deleted_at) rows.
+    """
+    rows = conn.execute(
+        """
+        SELECT cl.lot_id, cl.product_id, cl.qty_containers,
+               cl.in_flight_since, cl.pickup_event_id, cl.created_at,
+               p.name AS p_name, p.brand AS p_brand,
+               p.net_weight_g AS p_net_weight_g,
+               p.gross_weight_g AS p_gross_weight_g,
+               p.container_type AS p_container_type
+          FROM cloud_lots cl
+          LEFT JOIN products p ON p.product_id = cl.product_id
+         WHERE cl.in_flight_kind = 'catch_all'
+           AND cl.deleted_at IS NULL
+         ORDER BY cl.in_flight_since ASC
+        """
+    ).fetchall()
+    return [tuple(r) for r in rows]
+
+
+def list_certified_not_on_shelf_lots_by_oldest_created(
+    conn: sqlite3.Connection,
+) -> list[tuple[Any, ...]]:
+    """Return certified cloud_lots whose product is not on any Pi shelf.
+
+    "Certified-not-on-any-shelf" tier (Tier 2) for the catch-all
+    candidate pool. Predicates:
+
+      * ``cloud_lots.qty_containers > 0`` — must have stock.
+      * ``cloud_lots.in_flight_kind`` is NULL or 'catch_all'.
+        Excluding live_shelf in-flight rows means a lot mid-pickup-
+        on-the-live-shelf cannot be misclassified as a catch-all
+        candidate.
+      * Product is certified (``products.certified = 1``) and not soft-
+        deleted (``products.deleted_at IS NULL``).
+      * The product has no current Pi-local ``lots`` row on any shelf.
+        This implicitly covers the "scale_pairings.lot_id reference"
+        case: LiveTrack-paired lots ALWAYS have a Pi-local ``lots`` row
+        (Pi mints local rows on first heartbeat), and ``scale_pairings.
+        lot_id`` REFERENCES ``lots(lot_id)`` so a paired lot is by
+        construction also a Pi-local lot. live_shelf-on-shelf lots are
+        also Pi-local. Excluding "any Pi-local lots row" therefore
+        excludes both LiveTrack-paired AND live_shelf-tracked products.
+
+    Ordering: ``cloud_lots.created_at ASC`` — FEFO on import time, which
+    is the user's directive ("oldest imported lot wins"). NULLs (legacy
+    rows from before the Pi started persisting created_at on cloud_lots)
+    sort last so a proper timestamped row always beats them.
+
+    Returns the same lightweight tuple shape as
+    :func:`list_cloud_in_flight_catch_all_lots` for symmetry.
+    """
+    rows = conn.execute(
+        """
+        SELECT cl.lot_id, cl.product_id, cl.qty_containers,
+               cl.in_flight_since, cl.pickup_event_id, cl.created_at,
+               p.name AS p_name, p.brand AS p_brand,
+               p.net_weight_g AS p_net_weight_g,
+               p.gross_weight_g AS p_gross_weight_g,
+               p.container_type AS p_container_type
+          FROM cloud_lots cl
+          JOIN products p ON p.product_id = cl.product_id
+         WHERE cl.qty_containers > 0
+           AND cl.deleted_at IS NULL
+           AND p.deleted_at IS NULL
+           AND p.certified = 1
+           AND (cl.in_flight_kind IS NULL OR cl.in_flight_kind = 'catch_all')
+           AND NOT EXISTS (
+                 SELECT 1 FROM lots l
+                  WHERE l.product_id = cl.product_id
+               )
+         ORDER BY (cl.created_at IS NULL), cl.created_at ASC
+        """
+    ).fetchall()
+    return [tuple(r) for r in rows]
+
+
+# ---------------------------------------------------------------------------
 # sessions
 # ---------------------------------------------------------------------------
 

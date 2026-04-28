@@ -2017,6 +2017,265 @@ class ScaleHandler:
             )
         return True
 
+    def _dispatch_catch_all_add(
+        self,
+        *,
+        classification: Any,
+        delta_g: float,
+        event_ts: str,
+        event_id: Optional[str],
+        session_id: Optional[str],
+    ) -> bool:
+        """Catch-all ADD dispatch — first vs second measurement vs discard.
+
+        CATCH_ALL_SCALE_PLAN.md §"Final confirmed model" + Pi state
+        machine §5. Returns True if a cloud emit was enqueued (or the
+        UNKNOWN review path fired); caller short-circuits the legacy
+        apply flow on True. Returns False to signal "fall through to
+        legacy path" — used for hallucinations or pool misses.
+
+        Branch logic, in order:
+
+          1. ``item_id == UNKNOWN`` → fall through to legacy review path.
+          2. Picked candidate's ``cloud_lots`` row has
+             ``in_flight_kind='catch_all'`` → SECOND event. Emit
+             ``catch_all_second_measurement`` with the lot's existing
+             ``pickup_event_id`` as the cloud's lookup key.
+          3. Empty-bottle short-circuit (preserves commit abbd518): if
+             measured weight ≈ tare ± 5% of (tare+net) AND the picked
+             lot is NOT in-flight on catch-all → emit ``discarded``
+             directly via the existing manual-discard cloud emit. This
+             is the "user places an empty container with no prior
+             session" path.
+          4. Otherwise → FIRST event. Emit
+             ``catch_all_first_measurement`` with this Pi event_id
+             stamped as ``pi_event_id`` so the cloud can write it onto
+             ``stock_lots.pickup_event_id``.
+        """
+        if not isinstance(classification, dict):
+            return False
+        item_id = classification.get("item_id")
+        if not item_id or item_id in {UNKNOWN_CANDIDATE_ID, "unknown"}:
+            # UNKNOWN — let the existing review queue path handle it.
+            return False
+
+        cid = str(item_id)
+
+        # Look up the cloud_lots row for this lot_id. The catch-all
+        # candidate pool sources from cloud_lots (Tier 1 + Tier 2), so
+        # the picked candidate's id is a cloud lot_id.
+        try:
+            row = self._conn.execute(
+                """
+                SELECT cl.lot_id, cl.product_id, cl.in_flight_kind,
+                       cl.pickup_event_id
+                  FROM cloud_lots cl
+                 WHERE cl.lot_id = ?
+                   AND cl.deleted_at IS NULL
+                """,
+                (cid,),
+            ).fetchone()
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "catch_all dispatch: cloud_lots lookup threw for %s", cid,
+            )
+            return False
+
+        if row is None:
+            log.warning(
+                "catch_all dispatch: classifier picked lot_id %r but no "
+                "cloud_lots row found; falling through (event %s)",
+                cid, event_id,
+            )
+            return False
+
+        cloud_lot_id = row[0]
+        product_id = row[1]
+        in_flight_kind = row[2]
+        existing_pickup_event_id = row[3]
+
+        if not product_id:
+            log.warning(
+                "catch_all dispatch: cloud_lots row %s has no product_id; "
+                "falling through (event %s)", cloud_lot_id, event_id,
+            )
+            return False
+
+        scale_id = self._scale_id_for_shelf("catch_all")
+        measured_g = abs(float(delta_g)) if delta_g is not None else 0.0
+        if measured_g <= 0:
+            log.warning(
+                "catch_all dispatch: non-positive measured weight (%.3f) "
+                "for event %s; falling through", measured_g, event_id,
+            )
+            return False
+
+        # Branch 2: SECOND measurement — picked lot already in-flight
+        # on catch-all from a prior FIRST event.
+        if in_flight_kind == "catch_all":
+            if not existing_pickup_event_id:
+                log.warning(
+                    "catch_all dispatch: lot %s in_flight_kind='catch_all' "
+                    "but pickup_event_id is NULL — cannot reference first "
+                    "event; falling through (event %s)",
+                    cloud_lot_id, event_id,
+                )
+                return False
+            self._lc_event(
+                event_id,
+                actor="classifier",
+                reason_code=ReasonCode.APPLY_ACCEPTED,
+                payload={
+                    "branch": "catch_all_second_measurement",
+                    "lot_id": cloud_lot_id,
+                    "product_id": product_id,
+                    "measured_weight_g": measured_g,
+                    "first_event_pi_event_id": str(existing_pickup_event_id),
+                },
+            )
+            try:
+                self._cloud_emitter.emit_catch_all_second_measurement(
+                    scale_id=scale_id,
+                    product_id=str(product_id),
+                    measured_weight_g=measured_g,
+                    first_event_pi_event_id=str(existing_pickup_event_id),
+                    occurred_at=event_ts,
+                )
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "catch_all dispatch: emit_catch_all_second_measurement "
+                    "threw for event %s lot %s",
+                    event_id, cloud_lot_id,
+                )
+                return False
+            log.info(
+                "catch_all SECOND measurement: lot %s product %s "
+                "measured=%.1fg first_event=%s (Pi event %s)",
+                cloud_lot_id, product_id, measured_g,
+                existing_pickup_event_id, event_id,
+            )
+            return True
+
+        # Branch 3: empty-bottle short-circuit. The lot is NOT
+        # in-flight on catch-all (in_flight_kind is NULL or 'live_shelf')
+        # AND the measured weight matches tare ± 5% of (tare+net). Emit
+        # ``discarded`` directly without going through the in-flight
+        # cycle. This preserves commit abbd518's user-acknowledges-
+        # empty-container semantics for the case where consumption was
+        # logged elsewhere (e.g. live_scale during a drink session).
+        if self._matches_empty_bottle_window(
+            product_id=str(product_id), measured_g=measured_g,
+        ):
+            self._lc_event(
+                event_id,
+                actor="classifier",
+                reason_code=ReasonCode.APPLY_ACCEPTED,
+                payload={
+                    "branch": "catch_all_empty_bottle_discard",
+                    "lot_id": cloud_lot_id,
+                    "product_id": product_id,
+                    "measured_weight_g": measured_g,
+                },
+            )
+            try:
+                self._cloud_emitter.emit_manual_discard(
+                    scale_id=scale_id,
+                    product_id=str(product_id),
+                    kind="catch_all",
+                    occurred_at=event_ts,
+                    pi_event_id=event_id,
+                )
+            except Exception:  # pragma: no cover - defensive
+                log.warning(
+                    "catch_all dispatch: emit_manual_discard threw for "
+                    "event %s lot %s",
+                    event_id, cloud_lot_id,
+                    exc_info=True,
+                )
+                # Fall through anyway so we don't double-emit on retry.
+            log.info(
+                "catch_all empty-bottle discard: lot %s product %s "
+                "measured=%.1fg (no prior session) — emitted discarded",
+                cloud_lot_id, product_id, measured_g,
+            )
+            return True
+
+        # Branch 4: FIRST measurement. Stamp this Pi event_id as
+        # pickup_event_id on the cloud lot so the second measurement
+        # can find it.
+        if not event_id:
+            log.warning(
+                "catch_all dispatch: missing event_id for FIRST "
+                "measurement (lot %s)", cloud_lot_id,
+            )
+            return False
+        self._lc_event(
+            event_id,
+            actor="classifier",
+            reason_code=ReasonCode.APPLY_ACCEPTED,
+            payload={
+                "branch": "catch_all_first_measurement",
+                "lot_id": cloud_lot_id,
+                "product_id": product_id,
+                "measured_weight_g": measured_g,
+            },
+        )
+        try:
+            self._cloud_emitter.emit_catch_all_first_measurement(
+                scale_id=scale_id,
+                product_id=str(product_id),
+                measured_weight_g=measured_g,
+                pi_event_id=str(event_id),
+                occurred_at=event_ts,
+            )
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "catch_all dispatch: emit_catch_all_first_measurement "
+                "threw for event %s lot %s",
+                event_id, cloud_lot_id,
+            )
+            return False
+        log.info(
+            "catch_all FIRST measurement: lot %s product %s "
+            "measured=%.1fg (Pi event %s stamped as pickup_event_id)",
+            cloud_lot_id, product_id, measured_g, event_id,
+        )
+        return True
+
+    def _matches_empty_bottle_window(
+        self,
+        *,
+        product_id: str,
+        measured_g: float,
+    ) -> bool:
+        """True if measured_g is within 5% of (tare+net) of the product's tare.
+
+        Helper for the catch-all empty-bottle short-circuit. Mirrors
+        :meth:`_maybe_emit_empty_container_discard`'s tare-window logic
+        but is read-only (no side effects). Returns False on missing
+        / invalid tare/net so a stale snapshot can't trigger a false
+        discard.
+        """
+        try:
+            product = storage_repo.get_product(self._conn, product_id)
+        except Exception:  # pragma: no cover - defensive
+            return False
+        if product is None:
+            return False
+        tare = getattr(product, "tare_weight_g", None)
+        net = getattr(product, "net_weight_g", None)
+        if tare is None or net is None:
+            return False
+        try:
+            tare_f = float(tare)
+            net_f = float(net)
+        except (TypeError, ValueError):
+            return False
+        if tare_f <= 0.0 or net_f <= 0.0:
+            return False
+        tolerance = 0.05 * (tare_f + net_f)
+        return abs(measured_g - tare_f) <= tolerance
+
     def _apply_lot_update_from_classification(
         self,
         *,
@@ -2130,6 +2389,45 @@ class ScaleHandler:
         # the picked product's lot exists.
         if confidence < LOW_CONFIDENCE_THRESHOLD and not weight_match_ok:
             return
+
+        # ----------------------------------------------------------------
+        # Catch-all delta-capture dispatch (CATCH_ALL_SCALE_PLAN.md, 2026-
+        # 04-27). For catch-all ADD events the apply path is fundamentally
+        # different from live_shelf: we don't mint/manage Pi-local lots,
+        # we don't run the in_flight_return / new_arrival flow, and we
+        # don't emit ``consumed`` / ``added`` cloud events. Instead the
+        # picked candidate's cloud_lots row tells us whether this is the
+        # FIRST measurement (no in-flight session yet → emit
+        # catch_all_first_measurement) or the SECOND (lot already
+        # in_flight_kind='catch_all' → emit catch_all_second_measurement).
+        #
+        # The empty-bottle short-circuit (commit abbd518) is preserved
+        # for the special case where the user places an empty bottle
+        # whose product has NO active catch-all in-flight session — that
+        # path emits ``discarded`` directly and skips the in-flight cycle.
+        # When the picked lot IS already in-flight on catch-all, an
+        # empty-bottle weight is just the SECOND measurement (full
+        # consumption), and the second-measurement path correctly logs
+        # the macros.
+        if shelf_id == "catch_all" and direction == "add":
+            handled = self._dispatch_catch_all_add(
+                classification=classification,
+                delta_g=delta_g,
+                event_ts=event_ts,
+                event_id=event_id,
+                session_id=session_id,
+            )
+            if handled:
+                return
+            # handled=False → fall through to legacy live_shelf-style
+            # path. Defensive: should only fire when the classifier
+            # picked UNKNOWN or a candidate that doesn't resolve to a
+            # cloud lot, in which case the existing review-queue / mint
+            # logic below preserves backwards compatibility.
+            log.warning(
+                "catch_all dispatch returned False for event %s; "
+                "falling through to legacy apply path", event_id,
+            )
 
         # Fix 2: build a validation set of ids that were ACTUALLY in the
         # candidate pool we fed the classifier. The classifier is not

@@ -354,10 +354,17 @@ async function handleOverrides(supabase: SupabaseClient, device: Device, url: UR
  *   {
  *     lots: [
  *       { lot_id, product_id, location_id, qty_containers, expires_on,
- *         in_flight_since, pickup_event_id, updated_at, deleted_at },
+ *         in_flight_since, in_flight_kind, pickup_event_id, created_at,
+ *         updated_at, deleted_at },
  *       ...
  *     ]
  *   }
+ *
+ * `in_flight_kind` discriminates live_shelf vs catch_all in-flight rows
+ * (migration 20260427120000) so the Pi's catch-all candidate-pool builder
+ * can filter to the catch-all-only in-flight tier without re-querying.
+ * `created_at` is the lot's import time, used by the catch-all
+ * "certified-not-on-any-shelf" tier to FEFO by oldest-imported lot.
  *
  * An invalid updated_since silently degrades to a full pull (matches
  * /catalog + /overrides behavior — a stuck poller re-establishing its
@@ -383,7 +390,7 @@ async function handleLotSnapshot(supabase: SupabaseClient, device: Device, url: 
     .schema('chefbyte')
     .from('stock_lots')
     .select(
-      'lot_id, product_id, location_id, qty_containers, expires_on, in_flight_since, pickup_event_id, updated_at, deleted_at',
+      'lot_id, product_id, location_id, qty_containers, expires_on, in_flight_since, in_flight_kind, pickup_event_id, created_at, updated_at, deleted_at',
     )
     .eq('user_id', userId)
     .order('updated_at', { ascending: true });

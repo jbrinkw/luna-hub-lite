@@ -492,6 +492,111 @@ def pool_for_add(
     return _ensure_sentinel_last(truncated)
 
 
+def pool_for_catch_all(
+    delta_g: float,
+    ctx: ClassifierContext,
+    *,
+    top_n: int | None = None,
+) -> list[Candidate]:
+    """Assemble the catch-all delta-capture candidate pool.
+
+    **2026-04-27 single-pool design (decisions.md, CATCH_ALL_SCALE_PLAN.md
+    §"Final confirmed model"):** the catch-all scale runs a delta-capture
+    state machine where the FIRST event measures the placed item and the
+    SECOND event records consumption against the snapshotted pickup weight.
+    Both events draw from ONE pool — composition does not change between
+    first and second; the runtime branching at apply time decides whether
+    to emit ``catch_all_first_measurement`` or ``catch_all_second_measurement``
+    based on whether the picked lot is already in-flight on catch-all.
+
+    Pool composition (in tier order):
+
+    1. ``in_flight`` lots — every lot currently mid-measurement on the
+       catch-all (``cloud_lots.in_flight_kind='catch_all'``). Multiple
+       can coexist. Picking one of these triggers the SECOND event in
+       the apply path.
+    2. ``catch_all_inventory`` lots — every certified-not-on-any-shelf
+       lot, ordered FEFO by ``cloud_lots.created_at ASC``. Picking one
+       of these triggers the FIRST event in the apply path. "Not on any
+       shelf" = no Pi-local ``lots`` row AND not pinned via
+       ``scale_pairings``.
+    3. UNKNOWN sentinel.
+
+    Live-shelf branches (``recently_out``, ``top_up_target``,
+    ``catalog_not_on_shelf``, ``inventory_only``) are intentionally NOT
+    queried here. Catch-all is its own state machine; bleeding in
+    live-shelf-specific inventory sources would let a lot mid-pickup-
+    on-the-live-shelf get incorrectly resolved as a catch-all event.
+
+    Lot-level: the apply path uses ``candidate_id`` as a lot_id, NOT a
+    product_id (unlike the live_shelf pool which collapses by product).
+    Pi's catch-all dispatch uses the picked lot's ``in_flight_kind``
+    state to route first-vs-second-event semantics; routing by product
+    would lose the discriminator needed for that decision.
+
+    Args:
+        delta_g: Positive scale delta in grams (the placed item's mass).
+        ctx: Classifier context carrying the :class:`CandidateSource`.
+        top_n: Optional override for the pool cap.
+    """
+    source: CandidateSource = ctx.source
+    observed_abs = abs(delta_g)
+    limit = top_n if top_n is not None else ctx.pool_top_n
+
+    # Tier 1 — lots currently in-flight on the catch-all.
+    get_in_flight = getattr(source, "get_catch_all_in_flight_lots", None)
+    in_flight_lots: list[Candidate] = []
+    if callable(get_in_flight):
+        try:
+            rows = list(get_in_flight())
+        except Exception:  # noqa: BLE001 — never crash the pool builder
+            rows = []
+        in_flight_lots = [_from_lot(lot, "in_flight") for lot in rows]
+
+    # Tier 2 — certified-not-on-any-shelf lots, FEFO by created_at.
+    # Use ``inventory_only`` as the why_candidate so existing rank/dedupe
+    # tiers still apply (catch-all only — these never appear in the
+    # live_shelf pool builder).
+    get_inventory = getattr(source, "get_catch_all_inventory_lots", None)
+    inventory_lots: list[Candidate] = []
+    if callable(get_inventory):
+        try:
+            rows = list(get_inventory())
+        except Exception:  # noqa: BLE001
+            rows = []
+        inventory_lots = [_from_lot(lot, "inventory_only") for lot in rows]
+
+    # Lot-level: candidate_id is the lot_id (override _from_lot's
+    # product_id default). The apply path will look up the picked
+    # candidate by lot_id to find the in-flight markers.
+    def _lot_keyed(c: Candidate, source_lot_id: str) -> Candidate:
+        return Candidate(
+            candidate_id=source_lot_id,
+            name=c.name,
+            brand=c.brand,
+            expected_weight_g=c.expected_weight_g,
+            container_type=c.container_type,
+            why_candidate=c.why_candidate,
+            reference_image_paths=c.reference_image_paths,
+            rank_score=c.rank_score,
+            product_id=c.product_id,
+            lot_id=source_lot_id,
+        )
+
+    rebuilt: list[Candidate] = []
+    for c in in_flight_lots + inventory_lots:
+        if c.lot_id is None:
+            continue
+        rebuilt.append(_lot_keyed(c, c.lot_id))
+
+    # No product-collapse: catch-all pool is lot-keyed (each lot has its
+    # own state machine). Rank within the (in_flight, inventory_only)
+    # tiers and append the UNKNOWN sentinel.
+    ranked = _rank_candidates(rebuilt, observed_abs)
+    truncated = ranked[: max(0, limit - 1)]
+    return _ensure_sentinel_last(truncated)
+
+
 def pool_for_remove(
     delta_g: float,
     ctx: ClassifierContext,

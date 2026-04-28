@@ -19,7 +19,7 @@ import re
 from typing import Any, Optional
 
 from .anthropic_client import AnthropicClassifierClient, ClassifierCallResult
-from .candidate_pool import pool_for_add, pool_for_remove
+from .candidate_pool import pool_for_add, pool_for_catch_all, pool_for_remove
 from .models import (
     UNKNOWN_CANDIDATE_ID,
     Candidate,
@@ -340,9 +340,22 @@ def _is_cold_start(source: Any) -> bool:
 
 
 def _build_pool(event: ScaleEvent, ctx: ClassifierContext) -> list[Candidate]:
-    """Choose between ADD and REMOVE pools based on the event direction."""
+    """Choose between ADD / catch-all / REMOVE pools based on shelf + direction.
+
+    **2026-04-27 catch-all delta-capture (CATCH_ALL_SCALE_PLAN.md):** an
+    ADD event on the catch-all shelf uses a dedicated single-pool
+    composition (in-flight catch-all lots + certified-not-on-any-shelf
+    lots + UNKNOWN). REMOVE on the catch-all uses the default REMOVE
+    pool — catch-all REMOVEs are rare (user picks the bottle off the
+    measuring station) and are handled by the same on-shelf rank logic.
+    Live_shelf events use the existing pool_for_add / pool_for_remove
+    paths.
+    """
+    shelf_id = getattr(ctx, "shelf_id", None)
 
     if event.direction == "add":
+        if shelf_id == "catch_all":
+            return pool_for_catch_all(event.delta_g, ctx)
         return pool_for_add(event.delta_g, ctx)
     if event.direction == "remove":
         return pool_for_remove(event.delta_g, ctx)

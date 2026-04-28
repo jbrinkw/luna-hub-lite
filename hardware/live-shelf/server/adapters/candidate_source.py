@@ -251,6 +251,103 @@ class RepoCandidateSource:
                 )
             return out
 
+    # ----------------------------------------------------------------
+    # Catch-all delta-capture pool sources (CATCH_ALL_SCALE_PLAN.md
+    # §"Pi catch-all candidate pool builder", 2026-04-27).
+    #
+    # Both methods serve LotCandidates for the catch-all-only pool —
+    # the catch-all flow is lot-level (multiple lots may coexist) so
+    # the classifier sees individual lots rather than collapsed
+    # products. Apply path then routes by lot_id directly.
+    # ----------------------------------------------------------------
+
+    def get_catch_all_in_flight_lots(self) -> Sequence[LotCandidate]:
+        """Tier 1 of the catch-all pool — lots mid-measurement.
+
+        Cloud-mirrored ``cloud_lots`` rows with
+        ``in_flight_kind='catch_all'``. Each lot's
+        ``expected_weight_g`` is its ``pickup_weight_g`` (snapshot at
+        first-event time) — but we don't have direct access to the
+        snapshot here because cloud_lots doesn't mirror
+        pickup_weight_g; the gross_weight_g of the product is the best
+        available proxy and is also what the classifier prompt builder
+        expects.
+        """
+        with self._db_lock:
+            rows = storage_repo.list_cloud_in_flight_catch_all_lots(self._conn)
+            out: list[LotCandidate] = []
+            for row in rows:
+                (
+                    lot_id, product_id, _qty, _ifsince, _pkid, _created,
+                    p_name, p_brand, p_net, p_gross, p_container,
+                ) = row
+                if not product_id or not p_name:
+                    # Orphan: cloud_lots has a product_id but products
+                    # row is missing locally. Skip — without product
+                    # metadata we can't build a usable candidate.
+                    continue
+                out.append(
+                    LotCandidate(
+                        lot_id=str(lot_id),
+                        product_id=str(product_id),
+                        name=str(p_name),
+                        brand=p_brand,
+                        expected_weight_g=p_gross or p_net,
+                        container_type=p_container,
+                        # Reuse the existing in_flight status sentinel
+                        # so downstream candidate_pool tier-rank logic
+                        # treats this branch like the live_shelf
+                        # in-flight branch.
+                        status="in_flight",
+                        reference_image_paths=self._absolute_refs(
+                            str(product_id)
+                        ),
+                    )
+                )
+            return out
+
+    def get_catch_all_inventory_lots(self) -> Sequence[LotCandidate]:
+        """Tier 2 of the catch-all pool — certified lots on no shelf.
+
+        Cloud-mirrored ``cloud_lots`` for certified products that
+        aren't currently on any Pi shelf and aren't pinned to a
+        LiveTrack scale. FEFO-ordered by ``created_at`` (oldest
+        imported lot first) per the user's directive.
+        """
+        with self._db_lock:
+            rows = storage_repo.list_certified_not_on_shelf_lots_by_oldest_created(
+                self._conn,
+            )
+            out: list[LotCandidate] = []
+            for row in rows:
+                (
+                    lot_id, product_id, _qty, _ifsince, _pkid, _created,
+                    p_name, p_brand, p_net, p_gross, p_container,
+                ) = row
+                if not product_id or not p_name:
+                    continue
+                out.append(
+                    LotCandidate(
+                        lot_id=str(lot_id),
+                        product_id=str(product_id),
+                        name=str(p_name),
+                        brand=p_brand,
+                        expected_weight_g=p_gross or p_net,
+                        container_type=p_container,
+                        # No "off-shelf certified inventory" status in
+                        # the LotCandidate enum — borrow ``out`` as the
+                        # closest match (the lot is logically off any
+                        # shelf). Tier ranking is driven by why_candidate
+                        # set in candidate_pool, not status, so this
+                        # is purely cosmetic.
+                        status="out",
+                        reference_image_paths=self._absolute_refs(
+                            str(product_id)
+                        ),
+                    )
+                )
+            return out
+
     def get_certified_livetrack_tracked(self) -> Sequence[ProductCandidate]:
         """Fallback pool — all certified LiveTrack-tracked products.
 
