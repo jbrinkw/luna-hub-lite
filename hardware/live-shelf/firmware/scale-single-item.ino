@@ -162,6 +162,16 @@ float lastStableWeight = 0.0f;
 bool  hasLastStable = false;
 uint16_t currentStableSamples = 0;
 
+// Most-recent successful raw reading from scaleLoop, cached so the tare /
+// calibrate handlers have an emergency fallback when their fresh-read path
+// (`readRaw` retries) hits the HX711 in a transiently busy state. Without
+// this cache, a stuck tare endpoint creates a catch-22: the scale is reading
+// fine in heartbeats / `/data`, but the user can't recover from a bad
+// offset because tare itself fails. With it, the offset can always be set
+// to whatever the scaleLoop most recently saw.
+long  lastRawReading[NUM_CELLS] = { 0 };
+bool  hasLastRaw = false;
+
 // Moment (millis()) when the scale most recently transitioned from STABLE
 // to SETTLING — i.e., when motion first started. Reported in the event
 // payload so the Pi can anchor its "before" frame half a second before
@@ -311,6 +321,11 @@ float rawToGrams(int i, long raw) {
 bool readShelfWeight(float* out_weight) {
   long raw[NUM_CELLS];
   if (!readRaw(raw)) return false;
+  // Cache for emergency-tare fallback. Updated unconditionally on each
+  // successful scaleLoop sample so the tare handler always has a recent
+  // raw value to fall back on if its own fresh-read path fails.
+  for (int i = 0; i < NUM_CELLS; i++) lastRawReading[i] = raw[i];
+  hasLastRaw = true;
   float sum = 0;
   for (int i = 0; i < NUM_CELLS; i++) sum += rawToGrams(i, raw[i]);
   *out_weight = sum;
@@ -640,6 +655,34 @@ int parseCellArg(bool &all) {
   return c;
 }
 
+// Try to capture a fresh tare/calibration reading. Returns true and fills
+// `out` on success. Falls back to the scaleLoop's cached raw reading when
+// fresh reads fail, marking `*used_cached` so the handler can include it
+// in the JSON response. This is the safety valve that prevents a bad
+// offset from creating a catch-22 — tare is the ONLY way to recover from
+// a drifted offset, so it must succeed whenever the scaleLoop is reading.
+bool captureTareRaw(long out[NUM_CELLS], bool* used_cached) {
+  *used_cached = false;
+  // Single-read retry loop. /data uses `readRaw` once and works reliably,
+  // so a single read is the right primitive here too — readAverage(_, 10)
+  // multiplied the per-sample timeout window 10x and could fail the entire
+  // tare even when the scale was reading fine in heartbeats.
+  for (int attempt = 0; attempt < 5; attempt++) {
+    if (readRaw(out)) return true;
+    yield();
+  }
+  // Fresh reads all timed out — fall back to the most-recent cached
+  // reading from scaleLoop. If we have no cached reading either, the
+  // scale really hasn't reported anything yet and tare is genuinely
+  // unsafe.
+  if (hasLastRaw) {
+    for (int i = 0; i < NUM_CELLS; i++) out[i] = lastRawReading[i];
+    *used_cached = true;
+    return true;
+  }
+  return false;
+}
+
 void handleTare() {
   bool all;
   int cell = parseCellArg(all);
@@ -648,7 +691,8 @@ void handleTare() {
     return;
   }
   long raw[NUM_CELLS];
-  if (!readAverage(raw, 10)) {
+  bool used_cached = false;
+  if (!captureTareRaw(raw, &used_cached)) {
     server.send(503, "application/json", "{\"ok\":false,\"err\":\"scale not ready\"}");
     return;
   }
@@ -658,7 +702,9 @@ void handleTare() {
     cells[cell].offset = raw[cell];
   }
   saveAll();
-  String json = "{\"ok\":true,\"scope\":\"" + String(all ? "all" : String(cell)) + "\"}";
+  String json = "{\"ok\":true,\"scope\":\"" + String(all ? "all" : String(cell)) + "\"";
+  if (used_cached) json += ",\"source\":\"cached\"";
+  json += "}";
   server.send(200, "application/json", json);
 }
 
@@ -678,7 +724,8 @@ void handleCalibrate() {
     return;
   }
   long raw[NUM_CELLS];
-  if (!readAverage(raw, 10)) {
+  bool used_cached = false;
+  if (!captureTareRaw(raw, &used_cached)) {
     server.send(503, "application/json", "{\"ok\":false,\"err\":\"scale not ready\"}");
     return;
   }
