@@ -54,21 +54,39 @@ def _live_scale_lot_rotation(ctx: HarnessContext) -> None:
     # Two lots — A is the FEFO winner (earlier expiry), B is the next.
     # The pairing pins to A; consumption drains A; rotation should
     # advance to B automatically.
-    lot_a = ctx.seed_stock_lot(product_id=product_id, qty_containers=1.0)
-    lot_b = ctx.seed_stock_lot(product_id=product_id, qty_containers=1.0)
-
-    # Stamp expires_on so the rotation FEFO ordering is deterministic.
-    # (seed_stock_lot doesn't accept expires_on — push it directly.)
+    #
+    # Two unique-index considerations:
+    #   1. chefbyte.stock_lots_merge_key on
+    #      (user_id, product_id, location_id, COALESCE(expires_on, '9999-12-31'))
+    #      — two NULL-expires_on lots for the same product collide.
+    #      Pass distinct expires_on at insert time.
+    #   2. chefbyte.stock_lots_one_per_tracked_shelf — partial unique on
+    #      (user_id, product_id, last_update_source) WHERE
+    #      last_update_source IN ('live_shelf','live_scale') AND
+    #      qty_containers > 0. Two lots with the SAME tracked source
+    #      and qty>0 collide; in production the realistic shape is one
+    #      tracked (the paired one) + on-shelf candidates from another
+    #      source, which the rotation function picks via FEFO.
+    #
+    # Lot A is the live_scale-tracked paired lot. Lot B is on-shelf
+    # tracked by live_shelf (the FEFO next candidate the rotation
+    # function will pick, regardless of source).
+    lot_a = ctx.seed_stock_lot(
+        product_id=product_id, qty_containers=1.0, expires_on="2026-05-15",
+    )
+    lot_b = ctx.seed_stock_lot(
+        product_id=product_id, qty_containers=1.0, expires_on="2026-06-15",
+    )
     with ctx.db.cursor() as cur:
         cur.execute(
-            "UPDATE chefbyte.stock_lots SET expires_on = %s, last_update_source = %s "
+            "UPDATE chefbyte.stock_lots SET last_update_source = %s "
             " WHERE lot_id = %s",
-            ("2026-05-15", "live_scale", lot_a),
+            ("live_scale", lot_a),
         )
         cur.execute(
-            "UPDATE chefbyte.stock_lots SET expires_on = %s, last_update_source = %s "
+            "UPDATE chefbyte.stock_lots SET last_update_source = %s "
             " WHERE lot_id = %s",
-            ("2026-06-15", "live_scale", lot_b),
+            ("live_shelf", lot_b),
         )
 
     # Pair scale-03 to product, pinned to lot A.

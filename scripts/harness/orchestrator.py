@@ -393,8 +393,18 @@ class HarnessContext:
         qty_containers: float = 1.0,
         in_flight_since: Optional[str] = None,
         pickup_event_id: Optional[str] = None,
+        expires_on: Optional[str] = None,
     ) -> str:
-        """Insert a chefbyte.stock_lots row. Returns lot_id."""
+        """Insert a chefbyte.stock_lots row. Returns lot_id.
+
+        ``expires_on`` is optional — when omitted, the row inserts with
+        a NULL expires_on. The chefbyte.stock_lots_merge_key unique
+        index treats NULL as ``9999-12-31`` via COALESCE, so two lots
+        for the same (user, product, location) with NULL expires_on
+        collide. Scenarios that need multiple lots for one product
+        (e.g. live_scale_lot_rotation testing FEFO rotation) MUST pass
+        distinct expires_on values per lot.
+        """
         assert self.user_id
         lot_id = str(uuid.uuid4())
         with self.db.cursor() as cur:
@@ -408,8 +418,9 @@ class HarnessContext:
                 """
                 INSERT INTO chefbyte.stock_lots (
                     lot_id, user_id, product_id, location_id,
-                    qty_containers, in_flight_since, pickup_event_id
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s)
+                    qty_containers, in_flight_since, pickup_event_id,
+                    expires_on
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)
                 """,
                 (
                     lot_id,
@@ -419,6 +430,7 @@ class HarnessContext:
                     qty_containers,
                     in_flight_since,
                     pickup_event_id,
+                    expires_on,
                 ),
             )
         return lot_id
