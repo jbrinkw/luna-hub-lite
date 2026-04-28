@@ -646,6 +646,7 @@ class ScaleHandler:
         occurred_at: Optional[str] = None,
         depleted: bool = False,
         refill_threshold_g: Optional[float] = None,
+        after_weight_g: Optional[float] = None,
     ) -> Optional[str]:
         """Public hook for single-item (``live_scale``) scale commits.
 
@@ -655,6 +656,11 @@ class ScaleHandler:
         without waiting on the hardware wiring. Delegates to
         :meth:`CloudEventEmitter.emit_single_item_event` which handles
         the consumed/refilled/depleted/noise branching.
+
+        ``after_weight_g`` (added 2026-04-28) propagates the absolute
+        on-scale mass so the cloud can SET qty rather than ADD on
+        live_scale `refilled` / `added` events. See migration
+        20260428060000 (single_track-never-mints fix).
         """
         return self._cloud_emitter.emit_single_item_event(
             scale_id=scale_id,
@@ -670,6 +676,7 @@ class ScaleHandler:
             ),
             depleted=depleted,
             occurred_at=occurred_at,
+            after_weight_g=after_weight_g,
         )
 
     def _lc_event(
@@ -3532,6 +3539,12 @@ class ScaleHandler:
                     delta_g=float(delta_g),
                     occurred_at=ts,
                     depleted=depleted,
+                    # Absolute on-scale mass — drives cloud's SET
+                    # semantics for live_scale ADD events so a paired
+                    # lot's qty follows the scale rather than
+                    # accumulating from each placement (no-mint rule,
+                    # migration 20260428060000).
+                    after_weight_g=float(after_weight_g),
                 )
             except Exception:  # pragma: no cover - defensive
                 log.exception(
@@ -3544,6 +3557,7 @@ class ScaleHandler:
                 "scale_id": scale_id,
                 "event_kind": "consumed" if delta_g < 0 else "refilled",
                 "delta_g": delta_g,
+                "after_weight_g": float(after_weight_g),
                 "depleted": depleted,
             }, 200
 
