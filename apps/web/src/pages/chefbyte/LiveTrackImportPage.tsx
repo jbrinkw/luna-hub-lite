@@ -71,6 +71,12 @@ interface ProductRow {
   tare_weight_g: number | null;
   container_type: string | null;
   unit_type: string | null;
+  /** LLM-suggested unopened shelf life from analyze-product. Drives the
+   * fallback save path's expires_on derivation (LiveTrack wizard) so
+   * imported lots inherit the same expiry-date math the scanner
+   * Purchase mode uses. NULL when the AI didn't suggest one OR the
+   * column wasn't selected (older inserts). */
+  default_shelf_life_days: number | null;
 }
 
 /** WizardState — owns the UI's derived-from-session state machine. */
@@ -354,7 +360,7 @@ export function LiveTrackImportPage() {
         const { data: existing } = await chefbyte()
           .from('products')
           .select(
-            'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g, certified',
+            'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g, certified, default_shelf_life_days',
           )
           .eq('user_id', user.id)
           .eq('barcode', barcode)
@@ -450,7 +456,7 @@ export function LiveTrackImportPage() {
             .from('products')
             .insert({ user_id: user.id, ...productFields })
             .select(
-              'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g, certified',
+              'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g, certified, default_shelf_life_days',
             )
             .single();
           if (insErr || !created) {
@@ -627,14 +633,36 @@ export function LiveTrackImportPage() {
           tareG,
           netWeightG: effectiveNetWeightG,
         });
-        const { error: lotInsErr } = await chefbyte().from('stock_lots').insert({
+        // Auto-set expires_on from products.default_shelf_life_days.
+        // The wizard's analyze-product call (line 429 above) writes the
+        // shelf life to chefbyte.products at insert time when the LLM
+        // suggests one — pulling it back here keeps the wizard's
+        // fallback path consistent with the cloud resolve_add path
+        // (which also derives expires_on from the same column).
+        // Fallback to NULL when default_shelf_life_days is null/0/NaN.
+        const shelfLifeDays = (product as any).default_shelf_life_days;
+        let expiresOn: string | null = null;
+        if (shelfLifeDays != null) {
+          const n = Number(shelfLifeDays);
+          if (Number.isFinite(n) && n > 0) {
+            const d = new Date();
+            d.setDate(d.getDate() + Math.floor(n));
+            const y = d.getFullYear();
+            const m = String(d.getMonth() + 1).padStart(2, '0');
+            const day = String(d.getDate()).padStart(2, '0');
+            expiresOn = `${y}-${m}-${day}`;
+          }
+        }
+        const insertRow: Record<string, unknown> = {
           user_id: user.id,
           product_id: product.product_id,
           location_id: defaultLocationId,
           qty_containers: qtyContainers,
           last_update_source: 'manual',
           last_update_ts: new Date().toISOString(),
-        });
+        };
+        if (expiresOn) insertRow.expires_on = expiresOn;
+        const { error: lotInsErr } = await chefbyte().from('stock_lots').insert(insertRow);
         if (lotInsErr) throw new Error(lotInsErr.message);
       }
 
