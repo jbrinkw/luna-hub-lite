@@ -23,6 +23,7 @@ import { queryKeys } from '@/shared/queryKeys';
 import { useScannerDetection } from '@/hooks/useScannerDetection';
 import { useLiveTrackSession } from '@/hooks/useLiveTrackSession';
 import {
+  computeHeartbeatAgeSeconds,
   computeQtyContainersFromScale,
   createLiveTrackSession,
   isDeviceFresh,
@@ -35,6 +36,12 @@ import {
 /* ------------------------------------------------------------------ */
 
 interface NutritionData {
+  /**
+   * Editable product name. Mirrors `products.name` and is written back
+   * on save. Surfaced in the wizard form (not just the read-only header)
+   * so OFF prefill values can be corrected before they hit the catalog.
+   */
+  name: string;
   servingsPerContainer: string;
   calories: string;
   carbs: string;
@@ -51,6 +58,14 @@ interface NutritionData {
   netWeightG: string;
   /** Editable serving weight (g). Same story: derived when net/spc known. */
   servingWeightG: string;
+  /**
+   * Editable tare weight (g). Mirrors `products.tare_weight_g` and is
+   * written back on save. Made first-class in the form so the operator
+   * can override the auto / AI / manual tare paths inline (e.g. tweak
+   * a measurement after seeing the live scale reading) without leaving
+   * the product editor.
+   */
+  tareWeightG: string;
 }
 
 interface ProductRow {
@@ -86,7 +101,20 @@ type WizardState =
   | { kind: 'offline'; reason: string }
   | { kind: 'waiting_barcode' }
   | { kind: 'analyzing'; barcode: string }
-  | { kind: 'product_loaded'; product: ProductRow; nutrition: NutritionData; isFullContainer: boolean }
+  | {
+      kind: 'product_loaded';
+      product: ProductRow;
+      nutrition: NutritionData;
+      isFullContainer: boolean;
+      /**
+       * True when analyze-product returned a 404 ("Product not found in
+       * OpenFoodFacts") for this barcode. The wizard still proceeds —
+       * the user can fill in details manually — but the form surfaces a
+       * neutral hint so they understand why fields are empty. NOT an
+       * error state; the only difference vs the happy path is the hint.
+       */
+      offMiss: boolean;
+    }
   | {
       kind: 'review';
       product: ProductRow;
@@ -111,7 +139,7 @@ type WizardAction =
   | { type: 'session_ready'; session: LiveTrackSession }
   | { type: 'offline'; reason: string }
   | { type: 'scan'; barcode: string }
-  | { type: 'product_loaded'; product: ProductRow; nutrition: NutritionData }
+  | { type: 'product_loaded'; product: ProductRow; nutrition: NutritionData; offMiss?: boolean }
   | { type: 'set_nutrition'; patch: Partial<NutritionData> }
   | { type: 'toggle_full'; isFull: boolean }
   | { type: 'scale_reading'; scaleG: number; netG: number | null }
@@ -143,6 +171,7 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
         product: action.product,
         nutrition: action.nutrition,
         isFullContainer: true,
+        offMiss: action.offMiss === true,
       };
     case 'set_nutrition':
       if (state.kind !== 'product_loaded' && state.kind !== 'review') return state;
@@ -161,7 +190,9 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
       return {
         kind: 'review',
         product: state.product,
-        nutrition: state.nutrition,
+        // Sync the editable tare field so the value the user sees in
+        // the form (and on the review panel) matches the derived tareG.
+        nutrition: { ...state.nutrition, tareWeightG: String(Math.round(tareG * 10) / 10) },
         tareG,
         tareSource: 'scale',
         scaleG: action.scaleG,
@@ -172,7 +203,7 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
       return {
         kind: 'review',
         product: state.product,
-        nutrition: state.nutrition,
+        nutrition: { ...state.nutrition, tareWeightG: String(Math.round(action.aiG * 10) / 10) },
         tareG: action.aiG,
         tareSource: 'ai',
         scaleG: action.scaleG,
@@ -182,7 +213,7 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
       return {
         kind: 'review',
         product: action.product,
-        nutrition: action.nutrition,
+        nutrition: { ...action.nutrition, tareWeightG: String(Math.round(action.tareG * 10) / 10) },
         tareG: action.tareG,
         tareSource: 'manual',
         scaleG: action.scaleG,
@@ -367,27 +398,57 @@ export function LiveTrackImportPage() {
           .maybeSingle();
 
         let product: ProductRow | null = (existing as ProductRow | null) ?? null;
+        // OFF-miss flag survives the analyze-product branch — declared at
+        // the outer scope so the post-product dispatch can read it. When
+        // the existing product was already in the user's catalog (skipped
+        // analyze-product entirely) the flag stays false and the wizard
+        // behaves like a normal re-edit.
+        let offMissFlag = false;
 
         // 2. analyze-product if needed.
         if (!product) {
           const { data: efData, error: efError } = await supabase.functions.invoke('analyze-product', {
             body: { barcode },
           });
+          // OFF-miss policy (2026-04-28): a 404 from analyze-product means
+          // OpenFoodFacts has no record for this barcode. That is a NORMAL
+          // case (store-brand items, regional products, brand-new SKUs) —
+          // NOT a fatal error. Continue to the manual-entry form with
+          // empty editable fields so the operator can fill in details.
+          // Other errors (502/503 OFF down, 503 AI hard-failure, 422
+          // validation, 401/500) remain fatal.
+          let efStatus: number | null = null;
+          let efBody: any = null;
           if (efError) {
-            // Hard error — surface to the user. Don't create a placeholder
-            // (plan explicitly excludes that mode for the wizard).
-            let body: any = null;
             try {
-              body = await (efError as any)?.context?.json?.();
+              efBody = await (efError as any)?.context?.json?.();
             } catch {
-              body = null;
+              efBody = null;
             }
-            const msg = body?.error ?? efError.message ?? 'analyze-product failed';
-            dispatch({ type: 'error', message: msg });
-            return;
+            efStatus = ((efError as any)?.context?.status as number | undefined) ?? (efError as any)?.status ?? null;
+            const looksLikeOffMiss =
+              efStatus === 404 ||
+              /not found in openfoodfacts/i.test(efBody?.error ?? '') ||
+              /not found in openfoodfacts/i.test((efError as any)?.message ?? '');
+            if (!looksLikeOffMiss) {
+              const msg = efBody?.error ?? efError.message ?? 'analyze-product failed';
+              dispatch({ type: 'error', message: msg });
+              return;
+            }
+            // Fall through with no AI suggestion + no OFF data — the
+            // wizard creates a blank product row and routes the user
+            // straight to the editable form. Flag the state so the
+            // ProductEditor surfaces a neutral hint instead of looking
+            // like a successful prefill.
+            offMissFlag = true;
           }
           const s = efData?.suggestion;
           const off = efData?.off;
+          // On OFF-miss leave the catalog name as a barcode-stub so we
+          // never violate the NOT NULL constraint, but the editable form
+          // (nutrition.name below) starts EMPTY so the user actively
+          // types a real name. Happy path falls through to AI / OFF as
+          // before.
           const name = s?.name || off?.product_name || `Product (${barcode})`;
           // Fallback layer: when analyze-product's AI step fails (timeout,
           // rate limit, transient), `suggestion` is null but OFF itself
@@ -483,16 +544,26 @@ export function LiveTrackImportPage() {
         const derivedNet = spcN > 0 && swN > 0 ? Math.round(spcN * swN * 100) / 100 : null;
         const netW = product.net_weight_g ?? derivedNet;
 
+        // OFF-miss: blank out the editable form (except for the implicit
+        // schema-fallbacks already on the product row) so the user is
+        // visibly prompted to fill in details rather than seeing zeroes
+        // that look like "successfully prefilled with all-zero macros".
+        // The product row keeps its NOT-NULL placeholders (1, 0, 0, ...)
+        // so the eventual UPDATE on save is well-formed.
+        const isOffMiss = offMissFlag;
+        const blankIfMiss = (v: string): string => (isOffMiss ? '' : v);
         const nut: NutritionData = {
-          servingsPerContainer: String(product.servings_per_container ?? 1),
-          calories: String(product.calories_per_serving ?? ''),
-          carbs: String(product.carbs_per_serving ?? ''),
-          fat: String(product.fat_per_serving ?? ''),
-          protein: String(product.protein_per_serving ?? ''),
-          netWeightG: netW != null ? String(netW) : '',
-          servingWeightG: product.serving_weight_g != null ? String(product.serving_weight_g) : '',
+          name: isOffMiss ? '' : (product.name ?? ''),
+          servingsPerContainer: blankIfMiss(String(product.servings_per_container ?? 1)),
+          calories: blankIfMiss(String(product.calories_per_serving ?? '')),
+          carbs: blankIfMiss(String(product.carbs_per_serving ?? '')),
+          fat: blankIfMiss(String(product.fat_per_serving ?? '')),
+          protein: blankIfMiss(String(product.protein_per_serving ?? '')),
+          netWeightG: blankIfMiss(netW != null ? String(netW) : ''),
+          servingWeightG: blankIfMiss(product.serving_weight_g != null ? String(product.serving_weight_g) : ''),
+          tareWeightG: blankIfMiss(product.tare_weight_g != null ? String(product.tare_weight_g) : ''),
         };
-        dispatch({ type: 'product_loaded', product, nutrition: nut });
+        dispatch({ type: 'product_loaded', product, nutrition: nut, offMiss: isOffMiss });
 
         // Auto-focus servingsPerContainer on analyze-product completion
         // (plan §9 + §0 note). The AI value for servings_per_container is
@@ -576,9 +647,19 @@ export function LiveTrackImportPage() {
       // left never-certified products invisible to the Pi forever.
       const netWeightParsed = parseFloat(nutrition.netWeightG);
       const servingWeightParsed = parseFloat(nutrition.servingWeightG);
+      // Prefer the user-edited tare from nutrition.tareWeightG over the
+      // tare-source-derived tareG. This lets the operator override the
+      // auto / AI / manual paths inline (e.g. tweak the value after seeing
+      // the live scale reading) without leaving the editor. Falls back
+      // to the source-derived tareG when the field is empty/non-finite.
+      const tareEdited = parseFloat(nutrition.tareWeightG);
+      const tareForSave = Number.isFinite(tareEdited) && tareEdited >= 0 ? tareEdited : tareG;
+      // Editable name override. Empty / whitespace-only falls back to the
+      // existing product.name so the NOT NULL constraint is preserved.
+      const nameEdited = (nutrition.name ?? '').trim();
       const promotedCertified = Number(product.certified ?? 0) >= 1 ? undefined : 1;
       const updatePayload: Record<string, unknown> = {
-        tare_weight_g: Number.isFinite(tareG) ? tareG : null,
+        tare_weight_g: Number.isFinite(tareForSave) ? tareForSave : null,
         servings_per_container: parseFloat(nutrition.servingsPerContainer) || 1,
         calories_per_serving: parseFloat(nutrition.calories) || 0,
         carbs_per_serving: parseFloat(nutrition.carbs) || 0,
@@ -587,6 +668,7 @@ export function LiveTrackImportPage() {
         net_weight_g: Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null,
         serving_weight_g: Number.isFinite(servingWeightParsed) && servingWeightParsed > 0 ? servingWeightParsed : null,
       };
+      if (nameEdited.length > 0 && nameEdited !== product.name) updatePayload.name = nameEdited;
       if (promotedCertified !== undefined) updatePayload.certified = promotedCertified;
       const { error: prodUpdErr } = await chefbyte()
         .from('products')
@@ -610,9 +692,14 @@ export function LiveTrackImportPage() {
       // Use the EDITED net weight (already written back to products above)
       // rather than the possibly-stale product.net_weight_g snapshot.
       const effectiveNetWeightG = Number.isFinite(netWeightParsed) && netWeightParsed > 0 ? netWeightParsed : null;
+      // Use tareForSave (which already prefers the user-edited tare from
+      // nutrition.tareWeightG over the tare-source-derived tareG) for the
+      // qty-derivation math. Otherwise an inline edit on the tare field
+      // would be persisted to products.tare_weight_g but ignored when
+      // computing the lot quantity.
       const netProductG =
-        scaleG != null && Number.isFinite(scaleG) && Number.isFinite(tareG) && effectiveNetWeightG != null
-          ? Math.max(0, (scaleG as number) - (tareG as number))
+        scaleG != null && Number.isFinite(scaleG) && Number.isFinite(tareForSave) && effectiveNetWeightG != null
+          ? Math.max(0, (scaleG as number) - (tareForSave as number))
           : null;
 
       if (netProductG != null && netProductG > 0) {
@@ -630,7 +717,7 @@ export function LiveTrackImportPage() {
         // reading (user typed a tare but no Pi reading posted).
         const qtyContainers = computeQtyContainersFromScale({
           scaleG: state.scaleG,
-          tareG,
+          tareG: tareForSave,
           netWeightG: effectiveNetWeightG,
         });
         // Auto-set expires_on from products.default_shelf_life_days.
@@ -709,11 +796,12 @@ export function LiveTrackImportPage() {
   /*  Render                                                           */
   /* ---------------------------------------------------------------- */
 
-  const heartbeatAge = useMemo(() => {
-    if (!device?.last_heartbeat_ts) return null;
-    const secs = Math.round((Date.now() - new Date(device.last_heartbeat_ts).getTime()) / 1000);
-    return secs;
-  }, [device]);
+  // Heartbeat-age display helper. Delegates to the pure helper so the
+  // negative-age clamp + non-finite fallback are unit-testable.
+  const heartbeatAge = useMemo(
+    () => computeHeartbeatAgeSeconds(device?.last_heartbeat_ts ?? null),
+    [device?.last_heartbeat_ts],
+  );
 
   return (
     <ChefLayout title="LiveTrack Import">
@@ -723,8 +811,14 @@ export function LiveTrackImportPage() {
           <div className="text-sm" data-testid="livetrack-device-status" role="status" aria-live="polite">
             {device
               ? deviceOnline
-                ? `Pi: ${device.device_name} (online, last hb ${heartbeatAge ?? '?'}s ago)`
-                : `Pi: ${device.device_name} (offline — last hb ${heartbeatAge ?? '?'}s ago)`
+                ? // Online: show heartbeat age. 0s renders as "just now" for clarity.
+                  `Pi: ${device.device_name} (online, ${
+                    heartbeatAge === 0 ? 'just now' : `last hb ${heartbeatAge ?? '?'}s ago`
+                  })`
+                : // Offline: drop the "last hb" detail. The status word
+                  // ("offline") already conveys staleness and an age like
+                  // "-1s" / "?s" only confuses the user.
+                  `Pi: ${device.device_name} (offline)`
               : 'No Pi paired'}
           </div>
         </div>
@@ -876,7 +970,7 @@ function ProductEditor({
   currentScaleReadingG,
   onConfirmAutoTare,
 }: ProductEditorProps) {
-  const { product, nutrition, isFullContainer } = state;
+  const { product, nutrition, isFullContainer, offMiss } = state;
   // hasNet is driven by the editable nutrition.netWeightG, not the stored
   // product.net_weight_g. User can type in a net weight (or accept the
   // spc×serving_weight_g derivation) and unlock the Full + sealed path
@@ -887,9 +981,38 @@ function ProductEditor({
   return (
     <section className="rounded-md border border-slate-200 p-4 space-y-4" data-testid="livetrack-product-loaded">
       <header>
-        <h3 className="font-semibold text-lg">{product.name}</h3>
-        {product.barcode ? <p className="text-xs text-slate-500 font-mono">{product.barcode}</p> : null}
+        {/* Editable name field. Replaces the prior read-only h3 so the
+            operator can correct OFF prefill (or enter from scratch on
+            OFF-miss). Stored back to products.name on save. */}
+        <label className="block text-sm" htmlFor="lt-name">
+          <span className="block text-slate-500 text-xs">Name</span>
+          <input
+            id="lt-name"
+            type="text"
+            className="w-full rounded border border-slate-300 px-2 py-1 font-semibold text-base"
+            value={nutrition.name}
+            onChange={(e) => onNutritionChange({ name: e.target.value })}
+            data-testid="livetrack-field-name"
+            placeholder="Product name"
+          />
+        </label>
+        {product.barcode ? <p className="text-xs text-slate-500 font-mono mt-1">{product.barcode}</p> : null}
       </header>
+
+      {offMiss ? (
+        // OFF-miss banner — neutral hint, not an error. Surfaced when
+        // analyze-product returned 404 (OFF has no record for this
+        // barcode). Common for store-brands, regional products, recently
+        // launched SKUs. Wizard still proceeds; the operator just fills
+        // in the details by hand.
+        <div
+          className="rounded border border-slate-300 bg-slate-50 p-3 text-sm text-slate-700"
+          data-testid="livetrack-off-miss-notice"
+          role="status"
+        >
+          No OpenFoodFacts data for this barcode — please fill in the details below.
+        </div>
+      ) : null}
 
       <div className="grid grid-cols-2 gap-2">
         <Field
@@ -946,6 +1069,16 @@ function ProductEditor({
           label="Net wt (g)"
           value={nutrition.netWeightG}
           onChange={(v) => onNutritionChange({ netWeightG: v })}
+        />
+        {/* Tare weight is now first-class in the form. Editable at all
+            times; auto / AI / manual tare paths still populate it via
+            the wizard reducer + applyManualTare, but the operator can
+            also override inline. */}
+        <Field
+          id="lt-tare-weight"
+          label="Tare wt (g)"
+          value={nutrition.tareWeightG}
+          onChange={(v) => onNutritionChange({ tareWeightG: v })}
         />
       </div>
 

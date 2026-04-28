@@ -201,6 +201,37 @@ export function isDeviceFresh(lastHeartbeatTs: string | null | undefined): boole
 }
 
 /**
+ * Compute display-friendly seconds-since-last-heartbeat for the wizard's
+ * device-status banner.
+ *
+ * Returns:
+ *   * ``null`` — no heartbeat ts on file, or the timestamp parses as NaN.
+ *     Caller renders "?".
+ *   * ``0..N`` — seconds since the heartbeat, clamped at 0. Negative
+ *     ages (Pi clock skewed slightly ahead of the browser) bucket as 0
+ *     so the UI never renders the confusing "-1s ago" string. The user
+ *     only cares about staleness; sub-second clock skew between client
+ *     and Pi is functionally indistinguishable from "just now".
+ *
+ * ``nowMs`` defaults to ``Date.now()``; an injectable wall clock keeps
+ * the unit test deterministic.
+ *
+ * Exported so ``__tests__/unit/pure/livetrack-heartbeat.test.ts`` can
+ * pin the negative-age clamp + null/non-finite handling.
+ */
+export function computeHeartbeatAgeSeconds(
+  lastHeartbeatTs: string | null | undefined,
+  nowMs: number = Date.now(),
+): number | null {
+  if (!lastHeartbeatTs) return null;
+  const ts = new Date(lastHeartbeatTs).getTime();
+  if (!Number.isFinite(ts)) return null;
+  const rawSecs = Math.round((nowMs - ts) / 1000);
+  if (!Number.isFinite(rawSecs)) return null;
+  return Math.max(0, rawSecs);
+}
+
+/**
  * LiveTrack qty_containers derivation — fixed by commit 91550dd.
  *
  * Before the fix the wizard save-path hardcoded qty_containers: 1 for
