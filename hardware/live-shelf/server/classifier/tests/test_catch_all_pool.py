@@ -223,3 +223,66 @@ def test_pool_lot_id_persists_through_rebuild():
     pool = pool_for_catch_all(300.0, ctx)
     pick = next(c for c in pool if c.candidate_id == "LOT-Z")
     assert pick.lot_id == "LOT-Z"
+
+
+# ----------------------------------------------------------------------
+# Codex finding MEDIUM-5 (2026-04-28): Tier 1 / Tier 2 lot dedupe
+# ----------------------------------------------------------------------
+
+
+def test_pool_dedupes_lot_when_present_in_both_tiers():
+    """Regression: same lot returned by BOTH the in-flight tier AND the
+    inventory tier must appear exactly ONCE in the pool. Pre-fix the
+    same lot could be in Tier 1 (in_flight_kind='catch_all') AND Tier 2
+    (certified-not-on-shelf was previously also accepting
+    in_flight_kind='catch_all'); the duplicate then crowded out a
+    real candidate after top-N truncation.
+
+    Mutation guard: the dedupe pass uses a ``seen_lot_ids`` set keyed by
+    the candidate's lot_id. Removing the set membership check (or
+    reverting Tier 2's source query to permit ``in_flight_kind='catch_all'``
+    rows AND removing the post-concat dedupe) re-introduces the
+    duplicate and fails the count assertion.
+    """
+    same_lot = _lot("LOT-DUP", 250.0)
+    ctx = ClassifierContext(
+        source=_CatchAllStubSource(
+            in_flight=[same_lot],
+            inventory=[same_lot],  # legitimately exposes the same lot
+        ),
+    )
+    pool = pool_for_catch_all(250.0, ctx)
+    ids = [c.candidate_id for c in pool if c.candidate_id != UNKNOWN_CANDIDATE_ID]
+    # The lot appears exactly once.
+    assert ids.count("LOT-DUP") == 1, (
+        f"expected lot LOT-DUP exactly once in pool, got {ids}"
+    )
+
+
+def test_pool_dedupe_prefers_in_flight_tier():
+    """When both tiers expose the same lot_id, the dedupe pass keeps
+    the FIRST occurrence (Tier 1 — in-flight). The Tier 1 candidate's
+    ``why_candidate='in_flight'`` outranks Tier 2's ``inventory_only``,
+    so the in-flight semantics drive the apply branch — i.e. SECOND
+    measurement wins over FIRST, which is the safer default when
+    state is ambiguous.
+
+    Mutation guard: re-ordering the concat to ``inventory_lots +
+    in_flight_lots`` would make this test fail because the kept
+    candidate's why_candidate would be ``inventory_only`` instead of
+    ``in_flight``.
+    """
+    in_flight_v = _lot("LOT-BOTH", 200.0, status="on_shelf")
+    inventory_v = _lot("LOT-BOTH", 200.0, status="out")
+    ctx = ClassifierContext(
+        source=_CatchAllStubSource(
+            in_flight=[in_flight_v],
+            inventory=[inventory_v],
+        ),
+    )
+    pool = pool_for_catch_all(200.0, ctx)
+    pick = next(c for c in pool if c.candidate_id == "LOT-BOTH")
+    assert pick.why_candidate == "in_flight", (
+        "in-flight tier must win the dedupe so the SECOND-measurement "
+        "branch fires when the lot is mid-session"
+    )

@@ -2037,20 +2037,44 @@ class ScaleHandler:
         Branch logic, in order:
 
           1. ``item_id == UNKNOWN`` → fall through to legacy review path.
-          2. Picked candidate's ``cloud_lots`` row has
+          2. **Hallucination guard (Codex HIGH-1, 2026-04-28):**
+             ``item_id`` MUST appear in ``classification.candidate_pool_used``.
+             A model-invented id is treated like UNKNOWN — fall through
+             to the legacy review path so no cloud emit can fire for an
+             out-of-pool lot.
+          3. Picked candidate's ``cloud_lots`` row has
              ``in_flight_kind='catch_all'`` → SECOND event. Emit
              ``catch_all_second_measurement`` with the lot's existing
              ``pickup_event_id`` as the cloud's lookup key.
-          3. Empty-bottle short-circuit (preserves commit abbd518): if
+          4. Empty-bottle short-circuit (preserves commit abbd518): if
              measured weight ≈ tare ± 5% of (tare+net) AND the picked
              lot is NOT in-flight on catch-all → emit ``discarded``
              directly via the existing manual-discard cloud emit. This
              is the "user places an empty container with no prior
              session" path.
-          4. Otherwise → FIRST event. Emit
+          5. Otherwise → FIRST event. Emit
              ``catch_all_first_measurement`` with this Pi event_id
              stamped as ``pi_event_id`` so the cloud can write it onto
              ``stock_lots.pickup_event_id``.
+
+        **Fail-closed semantics (Codex HIGH-2, 2026-04-28):** every
+        cloud emit's return value is checked. ``None`` (the
+        ``CloudEventEmitter._enqueue`` failure sentinel) or an exception
+        means the event is NOT marked handled — the caller falls
+        through to the legacy review path so the sweeper can retry,
+        rather than silently dropping the event.
+
+        **Local fast-path marker (Codex HIGH-3, 2026-04-28):** after a
+        successful FIRST emit, the local ``cloud_lots`` mirror is
+        write-through-updated to ``in_flight_kind='catch_all'`` +
+        ``pickup_event_id`` synchronously. The next event's branch
+        decision sees the fresh state immediately rather than waiting
+        for the lot-snapshot poller's 60s sync. After a successful
+        SECOND emit the markers are cleared the same way. The Pi
+        mirror is non-authoritative — if the cloud later disagrees the
+        poller overwrites these write-throughs, but in the common case
+        the local update guarantees first→second routing is immune to
+        sync lag.
         """
         if not isinstance(classification, dict):
             return False
@@ -2060,6 +2084,40 @@ class ScaleHandler:
             return False
 
         cid = str(item_id)
+
+        # ----------------------------------------------------------------
+        # Codex HIGH-1 (2026-04-28): hallucination guard. Validate the
+        # picked id against the pool we sent the classifier BEFORE any
+        # cloud-emit branch can fire. The legacy fall-through path also
+        # has this guard, but for catch-all the cloud emits happen
+        # INSIDE _dispatch_catch_all_add — never reaching the legacy
+        # check — so we must enforce it here too. An out-of-pool id
+        # (model error / drift / hallucination) routes to the legacy
+        # review path so the user can confirm rather than touching a
+        # random lot.
+        #
+        # We also accept any pool entry's ``lot_id`` as valid — the
+        # reunite guard (and the lot-keyed catch-all pool itself)
+        # legitimately uses lot_ids as candidate_ids.
+        # ----------------------------------------------------------------
+        valid_pool_ids: set[str] = set()
+        for c in classification.get("candidate_pool_used") or []:
+            if not isinstance(c, dict):
+                continue
+            pool_cid = c.get("candidate_id")
+            if pool_cid:
+                valid_pool_ids.add(str(pool_cid))
+            pool_lid = c.get("lot_id")
+            if pool_lid:
+                valid_pool_ids.add(str(pool_lid))
+        if valid_pool_ids and cid not in valid_pool_ids:
+            log.warning(
+                "catch_all dispatch: classifier returned item_id %r not in "
+                "candidate pool — refusing to emit (event %s). Falling "
+                "through to legacy review path.",
+                cid, event_id,
+            )
+            return False
 
         # Look up the cloud_lots row for this lot_id. The catch-all
         # candidate pool sources from cloud_lots (Tier 1 + Tier 2), so
@@ -2133,21 +2191,42 @@ class ScaleHandler:
                     "first_event_pi_event_id": str(existing_pickup_event_id),
                 },
             )
+            # HIGH-2 fail-closed: enqueue failure (None) or exception
+            # MUST NOT mark the event handled. Return False so the
+            # caller falls through to the legacy review/sweeper path.
             try:
-                self._cloud_emitter.emit_catch_all_second_measurement(
+                client_event_id = self._cloud_emitter.emit_catch_all_second_measurement(
                     scale_id=scale_id,
                     product_id=str(product_id),
                     measured_weight_g=measured_g,
                     first_event_pi_event_id=str(existing_pickup_event_id),
                     occurred_at=event_ts,
                 )
-            except Exception:  # pragma: no cover - defensive
+            except Exception:
                 log.exception(
                     "catch_all dispatch: emit_catch_all_second_measurement "
-                    "threw for event %s lot %s",
+                    "threw for event %s lot %s — leaving event pending "
+                    "for sweeper retry",
                     event_id, cloud_lot_id,
                 )
                 return False
+            if not client_event_id:
+                log.warning(
+                    "catch_all dispatch: emit_catch_all_second_measurement "
+                    "returned no client_event_id for event %s lot %s — "
+                    "leaving event pending for sweeper retry",
+                    event_id, cloud_lot_id,
+                )
+                return False
+            # HIGH-3 fast-path mirror: clear the in-flight markers locally
+            # so the next event's lookup sees the closed-session state
+            # immediately (the lot-snapshot poller will re-sync from
+            # cloud later, but the local row is non-authoritative — the
+            # write-through is correct under the cloud's projection
+            # semantics).
+            self._writethrough_clear_catch_all_in_flight(
+                lot_id=str(cloud_lot_id), event_id=event_id,
+            )
             log.info(
                 "catch_all SECOND measurement: lot %s product %s "
                 "measured=%.1fg first_event=%s (Pi event %s)",
@@ -2177,22 +2256,37 @@ class ScaleHandler:
                     "measured_weight_g": measured_g,
                 },
             )
+            # HIGH-2 fail-closed: same as above. The pre-fix code
+            # swallowed exceptions and still returned True, silently
+            # dropping the event. MEDIUM-6: include lot_id so the cloud
+            # apply zeros THIS lot specifically rather than whatever a
+            # product-level FEFO lookup would pick.
             try:
-                self._cloud_emitter.emit_manual_discard(
+                client_event_id = self._cloud_emitter.emit_manual_discard(
                     scale_id=scale_id,
                     product_id=str(product_id),
                     kind="catch_all",
                     occurred_at=event_ts,
                     pi_event_id=event_id,
+                    lot_id=str(cloud_lot_id),
                 )
-            except Exception:  # pragma: no cover - defensive
+            except Exception:
                 log.warning(
                     "catch_all dispatch: emit_manual_discard threw for "
-                    "event %s lot %s",
+                    "event %s lot %s — leaving event pending for "
+                    "sweeper retry",
                     event_id, cloud_lot_id,
                     exc_info=True,
                 )
-                # Fall through anyway so we don't double-emit on retry.
+                return False
+            if not client_event_id:
+                log.warning(
+                    "catch_all dispatch: emit_manual_discard returned no "
+                    "client_event_id for event %s lot %s — leaving event "
+                    "pending for sweeper retry",
+                    event_id, cloud_lot_id,
+                )
+                return False
             log.info(
                 "catch_all empty-bottle discard: lot %s product %s "
                 "measured=%.1fg (no prior session) — emitted discarded",
@@ -2220,27 +2314,140 @@ class ScaleHandler:
                 "measured_weight_g": measured_g,
             },
         )
+        # HIGH-2 fail-closed: as above.
         try:
-            self._cloud_emitter.emit_catch_all_first_measurement(
+            client_event_id = self._cloud_emitter.emit_catch_all_first_measurement(
                 scale_id=scale_id,
                 product_id=str(product_id),
                 measured_weight_g=measured_g,
                 pi_event_id=str(event_id),
                 occurred_at=event_ts,
             )
-        except Exception:  # pragma: no cover - defensive
+        except Exception:
             log.exception(
                 "catch_all dispatch: emit_catch_all_first_measurement "
-                "threw for event %s lot %s",
+                "threw for event %s lot %s — leaving event pending for "
+                "sweeper retry",
                 event_id, cloud_lot_id,
             )
             return False
+        if not client_event_id:
+            log.warning(
+                "catch_all dispatch: emit_catch_all_first_measurement "
+                "returned no client_event_id for event %s lot %s — "
+                "leaving event pending for sweeper retry",
+                event_id, cloud_lot_id,
+            )
+            return False
+        # HIGH-3 fast-path mirror: stamp the in-flight markers locally so
+        # a quick SECOND event (arriving before the lot-snapshot poller
+        # syncs) routes correctly via Branch 2. Without this, a second
+        # measurement under the 60s sync window would re-route as
+        # another FIRST measurement (mirroring the cloud's stale
+        # in_flight_kind=NULL state) and lose consumption accounting.
+        self._writethrough_stamp_catch_all_in_flight(
+            lot_id=str(cloud_lot_id),
+            pickup_event_id=str(event_id),
+            in_flight_since=event_ts,
+        )
         log.info(
             "catch_all FIRST measurement: lot %s product %s "
             "measured=%.1fg (Pi event %s stamped as pickup_event_id)",
             cloud_lot_id, product_id, measured_g, event_id,
         )
         return True
+
+    # ------------------------------------------------------------------
+    # HIGH-3 fast-path mirror helpers (2026-04-28).
+    #
+    # The Pi's ``cloud_lots`` table is a NON-authoritative mirror of the
+    # cloud's stock_lots projection, kept fresh by the lot-snapshot
+    # poller (≤ 60s lag). The catch-all dispatch's first→second routing
+    # depends on reading ``in_flight_kind='catch_all'`` from this
+    # mirror; without a synchronous local update the poller's sync lag
+    # creates a window where a quick second event re-routes as a first
+    # measurement and the consumption is never recorded.
+    #
+    # The two helpers below write through the local mirror at emit time
+    # (after the cloud emit has succeeded). The poller is the eventual
+    # source of truth — if it re-syncs and overwrites our value, the
+    # mirror still ends up correct on the next poll. The window we're
+    # closing is only the moments between emit and next poll, which is
+    # exactly when a follow-up event is most likely.
+    # ------------------------------------------------------------------
+
+    def _writethrough_stamp_catch_all_in_flight(
+        self,
+        *,
+        lot_id: str,
+        pickup_event_id: str,
+        in_flight_since: str,
+    ) -> None:
+        """Mirror the cloud's stamping of catch-all in-flight on a lot.
+
+        Writes ``in_flight_kind='catch_all'``, ``pickup_event_id``, and
+        ``in_flight_since`` to the local ``cloud_lots`` row so the next
+        catch-all event's lookup sees the new state immediately rather
+        than waiting for the lot-snapshot poller's next tick.
+
+        Best-effort: failures are logged but never raised. The poller
+        is the authority and will catch up within ~60s even if the
+        local write fails.
+        """
+        try:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    UPDATE cloud_lots
+                       SET in_flight_kind = 'catch_all',
+                           pickup_event_id = ?,
+                           in_flight_since = ?
+                     WHERE lot_id = ?
+                       AND deleted_at IS NULL
+                    """,
+                    (pickup_event_id, in_flight_since, lot_id),
+                )
+        except Exception:  # pragma: no cover - defensive
+            log.warning(
+                "catch_all dispatch: write-through stamp on cloud_lots "
+                "lot %s failed — relying on poller (~60s lag)",
+                lot_id, exc_info=True,
+            )
+
+    def _writethrough_clear_catch_all_in_flight(
+        self,
+        *,
+        lot_id: str,
+        event_id: Optional[str],
+    ) -> None:
+        """Mirror the cloud's clearing of catch-all in-flight markers.
+
+        Symmetric to :meth:`_writethrough_stamp_catch_all_in_flight`.
+        Called after a successful SECOND-measurement emit so the next
+        event sees the closed-session state immediately.
+
+        Best-effort: failures are logged but never raised.
+        """
+        try:
+            with self._conn:
+                self._conn.execute(
+                    """
+                    UPDATE cloud_lots
+                       SET in_flight_kind = NULL,
+                           pickup_event_id = NULL,
+                           in_flight_since = NULL
+                     WHERE lot_id = ?
+                       AND in_flight_kind = 'catch_all'
+                       AND deleted_at IS NULL
+                    """,
+                    (lot_id,),
+                )
+        except Exception:  # pragma: no cover - defensive
+            log.warning(
+                "catch_all dispatch: write-through clear on cloud_lots "
+                "lot %s (event %s) failed — relying on poller (~60s lag)",
+                lot_id, event_id, exc_info=True,
+            )
 
     def _matches_empty_bottle_window(
         self,

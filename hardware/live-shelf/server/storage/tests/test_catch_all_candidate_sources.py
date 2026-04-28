@@ -241,9 +241,17 @@ def test_certified_not_on_shelf_excludes_live_shelf_in_flight(conn):
     assert [r[0] for r in rows] == []
 
 
-def test_certified_not_on_shelf_includes_catch_all_in_flight_too(conn):
-    """A lot already in-flight on catch_all is still a valid candidate
-    — picking it triggers the SECOND-event branch, not the first.
+def test_certified_not_on_shelf_excludes_catch_all_in_flight(conn):
+    """**2026-04-28 (Codex finding MEDIUM-5):** Tier 1
+    (``list_cloud_in_flight_catch_all_lots``) already exposes every lot
+    with ``in_flight_kind='catch_all'``. Tier 2 must therefore EXCLUDE
+    those rows so the two tiers are strictly disjoint at the source —
+    no lot appears in both, so the post-concat dedupe never has work
+    to do under normal operation.
+
+    Mutation guard: reverting the source query to
+    ``in_flight_kind IS NULL OR 'catch_all'`` lets the row leak back
+    into Tier 2 — this assertion catches it.
     """
     _seed_product(conn, "P")
     _seed_cloud_lot(
@@ -253,7 +261,10 @@ def test_certified_not_on_shelf_includes_catch_all_in_flight_too(conn):
     )
 
     rows = storage_repo.list_certified_not_on_shelf_lots_by_oldest_created(conn)
-    assert [r[0] for r in rows] == ["L"]
+    assert [r[0] for r in rows] == [], (
+        "catch_all in-flight rows belong to Tier 1 only; Tier 2 must "
+        "stay disjoint"
+    )
 
 
 def test_certified_not_on_shelf_excludes_pi_local_lot_holders(conn):

@@ -584,9 +584,23 @@ def pool_for_catch_all(
         )
 
     rebuilt: list[Candidate] = []
+    seen_lot_ids: set[str] = set()
+    # **2026-04-28 (Codex finding MEDIUM-5):** Tier 1 (in-flight) and
+    # Tier 2 (inventory-only) are now strictly disjoint at the source
+    # query (Tier 2 excludes ``in_flight_kind IS NOT NULL``), but we
+    # also dedupe by lot_id here as a belt-and-braces guard. If a
+    # future repo refactor re-introduces overlap, the first
+    # occurrence wins (Tier 1 in-flight always precedes Tier 2 in the
+    # iteration order below) and the duplicate is silently dropped
+    # before ranking + truncation, so a single lot can never crowd out
+    # real options or appear twice in the prompt.
     for c in in_flight_lots + inventory_lots:
         if c.lot_id is None:
             continue
+        lot_id_str = str(c.lot_id)
+        if lot_id_str in seen_lot_ids:
+            continue
+        seen_lot_ids.add(lot_id_str)
         rebuilt.append(_lot_keyed(c, c.lot_id))
 
     # No product-collapse: catch-all pool is lot-keyed (each lot has its

@@ -1318,10 +1318,17 @@ def list_certified_not_on_shelf_lots_by_oldest_created(
     candidate pool. Predicates:
 
       * ``cloud_lots.qty_containers > 0`` — must have stock.
-      * ``cloud_lots.in_flight_kind`` is NULL or 'catch_all'.
-        Excluding live_shelf in-flight rows means a lot mid-pickup-
-        on-the-live-shelf cannot be misclassified as a catch-all
-        candidate.
+      * ``cloud_lots.in_flight_kind`` IS NULL.
+        **2026-04-28 (Codex finding MEDIUM-5):** Tier 1
+        (``list_cloud_in_flight_catch_all_lots``) already returns every
+        lot with ``in_flight_kind='catch_all'``; including those rows
+        again in Tier 2 produced duplicate candidates that crowded out
+        real options after the top-N truncation. Restricting Tier 2 to
+        ``in_flight_kind IS NULL`` makes the two tiers strictly
+        disjoint at the source — no post-concat dedupe pass is needed.
+        live_shelf in-flight rows are still excluded (covered by the
+        Pi-local ``lots`` row predicate below — a live-shelf in-flight
+        lot has a Pi-local row).
       * Product is certified (``products.certified = 1``) and not soft-
         deleted (``products.deleted_at IS NULL``).
       * The product has no current Pi-local ``lots`` row on any shelf.
@@ -1355,7 +1362,7 @@ def list_certified_not_on_shelf_lots_by_oldest_created(
            AND cl.deleted_at IS NULL
            AND p.deleted_at IS NULL
            AND p.certified = 1
-           AND (cl.in_flight_kind IS NULL OR cl.in_flight_kind = 'catch_all')
+           AND cl.in_flight_kind IS NULL
            AND NOT EXISTS (
                  SELECT 1 FROM lots l
                   WHERE l.product_id = cl.product_id

@@ -598,6 +598,7 @@ class CloudEventEmitter:
         kind: str = "live_shelf",
         occurred_at: Optional[str] = None,
         pi_event_id: Optional[str] = None,
+        lot_id: Optional[str] = None,
     ) -> Optional[str]:
         """Emit a cloud ``discarded`` event from the Pi /inventory remove button.
 
@@ -619,6 +620,14 @@ class CloudEventEmitter:
         state is the leading edge. Cloud-side dedup via
         shelf_event_log UNIQUE(user_id, client_event_id) makes a
         worker retry safe.
+
+        **2026-04-28 (Codex finding MEDIUM-6):** ``lot_id`` (cloud lot
+        UUID) is now optional. When supplied, the cloud apply path
+        prefers it over product-level FEFO when picking which lot to
+        zero. Required for the catch-all empty-bottle short-circuit so
+        the visually-identified in-flight lot is what gets zeroed
+        rather than whatever lot FEFO would otherwise pick (which can
+        differ when the same product has multiple lots).
         """
         if not product_id:
             return None
@@ -635,6 +644,12 @@ class CloudEventEmitter:
         }
         if pi_event_id:
             payload["pi_event_id"] = pi_event_id
+        if lot_id:
+            # Forwarded by the edge function as ``pi_lot_id`` (the
+            # cloud-side parameter name). Older edge-function versions
+            # ignore unknown payload keys, so adding the field is
+            # backward-compatible.
+            payload["pi_lot_id"] = lot_id
         return self._enqueue(payload)
 
     def emit_in_flight_return_marker(

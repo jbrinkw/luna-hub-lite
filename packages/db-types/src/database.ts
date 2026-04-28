@@ -783,6 +783,26 @@ export type Database = {
           out_qty_containers: number
         }[]
       }
+      apply_discard_with_lot_id_admin: {
+        Args: {
+          p_client_event_id: string
+          p_device_id: string
+          p_kind: string
+          p_occurred_at: string
+          p_pi_event_id?: string
+          p_pi_lot_id: string
+          p_product_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       apply_event_override: {
         Args: {
           p_calories_override?: number
@@ -1713,6 +1733,26 @@ export type Database = {
       activate_app: {
         Args: { p_app_name: string; p_user_id: string }
         Returns: undefined
+      }
+      apply_discard_with_lot_id: {
+        Args: {
+          p_client_event_id: string
+          p_device_id: string
+          p_kind: string
+          p_occurred_at: string
+          p_pi_event_id?: string
+          p_pi_lot_id: string
+          p_product_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
       }
       apply_event_override: {
         Args: {

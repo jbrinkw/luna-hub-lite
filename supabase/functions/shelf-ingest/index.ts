@@ -550,21 +550,50 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     return jsonResponse({ error: 'product_id required' }, 400);
   }
 
-  // Hand off to the plpgsql function. It owns idempotency: if this
-  // client_event_id was already processed, it replays the cached result
-  // inside the same transaction (no race window).
-  const { data, error } = await (supabase as any).schema('chefbyte').rpc('apply_shelf_event_admin', {
-    p_user_id: device.user_id,
-    p_device_id: device.device_id,
-    p_scale_id: scaleId,
-    p_kind: kind,
-    p_event_kind: eventKind,
-    p_product_id: productId,
-    p_delta_g: deltaG,
-    p_occurred_at: occurredAt,
-    p_client_event_id: clientEventId,
-    p_pi_event_id: piEventId,
-  });
+  // Codex MEDIUM-6 fix (2026-04-28): catch-all empty-bottle short-circuit
+  // sends a ``discarded`` event with an explicit ``pi_lot_id`` so the cloud
+  // zeros the visually-identified lot rather than whatever a product-level
+  // FEFO would pick. Route those requests through the lot-targeted helper
+  // (private.apply_discard_with_lot_id) added in 20260428030000. The
+  // legacy apply_shelf_event_admin path remains the default — older Pi
+  // versions that don't include pi_lot_id continue to work unchanged.
+  const piLotId: string | null =
+    typeof body?.pi_lot_id === 'string' && body.pi_lot_id.length > 0 && body.pi_lot_id.length <= 64
+      ? body.pi_lot_id
+      : null;
+  const isLotTargetedDiscard = eventKind === 'discarded' && kind === 'catch_all' && piLotId !== null;
+
+  let data: any;
+  let error: any;
+  if (isLotTargetedDiscard) {
+    ({ data, error } = await (supabase as any).schema('chefbyte').rpc('apply_discard_with_lot_id_admin', {
+      p_user_id: device.user_id,
+      p_device_id: device.device_id,
+      p_scale_id: scaleId,
+      p_kind: kind,
+      p_pi_lot_id: piLotId,
+      p_product_id: productId,
+      p_occurred_at: occurredAt,
+      p_client_event_id: clientEventId,
+      p_pi_event_id: piEventId,
+    }));
+  } else {
+    // Hand off to the plpgsql function. It owns idempotency: if this
+    // client_event_id was already processed, it replays the cached result
+    // inside the same transaction (no race window).
+    ({ data, error } = await (supabase as any).schema('chefbyte').rpc('apply_shelf_event_admin', {
+      p_user_id: device.user_id,
+      p_device_id: device.device_id,
+      p_scale_id: scaleId,
+      p_kind: kind,
+      p_event_kind: eventKind,
+      p_product_id: productId,
+      p_delta_g: deltaG,
+      p_occurred_at: occurredAt,
+      p_client_event_id: clientEventId,
+      p_pi_event_id: piEventId,
+    }));
+  }
 
   if (error) {
     // Always include client_event_id so operators can correlate a 500 with
