@@ -332,4 +332,182 @@ describe('useScannerDetection', () => {
 
     expect(onBarcodeScanned).not.toHaveBeenCalled();
   });
+
+  /* ---------------------------------------------------------------- */
+  /*  onScanDropped — silent-keystroke-drop UX bug fix                 */
+  /* ---------------------------------------------------------------- */
+  //
+  // Background: when focus is on a non-scanner input/textarea, the hook's
+  // protected-target rule clears the buffer and early-returns. A hardware
+  // scanner = keyboard emulator firing here drops the entire scan
+  // silently. The fix surfaces the drop via `onScanDropped` so the page
+  // can render a toast / flip an indicator.
+  //
+  // These tests assert the callback fires with the right reason + detail
+  // for each early-return path inside the global keydown listener, and
+  // that the legitimate scanner-input path STILL flows through
+  // `onBarcodeScanned` untouched.
+
+  describe('onScanDropped', () => {
+    it('fires with reason "protected-target" when focus is on a textarea', () => {
+      const onBarcodeScanned = vi.fn();
+      const onScanDropped = vi.fn();
+      renderHook(() => useScannerDetection({ onBarcodeScanned, onScanDropped }));
+
+      const textarea = document.createElement('textarea');
+      document.body.appendChild(textarea);
+
+      try {
+        // Type 6 rapid digits + Enter targeting the textarea.
+        let time = 1000;
+        for (const char of '123456') {
+          nowSpy.mockReturnValue(time);
+          fireKey(char, { target: textarea });
+          time += 10;
+        }
+        nowSpy.mockReturnValue(time);
+        fireKey('Enter', { target: textarea });
+
+        // The barcode callback never fired (the silent-drop bug).
+        expect(onBarcodeScanned).not.toHaveBeenCalled();
+        // But onScanDropped DID fire — once per intercepted keystroke.
+        expect(onScanDropped).toHaveBeenCalled();
+        const calls = onScanDropped.mock.calls;
+        // Every call should carry the protected-target reason.
+        for (const [reason, detail] of calls) {
+          expect(reason).toBe('protected-target');
+          expect(detail.targetTagName?.toUpperCase()).toBe('TEXTAREA');
+        }
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    });
+
+    it('fires with reason "protected-target" when focus is on a protected input ID', () => {
+      const onBarcodeScanned = vi.fn();
+      const onScanDropped = vi.fn();
+      renderHook(() =>
+        useScannerDetection({
+          onBarcodeScanned,
+          onScanDropped,
+          protectedInputIds: ['nut-calories'],
+        }),
+      );
+
+      const input = document.createElement('input');
+      input.id = 'nut-calories';
+      document.body.appendChild(input);
+
+      try {
+        nowSpy.mockReturnValue(1000);
+        fireKey('5', { target: input });
+
+        expect(onBarcodeScanned).not.toHaveBeenCalled();
+        expect(onScanDropped).toHaveBeenCalledWith(
+          'protected-target',
+          expect.objectContaining({
+            targetId: 'nut-calories',
+            key: '5',
+          }),
+        );
+      } finally {
+        document.body.removeChild(input);
+      }
+    });
+
+    it('does NOT fire onScanDropped when keystrokes go to the legitimate barcode input', () => {
+      const onBarcodeScanned = vi.fn();
+      const onScanDropped = vi.fn();
+      renderHook(() => useScannerDetection({ onBarcodeScanned, onScanDropped }));
+
+      const barcodeInput = document.createElement('input');
+      barcodeInput.setAttribute('data-testid', 'barcode-input');
+      document.body.appendChild(barcodeInput);
+
+      try {
+        let time = 1000;
+        for (const char of '123456') {
+          nowSpy.mockReturnValue(time);
+          fireKey(char, { target: barcodeInput });
+          time += 10;
+        }
+        nowSpy.mockReturnValue(time);
+        fireKey('Enter', { target: barcodeInput });
+
+        // Happy path: scan flows through cleanly. No drops.
+        expect(onBarcodeScanned).toHaveBeenCalledOnce();
+        expect(onBarcodeScanned).toHaveBeenCalledWith('123456');
+        expect(onScanDropped).not.toHaveBeenCalled();
+      } finally {
+        document.body.removeChild(barcodeInput);
+      }
+    });
+
+    it('fires with reason "buffer-stale" when the 200 ms inactivity timer wipes accumulated digits', () => {
+      const onBarcodeScanned = vi.fn();
+      const onScanDropped = vi.fn();
+      renderHook(() => useScannerDetection({ onBarcodeScanned, onScanDropped }));
+
+      // Type 3 rapid digits — buffer = "123" (below min length, not yet committed).
+      let time = 1000;
+      for (const char of '123') {
+        nowSpy.mockReturnValue(time);
+        fireKey(char);
+        time += 10;
+      }
+
+      // Advance fake timers past the 200 ms reset threshold. The internal
+      // setTimeout callback fires + emits 'buffer-stale'.
+      vi.advanceTimersByTime(200);
+
+      expect(onScanDropped).toHaveBeenCalledWith('buffer-stale', expect.objectContaining({ bufferLength: 3 }));
+      expect(onBarcodeScanned).not.toHaveBeenCalled();
+    });
+
+    it('fires with reason "non-digit-clears-buffer" when a stray non-digit kills an in-flight scan', () => {
+      const onBarcodeScanned = vi.fn();
+      const onScanDropped = vi.fn();
+      renderHook(() => useScannerDetection({ onBarcodeScanned, onScanDropped }));
+
+      // Type 4 rapid digits, then a stray non-digit (e.g. 'a').
+      let time = 1000;
+      for (const char of '1234') {
+        nowSpy.mockReturnValue(time);
+        fireKey(char);
+        time += 10;
+      }
+      nowSpy.mockReturnValue(time);
+      fireKey('a');
+
+      expect(onScanDropped).toHaveBeenCalledWith(
+        'non-digit-clears-buffer',
+        expect.objectContaining({ key: 'a', bufferLength: 4 }),
+      );
+      expect(onBarcodeScanned).not.toHaveBeenCalled();
+    });
+
+    it('does not throw if onScanDropped callback itself throws', () => {
+      const onBarcodeScanned = vi.fn();
+      const onScanDropped = vi.fn(() => {
+        throw new Error('handler bug');
+      });
+      renderHook(() => useScannerDetection({ onBarcodeScanned, onScanDropped }));
+
+      const textarea = document.createElement('textarea');
+      document.body.appendChild(textarea);
+
+      try {
+        // Suppress the expected console.error from the hook's safety net.
+        const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+        expect(() => {
+          nowSpy.mockReturnValue(1000);
+          fireKey('5', { target: textarea });
+        }).not.toThrow();
+        expect(onScanDropped).toHaveBeenCalled();
+        errSpy.mockRestore();
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    });
+  });
 });

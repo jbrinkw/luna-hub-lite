@@ -8,8 +8,51 @@ import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte, supabase } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { queryKeys } from '@/shared/queryKeys';
-import { useScannerDetection } from '@/hooks/useScannerDetection';
+import { useScannerDetection, type ScannerDropReason, type ScannerDropDetail } from '@/hooks/useScannerDetection';
 import { handleKeypadStep } from './keypadLogic';
+
+/**
+ * Snapshot of the most-recent dropped scan, surfaced as a transient toast.
+ *
+ * Captured the moment `useScannerDetection` reports a keystroke was eaten
+ * by the protected-target / buffer-stale / non-digit-clear rules. Auto-
+ * clears 3 s after the timestamp (or earlier if the user re-focuses the
+ * scanner field). Without this surfacing, a hardware scanner firing while
+ * focus was on a non-scanner input dropped digits + Enter into a void —
+ * the bug this whole change exists to fix.
+ */
+interface DroppedScanState {
+  reason: ScannerDropReason;
+  detail: ScannerDropDetail;
+  timestamp: number;
+  /** Pre-formatted message rendered into the toast body. */
+  message: string;
+}
+
+/** Duration the dropped-scan toast stays visible before auto-clearing. */
+const DROPPED_SCAN_TOAST_MS = 3000;
+
+/**
+ * Format the toast copy for a dropped scan event. Pure helper so the test
+ * can mutation-check the user-facing string without rendering. The brief
+ * specifies the format `"Scan ignored — focus is on <element>. Click the
+ * Scan field."` and we mirror it here, falling back to a generic
+ * description if the dropped-target metadata is incomplete.
+ */
+export function formatDroppedScanMessage(reason: ScannerDropReason, detail: ScannerDropDetail): string {
+  if (reason === 'protected-target') {
+    const label =
+      detail.targetId || (detail.targetTagName ? detail.targetTagName.toLowerCase() : null) || 'another field';
+    return `Scan ignored — focus is on ${label}. Click the Scan field.`;
+  }
+  if (reason === 'buffer-stale') {
+    return `Scan ignored — partial barcode timed out${
+      detail.bufferLength ? ` (${detail.bufferLength} digits lost)` : ''
+    }.`;
+  }
+  // non-digit-clears-buffer
+  return `Scan interrupted — a stray "${detail.key ?? 'key'}" cleared the buffer.`;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -267,10 +310,49 @@ export function ScannerPage() {
   // handleBarcodeSubmit is defined below but referenced here via ref
   const barcodeSubmitRef = useRef<(barcode: string) => void>(() => {});
 
+  /* ---- Scanner drop observability ----
+   *
+   * `droppedScan` records the most recent silent-drop event so the UI can
+   * render a transient toast. `scannerFocused` tracks whether the barcode
+   * input currently owns focus — drives the green/yellow indicator next
+   * to the input. Both pieces of state exist purely to surface the bug
+   * class where a hardware scanner fires while focus is on the wrong
+   * field and digits go to /dev/null. The protected-target predicate
+   * inside `useScannerDetection` itself is unchanged.
+   */
+  const [droppedScan, setDroppedScan] = useState<DroppedScanState | null>(null);
+  const [scannerFocused, setScannerFocused] = useState(false);
+  const droppedClearTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   useScannerDetection({
     onBarcodeScanned: (barcode) => barcodeSubmitRef.current(barcode),
+    onScanDropped: (reason, detail) => {
+      setDroppedScan({
+        reason,
+        detail,
+        timestamp: Date.now(),
+        message: formatDroppedScanMessage(reason, detail),
+      });
+      // Refresh the auto-clear timer on every drop so back-to-back drops
+      // (a hardware scanner fires 12 digits + Enter = 13 events) don't
+      // each schedule their own competing clear timeouts.
+      if (droppedClearTimerRef.current) clearTimeout(droppedClearTimerRef.current);
+      droppedClearTimerRef.current = setTimeout(() => {
+        setDroppedScan(null);
+        droppedClearTimerRef.current = null;
+      }, DROPPED_SCAN_TOAST_MS);
+    },
     protectedInputIds: ['nut-servingsPerContainer', 'nut-calories', 'nut-carbs', 'nut-fat', 'nut-protein'],
   });
+
+  // Clean up the toast timer on unmount so it can't fire setState after
+  // the component is gone (React would warn about state updates on an
+  // unmounted component).
+  useEffect(() => {
+    return () => {
+      if (droppedClearTimerRef.current) clearTimeout(droppedClearTimerRef.current);
+    };
+  }, []);
 
   /* ---------------------------------------------------------------- */
   /*  Barcode submit                                                   */
@@ -1175,6 +1257,19 @@ export function ScannerPage() {
             placeholder="Scan or type barcode..."
             aria-label="Barcode"
             autoFocus
+            onFocus={() => {
+              setScannerFocused(true);
+              // Re-focusing the scanner field is a strong "I noticed and
+              // am ready to scan again" signal. Clear any pending dropped-
+              // scan toast so the user isn't reading a stale message
+              // about a focus-mismatch they've already corrected.
+              if (droppedClearTimerRef.current) {
+                clearTimeout(droppedClearTimerRef.current);
+                droppedClearTimerRef.current = null;
+              }
+              setDroppedScan(null);
+            }}
+            onBlur={() => setScannerFocused(false)}
             onKeyDown={(e) => {
               if (e.key === 'Enter') {
                 e.preventDefault();
@@ -1183,6 +1278,52 @@ export function ScannerPage() {
             }}
             className="w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
           />
+
+          {/* Scanner-status indicator. Green dot = barcode input has focus
+              (hardware scans will be captured normally). Yellow dot =
+              focus is elsewhere; any hardware scanner pulse will be
+              eaten by the protected-target rule and digits will be
+              dropped silently unless the user re-focuses the field.
+              The persistent affordance complements the transient
+              dropped-scan toast below. */}
+          <div
+            data-testid="scanner-status-indicator"
+            data-scanner-focused={scannerFocused ? 'true' : 'false'}
+            role="status"
+            aria-live="polite"
+            className={`flex items-center gap-2 text-xs px-2 py-1 rounded-md border ${
+              scannerFocused
+                ? 'border-emerald-300 bg-success-subtle text-emerald-700'
+                : 'border-amber-300 bg-amber-50 text-amber-800'
+            }`}
+          >
+            <span
+              data-testid="scanner-status-dot"
+              aria-hidden="true"
+              className={`inline-block w-2 h-2 rounded-full ${scannerFocused ? 'bg-emerald-500' : 'bg-amber-500'}`}
+            />
+            <span data-testid="scanner-status-text">
+              {scannerFocused ? 'Scanner active' : 'Scanner inactive — focus the barcode field'}
+            </span>
+          </div>
+
+          {/* Dropped-scan toast. Only renders while a recent drop is
+              present in state; the auto-clear timer (3 s after the
+              latest drop) wipes it out, and re-focusing the scanner
+              input also wipes it. Without this surfacing, the
+              hardware-scanner-while-focus-elsewhere case looked
+              identical to "scanned successfully" from the user's side
+              — the exact UX bug we're closing. */}
+          {droppedScan && (
+            <div
+              data-testid="dropped-scan-toast"
+              role="alert"
+              aria-live="assertive"
+              className="text-xs px-2 py-1.5 rounded-md border border-amber-400 bg-amber-100 text-amber-900 font-medium"
+            >
+              {droppedScan.message}
+            </div>
+          )}
 
           {/* Filter buttons */}
           <div data-testid="filter-buttons" className="flex gap-1">
