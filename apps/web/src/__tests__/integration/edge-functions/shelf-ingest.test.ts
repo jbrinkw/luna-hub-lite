@@ -510,22 +510,34 @@ describe('shelf-ingest Edge Function', () => {
 
   // ─── /event — empty-lot revive (prod chocolate-milk fix 2026-04-22) ────
 
-  it('POST /event live_scale refilled REVIVES an empty lot at the merge-key tuple (prod chocolate-milk fix)', async () => {
-    // Production repro (2026-04-22): user had a chocolate-milk lot
-    // depleted to qty=0 on live_shelf; next event was a live_scale
-    // refill on scale-03 paired to the same product. The old resolver
-    // fell through to a MINT, which violated stock_lots_merge_key
-    // (user, product, location, COALESCE(expires_on,'9999-12-31')) and
-    // raised 23505 — rolling back the shelf_event_log INSERT with it.
-    // Result: zero shelf_event_log rows for this user, every /event
-    // call returned 500, Pi outbox stalled indefinitely.
+  it('POST /event live_scale refilled CLAIMS an empty lot via apply_live_scale_measurement (single_track-never-mints)', async () => {
+    // Production repro (2026-04-22): chocolate-milk lot depleted to
+    // qty=0 on live_shelf, next event was a live_scale refill on
+    // scale-03 paired to the same product.
     //
-    // Migration 20260425070000 adds an empty-lot reuse step: if any
-    // empty lot exists for (user, product) at the fallback location,
-    // REVIVE it (flip qty 0 → delta_g/net_weight_g) instead of minting.
+    // Pre-fix history:
+    //   * Original bug (2026-04-22): the old resolver fell through to
+    //     a MINT which violated stock_lots_merge_key → 500 → Pi outbox
+    //     stalled.
+    //   * Migration 20260425070000 added empty-lot reuse to the
+    //     resolver — fixed the 500, but still let live_scale create
+    //     phantom rows in OTHER scenarios.
+    //   * Migration 20260428060000 (single_track-never-mints) routes
+    //     live_scale ADDs through private.apply_live_scale_measurement
+    //     which uses SET semantics + claim-or-ignore. NEVER mints.
     //
-    // This test MUST fail against the pre-fix resolver (500 response)
-    // and pass after the migration lands.
+    // Under the new rule the chocolate-milk scenario works like this:
+    //   - User pairs scale-03 to product (scale_pairings row created
+    //     with lot_id=NULL). This is what the wizard does when the
+    //     user runs the LiveTrack pair flow.
+    //   - User places fresh bottle on the scale.
+    //   - apply_live_scale_measurement sees no pinned lot, finds the
+    //     existing (empty) lot of the product, claims it via
+    //     scale_pairings.lot_id update, SETs qty := after_weight/net_g.
+    //
+    // This test pins that contract. A regression that re-introduces
+    // the resolver-mint path for live_scale (or removes the pairing
+    // requirement) trips the assertions.
     const { data: prod } = await (adminClient as any)
       .schema('chefbyte')
       .from('products')
@@ -540,11 +552,6 @@ describe('shelf-ingest Edge Function', () => {
       .select('product_id')
       .single();
 
-    // Find the user's earliest-created location — that's what the
-    // resolver's mint path uses as fallback_location (ORDER BY
-    // created_at ASC LIMIT 1 inside private.apply_shelf_event). Seed
-    // the empty lot at THAT location so its merge-key collides with
-    // the mint path exactly — this is the production scenario.
     const { data: fallbackLoc } = await (adminClient as any)
       .schema('chefbyte')
       .from('locations')
@@ -568,6 +575,29 @@ describe('shelf-ingest Edge Function', () => {
       .select('lot_id')
       .single();
 
+    // NEW (single_track-never-mints): the wizard creates a
+    // scale_pairings row when the user pairs the scale to a product.
+    // Without this row, the apply path correctly REJECTS the event
+    // with reason='live_scale_no_pairing_ignore'. Seed the row with
+    // lot_id=NULL so the apply path exercises the claim branch.
+    const { data: device } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('live_shelf_devices')
+      .select('device_id')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: true })
+      .limit(1)
+      .single();
+
+    await (adminClient as any).schema('chefbyte').from('scale_pairings').insert({
+      user_id: userId,
+      device_id: device.device_id,
+      scale_id: 'scale-revive-03',
+      kind: 'live_scale',
+      product_id: prod.product_id,
+      lot_id: null,
+    });
+
     const clientEventId = crypto.randomUUID();
     const res = await fetch(`${BASE_URL}/event`, {
       method: 'POST',
@@ -578,23 +608,19 @@ describe('shelf-ingest Edge Function', () => {
         event_kind: 'refilled',
         product_id: prod.product_id,
         delta_g: 1000, // exactly 1 container
+        after_weight_g: 1000, // SET target
         occurred_at: new Date().toISOString(),
         client_event_id: clientEventId,
       }),
     });
 
-    // Before the fix: 500 because apply_shelf_event raised 23505.
-    // After the fix: 200 with applied=true.
     expect(res.status).toBe(200);
     const body = await res.json();
     expect(body.ok).toBe(true);
     expect(body.applied).toBe(true);
-    // The empty lot was revived, not a new one minted.
+    // The empty lot was claimed + revived to qty=1, not a new one minted.
     expect(body.resolved_lot_id).toBe(emptyLot.lot_id);
 
-    // shelf_event_log row landed — the whole point of the fix. Before
-    // the migration, the RPC's exception rolled this INSERT back, so
-    // there was no forensic trail at all.
     const { data: logRow } = await (adminClient as any)
       .schema('chefbyte')
       .from('shelf_event_log')
@@ -604,10 +630,13 @@ describe('shelf-ingest Edge Function', () => {
       .single();
     expect(logRow).toBeTruthy();
     expect(logRow.applied).toBe(true);
-    expect(logRow.reason).toBe('revived_empty_lot');
+    // SET-semantics fingerprint — was 'revived_empty_lot' before the
+    // single_track-never-mints fix, is 'live_scale_claimed_and_set'
+    // now (the claim path also covers the formerly-empty lot scenario).
+    expect(logRow.reason).toBe('live_scale_claimed_and_set');
     expect(logRow.resolved_lot_id).toBe(emptyLot.lot_id);
 
-    // Empty lot now has stock — 1000g / net_weight_g(1000) = 1 container.
+    // Empty lot now has stock — SET qty := 1000g / net(1000g) = 1.000.
     const { data: revivedLot } = await (adminClient as any)
       .schema('chefbyte')
       .from('stock_lots')
@@ -617,10 +646,19 @@ describe('shelf-ingest Edge Function', () => {
     expect(Number(revivedLot.qty_containers)).toBeCloseTo(1.0, 3);
     expect(revivedLot.last_update_source).toBe('live_scale');
 
-    // Exactly one lot for this product: the resurrected one. The
-    // merge_key unique index means a MINT attempt would have created
-    // a duplicate row — this assertion proves the resolver took the
-    // reuse path, not an (impossible) mint.
+    // Pairing's lot_id was claimed during apply.
+    const { data: pairing } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('scale_pairings')
+      .select('lot_id')
+      .eq('user_id', userId)
+      .eq('scale_id', 'scale-revive-03')
+      .eq('kind', 'live_scale')
+      .single();
+    expect(pairing.lot_id).toBe(emptyLot.lot_id);
+
+    // Exactly one lot for this product: the claimed one. NO new row
+    // minted — the no-mint rule.
     const { data: allLots } = await (adminClient as any)
       .schema('chefbyte')
       .from('stock_lots')
@@ -630,6 +668,12 @@ describe('shelf-ingest Edge Function', () => {
     expect(allLots.length).toBe(1);
 
     // Cleanup
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('scale_pairings')
+      .delete()
+      .eq('user_id', userId)
+      .eq('scale_id', 'scale-revive-03');
     await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('product_id', prod.product_id);
     await (adminClient as any)
       .schema('chefbyte')

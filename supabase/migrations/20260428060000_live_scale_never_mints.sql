@@ -142,19 +142,28 @@ BEGIN
   END IF;
 
   -- Pairing exists, lot_id NULL — try to claim a single unpaired lot.
+  -- Includes empty (qty=0) lots: an existing lot from a previous
+  -- live_shelf depletion is a legitimate claim target (the user is
+  -- placing a fresh bottle of the same product, the empty lot is the
+  -- canonical home for it). What we MUST NOT do is mint a brand-new
+  -- row — but reusing an existing one is the user's intent.
   SELECT lot_id, COUNT(*) OVER ()
     INTO v_unpaired_lot, v_unpaired_count
     FROM chefbyte.stock_lots sl
    WHERE sl.user_id = p_user_id
      AND sl.product_id = p_product_id
-     AND sl.qty_containers > 0
      AND NOT EXISTS (
        SELECT 1 FROM chefbyte.scale_pairings sp
         WHERE sp.user_id = p_user_id
           AND sp.kind = 'live_scale'
           AND sp.lot_id = sl.lot_id
      )
-   ORDER BY sl.created_at ASC
+   ORDER BY
+     -- Prefer qty>0 lots (active inventory) over empty lots so a
+     -- multi-lot scenario (one active + one empty) picks the active
+     -- one. When only an empty lot exists, it's still a valid claim.
+     CASE WHEN sl.qty_containers > 0 THEN 0 ELSE 1 END,
+     sl.created_at ASC
    LIMIT 2;
 
   IF v_unpaired_lot IS NULL THEN
