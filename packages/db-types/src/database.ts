@@ -1842,6 +1842,10 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      reap_catch_all_in_flight: {
+        Args: { p_limit?: number; p_ttl_seconds?: number }
+        Returns: number
+      }
       reset_demo_dates: { Args: never; Returns: undefined }
       reset_timer: { Args: { p_user_id: string }; Returns: number }
       resolve_add_to_shelf_lot: {
