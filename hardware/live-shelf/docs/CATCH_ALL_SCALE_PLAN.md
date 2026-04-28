@@ -1,7 +1,7 @@
 # Catch-all Scale — Plan (delta-capture model)
 
-Date: 2026-04-27 (rewritten — superseded the 2026-04-17 single-item shelf model)
-Status: cloud foundation + Pi unblocker shipped; Pi state machine deferred
+Date: 2026-04-28 (Pi state machine + catch-all reaper shipped)
+Status: end-to-end shipped — cloud foundation + Pi unblocker + Pi state machine + catch-all-specific TTL reaper
 Scope: `hardware/live-shelf/` (server) + `supabase/` (cloud)
 Depends on: `IN_FLIGHT_TRACKER_PLAN.md` (live_shelf in-flight) — concept of in-flight, but with a different semantic than live_shelf
 
@@ -160,16 +160,19 @@ than first'` when `consumption_g <= 0`. Lot stays in flight so
 ### 5.2 Edge: one-shot measurement, no second event
 
 1. First event fires, qty reconciled, in-flight markers stamped.
-2. User walks away. 6 h later the TTL reaper runs.
-3. Reaper for `in_flight_kind='catch_all'`: clears the markers but
-   does NOT zero qty (vs live_shelf which zeros). Stamps
-   `shelf_event_log.reason = 'catch_all_first_measurement_orphaned'`.
+2. User walks away. 6 h later the cloud's `private.reap_catch_all_in_flight()`
+   reaper runs (cron every 30 min).
+3. Reaper for `in_flight_kind='catch_all'`: clears `in_flight_since` +
+   `in_flight_kind` + `pickup_event_id` + `pickup_weight_g`. Does NOT
+   change `qty_containers`. Does NOT write `food_logs` — the user
+   weighed an item but did not complete the delta-capture cycle, that's
+   not consumption.
 
-   _NOTE (deferred):_ this reaper logic is not yet wired. Currently the
-   existing live_shelf reaper runs against `in_flight_since IS NOT
-NULL` regardless of `in_flight_kind`, so a TTL-expired catch_all
-   row will be zeroed exactly like a live_shelf one. Layer 5 of the
-   redesign brief covers the proper fix.
+   This is fundamentally different from the live_shelf TTL path
+   (which zeros qty + writes food_logs for the pre-pickup mass via
+   `private.apply_shelf_event`'s pickup-resolve branch when the Pi
+   reaper emits a `consumed` event with a matching `pi_event_id`).
+   Catch-all and live_shelf intentionally diverge on TTL semantics.
 
 ### 5.3 Edge: inconsistent delta (heavier than first)
 
@@ -192,28 +195,71 @@ not lighter than first'`. The in-flight markers stay set so the
    classifier never ran for catch-all events. Layer 1 (frame
    persistence + inline dispatch) makes it live.
 
-## 6. Pi state machine (deferred — Layer 6)
+## 6. Pi state machine — single-pool, runtime first-vs-second branching
 
-Detect placement (weight 0g → > threshold + stable):
+**Final confirmed model (2026-04-28):** the catch-all uses ONE
+candidate pool for both first and second events. The pool composition
+does NOT change between first and second; the runtime branching
+happens at apply time.
 
-- If no catch-all in-flight session for this user/device exists →
-  this is a first event. Run classifier with the standard ADD pool
-  (today). Emit `catch_all_first_measurement`.
-- If a catch-all in-flight session exists → this is a candidate
-  second event. Run classifier with a tight pool restricted to the
-  in-flight catch_all items. Emit `catch_all_second_measurement` if
-  it matches; treat as a fresh first event for a different item if
-  it doesn't.
+### 6.1 Pool — `pool_for_catch_all`
 
-Detect removal (weight back to ~0g): nothing to do — the first/second
-event already fired on placement+stable.
+Source: `cloud_lots` (cloud-mirrored stock_lots) — NOT live_shelf-
+style sources. Composition (`server/classifier/candidate_pool.py`):
 
-Status: **NOT YET IMPLEMENTED.** With Layer 1 (Pi unblocker) shipped,
-the existing live-shelf-shape apply path runs against catch-all
-events and emits `consumed`/`added`/`refilled` etc. The
-`catch_all_first_measurement` / `catch_all_second_measurement` event
-kinds are reachable end-to-end on the cloud side, but no Pi code
-emits them yet. Next session's work.
+| Tier | Source                                                               | Why-candidate string |
+| ---- | -------------------------------------------------------------------- | -------------------- |
+| 1    | `in_flight_kind='catch_all'` lots — items currently mid-measurement  | `in_flight`          |
+| 2    | Certified-not-on-any-shelf lots, FEFO by `cloud_lots.created_at ASC` | `inventory_only`     |
+| 3    | UNKNOWN sentinel                                                     | `sentinel`           |
+
+"Not on any shelf" = no Pi-local `lots` row exists for the product.
+Since `scale_pairings.lot_id` references `lots(lot_id)`, this
+implicitly excludes LiveTrack-paired and live_shelf-tracked lots in
+one predicate.
+
+Lot-keyed: each candidate's `candidate_id` is the cloud `lot_id`,
+NOT the `product_id` (unlike `pool_for_add` which collapses by
+product). The apply path uses the picked candidate's `lot_id` to
+look up the cloud_lots row's `in_flight_kind` for the runtime branch
+decision; collapsing by product would lose that discriminator.
+
+### 6.2 Runtime first-vs-second branching — `_dispatch_catch_all_add`
+
+Implemented in `server/handlers/scale_events.py`. After the
+classifier picks a candidate, the dispatch resolves the cloud_lots
+row and branches:
+
+1. **`item_id == UNKNOWN`** → fall through to legacy review path.
+2. **Picked lot is in-flight on catch-all**
+   (`cloud_lots.in_flight_kind='catch_all'`) → SECOND event. Emit
+   `catch_all_second_measurement` with the lot's existing
+   `pickup_event_id` as the cloud's first-event lookup key.
+3. **Picked lot is NOT in-flight** AND measured weight ≈ tare ± 5%
+   of `(tare+net)` AND no active session for this product → empty-
+   bottle short-circuit. Emit `discarded` directly (preserves commit
+   `abbd518`'s "user acknowledges empty container" semantics).
+4. **Otherwise** → FIRST event. Emit `catch_all_first_measurement`
+   with this Pi event_id stamped as `pi_event_id`.
+
+### 6.3 Why one pool, not two?
+
+The user's mental model is "every time I want to log how much I just
+ate, I weigh it before and after on this scale." The first vs second
+event is determined by physical state (is the lot already on the
+catch-all from a prior placement?), not by what the user is trying
+to do. Two pools would force the user to declare intent up front;
+one pool lets the system figure it out from observation.
+
+### 6.4 Empty-bottle short-circuit + sessioned drinking
+
+A lot that's currently in-flight on catch-all (mid-session) coming
+back at near-tare weight is the SECOND event of a delta-capture cycle
+where the user drank the whole bottle — NOT a discard. The
+second-measurement apply path correctly logs the macros for the full
+delta. The empty-bottle short-circuit only fires when there's NO
+active session for the lot (the "I drank this away from the catch-
+all somehow and am acknowledging the empty container" path).
 
 ## 7. Migrations + tests
 
@@ -244,41 +290,29 @@ emits them yet. Next session's work.
 
 ## 8. Layers shipped vs deferred
 
-Per decisions.md #55:
+| Layer | Description                                                                    | Status                                                                    |
+| ----- | ------------------------------------------------------------------------------ | ------------------------------------------------------------------------- |
+| 1     | Frame path persistence + inline classifier dispatch + sweeper recovery         | **Shipped** (2026-04-27)                                                  |
+| 2     | Catch-all candidate pool (`pool_for_catch_all`)                                | **Shipped** (2026-04-28)                                                  |
+| 3     | `in_flight_kind` schema column + backfill                                      | **Shipped** (2026-04-27)                                                  |
+| 4     | Cloud apply branches (first/second measurement)                                | **Shipped** (2026-04-27)                                                  |
+| 5     | Catch-all-specific TTL reaper (clear markers, don't zero qty)                  | **Shipped** (2026-04-28 — `private.reap_catch_all_in_flight()` + pg_cron) |
+| 6     | Pi state machine: detect first vs second event, emit the correct event_kind    | **Shipped** (2026-04-28 — runtime branching in `_dispatch_catch_all_add`) |
+| 7     | Empty container path (today's `abbd518`)                                       | **Verified** + extended to gate on "no active session"                    |
+| 8     | UI: distinguish catch-all in-flight from live_shelf in-flight on InventoryPage | Deferred (low priority)                                                   |
+| 9     | Harness scenarios                                                              | **Shipped** (2026-04-28 — first-event, full-session, TTL-clears-markers)  |
 
-| Layer | Description                                                                     | Status                  |
-| ----- | ------------------------------------------------------------------------------- | ----------------------- |
-| 1     | Frame path persistence + inline classifier dispatch + sweeper recovery          | **Shipped**             |
-| 2     | First-event vs second-event candidate pool builders                             | Deferred                |
-| 3     | `in_flight_kind` schema column + backfill                                       | **Shipped**             |
-| 4     | Cloud apply branches (first/second measurement)                                 | **Shipped**             |
-| 5     | Catch-all-specific TTL reaper (clear markers, don't zero qty)                   | Deferred                |
-| 6     | Pi state machine: detect first vs second event, emit the correct event_kind     | Deferred                |
-| 7     | Empty container path (today's `abbd518`) verified live as a Layer 1 side effect | **Verified**            |
-| 8     | UI: distinguish catch-all in-flight from live_shelf in-flight on InventoryPage  | Deferred (low priority) |
-| 9     | Harness scenarios (4 named in the brief)                                        | Deferred (need Layer 6) |
+## 9. Live_shelf TTL macro write — already correct
 
-## 9. Why the partial ship?
-
-Layer 1 alone is necessary AND sufficient for catch-all classification
-to work AT ALL. Pre-Layer-1, every catch-all event was marked failed
-~62 s after ingress (0 successful classifications across 21 events).
-With Layer 1 the classifier runs and the existing apply path (which
-emits `consumed`/`added`/`refilled` etc) takes over end-to-end —
-including the empty-container detection that's been dead code since
-2026-04-27.
-
-The cloud-side foundation (Layers 3 + 4) is fully tested and
-reversible. Shipping it ahead of the Pi-side (Layer 6) state machine
-unblocks the next session: the migration + apply path + edge function
-are forward-compatible with whatever Pi state machine lands.
-
-The deferred Pi-side state machine (Layer 6) is the larger
-engineering chunk — it requires real Pi-side state tracking (which
-catch-all in-flight sessions exist for the device), per-event
-classifier pool scoping (Layer 2), and harness coverage for both the
-happy path and the no-second-event TTL case (Layer 9). Worth a
-dedicated session.
+User question: does the live_shelf TTL path write `food_logs` for
+the pre-pickup qty? **Yes** — verified 2026-04-28 via
+`supabase/tests/chefbyte/in_flight_pickup_resolve_whole_lot.test.sql`
+case 4. The Pi reaper emits a `consumed` event with
+`delta_g = -pickup_weight_g` and `pi_event_id` matching the lot's
+`pickup_event_id`. The cloud's `apply_shelf_event` consumed branch
+detects the pickup-resolve match, zeros qty, AND writes a food_logs
+row with `qty_consumed = (pickup_weight_g / net_weight_g) *
+servings_per_container` servings. No code change needed.
 
 ---
 
