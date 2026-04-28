@@ -1030,9 +1030,18 @@ class ScaleHandler:
             return None, None, "no after frame available (session still open?)"
         try:
             dst = out_dir / "after.jpg"
-            shutil.copyfile(after_src, dst)
+            # Same-file guard: the catch-all fast-path
+            # (``_capture_catch_all_frames``) writes frames directly to
+            # the canonical event dir, then ``_classify_recorded_event``
+            # re-enters this helper with those same paths as ``src``.
+            # The sweeper-recovery path also re-enters with paths read
+            # straight off the persisted ``scale_events`` row. In both
+            # cases ``shutil.copyfile`` would raise ``SameFileError`` —
+            # treat resolve-equality as a no-op success.
+            if Path(after_src).resolve() != dst.resolve():
+                shutil.copyfile(after_src, dst)
             after_final = str(dst.resolve())
-        except OSError as exc:
+        except (OSError, shutil.SameFileError) as exc:
             return None, None, f"after copy failed: {exc}"
 
         before_final: Optional[str] = None
@@ -1040,9 +1049,13 @@ class ScaleHandler:
             return None, after_final, "no before frame available (no session opened yet)"
         try:
             dst = out_dir / "before.jpg"
-            shutil.copyfile(before_src, dst)
+            # Same-file guard — see ``after.jpg`` block above for the
+            # full rationale (catch-all fast-path + sweeper recovery
+            # both re-enter with src == dst).
+            if Path(before_src).resolve() != dst.resolve():
+                shutil.copyfile(before_src, dst)
             before_final = str(dst.resolve())
-        except OSError as exc:
+        except (OSError, shutil.SameFileError) as exc:
             return None, after_final, f"before copy failed: {exc}"
 
         return before_final, after_final, None
