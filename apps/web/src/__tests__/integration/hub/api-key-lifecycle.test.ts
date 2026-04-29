@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import { createTestUser, cleanupUser } from '../../test-helpers';
 import { adminClient } from '../../setup.integration';
 
@@ -432,5 +433,71 @@ describe('API key lifecycle', () => {
       .eq('user_id', userId)
       .is('revoked_at', null);
     expect(count).toBe(10);
+  });
+});
+
+// HUB-I-01: Cross-validate Web Crypto (browser/edge) vs node:crypto (MCP Worker)
+// SHA-256 implementations. The MCP Worker uses node:crypto createHash('sha256')
+// while the integration layer and browser use crypto.subtle.digest. These MUST
+// produce identical hex output for the same input — a divergence would cause
+// valid API keys to fail authentication silently (the stored hash would never
+// match the worker's computed hash).
+describe('SHA-256 implementation cross-validation (HUB-I-01)', () => {
+  it('Web Crypto and node:crypto SHA-256 produce identical hex for lh_ prefixed keys', async () => {
+    const plaintext = 'lh_' + 'a'.repeat(32); // fixed value, not random, so both sides hash identically
+
+    // Web Crypto path (used by browsers and Supabase Edge Functions)
+    const encoded = new TextEncoder().encode(plaintext);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+    const webCryptoHex = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    // node:crypto path (used by apps/mcp-worker/src/auth.ts + helpers/api-key.ts)
+    const nodeCryptoHex = createHash('sha256').update(plaintext).digest('hex');
+
+    // They must be byte-for-byte identical 64-char lowercase hex strings.
+    expect(webCryptoHex).toHaveLength(64);
+    expect(nodeCryptoHex).toHaveLength(64);
+    expect(webCryptoHex).toBe(nodeCryptoHex);
+  });
+
+  it('Web Crypto and node:crypto agree on a key stored and retrieved from DB', async () => {
+    const { userId, client } = await createTestUser('key-sha256-xval');
+    userIds.push(userId);
+
+    // Generate plaintext the same way helpers/api-key.ts does (lh_ + hex)
+    const { randomBytes } = await import('node:crypto');
+    const rawKey = 'lh_' + randomBytes(16).toString('hex');
+
+    // Hash with node:crypto (MCP Worker auth path)
+    const nodeHash = createHash('sha256').update(rawKey).digest('hex');
+
+    // Store the node:crypto hash
+    const { error: insertErr } = await client
+      .schema('hub')
+      .from('api_keys')
+      .insert({ user_id: userId, api_key_hash: nodeHash, label: 'Cross-val key' });
+    expect(insertErr).toBeNull();
+
+    // Look up using Web Crypto hash (browser/edge auth path)
+    const encoded = new TextEncoder().encode(rawKey);
+    const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+    const webHash = Array.from(new Uint8Array(hashBuffer))
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('');
+
+    const { data: matchedKey, error: lookupErr } = await adminClient
+      .schema('hub')
+      .from('api_keys')
+      .select('user_id, label')
+      .eq('api_key_hash', webHash)
+      .is('revoked_at', null)
+      .single();
+
+    expect(lookupErr).toBeNull();
+    expect(matchedKey).not.toBeNull();
+    expect(matchedKey!.user_id).toBe(userId);
+    expect(matchedKey!.label).toBe('Cross-val key');
   });
 });
