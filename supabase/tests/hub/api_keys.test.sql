@@ -5,11 +5,18 @@ SELECT plan(11);
 SELECT tests.create_supabase_user('key_owner', 'keyowner@test.com');
 SELECT tests.create_supabase_user('key_other', 'keyother@test.com');
 
+-- HUB-P-01 fix: use encode(sha256(...), 'hex') for all hash fixtures so they
+-- are real 64-character lowercase hex strings matching production key shapes.
+-- Fake literals like 'hash_abc123' could mask a future CHECK(LENGTH=64)
+-- constraint or format index that would block inserts with invalid values.
+
 -- Test 1: Insert API key for user -> row created
 SELECT tests.authenticate_as('key_owner');
 
 INSERT INTO hub.api_keys (user_id, api_key_hash, label)
-VALUES (tests.get_supabase_uid('key_owner'), 'hash_abc123', 'My Key 1');
+VALUES (tests.get_supabase_uid('key_owner'),
+        encode(sha256('test-plaintext-1'), 'hex'),
+        'My Key 1');
 
 SELECT is(
   (SELECT count(*)::integer FROM hub.api_keys WHERE user_id = tests.get_supabase_uid('key_owner')),
@@ -27,7 +34,8 @@ SELECT is(
 
 -- Test 3: Revoke key -> excluded from active query
 UPDATE hub.api_keys SET revoked_at = now()
-WHERE user_id = tests.get_supabase_uid('key_owner') AND api_key_hash = 'hash_abc123';
+WHERE user_id = tests.get_supabase_uid('key_owner')
+  AND api_key_hash = encode(sha256('test-plaintext-1'), 'hex');
 
 SELECT is(
   (SELECT count(*)::integer FROM hub.api_keys
@@ -39,8 +47,8 @@ SELECT is(
 -- Test 4: Insert multiple keys -> all returned in active query
 INSERT INTO hub.api_keys (user_id, api_key_hash, label)
 VALUES
-  (tests.get_supabase_uid('key_owner'), 'hash_def456', 'Key 2'),
-  (tests.get_supabase_uid('key_owner'), 'hash_ghi789', 'Key 3');
+  (tests.get_supabase_uid('key_owner'), encode(sha256('test-plaintext-2'), 'hex'), 'Key 2'),
+  (tests.get_supabase_uid('key_owner'), encode(sha256('test-plaintext-3'), 'hex'), 'Key 3');
 
 SELECT is(
   (SELECT count(*)::integer FROM hub.api_keys
@@ -51,7 +59,8 @@ SELECT is(
 
 -- Test 5: Revoke one of multiple -> only revoked one excluded
 UPDATE hub.api_keys SET revoked_at = now()
-WHERE user_id = tests.get_supabase_uid('key_owner') AND api_key_hash = 'hash_def456';
+WHERE user_id = tests.get_supabase_uid('key_owner')
+  AND api_key_hash = encode(sha256('test-plaintext-2'), 'hex');
 
 SELECT is(
   (SELECT count(*)::integer FROM hub.api_keys
@@ -73,11 +82,12 @@ SELECT is(
 SELECT tests.authenticate_as('key_owner');
 
 INSERT INTO hub.api_keys (user_id, api_key_hash, label)
-VALUES (tests.get_supabase_uid('key_owner'), 'hash_jkl012', 'Key 4');
+VALUES (tests.get_supabase_uid('key_owner'), encode(sha256('test-plaintext-4'), 'hex'), 'Key 4');
 
 SELECT is(
   (SELECT count(*)::integer FROM hub.api_keys
-   WHERE user_id = tests.get_supabase_uid('key_owner') AND api_key_hash = 'hash_jkl012'),
+   WHERE user_id = tests.get_supabase_uid('key_owner')
+     AND api_key_hash = encode(sha256('test-plaintext-4'), 'hex')),
   1,
   'User A can INSERT api_key with own user_id'
 );
@@ -87,8 +97,9 @@ SELECT tests.authenticate_as('key_other');
 
 SELECT throws_ok(
   format(
-    'INSERT INTO hub.api_keys (user_id, api_key_hash, label) VALUES (%L, ''hash_fake'', ''Fake'')',
-    tests.get_supabase_uid('key_owner')
+    'INSERT INTO hub.api_keys (user_id, api_key_hash, label) VALUES (%L, %L, ''Fake'')',
+    tests.get_supabase_uid('key_owner'),
+    encode(sha256('test-plaintext-fake'), 'hex')
   ),
   '42501',
   NULL,
@@ -111,10 +122,11 @@ SELECT is(
 -- Test 10: User A can DELETE own key
 SELECT tests.authenticate_as('key_owner');
 
-DELETE FROM hub.api_keys WHERE api_key_hash = 'hash_jkl012';
+DELETE FROM hub.api_keys WHERE api_key_hash = encode(sha256('test-plaintext-4'), 'hex');
 
 SELECT is(
-  (SELECT count(*)::integer FROM hub.api_keys WHERE api_key_hash = 'hash_jkl012'),
+  (SELECT count(*)::integer FROM hub.api_keys
+   WHERE api_key_hash = encode(sha256('test-plaintext-4'), 'hex')),
   0,
   'User A can DELETE own api_key'
 );
