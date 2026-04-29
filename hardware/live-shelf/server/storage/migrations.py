@@ -347,6 +347,69 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
             "ON scale_pairings(product_id)"
         )
 
+        # Drop legacy FK on scale_pairings.lot_id → lots(lot_id) (2026-04-29).
+        # Long-lived DBs initially created from schema.sql have:
+        #   lot_id TEXT REFERENCES lots(lot_id) ON DELETE SET NULL
+        # but live_scale (single_item) lots are NEVER inserted into the Pi's
+        # `lots` table — the live_scale event handler emits cloud consumption
+        # events directly without lifecycle. When the cloud assigns
+        # scale_pairings.lot_id for a live_scale row and the Pi tries to
+        # mirror it via pairings_sync_poller, the FK fires and the upsert
+        # raises sqlite3.IntegrityError. The Pi's lot_id stays NULL forever
+        # and the weight_sync_poller has no way to attribute weight to a
+        # cloud lot.
+        #
+        # Fix: rebuild scale_pairings without the FK on lot_id. The
+        # device_id PK + shelf_id CHECK + indexes are preserved.
+        sp_ddl_row = conn.execute(
+            "SELECT sql FROM sqlite_master "
+            "WHERE type='table' AND name='scale_pairings'"
+        ).fetchone()
+        sp_ddl = (sp_ddl_row[0] or "") if sp_ddl_row else ""
+        if "REFERENCES lots(lot_id)" in sp_ddl:
+            conn.execute("PRAGMA foreign_keys = OFF")
+            try:
+                conn.execute("DROP TABLE IF EXISTS scale_pairings_new")
+                conn.execute(
+                    """
+                    CREATE TABLE scale_pairings_new (
+                      device_id           TEXT PRIMARY KEY,
+                      shelf_id            TEXT NOT NULL CHECK(shelf_id IN ('live_shelf','catch_all','single_item')),
+                      product_id          TEXT REFERENCES products(product_id) ON DELETE SET NULL,
+                      lot_id              TEXT,
+                      first_seen_at       TEXT NOT NULL DEFAULT (datetime('now')),
+                      last_heartbeat_ts   TEXT,
+                      notes               TEXT
+                    )
+                    """
+                )
+                conn.execute(
+                    """
+                    INSERT INTO scale_pairings_new (
+                      device_id, shelf_id, product_id, lot_id,
+                      first_seen_at, last_heartbeat_ts, notes
+                    )
+                    SELECT
+                      device_id, shelf_id, product_id, lot_id,
+                      first_seen_at, last_heartbeat_ts, notes
+                      FROM scale_pairings
+                    """
+                )
+                conn.execute("DROP TABLE scale_pairings")
+                conn.execute(
+                    "ALTER TABLE scale_pairings_new RENAME TO scale_pairings"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_scale_pairings_shelf "
+                    "ON scale_pairings(shelf_id)"
+                )
+                conn.execute(
+                    "CREATE INDEX IF NOT EXISTS idx_scale_pairings_product "
+                    "ON scale_pairings(product_id)"
+                )
+            finally:
+                conn.execute("PRAGMA foreign_keys = ON")
+
     # Lifecycle observability tables — long-lived DBs predate these.
     # ``CREATE TABLE IF NOT EXISTS`` makes this idempotent. Indexes use
     # the same IF NOT EXISTS pattern.

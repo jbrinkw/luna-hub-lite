@@ -202,11 +202,17 @@ CREATE UNIQUE INDEX idx_usage_log_return_dedup
 -- Live-shelf + catch-all scales are also represented for a unified
 -- "scales" listing, but their pairing is system-configured — not
 -- user-assigned. Keyed by ESP device_id.
+-- ``lot_id`` does NOT have an FK to ``lots(lot_id)`` because live_scale
+-- (single_item) lots are NEVER inserted into the Pi's ``lots`` table —
+-- the live_scale event handler emits cloud consumption events directly
+-- without lifecycle. Mirroring an FK here would block the
+-- pairings_sync_poller from copying the cloud's lot_id over (FK fails
+-- on every insert/update). Treated as an opaque cloud reference instead.
 CREATE TABLE scale_pairings (
   device_id           TEXT PRIMARY KEY,
   shelf_id            TEXT NOT NULL CHECK(shelf_id IN ('live_shelf','catch_all','single_item')),
   product_id          TEXT REFERENCES products(product_id) ON DELETE SET NULL,
-  lot_id              TEXT REFERENCES lots(lot_id) ON DELETE SET NULL,
+  lot_id              TEXT,
   first_seen_at       TEXT NOT NULL DEFAULT (datetime('now')),
   last_heartbeat_ts   TEXT,
   notes               TEXT
