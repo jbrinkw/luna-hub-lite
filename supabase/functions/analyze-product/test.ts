@@ -349,3 +349,76 @@ Deno.test('validateSuggestion: default_shelf_life_days rounds floats', () => {
   assertEquals(result.ok, true);
   if (result.ok) assertEquals(result.suggestion.default_shelf_life_days, 31);
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// Anthropic SDK call shape — timeout must be in the RequestOptions arg,
+// NOT in the message body. The Node SDK signature is:
+//   messages.create(body, options?)  where options.timeout is honored.
+// Putting timeout inside the body is silently ignored by the SDK, falling
+// back to the default 10-min timeout. This is a tiny static-text guard
+// against the regression — turns red the moment a future edit moves
+// `timeout:` back into the body.
+// ─────────────────────────────────────────────────────────────────────────
+
+Deno.test('normalizeWithAI calls anthropic.messages.create with timeout in RequestOptions, not body', async () => {
+  const src = await Deno.readTextFile(new URL('./index.ts', import.meta.url));
+
+  // Find the (single) anthropic.messages.create(...) invocation.
+  const callIdx = src.indexOf('anthropic.messages.create(');
+  assert(callIdx > -1, 'expected anthropic.messages.create call in index.ts');
+
+  // Walk balanced parens from the open to find the full call. We need
+  // both the body literal and the options literal — a quick char-by-
+  // char paren depth scan handles nested braces in the body.
+  const start = src.indexOf('(', callIdx);
+  let depth = 0;
+  let end = -1;
+  for (let i = start; i < src.length; i++) {
+    const c = src[i];
+    if (c === '(') depth++;
+    else if (c === ')') {
+      depth--;
+      if (depth === 0) {
+        end = i;
+        break;
+      }
+    }
+  }
+  assert(end > start, 'unbalanced parens around anthropic call');
+
+  const callBody = src.slice(start + 1, end);
+
+  // Split top-level args by counting depth — body is arg[0], options
+  // is arg[1]. We only need to find the comma at depth==0.
+  let argDepth = 0;
+  const splitPoints: number[] = [0];
+  for (let i = 0; i < callBody.length; i++) {
+    const c = callBody[i];
+    if (c === '(' || c === '{' || c === '[') argDepth++;
+    else if (c === ')' || c === '}' || c === ']') argDepth--;
+    else if (c === ',' && argDepth === 0) splitPoints.push(i + 1);
+  }
+  splitPoints.push(callBody.length + 1);
+
+  const args: string[] = [];
+  for (let i = 0; i < splitPoints.length - 1; i++) {
+    const segment = callBody.slice(splitPoints[i], splitPoints[i + 1] - 1).trim();
+    if (segment.length > 0) args.push(segment);
+  }
+
+  // Must be a 2-arg call (body, options). Trailing commas / whitespace
+  // around them are tolerated above.
+  assertEquals(args.length, 2, `expected anthropic.messages.create(body, options) — got ${args.length} args`);
+
+  const [body, options] = args;
+  // Body must NOT contain a `timeout:` key — that's the bug we fixed.
+  assert(
+    !/\btimeout\s*:/.test(body),
+    'timeout must NOT be in the messages.create body — the SDK silently ignores it there',
+  );
+  // Options must contain `timeout:` so the SDK honors it.
+  assert(/\btimeout\s*:/.test(options), 'timeout must be in the RequestOptions arg (second arg of messages.create)');
+  // Spot-check the value is the documented 25s — guards against silent
+  // edits that swap it for something useless.
+  assert(/timeout\s*:\s*25[_]?000/.test(options), `timeout option should be 25_000ms (25s) — got: ${options}`);
+});

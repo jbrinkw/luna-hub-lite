@@ -93,6 +93,12 @@ class LiveTrackPoller:
         # only the targeted scale's events are suppressed; unrelated
         # scales on the same device keep flowing events.
         self._snapshots_by_tuple: dict[tuple[str, str], dict[str, Any]] = {}
+        # First cloud-side device_id we've observed in a snapshot row —
+        # used by :meth:`is_active_for` for defense-in-depth (Audit #13)
+        # so a leaked row from a different cloud device can't cross-
+        # suppress this Pi's events for an overlapping scale_id. None
+        # until the first non-empty device_id is seen; sticky thereafter.
+        self._observed_cloud_device_id: Optional[str] = None
         self._stop = threading.Event()
         self._thread: Optional[threading.Thread] = None
 
@@ -149,16 +155,27 @@ class LiveTrackPoller:
 
         Important: the cloud's ``livetrack_import_sessions.device_id``
         column is the UUID of the live_shelf_devices row — NOT the ESP
-        device id. Every session row reaching THIS poller belongs to
-        THIS Pi's cloud device by construction (the Pi authenticates
-        with its own import_key, and the edge function scopes /active
-        to that device). So the gate's only meaningful filter is
-        scale_id. The ``device_id`` argument is accepted for symmetry
-        with the call site but ignored when computing the match;
-        instead we look up by scale_id alone within this Pi's snapshots.
+        device id. The cloud's /active edge function already scopes
+        responses to this Pi's cloud device (Pi authenticates with its
+        own import_key). So in normal operation every snapshot row
+        belongs to this Pi.
+
+        Defense-in-depth (Audit #13): the lookup additionally enforces
+        that all snapshot rows agree on a single cloud-side device_id.
+        If a row leaks in from a different cloud device (e.g. an RLS
+        regression on the /active endpoint), we reject the match —
+        scale_id collisions across devices must NOT cross-suppress.
+        We discover the Pi's own cloud-device UUID lazily: the first
+        time a snapshot lands, we record its device_id; subsequent
+        rows whose device_id differs are treated as invalid and
+        skipped here. The caller-side ``device_id`` argument continues
+        to be matched against scale_id only (callers pass ESP-style
+        ids that never equal cloud UUIDs); its only enforced role is
+        non-empty validation.
 
         Mismatched scale_id → return None → event flows through.
-        Matching scale_id → return the session row → event is suppressed.
+        Matching scale_id (with a row whose device_id agrees with the
+        first observed) → return the row → event suppressed.
 
         Both args must be non-None and non-empty — defensive: an empty
         scale_id from a corrupt event must NOT match arbitrarily,
@@ -171,12 +188,26 @@ class LiveTrackPoller:
             return None
         scale_str = str(scale_id)
         with self._snapshot_lock:
+            expected_device = self._observed_cloud_device_id
             # Linear scan — at most a handful of active sessions per Pi
             # (one per scale; 3 today). Faster than a defensive UUID-vs-
             # ESP-id mapping table.
-            for (_d, sid), row in self._snapshots_by_tuple.items():
-                if sid == scale_str:
-                    return dict(row)
+            for (row_device, sid), row in self._snapshots_by_tuple.items():
+                if sid != scale_str:
+                    continue
+                # Defensive: drop matches from a different cloud device.
+                # In normal operation expected_device == row_device for
+                # every row (the cloud /active endpoint scopes to this
+                # Pi). A leak from another device's row would otherwise
+                # trip cross-device suppression for the same scale_id.
+                if expected_device is not None and row_device != expected_device:
+                    log.warning(
+                        "livetrack poller: dropping cross-device match "
+                        "(scale_id=%s, row_device=%s, expected=%s)",
+                        scale_str, row_device, expected_device,
+                    )
+                    continue
+                return dict(row)
             return None
 
     def active_tuples(self) -> set[tuple[str, str]]:
@@ -327,6 +358,13 @@ class LiveTrackPoller:
         still considered for the legacy snapshot (matches the cloud
         edge function's response shape — every row carries device_id,
         scale_id is nullable for legacy backfill).
+
+        Side-effect (Audit #8): garbage-collect any
+        ``_ai_tare_inflight`` keys whose session_id no longer appears
+        in the active set. Without this, sessions that disappear mid-
+        flight (operator closes the wizard, /create eviction, server-
+        side expiry) leave their flight key in the set forever — a
+        long-running Pi would accumulate orphaned entries unbounded.
         """
         legacy = sessions[0] if sessions else None
         by_tuple: dict[tuple[str, str], dict[str, Any]] = {}
@@ -340,9 +378,46 @@ class LiveTrackPoller:
             # wins; ignore older overlaps. (The edge function expires
             # priors on /create, so collisions should be rare.)
             by_tuple.setdefault(key, row)
+        # Snapshot of session_ids currently active across all rows
+        # (use the raw sessions list — anything the cloud returned
+        # counts as live, including rows missing scale_id).
+        active_session_ids = {
+            str(row.get("session_id", ""))
+            for row in sessions
+            if row.get("session_id")
+        }
+        # Capture the first non-empty cloud-side device_id we ever see.
+        # Used by is_active_for to reject any later row whose device_id
+        # disagrees (defense-in-depth against RLS leaks; Audit #13).
+        # Sticky once set — if the cloud truly switched the device's UUID
+        # we'd want a fresh process anyway.
+        first_observed_device: Optional[str] = None
+        for row in sessions:
+            d = row.get("device_id")
+            if d:
+                first_observed_device = str(d)
+                break
         with self._snapshot_lock:
             self._snapshot = legacy
             self._snapshots_by_tuple = by_tuple
+            if self._observed_cloud_device_id is None and first_observed_device:
+                self._observed_cloud_device_id = first_observed_device
+        # Acquire the inflight lock separately — keeps the snapshot
+        # lock's critical section tight, and the two locks are
+        # independent (no caller holds both at once elsewhere).
+        # Each flight key is "{session_id}:awaiting_ai_tare"; split off
+        # the session_id prefix for the membership test.
+        with self._ai_tare_lock:
+            stale = {
+                key for key in self._ai_tare_inflight
+                if key.split(":", 1)[0] not in active_session_ids
+            }
+            if stale:
+                self._ai_tare_inflight.difference_update(stale)
+                log.debug(
+                    "livetrack poller: gc'd %d stale ai_tare inflight key(s): %s",
+                    len(stale), sorted(stale),
+                )
 
     # ------------------------------------------------------------------
     # Internal loop
@@ -408,6 +483,20 @@ class LiveTrackPoller:
             try:
                 self._handle_ai_tare(session)
             finally:
+                # Audit #15 — retry semantics on POST failure.
+                # The flight key is cleared unconditionally here so that
+                # if the cloud-side update POST failed inside
+                # ``_handle_ai_tare``, the cloud session is still in
+                # ``awaiting_ai_tare`` and the NEXT poll re-runs the AI
+                # call. Tradeoff: a transient cloud blip during the
+                # POST costs one extra ~5s Anthropic call instead of
+                # forcing the operator to manually re-arm the wizard.
+                # The Anthropic call is the expensive part, but losing
+                # the result silently is worse UX. (We chose option (b)
+                # over routing the POST through cloud_outbox: the outbox
+                # is shaped for event delivery, not arbitrary session
+                # updates, and the natural state-machine retry here is
+                # self-healing without extra schema.)
                 with self._ai_tare_lock:
                     self._ai_tare_inflight.discard(flight_key)
         return True
@@ -527,24 +616,35 @@ class LiveTrackPoller:
     # Helpers
     # ------------------------------------------------------------------
 
-    def _post_update_safely(self, session_id: str, **fields: Any) -> None:
+    def _post_update_safely(self, session_id: str, **fields: Any) -> bool:
         """POST a session update; swallow + log any failure.
 
+        Returns True on success, False on any failure (CloudError or
+        unexpected). The caller uses this signal to decide whether to
+        leave the AI-tare inflight key cleared (so the next poll retries
+        the whole flow) — see Audit #15 / option (b).
+
         The cloud is the source of truth for session state, so a failed
-        update means the UI won't see the result. But we can't block the
-        poll loop on it — the next poll will retry implicitly (state
-        hasn't changed, so the UI's Realtime subscription will still
-        wait until the user resets the session).
+        update means the UI won't see the result. We can't block the
+        poll loop, but on failure we explicitly drop the inflight key
+        in :meth:`_poll_once` so the next 500ms tick re-runs the
+        Anthropic call. Tradeoff: a transient cloud blip costs one
+        extra ~5s Anthropic call instead of forcing the operator to
+        manually re-arm. The Anthropic call is the expensive part, but
+        the alternative — silent state-machine stall — is worse UX.
         """
         try:
             self._client.post_livetrack_session_update(session_id, **fields)
+            return True
         except CloudError as err:
             log.warning(
                 "livetrack poller: post update failed (%d): %s",
                 err.status_code, str(err.body)[:200],
             )
+            return False
         except Exception:  # pragma: no cover - defensive
             log.exception("livetrack poller: post update raised unexpectedly")
+            return False
 
 
 def _build_product_form(raw: Any) -> AiTareProductForm:

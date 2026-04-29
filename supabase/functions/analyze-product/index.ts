@@ -233,13 +233,19 @@ async function normalizeWithAI(offProduct: any, forceFailure: string | null = nu
     const systemPrompt = buildSystemPrompt(offProduct);
     const userPrompt = buildUserPrompt(offProduct);
 
-    const message = await anthropic.messages.create({
-      model: 'claude-haiku-4-5-20251001',
-      max_tokens: 512,
-      timeout: 25_000,
-      system: systemPrompt,
-      messages: [{ role: 'user', content: userPrompt }],
-    });
+    // Anthropic Node SDK signature: messages.create(body, options).
+    // ``timeout`` belongs in the second arg (RequestOptions) — passing
+    // it inside the body is silently ignored by the SDK, falling back
+    // to the default 10-min timeout. Audit-bonus fix.
+    const message = await anthropic.messages.create(
+      {
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 512,
+        system: systemPrompt,
+        messages: [{ role: 'user', content: userPrompt }],
+      },
+      { timeout: 25_000 },
+    );
 
     const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
     const parsed = parseAIResponse(text);
