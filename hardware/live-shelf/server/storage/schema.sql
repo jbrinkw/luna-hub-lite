@@ -310,6 +310,50 @@ CREATE INDEX cloud_outbox_pending_idx
   ON cloud_outbox (outbox_id)
   WHERE sent_at IS NULL AND failed_permanently = 0;
 
+-- Intake DLQ (PROD_MIGRATION_PLAN.md §5 follow-up; AUDIT_FINDINGS_PHASE1
+-- L8/HIGH). Sibling of cloud_outbox but for the barcode-intake AI
+-- pipeline: when ``POST /shelf-ingest/intake`` fails transiently
+-- (5xx, network), the user-typed product spec is parked here so
+-- ops can retry it later without forcing the user to re-enter
+-- everything. 4xx (validation) goes straight to the user — those
+-- are NOT enqueued.
+--
+-- Distinct from cloud_outbox semantics:
+--   * cloud_outbox carries shelf events (consumed/added/in_flight)
+--     — the user does not see the queue depth.
+--   * intake_pending carries product creates — the user *does*
+--     see the result (the wizard returns success/failure inline)
+--     and ops surface a "review failed intakes" page so the user
+--     can re-run them after fixing connectivity / cloud side.
+--
+-- ``client_intake_id`` is a UUID4 minted at enqueue. The cloud
+-- /intake handler doesn't dedupe on it today (intake creates a
+-- product, not a ledger entry), so retries are guarded by the
+-- caller checking for an already-created product before posting
+-- again. The id is recorded for audit + future dedup.
+CREATE TABLE intake_pending (
+  intake_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_intake_id      TEXT NOT NULL UNIQUE,
+  payload_json          TEXT NOT NULL,
+  enqueued_at           TEXT NOT NULL DEFAULT (datetime('now')),
+  resolved_at           TEXT,
+  attempts              INTEGER NOT NULL DEFAULT 0,
+  last_error            TEXT,
+  -- Retry status:
+  --   0 = pending  — operator action: click "retry" in the admin UI.
+  --   1 = resolved — retry succeeded; cloud minted a product_id.
+  --   2 = abandoned — operator gave up (e.g. cloud refuses 4xx
+  --       after the operator manually fixed something cloud-side).
+  status                INTEGER NOT NULL DEFAULT 0
+                          CHECK(status IN (0, 1, 2)),
+  -- product_id stamped when the retry succeeds; null otherwise.
+  product_id            TEXT
+);
+CREATE INDEX intake_pending_pending_idx
+  ON intake_pending (intake_id)
+  WHERE status = 0;
+CREATE INDEX intake_pending_status_idx ON intake_pending (status);
+
 -- Periodic system health snapshot (60s cadence). Operators and post-hoc
 -- debugging lean on this to correlate UI symptoms with queue sizes.
 CREATE TABLE system_health (

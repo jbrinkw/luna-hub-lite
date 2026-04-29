@@ -33,6 +33,7 @@ from flask import Blueprint, Response, current_app, jsonify, render_template, re
 from ..storage.models import ProductIn, ProductReferenceImageIn
 from . import ai_tare as ai_tare_module
 from . import cloud_sync as cloud_sync_module
+from . import dlq as intake_dlq
 from . import off_lookup as off_lookup_module
 from .ai_tare import (
     AiTareApiError,
@@ -425,39 +426,73 @@ def create_blueprint(
         # products, Pi caches the returned UUID. The rest of the flow
         # (reference images on disk + DB rows) is identical either way.
         if cloud_enabled:
+            intake_payload_for_dlq = _build_intake_payload(product_in)
             try:
                 cloud_product = _post_intake_to_cloud(
                     cloud_client, product_in
                 )
             except _CloudError as exc:
-                # 4xx surfaces the user-visible validation error; 5xx is
-                # transient. TODO(v2): drop 5xx payloads into a local
-                # ``intake_pending`` queue for a background retry worker
-                # (PROD_MIGRATION_PLAN.md §5 follow-up). For v1 we just
-                # reflect the failure to the user and block the save —
-                # the user retries when connectivity returns. No photos
-                # are snapped (they'd orphan without a product_id).
-                status = exc.status_code if 400 <= exc.status_code < 500 else 503
+                # 4xx vs 5xx split:
+                #   * 4xx (validation) — intrinsic to the user's input
+                #     (bad barcode shape, etc). Surface so the user
+                #     fixes their entry; do NOT queue (queueing a row
+                #     the cloud will reject forever just clogs the DLQ).
+                #   * 5xx (transient) — cloud-side outage. Park the
+                #     payload in ``intake_pending`` so an operator can
+                #     retry from /api/admin/intake-dlq once cloud is
+                #     healthy again. AUDIT_FINDINGS_PHASE1 L8/HIGH.
+                # No photos are snapped either way (they'd orphan
+                # without a product_id).
                 log.warning(
                     "cloud /intake returned %s: %s",
                     exc.status_code,
                     exc.body[:200] if exc.body else "",
                 )
+                if 400 <= exc.status_code < 500:
+                    return _json_error(
+                        f"cloud rejected intake ({exc.status_code}): "
+                        f"{exc.body or ''}",
+                        exc.status_code,
+                    )
+                # 5xx → DLQ. Best-effort; if the DLQ insert fails the
+                # user still gets the original 503.
+                queued_id = _try_queue_intake_dlq(
+                    db_conn, db_lock, intake_payload_for_dlq,
+                    error=f"cloud {exc.status_code}: {exc.body or ''}"[:500],
+                )
                 return _json_error(
-                    f"cloud rejected intake ({exc.status_code}): {exc.body or ''}",
-                    status,
+                    f"cloud unavailable ({exc.status_code}); intake queued "
+                    f"for retry"
+                    + (f" (id={queued_id})" if queued_id else ""),
+                    503,
                 )
             except _RequestException as exc:
                 # Network timeout / DNS / TCP reset — always transient.
-                # Same v1 policy: surface, don't queue.
+                # Park into the DLQ for an operator-driven retry.
                 log.warning("cloud /intake network failure: %s", exc)
+                queued_id = _try_queue_intake_dlq(
+                    db_conn, db_lock, intake_payload_for_dlq,
+                    error=f"network: {exc}"[:500],
+                )
                 return _json_error(
-                    f"cloud unreachable during intake: {exc}",
+                    f"cloud unreachable; intake queued for retry"
+                    + (f" (id={queued_id})" if queued_id else ""),
                     503,
                 )
             except Exception as exc:  # pragma: no cover — defensive
                 log.exception("unexpected failure posting intake to cloud")
-                return _json_error(f"unexpected cloud error: {exc}", 500)
+                # Even unexpected errors land in the DLQ so we don't
+                # lose the user's typed entry to a programming bug we
+                # haven't seen yet.
+                queued_id = _try_queue_intake_dlq(
+                    db_conn, db_lock, intake_payload_for_dlq,
+                    error=f"unexpected: {exc}"[:500],
+                )
+                return _json_error(
+                    f"unexpected cloud error; intake queued for retry"
+                    + (f" (id={queued_id})" if queued_id else ""),
+                    500,
+                )
 
             product_id = cloud_product.get("product_id")
             if not isinstance(product_id, str) or not product_id.strip():
@@ -599,19 +634,14 @@ def _parse_form(payload: dict[str, Any]) -> IntakeForm:
     return IntakeForm(**clean)
 
 
-def _post_intake_to_cloud(client: Any, product_in: ProductIn) -> dict[str, Any]:
-    """POST the intake payload to ``shelf-ingest/intake``.
+def _build_intake_payload(product_in: ProductIn) -> dict[str, Any]:
+    """Construct the JSON body sent to ``POST /shelf-ingest/intake``.
 
-    Builds the JSON body from a :class:`ProductIn` (same merged shape
-    the local-save path writes) and returns the parsed response dict.
-    The caller is responsible for catching :class:`CloudError` and
-    network exceptions.
-
-    The edge function mints the ``product_id`` UUID and echoes back the
-    full created row so the Pi can cache it locally without a follow-up
-    fetch. That's why we return the raw dict rather than just the id.
+    Extracted so the DLQ can persist the same dict the original POST
+    would have used — a retry pulls this back out + re-POSTs verbatim.
+    Keep this pure (no I/O) so it can run inside the request handler
+    AND on the retry path.
     """
-
     body = {
         "barcode": product_in.barcode,
         "name": product_in.name,
@@ -639,8 +669,57 @@ def _post_intake_to_cloud(client: Any, product_in: ProductIn) -> dict[str, Any]:
     # Drop None-valued keys so the cloud doesn't see a flood of nulls and
     # we don't overwrite its defaults with literal NULL for fields the
     # user left blank.
-    clean = {k: v for k, v in body.items() if v is not None}
-    return client.post("/intake", clean)
+    return {k: v for k, v in body.items() if v is not None}
+
+
+def _post_intake_to_cloud(client: Any, product_in: ProductIn) -> dict[str, Any]:
+    """POST the intake payload to ``shelf-ingest/intake``.
+
+    Builds the JSON body from a :class:`ProductIn` (same merged shape
+    the local-save path writes) and returns the parsed response dict.
+    The caller is responsible for catching :class:`CloudError` and
+    network exceptions.
+
+    The edge function mints the ``product_id`` UUID and echoes back the
+    full created row so the Pi can cache it locally without a follow-up
+    fetch. That's why we return the raw dict rather than just the id.
+    """
+    return client.post("/intake", _build_intake_payload(product_in))
+
+
+def _try_queue_intake_dlq(
+    db_conn: Optional[Any],
+    db_lock: Optional[Any],
+    payload: dict[str, Any],
+    *,
+    error: str,
+) -> Optional[int]:
+    """Best-effort enqueue into ``intake_pending``.
+
+    Returns the new ``intake_id`` on success or ``None`` on failure.
+    A failed enqueue is logged but not raised — the caller still
+    surfaces the original cloud error to the user. Without this
+    swallow, a malformed DLQ schema would convert a transient cloud
+    outage into a 500 with no actionable message.
+    """
+    if db_conn is None:
+        log.warning("intake DLQ skipped: no db_conn wired (cloud_enabled=False?)")
+        return None
+    try:
+        client_id = intake_dlq.enqueue(
+            db_conn, payload, error=error, db_lock=db_lock,
+        )
+        # Round-trip the UUID → integer id; keeps the user-facing
+        # response number short while preserving the audit trail.
+        # The lookup is fast — the UNIQUE index on client_intake_id.
+        row = db_conn.execute(
+            "SELECT intake_id FROM intake_pending WHERE client_intake_id = ?",
+            (client_id,),
+        ).fetchone()
+        return int(row["intake_id"]) if row else None
+    except Exception:  # noqa: BLE001 - DLQ failure must not mask the cloud error
+        log.exception("intake DLQ enqueue failed; user will see the bare cloud error")
+        return None
 
 
 # Re-export ``current_app`` so the module works if Flask's import graph

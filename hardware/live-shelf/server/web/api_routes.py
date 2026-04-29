@@ -102,6 +102,10 @@ def make_api_bp(
     delete_usage_dedup_group_fn: Optional[DeleteUsageDedupGroupFn] = None,
     default_camera_device: str = "/dev/video0",
     cloud_outbox_conn: Optional[Callable[[], Any]] = None,
+    intake_dlq_conn: Optional[Callable[[], Any]] = None,
+    intake_dlq_lock: Optional[Any] = None,
+    intake_dlq_cloud_client: Optional[Any] = None,
+    intake_dlq_cloud_upsert_fn: Optional[Callable[..., Any]] = None,
 ) -> Blueprint:
     """Build the JSON API blueprint.
 
@@ -502,6 +506,216 @@ def make_api_bp(
             "operator retried dead-lettered outbox row %d", outbox_id,
         )
         return jsonify({"ok": True, "outbox_id": outbox_id})
+
+    # ----- /api/admin/intake-dlq -------------------------------------------
+    #
+    # Intake dead-letter queue (AUDIT_FINDINGS_PHASE1 L8/HIGH closed).
+    # When ``POST /shelf-ingest/intake`` returns 5xx or the request
+    # never makes it (DNS / TCP reset / timeout), the user-typed
+    # product spec is parked in ``intake_pending`` so an operator can
+    # retry it later from this endpoint without forcing the user to
+    # re-enter every field. Distinct from the ``cloud_outbox``
+    # dead-letter (event ledger) — see server/intake/dlq.py docstring.
+
+    @bp.get("/api/admin/intake-dlq")
+    def api_admin_intake_dlq_list():
+        """List intake_pending rows.
+
+        Default to the all-statuses view (newest first) so the
+        admin UI can render the audit trail (resolved + abandoned)
+        too. Pass ``?status=pending`` to scope to retry-eligible
+        rows only.
+        """
+        if intake_dlq_conn is None:
+            return jsonify({
+                "error": "intake DLQ not configured",
+                "rows": [],
+            }), 501
+        try:
+            from ..intake import dlq as _dlq  # local import — cloud dep optional
+            conn = intake_dlq_conn()
+            scope = (request.args.get("status") or "").strip().lower()
+            if scope == "pending":
+                rows = _dlq.list_pending(conn, limit=200)
+            else:
+                rows = _dlq.list_all(conn, limit=200)
+        except Exception as exc:  # noqa: BLE001 — never crash the route
+            log.exception("intake-dlq list failed: %s", exc)
+            return jsonify({
+                "error": "intake-dlq list failed",
+                "rows": [],
+            }), 500
+        return jsonify({
+            "rows": [
+                {
+                    "intake_id": r.intake_id,
+                    "client_intake_id": r.client_intake_id,
+                    "enqueued_at": r.enqueued_at,
+                    "resolved_at": r.resolved_at,
+                    "attempts": r.attempts,
+                    "last_error": r.last_error,
+                    "status": r.status,  # 0=pending 1=resolved 2=abandoned
+                    "product_id": r.product_id,
+                    # Echo the queued payload so the operator can
+                    # eyeball what would be re-POSTed before clicking
+                    # retry. Strings only — never log secrets via this
+                    # endpoint; intake bodies are user-typed product
+                    # specs (no API keys / passwords).
+                    "payload_json": r.payload_json,
+                }
+                for r in rows
+            ],
+        })
+
+    @bp.post("/api/admin/intake-dlq/<int:intake_id>/retry")
+    def api_admin_intake_dlq_retry(intake_id: int):
+        """Re-POST a queued intake to the cloud.
+
+        On success: stamps ``status=1``, ``resolved_at=now``,
+        ``product_id=<cloud-minted>`` and writes-through the local
+        product cache so subsequent classifier lookups see the row.
+        On a transient failure: bumps ``attempts`` and stores the
+        latest error; row stays pending for the next click.
+        On a 4xx (validation) failure: surface to the operator
+        (don't auto-abandon — operator chooses via the abandon
+        endpoint when they're sure).
+        """
+        if intake_dlq_conn is None:
+            return jsonify({"error": "intake DLQ not configured"}), 501
+        if intake_dlq_cloud_client is None:
+            # Cloud disabled / missing import key — no point retrying.
+            return jsonify({
+                "error": "cloud client not configured; cannot retry",
+            }), 501
+        try:
+            from ..intake import dlq as _dlq
+            from ..cloud import CloudError as _CloudError
+            conn = intake_dlq_conn()
+            row = _dlq.get(conn, intake_id)
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "intake-dlq retry pre-check failed for %d: %s",
+                intake_id, exc,
+            )
+            return jsonify({
+                "error": "intake-dlq retry failed (pre-check)",
+            }), 500
+        if row is None:
+            return jsonify({"error": "intake_id not found"}), 404
+        if row.status != 0:
+            return jsonify({
+                "error": "row is not pending",
+                "status": row.status,
+            }), 409
+
+        try:
+            payload = row.payload
+        except Exception as exc:  # noqa: BLE001
+            log.exception("intake-dlq retry: payload decode failed for %d", intake_id)
+            return jsonify({
+                "error": f"payload decode failed: {exc}",
+            }), 500
+
+        # Re-POST verbatim. The cloud /intake handler doesn't dedupe
+        # on client_intake_id today — operator-driven retries are how
+        # we keep this safe (operator only clicks after they've
+        # confirmed the prior attempt didn't land a row).
+        try:
+            cloud_product = intake_dlq_cloud_client.post("/intake", payload)
+        except _CloudError as exc:  # type: ignore[misc]
+            err = f"cloud {exc.status_code}: {(exc.body or '')[:300]}"
+            _dlq.record_retry_failure(
+                conn, intake_id, error=err, db_lock=intake_dlq_lock,
+            )
+            log.warning("intake-dlq retry %d returned %s", intake_id, err)
+            return jsonify({
+                "error": "retry failed",
+                "status_code": exc.status_code,
+                "body": exc.body,
+            }), 502 if exc.status_code >= 500 else 400
+        except Exception as exc:  # noqa: BLE001
+            err = f"network: {exc}"[:500]
+            _dlq.record_retry_failure(
+                conn, intake_id, error=err, db_lock=intake_dlq_lock,
+            )
+            log.warning(
+                "intake-dlq retry %d network error: %s", intake_id, exc,
+            )
+            return jsonify({
+                "error": f"retry failed (network): {exc}",
+            }), 503
+
+        product_id = (
+            cloud_product.get("product_id")
+            if isinstance(cloud_product, dict) else None
+        )
+        if not isinstance(product_id, str) or not product_id.strip():
+            err = "cloud response missing product_id"
+            _dlq.record_retry_failure(
+                conn, intake_id, error=err, db_lock=intake_dlq_lock,
+            )
+            log.error(
+                "intake-dlq retry %d: %s (%r)", intake_id, err, cloud_product,
+            )
+            return jsonify({"error": err}), 502
+
+        # Mirror the success path of intake_save: write-through the
+        # local cache so classifier lookups + subsequent UI reads see
+        # the row immediately. Failures here are non-fatal (cloud
+        # already wrote; next product-sync poller tick recovers).
+        if intake_dlq_cloud_upsert_fn is not None:
+            try:
+                intake_dlq_cloud_upsert_fn(
+                    conn, cloud_product, db_lock=intake_dlq_lock,
+                )
+            except Exception:
+                log.exception(
+                    "intake-dlq retry %d: local cache upsert failed for %s",
+                    intake_id, product_id,
+                )
+
+        _dlq.mark_resolved(
+            conn, intake_id, product_id=product_id, db_lock=intake_dlq_lock,
+        )
+        log.warning(
+            "operator-resolved intake-dlq row %d as product %s",
+            intake_id, product_id,
+        )
+        return jsonify({
+            "ok": True,
+            "intake_id": intake_id,
+            "product_id": product_id,
+        })
+
+    @bp.post("/api/admin/intake-dlq/<int:intake_id>/abandon")
+    def api_admin_intake_dlq_abandon(intake_id: int):
+        """Mark a pending DLQ row as abandoned.
+
+        Operator path for "this will never succeed" — e.g. the cloud
+        rejected with 4xx after the operator manually fixed something
+        and confirmed the queued payload is no longer needed.
+        """
+        if intake_dlq_conn is None:
+            return jsonify({"error": "intake DLQ not configured"}), 501
+        body = request.get_json(silent=True) or {}
+        reason = str(body.get("reason") or "operator abandoned")[:300]
+        try:
+            from ..intake import dlq as _dlq
+            conn = intake_dlq_conn()
+            updated = _dlq.mark_abandoned(
+                conn, intake_id, reason=reason, db_lock=intake_dlq_lock,
+            )
+        except Exception as exc:  # noqa: BLE001
+            log.exception(
+                "intake-dlq abandon failed for %d: %s", intake_id, exc,
+            )
+            return jsonify({"error": "intake-dlq abandon failed"}), 500
+        if not updated:
+            return jsonify({"error": "row not in pending state"}), 404
+        log.warning(
+            "operator abandoned intake-dlq row %d: %s", intake_id, reason,
+        )
+        return jsonify({"ok": True, "intake_id": intake_id})
 
     # ----- /api/product/<product_id>/tare/arm ------------------------------
     #

@@ -1891,6 +1891,17 @@ def create_app(
         # the same shared sqlite connection the worker drains against so
         # the operator UI sees the live state without a second handle.
         cloud_outbox_conn=lambda: conn,
+        # Intake DLQ admin endpoints (AUDIT_FINDINGS_PHASE1 L8/HIGH).
+        # Same conn + lock as cloud_outbox; the retry endpoint also
+        # needs the cloud_client (to re-POST /intake) and the
+        # cloud_sync upsert_product_from_cloud (to write-through the
+        # local cache after a successful retry).
+        intake_dlq_conn=lambda: conn,
+        intake_dlq_lock=db_lock,
+        intake_dlq_cloud_client=cloud_client,
+        intake_dlq_cloud_upsert_fn=(
+            upsert_product_from_cloud if cloud_client is not None else None
+        ),
     )
     app.register_blueprint(html_bp)
     app.register_blueprint(api_bp)

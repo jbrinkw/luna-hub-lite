@@ -1307,3 +1307,178 @@ def test_create_blueprint_rejects_cloud_without_db_conn():
             cloud_enabled=True,
             cloud_client=FakeCloudClient(),
         )
+
+
+# ---------------------------------------------------------------------------
+# Intake DLQ — AUDIT_FINDINGS_PHASE1 L8/HIGH closed
+# ---------------------------------------------------------------------------
+#
+# When the cloud /intake POST fails 5xx or the request never reaches the
+# cloud (network), the user-typed product spec is parked in the
+# ``intake_pending`` table so an operator can retry it from the
+# /api/admin/intake-dlq endpoints. 4xx (validation) failures do NOT
+# enqueue — they're intrinsic to the user's input.
+
+
+@pytest.fixture
+def dlq_app(
+    fake_repo, fake_camera, refs_root, lookup_stub, ai_tare_stub,
+    fake_cloud_client, cloud_upsert_spy,
+):
+    """Cloud-mode app with a real (in-memory) sqlite conn so the
+    DLQ enqueue path lands rows we can inspect.
+    """
+    import sqlite3
+    from server.storage.migrations import apply_migrations
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    apply_migrations(conn)
+
+    app = Flask(__name__)
+    bp = create_blueprint(
+        repo=fake_repo,
+        camera=fake_camera,
+        refs_root=refs_root,
+        lookup_fn=lookup_stub,
+        ai_tare_fn=ai_tare_stub,
+        cloud_enabled=True,
+        cloud_client=fake_cloud_client,
+        cloud_upsert_fn=cloud_upsert_spy,
+        db_conn=conn,
+    )
+    app.register_blueprint(bp)
+    app.testing = True
+    return app, conn
+
+
+def test_save_5xx_enqueues_into_intake_dlq(dlq_app, fake_cloud_client):
+    """Cloud 5xx → user gets 503 AND a row lands in ``intake_pending``
+    so an operator can retry once cloud is healthy. Without DLQ, a
+    transient outage would force the user to re-type every field.
+    """
+    from server.cloud.client import CloudError
+    from server.intake import dlq
+
+    app, conn = dlq_app
+
+    def _boom(path, body):  # noqa: ARG001
+        raise CloudError(503, "supabase edge timeout")
+    fake_cloud_client.post_behavior = _boom
+
+    payload = {
+        "name": "Olive Oil",
+        "barcode": "8001070100600",
+        "brand": "Bertolli",
+        "net_weight_g": 500.0,
+        "unit_type": "liquid",
+    }
+    resp = app.test_client().post("/api/intake/save", json=payload)
+    assert resp.status_code == 503
+    error = resp.get_json()["error"].lower()
+    # User-facing message must indicate the queue, not the bare cloud error.
+    assert "queued" in error
+    assert "retry" in error
+
+    # Row landed in the DLQ.
+    rows = dlq.list_pending(conn)
+    assert len(rows) == 1
+    queued = rows[0]
+    assert queued.payload["name"] == "Olive Oil"
+    assert queued.payload["barcode"] == "8001070100600"
+    assert queued.payload["brand"] == "Bertolli"
+    # Last error captures the cloud status + body for ops to triage.
+    assert "503" in (queued.last_error or "")
+    assert queued.attempts == 1
+
+
+def test_save_network_error_enqueues_into_intake_dlq(
+    dlq_app, fake_cloud_client
+):
+    """Network failure (timeout / DNS / TCP reset) → 503 + DLQ row.
+
+    Mirrors the 5xx behavior since both are transient — operator
+    drives the retry once connectivity returns.
+    """
+    import requests
+    from server.intake import dlq
+
+    app, conn = dlq_app
+
+    def _boom(path, body):  # noqa: ARG001
+        raise requests.exceptions.ConnectTimeout("wifi went down")
+    fake_cloud_client.post_behavior = _boom
+
+    resp = app.test_client().post(
+        "/api/intake/save", json={"name": "Bread", "net_weight_g": 400.0},
+    )
+    assert resp.status_code == 503
+    assert "queued" in resp.get_json()["error"].lower()
+
+    rows = dlq.list_pending(conn)
+    assert len(rows) == 1
+    assert rows[0].payload["name"] == "Bread"
+    assert "network" in (rows[0].last_error or "").lower()
+
+
+def test_save_4xx_does_not_enqueue_into_intake_dlq(
+    dlq_app, fake_cloud_client
+):
+    """Cloud 4xx (validation) → user error passthrough, NO DLQ row.
+
+    Queueing a 4xx would have the cloud reject it forever — the
+    payload is intrinsically broken from the cloud's perspective.
+    Surface to the user so they fix their input.
+    """
+    from server.cloud.client import CloudError
+    from server.intake import dlq
+
+    app, conn = dlq_app
+
+    def _boom(path, body):  # noqa: ARG001
+        raise CloudError(409, "barcode already exists")
+    fake_cloud_client.post_behavior = _boom
+
+    resp = app.test_client().post(
+        "/api/intake/save",
+        json={"name": "Dup", "barcode": "111111111111"},
+    )
+    assert resp.status_code == 409
+    # No "queued" wording in the user-facing message.
+    assert "queued" not in resp.get_json()["error"].lower()
+    # And no row in the DLQ — 4xx is NOT retry-eligible.
+    assert dlq.list_pending(conn) == []
+    assert dlq.list_all(conn) == []
+
+
+def test_save_dlq_enqueue_failure_still_returns_503(
+    dlq_app, fake_cloud_client, monkeypatch
+):
+    """Defence-in-depth: if the DLQ enqueue itself blows up (schema
+    drift, disk full, etc.), the user STILL gets the 503 — they
+    must not see a 500 from the DLQ failure that masks the cloud
+    error.
+    """
+    from server.cloud.client import CloudError
+    from server.intake import dlq
+
+    app, conn = dlq_app
+
+    def _boom(path, body):  # noqa: ARG001
+        raise CloudError(503, "supabase edge timeout")
+    fake_cloud_client.post_behavior = _boom
+
+    # Force the DLQ enqueue to raise.
+    def _broken_enqueue(*args, **kwargs):
+        raise sqlite3.OperationalError("simulated DLQ failure")
+    monkeypatch.setattr(dlq, "enqueue", _broken_enqueue)
+
+    resp = app.test_client().post(
+        "/api/intake/save",
+        json={"name": "Thing", "net_weight_g": 100.0},
+    )
+    # 503 surfaces despite DLQ enqueue failing — the user-visible
+    # error wording stays in the cloud-failure family.
+    assert resp.status_code == 503
+    # No row landed (enqueue raised).
+    assert dlq.list_pending(conn) == []

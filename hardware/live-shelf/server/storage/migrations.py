@@ -487,6 +487,35 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
             "ON cloud_outbox(json_extract(payload_json, '$.event_kind'))"
         )
 
+    # Intake DLQ (AUDIT_FINDINGS_PHASE1 L8/HIGH closed). Long-lived DBs
+    # predate this table — guard with IF NOT EXISTS so we land the
+    # table + indexes on existing installs.
+    with conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS intake_pending (
+              intake_id             INTEGER PRIMARY KEY AUTOINCREMENT,
+              client_intake_id      TEXT NOT NULL UNIQUE,
+              payload_json          TEXT NOT NULL,
+              enqueued_at           TEXT NOT NULL DEFAULT (datetime('now')),
+              resolved_at           TEXT,
+              attempts              INTEGER NOT NULL DEFAULT 0,
+              last_error            TEXT,
+              status                INTEGER NOT NULL DEFAULT 0
+                                      CHECK(status IN (0, 1, 2)),
+              product_id            TEXT
+            )
+            """
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS intake_pending_pending_idx "
+            "ON intake_pending (intake_id) WHERE status = 0"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS intake_pending_status_idx "
+            "ON intake_pending (status)"
+        )
+
     # --- CHECK-constraint evolution for ``lots.status`` ---------------------
     # Add 'in_flight' to the lot status enum + the paired in-flight-columns
     # invariant CHECK (IN_FLIGHT_TRACKER_PLAN.md §11 + audit M1).
