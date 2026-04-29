@@ -85,6 +85,64 @@ def test_audit_symmetry_matrix_deterministic(tmp_path):
     assert a.read_bytes() == b.read_bytes()
 
 
+# Cells that AUDIT_FINDINGS_PHASE2.md surfaced as HIGH symmetry gaps.
+# The Phase-2 fix pass either implemented, waived, or detector-fixed
+# each one. This test pins the resolution so a regression (a probe
+# narrowing, a waiver getting deleted, or a translator file getting
+# renamed) re-flags loudly instead of silently re-opening the gap.
+_PHASE2_HIGH_FINDING_CELLS: list[tuple[str, str]] = [
+    ("catch_all", "cloud_pairings_sync"),
+    ("catch_all", "pi_UI_section"),
+    ("catch_all", "weight_sync_to_cloud"),
+    ("live_scale", "classifier_prompt"),
+    ("live_scale", "cloud_pairings_sync"),
+    ("live_shelf", "cloud_pairings_sync"),
+    ("live_shelf", "pi_UI_section"),
+    ("single_item", "auto_register"),
+    ("single_item", "classifier_prompt"),
+    ("single_item", "cloud_pairings_sync"),
+    ("single_item", "pi_UI_section"),
+]
+
+
+@pytest.mark.parametrize("entity,feature", _PHASE2_HIGH_FINDING_CELLS)
+def test_audit_symmetry_phase2_findings_resolved(tmp_path, entity, feature):
+    """Each Phase-2 HIGH finding cell must now be `present` or `waived`.
+
+    Locks in the L1 fix pass: lets the detector re-discover whether the
+    feature is implemented (`present`) or genuinely doesn't apply
+    (`waived`), but never silently regress to `missing`.
+    """
+    out_json = tmp_path / "sym.json"
+    out_md = tmp_path / "sym.md"
+    res = _run(
+        [
+            sys.executable,
+            str(SCRIPTS / "audit_symmetry_matrix.py"),
+            "--json", str(out_json),
+            "--md", str(out_md),
+            "--quiet",
+        ]
+    )
+    assert res.returncode == 0, (
+        f"audit_symmetry_matrix exited non-zero ({res.returncode}); "
+        f"some symmetry cells are missing again.\nstderr: {res.stderr}"
+    )
+    data = json.loads(out_json.read_text())
+    cell = next(
+        (c for c in data["cells"] if c["entity"] == entity and c["feature"] == feature),
+        None,
+    )
+    assert cell is not None, (
+        f"cell ({entity}, {feature}) not present in matrix output — "
+        "did ENTITIES or PROBES change?"
+    )
+    assert cell["status"] in ("present", "waived"), (
+        f"cell ({entity}, {feature}) regressed to {cell['status']!r} "
+        "after Phase-2 L1 fix pass — see AUDIT_STRATEGY_MERGED.md §7."
+    )
+
+
 # ---------------------------------------------------------------------------
 # 2. audit_invariants_pinned.py
 # ---------------------------------------------------------------------------

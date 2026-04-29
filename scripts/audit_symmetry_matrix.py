@@ -96,6 +96,22 @@ def _kind_present_in(text: str, entity: str) -> bool:
     return bool(re.search(rf"['\"]{re.escape(entity)}['\"]", text))
 
 
+def _kind_word_in(text: str, entity: str) -> bool:
+    """Word-boundary occurrence of the entity kind.
+
+    Used by probes that scan template / HTML / URL contexts where the
+    kind appears as a bare token (e.g. ``shelf=catch_all`` query
+    string, ``id="live-shelf-preview"`` element id, jinja conditional
+    ``{% if catch_all_enabled %}``). ``catch_all``, ``live_shelf``,
+    ``live_scale``, ``single_item`` are unique enough as identifiers
+    that a word-boundary match has very low false-positive risk; we
+    deliberately accept hyphen variants for HTML element ids by
+    swapping ``_`` ↔ ``-`` and matching either form.
+    """
+    pattern = re.escape(entity).replace("_", "[-_]")
+    return bool(re.search(rf"(?<![A-Za-z0-9]){pattern}(?![A-Za-z0-9])", text))
+
+
 def probe_apply_shelf_event_branch(entity: str) -> bool:
     """Cloud: ``private.apply_shelf_event`` has a branch handling this kind."""
     text = "\n".join(
@@ -142,8 +158,21 @@ def probe_pi_storage_table(entity: str) -> bool:
 
 
 def probe_cloud_pairings_sync(entity: str) -> bool:
-    """Pi: pairings_sync_poller mentions this kind so the upsert covers it."""
-    text = src("hardware/live-shelf/server/cloud/pairings_sync_poller.py")
+    """Pi: pairings_sync_poller (or its translation table) mentions this kind.
+
+    The poller centralised cloud↔Pi vocabulary translation in
+    ``cloud/_kind_translate.py`` (Phase 1 audit L10/HIGH fix). Both files
+    count for symmetry purposes — the poller delegates to the table and
+    re-quoting every literal in both files would duplicate the source of
+    truth.
+    """
+    text = "\n".join(
+        src(p)
+        for p in (
+            "hardware/live-shelf/server/cloud/pairings_sync_poller.py",
+            "hardware/live-shelf/server/cloud/_kind_translate.py",
+        )
+    )
     return _kind_present_in(text, entity)
 
 
@@ -162,13 +191,20 @@ def probe_classifier_prompt(entity: str) -> bool:
 
 
 def probe_pi_ui_section(entity: str) -> bool:
-    """Pi-served UI templates render this kind somewhere."""
+    """Pi-served UI templates render this kind somewhere.
+
+    Templates use the kind as a bare token in URL query strings
+    (``shelf=catch_all``), HTML element ids (``id="live-shelf-preview"``)
+    and jinja conditionals (``{% if catch_all_enabled %}``) rather than
+    as a Python-quoted literal, so we match by word boundary. Hyphen
+    variants of underscore-cased kinds count (HTML id convention).
+    """
     base = REPO_ROOT / "hardware" / "live-shelf" / "server" / "web" / "templates"
     if not base.is_dir():
         return False
     for path in sorted(base.glob("*.html")):
         try:
-            if _kind_present_in(path.read_text(encoding="utf-8"), entity):
+            if _kind_word_in(path.read_text(encoding="utf-8"), entity):
                 return True
         except OSError:
             continue
@@ -249,6 +285,35 @@ WAIVERS: dict[tuple[str, str], str] = {
     ),
     ("live_scale", "weight_sync_to_cloud"): (
         "weight_sync_poller is Pi-internal and uses Pi 'single_item' literal"
+    ),
+    # Catch-all has its own delta-capture stream
+    # (catch_all_first_measurement / _second_measurement event pair, see
+    # migrations 20260427120000 / 20260427130000) so the
+    # weight_sync_poller deliberately filters it OUT to avoid duplicate
+    # cloud events. See poller docstring "Scope" section.
+    ("catch_all", "weight_sync_to_cloud"): (
+        "catch-all uses delta-capture event pair; weight_sync_poller scope excludes it"
+    ),
+    # The classifier is camera-driven (Anthropic vision over a
+    # before/after frame pair). Live-scale rigs (cloud term `live_scale`,
+    # Pi term `single_item`) are HX711 load-cell-only with no camera, so
+    # the classifier prompt machinery genuinely doesn't apply to either
+    # synonym. See classifier/classify.py: only `live_shelf` and
+    # `catch_all` shelf_ids reach the prompt builder.
+    ("live_scale", "classifier_prompt"): (
+        "live_scale is cameraless (HX711-only); classifier is shelf/catch_all only"
+    ),
+    ("single_item", "classifier_prompt"): (
+        "Pi-side alias of live_scale; cameraless rig, no classifier prompt"
+    ),
+    # Auto-register lives in the cloud edge function
+    # (`supabase/functions/shelf-ingest/index.ts`) which speaks the cloud
+    # vocabulary `{live_shelf, live_scale, catch_all}`. The Pi-only
+    # `single_item` literal genuinely never appears in the edge fn — the
+    # translator at scale_events.py:3279 maps it to `live_scale` before
+    # the cloud sees it.
+    ("single_item", "auto_register"): (
+        "auto-register is cloud-side (uses 'live_scale'); 'single_item' is Pi-only literal"
     ),
 }
 
