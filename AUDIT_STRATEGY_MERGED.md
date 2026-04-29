@@ -194,6 +194,26 @@ Phase 2 fills this in. Each ⚠️ becomes a queued fix.
 - Performance micro-optimizations (this audit is bug-driven, not latency-driven).
 - Broad CoachByte/Hub feature logic outside shared infra (`logical_date`, auth/RLS, realtime, extension_settings, timer state machine).
 
+### L1 symmetry-matrix waivers
+
+`scripts/audit_symmetry_matrix.py` carries an in-source `WAIVERS` map for cells that genuinely don't apply to a given entity. The full justified list lives next to the cell in code; the user-visible summary:
+
+- **`catch_all × weight_sync_to_cloud`** — catch-all has its own `catch_all_first_measurement` / `_second_measurement` event pair (migrations `20260427120000` / `20260427130000`). The `weight_sync_poller` scope clause filters it out so no duplicate cloud events are emitted.
+- **`live_scale × classifier_prompt`** and **`single_item × classifier_prompt`** — the classifier is camera-driven (Anthropic vision before/after frame pair). Live-scale rigs are HX711 load-cell-only with no camera, so the prompt scaffolding genuinely doesn't apply to either the cloud (`live_scale`) or Pi (`single_item`) synonym.
+- **`single_item × auto_register`** — auto-register lives in the cloud edge fn `supabase/functions/shelf-ingest/index.ts` which speaks the cloud vocabulary `{live_shelf, live_scale, catch_all}`. The Pi-only `single_item` literal is never in scope there.
+- Cloud↔Pi vocabulary translator (`hardware/live-shelf/server/cloud/_kind_translate.py`) handles the `live_scale ↔ single_item` boundary, so each side is allowed to be absent in the OTHER side's storage / handler / outbox / UI section. This was the L10/HIGH fix from `AUDIT_FINDINGS_PHASE1.md`.
+
+### L11 invariants-pinned waivers
+
+`scripts/audit_invariants_pinned.py` greps for must/never/always sentences across `docs/`, `AUDIT_STRATEGY*.md`, `planned-work.md`, migrations, and `hardware/live-shelf/server/storage/schema.sql`, then asserts each rule is pinned by a filename in `supabase/tests/invariants/`. The bare grep is intentionally aggressive (it cannot distinguish "X must Y" rules from "X has never seen Y" narrative), so the script carries three explicit waiver mechanisms reviewed line-by-line during the Phase-2 triage:
+
+1. **`WAIVED_FILE_PREFIXES`** — entire files whose purpose is to _describe_ rules rather than encode them. Audit-strategy markdowns (`AUDIT_STRATEGY*.md`), planning docs (`docs/superpowers/plans/`, `docs/superpowers/specs/`), the verification-gate spec (`docs/VERIFY.md`), the L11 lens spec itself (`docs/testing/design-intent-invariants.md`), test-system retros (`docs/test-system-fix-plan.md`, `docs/test-audit-*.md`), accountability-process docs (`docs/accountability/`), and the forward-looking `planned-work.md`. Their must/never/always sentences are how-to-audit instructions, not production invariants.
+2. **`IN_CODE_ENFORCED_SUBSTRINGS`** — `RAISE EXCEPTION '... must ...'`, `GENERATED ALWAYS AS`, `USING HINT = '... must ...'`, `USING ERRCODE`. These ARE the enforcement code; happy-path + error-path coverage in `supabase/tests/<schema>/` already exercises them (otherwise the migration wouldn't compile). Re-asserting a CHECK constraint in `invariants/` would be tautological.
+3. **`NARRATIVE_PATTERNS`** — regex patterns for descriptive phrasings ("never observed", "never trips", "NULL = never observed", "always reflects", etc.) that describe past behaviour or non-testable context.
+4. **`WAIVED_LINES`** — explicit `(file, line)` overrides for cases the broader patterns shouldn't cover. Each entry records why the rule is pinned elsewhere (cross-reference to a non-`invariants/` test file like `supabase/tests/chefbyte/*` or `supabase/tests/hub/*`, an app-tools integration test, or a frontend-design layer).
+
+The Phase-2 triage closed all 208 initial L11 findings: 91 already-pinned plus 3 new pgTAP files (`nonneg_check_constraints.test.sql`, `discard_lot_by_id_ownership.test.sql`, `close_in_flight_lot_ownership.test.sql`) covering the genuinely-new invariants, and the rest into the four waiver categories above. Section 7 should NOT widen beyond truly-advisory items — every entry above has a filename or pattern that a reviewer can audit.
+
 ---
 
 ## Appendix A — Anchoring Each Lens to a Real Bug Pattern
