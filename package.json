@@ -24,6 +24,7 @@
     "verify:deno": "bash scripts/verify/deno_check.sh",
     "verify:fast": "bash scripts/verify/run.sh fast",
     "verify:full": "bash scripts/verify/run.sh full",
+    "verify:audit-phase2": "bash scripts/verify/audit_phase2.sh",
     "verify": "pnpm verify:fast",
     "lint": "eslint .",
     "lint:fix": "eslint . --fix",
