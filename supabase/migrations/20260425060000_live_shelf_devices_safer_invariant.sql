@@ -37,11 +37,13 @@
 --      is observability, not prevention — operators see the warning
 --      in the Postgres log.
 --
--- NON-GOALS:
---   * Doesn't ledger-ize the is_active flag (deferred: would need a
---     separate live_shelf_device_activations table + join-view).
---     The current INSERT-default-true + partial-unique-index pattern
---     stays; we just add self-healing on heartbeat.
+-- NON-GOALS (at the time this migration landed):
+--   * Doesn't ledger-ize the is_active flag.
+--     **DISCHARGED 2026-04-29** by migration
+--     20260429150000_live_shelf_devices_state_ledger.sql which adds
+--     the chefbyte.live_shelf_device_state_changes ledger table +
+--     trigger + view. The note is retained here for migration-history
+--     archeology.
 --   * Doesn't change the INSERT path — adding a new device with
 --     is_active=true still errors 23505 if the user already has one
 --     active. The Scales UI should pre-deactivate or delete the old

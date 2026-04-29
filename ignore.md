@@ -34,17 +34,6 @@ on 2026-04-29 before this triage).
 - **Effort estimate:** L (Pi mirror schema + sync poller + reconcile
   contract).
 
-## Live-shelf devices: ledger-ize is_active flag
-
-- **Source:** `supabase/migrations/20260425060000_live_shelf_devices_safer_invariant.sql:41` 2026-04-29
-- **TODO text:** "Doesn't ledger-ize the is_active flag (deferred:
-  would need a separate live_shelf_device_activations table +
-  join-view)."
-- **Why deferred:** Documented NON-GOAL of that migration. Current
-  INSERT-default-true + partial-unique-index pattern is sufficient;
-  a full activation ledger is post-MVP audit-trail work.
-- **Effort estimate:** M (schema + view + backfill + RLS).
-
 ---
 
 ## Historical migration TODOs (do not edit — already discharged)

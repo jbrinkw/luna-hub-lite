@@ -125,7 +125,39 @@ async function authenticate(supabase: SupabaseClient, apiKey: string | null): Pr
 
   if (error) return { ok: false, reason: 'db_error' };
   if (!data) return { ok: false, reason: 'bad_key' };
-  if (!data.is_active) return { ok: false, reason: 'inactive_device' };
+
+  // Defensive ledger fallback (2026-04-29 — drains the
+  // ledger-ize-is_active item from ignore.md). If the live row says
+  // inactive but the most-recent ledger entry says became_active=true,
+  // we trust the ledger. Rationale: the 2026-04-24 silent-revoke
+  // incident flipped is_active=false on a row that was actively
+  // heart-beating; a rogue UPDATE that bypasses the self-heal trigger
+  // (e.g. a future migration's consolidation sweep) could repeat the
+  // class. Reading the ledger here means a Pi whose live row has been
+  // "silently revoked" can still authenticate as long as the ledger's
+  // most-recent reality says active. The opposite (ledger inactive,
+  // live active) keeps live as the source of truth — explicit Revoke
+  // via the UI flips both, so trusting live there is correct.
+  if (!data.is_active) {
+    const { data: latestLedger } = await supabase
+      .schema('chefbyte')
+      .from('live_shelf_device_state_changes')
+      .select('became_active, change_reason')
+      .eq('device_id', data.device_id)
+      .order('changed_at', { ascending: false })
+      .order('change_id', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (!latestLedger || latestLedger.became_active === false) {
+      return { ok: false, reason: 'inactive_device' };
+    }
+    // Ledger disagrees with live row — trust ledger and log so the
+    // discrepancy is grep-able.
+    console.warn('shelf-ingest: ledger overrides live is_active=false', {
+      device_id: data.device_id,
+      latest_ledger_reason: latestLedger.change_reason ?? null,
+    });
+  }
   return { ok: true, device: { device_id: data.device_id, user_id: data.user_id } };
 }
 
