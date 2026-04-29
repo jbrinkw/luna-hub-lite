@@ -131,7 +131,88 @@ def test_audit_negative_space_runs(tmp_path):
     data = json.loads(out_json.read_text())
     assert data["gate"] == "audit_negative_space"
     assert data["lens"] == "L8"
-    assert data["stats"]["files_scanned"] > 0
+    # files_scanned counts files WITH hits; if all backlog is triaged this
+    # can be 0 — but the artifact stats key must always be present.
+    assert "files_scanned" in data["stats"]
+    assert "findings" in data["stats"]
+    assert "hits_total" in data["stats"]
+
+
+def test_audit_negative_space_inline_waivers():
+    """Three inline waiver markers must be recognized so triaged backlog
+    survives in source: GitHub issue refs, ignore.md pointers, and the
+    explicit ``__deferred__`` sentinel.
+
+    We import ``line_waiver`` directly rather than running the full scan
+    so the test pins the contract regardless of the wider repo state.
+    """
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import audit_negative_space as ans  # noqa: WPS433
+    finally:
+        sys.path.pop(0)
+
+    # Each entry: (line, expected-rationale-substring)
+    cases = [
+        ("# TODO #123 — tracked in GH", "github-issue-ref"),
+        ("// FIXME(#1234): blah", "github-issue-ref"),
+        ("# TODO gh#42: align", "github-issue-ref"),
+        ("// TODO: see ignore.md \"Vault Encryption\"", "ignore-md-pointer"),
+        ("# Tracked in ignore.md", "ignore-md-pointer"),
+        ("// TODO: __deferred__ to phase 3", "deferred-sentinel"),
+        ("# nothing to see here", None),
+        ("# TODO: implement caching", None),  # actionable, NOT waived
+    ]
+    for line, expected in cases:
+        got = ans.line_waiver(line)
+        if expected is None:
+            assert got is None, f"expected no waiver for {line!r}, got {got!r}"
+        else:
+            assert got == expected, (
+                f"expected {expected!r} for {line!r}, got {got!r}"
+            )
+
+
+def test_audit_negative_space_actionable_vs_prose():
+    """Detector must distinguish actionable markers from descriptive
+    prose. This pins the false-positive-reduction work that took the
+    L8 backlog from 874 → 0.
+    """
+    sys.path.insert(0, str(SCRIPTS))
+    try:
+        import audit_negative_space as ans  # noqa: WPS433
+    finally:
+        sys.path.pop(0)
+
+    # Use scan_file via a temp file inside REPO so .relative_to() works.
+    fixture = REPO / ".verify" / "_neg_space_smoke_fixture.py"
+    try:
+        fixture.write_text(
+            "\n".join(
+                [
+                    "# TODO: real action",
+                    "# FIXME: real action",
+                    "import { todoistTools } from 'x';",
+                    "class StubSource: pass",
+                    "# Stub source",
+                    "# A future migration must keep this column",
+                    "# Decision deferred: ledger-ize is_active",
+                    "this.deferred = new Promise(...);",
+                ]
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        hits = ans.scan_file(fixture)
+    finally:
+        fixture.unlink(missing_ok=True)
+
+    # Lines 1, 2 (TODO, FIXME) and 7 (deferred:) are actionable.
+    flagged_lines = sorted(h.line for h in hits)
+    assert flagged_lines == [1, 2, 7], (
+        f"expected actionable lines [1, 2, 7], got {flagged_lines}: "
+        f"{[h.excerpt for h in hits]}"
+    )
 
 
 # ---------------------------------------------------------------------------
