@@ -185,7 +185,7 @@ privilege escalation), **HIGH** (silent divergence, recoverable), **MEDIUM**
 - **Lens**: L8
 - **What**: TTL reaper for `status='in_flight'` rows that close + reconcile inside one sweeper tick is explicitly deferred. The 5-second `_reap_expired_in_flight` covers most cases, but a small race window exists. Documented; not yet addressed.
 - **Evidence**: `/home/jeremy/luna-hub-lite/hardware/live-shelf/server/reconciler/reconcile.py:695-713`.
-- **Suggested fix**: Either (a) implement Pass 4 of the reconciler (extends `ReconcilerRepo` protocol — non-trivial), or (b) graduate to a planned-work item with a dated ETA so the TODO does not rot.
+- **Suggested fix**: Either (a) implement Pass 4 of the reconciler (extends `ReconcilerRepo` protocol — non-trivial), or (b) graduate to a deferred-backlog item with a dated ETA so the TODO does not rot.
 - **Waiver candidate?**: yes — race window is bounded by the 5s sweeper tick and the existing reaper covers > 99% of cases.
 
 ### [Internal-Pi] HIGH — `app.py:1270` & `app.py:2037` "future single_item" comments — Pi auto-register for live_scale ESPs still relies on static-registry fallback

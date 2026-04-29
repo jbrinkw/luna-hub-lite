@@ -1,6 +1,6 @@
 /**
  * Lock-in test for the silent-scanner-keystroke-drop UX bug
- * (matches the planned-work brief).
+ * (matches the ignore.md brief).
  *
  * Reproduces: focus is on a non-scanner input; a hardware barcode scanner
  * fires (rapid digits + Enter); `useScannerDetection`'s protected-target
