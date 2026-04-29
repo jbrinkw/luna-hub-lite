@@ -211,6 +211,7 @@ def make_html_bp(
     data_dir: Path,
     templates_dir: Optional[Path] = None,
     catch_all_enabled: Optional[Callable[[], bool]] = None,
+    live_scale_enabled: Optional[Callable[[], bool]] = None,
     classifier_pool_provider: Optional[Callable[[], list]] = None,
 ) -> Blueprint:
     """Build an HTML blueprint bound to ``repo``.
@@ -227,6 +228,14 @@ def make_html_bp(
             dashboard templates can hide catch-all sections when the
             hardware isn't attached. Defaults to a constant ``False``
             callable — single-shelf deployments keep the page clean.
+        live_scale_enabled: zero-arg callable returning the current
+            single-track flag. When ``None``, the route auto-derives
+            the flag from the presence of any ``scale_pairings`` row
+            with ``shelf_id='single_item'`` — so the section + tile
+            appear the moment a single-track ESP heartbeats and the
+            auto-register handler mints a pairing row. Pass an
+            explicit callable to override (e.g. force-on for
+            screenshots, force-off to hide while debugging).
         classifier_pool_provider: zero-arg callable returning the current
             ``pool_for_add`` output for the live_shelf — a list of
             :class:`server.classifier.models.Candidate`. Used to render
@@ -260,6 +269,26 @@ def make_html_bp(
         try:
             return bool(catch_all_enabled())
         except Exception:  # pragma: no cover — UI must never crash on this
+            return False
+
+    # Resolve the single-track flag each request. When the host doesn't
+    # supply an explicit callable, auto-derive it from "is there at
+    # least one paired single_item scale?" — so the section appears the
+    # moment a LiveTrack ESP first heartbeats and the auto-register
+    # handler mints a ``scale_pairings`` row. Failures are swallowed
+    # (UI must never crash on this).
+    def _live_scale_on() -> bool:
+        if live_scale_enabled is not None:
+            try:
+                return bool(live_scale_enabled())
+            except Exception:  # pragma: no cover — UI must never crash on this
+                return False
+        get_scales = getattr(repo, "get_single_track_scales", None)
+        if not callable(get_scales):
+            return False
+        try:
+            return len(get_scales()) > 0
+        except Exception:  # pragma: no cover — defensive
             return False
 
     # ----- shared helper ---------------------------------------------------
@@ -299,6 +328,19 @@ def make_html_bp(
                     catch_all_state = get_ca()
                 except Exception:  # pragma: no cover — defensive
                     catch_all_state = None
+        # Single-track tile: only render when at least one paired
+        # single_item scale exists (matches the ``catch_all_enabled``
+        # gate pattern). Initial snapshot lets the template render
+        # populated cells before the polling JS kicks in.
+        ls_on = _live_scale_on()
+        single_track_state: dict[str, Any] = {}
+        if ls_on:
+            get_st = getattr(repo, "get_single_track_state", None)
+            if callable(get_st):
+                try:
+                    single_track_state = get_st() or {}
+                except Exception:  # pragma: no cover — defensive
+                    single_track_state = {}
         return render_template(
             "dashboard.html",
             state=state,
@@ -306,6 +348,8 @@ def make_html_bp(
             in_flight=in_flight,
             catch_all_enabled=ca_on,
             catch_all_state=catch_all_state or {},
+            live_scale_enabled=ls_on,
+            single_track_state=single_track_state,
             **_nav_ctx(),
         )
 
@@ -336,6 +380,19 @@ def make_html_bp(
         on_shelf = live_on_shelf + catch_all_on_shelf
         in_flight = live_in_flight + catch_all_in_flight
         catalog = repo.get_products_certified_not_on_shelf()
+
+        # Single-track scales (cloud term ``live_scale``; see
+        # CLAUDE.md "Live Shelf" notes). Auto-derived flag — the
+        # section appears the moment a LiveTrack ESP heartbeats.
+        ls_on = _live_scale_on()
+        single_track_scales: list[dict[str, Any]] = []
+        if ls_on:
+            get_st_scales = getattr(repo, "get_single_track_scales", None)
+            if callable(get_st_scales):
+                try:
+                    single_track_scales = list(get_st_scales())
+                except Exception:  # pragma: no cover — defensive
+                    single_track_scales = []
 
         # Tare-capture arm — present when the operator clicked Tare on
         # a catalog row and the 60s TTL hasn't elapsed yet. Template
@@ -416,6 +473,8 @@ def make_html_bp(
             catch_all_on_shelf=catch_all_on_shelf,
             catch_all_in_flight=catch_all_in_flight,
             catch_all_enabled=ca_on,
+            live_scale_enabled=ls_on,
+            single_track_scales=single_track_scales,
             tare_arm=tare_arm,
             usage_items=usage_items,
             usage_total=usage_total,

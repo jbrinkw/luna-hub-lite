@@ -756,5 +756,192 @@ class RepoWebAdapter:
             )
         return _to_dict(arm) if arm is not None else None
 
+    # ------------------------------------------------------ single-track
+    # Single-track scales (cloud term: ``live_scale``; Pi-local term:
+    # ``single_item``) are direct-consumption scales paired to one
+    # product — see ``scale_events.py:3525``. They do NOT write to
+    # ``scale_events`` for non-noise events (those short-circuit
+    # straight to the cloud emitter), so the UI's "current weight"
+    # comes from a layered source: latest scale_events row first
+    # (covers noise events + any legacy data), then the volatile
+    # heartbeat runtime state (always fresher when the device is
+    # online). This matches the live-shelf + catch-all pattern in
+    # :meth:`get_app_state` / :meth:`get_catch_all_state`.
+
+    def get_single_track_scales(self) -> list[dict[str, Any]]:
+        """Return per-pairing rows for the inventory + dashboard surfaces.
+
+        One element per ``scale_pairings`` row whose ``shelf_id =
+        'single_item'``. Each dict carries::
+
+            {
+              "device_id": str,
+              "shelf_id": "single_item",
+              "product_id": Optional[str],     # NULL = unpaired
+              "product_name": Optional[str],
+              "product_brand": Optional[str],
+              "lot_id": Optional[str],         # FEFO target if paired
+              "first_seen_at": str,
+              "last_heartbeat_ts": Optional[str],
+              "last_event_ts": Optional[str],   # latest scale_events row
+              "last_event_kind": Optional[str], # direction ('add' | 'remove' | 'noise')
+              "last_event_delta_g": Optional[float],
+              "current_weight_g": Optional[float],  # heartbeat-fresh if online,
+                                                    # else last scale_events.after
+              "scale_stable": Optional[bool],
+              "is_online": bool,                # heartbeat <60s
+            }
+
+        Ordering: by paired ``product_name`` ascending (unpaired rows
+        sort last). Stable across calls. The caller is responsible for
+        any further filtering / grouping.
+        """
+        with self._db_lock:
+            pairings = self._conn.execute(
+                """
+                SELECT sp.device_id,
+                       sp.shelf_id,
+                       sp.product_id,
+                       sp.lot_id,
+                       sp.first_seen_at,
+                       sp.last_heartbeat_ts,
+                       p.name        AS product_name,
+                       p.brand       AS product_brand
+                  FROM scale_pairings sp
+             LEFT JOIN products p ON p.product_id = sp.product_id
+                 WHERE sp.shelf_id = 'single_item'
+                """,
+            ).fetchall()
+            # Latest scale_events row per device_id. Single-item
+            # non-noise events short-circuit before writing scale_events
+            # (handlers/scale_events.py:3525), so this captures only
+            # noise rows + any legacy data — that's the contract.
+            last_events: dict[str, dict[str, Any]] = {}
+            for row in pairings:
+                ev = self._conn.execute(
+                    """
+                    SELECT ts, after_weight_g, delta_g, direction
+                      FROM scale_events
+                     WHERE device_id = ?
+                     ORDER BY ts DESC
+                     LIMIT 1
+                    """,
+                    (row["device_id"],),
+                ).fetchone()
+                if ev is not None:
+                    last_events[row["device_id"]] = dict(ev)
+
+        out: list[dict[str, Any]] = []
+        for row in pairings:
+            device_id = row["device_id"]
+            ev = last_events.get(device_id)
+            last_event_ts = ev["ts"] if ev is not None else None
+            last_event_kind = ev["direction"] if ev is not None else None
+            last_event_delta = ev["delta_g"] if ev is not None else None
+            current_weight: Optional[float] = (
+                ev["after_weight_g"] if ev is not None else None
+            )
+            heartbeat_ts = row["last_heartbeat_ts"]
+            stable: Optional[bool] = None
+            # Volatile runtime cache (heartbeats — see
+            # handlers/scale_events.py:5751). When fresh, supersedes the
+            # scale_events-derived weight + provides the ``stable`` flag.
+            rt = get_scale_runtime_state(device_id)
+            if rt:
+                if rt.get("weight_g") is not None:
+                    current_weight = rt["weight_g"]
+                if rt.get("ts"):
+                    heartbeat_ts = rt["ts"]
+                stable = rt.get("stable")
+            is_online = _is_heartbeat_recent(heartbeat_ts, max_age_s=60.0)
+            out.append(
+                {
+                    "device_id": device_id,
+                    "shelf_id": "single_item",
+                    "product_id": row["product_id"],
+                    "product_name": row["product_name"],
+                    "product_brand": row["product_brand"],
+                    "lot_id": row["lot_id"],
+                    "first_seen_at": row["first_seen_at"],
+                    "last_heartbeat_ts": heartbeat_ts,
+                    "last_event_ts": last_event_ts,
+                    "last_event_kind": last_event_kind,
+                    "last_event_delta_g": last_event_delta,
+                    "current_weight_g": current_weight,
+                    "scale_stable": stable,
+                    "is_online": is_online,
+                }
+            )
+        # Order: paired-by-name ascending, unpaired last (NULLs sort
+        # last). Stable so the inventory + dashboard tile show rows
+        # in the same order on every render.
+        out.sort(
+            key=lambda r: (
+                r["product_name"] is None,
+                (r["product_name"] or "").lower(),
+                r["device_id"],
+            )
+        )
+        return out
+
+    def get_single_track_state(self) -> dict[str, Any]:
+        """Aggregate state for the dashboard tile (``GET /api/state?shelf=single_item``).
+
+        Returns::
+
+            {
+              "shelf_id": "single_item",
+              "scales_total": int,           # number of paired rows
+              "scales_online": int,          # heartbeat <60s
+              "scales": [                    # truncated dashboard list
+                {
+                  "device_id", "product_id", "product_name",
+                  "current_weight_g", "last_heartbeat_ts",
+                  "is_online", "scale_stable",
+                },
+                ...
+              ],
+            }
+
+        Mirrors :meth:`get_catch_all_state` so the dashboard polling
+        layer can reuse the same shape conventions.
+        """
+        scales = self.get_single_track_scales()
+        compact = [
+            {
+                "device_id": s["device_id"],
+                "product_id": s["product_id"],
+                "product_name": s["product_name"],
+                "current_weight_g": s["current_weight_g"],
+                "last_heartbeat_ts": s["last_heartbeat_ts"],
+                "is_online": s["is_online"],
+                "scale_stable": s["scale_stable"],
+            }
+            for s in scales
+        ]
+        return {
+            "shelf_id": "single_item",
+            "scales_total": len(scales),
+            "scales_online": sum(1 for s in scales if s["is_online"]),
+            "scales": compact,
+        }
+
+
+def _is_heartbeat_recent(ts: Optional[str], *, max_age_s: float) -> bool:
+    """True iff ``ts`` (ISO-8601 UTC, ``...Z`` accepted) is within ``max_age_s``
+    of now. ``None`` / unparseable values return False so a never-heartbeated
+    pairing never gets flagged "online"."""
+    if not isinstance(ts, str) or not ts:
+        return False
+    import datetime as _dt
+    try:
+        parsed = _dt.datetime.fromisoformat(ts.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=_dt.timezone.utc)
+    age = _dt.datetime.now(_dt.timezone.utc) - parsed
+    return age.total_seconds() <= max_age_s
+
 
 __all__ = ["RepoWebAdapter"]

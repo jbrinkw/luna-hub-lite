@@ -67,6 +67,44 @@
     </div>
     {% endif %}
 
+    {# Single-track scales tile — paired LiveTrack (live_scale) rigs.
+       Gate-on derived from "is there at least one paired single_item
+       row?" so it auto-appears the moment a LiveTrack ESP heartbeats.
+       Initial values are server-rendered so the first paint already
+       shows real data; the JS poller below refreshes via
+       /api/state?shelf=single_item. #}
+    {% if live_scale_enabled %}
+    <div class="panel" id="single-track-preview">
+      <h3>single-track scales <span class="muted">(<span id="single-track-online">{{ single_track_state.scales_online|default(0) }}</span> / <span id="single-track-total">{{ single_track_state.scales_total|default(0) }}</span> online)</span></h3>
+      {% if single_track_state.scales %}
+      <ul id="single-track-list" style="list-style: none; margin: 0; padding: 0;">
+        {% for s in single_track_state.scales %}
+          <li data-device-id="{{ s.device_id }}"
+              style="padding: 4px 0; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center;">
+            <span class="dot {% if s.is_online %}on{% else %}off{% endif %}"
+                  data-role="dot"></span>
+            <span class="value" data-role="name">
+              {{ s.product_name or '(unpaired)' }}
+            </span>
+            <span class="muted mono" style="font-size: 11px;" data-role="device">
+              {{ s.device_id }}
+            </span>
+            <span class="spacer" style="flex: 1;"></span>
+            <span class="value mono" data-role="weight">
+              {% if s.current_weight_g is not none %}{{ '%.0f g'|format(s.current_weight_g) }}{% else %}&mdash;{% endif %}
+            </span>
+            <span class="muted mono" style="font-size: 11px;" data-role="hb">
+              {% if s.last_heartbeat_ts %}{{ s.last_heartbeat_ts[11:19] }}{% else %}&mdash;{% endif %}
+            </span>
+          </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <p class="muted" id="single-track-empty">no scales paired yet.</p>
+      {% endif %}
+    </div>
+    {% endif %}
+
     <div class="panel">
       <h3>shelf</h3>
       <div>
@@ -396,6 +434,83 @@
         }
       }
       refreshCatchAll();
+    }
+
+    // Single-track scales poller. Mirrors the catch-all pattern:
+    // polls /api/state?shelf=single_item, updates the tile in place,
+    // backs off on persistent failures. Guarded by the panel's
+    // presence so dashboards rendered with live_scale_enabled=false
+    // incur zero polling traffic.
+    const stPanel = document.getElementById('single-track-preview');
+    if (stPanel) {
+      const ST_BASE_MS = 1000;
+      const ST_BACKOFF_THRESHOLD_1 = 3;
+      const ST_BACKOFF_MS_1 = 2000;
+      const ST_BACKOFF_THRESHOLD_2 = 5;
+      const ST_BACKOFF_MS_2 = 5000;
+
+      let stFailures = 0;
+
+      function stInterval() {
+        if (stFailures >= ST_BACKOFF_THRESHOLD_2) return ST_BACKOFF_MS_2;
+        if (stFailures >= ST_BACKOFF_THRESHOLD_1) return ST_BACKOFF_MS_1;
+        return ST_BASE_MS;
+      }
+
+      async function refreshSingleTrack() {
+        try {
+          const s = await fetchJSON('/api/state?shelf=single_item');
+          const onlineEl = document.getElementById('single-track-online');
+          const totalEl = document.getElementById('single-track-total');
+          if (onlineEl && typeof s.scales_online === 'number') {
+            onlineEl.textContent = s.scales_online;
+          }
+          if (totalEl && typeof s.scales_total === 'number') {
+            totalEl.textContent = s.scales_total;
+          }
+          const list = document.getElementById('single-track-list');
+          if (list && Array.isArray(s.scales)) {
+            // Update existing rows in place; rows are keyed by device_id
+            // so the DOM identity stays stable across polls.
+            const seen = new Set();
+            s.scales.forEach(function (sc) {
+              seen.add(sc.device_id);
+              let row = list.querySelector(
+                'li[data-device-id="' + cssEscape(sc.device_id) + '"]'
+              );
+              if (!row) return;  // First-paint server-rendered the row;
+                                 // adds across polls aren't expected and
+                                 // a full reload picks them up.
+              const dot = row.querySelector('[data-role="dot"]');
+              const name = row.querySelector('[data-role="name"]');
+              const weight = row.querySelector('[data-role="weight"]');
+              const hb = row.querySelector('[data-role="hb"]');
+              if (dot) dot.className = 'dot ' + (sc.is_online ? 'on' : 'off');
+              if (name) name.textContent = sc.product_name || '(unpaired)';
+              if (weight) weight.textContent = fmtGrams(sc.current_weight_g);
+              if (hb) {
+                hb.textContent = sc.last_heartbeat_ts
+                  ? sc.last_heartbeat_ts.slice(11, 19) : '—';
+              }
+            });
+          }
+          stFailures = 0;
+        } catch (_) {
+          stFailures += 1;
+        } finally {
+          setTimeout(refreshSingleTrack, stInterval());
+        }
+      }
+
+      // Lightweight CSS.escape polyfill for older WebViews that don't
+      // expose it; the device_id is alphanumeric+dash in practice but
+      // we don't want a stray quote to break the selector.
+      function cssEscape(s) {
+        if (window.CSS && CSS.escape) return CSS.escape(s);
+        return String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+      }
+
+      refreshSingleTrack();
     }
 
     // Tuning: min event delta threshold. Loaded from /api/config on page

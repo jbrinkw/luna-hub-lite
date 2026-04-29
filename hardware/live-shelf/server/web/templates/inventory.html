@@ -331,6 +331,99 @@
 {% endif %}
 {% endif %}
 
+{# -- Single-track scales -------------------------------------------- #}
+{# Cloud term ``live_scale``; Pi-local ``single_item``. Per-device
+   pairings come from chefbyte.scale_pairings (mirrored to local
+   SQLite). Section auto-shows the moment a LiveTrack ESP heartbeats
+   and the auto-register handler mints a row — gate-on is derived
+   from "is there at least one paired single-track scale?" so single-
+   shelf + catch-all-only deployments stay clean. #}
+{% if live_scale_enabled %}
+<h2 style="margin-top: 24px;">Single-track scales</h2>
+
+<div class="panel">
+  <h3>scales <span class="muted">({{ single_track_scales|length }})</span></h3>
+  {% if single_track_scales %}
+    <table>
+      <thead>
+        <tr>
+          <th>device</th>
+          <th>paired product</th>
+          <th>lot</th>
+          <th>current weight</th>
+          <th>last event</th>
+          <th>status</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for s in single_track_scales %}
+          <tr data-device-id="{{ s.device_id }}">
+            <td>
+              <strong class="mono">{{ s.device_id }}</strong>
+              {% if s.last_heartbeat_ts %}
+                <div class="muted" style="font-size: 11px;">
+                  hb {{ s.last_heartbeat_ts[:19]|replace('T', ' ') }}
+                </div>
+              {% else %}
+                <div class="muted" style="font-size: 11px;">
+                  never heartbeated
+                </div>
+              {% endif %}
+            </td>
+            <td>
+              {% if s.product_name %}
+                <strong>{{ s.product_name }}</strong>
+                {% if s.product_brand %}
+                  <div class="muted" style="font-size: 11px;">{{ s.product_brand }}</div>
+                {% endif %}
+              {% else %}
+                <span class="muted">(unpaired)</span>
+              {% endif %}
+            </td>
+            <td class="mono" style="font-size: 11px;">
+              {% if s.lot_id %}
+                {{ s.lot_id[:8] }}
+              {% else %}
+                <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td class="mono">
+              {% if s.current_weight_g is not none %}
+                <strong>{{ '%.0f g'|format(s.current_weight_g) }}</strong>
+              {% else %}
+                <span class="muted">&mdash;</span>
+              {% endif %}
+            </td>
+            <td class="mono" style="font-size: 11px;">
+              {% if s.last_event_ts %}
+                {{ s.last_event_kind or '—' }}
+                {% if s.last_event_delta_g is not none %}
+                  ({{ '%+.1fg'|format(s.last_event_delta_g) }})
+                {% endif %}
+                <div class="muted">{{ s.last_event_ts[:19]|replace('T', ' ') }}</div>
+              {% else %}
+                <span class="muted">no events yet</span>
+              {% endif %}
+            </td>
+            <td>
+              {% if s.is_online %}
+                <span class="pill ok">online</span>
+              {% elif s.last_heartbeat_ts %}
+                <span class="pill warn">offline</span>
+              {% else %}
+                <span class="pill muted">never seen</span>
+              {% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">no single-track scales paired yet.</p>
+  {% endif %}
+</div>
+{% endif %}
+
 {# -- Usage log ------------------------------------------------------ #}
 <div class="panel">
   <h3>usage log <span class="muted">({{ usage_total }})</span></h3>
@@ -353,6 +446,8 @@
                 {% if filters.kind == 'in_flight_replaced_new_item' %}selected{% endif %}>replaced</option>
         <option value="reconciler_use_return"
                 {% if filters.kind == 'reconciler_use_return' %}selected{% endif %}>reconciler</option>
+        <option value="single_item_consumed"
+                {% if filters.kind == 'single_item_consumed' %}selected{% endif %}>single-track</option>
       </select>
     </label>
     <label>
@@ -422,6 +517,8 @@
                 <span class="pill warn">replaced</span>
               {% elif r.kind == 'reconciler_use_return' %}
                 <span class="pill muted">reconciler</span>
+              {% elif r.kind == 'single_item_consumed' %}
+                <span class="pill info">single-track</span>
               {% else %}
                 <span class="pill muted">{{ r.kind }}</span>
               {% endif %}

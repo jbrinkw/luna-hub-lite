@@ -110,8 +110,10 @@ def make_api_bp(
     def api_state():
         # Per-shelf dispatch — when the caller asks for ``?shelf=catch_all``
         # the response mirrors the catch-all's fields (session id, last
-        # weight from scale-02, on/in-flight counts). The default path
-        # (no query, or ``?shelf=live_shelf``) returns the existing
+        # weight from scale-02, on/in-flight counts). ``?shelf=single_item``
+        # returns the aggregate single-track tile state (count + paired
+        # device list with per-device weight + product name). The default
+        # path (no query, or ``?shelf=live_shelf``) returns the existing
         # app_state shape unchanged for backward compat.
         #
         # Unknown ``shelf`` values are rejected with 400 rather than silently
@@ -119,7 +121,9 @@ def make_api_bp(
         # typos in clients and hide the fact that a new shelf key hasn't
         # been wired into the backend yet.
         shelf = request.args.get("shelf")
-        if shelf is not None and shelf not in {"live_shelf", "catch_all"}:
+        if shelf is not None and shelf not in {
+            "live_shelf", "catch_all", "single_item",
+        }:
             return jsonify({"error": "unknown shelf"}), 400
         if shelf == "catch_all":
             get_ca = getattr(repo, "get_catch_all_state", None)
@@ -127,6 +131,12 @@ def make_api_bp(
                 return jsonify({"error": "catch-all state not configured"}), 501
             ca = get_ca()
             return jsonify(dict(ca))
+        if shelf == "single_item":
+            get_st = getattr(repo, "get_single_track_state", None)
+            if not callable(get_st):
+                return jsonify({"error": "single-track state not configured"}), 501
+            st = get_st()
+            return jsonify(dict(st))
         state = repo.get_app_state()
         # Shape defensively: Jinja-friendly dict already, but ensure bools
         # are primitives not 0/1 ints for JS polling code.

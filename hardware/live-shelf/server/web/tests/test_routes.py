@@ -218,6 +218,9 @@ def _seed() -> dict[str, Any]:
         "resolutions": resolutions,
         "reviews": reviews,
         "usage_log": usage_log,
+        # Default empty — single-track section + tile auto-hide unless
+        # a test seeds a scale_pairings row with shelf_id='single_item'.
+        "scale_pairings": [],
     }
 
 
@@ -308,6 +311,74 @@ class FakeRepo:
             "scale_device_id": "scale-02",
             "on_shelf_count": on_count,
             "in_flight_count": in_flight_count,
+        }
+
+    # --- single-track scales ----------------------------------------------
+    # Mirrors the contract of RepoWebAdapter.get_single_track_scales /
+    # get_single_track_state so the templates + /api/state?shelf=
+    # single_item branch can be exercised by Flask tests without a real
+    # SQLite DB. ``self.db['scale_pairings']`` is a list of dicts; each
+    # row may carry an explicit ``current_weight_g`` / ``last_event_*`` /
+    # ``last_heartbeat_ts`` / ``is_online`` so tests can drive the various
+    # branches (online, offline, never-heartbeated, unpaired).
+
+    def get_single_track_scales(self) -> list[dict[str, Any]]:
+        out: list[dict[str, Any]] = []
+        for row in self.db.get("scale_pairings", []):
+            if row.get("shelf_id") != "single_item":
+                continue
+            product = (
+                self.db["products"].get(row.get("product_id"))
+                if row.get("product_id") else None
+            )
+            out.append(
+                {
+                    "device_id": row["device_id"],
+                    "shelf_id": "single_item",
+                    "product_id": row.get("product_id"),
+                    "product_name": product["name"] if product else None,
+                    "product_brand": product["brand"] if product else None,
+                    "lot_id": row.get("lot_id"),
+                    "first_seen_at": row.get(
+                        "first_seen_at", "2026-04-28T12:00:00Z"
+                    ),
+                    "last_heartbeat_ts": row.get("last_heartbeat_ts"),
+                    "last_event_ts": row.get("last_event_ts"),
+                    "last_event_kind": row.get("last_event_kind"),
+                    "last_event_delta_g": row.get("last_event_delta_g"),
+                    "current_weight_g": row.get("current_weight_g"),
+                    "scale_stable": row.get("scale_stable"),
+                    "is_online": bool(row.get("is_online", False)),
+                }
+            )
+        out.sort(
+            key=lambda r: (
+                r["product_name"] is None,
+                (r["product_name"] or "").lower(),
+                r["device_id"],
+            )
+        )
+        return out
+
+    def get_single_track_state(self) -> dict[str, Any]:
+        scales = self.get_single_track_scales()
+        compact = [
+            {
+                "device_id": s["device_id"],
+                "product_id": s["product_id"],
+                "product_name": s["product_name"],
+                "current_weight_g": s["current_weight_g"],
+                "last_heartbeat_ts": s["last_heartbeat_ts"],
+                "is_online": s["is_online"],
+                "scale_stable": s["scale_stable"],
+            }
+            for s in scales
+        ]
+        return {
+            "shelf_id": "single_item",
+            "scales_total": len(scales),
+            "scales_online": sum(1 for s in scales if s["is_online"]),
+            "scales": compact,
         }
 
     # --- usage log (USAGE_LOG_PLAN.md §5.3) --------------------------------
@@ -1183,6 +1254,404 @@ def test_review_resolve_unknown_id_404(client):
         json={"candidate_id": "x"},
     )
     assert r.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Single-track scales (cloud term: live_scale; Pi term: single_item)
+# Surfaces under test:
+#   1. /inventory renders the section iff at least one paired row exists
+#   2. /api/state?shelf=single_item returns the aggregate tile shape
+#   3. usage-log kind filter scopes to single-track-emitted events
+#   4. /dashboard tile auto-shows when paired + hides when not
+# ---------------------------------------------------------------------------
+
+
+def _seed_single_track_pairing(
+    repo: FakeRepo,
+    *,
+    device_id: str = "scale-single-01",
+    product_id: Optional[str] = "p1",
+    lot_id: Optional[str] = "l1",
+    is_online: bool = True,
+    last_heartbeat_ts: Optional[str] = "2026-04-28T12:00:00Z",
+    current_weight_g: Optional[float] = 1247.0,
+    last_event_ts: Optional[str] = None,
+    last_event_kind: Optional[str] = None,
+    last_event_delta_g: Optional[float] = None,
+) -> None:
+    """Append one ``scale_pairings`` row to the FakeRepo and return.
+
+    Mirrors the cloud→Pi ``scale_pairings`` mirror shape (see
+    ``storage/schema.sql:193``). Defaults to a fully-paired, online
+    scale-single-01 reading 1247g — flip ``is_online`` /
+    ``current_weight_g`` / ``last_event_*`` for branch coverage.
+    """
+    repo.db.setdefault("scale_pairings", []).append(
+        {
+            "device_id": device_id,
+            "shelf_id": "single_item",
+            "product_id": product_id,
+            "lot_id": lot_id,
+            "first_seen_at": "2026-04-28T11:00:00Z",
+            "last_heartbeat_ts": last_heartbeat_ts,
+            "is_online": is_online,
+            "current_weight_g": current_weight_g,
+            "last_event_ts": last_event_ts,
+            "last_event_kind": last_event_kind,
+            "last_event_delta_g": last_event_delta_g,
+            "scale_stable": None,
+        }
+    )
+
+
+def test_inventory_hides_single_track_section_when_no_pairings(client):
+    """Default seed has ``scale_pairings = []`` → /inventory must NOT
+    render the single-track section. Mirrors the catch-all-disabled
+    invariant (single-shelf deployments stay clean)."""
+    body = client.get("/inventory").get_data(as_text=True)
+    assert "Single-track scales" not in body
+    # And the section's table headers must NOT bleed in either.
+    assert "paired product" not in body
+
+
+def test_inventory_shows_single_track_section_when_paired_scale_exists(
+    repo, tmp_data_dir,
+):
+    """Seed one paired single_item row → section renders with the
+    paired product name, current weight, status pill, and device id.
+    Asserts data bindings (not just header presence) so a future
+    refactor that drops the data plumbing fails this test."""
+    _seed_single_track_pairing(
+        repo,
+        device_id="scale-single-01",
+        product_id="p1",
+        lot_id="l1",
+        is_online=True,
+        current_weight_g=1247.0,
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        catch_all_enabled=lambda: repo.catch_all_enabled,
+    ))
+    body = app.test_client().get("/inventory").get_data(as_text=True)
+    # Section heading + count.
+    assert "Single-track scales" in body
+    assert "scales" in body
+    # Data bindings: product name, device id, weight (formatted), pill.
+    assert "Heinz Ketchup" in body
+    assert "scale-single-01" in body
+    assert "1247 g" in body
+    assert "online" in body  # status pill
+    # Lot prefix (8 chars) — l1 only has 2 chars so just check substring.
+    # Use the row marker so we don't false-positive on the catalog table.
+    assert 'data-device-id="scale-single-01"' in body
+
+
+def test_inventory_single_track_unpaired_renders_placeholder(repo, tmp_data_dir):
+    """An ESP that's heartbeated but the operator hasn't paired a
+    product to yet (product_id IS NULL) — must still render with an
+    "(unpaired)" placeholder, NOT crash on the missing join."""
+    _seed_single_track_pairing(
+        repo,
+        device_id="scale-single-99",
+        product_id=None,
+        lot_id=None,
+        current_weight_g=42.0,
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        catch_all_enabled=lambda: repo.catch_all_enabled,
+    ))
+    r = app.test_client().get("/inventory")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "Single-track scales" in body
+    assert "(unpaired)" in body
+    assert "scale-single-99" in body
+    assert "42 g" in body
+
+
+def test_inventory_single_track_offline_renders_offline_pill(
+    repo, tmp_data_dir,
+):
+    """When ``is_online=False`` the row must show the ``offline`` pill,
+    not ``online``. Catches a regression where the template branches
+    on the wrong key."""
+    _seed_single_track_pairing(
+        repo,
+        device_id="scale-single-02",
+        is_online=False,
+        last_heartbeat_ts="2026-04-28T11:00:00Z",
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        catch_all_enabled=lambda: repo.catch_all_enabled,
+    ))
+    body = app.test_client().get("/inventory").get_data(as_text=True)
+    # The row should have the offline pill, not online.
+    # We can't just assert "online" not in body because the catch-all
+    # tile and scale-single-01 would both reference "online" — so we
+    # anchor on the device_id row marker + the pill class.
+    assert 'data-device-id="scale-single-02"' in body
+    assert "offline" in body
+
+
+def test_inventory_kind_filter_includes_single_item_consumed(client, repo):
+    """The kind dropdown must include ``single_item_consumed`` so the
+    operator can filter the usage log to direct-consumption events
+    only. Asserts both the option and the displayed label."""
+    body = client.get("/inventory").get_data(as_text=True)
+    assert 'value="single_item_consumed"' in body
+    # Human-readable label in the dropdown.
+    assert ">single-track</option>" in body
+
+
+def test_inventory_kind_filter_scopes_usage_to_single_item_only(
+    repo, tmp_data_dir,
+):
+    """Selecting ``kind=single_item_consumed`` must EXCLUDE shelf /
+    catch-all events from the rendered usage table.
+
+    Anchored on the ``data-usage-id`` row markers — the kind dropdown
+    options re-mention "ttl expired" / "return" textually, so plain
+    substring assertions would false-pass even when filtering is
+    broken. The seeded usage rows have known ids (u1, u2 from the
+    base seed; u-st1 for the new single-track row) so we can directly
+    assert which rows the template rendered."""
+    repo.db["usage_log"].append(
+        {
+            "usage_id": "u-st1",
+            "lot_id": "l1",
+            "product_id": "p1",
+            "product_name": "Heinz Ketchup",
+            "product_brand": "Heinz",
+            "container_type": "bottle",
+            "consumed_g": 12.5,
+            "pickup_weight_g": None,
+            "return_weight_g": None,
+            "kind": "single_item_consumed",
+            "session_id": None,
+            "pickup_event_id": None,
+            "return_event_id": None,
+            "occurred_at": _iso_days_ago(0.5),
+            "created_at": _iso_days_ago(0.5),
+        }
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(repo, data_dir=tmp_data_dir))
+    body = app.test_client().get(
+        "/inventory?kind=single_item_consumed"
+    ).get_data(as_text=True)
+    # Only the single-track row survives the filter — anchor on row ids.
+    assert 'data-usage-id="u-st1"' in body
+    assert 'data-usage-id="u1"' not in body
+    assert 'data-usage-id="u2"' not in body
+    # And the row's consumed weight rendered.
+    assert "12.5 g" in body
+
+
+def test_api_state_single_item_returns_aggregate(repo, tmp_data_dir):
+    """``GET /api/state?shelf=single_item`` returns the count + per-
+    device list shape needed by the dashboard tile poller. Asserts the
+    full shape (keys + types), not just status code."""
+    _seed_single_track_pairing(
+        repo,
+        device_id="scale-single-01",
+        product_id="p1",
+        is_online=True,
+        current_weight_g=1247.0,
+    )
+    _seed_single_track_pairing(
+        repo,
+        device_id="scale-single-02",
+        product_id=None,
+        is_online=False,
+        current_weight_g=None,
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(repo, data_dir=tmp_data_dir))
+    app.register_blueprint(make_api_bp(repo))
+    r = app.test_client().get("/api/state?shelf=single_item")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["shelf_id"] == "single_item"
+    assert body["scales_total"] == 2
+    assert body["scales_online"] == 1
+    assert isinstance(body["scales"], list)
+    assert len(body["scales"]) == 2
+    # Order: paired (Heinz) first, unpaired last.
+    paired = body["scales"][0]
+    assert paired["device_id"] == "scale-single-01"
+    assert paired["product_name"] == "Heinz Ketchup"
+    assert paired["current_weight_g"] == 1247.0
+    assert paired["is_online"] is True
+    unpaired = body["scales"][1]
+    assert unpaired["device_id"] == "scale-single-02"
+    assert unpaired["product_name"] is None
+    assert unpaired["is_online"] is False
+
+
+def test_api_state_unknown_shelf_still_400(client):
+    """Adding ``single_item`` to the allowlist must NOT loosen the
+    rejection of typos / unknown values."""
+    r = client.get("/api/state?shelf=mystery")
+    assert r.status_code == 400
+    assert "unknown shelf" in r.get_json()["error"]
+
+
+def test_api_state_single_item_returns_501_when_repo_lacks_method(
+    tmp_data_dir,
+):
+    """A repo without ``get_single_track_state`` must surface 501
+    rather than 500 — same defensive pattern as the catch-all branch."""
+
+    class _MinimalRepo:
+        def get_app_state(self):
+            return {
+                "door_open": False,
+                "current_session_id": None,
+                "last_scale_weight_g": 0.0,
+                "pending_reviews": 0,
+                "total_events": 0,
+                "shelf_name": "demo",
+                "updated_at": "2026-04-28T12:00:00Z",
+            }
+
+        def list_events(self, *, limit, offset):
+            return []
+
+        def count_events(self):
+            return 0
+
+        def get_review_item(self, rid):
+            return None
+
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(_MinimalRepo(), data_dir=tmp_data_dir))
+    app.register_blueprint(make_api_bp(_MinimalRepo()))
+    r = app.test_client().get("/api/state?shelf=single_item")
+    assert r.status_code == 501
+    assert "single-track" in r.get_json()["error"]
+
+
+def test_dashboard_hides_single_track_tile_when_no_pairings(client):
+    """Default seed: zero paired single-track scales → no tile.
+
+    The poller JS is always present (matching the catch-all pattern:
+    the poller is gated by a ``document.getElementById`` check), so
+    we assert specifically that the load-bearing DOM ids the JS reads
+    + writes are ABSENT. Without those ids the poller's branch never
+    fires — so even though ``shelf=single_item`` appears textually in
+    the JS, no traffic is generated."""
+    body = client.get("/").get_data(as_text=True)
+    assert 'id="single-track-preview"' not in body
+    assert 'id="single-track-list"' not in body
+    assert 'id="single-track-online"' not in body
+    assert 'id="single-track-total"' not in body
+
+
+def test_dashboard_shows_single_track_tile_when_paired_scale_exists(
+    repo, tmp_data_dir,
+):
+    """Seed one paired row → tile appears with the device id, product
+    name, formatted weight, and the poller wiring referenced in the
+    JS block. Asserts the load-bearing DOM ids the JS reads from so
+    a refactor that drops/renames an id breaks this test."""
+    _seed_single_track_pairing(
+        repo,
+        device_id="scale-single-01",
+        product_id="p2",  # Chobani Yogurt — distinct from /inventory tests
+        is_online=True,
+        current_weight_g=523.0,
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        catch_all_enabled=lambda: repo.catch_all_enabled,
+    ))
+    body = app.test_client().get("/").get_data(as_text=True)
+    # Tile + count container.
+    assert 'id="single-track-preview"' in body
+    assert 'id="single-track-online"' in body
+    assert 'id="single-track-total"' in body
+    # Polled DOM ids the JS writes into.
+    assert 'id="single-track-list"' in body
+    assert 'data-device-id="scale-single-01"' in body
+    # Initial server-rendered values (so the first paint isn't blank).
+    assert "Chobani Yogurt" in body
+    assert "523 g" in body
+    # Poller wiring — the JS block must reference the API call.
+    assert "/api/state?shelf=single_item" in body
+
+
+def test_dashboard_single_track_tile_initial_count_matches_paired_rows(
+    repo, tmp_data_dir,
+):
+    """Server-rendered initial counts (online / total) must agree with
+    the seeded data BEFORE the JS poller runs. Catches a bug where
+    the tile shows 0/0 until the first poll lands."""
+    _seed_single_track_pairing(
+        repo, device_id="scale-A", product_id="p1", is_online=True,
+    )
+    _seed_single_track_pairing(
+        repo, device_id="scale-B", product_id="p2", is_online=False,
+        last_heartbeat_ts="2026-04-28T11:00:00Z",
+    )
+    _seed_single_track_pairing(
+        repo, device_id="scale-C", product_id=None, is_online=True,
+    )
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        catch_all_enabled=lambda: repo.catch_all_enabled,
+    ))
+    body = app.test_client().get("/").get_data(as_text=True)
+    # 3 total, 2 online (A + C). The counts ride inside the rendered
+    # spans whose ids the JS poller updates — so we anchor on the
+    # markup pattern rather than just substring-matching the digit.
+    assert '<span id="single-track-online">2</span>' in body
+    assert '<span id="single-track-total">3</span>' in body
+
+
+def test_inventory_single_track_section_with_explicit_flag_override(
+    repo, tmp_data_dir,
+):
+    """The explicit ``live_scale_enabled`` callable overrides the
+    auto-derive. Force-on with no rows → empty-state message;
+    force-off with rows → no section. Mirrors the catch-all
+    flag's host-toggle pattern."""
+    # Force-on, no rows — section renders with the empty-state msg.
+    app_on = Flask(__name__)
+    app_on.config["TESTING"] = True
+    app_on.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        live_scale_enabled=lambda: True,
+    ))
+    body_on = app_on.test_client().get("/inventory").get_data(as_text=True)
+    assert "Single-track scales" in body_on
+    assert "no single-track scales paired yet" in body_on
+
+    # Force-off, with rows — section hidden.
+    _seed_single_track_pairing(repo)
+    app_off = Flask(__name__)
+    app_off.config["TESTING"] = True
+    app_off.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        live_scale_enabled=lambda: False,
+    ))
+    body_off = app_off.test_client().get("/inventory").get_data(as_text=True)
+    assert "Single-track scales" not in body_off
 
 
 def test_api_usage_delete_malformed_summary_returns_500(repo, tmp_data_dir):
