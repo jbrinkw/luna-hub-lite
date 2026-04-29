@@ -31,6 +31,12 @@ interface Product {
   is_placeholder: boolean;
   walmart_link: string | null;
   price: number | null;
+  /** Net weight of full container in grams. Used for gram-unit recipe ingredients. */
+  net_weight_g: number | null;
+  /** True when sold as discrete countable pieces (eggs, buns, slices, bars). */
+  is_distinct_unit_item: boolean;
+  /** Initial unit when this product is added to a recipe. */
+  default_recipe_unit: 'gram' | 'serving' | 'container' | null;
   /**
    * When non-null, this product has been through the LiveTrack Import
    * wizard and has a captured container tare — used for auto-deducting
@@ -81,6 +87,9 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
   is_placeholder: false,
   walmart_link: null,
   price: null,
+  net_weight_g: null,
+  is_distinct_unit_item: false,
+  default_recipe_unit: null,
   tare_weight_g: null,
 });
 
@@ -462,6 +471,68 @@ export function SettingsPage() {
             </div>
           </div>
         </div>
+
+        {/* Recipe defaults */}
+        <div>
+          <div className={sectionHeaderCls}>Recipe Defaults</div>
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr] gap-3 items-start">
+            <div>
+              <label className={labelCls}>
+                Net weight <span className="text-text-tertiary font-normal">g</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.net_weight_g ?? ''}
+                onChange={(e) => onChange('net_weight_g', e.target.value ? Number(e.target.value) : null)}
+                data-testid={`${testIdPrefix}-net-weight-g`}
+                placeholder="e.g. 454"
+                className={inputCls}
+              />
+              <p className="mt-1 text-[11px] text-text-tertiary">
+                Full container mass. Required for gram-unit recipes.
+              </p>
+            </div>
+            <div>
+              <label className={labelCls}>Default recipe unit</label>
+              <select
+                value={form.default_recipe_unit ?? ''}
+                onChange={(e) => onChange('default_recipe_unit', e.target.value === '' ? null : e.target.value)}
+                data-testid={`${testIdPrefix}-default-recipe-unit`}
+                className={inputCls}
+              >
+                <option value="">None (auto)</option>
+                <option value="gram">Gram</option>
+                <option value="serving">Serving</option>
+                <option value="container">Container</option>
+              </select>
+              <p className="mt-1 text-[11px] text-text-tertiary">Initial unit when added to a recipe.</p>
+              {form.default_recipe_unit === 'gram' && !(form.net_weight_g && form.net_weight_g > 0) && (
+                <p
+                  className="mt-1 text-[11px] text-red-600 font-semibold"
+                  data-testid={`${testIdPrefix}-gram-unit-error`}
+                >
+                  Set net weight first
+                </p>
+              )}
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className={labelCls}>Item type</label>
+              <label className="flex items-start gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={!!form.is_distinct_unit_item}
+                  onChange={(e) => onChange('is_distinct_unit_item', e.target.checked)}
+                  data-testid={`${testIdPrefix}-distinct-unit`}
+                  className="mt-0.5 h-4 w-4 accent-emerald-600"
+                />
+                <span className="text-sm font-semibold text-text">Distinct unit item</span>
+              </label>
+              <p className="text-[11px] text-text-tertiary ml-6">1 piece = 1 serving (eggs, buns, slices, bars)</p>
+            </div>
+          </div>
+        </div>
       </div>
     );
   };
@@ -569,7 +640,10 @@ export function SettingsPage() {
                   <button
                     className="mt-3 bg-emerald-600 text-white border-none w-full py-3 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
                     onClick={() => addProductMutation.mutate()}
-                    disabled={!addForm.name.trim()}
+                    disabled={
+                      !addForm.name.trim() ||
+                      (addForm.default_recipe_unit === 'gram' && !(addForm.net_weight_g && addForm.net_weight_g > 0))
+                    }
                     data-testid="save-new-product"
                   >
                     Save Product
@@ -610,9 +684,13 @@ export function SettingsPage() {
                         )}
                         <div className="flex gap-2 mt-5 pt-4 border-t border-border-light">
                           <button
-                            className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700"
+                            className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
                             onClick={() => saveProductMutation.mutate()}
                             data-testid="save-edit-product"
+                            disabled={
+                              editForm.default_recipe_unit === 'gram' &&
+                              !(editForm.net_weight_g && editForm.net_weight_g > 0)
+                            }
                           >
                             Save
                           </button>

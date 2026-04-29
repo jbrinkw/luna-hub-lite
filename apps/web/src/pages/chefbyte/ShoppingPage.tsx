@@ -306,7 +306,9 @@ export function ShoppingPage() {
 
     let productId = selectedProductId;
 
-    // If no product selected, create a placeholder
+    // If no product selected, create a placeholder (name-only, no barcode).
+    // New columns default to false / null — user can refine via Settings or
+    // the AI matcher on next scan.
     if (!productId) {
       const { data: newProduct, error: createErr } = await chefbyte()
         .from('products')
@@ -314,6 +316,8 @@ export function ShoppingPage() {
           user_id: user.id,
           name: searchText.trim(),
           is_placeholder: true,
+          is_distinct_unit_item: false,
+          default_recipe_unit: null,
         })
         .select('product_id')
         .single();
