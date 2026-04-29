@@ -21,7 +21,7 @@
 --      step 2.5 never sees them).
 
 BEGIN;
-SELECT plan(11);
+SELECT plan(12);
 
 ------------------------------------------------------------
 -- Setup
@@ -114,12 +114,24 @@ SELECT is(
   'last_update_source flipped from NULL to live_shelf'
 );
 
+-- Updated 2026-04-29 (migration 20260429210000): step 2.5 must NOT bump
+-- qty past 1.0. The lot represents one physical container; partial-fill
+-- state lives in last_observed_weight_g. Pre-fix this read 1.737 and
+-- caused the user-visible "Gatorade qty=2.4 ctn" bug.
 SELECT cmp_ok(
   (SELECT qty_containers FROM chefbyte.stock_lots
     WHERE lot_id = '11111111-1111-1111-1111-111111111111')::numeric,
-  '>',
-  1.0::numeric,
-  'qty_containers bumped (1.0 + 663.452/900 ≈ 1.737)'
+  '<=',
+  1.05::numeric,
+  'qty_containers preserved at 1.0 (one-container rule, ±0.05 epsilon)'
+);
+
+-- And the placement weight is recorded as last_observed_weight_g.
+SELECT is(
+  (SELECT last_observed_weight_g FROM chefbyte.stock_lots
+    WHERE lot_id = '11111111-1111-1111-1111-111111111111')::numeric,
+  663.452::numeric,
+  'placement weight stored in last_observed_weight_g (fill-state truth)'
 );
 
 SELECT is(
@@ -329,12 +341,14 @@ SELECT is(
   'untracked sibling lot stays untracked when a tracked lot already exists'
 );
 
-SELECT cmp_ok(
+-- Updated 2026-04-29 (migration 20260429210000): step 2 must NOT bump
+-- qty (return-of-existing-bottle, not a second container). qty stays at
+-- the planted 0.5; placement weight goes to last_observed_weight_g.
+SELECT is(
   (SELECT qty_containers FROM chefbyte.stock_lots
     WHERE lot_id = '66666666-6666-6666-6666-666666666666')::numeric,
-  '>',
   0.5::numeric,
-  'tracked lot was bumped (step 2 took the placement)'
+  'tracked lot qty preserved (return-of-existing-bottle, no qty bump)'
 );
 
 SELECT * FROM finish();

@@ -145,12 +145,15 @@ SELECT is(
   'last_update_source flipped from live_scale to live_shelf'
 );
 
+-- Updated 2026-04-29 (migration 20260429210000): step 2.6 must NOT bump
+-- qty (cross-source transfer of one physical bottle, not two bottles).
+-- Pre-fix this read 1.574 and contributed to the chicken qty=1.4 bug.
 SELECT cmp_ok(
   (SELECT qty_containers FROM chefbyte.stock_lots
     WHERE lot_id = '11111111-1111-1111-1111-111111111101')::numeric,
-  '>',
-  1.0::numeric,
-  'qty_containers bumped (1.0 + 244.1237/425 ≈ 1.574)'
+  '<=',
+  1.05::numeric,
+  'qty_containers preserved at 1.0 on cross-source transfer'
 );
 
 SELECT is(
