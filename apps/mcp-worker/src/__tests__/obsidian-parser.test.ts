@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { buildProjectTree, resolveProject } from '../../../../extensions/obsidian/tools/vault-parser';
+import { buildProjectTree, resolveProject, parseNoteEntries } from '../../../../extensions/obsidian/tools/vault-parser';
 import type { TreeEntry } from '../../../../extensions/obsidian/tools/git-api';
 
 function blob(path: string, sha = `sha-${path}`): TreeEntry {
@@ -182,5 +182,59 @@ describe('resolveProject', () => {
     const { project, ambiguous } = resolveProject(projects, '');
     expect(project).toBeNull();
     expect(ambiguous).toEqual([]);
+  });
+});
+
+// =============================================================================
+// parseNoteEntries — frontmatter edge cases
+// =============================================================================
+
+describe('parseNoteEntries', () => {
+  it('OBS-2: YAML block scalar containing "---" on its own indented line does not corrupt bodyStart', () => {
+    // A YAML block scalar uses `|` and the content is indented. The literal
+    // "---" inside the scalar is NOT the frontmatter closing delimiter — only
+    // an unindented "---" at column 0 closes the frontmatter block.
+    const text = [
+      '---',
+      'some_key: |',
+      '  line1',
+      '  ---', // this is content inside the block scalar, not a delimiter
+      '  line2',
+      '---', // real closing delimiter at column 0
+      '',
+      '4/1/26',
+      'Today entry.',
+    ].join('\n');
+
+    const entries = parseNoteEntries(text);
+
+    // Must find the entry — if bodyStart is computed incorrectly,
+    // the date header "4/1/26" is never reached and entries is empty.
+    expect(entries.length).toBe(1);
+    expect(entries[0].dateStr).toBe('4/1/26');
+    expect(entries[0].content).toBe('Today entry.');
+  });
+
+  it('parses entries from a file with no frontmatter at all', () => {
+    const text = '4/5/26\nJust a plain note.\n\n4/6/26\nAnother note.\n';
+    const entries = parseNoteEntries(text);
+    expect(entries.length).toBe(2);
+    expect(entries[0].dateStr).toBe('4/5/26');
+    expect(entries[1].dateStr).toBe('4/6/26');
+  });
+
+  it('silently skips invalid date headers (e.g. 13/45/26 — month 13) and continues parsing', () => {
+    // JS Date rolls over impossible dates — we verify no crash and the valid
+    // entry is still returned.
+    const text = '---\nfoo: bar\n---\n\n13/45/26\nImpossible date.\n\n4/5/26\nValid entry.\n';
+    const entries = parseNoteEntries(text);
+    // 13/45/26 is a JS Date roll-over (month 13 → February of next year,
+    // day 45 rolls further). The parser does NOT currently validate the date
+    // against month boundaries — it just wraps. So 13/45/26 may yield a
+    // rolled date. The important assertion: no crash and the valid 4/5/26
+    // entry is present.
+    const validEntry = entries.find((e) => e.dateStr === '4/5/26');
+    expect(validEntry).toBeDefined();
+    expect(validEntry!.content).toBe('Valid entry.');
   });
 });

@@ -160,10 +160,14 @@ export function parseNoteEntries(text: string): NoteEntry[] {
   const lines = text.split('\n');
 
   // Skip frontmatter if present.
+  // The opening and closing delimiters must be exactly "---" at column 0
+  // (no leading whitespace). This prevents a YAML block-scalar value that
+  // contains "---" on its own indented line from being mistaken for the
+  // closing delimiter — which would corrupt bodyStart and lose all entries.
   let bodyStart = 0;
-  if (lines[0]?.trim() === '---') {
+  if (lines[0] === '---') {
     for (let i = 1; i < lines.length; i++) {
-      if (lines[i].trim() === '---') {
+      if (lines[i] === '---') {
         bodyStart = i + 1;
         break;
       }
