@@ -420,11 +420,14 @@ INSERT INTO chefbyte.meal_plan_entries (
   '2026-03-03', 1, false
 );
 
-SELECT lives_ok(
-  $$
-    SELECT chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000003'::uuid)
-  $$,
-  'mark_meal_done on product-based meal (no recipe) succeeds'
+-- CB-PG-05 (MOCK_AUDIT_CHEFBYTE_SERVER.md 2026-04-29): replaced
+-- lives_ok (only verifies no exception) with is() on the return value
+-- so a hollow success=true without food_log rows is caught here, not
+-- only by the downstream state assertions.
+SELECT is(
+  (SELECT (chefbyte.mark_meal_done('50000000-0000-0000-0000-000000000003'::uuid))->>'success'),
+  'true',
+  'mark_meal_done on product-based meal (no recipe) returns success=true'
 );
 
 -- ─────────────────────────────────────────────────────────────
