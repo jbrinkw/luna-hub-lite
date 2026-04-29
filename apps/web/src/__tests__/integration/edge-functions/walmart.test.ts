@@ -16,15 +16,17 @@
  * (gated by isLocalDev() in the edge fn source); production requests that
  * send the header are silently ignored.
  *
- * NOTE: Per-user quota ("rate limiting with request queuing" per
- * docs/apps/chefbyte.md) is documented but NOT currently implemented in
- * the edge fn. The "quota exhaustion 429" + "cross-user quota isolation"
- * tests the audit called for are intentionally omitted here — they would
- * test unimplemented behavior. When quota is wired in, re-open this file
- * and add them.
+ * CB-EF-01 (MOCK_AUDIT_CHEFBYTE_SERVER.md 2026-04-29): quota exhaustion
+ * (429) and cross-user quota isolation tests are now implemented. The
+ * walmart_quota table (migration 20260429040000) + private.walmart_check_and_increment
+ * function are confirmed in the edge fn. We seed an exhausted quota row
+ * directly via adminClient (matching the analyze-product quota test pattern)
+ * then assert the 429 response shape. Cross-user isolation: we seed user A's
+ * quota to exhaustion, then verify user B's first call is NOT rejected by A's
+ * counter.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { SUPABASE_URL } from '../../setup.integration';
+import { adminClient, SUPABASE_URL } from '../../setup.integration';
 import { createTestUser, cleanupUser } from '../../test-helpers';
 
 const EDGE_URL = `${SUPABASE_URL}/functions/v1/walmart-scrape`;
@@ -169,12 +171,10 @@ describe('walmart-scrape Edge Function — upstream failure paths', () => {
   }, 15_000);
 });
 
-describe('walmart-scrape Edge Function — cross-user isolation', () => {
+describe('walmart-scrape Edge Function — cross-user isolation (stateless upstream)', () => {
   // User A and User B both authenticate; failure-path requests from A do
-  // not cause any observable state change for B. Because the edge fn is
-  // stateless (no quota counter implemented), this test pins the
-  // stateless-invariant: B's subsequent request still passes auth and
-  // validation independently of A's prior request.
+  // not cause any observable state change for B. Quota counters are
+  // per-user so A's upstream-failure requests cannot exhaust B's quota.
   let userA: { userId: string; jwt: string };
   let userB: { userId: string; jwt: string };
 
@@ -220,6 +220,124 @@ describe('walmart-scrape Edge Function — cross-user isolation', () => {
       },
       body: JSON.stringify({ search_term: 'bread' }),
     });
+    expect(resB.status).not.toBe(401);
+    expect(resB.status).not.toBe(400);
+  }, 15_000);
+});
+
+// ─── CB-EF-01: Quota exhaustion 429 ─────────────────────────────────────────
+// Seeds the walmart_quota table via adminClient (service_role bypasses RLS)
+// with today's date and used=100 (= p_max). The edge fn calls
+// private.walmart_check_and_increment before hitting SerpApi; when
+// allowed=false it must return 429 with quota_exceeded=true.
+// Pattern follows analyze-product.test.ts quota tests (lines 134-169).
+
+describe('walmart-scrape Edge Function — quota exhaustion 429 (CB-EF-01)', () => {
+  let userId: string;
+  let userJwt: string;
+
+  beforeAll(async () => {
+    const u = await createTestUser('walmart-quota');
+    userId = u.userId;
+    const { data: session } = await u.client.auth.getSession();
+    userJwt = session.session!.access_token;
+  });
+
+  afterAll(async () => {
+    await (adminClient as any).schema('chefbyte').from('walmart_quota').delete().eq('user_id', userId);
+    await cleanupUser(userId);
+  });
+
+  it('returns 429 with quota_exceeded=true when daily quota is exhausted', async () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Seed exhausted quota: used = 100 = p_max cap
+    const { error: seedErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('walmart_quota')
+      .upsert({ user_id: userId, quota_date: today, used: 100 }, { onConflict: 'user_id' });
+    expect(seedErr).toBeNull();
+
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userJwt}`,
+      },
+      body: JSON.stringify({ search_term: 'milk' }),
+    });
+
+    expect(res.status).toBe(429);
+    const body = await res.json();
+    expect(body.quota_exceeded).toBe(true);
+    expect(body.error).toMatch(/quota exceeded/i);
+    expect(typeof body.limit).toBe('number');
+    expect(typeof body.used).toBe('number');
+    expect(body.used).toBeGreaterThanOrEqual(body.limit);
+  }, 15_000);
+});
+
+// ─── CB-EF-01: Cross-user quota isolation ───────────────────────────────────
+// Verifies A's exhausted quota does not block B.
+// Seeds A's walmart_quota row to exhaustion; asserts A gets 429 and B does NOT.
+
+describe('walmart-scrape Edge Function — cross-user quota isolation (CB-EF-01)', () => {
+  let userA: { userId: string; jwt: string };
+  let userB: { userId: string; jwt: string };
+
+  beforeAll(async () => {
+    const a = await createTestUser('walmart-quotaiso-a');
+    const b = await createTestUser('walmart-quotaiso-b');
+    const { data: sessionA } = await a.client.auth.getSession();
+    const { data: sessionB } = await b.client.auth.getSession();
+    userA = { userId: a.userId, jwt: sessionA.session!.access_token };
+    userB = { userId: b.userId, jwt: sessionB.session!.access_token };
+  });
+
+  afterAll(async () => {
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('walmart_quota')
+      .delete()
+      .in('user_id', [userA.userId, userB.userId]);
+    await cleanupUser(userA.userId);
+    await cleanupUser(userB.userId);
+  });
+
+  it("User A's exhausted quota does not block User B", async () => {
+    const today = new Date().toISOString().slice(0, 10);
+
+    // Exhaust user A's quota
+    const { error: seedErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('walmart_quota')
+      .upsert({ user_id: userA.userId, quota_date: today, used: 100 }, { onConflict: 'user_id' });
+    expect(seedErr).toBeNull();
+
+    // Confirm A is blocked
+    const resA = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userA.jwt}`,
+      },
+      body: JSON.stringify({ search_term: 'milk' }),
+    });
+    expect(resA.status).toBe(429);
+
+    // B has no quota row; first call must NOT be blocked by A's counter.
+    // No SERPAPI_KEY in test env → 500/503 from upstream is expected and fine —
+    // it proves the fn reached the upstream-call stage (past quota check).
+    const resB = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${userB.jwt}`,
+      },
+      body: JSON.stringify({ search_term: 'bread' }),
+    });
+    // Must not be 429 (quota-blocked) — anything else means quota isolation holds
+    expect(resB.status).not.toBe(429);
     expect(resB.status).not.toBe(401);
     expect(resB.status).not.toBe(400);
   }, 15_000);
