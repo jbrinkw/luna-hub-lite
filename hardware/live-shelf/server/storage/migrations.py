@@ -229,6 +229,18 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_log_pickup_dedup "
             "ON usage_log(pickup_event_id) WHERE pickup_event_id IS NOT NULL"
         )
+    # Usage_log second dedup index — keys on (return_event_id, lot_id, kind)
+    # so the self-heal/backfill re-emission path can't slip past the
+    # pickup-side guard (UX_AUDIT R2 F2). Existing duplicate rows are
+    # consolidated below before creating the unique index, otherwise the
+    # CREATE itself would fail on the live DB. See _consolidate_usage_log_dupes.
+    _consolidate_usage_log_dupes(conn)
+    with conn:
+        conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_log_return_dedup "
+            "ON usage_log(return_event_id, lot_id, kind) "
+            "WHERE return_event_id IS NOT NULL"
+        )
 
     # Usage log CHECK rebuild: add 'single_item_consumed' on existing DBs
     # that predate the single-item tracker. Same rebuild-preserving-rows
@@ -300,6 +312,16 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
                 )
         finally:
             conn.execute("PRAGMA foreign_keys = ON")
+        # Same return-side dedup index installed on the rebuilt
+        # table. Consolidate duplicates before creating because
+        # SQLite refuses CREATE UNIQUE INDEX when violations exist.
+        _consolidate_usage_log_dupes(conn)
+        with conn:
+            conn.execute(
+                "CREATE UNIQUE INDEX IF NOT EXISTS idx_usage_log_return_dedup "
+                "ON usage_log(return_event_id, lot_id, kind) "
+                "WHERE return_event_id IS NOT NULL"
+            )
 
     # Scale pairings table (single-item tracker). Long-lived DBs predate it.
     with conn:
@@ -452,6 +474,17 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
             "CREATE INDEX IF NOT EXISTS cloud_outbox_pending_idx "
             "ON cloud_outbox (outbox_id) "
             "WHERE sent_at IS NULL AND failed_permanently = 0"
+        )
+        # Sync-audit finding #14: triage queries that filter by
+        # event_kind (e.g. /admin/dead-letter UI grouping by kind, or
+        # back-fill scans filtering for ``in_flight_*`` patterns)
+        # currently full-scan payload_json strings. Add an expression
+        # index on json_extract(payload_json, '$.event_kind') so those
+        # filters use the index directly. Cheap on insert: SQLite
+        # evaluates json_extract once per row at write time. Idempotent.
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_cloud_outbox_event_kind "
+            "ON cloud_outbox(json_extract(payload_json, '$.event_kind'))"
         )
 
     # --- CHECK-constraint evolution for ``lots.status`` ---------------------
@@ -880,6 +913,69 @@ def _apply_column_additions(conn: sqlite3.Connection) -> None:
     # not apply because neither ``scale_id`` nor ``disarmed_at``
     # columns exist in this schema; a re-arm is an INSERT OR REPLACE
     # into the singleton. No migration is needed.
+
+
+def _consolidate_usage_log_dupes(conn: sqlite3.Connection) -> int:
+    """Collapse pre-existing usage_log duplicates to one row per logical event.
+
+    Background: the live Pi accumulated N rows that share
+    ``(return_event_id, lot_id, kind)`` because the self-heal scanner
+    + history backfill re-emit the same return on every restart. The
+    pickup-side unique index didn't catch this vector — those re-emits
+    each carry a fresh pickup_event_id (or NULL via the reaper path).
+    See ``UX_AUDIT_PI_LIVESHELF_R2.md`` Finding 2.
+
+    The clean path (chosen over a soft-delete column): physically delete
+    the duplicate rows, keeping the earliest ``usage_id`` per group as
+    the survivor. The earliest row carries the most authentic created_at
+    timestamp + the original pickup_event_id, so picking it as the
+    survivor preserves the truthful trail.
+
+    Idempotent: when no duplicates exist (fresh DBs, or post-fix DBs
+    that already ran this once) the SELECT returns nothing and the
+    DELETE is a no-op.
+
+    Returns the number of rows physically deleted (0 on a clean DB).
+    """
+    try:
+        rows = conn.execute(
+            """
+            SELECT MIN(usage_id) AS keep, COUNT(*) AS n,
+                   return_event_id, lot_id, kind
+              FROM usage_log
+             WHERE return_event_id IS NOT NULL
+             GROUP BY return_event_id, lot_id, kind
+            HAVING COUNT(*) > 1
+            """
+        ).fetchall()
+    except sqlite3.OperationalError:  # table missing on a fresh DB
+        return 0
+    if not rows:
+        return 0
+
+    deleted_total = 0
+    with conn:
+        for row in rows:
+            cur = conn.execute(
+                """
+                DELETE FROM usage_log
+                 WHERE return_event_id = ?
+                   AND lot_id IS ?
+                   AND kind = ?
+                   AND usage_id != ?
+                """,
+                (row["return_event_id"], row["lot_id"],
+                 row["kind"], row["keep"]),
+            )
+            deleted_total += cur.rowcount or 0
+    if deleted_total > 0:
+        log.warning(
+            "migrations: consolidated %d duplicate usage_log row(s) "
+            "across %d (return_event_id, lot_id, kind) group(s); "
+            "see UX_AUDIT_PI_LIVESHELF_R2.md Finding 2",
+            deleted_total, len(rows),
+        )
+    return deleted_total
 
 
 def _backfill_usage_log(conn: sqlite3.Connection) -> int:

@@ -79,6 +79,14 @@ DeleteLotFn = Callable[[str], dict[str, Any]]
 # unknown ids — deletes are idempotent (summary reports ``deleted: 0``).
 DeleteUsageFn = Callable[[str], dict[str, Any]]
 
+# Dedup-group delete callable. Backs POST /api/usage/dedupe-group/delete —
+# the inventory page needs a way to drop every usage_log row that shares a
+# (return_event_id, lot_id, kind) key in one transaction. The per-row
+# delete only removes one of the duplicates the re-emission backend bug
+# leaves behind (see UX_AUDIT R2 F2). Idempotent — empty groups return
+# ``deleted: 0`` without raising.
+DeleteUsageDedupGroupFn = Callable[..., dict[str, Any]]
+
 
 def make_api_bp(
     repo: WebRepo,
@@ -91,6 +99,7 @@ def make_api_bp(
     delete_product_fn: Optional[DeleteProductFn] = None,
     delete_lot_fn: Optional[DeleteLotFn] = None,
     delete_usage_fn: Optional[DeleteUsageFn] = None,
+    delete_usage_dedup_group_fn: Optional[DeleteUsageDedupGroupFn] = None,
     default_camera_device: str = "/dev/video0",
     cloud_outbox_conn: Optional[Callable[[], Any]] = None,
 ) -> Blueprint:
@@ -675,6 +684,76 @@ def make_api_bp(
         if deleted == 0:
             return jsonify({"error": "usage row not found", "summary": summary}), 404
         log.info("usage delete: %s", summary)
+        return jsonify({"ok": True, "summary": summary})
+
+    # ----- /api/usage/dedupe-group/delete (UX_AUDIT R2 F2) ----------------
+    #
+    # Drop every usage_log row that shares a (return_event_id, lot_id,
+    # kind) dedup key. Backs the survivor row's "Nx" pill action on the
+    # inventory page when the per-row × button would only remove one of N
+    # duplicates (the re-emission backend bug). Body is JSON::
+    #
+    #     {"return_event_id": "<event_id>",
+    #      "lot_id": "<lot_id>"|null,    # optional
+    #      "kind": "<usage_kind>"|null}  # optional
+    #
+    # ``lot_id`` and ``kind`` narrow the scope so two unrelated dedup
+    # groups that happened to share a return_event_id can't be wiped
+    # with one POST. Returns the same summary shape as the per-row
+    # delete: ``{ok, summary: {deleted, reverted_g, lot_id}}``.
+    @bp.post("/api/usage/dedupe-group/delete")
+    def api_usage_dedupe_group_delete():
+        if delete_usage_dedup_group_fn is None:
+            return jsonify({"error": "dedupe-group delete not configured"}), 501
+        if not request.is_json:
+            return jsonify({"error": "expected application/json"}), 400
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({"error": "body must be a JSON object"}), 400
+        return_event_id = body.get("return_event_id")
+        if (not isinstance(return_event_id, str)
+                or not return_event_id.strip()
+                or "/" in return_event_id
+                or ".." in return_event_id):
+            return jsonify({"error": "invalid return_event_id"}), 400
+        lot_id_raw = body.get("lot_id")
+        kind_raw = body.get("kind")
+        # Guard the optional narrowing fields the same way the route's
+        # other handlers do — non-string values that aren't None are
+        # rejected so a hostile caller can't smuggle dicts/lists through.
+        lot_id: Optional[str] = None
+        if lot_id_raw is not None:
+            if not isinstance(lot_id_raw, str) or "/" in lot_id_raw or ".." in lot_id_raw:
+                return jsonify({"error": "invalid lot_id"}), 400
+            lot_id = lot_id_raw or None
+        kind: Optional[str] = None
+        if kind_raw is not None:
+            if not isinstance(kind_raw, str):
+                return jsonify({"error": "invalid kind"}), 400
+            kind = kind_raw or None
+        try:
+            summary = delete_usage_dedup_group_fn(
+                return_event_id=return_event_id,
+                lot_id=lot_id,
+                kind=kind,
+            )
+        except Exception as exc:  # pragma: no cover - defensive
+            log.exception("dedupe-group delete failed")
+            return jsonify({"error": f"delete failed: {exc}"}), 500
+        try:
+            deleted = int(summary["deleted"])
+        except (KeyError, TypeError, ValueError):
+            log.error(
+                "dedupe-group delete returned malformed summary: %r", summary,
+            )
+            return jsonify(
+                {"error": "delete summary malformed", "summary": summary},
+            ), 500
+        if deleted == 0:
+            return jsonify(
+                {"error": "no rows in dedupe group", "summary": summary},
+            ), 404
+        log.info("usage dedupe-group delete: %s", summary)
         return jsonify({"ok": True, "summary": summary})
 
     @bp.get("/api/usage/summary")

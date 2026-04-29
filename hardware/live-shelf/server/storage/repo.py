@@ -1951,6 +1951,71 @@ def delete_usage_log(
         }
 
 
+def delete_usage_log_by_return_event(
+    conn: sqlite3.Connection,
+    *,
+    return_event_id: str,
+    lot_id: Optional[str] = None,
+    kind: Optional[str] = None,
+) -> dict[str, Any]:
+    """Delete every usage_log row matching the dedup-group key.
+
+    Mirrors :func:`delete_usage_log` for a multi-row consolidation. Used
+    by the inventory page's "delete duplicate group" affordance — the
+    per-row × delete only removes one row, leaving the duplicates the
+    re-emission backend bug created. See UX_AUDIT R2 F2.
+
+    Reverts consumption on the lot once for the survivor row's
+    ``consumed_g`` (the duplicates are byte-identical so each row's
+    consumed_g is the same value; reverting once matches what the
+    emission path actually added). Clamped at 0 so the lifetime total
+    can't go negative.
+
+    Returns ``{"deleted": int, "reverted_g": float, "lot_id": str|None}``.
+    """
+    clauses = ["return_event_id = ?"]
+    params: list[Any] = [return_event_id]
+    if lot_id is not None:
+        # ``IS`` so a NULL lot_id matches NULL (not '=', which never does).
+        clauses.append("lot_id IS ?")
+        params.append(lot_id)
+    if kind is not None:
+        clauses.append("kind = ?")
+        params.append(kind)
+    where = " AND ".join(clauses)
+    with conn:
+        rows = conn.execute(
+            f"SELECT usage_id, lot_id, consumed_g FROM usage_log WHERE {where}",
+            params,
+        ).fetchall()
+        if not rows:
+            return {"deleted": 0, "reverted_g": 0.0, "lot_id": None}
+        # All rows in the group are byte-identical (same consumed_g) by
+        # construction of the dedup key. Revert the survivor's consumption
+        # once so we don't double-revert N times.
+        survivor = rows[0]
+        survivor_lot = survivor["lot_id"]
+        consumed = float(survivor["consumed_g"] or 0.0)
+        reverted = max(0.0, consumed)
+        if survivor_lot and reverted > 0:
+            conn.execute(
+                """
+                UPDATE lots
+                   SET total_consumed_g = MAX(0.0, total_consumed_g - ?)
+                 WHERE lot_id = ?
+                """,
+                (reverted, survivor_lot),
+            )
+        cur = conn.execute(
+            f"DELETE FROM usage_log WHERE {where}", params,
+        )
+        return {
+            "deleted": cur.rowcount or 0,
+            "reverted_g": reverted if survivor_lot else 0.0,
+            "lot_id": survivor_lot,
+        }
+
+
 def sum_usage_log_by_product(
     conn: sqlite3.Connection,
     *,

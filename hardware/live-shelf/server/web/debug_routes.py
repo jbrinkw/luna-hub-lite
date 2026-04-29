@@ -57,8 +57,17 @@ def _row_to_dict(row: Any) -> dict[str, Any]:
 def make_debug_bp(
     conn: sqlite3.Connection,
     db_lock: threading.Lock,
+    *,
+    runtime_health_provider: Optional[Any] = None,
 ) -> Blueprint:
-    """Build the debug blueprint bound to a shared DB connection."""
+    """Build the debug blueprint bound to a shared DB connection.
+
+    ``runtime_health_provider`` is a zero-arg callable returning a dict
+    of runtime-side health probes (Anthropic counters, camera daemon
+    liveness) that the SQLite-only ``system_health`` snapshot can't
+    capture. Surfaced under ``/api/debug/health.runtime``. Wired by
+    ``app.py``; tests can pass ``None`` to skip. UX audit FLAG 3.
+    """
     bp = Blueprint("web_debug", __name__)
 
     # --- JSON -----------------------------------------------------------
@@ -128,7 +137,31 @@ def make_debug_bp(
             rows = lifecycle.get_recent_health(
                 conn, since_seconds=since_s, limit=1000,
             )
-        return jsonify({"since_seconds": since_s, "snapshots": rows})
+        # UX audit FLAG 3: surface the runtime-only signals
+        # (Anthropic call counters, camera daemon liveness) the
+        # SQLite snapshot loop can't capture. Best-effort: a missing
+        # provider or a thrown probe lands as ``None`` for that field
+        # rather than failing the endpoint — operators reading this
+        # JSON expect partial data over a 500.
+        runtime: dict[str, Any] = {
+            "anthropic_calls_total": None,
+            "anthropic_errors_total": None,
+            "camera_daemon_alive": None,
+            "catch_all_camera_alive": None,
+        }
+        if runtime_health_provider is not None:
+            try:
+                extra = runtime_health_provider() or {}
+                if isinstance(extra, dict):
+                    for k, v in extra.items():
+                        runtime[k] = v
+            except Exception:  # noqa: BLE001 — defensive
+                pass
+        return jsonify({
+            "since_seconds": since_s,
+            "snapshots": rows,
+            "runtime": runtime,
+        })
 
     # --- HTML timelines ------------------------------------------------
 

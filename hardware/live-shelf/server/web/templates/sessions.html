@@ -48,16 +48,20 @@
      CSS classes so paging state isn't lost. #}
   <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
     <span class="muted" style="font-size: 11px;">show:</span>
+    {# UX audit FLAG 9: filter chips bumped to ≥44px tap targets so a
+       phone-sized hit zone (e.g. operator on the kitchen iPad) doesn't
+       miss between adjacent buttons. Desktop layout is unaffected
+       because the chips don't collide horizontally. #}
     <button type="button" id="filter-with-events" class="primary"
-            style="font-size: 11px; padding: 2px 8px;">
+            style="font-size: 13px; padding: 8px 14px; min-height: 44px;">
       with events
     </button>
     <button type="button" id="filter-all"
-            style="font-size: 11px; padding: 2px 8px;">
+            style="font-size: 13px; padding: 8px 14px; min-height: 44px;">
       all
     </button>
     <button type="button" id="filter-unreconciled"
-            style="font-size: 11px; padding: 2px 8px;">
+            style="font-size: 13px; padding: 8px 14px; min-height: 44px;">
       unreconciled
     </button>
   </div>
@@ -198,6 +202,22 @@
     );
     // Default to "with events" — leads with signal.
     applyFilter('with-events');
+  })();
+
+  // UX audit FLAG 1: server-rendered table refreshes every 30s so the
+  // operator sees new sessions without hitting reload. We reload the
+  // whole document (cheaper than wiring per-table partial fetches and
+  // matches the catch-all poller cadence). Skip the reload while the
+  // tab is hidden so backgrounded tabs don't churn, and skip while a
+  // dialog (window.confirm) holds the document — confirm() blocks the
+  // event loop, so a reload mid-prompt would dismiss the operator's
+  // pending confirmation.
+  (function () {
+    const REFRESH_MS = 30000;
+    setInterval(function () {
+      if (document.visibilityState === 'hidden') return;
+      window.location.reload();
+    }, REFRESH_MS);
   })();
 </script>
 {% endblock %}

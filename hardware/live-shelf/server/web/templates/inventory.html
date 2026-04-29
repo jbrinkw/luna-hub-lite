@@ -253,7 +253,7 @@
                 data-lot-id="{{ lot.lot_id }}"
                 data-lot-label="{{ product.name }}{% if product.variant %} — {{ product.variant }}{% endif %}"
                 title="remove this lot from the shelf (product stays in catalog)"
-                style="background: transparent; border: 1px solid var(--border); color: var(--muted); width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 3px; cursor: pointer; font-size: 13px;"
+                style="background: transparent; border: 1px solid var(--border); color: var(--muted); min-width: 44px; min-height: 44px; padding: 0; line-height: 1; border-radius: 3px; cursor: pointer; font-size: 16px;"
                 onmouseover="this.style.borderColor='var(--danger)';this.style.color='var(--danger)';"
                 onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)';"
               >&times;</button>
@@ -546,16 +546,25 @@
                 </span>
               {% endif %}
               {% if r._dup_count is defined and r._dup_count and r._dup_count > 1 %}
-                {# UX audit (2026-04-28) §inventory friction #11: a backend
-                   bug re-emits the same return row on each Pi restart. We
-                   collapse them server-side and badge the survivor with
-                   the count so the user can see "this is one event
-                   recorded N times" instead of N rows of visual noise. #}
-                <span class="pill warn"
-                      title="{{ r._dup_count }} duplicate inserts collapsed (likely a Pi-restart re-emission bug). The other rows are still in the DB; deleting this one will leave them behind."
-                      style="font-size: 10px; margin-left: 6px;">
-                  {{ r._dup_count }}x
-                </span>
+                {# UX audit (2026-04-28) §inventory friction #11 + R2 F2:
+                   a backend bug re-emits the same return row on each Pi
+                   restart. We collapse the visual representation server-
+                   side AND surface a button that removes the entire group
+                   in one transaction (the per-row × only deletes the
+                   survivor). The DB-side dedup index that prevents future
+                   duplicates was added in migrations.py — this control is
+                   the recovery affordance for backlogged duplicate rows. #}
+                <button type="button"
+                        class="pill warn dedup-group-delete"
+                        data-return-event-id="{{ r.return_event_id }}"
+                        data-lot-id="{{ r.lot_id or '' }}"
+                        data-kind="{{ r.kind }}"
+                        data-dup-count="{{ r._dup_count }}"
+                        data-dup-label="{{ r.product_name }} — {{ r._dup_count }} duplicate rows"
+                        title="{{ r._dup_count }} duplicate inserts collapsed (Pi-restart re-emission bug). Click to delete all {{ r._dup_count }} rows in this group."
+                        style="font-size: 10px; margin-left: 6px; cursor: pointer; border: none; padding: 2px 6px; min-height: 22px;">
+                  {{ r._dup_count }}x &times;
+                </button>
               {% endif %}
             </td>
             <td class="mono" style="text-align: right;">
@@ -603,7 +612,7 @@
                 data-usage-id="{{ r.usage_id }}"
                 data-usage-label="{{ r.product_name }} — {{ '%.1f g'|format(r.consumed_g or 0) }}"
                 title="delete this usage entry (reverts its consumption on the lot)"
-                style="background: transparent; border: 1px solid var(--border); color: var(--muted); width: 22px; height: 22px; padding: 0; line-height: 1; border-radius: 3px; cursor: pointer; font-size: 13px;"
+                style="background: transparent; border: 1px solid var(--border); color: var(--muted); min-width: 44px; min-height: 44px; padding: 0; line-height: 1; border-radius: 3px; cursor: pointer; font-size: 16px;"
                 onmouseover="this.style.borderColor='var(--danger)';this.style.color='var(--danger)';"
                 onmouseout="this.style.borderColor='var(--border)';this.style.color='var(--muted)';"
               >&times;</button>
@@ -881,6 +890,52 @@
     });
   });
 
+  // Dedup-group delete (UX_AUDIT R2 F2). The "Nx ×" badge is now a
+  // button; clicking removes every row that shares
+  // (return_event_id, lot_id, kind) in one transaction. Falls back to
+  // the per-row × delete if the group endpoint is unconfigured (501)
+  // so the operator can at least drop the survivor row.
+  document.querySelectorAll('button.dedup-group-delete').forEach(function (btn) {
+    btn.addEventListener('click', async function (ev) {
+      ev.preventDefault();
+      ev.stopPropagation();
+      const rid = btn.getAttribute('data-return-event-id');
+      const lid = btn.getAttribute('data-lot-id') || null;
+      const kind = btn.getAttribute('data-kind') || null;
+      const dupCount = btn.getAttribute('data-dup-count') || '?';
+      const label = btn.getAttribute('data-dup-label') || ('group of ' + dupCount);
+      if (!rid) {
+        showToast('cannot delete: return_event_id missing', true);
+        return;
+      }
+      if (!confirm('delete all ' + dupCount + ' duplicate rows?\n\n' + label +
+                   '\n\nReverts consumption on the lot once and removes every row in the group. Cannot be undone.')) {
+        return;
+      }
+      btn.disabled = true;
+      const prev = btn.textContent;
+      btn.textContent = '…';
+      try {
+        await fetchJSON('/api/usage/dedupe-group/delete', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({
+            return_event_id: rid,
+            lot_id: lid,
+            kind: kind,
+          }),
+        });
+        showToast('deleted ' + dupCount + ' duplicate row(s)');
+        const row = btn.closest('tr');
+        if (row && row.parentNode) row.parentNode.removeChild(row);
+      } catch (e) {
+        showToast('group delete failed: ' + e.message, true);
+        btn.disabled = false;
+        btn.textContent = prev;
+      }
+    });
+  });
+
   // Per-row usage_log delete. Reverts consumption on the lot + drops the row.
   document.querySelectorAll('button.del-usage').forEach(function (btn) {
     btn.addEventListener('click', async function () {
@@ -1096,5 +1151,34 @@
       }
     });
   });
+
+  // UX audit FLAG 1: server-rendered tables refresh on a 30s cadence so
+  // "what's on the shelf" doesn't go stale between manual reloads.
+  // Skip the reload while:
+  //   * the tab is hidden  — backgrounded tabs shouldn't churn
+  //   * any input is focused — would yank text mid-type / lose date
+  //                            selections in the filter bar
+  //   * any disabled button is on screen — means an in-flight delete /
+  //                                        tare op; reload would lose
+  //                                        the user's "wait" affordance.
+  // The cadence intentionally matches the catch-all preview poller's
+  // backoff floor so all "live" surfaces feel coherent.
+  (function () {
+    const REFRESH_MS = 30000;
+    function safeToReload() {
+      if (document.visibilityState === 'hidden') return false;
+      const ae = document.activeElement;
+      if (ae && (ae.tagName === 'INPUT' || ae.tagName === 'TEXTAREA'
+                  || ae.tagName === 'SELECT' || ae.isContentEditable)) {
+        return false;
+      }
+      // Any disabled button = in-flight server call (delete/tare).
+      if (document.querySelector('button[disabled]')) return false;
+      return true;
+    }
+    setInterval(function () {
+      if (safeToReload()) window.location.reload();
+    }, REFRESH_MS);
+  })();
 </script>
 {% endblock %}

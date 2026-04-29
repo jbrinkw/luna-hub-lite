@@ -9,7 +9,13 @@
          style="border-left: 3px solid var(--accent);">
       <h3>
         live preview{% if catch_all_enabled %} — live shelf{% endif %}
-        <span class="pill ok" style="margin-left: 8px; font-size: 10px;">scale-01</span>
+        {# UX audit R2 F3: chip text was hard-coded to scale-01, but
+           ``/api/state.scale_device_id`` ships the real device_id. Render
+           it from the snapshot + let the dashboard poller refresh it so
+           the chip stays truthful when hardware changes / is replaced. #}
+        <span class="pill ok"
+              id="live-shelf-device-chip"
+              style="margin-left: 8px; font-size: 10px;">{{ state.scale_device_id or 'scale-?' }}</span>
       </h3>
       <div class="preview-wrap">
         <img src="/live.mjpg" alt="live camera preview" />
@@ -49,7 +55,13 @@
          style="border-left: 3px solid var(--info);">
       <h3>
         live preview — catch-all
-        <span class="pill info" style="margin-left: 8px; font-size: 10px;">scale-02</span>
+        {# UX audit R2 F3: chip text driven from
+           /api/state?shelf=catch_all.scale_device_id rather than a
+           literal "scale-02" so a hardware swap / id collision is
+           visible at a glance. #}
+        <span class="pill info"
+              id="catch-all-device-chip"
+              style="margin-left: 8px; font-size: 10px;">{{ catch_all_state.scale_device_id or 'scale-?' }}</span>
       </h3>
       <div class="preview-wrap">
         <img src="/live.mjpg?shelf=catch_all" alt="catch-all camera preview" />
@@ -124,18 +136,31 @@
           <span class="value mono">{{ state.shelf_name|default('demo shelf') }}</span>
         </span>
         <span class="stat"><span class="label">events total:</span>
-          <span class="value">{{ state.total_events|default(0) }}</span>
+          <span class="value" id="events-total">{{ state.total_events|default(0) }}</span>
         </span>
         <span class="stat"><span class="label">pending review:</span>
-          <span class="value">{{ state.pending_reviews|default(pending_reviews|default(0)) }}</span>
+          <span class="value" id="pending-review-count">{{ state.pending_reviews|default(pending_reviews|default(0)) }}</span>
         </span>
-        {# Always-on in-flight counter. UX audit (2026-04-28) noted that
-           the in-flight panel only renders when non-empty, so the user
-           gets no visible "0 lots in flight" / "all at rest" signal —
-           and "1 in flight" makes the page jump on first appearance. #}
+        {# UX audit R2 F6: in-flight counter polled from /api/state
+           (in_flight_count) so it stays in sync with the catch-all
+           tile. Server-rendered initial value covers the first paint
+           before the poller runs. #}
         <span class="stat"><span class="label">in flight:</span>
           <span class="value" id="in-flight-count">{{ in_flight|length }}</span>
         </span>
+      </div>
+      {# UX audit R2 F4: "events total: 141 / pending review: 84" stays
+         constant for hours in steady state, so the operator stops
+         trusting the right column. Surface a relative-time stamp for
+         the most recent scale event so a freshness signal is right
+         next to the counters. The pill recolours based on age:
+         green ≤ 2 min, info ≤ 60 min, warn > 60 min (clearly stale). #}
+      <div style="margin-top: 6px;">
+        <span class="muted" style="font-size: 11px;">last event:</span>
+        <span class="pill"
+              id="last-event-fresh-pill"
+              data-last-event-ts="{{ state.last_scale_event_ts or '' }}"
+              style="font-size: 10px; margin-left: 4px;">—</span>
       </div>
     </div>
 
@@ -200,13 +225,18 @@
           <tr>
             <th>cloud drift</th>
             <td>
+              {# UX audit R2 F5: previous threshold (≥2s) is so loose
+                 the row is permanently green — live drift sits at
+                 -0.3s in steady state. Tighten to 0.75s so genuine
+                 drift growth (post-reboot before chrony stabilises,
+                 NTP outage, etc.) actually trips the warn pill. #}
               {% if health.cloud_drift_s is none %}
                 <span class="muted">—</span>
-              {% elif health.cloud_drift_s|abs < 2 %}
+              {% elif health.cloud_drift_s|abs < 0.75 %}
                 <span class="pill ok mono">{{ '%+.2fs'|format(health.cloud_drift_s) }}</span>
               {% else %}
                 <span class="pill warn mono"
-                      title="absolute drift between Pi clock and cloud is over 2 seconds — check NTP">
+                      title="absolute drift between Pi clock and cloud is at least 0.75 seconds — check NTP / chrony">
                   {{ '%+.2fs'|format(health.cloud_drift_s) }}
                 </span>
               {% endif %}
@@ -418,6 +448,58 @@
       }
     }
 
+    // UX audit R2 F4: relative-time pill for the most recent scale
+    // event. Polled UIs feel dead when every visible value is static;
+    // a freshness pill makes the dashboard feel alive even when no
+    // counters changed since last poll. Re-renders on every dashboard
+    // poll AND on a 30s wall-clock tick so the relative-time string
+    // advances smoothly without waiting for the next API hit.
+    function updateLastEventFreshPill() {
+      const pill = document.getElementById('last-event-fresh-pill');
+      if (!pill) return;
+      const ts = pill.getAttribute('data-last-event-ts');
+      if (!ts) {
+        pill.textContent = '—';
+        pill.className = 'pill muted';
+        pill.title = 'no scale events yet';
+        return;
+      }
+      const t = Date.parse(ts);
+      if (!isFinite(t)) {
+        pill.textContent = '—';
+        pill.className = 'pill muted';
+        return;
+      }
+      const ageMs = Date.now() - t;
+      const ageMin = ageMs / 60000;
+      let label;
+      if (ageMs < 0) {
+        label = 'just now';
+      } else if (ageMin < 1) {
+        label = Math.max(0, Math.floor(ageMs / 1000)) + 's ago';
+      } else if (ageMin < 60) {
+        label = Math.floor(ageMin) + 'm ago';
+      } else if (ageMin < 60 * 24) {
+        label = Math.floor(ageMin / 60) + 'h ago';
+      } else {
+        label = Math.floor(ageMin / (60 * 24)) + 'd ago';
+      }
+      pill.textContent = label;
+      // Threshold ladder: ≤2min = ok (green), ≤60min = info (neutral),
+      // >60min = warn (amber, "stop ignoring this"). Matches the system-
+      // health tile styling so the operator's eye pattern is consistent.
+      let cls = 'pill';
+      if (ageMin <= 2) cls += ' ok';
+      else if (ageMin <= 60) cls += ' info';
+      else cls += ' warn';
+      pill.className = cls;
+      pill.title = 'last scale event at ' + ts;
+    }
+    // First paint + 30s tick. The poller also calls this after every
+    // /api/state response so the timestamp is always honest.
+    updateLastEventFreshPill();
+    setInterval(updateLastEventFreshPill, 30000);
+
     async function refreshDashboard() {
       try {
         const s = await fetchJSON('/api/state');
@@ -427,20 +509,44 @@
         lbl.textContent = s.door_open ? 'OPEN' : 'closed';
         lbl.style.color = s.door_open ? 'var(--accent)' : 'var(--muted)';
         document.getElementById('weight').textContent = fmtGrams(s.last_scale_weight_g);
-        // Stable indicator
+        // UX audit R2 F3: keep the device-id chip in sync with the API
+        // truth. Falls through silently if the chip doesn't exist (e.g.
+        // a future template variant).
+        const liveChip = document.getElementById('live-shelf-device-chip');
+        if (liveChip && typeof s.scale_device_id === 'string' && s.scale_device_id) {
+          liveChip.textContent = s.scale_device_id;
+        }
+        // Stable indicator with sliding-window hysteresis.
+        // UX audit FLAG 2: the display was flipping every poll because
+        // weight oscillates around the door-closed mean. We dampen
+        // here (UI-side, not in the handler) because the handler's
+        // signal is still useful in raw form for backend logic — the
+        // operator just doesn't want to see micro-oscillations. Show
+        // STABLE when ≥4 of the last 5 polls reported stable=true;
+        // show SETTLING when ≥4 of the last 5 reported false.
+        // Otherwise hold the previous state. Indeterminate (null)
+        // values count as neither for both windows so a single poll
+        // with no scale runtime doesn't flush the window.
         const stableDot = document.getElementById('stable-dot');
         const stableLabel = document.getElementById('stable-label');
         if (stableDot && stableLabel) {
-          // UX-FLAG: stable-indicator hysteresis — deferred (see
-          // UX_AUDIT_PI_LIVESHELF_FLAGS.md Flag 2). The display flips
-          // every couple of seconds because the underlying weight
-          // oscillates around the door-closed mean. Tuning where to
-          // dampen (handler vs poller) is queued for the user.
-          if (s.scale_stable === true) {
+          if (!window.__stableWindow) window.__stableWindow = [];
+          window.__stableWindow.push(s.scale_stable);
+          if (window.__stableWindow.length > 5) window.__stableWindow.shift();
+          const tCount = window.__stableWindow.filter(function (v) { return v === true; }).length;
+          const fCount = window.__stableWindow.filter(function (v) { return v === false; }).length;
+          let nextState = window.__stableState || 'unknown';
+          if (tCount >= 4) nextState = 'stable';
+          else if (fCount >= 4) nextState = 'settling';
+          else if (window.__stableWindow.every(function (v) { return v === null || v === undefined; })) {
+            nextState = 'unknown';
+          }
+          window.__stableState = nextState;
+          if (nextState === 'stable') {
             stableDot.className = 'dot on';
             stableLabel.textContent = 'STABLE';
             stableLabel.style.color = 'var(--accent)';
-          } else if (s.scale_stable === false) {
+          } else if (nextState === 'settling') {
             stableDot.className = 'dot off';
             stableLabel.textContent = 'settling';
             stableLabel.style.color = '#d79b00';
@@ -454,6 +560,34 @@
           s.current_session_id ? s.current_session_id.slice(0, 8) : '—';
         document.getElementById('last-event-ts').textContent =
           s.last_scale_event_ts ? s.last_scale_event_ts.slice(11, 19) : '—';
+        // UX audit R2 F4: refresh the freshness pill on every poll so
+        // the operator sees the timer tick over even when nothing else
+        // is changing. Source of truth is state.last_scale_event_ts.
+        const fpill = document.getElementById('last-event-fresh-pill');
+        if (fpill && typeof s.last_scale_event_ts === 'string') {
+          fpill.setAttribute('data-last-event-ts', s.last_scale_event_ts || '');
+          updateLastEventFreshPill();
+        }
+        // UX audit R2 F4: live counts mirror the API truth instead of
+        // staying frozen at first-paint values. ``total_events`` +
+        // ``pending_reviews`` come from get_app_state and update on
+        // every classifier finish.
+        const totEv = document.getElementById('events-total');
+        if (totEv && typeof s.total_events === 'number') {
+          totEv.textContent = s.total_events;
+        }
+        const prCnt = document.getElementById('pending-review-count');
+        if (prCnt && typeof s.pending_reviews === 'number') {
+          prCnt.textContent = s.pending_reviews;
+        }
+        // UX audit R2 F6: live-shelf in-flight count polled from
+        // /api/state.in_flight_count so it stays in sync with the
+        // catch-all tile (which already polls). Without this the
+        // server-rendered value goes stale until full reload.
+        const ifCnt = document.getElementById('in-flight-count');
+        if (ifCnt && typeof s.in_flight_count === 'number') {
+          ifCnt.textContent = s.in_flight_count;
+        }
         const snapDoor = document.getElementById('snap-door');
         if (snapDoor) snapDoor.textContent = s.door_open ? 'open' : 'closed';
 
@@ -507,6 +641,11 @@
           const s = await fetchJSON('/api/state?shelf=catch_all');
           const w = document.getElementById('catch-weight');
           if (w) w.textContent = fmtGrams(s.last_scale_weight_g);
+          // UX audit R2 F3: chip mirrors the API truth.
+          const caChip = document.getElementById('catch-all-device-chip');
+          if (caChip && typeof s.scale_device_id === 'string' && s.scale_device_id) {
+            caChip.textContent = s.scale_device_id;
+          }
           const sd = document.getElementById('catch-stable-dot');
           const sl = document.getElementById('catch-stable-label');
           if (sd && sl) {

@@ -184,6 +184,18 @@ CREATE INDEX idx_usage_log_lot        ON usage_log(lot_id);
 CREATE UNIQUE INDEX idx_usage_log_pickup_dedup
   ON usage_log(pickup_event_id)
   WHERE pickup_event_id IS NOT NULL;
+-- Idempotency guard #2: one usage_log row per (return_event_id, lot_id, kind).
+-- The pickup-side guard above misses the actual duplicate vector observed
+-- on the live Pi: the self-heal scanner + history backfill re-emit the
+-- SAME return event for the same lot on every restart, producing N
+-- "Pulled <product> Ng return" rows that share return_event_id but each
+-- carry a fresh pickup_event_id (or NULL pickup_event_id from the reaper
+-- path). The pickup-side index can't catch those because the column
+-- value differs row-to-row. Keying the dedup on (return_event_id, lot_id,
+-- kind) exactly matches the row a re-emission would write. UX_AUDIT R2 F2.
+CREATE UNIQUE INDEX idx_usage_log_return_dedup
+  ON usage_log(return_event_id, lot_id, kind)
+  WHERE return_event_id IS NOT NULL;
 
 -- Scale → product pairings (single-item tracker scales auto-register on
 -- first heartbeat; operator assigns a product via the /inventory UI.

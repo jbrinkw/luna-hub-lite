@@ -1631,6 +1631,32 @@ def create_app(
         log.info("usage delete: id=%s summary=%s", usage_id, summary)
         return summary
 
+    def _delete_usage_dedup_group(
+        *, return_event_id: str,
+        lot_id: Optional[str] = None,
+        kind: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """Delete every usage_log row in a (return_event_id, lot_id, kind)
+        dedup group.
+
+        Backs POST /api/usage/dedupe-group/delete — the survivor row's ×
+        button on a duplicated group. The per-row delete leaves dupes
+        behind; this endpoint takes them all out in one transaction.
+        Idempotent — empty groups return ``deleted: 0``.
+        """
+        with db_lock:
+            summary = storage_repo.delete_usage_log_by_return_event(
+                conn,
+                return_event_id=return_event_id,
+                lot_id=lot_id,
+                kind=kind,
+            )
+        log.info(
+            "usage dedupe-group delete: return_event=%s lot=%s kind=%s -> %s",
+            return_event_id, lot_id, kind, summary,
+        )
+        return summary
+
     def _force_close_session() -> dict[str, Any]:
         """Manual session-close trigger for bench demos.
 
@@ -1848,6 +1874,7 @@ def create_app(
         delete_product_fn=_delete_product,
         delete_lot_fn=_delete_lot,
         delete_usage_fn=_delete_usage,
+        delete_usage_dedup_group_fn=_delete_usage_dedup_group,
         # Default target for the dashboard's auto-exposure toggle. The
         # button sends no ``device`` field, and the old hardcoded
         # /dev/video0 default targets the HD Web Camera (no exposure
@@ -1863,7 +1890,42 @@ def create_app(
     app.register_blueprint(api_bp)
 
     # Debug + observability routes (JSON + HTML timelines).
-    app.register_blueprint(make_debug_bp(conn, db_lock))
+    # UX audit FLAG 3: pass a runtime-health probe so /api/debug/health
+    # can surface Anthropic counters + camera daemon liveness without
+    # the snapshot loop having to reach into the runtime subsystem.
+    def _runtime_health() -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "anthropic_calls_total": None,
+            "anthropic_errors_total": None,
+            "camera_daemon_alive": None,
+            "catch_all_camera_alive": None,
+        }
+        try:
+            from .classifier.anthropic_client import get_anthropic_counters
+            calls, errors = get_anthropic_counters()
+            out["anthropic_calls_total"] = int(calls)
+            out["anthropic_errors_total"] = int(errors)
+        except Exception:  # pragma: no cover - defensive
+            pass
+        try:
+            cams = app.extensions.get("shelf_cameras", {}) or {}
+            live_d = cams.get("live_shelf")
+            if live_d is not None:
+                out["camera_daemon_alive"] = bool(
+                    getattr(live_d, "is_alive", lambda: True)()
+                )
+            ca_d = cams.get("catch_all")
+            if ca_d is not None:
+                out["catch_all_camera_alive"] = bool(
+                    getattr(ca_d, "is_alive", lambda: True)()
+                )
+        except Exception:  # pragma: no cover - defensive
+            pass
+        return out
+
+    app.register_blueprint(
+        make_debug_bp(conn, db_lock, runtime_health_provider=_runtime_health),
+    )
 
     # Scale + heartbeat
     app.register_blueprint(make_scale_bp(scale_handler))

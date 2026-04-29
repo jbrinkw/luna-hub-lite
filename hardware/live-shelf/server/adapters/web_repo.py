@@ -35,6 +35,68 @@ def _to_dict(obj: Any) -> dict[str, Any]:
     return {}
 
 
+# UX audit R2 F7: SQLite's ``datetime('now')`` default writes
+# ``"YYYY-MM-DD HH:MM:SS"`` (space separator, no timezone) — the
+# convention SQLite documents as "UTC text" but isn't ISO-8601. The
+# emission paths use ``strftime('%Y-%m-%dT%H:%M:%fZ', 'now')`` for
+# ``occurred_at`` and similar, which IS ISO+Z. The mismatch surfaces
+# in /api/usage rows that mix both formats inside one object.
+# Normalising at the adapter boundary keeps every API timestamp in the
+# same shape downstream consumers can parse with ``Date.parse`` or
+# ``datetime.fromisoformat`` without branching on which column they
+# came from. Documented once here rather than in every adapter site.
+def _iso_z(value: Any) -> Any:
+    """Coerce a SQLite UTC-text timestamp to ISO-8601 + ``Z``.
+
+    No-op for None, non-strings, and strings that already contain a
+    ``T`` separator + a ``Z``/offset suffix. Bare-naive forms like
+    ``"2026-04-29 04:19:07"`` are upgraded to
+    ``"2026-04-29T04:19:07Z"`` (assumed UTC, matching SQLite's
+    documented contract for ``datetime('now')``).
+    """
+    if not isinstance(value, str) or not value:
+        return value
+    s = value.strip()
+    if not s:
+        return value
+    # Already has T and either Z or an explicit offset (+HH:MM / -HH:MM).
+    if "T" in s:
+        last = s[-6:]
+        if s.endswith("Z") or (len(s) >= 6
+                                and last[0] in "+-"
+                                and last[3] == ":"):
+            return s
+        # T-but-no-zone: append Z (treat as UTC, matching SQLite).
+        return s + "Z"
+    # Space separator; rewrite + assume UTC.
+    if " " in s and len(s) >= 19 and s[10] == " ":
+        body = s[:10] + "T" + s[11:]
+        return body if body.endswith("Z") else body + "Z"
+    return value
+
+
+def _normalise_row_timestamps(row: dict[str, Any]) -> dict[str, Any]:
+    """Apply :func:`_iso_z` to common timestamp columns in a row dict.
+
+    Targets just the columns the API surface actually exposes — there's
+    no benefit to walking unknown keys, and a precise list keeps the
+    helper free of surprises if a non-timestamp column happens to be
+    string-valued.
+    """
+    if not isinstance(row, dict):
+        return row
+    for key in (
+        "occurred_at", "created_at", "updated_at", "started_at",
+        "ended_at", "ts", "last_seen_at", "last_out_at",
+        "last_scale_event_ts", "last_heartbeat_ts",
+        "first_seen_at", "in_flight_since", "reconciled_at",
+        "armed_at", "expires_at", "resolved_at",
+    ):
+        if key in row:
+            row[key] = _iso_z(row.get(key))
+    return row
+
+
 def _json_or_none(raw: Optional[str]) -> Any:
     if raw is None or raw == "":
         return None
@@ -97,6 +159,18 @@ class RepoWebAdapter:
             total_events_row = self._conn.execute(
                 "SELECT COUNT(*) AS c FROM scale_events"
             ).fetchone()
+            # UX audit R2 F6: dashboard's live-shelf in-flight badge was
+            # server-rendered + never polled, so it disagreed with the
+            # catch-all badge that DOES poll. Surface the count on
+            # /api/state so the dashboard JS can keep both in lockstep.
+            on_shelf_row = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM lots "
+                "WHERE shelf_id = 'live_shelf' AND status = 'on_shelf'"
+            ).fetchone()
+            in_flight_row = self._conn.execute(
+                "SELECT COUNT(*) AS c FROM lots "
+                "WHERE shelf_id = 'live_shelf' AND status = 'in_flight'"
+            ).fetchone()
         state_d = _to_dict(state)
         state_d["door_open"] = bool(state_d.get("door_open"))
         state_d["pending_reviews"] = int(
@@ -104,6 +178,12 @@ class RepoWebAdapter:
         )
         state_d["total_events"] = int(
             total_events_row["c"] if total_events_row is not None else 0
+        )
+        state_d["on_shelf_count"] = int(
+            on_shelf_row["c"] if on_shelf_row is not None else 0
+        )
+        state_d["in_flight_count"] = int(
+            in_flight_row["c"] if in_flight_row is not None else 0
         )
         # Volatile scale runtime (stable flag, latest heartbeat values).
         # Merge without clobbering authoritative DB fields.
@@ -125,7 +205,8 @@ class RepoWebAdapter:
             state_d["cloud_drift_s"] = get_last_drift_s()
         except Exception:  # noqa: BLE001 — defensive
             state_d["cloud_drift_s"] = None
-        return state_d
+        # UX audit R2 F7: same ISO+Z normalization /api/usage gets.
+        return _normalise_row_timestamps(state_d)
 
     # ----------------------------------------------------------- registry
 
@@ -206,7 +287,13 @@ class RepoWebAdapter:
                 limit=limit,
                 offset=offset,
             )
-        return [_to_dict(r) for r in rows]
+        # UX audit R2 F7: normalise timestamps so /api/usage rows don't
+        # mix ISO+Z (occurred_at, set via strftime) with bare-naive
+        # (created_at, set via SQLite's datetime('now')). Done at this
+        # layer rather than in storage_repo so plain-SQL consumers
+        # (analytics, manual queries) still see the literal stored
+        # value.
+        return [_normalise_row_timestamps(_to_dict(r)) for r in rows]
 
     def count_usage(
         self,
@@ -324,7 +411,7 @@ class RepoWebAdapter:
             if rt.get("weight_g") is not None:
                 last_weight = rt["weight_g"]
 
-        return {
+        return _normalise_row_timestamps({
             "shelf_id": "catch_all",
             "current_session_id": current_session_id,
             "last_scale_weight_g": last_weight,
@@ -333,7 +420,7 @@ class RepoWebAdapter:
             "scale_device_id": device_id,
             "on_shelf_count": int(on_shelf_row["c"] if on_shelf_row is not None else 0),
             "in_flight_count": int(in_flight_row["c"] if in_flight_row is not None else 0),
-        }
+        })
 
     # ----------------------------------------------------------- events
 
@@ -490,14 +577,22 @@ class RepoWebAdapter:
         *,
         status: Optional[str] = "pending",
     ) -> list[dict[str, Any]]:
+        # UX_AUDIT FLAG 4: pending reviews sort oldest-first so the
+        # operator tackles the longest-stuck items first (process-the-
+        # backlog mental model). Resolved / dismissed history keeps
+        # newest-first (review-what-just-happened mental model). Status
+        # ``None`` (the "all" view) also stays newest-first because it's
+        # primarily a history view.
+        order = "ASC" if status == "pending" else "DESC"
         with self._db_lock:
             if status is None:
                 rows = self._conn.execute(
-                    "SELECT * FROM review_queue ORDER BY created_at DESC"
+                    f"SELECT * FROM review_queue ORDER BY created_at {order}"
                 ).fetchall()
             else:
                 rows = self._conn.execute(
-                    "SELECT * FROM review_queue WHERE status = ? ORDER BY created_at DESC",
+                    f"SELECT * FROM review_queue WHERE status = ? "
+                    f"ORDER BY created_at {order}",
                     (status,),
                 ).fetchall()
         out: list[dict[str, Any]] = []

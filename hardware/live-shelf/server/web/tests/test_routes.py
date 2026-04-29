@@ -576,6 +576,37 @@ def app(repo: FakeRepo, tmp_data_dir: Path) -> Flask:
                         "lot_id": r.get("lot_id")}
         return {"deleted": 0, "reverted_g": 0.0, "lot_id": None}
 
+    # UX_AUDIT R2 F2: dedupe-group delete back-end. Mirrors the prod
+    # storage_repo helper: filters rows by (return_event_id, lot_id,
+    # kind), drops them all in one shot, and returns the same summary
+    # shape the per-row delete uses.
+    def delete_usage_dedup_group_fn(
+        *, return_event_id: str,
+        lot_id: Optional[str] = None,
+        kind: Optional[str] = None,
+    ) -> dict[str, Any]:
+        rows = repo.db.get("usage_log", [])
+        keep: list[dict[str, Any]] = []
+        gone: list[dict[str, Any]] = []
+        for r in rows:
+            match = (r.get("return_event_id") == return_event_id)
+            if match and lot_id is not None:
+                match = (r.get("lot_id") == lot_id)
+            if match and kind is not None:
+                match = (r.get("kind") == kind)
+            (gone if match else keep).append(r)
+        repo.db["usage_log"] = keep
+        if not gone:
+            return {"deleted": 0, "reverted_g": 0.0, "lot_id": None}
+        survivor = gone[0]
+        consumed = float(survivor.get("consumed_g") or 0.0)
+        reverted = max(0.0, consumed)
+        return {
+            "deleted": len(gone),
+            "reverted_g": reverted,
+            "lot_id": survivor.get("lot_id"),
+        }
+
     html_bp = make_html_bp(
         repo, data_dir=tmp_data_dir,
         catch_all_enabled=lambda: repo.catch_all_enabled,
@@ -585,6 +616,7 @@ def app(repo: FakeRepo, tmp_data_dir: Path) -> Flask:
         read_config=read_config,
         update_config=update_config,
         delete_usage_fn=delete_usage_fn,
+        delete_usage_dedup_group_fn=delete_usage_dedup_group_fn,
     )
     app.register_blueprint(html_bp)
     app.register_blueprint(api_bp)
@@ -1806,9 +1838,15 @@ def test_inventory_dedupes_usage_rows_with_same_return_event_id(repo, tmp_data_d
     r = client.get("/inventory?per_page=100")
     assert r.status_code == 200
     body = r.get_data(as_text=True)
-    # The "3x" duplicate badge must render exactly once even though the DB
-    # has three duplicate rows.
-    assert ">\n                  3x\n" in body or ">3x<" in body or "3x</span>" in body
+    # The "3x ×" duplicate-group delete button must render exactly once
+    # even though the DB has three duplicate rows. The button's payload
+    # carries the dup count + return_event_id so the dedupe-group endpoint
+    # can drop them in one transaction (UX_AUDIT R2 F2).
+    assert "data-dup-count=\"3\"" in body
+    assert "dedup-group-delete" in body
+    # Survivor row's data-return-event-id is the dedup key the new
+    # endpoint takes.
+    assert "data-return-event-id=\"e-return-x\"" in body
 
 
 def test_inventory_negative_single_track_weight_renders_tare_needed(
@@ -1909,14 +1947,31 @@ def test_dashboard_renders_in_flight_count_always(client):
     assert 'id="in-flight-count"' in body
 
 
-def test_dashboard_preview_tiles_have_device_id_chips(client):
+def test_dashboard_preview_tiles_have_device_id_chips(repo, tmp_data_dir):
     """UX audit: the two preview tiles look identical and the operator
-    can't tell which is which. Adding scale-01 / scale-02 chips +
-    colored left borders gives instant visual separation."""
-    r = client.get("/")
-    assert r.status_code == 200
-    body = r.get_data(as_text=True)
-    assert "scale-01" in body  # live-shelf chip
+    can't tell which is which. UX audit R2 F3 promotes the chip from a
+    hard-coded ``scale-01`` literal to ``state.scale_device_id`` so the
+    chip stays truthful when hardware is swapped. The chip element
+    must exist with an id the JS poller can hit; its text must reflect
+    whatever the state surface says (or fall back to the placeholder
+    when no device id is published)."""
+    # Seed the repo so the live-shelf state surfaces an explicit device.
+    repo.scale_device_override = "scale-07"
+    original_get_app_state = repo.get_app_state
+
+    def patched_get_app_state() -> dict[str, Any]:
+        out = original_get_app_state()
+        out["scale_device_id"] = "scale-07"
+        return out
+
+    repo.get_app_state = patched_get_app_state  # type: ignore[method-assign]
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(repo, data_dir=tmp_data_dir))
+    body = app.test_client().get("/").get_data(as_text=True)
+    assert 'id="live-shelf-device-chip"' in body
+    # Chip text reflects the API truth, not a literal "scale-01".
+    assert "scale-07" in body
     # catch-all chip only renders when catch_all_enabled — exercised in
     # the dedicated catch-all-on test below.
 
@@ -2073,3 +2128,419 @@ def test_collect_dashboard_health_swallows_exceptions():
     ):
         assert key in out
         assert out[key] is None
+
+
+# ---------------------------------------------------------------------------
+# UX audit Round 2 + FLAGS regression tests
+# ---------------------------------------------------------------------------
+
+
+def test_inventory_dedup_group_button_has_payload(repo, tmp_data_dir):
+    """UX_AUDIT R2 F2: the survivor row's "Nx" badge must be a button
+    with a complete payload — return_event_id, lot_id, kind, dup_count
+    — so the JS handler can hit /api/usage/dedupe-group/delete with
+    enough info to scope the delete to this exact group."""
+    same_ts = "2026-04-29T03:00:00Z"
+    repo.db["usage_log"].extend([
+        {
+            "usage_id": "g1",
+            "lot_id": "l1",
+            "product_id": "p1",
+            "product_name": "Heinz Ketchup",
+            "product_brand": "Heinz",
+            "container_type": "bottle",
+            "consumed_g": 17.0,
+            "pickup_weight_g": 400.0,
+            "return_weight_g": 383.0,
+            "kind": "in_flight_return",
+            "session_id": "s1-abcdef01",
+            "pickup_event_id": "e-pick-A",
+            "return_event_id": "e-return-K",
+            "occurred_at": same_ts,
+            "created_at": same_ts,
+        },
+        {
+            "usage_id": "g2",
+            "lot_id": "l1",
+            "product_id": "p1",
+            "product_name": "Heinz Ketchup",
+            "product_brand": "Heinz",
+            "container_type": "bottle",
+            "consumed_g": 17.0,
+            "pickup_weight_g": 400.0,
+            "return_weight_g": 383.0,
+            "kind": "in_flight_return",
+            "session_id": "s1-abcdef01",
+            "pickup_event_id": "e-pick-B",
+            "return_event_id": "e-return-K",
+            "occurred_at": same_ts,
+            "created_at": same_ts,
+        },
+    ])
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(repo, data_dir=tmp_data_dir))
+    body = app.test_client().get("/inventory?per_page=100").get_data(as_text=True)
+    # Survivor row exposes the dedupe-group payload + the new button class.
+    assert "dedup-group-delete" in body
+    assert 'data-return-event-id="e-return-K"' in body
+    assert 'data-lot-id="l1"' in body
+    assert 'data-kind="in_flight_return"' in body
+    assert 'data-dup-count="2"' in body
+
+
+def test_api_usage_dedupe_group_delete_drops_all_rows(client, repo):
+    """UX_AUDIT R2 F2: POST /api/usage/dedupe-group/delete with a
+    (return_event_id, lot_id, kind) tuple must remove every row in
+    the group and revert consumption once on the lot."""
+    repo.db["usage_log"].extend([
+        {
+            "usage_id": "h1",
+            "lot_id": "l1",
+            "product_id": "p1",
+            "product_name": "Heinz Ketchup",
+            "product_brand": "Heinz",
+            "container_type": "bottle",
+            "consumed_g": 17.0,
+            "pickup_weight_g": 400.0,
+            "return_weight_g": 383.0,
+            "kind": "in_flight_return",
+            "session_id": "s1-abcdef01",
+            "pickup_event_id": "e-pick-1",
+            "return_event_id": "e-return-Z",
+            "occurred_at": "2026-04-29T01:00:00Z",
+            "created_at": "2026-04-29T01:00:00Z",
+        },
+        {
+            "usage_id": "h2",
+            "lot_id": "l1",
+            "product_id": "p1",
+            "product_name": "Heinz Ketchup",
+            "product_brand": "Heinz",
+            "container_type": "bottle",
+            "consumed_g": 17.0,
+            "pickup_weight_g": 400.0,
+            "return_weight_g": 383.0,
+            "kind": "in_flight_return",
+            "session_id": "s1-abcdef01",
+            "pickup_event_id": "e-pick-2",
+            "return_event_id": "e-return-Z",
+            "occurred_at": "2026-04-29T01:00:00Z",
+            "created_at": "2026-04-29T01:00:00Z",
+        },
+    ])
+    r = client.post(
+        "/api/usage/dedupe-group/delete",
+        json={
+            "return_event_id": "e-return-Z",
+            "lot_id": "l1",
+            "kind": "in_flight_return",
+        },
+    )
+    assert r.status_code == 200, r.get_data(as_text=True)
+    body = r.get_json()
+    assert body["ok"] is True
+    assert body["summary"]["deleted"] == 2
+    # Both rows physically gone from the fake DB.
+    assert not any(
+        u["return_event_id"] == "e-return-Z"
+        for u in repo.db["usage_log"]
+    )
+
+
+def test_api_usage_dedupe_group_delete_rejects_missing_event_id(client):
+    """Hostile/empty payloads return 400, not 500."""
+    r = client.post(
+        "/api/usage/dedupe-group/delete", json={"lot_id": "l1"},
+    )
+    assert r.status_code == 400
+
+
+def test_api_usage_dedupe_group_delete_404_on_empty_group(client):
+    """Idempotent: an unknown return_event_id returns 404 with deleted=0
+    (mirrors the per-row delete contract)."""
+    r = client.post(
+        "/api/usage/dedupe-group/delete",
+        json={"return_event_id": "no-such-event"},
+    )
+    assert r.status_code == 404
+
+
+def test_dashboard_chip_renders_state_scale_device_id(repo, tmp_data_dir):
+    """UX_AUDIT R2 F3: the live-shelf chip text comes from
+    state.scale_device_id — NOT a hard-coded literal — so a hardware
+    swap surfaces immediately."""
+    original = repo.get_app_state
+
+    def patched():
+        out = original()
+        out["scale_device_id"] = "scale-99"
+        return out
+
+    repo.get_app_state = patched  # type: ignore[method-assign]
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(repo, data_dir=tmp_data_dir))
+    body = app.test_client().get("/").get_data(as_text=True)
+    # Element id the JS poller targets is present.
+    assert 'id="live-shelf-device-chip"' in body
+    # Server-rendered value reflects the API truth.
+    assert "scale-99" in body
+
+
+def test_dashboard_renders_last_event_freshness_pill(client):
+    """UX_AUDIT R2 F4: counters need a freshness signal so an idle
+    deployment doesn't read as live. The pill carries
+    data-last-event-ts so the JS can recompute "Xm ago" without
+    waiting for the next API poll."""
+    body = client.get("/").get_data(as_text=True)
+    assert 'id="last-event-fresh-pill"' in body
+    assert "data-last-event-ts" in body
+
+
+def test_dashboard_cloud_drift_threshold_tightened(repo, tmp_data_dir):
+    """UX_AUDIT R2 F5: the previous ≥2s threshold pinned green forever.
+    The template now warns at ≥0.75s (still safe for steady-state NTP
+    drift but trips on chrony-unstable post-reboot windows). Seed a
+    drift well over the new threshold but well under the old one (0.9s)
+    so the warn branch fires; pre-fix template would have stayed green."""
+    class _HealthRepo(FakeRepo):
+        def get_dashboard_health(self):
+            return {
+                "failed_events": 0,
+                "pending_events": 0,
+                "classifying_events": 0,
+                "outbox_backlog": 0,
+                "cloud_drift_s": 0.9,
+            }
+        def get_app_state(self):
+            out = super().get_app_state()
+            out["cloud_drift_s"] = 0.9
+            return out
+    h_repo = _HealthRepo()
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(h_repo, data_dir=tmp_data_dir))
+    body = app.test_client().get("/").get_data(as_text=True)
+    # warn pill rendered means threshold tripped — title attr names 0.75s.
+    assert "pill warn mono" in body
+    assert "0.75 seconds" in body
+
+
+def test_api_state_includes_in_flight_count_for_live_shelf():
+    """UX_AUDIT R2 F6: /api/state surfaces in_flight_count for the
+    live shelf so the dashboard's live-shelf in-flight badge polls in
+    lockstep with the catch-all badge. Verified against the real
+    RepoWebAdapter — the field comes from a SQL count query that
+    FakeRepo doesn't model, and the production adapter is what the
+    operator hits."""
+    import sqlite3 as _sq
+    import threading as _t
+    from flask import Flask as _Flask
+
+    from server.adapters.web_repo import RepoWebAdapter
+    from server.web import make_api_bp
+    from server.storage import migrations as _m
+
+    conn = _sq.connect(":memory:")
+    conn.row_factory = _sq.Row
+    _m.apply_migrations(conn)
+    # Seed 2 in-flight lots + 1 on-shelf for the live shelf.
+    conn.execute(
+        "INSERT INTO products (product_id, name, certified) VALUES ('p1', 'X', 1)"
+    )
+    # Lots have an invariant CHECK that ties in_flight status to
+    # in_flight_since being non-NULL, so seed both fields together.
+    rows = [
+        ("L1", "in_flight", "live_shelf", "2026-04-29T00:00:00Z"),
+        ("L2", "in_flight", "live_shelf", "2026-04-29T00:00:00Z"),
+        ("L3", "on_shelf", "live_shelf", None),
+        ("L4", "in_flight", "catch_all", "2026-04-29T00:00:00Z"),
+    ]
+    for lot_id, status, shelf, in_flight_since in rows:
+        conn.execute(
+            "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+            "initial_weight_g, total_consumed_g, placed_at, last_seen_at, "
+            "shelf_id, in_flight_since) VALUES (?, 'p1', ?, 0, 0, 0, "
+            "'2026-04-29T00:00:00Z', '2026-04-29T00:00:00Z', ?, ?)",
+            (lot_id, status, shelf, in_flight_since),
+        )
+    conn.commit()
+    repo = RepoWebAdapter(conn, db_lock=_t.Lock())
+    app = _Flask(__name__)
+    app.register_blueprint(make_api_bp(repo))
+    body = app.test_client().get("/api/state").get_json()
+    assert body["in_flight_count"] == 2
+    assert body["on_shelf_count"] == 1
+
+
+def test_api_usage_normalizes_created_at_to_iso_z(repo, tmp_data_dir):
+    """UX_AUDIT R2 F7: /api/usage rows must surface ISO+Z for both
+    occurred_at AND created_at; the bare-naive
+    "YYYY-MM-DD HH:MM:SS" produced by SQLite's datetime('now') gets
+    rewritten at the adapter layer."""
+    from server.adapters.web_repo import _iso_z
+
+    # Bare-naive → ISO+Z.
+    assert _iso_z("2026-04-29 04:19:07") == "2026-04-29T04:19:07Z"
+    # Already ISO+Z → unchanged.
+    assert _iso_z("2026-04-29T03:32:41.448Z") == "2026-04-29T03:32:41.448Z"
+    # ISO without zone → Z appended.
+    assert _iso_z("2026-04-29T03:32:41.448") == "2026-04-29T03:32:41.448Z"
+    # ISO with explicit offset → unchanged.
+    assert _iso_z("2026-04-29T03:32:41+00:00") == "2026-04-29T03:32:41+00:00"
+    # Non-strings pass through.
+    assert _iso_z(None) is None
+    assert _iso_z("") == ""
+
+
+def test_review_list_pending_sorted_oldest_first():
+    """UX_AUDIT FLAG 4: pending reviews sort ASC by created_at so the
+    oldest-stuck items surface at the top of the queue. Resolved /
+    dismissed history keeps DESC."""
+    import sqlite3
+    import threading
+
+    from server.adapters.web_repo import RepoWebAdapter
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        """
+        CREATE TABLE review_queue (
+          review_id TEXT PRIMARY KEY,
+          status TEXT,
+          created_at TEXT,
+          proposed TEXT,
+          images TEXT,
+          user_response TEXT,
+          event_id TEXT,
+          session_id TEXT
+        )
+        """
+    )
+    rows = [
+        ("oldest", "pending", "2026-04-20T00:00:00Z"),
+        ("middle", "pending", "2026-04-25T00:00:00Z"),
+        ("newest", "pending", "2026-04-29T00:00:00Z"),
+    ]
+    for rid, status, ts in rows:
+        conn.execute(
+            "INSERT INTO review_queue VALUES (?, ?, ?, '{}', '[]', NULL, NULL, NULL)",
+            (rid, status, ts),
+        )
+    repo = RepoWebAdapter(conn, db_lock=threading.Lock())
+    out = repo.list_review_items(status="pending")
+    ids = [r["review_id"] for r in out]
+    assert ids == ["oldest", "middle", "newest"]
+
+
+def test_inventory_action_buttons_have_44px_tap_targets(client):
+    """UX_AUDIT FLAG 9: inventory action buttons (delete) meet the 44px
+    minimum tap-target so a phone-sized hit zone doesn't miss between
+    adjacent rows."""
+    body = client.get("/inventory").get_data(as_text=True)
+    # Both action button styles bumped to min-width/min-height 44px.
+    assert "min-height: 44px" in body
+
+
+def test_sessions_filter_chips_have_44px_tap_targets(client):
+    """UX_AUDIT FLAG 9: sessions filter chips meet the 44px tap-target
+    minimum on the same rationale as the inventory buttons."""
+    body = client.get("/sessions").get_data(as_text=True)
+    assert "min-height: 44px" in body
+
+
+def test_consolidate_usage_log_dupes_keeps_earliest_per_group(tmp_path):
+    """UX_AUDIT R2 F2 migration: long-lived DBs accumulated N rows that
+    share (return_event_id, lot_id, kind). The migration consolidates
+    them by keeping the earliest usage_id per group + deleting the rest
+    so the new partial unique index can be created."""
+    import sqlite3 as _sq
+
+    from server.storage.migrations import _consolidate_usage_log_dupes
+
+    conn = _sq.connect(":memory:")
+    conn.row_factory = _sq.Row
+    conn.execute(
+        """
+        CREATE TABLE usage_log (
+          usage_id TEXT PRIMARY KEY,
+          lot_id TEXT,
+          product_id TEXT,
+          product_name TEXT,
+          product_brand TEXT,
+          container_type TEXT,
+          consumed_g REAL,
+          pickup_weight_g REAL,
+          return_weight_g REAL,
+          kind TEXT,
+          session_id TEXT,
+          pickup_event_id TEXT,
+          return_event_id TEXT,
+          occurred_at TEXT,
+          created_at TEXT
+        )
+        """
+    )
+    # Three rows in one dedup group + one unrelated row that must
+    # survive untouched.
+    rows = [
+        ("a", "lot1", "ev-Z", "in_flight_return"),
+        ("b", "lot1", "ev-Z", "in_flight_return"),
+        ("c", "lot1", "ev-Z", "in_flight_return"),
+        ("z", "lot2", "ev-Y", "in_flight_return"),
+    ]
+    for uid, lid, rid, kind in rows:
+        conn.execute(
+            "INSERT INTO usage_log (usage_id, lot_id, return_event_id, "
+            "kind, product_id, product_name, consumed_g, occurred_at) "
+            "VALUES (?, ?, ?, ?, 'p1', 'x', 1.0, '2026-04-29T01:00:00Z')",
+            (uid, lid, rid, kind),
+        )
+    conn.commit()
+    deleted = _consolidate_usage_log_dupes(conn)
+    assert deleted == 2  # b + c gone, a survives as the earliest id
+    survivors = {r["usage_id"] for r in conn.execute(
+        "SELECT usage_id FROM usage_log"
+    ).fetchall()}
+    assert survivors == {"a", "z"}
+
+
+def test_debug_health_runtime_provider_surfaces_anthropic_camera():
+    """UX_AUDIT FLAG 3: /api/debug/health includes the runtime probe
+    output (Anthropic counters + camera daemon liveness) so the
+    snapshot-only ``snapshots`` field doesn't have to."""
+    import sqlite3 as _sq
+    import threading as _t
+    from flask import Flask
+
+    from server.web.debug_routes import make_debug_bp
+
+    conn = _sq.connect(":memory:")
+    conn.row_factory = _sq.Row
+    # Empty system_health is fine — we only assert the runtime block.
+    conn.execute(
+        "CREATE TABLE system_health (id INTEGER PRIMARY KEY, ts TEXT, snapshot_json TEXT)"
+    )
+    conn.commit()
+
+    def runtime():
+        return {
+            "anthropic_calls_total": 42,
+            "anthropic_errors_total": 1,
+            "camera_daemon_alive": True,
+            "catch_all_camera_alive": False,
+        }
+
+    app = Flask(__name__)
+    app.register_blueprint(make_debug_bp(
+        conn, _t.Lock(), runtime_health_provider=runtime,
+    ))
+    r = app.test_client().get("/api/debug/health?since=1h")
+    assert r.status_code == 200
+    body = r.get_json()
+    assert body["runtime"]["anthropic_calls_total"] == 42
+    assert body["runtime"]["anthropic_errors_total"] == 1
+    assert body["runtime"]["camera_daemon_alive"] is True
+    assert body["runtime"]["catch_all_camera_alive"] is False
