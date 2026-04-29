@@ -17,7 +17,7 @@ describe('computeMealEntryMacros', () => {
           {
             product_id: 'p1',
             quantity: 2,
-            unit: 'containers',
+            unit: 'container',
             products: {
               calories_per_serving: 100,
               protein_per_serving: 10,
