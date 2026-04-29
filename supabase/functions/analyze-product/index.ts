@@ -454,6 +454,12 @@ Deno.serve(async (req) => {
         return jsonResponse({ error: 'AI could not parse product data — enter manually' }, 422);
       }
       suggestion = validation.suggestion;
+      // validateSuggestion already sanitizes is_distinct_unit_item, net_weight_g,
+      // and default_recipe_unit (including gram→serving downgrade when net_weight_g
+      // is absent). Log when the downgrade fires so we can monitor AI quality.
+      if ((suggestion as any).default_recipe_unit === 'serving' && (suggestion as any)._downgraded_from_gram) {
+        console.warn('analyze-product: default_recipe_unit gram→serving downgraded (net_weight_g missing)');
+      }
     }
 
     return jsonResponse({

@@ -485,6 +485,159 @@ Deno.test('buildSystemPrompt: default (no second arg) — treats as empty list',
   assertStringIncludes(prompt, 'matched_placeholder_id: always null');
 });
 
+// ─────────────────────────────────────────────────────────────────────────
+// Distinct-unit classifier — prompt + normalize tests
+// ─────────────────────────────────────────────────────────────────────────
+
+Deno.test('buildSystemPrompt: includes distinct-unit classification rules', () => {
+  const prompt = buildSystemPrompt(OFF_NUTELLA);
+  assertStringIncludes(prompt, 'is_distinct_unit_item');
+  assertStringIncludes(prompt, 'default_recipe_unit');
+  assertStringIncludes(prompt, 'net_weight_g');
+  assertStringIncludes(prompt, 'discrete countable pieces');
+  assertStringIncludes(prompt, 'gram');
+  assertStringIncludes(prompt, 'serving');
+});
+
+Deno.test('buildSystemPrompt: JSON schema includes new fields', () => {
+  const prompt = buildSystemPrompt(OFF_NUTELLA);
+  assertStringIncludes(prompt, '"is_distinct_unit_item"');
+  assertStringIncludes(prompt, '"default_recipe_unit"');
+  assertStringIncludes(prompt, '"net_weight_g"');
+});
+
+Deno.test('validateSuggestion: is_distinct_unit_item=true passes through unchanged', () => {
+  const raw = {
+    name: 'Large Eggs',
+    calories_per_serving: 70,
+    protein_per_serving: 6,
+    carbs_per_serving: 0,
+    fat_per_serving: 5,
+    servings_per_container: 12,
+    default_shelf_life_days: 45,
+    is_distinct_unit_item: true,
+    default_recipe_unit: 'serving',
+    net_weight_g: null,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.is_distinct_unit_item, true);
+    assertEquals(result.suggestion.default_recipe_unit, 'serving');
+    assertEquals(result.suggestion.net_weight_g, null);
+  }
+});
+
+Deno.test('validateSuggestion: default_recipe_unit=gram with net_weight_g present → kept', () => {
+  const raw = {
+    name: 'Greek Yogurt',
+    calories_per_serving: 100,
+    protein_per_serving: 17,
+    carbs_per_serving: 6,
+    fat_per_serving: 0,
+    servings_per_container: 1,
+    default_shelf_life_days: 14,
+    is_distinct_unit_item: false,
+    default_recipe_unit: 'gram',
+    net_weight_g: 170,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_recipe_unit, 'gram');
+    assertEquals(result.suggestion.net_weight_g, 170);
+    assertEquals(result.suggestion.is_distinct_unit_item, false);
+  }
+});
+
+Deno.test('validateSuggestion: default_recipe_unit=gram but net_weight_g=null → downgraded to serving', () => {
+  const raw = {
+    name: 'Mystery Bulk Item',
+    calories_per_serving: 200,
+    protein_per_serving: 5,
+    carbs_per_serving: 30,
+    fat_per_serving: 8,
+    servings_per_container: 4,
+    default_shelf_life_days: null,
+    is_distinct_unit_item: false,
+    default_recipe_unit: 'gram',
+    net_weight_g: null,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(
+      result.suggestion.default_recipe_unit,
+      'serving',
+      'gram downgraded to serving when net_weight_g is null',
+    );
+  }
+});
+
+Deno.test('validateSuggestion: default_recipe_unit=gram but net_weight_g=0 → downgraded to serving', () => {
+  const raw = {
+    name: 'Zero Weight Item',
+    calories_per_serving: 100,
+    protein_per_serving: 5,
+    carbs_per_serving: 10,
+    fat_per_serving: 3,
+    servings_per_container: 1,
+    default_shelf_life_days: null,
+    is_distinct_unit_item: false,
+    default_recipe_unit: 'gram',
+    net_weight_g: 0,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_recipe_unit, 'serving', 'net_weight_g=0 triggers downgrade');
+  }
+});
+
+Deno.test('validateSuggestion: 8-bun bag smoke — distinct=true, spc=8, unit=serving', () => {
+  // Simulates what Haiku returns for an 8-bun package
+  const raw = {
+    name: 'Martin Potato Hamburger Buns',
+    calories_per_serving: 120,
+    protein_per_serving: 4,
+    carbs_per_serving: 22,
+    fat_per_serving: 2,
+    servings_per_container: 8,
+    default_shelf_life_days: 14,
+    is_distinct_unit_item: true,
+    default_recipe_unit: 'serving',
+    net_weight_g: null,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.is_distinct_unit_item, true);
+    assertEquals(result.suggestion.servings_per_container, 8);
+    assertEquals(result.suggestion.default_recipe_unit, 'serving');
+  }
+});
+
+Deno.test('validateSuggestion: missing is_distinct_unit_item → defaults to false', () => {
+  const raw = {
+    name: 'Old Product',
+    calories_per_serving: 100,
+    protein_per_serving: 5,
+    carbs_per_serving: 10,
+    fat_per_serving: 3,
+    servings_per_container: 2,
+    default_shelf_life_days: null,
+    // is_distinct_unit_item absent
+    // default_recipe_unit absent
+    // net_weight_g absent
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.is_distinct_unit_item, false);
+    assertEquals(result.suggestion.net_weight_g, null);
+  }
+});
+
 Deno.test('buildSystemPrompt: candidate with null description omits the description suffix', () => {
   const prompt = buildSystemPrompt(OFF_NUTELLA, [
     { product_id: PLACEHOLDER_B, name: 'Almond Butter', description: null },

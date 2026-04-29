@@ -13,6 +13,12 @@ export interface Suggestion {
   fat_per_serving: number;
   description?: string;
   default_shelf_life_days: number | null;
+  /** True when sold as discrete countable pieces (eggs, buns, bars, packets). */
+  is_distinct_unit_item: boolean;
+  /** Default unit for recipe form. 'gram' requires net_weight_g > 0. */
+  default_recipe_unit: 'gram' | 'serving' | 'container';
+  /** Full container mass in grams. Required when default_recipe_unit='gram'. */
+  net_weight_g: number | null;
 }
 
 /** Result of validateSuggestion: ok | a list of missing required fields. */
@@ -148,6 +154,29 @@ export function validateSuggestion(raw: Record<string, unknown> | null): Suggest
     coerced.default_shelf_life_days = Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
   } else {
     coerced.default_shelf_life_days = null;
+  }
+
+  // is_distinct_unit_item: coerce to boolean, default false.
+  coerced.is_distinct_unit_item = !!coerced.is_distinct_unit_item;
+
+  // net_weight_g: must be a positive number or null.
+  if (coerced.net_weight_g != null) {
+    const w = Number(coerced.net_weight_g);
+    coerced.net_weight_g = Number.isFinite(w) && w > 0 ? w : null;
+  } else {
+    coerced.net_weight_g = null;
+  }
+
+  // default_recipe_unit: only 'gram'|'serving'|'container' accepted.
+  // Defensive: if 'gram' but net_weight_g absent/non-positive → downgrade to 'serving'.
+  const VALID_UNITS = new Set(['gram', 'serving', 'container']);
+  if (!VALID_UNITS.has(coerced.default_recipe_unit as string)) {
+    // Fall back: distinct items → 'serving', bulk → 'serving' (safe default).
+    coerced.default_recipe_unit = 'serving';
+  }
+  if (coerced.default_recipe_unit === 'gram' && !coerced.net_weight_g) {
+    console.warn('validateSuggestion: downgrading default_recipe_unit gram→serving (net_weight_g missing)');
+    coerced.default_recipe_unit = 'serving';
   }
 
   return { ok: true, suggestion: coerced as unknown as Suggestion };
