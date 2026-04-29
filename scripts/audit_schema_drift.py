@@ -818,6 +818,182 @@ def audit_flow_f() -> list[Finding]:
 
 
 # --------------------------------------------------------------------------
+# FLOW G — L10 unit annotations + uniqueness scope (Phase-2 extension)
+# --------------------------------------------------------------------------
+#
+# Catches the bug class behind the "1.6 ctn cloud vs 160.4 g Pi" sync
+# gap: a numeric column whose UNIT shifts across the boundary (g, kg,
+# ctn, srv) without an explicit annotation, AND/OR a uniqueness-scope
+# mismatch where Pi enforces UNIQUE(a) but cloud enforces
+# UNIQUE(a, b). Both shapes silently drift production state.
+
+
+# Heuristic table of expected unit suffixes for column-name suffix.
+# A column is OK if its name ends with one of these — the suffix
+# becomes the unit annotation. Mixing weight + container columns on the
+# same logical entity is what we flag.
+WEIGHT_SUFFIXES = ("_g", "_kg", "_grams", "_kilograms")
+CONTAINER_SUFFIXES = ("_containers", "_ctn", "_qty", "_serving", "_servings")
+
+
+def _unit_for(col: str) -> str:
+    low = col.lower()
+    if low.endswith(WEIGHT_SUFFIXES):
+        return "weight"
+    if low.endswith(CONTAINER_SUFFIXES):
+        return "container"
+    return "untyped"
+
+
+def _uniqueness_scope_for_table(text: str, table_fqn: str) -> set[frozenset[str]]:
+    """Return a set of column-name sets that constitute UNIQUE keys for
+    ``table_fqn`` according to ``text``. Recognizes both inline ``UNIQUE``
+    constraints and ``CREATE UNIQUE INDEX``."""
+    out: set[frozenset[str]] = set()
+    # Inline `UNIQUE(a,b)` inside CREATE TABLE
+    for m in re.finditer(
+        rf"CREATE\s+TABLE(?:\s+IF\s+NOT\s+EXISTS)?\s+{re.escape(table_fqn)}\s*\(([\s\S]*?)\n\s*\);",
+        text,
+        re.IGNORECASE,
+    ):
+        body = m.group(1)
+        for um in re.finditer(r"UNIQUE\s*\(([^)]*)\)", body, re.IGNORECASE):
+            cols = frozenset(
+                c.strip().lower() for c in um.group(1).split(",") if c.strip()
+            )
+            if cols:
+                out.add(cols)
+    # CREATE UNIQUE INDEX ... ON tbl (cols...)
+    for m in re.finditer(
+        rf"CREATE\s+UNIQUE\s+INDEX[\s\S]*?ON\s+{re.escape(table_fqn)}\s*\(([^)]*)\)",
+        text,
+        re.IGNORECASE,
+    ):
+        cols = frozenset(
+            c.strip().lower() for c in m.group(1).split(",") if c.strip()
+        )
+        if cols:
+            out.add(cols)
+    return out
+
+
+def _uniqueness_scope_sqlite(text: str, table: str) -> set[frozenset[str]]:
+    out: set[frozenset[str]] = set()
+    for m in re.finditer(
+        rf"CREATE\s+TABLE\s+{re.escape(table)}\s*\(([\s\S]*?)\n\);",
+        text,
+        re.IGNORECASE,
+    ):
+        body = m.group(1)
+        for um in re.finditer(r"UNIQUE\s*\(([^)]*)\)", body, re.IGNORECASE):
+            cols = frozenset(
+                c.strip().lower() for c in um.group(1).split(",") if c.strip()
+            )
+            if cols:
+                out.add(cols)
+    for m in re.finditer(
+        rf"CREATE\s+UNIQUE\s+INDEX[\s\S]*?ON\s+{re.escape(table)}\s*\(([^)]*)\)",
+        text,
+        re.IGNORECASE,
+    ):
+        cols = frozenset(
+            c.strip().lower() for c in m.group(1).split(",") if c.strip()
+        )
+        if cols:
+            out.add(cols)
+    return out
+
+
+def audit_flow_g_unit_annotations() -> list[Finding]:
+    findings: list[Finding] = []
+
+    # Inspect a curated set of tables where the bug is most likely to
+    # bite. We deliberately don't sweep every table — false-positives
+    # against reference tables (locations, etc.) drown the signal.
+    chef = read_text("supabase/migrations/20260303040000_chefbyte_tables.sql")
+    live = read_text("supabase/migrations/20260419010000_live_shelf.sql")
+    cloud_combined = chef + "\n" + live
+
+    pi_schema = read_text("hardware/live-shelf/server/storage/schema.sql")
+
+    pairs = [
+        # (logical_name, cloud_table_fqn, pi_table)
+        ("stock_lots", "chefbyte.stock_lots", "lots"),
+        ("scale_pairings", "chefbyte.scale_pairings", "scale_pairings"),
+        ("products", "chefbyte.products", "products"),
+    ]
+
+    for name, cloud_fqn, pi_table in pairs:
+        cloud_cols = extract_sql_table_columns(cloud_combined, cloud_fqn)
+        pi_cols = extract_sqlite_table_columns(pi_schema, pi_table)
+
+        # 1. Unit-annotation symmetry. For every numeric-suffix column
+        # that exists on Pi, an analogue must exist on cloud OR be
+        # explicitly translated. We flag a hard "weight on Pi, container
+        # on cloud" mismatch on the SAME logical concept (current_*).
+        pi_units = {c: _unit_for(c) for c in pi_cols}
+        cloud_units = {c: _unit_for(c) for c in cloud_cols}
+        if name == "stock_lots":
+            pi_weight_cols = {c for c, u in pi_units.items() if u == "weight"}
+            cloud_container_cols = {
+                c for c, u in cloud_units.items() if u == "container"
+            }
+            if pi_weight_cols and cloud_container_cols:
+                # This is the EXPECTED shape per spec — cloud is
+                # canonical containers, Pi is canonical grams. It's not
+                # a bug, but if there's no recorded coercion we want
+                # operators to see it. Severity LOW (informational
+                # — the L2 parity_assert harness covers the bug shape).
+                findings.append(
+                    Finding(
+                        flow="G: unit annotations",
+                        severity="low",
+                        file_a=f"hardware/live-shelf/server/storage/schema.sql::{pi_table}",
+                        file_b=f"supabase/migrations/*::{cloud_fqn}",
+                        field=", ".join(sorted(pi_weight_cols))
+                        + " <-> "
+                        + ", ".join(sorted(cloud_container_cols)),
+                        description=(
+                            "Pi tracks `weight (g)` while cloud tracks `containers`; "
+                            "this is the expected shape but L10 contract requires a "
+                            "coercer to be in scripts/harness/parity_assert.py. "
+                            "Verify g_to_ctn coercer is present for this pair."
+                        ),
+                    )
+                )
+
+        # 2. Uniqueness-scope drift. UNIQUE keys must align in their
+        # column-name sets where the SAME logical row exists on both
+        # sides.
+        cloud_uq = _uniqueness_scope_for_table(cloud_combined, cloud_fqn)
+        pi_uq = _uniqueness_scope_sqlite(pi_schema, pi_table)
+        # Compare only the keys that share at least one column with the
+        # other side — avoids flagging a Pi-only audit index.
+        for cloud_key in cloud_uq:
+            shared = next(
+                (k for k in pi_uq if cloud_key & k), None
+            )
+            if shared is None:
+                continue
+            if shared != cloud_key:
+                findings.append(
+                    Finding(
+                        flow="G: unit annotations / uniqueness scope",
+                        severity="high",
+                        file_a=f"hardware/live-shelf/server/storage/schema.sql::{pi_table}",
+                        file_b=f"supabase/migrations/*::{cloud_fqn}",
+                        field=f"UNIQUE({sorted(shared)}) vs UNIQUE({sorted(cloud_key)})",
+                        description=(
+                            "Pi UNIQUE scope and cloud UNIQUE scope diverge on the "
+                            "same logical row. One side will reject duplicates the "
+                            "other accepts."
+                        ),
+                    )
+                )
+    return findings
+
+
+# --------------------------------------------------------------------------
 # Main
 # --------------------------------------------------------------------------
 
@@ -829,6 +1005,7 @@ FLOWS: list[tuple[str, Callable[[], list[Finding]]]] = [
     ("D: scale_pairings naming collision", audit_flow_d),
     ("E: /catalog response", audit_flow_e),
     ("F: unit_type CHECK", audit_flow_f),
+    ("G: unit annotations + uniqueness scope (L10)", audit_flow_g_unit_annotations),
 ]
 
 

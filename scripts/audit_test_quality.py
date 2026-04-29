@@ -1071,6 +1071,118 @@ def analyze_sql(path: Path, findings: list[Finding]) -> None:
 # ---------------------------------------------------------------------------
 
 
+# ---------------------------------------------------------------------------
+# L9 extension: production-shape gap detection
+# ---------------------------------------------------------------------------
+#
+# Per AUDIT_STRATEGY_MERGED.md §1 row L9: any test that pre-seeds rows
+# (>0) must have a sibling ``*_empty`` test exercising the same code
+# path with an EMPTY fixture. Otherwise the empty-table production
+# path never gets exercised — exactly how the Pi `scale_pairings`
+# empty-in-prod regression slipped through.
+#
+# Heuristic: a test "pre-seeds" if its body contains an INSERT or
+# .insert(...) call before its first assertion. We mark the file as
+# "seeded" and look for any sibling test in the same suite whose name
+# ends in ``_empty`` / ``_no_rows`` / ``_zero``.
+#
+# Implementation note: scoping per file (not per test) — most pgTAP
+# suites have one file per behavior, and unit suites use describe
+# blocks for grouping. Per-file scoping captures both.
+
+_PY_PRESEED_RE = re.compile(r"\bINSERT\s+INTO\b|\.insert\s*\(\s*\{|\binsert_one\s*\(", re.IGNORECASE)
+_SQL_PRESEED_RE = re.compile(r"\bINSERT\s+INTO\b", re.IGNORECASE)
+_TS_PRESEED_RE = re.compile(r"\.insert\s*\(\s*[\[{]")
+_EMPTY_VARIANT_RE = re.compile(r"_empty\b|_no_rows\b|_zero\b|_blank\b", re.IGNORECASE)
+
+
+def _ts_test_names(text: str) -> list[str]:
+    return [n for _, n, *_ in _extract_ts_tests(text)]
+
+
+def _py_test_names(text: str) -> list[str]:
+    try:
+        tree = ast.parse(text)
+    except SyntaxError:
+        return []
+    out: list[str] = []
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name.startswith(
+            "test_"
+        ):
+            out.append(node.name)
+    return out
+
+
+def _file_has_preseed(text: str, ext: str) -> bool:
+    if ext in TS_EXTS:
+        return bool(_TS_PRESEED_RE.search(text))
+    if ext in PY_EXTS:
+        return bool(_PY_PRESEED_RE.search(text))
+    if ext in SQL_EXTS:
+        return bool(_SQL_PRESEED_RE.search(text))
+    return False
+
+
+def _file_has_empty_sibling(text: str, ext: str, file_path: Path) -> bool:
+    """A file passes the L9 contract if either:
+
+    1. it contains a test name with `_empty` / `_no_rows` / `_zero`, OR
+    2. a sibling file in the same dir with such a suffix exists.
+    """
+    if ext in TS_EXTS:
+        names = _ts_test_names(text)
+    elif ext in PY_EXTS:
+        names = _py_test_names(text)
+    elif ext in SQL_EXTS:
+        # pgTAP files with an "_empty" filename or has_table_empty assert
+        return bool(_EMPTY_VARIANT_RE.search(file_path.stem)) or "is_empty" in text
+    else:
+        names = []
+    if any(_EMPTY_VARIANT_RE.search(n or "") for n in names):
+        return True
+    sib_dir = file_path.parent
+    stem = file_path.stem
+    for sib in sib_dir.glob("*"):
+        if sib == file_path or not sib.is_file():
+            continue
+        if sib.stem.startswith(stem) and _EMPTY_VARIANT_RE.search(sib.stem):
+            return True
+        if _EMPTY_VARIANT_RE.search(sib.stem) and stem.startswith(
+            sib.stem.split("_empty")[0].split("_no_rows")[0].split("_zero")[0]
+        ):
+            return True
+    return False
+
+
+def analyze_l9_production_shape(findings: list[Finding]) -> None:
+    """Append L9 findings: pre-seeded tests without an `_empty` sibling."""
+    for path in iter_test_files():
+        ext = path.suffix
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if not _file_has_preseed(text, ext):
+            continue
+        if _file_has_empty_sibling(text, ext, path):
+            continue
+        findings.append(
+            Finding(
+                file=rel(path),
+                test_name="(file-level)",
+                line=1,
+                pattern="missing-empty-fixture-variant",
+                severity="MEDIUM",
+                excerpt=(
+                    f"{path.name} pre-seeds rows but has no sibling test/file "
+                    f"with `_empty`/`_no_rows`/`_zero` suffix. L9 contract: "
+                    f"every >0-row fixture needs an empty-table variant."
+                ),
+            )
+        )
+
+
 def analyze_all() -> list[Finding]:
     findings: list[Finding] = []
     for path in iter_test_files():
@@ -1093,6 +1205,7 @@ def analyze_all() -> list[Finding]:
                     excerpt=f"{type(exc).__name__}: {exc}",
                 )
             )
+    analyze_l9_production_shape(findings)
     return findings
 
 
