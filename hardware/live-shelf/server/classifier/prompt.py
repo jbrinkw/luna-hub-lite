@@ -73,6 +73,22 @@ a clean signal from the other source is enough to commit — do NOT downgrade
 to "unknown" just because part of the scene is hard to read. The answer may
 still be fully determined by the other evidence source.
 
+PARTIAL-FILL CONTAINERS (ADD events):
+Bottles, jugs, and other refillable containers are routinely placed on
+the shelf partially consumed — a half-empty bottle of milk being put
+back, a jug of water that was poured from in another room. When the
+visual unambiguously identifies an ADDed item as matching one specific
+candidate (clear logo / shape / branding), commit with HIGH confidence
+(>= 0.85) even if the placement weight is well below the candidate's
+catalog full weight. A delta that is 30-70% of catalog weight is
+NORMAL for a partially consumed container and is NOT a reason to
+downgrade confidence or fall back to "unknown". The visual match is
+the discriminator; catalog weight is just a sanity check that the
+right SKU class is selected (a 50g delta couldn't be a milk gallon).
+Do NOT reason "delta is significantly less than catalog weight,
+therefore suspicious" — that pattern is the expected case for any
+opened-then-replaced container.
+
 DIRECTION SEMANTICS:
   - ADD (positive delta): identify the single item that APPEARS in the AFTER
     frame but is NOT in the BEFORE frame, with a mass matching the delta.
@@ -217,15 +233,18 @@ INSTRUCTION_TEXT = (
     "before frame. For a REMOVE event, identify every item present in the "
     "before frame but missing from the after frame. "
     ""
-    "Cross-check your visual reading against weight arithmetic. The picked "
-    "item (or the set of picked items for multi_match) should have catalog "
-    "weights summing to |delta_g| within ~10% tolerance. If the visual "
-    "reading and the weight math disagree, prefer the answer that a subset "
-    "of the candidate list cleanly accounts for — catalog weights are "
-    "ground truth. Convergent visual + weight evidence should give high "
-    "confidence; a clean signal from either source alone (when the other "
-    "is noisy from occlusion, clutter, or dim lighting) is still enough "
-    "to commit. "
+    "Cross-check your visual reading against weight arithmetic. For REMOVE "
+    "events the picked item (or the set of picked items for multi_match) "
+    "should have catalog weights summing to |delta_g| within ~10% tolerance. "
+    "For ADD events of bottles / jugs / other refillable containers, a "
+    "partial fill is normal — a delta that is 30-70% of catalog weight is "
+    "expected when a partially consumed container is placed back, so do "
+    "NOT downgrade confidence on a clear visual match just because the "
+    "placement weight is well under catalog. Catalog weight is a sanity "
+    "check on SKU class (a 50g delta can't be a gallon jug), not a "
+    "tight match requirement on ADD. Convergent visual + weight evidence "
+    "should give high confidence (>= 0.85); a clean visual match alone is "
+    "enough to commit at high confidence even with a partial-fill weight. "
     ""
     "Do NOT pick a candidate just because its catalog weight matches the "
     "delta if that candidate is visibly present in BOTH frames — that item "
