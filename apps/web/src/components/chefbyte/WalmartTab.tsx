@@ -1,6 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase, chefbyte } from '@/shared/supabase';
+import { useToast } from '@/components/shared/Toast';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -56,6 +57,7 @@ const primaryBtnCls =
 export function WalmartTab() {
   const { user } = useAuth();
   const userId = user?.id;
+  const toast = useToast();
 
   const [loading, setLoading] = useState(true);
   const [missingLinksCount, setMissingLinksCount] = useState<number>(0);
@@ -73,6 +75,16 @@ export function WalmartTab() {
   const [quotaUsed, setQuotaUsed] = useState<number | null>(null);
   const [quotaLimit, setQuotaLimit] = useState<number>(100);
   const [quotaExceeded, setQuotaExceeded] = useState(false);
+  // R2 audit #6: mid-loop 429 leaves the user with no idea how many
+  // items got processed. Surface a structured summary
+  // {processed, hit_quota_at, remaining} the moment the loop bails.
+  const [bulkSummary, setBulkSummary] = useState<{
+    label: string;
+    processed: number;
+    total: number;
+    remaining: number;
+    hitQuota: boolean;
+  } | null>(null);
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -101,6 +113,29 @@ export function WalmartTab() {
       .neq('walmart_link', 'NOT_ON_WALMART');
 
     setMissingPricesCount(noPriceCount ?? 0);
+
+    // R2 audit #5: hydrate quota counter on mount so the chip shows the
+    // current X/100 the moment the page renders, not after the first
+    // walmart-scrape call. RLS allows authenticated reads of the user's
+    // own row. Missing row = unused today, render `0/100`.
+    try {
+      const todayUtc = new Date().toISOString().slice(0, 10);
+      const { data: quotaRow } = await chefbyte()
+        .from('walmart_quota')
+        .select('used, quota_date')
+        .eq('user_id', userId)
+        .maybeSingle();
+      if (quotaRow) {
+        const used = (quotaRow as any).quota_date === todayUtc ? Number((quotaRow as any).used) : 0;
+        setQuotaUsed(used);
+        setQuotaExceeded(used >= 100);
+      } else {
+        setQuotaUsed(0);
+      }
+    } catch {
+      // Failure to hydrate is non-fatal; the chip stays at "—" and the
+      // first call's response will fill it.
+    }
 
     setLoading(false);
   }, [userId]);
@@ -331,6 +366,7 @@ export function WalmartTab() {
     setPriceResults([]);
     setPriceProgress('');
     setError(null);
+    setBulkSummary(null);
 
     try {
       // Fetch products with walmart_link but no price
@@ -351,6 +387,7 @@ export function WalmartTab() {
 
       const results: PriceResult[] = [];
       let done = 0;
+      let hitQuota = false;
 
       for (const p of toFind) {
         setPriceProgress(`${done + 1}/${toFind.length}`);
@@ -360,10 +397,13 @@ export function WalmartTab() {
             body: { search_term: p.name },
           });
 
-          // Quota exceeded? Stop the loop — every further call would just
-          // 429 and waste round-trips. The user sees the exhausted counter
-          // in the tab header.
-          if (handleQuotaResponse(data, fnError)) break;
+          // Quota exceeded mid-loop. Bail and surface a summary so the
+          // user knows how many items completed. R2 audit #6 — the prior
+          // silent break left 25/60 unfinished with no indication.
+          if (handleQuotaResponse(data, fnError)) {
+            hitQuota = true;
+            break;
+          }
 
           if (!fnError && data?.results?.length > 0) {
             // Try to match the stored walmart_link first, fall back to first result
@@ -420,6 +460,29 @@ export function WalmartTab() {
         setPriceResults([...results]);
       }
 
+      // Surface mid-loop quota summary (R2 audit #6).
+      if (hitQuota || done < toFind.length) {
+        const summary = {
+          label: 'Find Missing Prices',
+          processed: done,
+          total: toFind.length,
+          remaining: toFind.length - done,
+          hitQuota,
+        };
+        setBulkSummary(summary);
+        if (hitQuota) {
+          toast.show(
+            `Walmart quota hit at ${done}/${toFind.length}. ${summary.remaining} remaining — try again tomorrow.`,
+            { variant: 'error', durationMs: 7000 },
+          );
+        }
+      } else if (done > 0) {
+        const savedCount = results.filter((r) => r.saved).length;
+        toast.show(`Updated ${savedCount} of ${done} prices.`, {
+          variant: savedCount > 0 ? 'success' : 'info',
+        });
+      }
+
       await loadData();
     } catch {
       setError('Failed to find prices');
@@ -440,6 +503,7 @@ export function WalmartTab() {
     if (!userId) return;
     setRefreshing(true);
     setError(null);
+    setBulkSummary(null);
 
     try {
       const { data: linked } = await chefbyte()
@@ -461,6 +525,7 @@ export function WalmartTab() {
       }
 
       let done = 0;
+      let hitQuota = false;
       for (const p of toRefresh) {
         setRefreshProgress(`${done + 1}/${toRefresh.length}`);
 
@@ -468,8 +533,12 @@ export function WalmartTab() {
           body: { search_term: p.name },
         });
 
-        // Stop bulk refresh on quota exhaustion — see findMissingPrices.
-        if (handleQuotaResponse(data, fnError)) break;
+        // Stop bulk refresh on quota exhaustion — surface a summary so the
+        // user sees how many of N items completed (R2 audit #6).
+        if (handleQuotaResponse(data, fnError)) {
+          hitQuota = true;
+          break;
+        }
 
         if (!fnError && data?.results?.length > 0) {
           const match = data.results.find(
@@ -492,6 +561,26 @@ export function WalmartTab() {
           }
         }
         done++;
+      }
+
+      // Mid-loop quota summary (R2 audit #6).
+      if (hitQuota || done < toRefresh.length) {
+        const summary = {
+          label: 'Refresh All Prices',
+          processed: done,
+          total: toRefresh.length,
+          remaining: toRefresh.length - done,
+          hitQuota,
+        };
+        setBulkSummary(summary);
+        if (hitQuota) {
+          toast.show(
+            `Walmart quota hit at ${done}/${toRefresh.length}. ${summary.remaining} remaining — try again tomorrow.`,
+            { variant: 'error', durationMs: 7000 },
+          );
+        }
+      } else if (done > 0) {
+        toast.show(`Refreshed prices for ${done} products.`, { variant: 'success' });
       }
 
       await loadData();
@@ -554,6 +643,41 @@ export function WalmartTab() {
 
       {error && (
         <p className="text-danger-text bg-danger-subtle px-3.5 py-2.5 rounded-md border border-danger mb-4">{error}</p>
+      )}
+
+      {/* R2 audit #6: structured bulk-loop summary. Shows up after every
+         findMissingPrices/refreshAllPrices run (success OR quota-hit) so
+         the user can read how many items were processed and what's left.
+         Hidden by default; only renders when the most recent bulk job
+         left items unfinished or actually hit the quota. */}
+      {bulkSummary && (
+        <div
+          data-testid="walmart-bulk-summary"
+          className={[
+            'mb-4 rounded-md border px-3.5 py-2.5 text-sm flex flex-wrap items-center gap-x-3 gap-y-1',
+            bulkSummary.hitQuota
+              ? 'bg-danger-subtle border-danger text-danger-text'
+              : 'bg-warning-subtle border-amber-300 text-amber-700',
+          ].join(' ')}
+        >
+          <span className="font-semibold">{bulkSummary.label}</span>
+          <span data-testid="walmart-bulk-summary-processed">
+            Processed {bulkSummary.processed}/{bulkSummary.total}
+          </span>
+          {bulkSummary.remaining > 0 && (
+            <span data-testid="walmart-bulk-summary-remaining">{bulkSummary.remaining} remaining</span>
+          )}
+          {bulkSummary.hitQuota && <span>Try again tomorrow.</span>}
+          <button
+            type="button"
+            onClick={() => setBulkSummary(null)}
+            data-testid="walmart-bulk-summary-dismiss"
+            aria-label="Dismiss summary"
+            className="ml-auto text-text-tertiary hover:text-text font-bold w-5 h-5 flex items-center justify-center"
+          >
+            &times;
+          </button>
+        </div>
       )}
 
       {/* ============================================================ */}

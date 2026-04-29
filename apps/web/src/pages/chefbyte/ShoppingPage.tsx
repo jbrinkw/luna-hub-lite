@@ -9,6 +9,7 @@ import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { generateWalmartCartLink } from '@/lib/walmart';
 import { PackageSearch } from 'lucide-react';
+import { useToast } from '@/components/shared/Toast';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -49,6 +50,7 @@ interface ProductSearchResult {
 export function ShoppingPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
+  const toast = useToast();
 
   const [error, setError] = useState<string | null>(null);
 
@@ -111,6 +113,32 @@ export function ShoppingPage() {
   });
 
   /* ---------------------------------------------------------------- */
+  /*  Walmart quota — R2 audit #7                                      */
+  /* ---------------------------------------------------------------- */
+  // Audit asked for an X/100 Walmart-search counter visible on Shopping
+  // when there's at least one Walmart-deeplinkable item, so the user
+  // sees their daily budget BEFORE clicking "Open in Walmart" or kicking
+  // off a price refresh from the Walmart tab. Reads the user's own row
+  // (RLS allows authenticated SELECT). Stale time 60s — this is a
+  // glanceable status, not a live counter.
+  const walmartTodayUtc = new Date().toISOString().slice(0, 10);
+  const { data: walmartQuota } = useQuery({
+    queryKey: ['walmart_quota', user?.id],
+    queryFn: async () => {
+      const { data: row } = await chefbyte()
+        .from('walmart_quota')
+        .select('used, quota_date')
+        .eq('user_id', user!.id)
+        .maybeSingle();
+      if (!row) return { used: 0, limit: 100 };
+      const used = (row as any).quota_date === walmartTodayUtc ? Number((row as any).used) : 0;
+      return { used, limit: 100 };
+    },
+    enabled: !!user,
+    staleTime: 60 * 1000,
+  });
+
+  /* ---------------------------------------------------------------- */
   /*  Realtime subscriptions                                           */
   /* ---------------------------------------------------------------- */
 
@@ -128,6 +156,21 @@ export function ShoppingPage() {
   const toBuy = useMemo(() => items.filter((i) => !i.purchased && !i.imported_at), [items]);
   const purchased = useMemo(() => items.filter((i) => i.purchased && !i.imported_at), [items]);
   const importedItems = useMemo(() => items.filter((i) => !!i.imported_at), [items]);
+
+  // R2 audit #7: only render the Walmart-quota chip when the user has at
+  // least one item that COULD be sent to Walmart. Otherwise the counter
+  // would be visual noise on an all-placeholder cart.
+  const hasWalmartDeeplinkable = useMemo(
+    () =>
+      items.some(
+        (i) =>
+          i.products &&
+          !i.products.is_placeholder &&
+          i.products.walmart_link &&
+          i.products.walmart_link !== 'NOT_ON_WALMART',
+      ),
+    [items],
+  );
 
   /* ---------------------------------------------------------------- */
   /*  Product search (server-side ilike + 300ms debounce)              */
@@ -335,13 +378,24 @@ export function ShoppingPage() {
     // Single-call RPC handles location resolution, stock_lot merge/insert,
     // and imported_at stamping atomically. Prevents double-imports and
     // orphaned stock_lots if a step mid-batch fails.
-    const { error: rpcErr } = await (chefbyte() as any).rpc('import_shopping_to_inventory', {
+    const importedCount = purchased.length;
+    const { data: importResult, error: rpcErr } = await (chefbyte() as any).rpc('import_shopping_to_inventory', {
       p_location_id: null,
     });
     if (rpcErr) {
       setError(rpcErr.message);
+      toast.show(`Import failed: ${rpcErr.message}`, { variant: 'error' });
       return;
     }
+    // Audit FLAGS #31: surface success feedback. The RPC returns
+    // { lots_processed, ... } — we prefer that count when present, fall
+    // back to the local purchased[] length (since the cache may have
+    // re-fetched between click and response).
+    const lotsProcessed =
+      typeof importResult?.lots_processed === 'number' ? Number(importResult.lots_processed) : importedCount;
+    toast.show(`Imported ${lotsProcessed} item${lotsProcessed === 1 ? '' : 's'} to inventory.`, {
+      variant: 'success',
+    });
 
     invalidateShoppingList();
   };
@@ -373,10 +427,28 @@ export function ShoppingPage() {
       stockByProduct.set(lot.product_id, current + Number(lot.qty_containers));
     }
 
-    // Collect deficient products — upsert sets qty to full deficit.
-    // imported_at is explicitly reset to null + purchased reset to false so
-    // a previously-imported row is re-activated in place (the UNIQUE
-    // (user_id, product_id) constraint prevents a parallel active row).
+    // R2 audit #11: also load the existing shopping_list rows so we can
+    // preserve `purchased=true` on any below-min-stock row already
+    // checked off. The prior version unconditionally set purchased=false
+    // which silently un-checked items the user had just toggled. We
+    // still reset imported_at on conflict so an imported row revives in
+    // place (UNIQUE(user_id, product_id) means there's only ever one).
+    const { data: existing } = await chefbyte()
+      .from('shopping_list')
+      .select('product_id, purchased, imported_at')
+      .eq('user_id', user.id);
+    const existingByProduct = new Map<string, { purchased: boolean; imported: boolean }>();
+    for (const row of (existing ?? []) as Array<{
+      product_id: string;
+      purchased: boolean;
+      imported_at: string | null;
+    }>) {
+      existingByProduct.set(row.product_id, {
+        purchased: !!row.purchased,
+        imported: !!row.imported_at,
+      });
+    }
+
     const rowsToUpsert: Array<{
       user_id: string;
       product_id: string;
@@ -390,12 +462,17 @@ export function ShoppingPage() {
       if (currentStock < minStock) {
         const deficit = Math.ceil(minStock - currentStock);
         if (deficit > 0) {
+          const prev = existingByProduct.get(product.product_id);
+          // If the row was previously imported, the lot has already left
+          // the cart — re-activating it as unpurchased is the correct
+          // behavior. Otherwise preserve the user's purchased flag.
+          const preservedPurchased = prev && !prev.imported ? prev.purchased : false;
           rowsToUpsert.push({
             user_id: user.id,
             product_id: product.product_id,
             qty_containers: deficit,
             imported_at: null,
-            purchased: false,
+            purchased: preservedPurchased,
           });
         }
       }
@@ -406,8 +483,14 @@ export function ShoppingPage() {
         .upsert(rowsToUpsert, { onConflict: 'user_id,product_id' });
       if (batchErr) {
         setError(batchErr.message);
+        toast.show(`Auto-add failed: ${batchErr.message}`, { variant: 'error' });
         return;
       }
+      toast.show(`Auto-added ${rowsToUpsert.length} item${rowsToUpsert.length === 1 ? '' : 's'} to To Buy.`, {
+        variant: 'success',
+      });
+    } else {
+      toast.show('Nothing below minimum stock — all caught up.', { variant: 'info' });
     }
 
     invalidateShoppingList();
@@ -465,6 +548,24 @@ export function ShoppingPage() {
       <div>
         <div className="flex justify-between items-center flex-wrap gap-2 mb-5">
           <h1 className="m-0 text-2xl font-bold text-text">Shopping List</h1>
+          {/* R2 audit #7: surface Walmart quota counter when the cart has
+             deeplinkable items. Lets the user see how much of today's
+             100-call budget is left BEFORE clicking "Open in Walmart" or
+             going to the Walmart tab to refresh prices. */}
+          {hasWalmartDeeplinkable && walmartQuota && (
+            <span
+              data-testid="shopping-walmart-quota"
+              className={[
+                'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border',
+                walmartQuota.used >= walmartQuota.limit
+                  ? 'bg-danger-subtle text-danger-text border-danger'
+                  : 'bg-surface text-text-secondary border-border',
+              ].join(' ')}
+              title="Walmart searches used today (resets at midnight UTC)"
+            >
+              {walmartQuota.used} / {walmartQuota.limit} Walmart searches today
+            </span>
+          )}
           <button
             onClick={() => {
               const missingLink = toBuy.filter(
@@ -630,6 +731,22 @@ export function ShoppingPage() {
                     <div className="flex-1">
                       <strong>{item.products?.name ?? 'Unknown Product'}</strong>
                       <span className="ml-3 text-text-secondary">{formatQty(item.qty_containers)}</span>
+                      {/* FLAGS: per-row Walmart price + computed line total
+                         when product has both price + walmart_link. Falls
+                         back silently if either is missing — keeps the
+                         layout uncluttered for the placeholder/no-price
+                         case. */}
+                      {item.products?.price != null &&
+                        item.products?.walmart_link &&
+                        item.products.walmart_link !== 'NOT_ON_WALMART' && (
+                          <span
+                            data-testid={`walmart-price-${item.cart_item_id}`}
+                            className="ml-3 text-xs text-text-tertiary tabular-nums"
+                          >
+                            ${Number(item.products.price).toFixed(2)} × {Math.ceil(Number(item.qty_containers))} = $
+                            {(Number(item.products.price) * Math.ceil(Number(item.qty_containers))).toFixed(2)}
+                          </span>
+                        )}
                     </div>
                     <button
                       onClick={() => removeMutation.mutate(item.cart_item_id)}

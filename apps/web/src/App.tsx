@@ -8,6 +8,7 @@ import { ThemeProvider } from './shared/ThemeProvider';
 import { AuthProvider } from './shared/auth/AuthProvider';
 import { AppLayout } from './shared/layout/AppLayout';
 import { AppProvider } from './shared/AppProvider';
+import { ToastProvider } from './components/shared/Toast';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ActivationGuard } from './components/ActivationGuard';
@@ -34,74 +35,76 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <BrowserRouter>
           <AppShell>
-            <AuthProvider>
-              <Routes>
-                {/* Public routes */}
-                <Route path="/login" element={<Login />} />
-                <Route path="/signup" element={<Signup />} />
-                <Route path="/hub/reset-password" element={<ResetPassword />} />
-                <Route path="/oauth/consent" element={<OAuthConsent />} />
+            <ToastProvider>
+              <AuthProvider>
+                <Routes>
+                  {/* Public routes */}
+                  <Route path="/login" element={<Login />} />
+                  <Route path="/signup" element={<Signup />} />
+                  <Route path="/hub/reset-password" element={<ResetPassword />} />
+                  <Route path="/oauth/consent" element={<OAuthConsent />} />
 
-                {/* Protected routes */}
-                <Route
-                  path="/*"
-                  element={
-                    <AuthGuard>
-                      <AppProvider>
-                        <AppLayout>
-                          <Suspense fallback={<PageSpinner />}>
-                            <Routes>
-                              <Route path="/" element={<Navigate to="/hub" replace />} />
-                              <Route
-                                path="/hub/*"
-                                element={
-                                  <ErrorBoundary module="Hub">
-                                    <HubRoutes />
-                                  </ErrorBoundary>
-                                }
-                              />
-                              <Route
-                                path="/coach/*"
-                                element={
-                                  <ErrorBoundary module="CoachByte">
-                                    <ActivationGuard appName="coachbyte">
-                                      <CoachRoutes />
-                                    </ActivationGuard>
-                                  </ErrorBoundary>
-                                }
-                              />
-                              <Route
-                                path="/chef/*"
-                                element={
-                                  <ErrorBoundary module="ChefByte">
-                                    <ActivationGuard appName="chefbyte">
-                                      <ChefRoutes />
-                                    </ActivationGuard>
-                                  </ErrorBoundary>
-                                }
-                              />
-                              <Route
-                                path="*"
-                                element={
-                                  <div className="p-8 text-center">
-                                    <h2 className="text-lg font-semibold text-text mb-2">Page not found</h2>
-                                    <p className="text-text-secondary mb-4">The page you requested does not exist.</p>
-                                    <a href="/hub" className="text-primary hover:text-primary-hover hover:underline">
-                                      Go to Hub
-                                    </a>
-                                  </div>
-                                }
-                              />
-                            </Routes>
-                          </Suspense>
-                        </AppLayout>
-                      </AppProvider>
-                    </AuthGuard>
-                  }
-                />
-              </Routes>
-            </AuthProvider>
-            <Analytics />
+                  {/* Protected routes */}
+                  <Route
+                    path="/*"
+                    element={
+                      <AuthGuard>
+                        <AppProvider>
+                          <AppLayout>
+                            <Suspense fallback={<PageSpinner />}>
+                              <Routes>
+                                <Route path="/" element={<Navigate to="/hub" replace />} />
+                                <Route
+                                  path="/hub/*"
+                                  element={
+                                    <ErrorBoundary module="Hub">
+                                      <HubRoutes />
+                                    </ErrorBoundary>
+                                  }
+                                />
+                                <Route
+                                  path="/coach/*"
+                                  element={
+                                    <ErrorBoundary module="CoachByte">
+                                      <ActivationGuard appName="coachbyte">
+                                        <CoachRoutes />
+                                      </ActivationGuard>
+                                    </ErrorBoundary>
+                                  }
+                                />
+                                <Route
+                                  path="/chef/*"
+                                  element={
+                                    <ErrorBoundary module="ChefByte">
+                                      <ActivationGuard appName="chefbyte">
+                                        <ChefRoutes />
+                                      </ActivationGuard>
+                                    </ErrorBoundary>
+                                  }
+                                />
+                                <Route
+                                  path="*"
+                                  element={
+                                    <div className="p-8 text-center">
+                                      <h2 className="text-lg font-semibold text-text mb-2">Page not found</h2>
+                                      <p className="text-text-secondary mb-4">The page you requested does not exist.</p>
+                                      <a href="/hub" className="text-primary hover:text-primary-hover hover:underline">
+                                        Go to Hub
+                                      </a>
+                                    </div>
+                                  }
+                                />
+                              </Routes>
+                            </Suspense>
+                          </AppLayout>
+                        </AppProvider>
+                      </AuthGuard>
+                    }
+                  />
+                </Routes>
+              </AuthProvider>
+              <Analytics />
+            </ToastProvider>
           </AppShell>
         </BrowserRouter>
       </QueryClientProvider>

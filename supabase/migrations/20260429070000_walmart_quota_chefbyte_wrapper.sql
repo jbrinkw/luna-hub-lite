@@ -5,6 +5,14 @@
 -- function 500s, and the test suite sees 500 instead of the expected
 -- structured 503 on upstream forced failures.
 --
+-- Ordering note (UX_AUDIT_CHEFBYTE_USE_R2 #13): the timestamp jumps
+-- from 20260429050000 (`update_food_log_qty.sql`) to 20260429070000
+-- with no 20260429060000 in between. The 060000 slot was reserved for
+-- a `food_logs.usage_kind` column migration that was reverted before
+-- merge — the gap is intentional, not a missing file. Keeping this
+-- timestamp avoids re-numbering the wrapper out from under any local
+-- developer who has already run `supabase db push`.
+--
 -- Standard fix follows the apply_shelf_event_admin precedent: thin
 -- chefbyte-schema wrapper that invokes the private function. Keeps the
 -- atomic upsert + check logic in `private` (where SECURITY DEFINER

@@ -132,6 +132,24 @@ type WizardState =
       scaleG: number | null;
     }
   | { kind: 'saving' }
+  | {
+      /**
+       * Wizard-local mirror of the server session state when an AI tare
+       * has been requested. R1 wired the server-side patch but never
+       * surfaced the in-flight UI; the operator was left looking at a
+       * still-clickable "Request AI tare" button with no feedback.
+       *
+       * The Pi typically returns within 5s. We hold this state until
+       * either an `ai_ready` action arrives (success) or the user
+       * cancels (which routes back to product_loaded so they can pick
+       * the manual or auto-tare path instead).
+       */
+      kind: 'awaiting_ai_tare';
+      product: ProductRow;
+      nutrition: NutritionData;
+      isFullContainer: boolean;
+      offMiss: boolean;
+    }
   | { kind: 'error'; message: string };
 
 type WizardAction =
@@ -143,6 +161,8 @@ type WizardAction =
   | { type: 'set_nutrition'; patch: Partial<NutritionData> }
   | { type: 'toggle_full'; isFull: boolean }
   | { type: 'scale_reading'; scaleG: number; netG: number | null }
+  | { type: 'ai_tare_requested' }
+  | { type: 'ai_tare_cancelled' }
   | { type: 'ai_ready'; aiG: number; scaleG: number | null }
   | { type: 'manual_tare'; tareG: number; product: ProductRow; nutrition: NutritionData; scaleG: number | null }
   | { type: 'saving' }
@@ -179,6 +199,32 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
     case 'toggle_full':
       if (state.kind !== 'product_loaded') return state;
       return { ...state, isFullContainer: action.isFull };
+    case 'ai_tare_requested':
+      // Mirror the server-side state.awaiting_ai_tare into the local
+      // reducer so the renderer can swap in a loading panel + cancel
+      // button. We carry product/nutrition/isFullContainer/offMiss
+      // forward so cancelling routes us back to the same product_loaded
+      // form without losing user edits.
+      if (state.kind !== 'product_loaded') return state;
+      return {
+        kind: 'awaiting_ai_tare',
+        product: state.product,
+        nutrition: state.nutrition,
+        isFullContainer: state.isFullContainer,
+        offMiss: state.offMiss,
+      };
+    case 'ai_tare_cancelled':
+      // Back to the same product_loaded view we left. Preserves the
+      // operator's pending edits so they can flip to manual tare or
+      // try AI again without retyping macros.
+      if (state.kind !== 'awaiting_ai_tare') return state;
+      return {
+        kind: 'product_loaded',
+        product: state.product,
+        nutrition: state.nutrition,
+        isFullContainer: state.isFullContainer,
+        offMiss: state.offMiss,
+      };
     case 'scale_reading': {
       if (state.kind !== 'product_loaded') return state;
       if (action.netG == null) {
@@ -199,7 +245,12 @@ function reducer(state: WizardState, action: WizardAction): WizardState {
       };
     }
     case 'ai_ready': {
-      if (state.kind !== 'product_loaded') return state;
+      // Accept the AI tare from either product_loaded (legacy path —
+      // kept so existing tests / a slow Pi response that beats the
+      // local reducer transition still land cleanly) OR
+      // awaiting_ai_tare (the loading-state path, which is the common
+      // case once R2 lands).
+      if (state.kind !== 'product_loaded' && state.kind !== 'awaiting_ai_tare') return state;
       return {
         kind: 'review',
         product: state.product,
@@ -353,7 +404,12 @@ export function LiveTrackImportPage() {
     if (session.state === 'ai_tare_ready' && session.ai_tare_g != null && session.updated_at !== lastAiTareTs.current) {
       lastAiTareTs.current = session.updated_at;
       setAriaAnnouncement(`AI tare ready: ${Math.round(session.ai_tare_g)} grams`);
-      if (state.kind === 'product_loaded') {
+      // Accept from either kind — the optimistic awaiting_ai_tare flip
+      // happens on click in `requestAiTare`, so by the time the Pi
+      // responds we should be in awaiting_ai_tare. Keep product_loaded
+      // as a fallback in case the click handler errored before
+      // dispatching but the Pi still got the request.
+      if (state.kind === 'awaiting_ai_tare' || state.kind === 'product_loaded') {
         dispatch({
           type: 'ai_ready',
           aiG: session.ai_tare_g,
@@ -584,16 +640,46 @@ export function LiveTrackImportPage() {
 
   const requestAiTare = useCallback(async () => {
     if (state.kind !== 'product_loaded' || !session) return;
-    await patchSession({
-      state: 'awaiting_ai_tare',
-      ai_tare_product_form: {
-        name: state.product.name,
-        net_weight_g: state.product.net_weight_g,
-        container_type: state.product.container_type,
-        unit_type: state.product.unit_type,
-        servings_per_container: state.product.servings_per_container,
-      },
-    });
+    // Optimistically flip the local reducer to awaiting_ai_tare BEFORE
+    // the patch round-trips. The Pi typically beats the patch ack and
+    // posts ai_tare_ready within ~5s — without the optimistic flip,
+    // the loading panel would never render. The patch error path
+    // catches network failures and routes back to product_loaded.
+    dispatch({ type: 'ai_tare_requested' });
+    try {
+      await patchSession({
+        state: 'awaiting_ai_tare',
+        ai_tare_product_form: {
+          name: state.product.name,
+          net_weight_g: state.product.net_weight_g,
+          container_type: state.product.container_type,
+          unit_type: state.product.unit_type,
+          servings_per_container: state.product.servings_per_container,
+        },
+      });
+    } catch (err: any) {
+      // Roll back the optimistic flip — operator can retry or pick a
+      // different tare path. The session row may already have the
+      // awaiting_ai_tare state on the server but the Pi will time out
+      // and fall through; safe to leave as-is.
+      dispatch({ type: 'ai_tare_cancelled' });
+      dispatch({ type: 'error', message: err?.message ?? 'Failed to request AI tare' });
+    }
+  }, [state, session, patchSession]);
+
+  const cancelAiTare = useCallback(async () => {
+    if (state.kind !== 'awaiting_ai_tare' || !session) return;
+    // Local-first: flip the wizard back to product_loaded immediately
+    // so the operator can pick another tare path without waiting on
+    // the patch. Best-effort: clear the server state too. A failed
+    // patch leaves the server in awaiting_ai_tare which expires on
+    // its own — no recovery action needed from the user.
+    dispatch({ type: 'ai_tare_cancelled' });
+    try {
+      await patchSession({ state: 'waiting_scale', ai_tare_product_form: null });
+    } catch {
+      /* best-effort */
+    }
   }, [state, session, patchSession]);
 
   /* ---------------------------------------------------------------- */
@@ -909,6 +995,38 @@ export function LiveTrackImportPage() {
               });
             }}
           />
+        )}
+
+        {state.kind === 'awaiting_ai_tare' && (
+          <section
+            className="rounded-md border border-blue-300 bg-blue-50 p-4 space-y-3"
+            data-testid="livetrack-awaiting-ai-tare"
+            role="status"
+            aria-live="polite"
+          >
+            <div className="flex items-center gap-3">
+              {/* Pure CSS spinner — avoids pulling in another asset.
+                  border-t spins around a transparent ring so the
+                  rotation is visible. */}
+              <span
+                className="inline-block h-5 w-5 animate-spin rounded-full border-2 border-blue-300 border-t-blue-700"
+                data-testid="livetrack-ai-tare-spinner"
+                aria-hidden="true"
+              />
+              <p className="text-sm text-blue-900 font-medium">AI is calculating tare (~5s)…</p>
+            </div>
+            <p className="text-xs text-blue-800">
+              The Pi is analyzing the container photo. If this takes more than 10s, cancel and try manual tare.
+            </p>
+            <button
+              type="button"
+              onClick={cancelAiTare}
+              className="rounded bg-slate-200 px-3 py-1 text-sm hover:bg-slate-300"
+              data-testid="livetrack-ai-tare-cancel"
+            >
+              Cancel
+            </button>
+          </section>
         )}
 
         {state.kind === 'review' && (

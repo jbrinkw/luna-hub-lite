@@ -186,11 +186,14 @@ async function handleCatalog(supabase: SupabaseClient, device: Device, url: URL)
     productsQuery = productsQuery.is('deleted_at', null);
   }
 
-  // Build each delta-aware query separately so the .or(...) fallback for
-  // NULL watermark columns stays readable. The .or() expression
-  // accepts only string filters, so we use ``last_update_ts.is.null``
-  // alongside the gt clause to keep rows that have never been touched
-  // (those would otherwise drop out and the Pi would never see them).
+  // Delta filtering. When `updated_since` is supplied, return only rows
+  // whose tracked timestamp is STRICTLY greater than the watermark. NULL
+  // watermark columns are EXCLUDED from delta windows on purpose — a row
+  // with a NULL last_update_ts / last_heartbeat_ts predates any sync
+  // watermark the Pi could send, so the Pi already saw it during the
+  // initial (no-watermark) full pull. Re-emitting NULL-timestamp rows
+  // every poll defeats the whole point of delta filtering and breaks
+  // the test contract "future watermark → empty list".
   let stockQuery = supabase
     .schema('chefbyte')
     .from('stock_lots')
@@ -198,7 +201,7 @@ async function handleCatalog(supabase: SupabaseClient, device: Device, url: URL)
     .eq('user_id', userId)
     .gt('qty_containers', 0);
   if (updatedSince) {
-    stockQuery = stockQuery.or(`last_update_ts.gt.${updatedSince},last_update_ts.is.null`);
+    stockQuery = stockQuery.gt('last_update_ts', updatedSince);
   }
 
   let pairingsQuery = supabase
@@ -208,7 +211,7 @@ async function handleCatalog(supabase: SupabaseClient, device: Device, url: URL)
     .eq('user_id', userId)
     .eq('device_id', device.device_id);
   if (updatedSince) {
-    pairingsQuery = pairingsQuery.or(`last_heartbeat_ts.gt.${updatedSince},last_heartbeat_ts.is.null`);
+    pairingsQuery = pairingsQuery.gt('last_heartbeat_ts', updatedSince);
   }
 
   let locationsQuery = supabase

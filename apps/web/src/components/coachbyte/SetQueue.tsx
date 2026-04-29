@@ -318,7 +318,14 @@ export function SetQueue({
                 type="submit"
                 variant="success"
                 size="xl"
-                disabled={disabled}
+                /* `disabled={completing}` is redundant with the
+                   Button's `loading` prop (which already sets
+                   `aria-disabled` and blocks pointer events), but
+                   we set it explicitly here so a double-tap during
+                   the optimistic-update window cannot fire mutate()
+                   twice — even if `loading` were dropped in a
+                   future refactor, the form-submit guard holds. */
+                disabled={disabled || completing}
                 loading={completing}
                 data-testid="complete-set-btn"
                 className="col-span-2 sm:col-span-1"

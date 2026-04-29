@@ -375,6 +375,11 @@ export function MacroPage() {
         } else if (item.source === 'Temp Item' && item.calories > 0) {
           scale = newQty / item.calories;
         }
+        const oldRow = previous.consumed.find((c) => c.id === item.id);
+        const newCal = oldRow ? Math.round(oldRow.calories * scale) : 0;
+        const newPro = oldRow ? Math.round(oldRow.protein * scale) : 0;
+        const newCar = oldRow ? Math.round(oldRow.carbs * scale) : 0;
+        const newFat = oldRow ? Math.round(oldRow.fat * scale) : 0;
         queryClient.setQueryData<MacroPageData>(fullKey, {
           ...previous,
           consumed: previous.consumed.map((c) =>
@@ -383,12 +388,30 @@ export function MacroPage() {
               : {
                   ...c,
                   qty: item.source === 'Meal Plan' ? newQty : c.qty,
-                  calories: Math.round(c.calories * scale),
-                  protein: Math.round(c.protein * scale),
-                  carbs: Math.round(c.carbs * scale),
-                  fat: Math.round(c.fat * scale),
+                  calories: newCal,
+                  protein: newPro,
+                  carbs: newCar,
+                  fat: newFat,
                 },
           ),
+          // R2 audit #8: patch macros.consumed so the top-of-page
+          // MacroProgressBar(s) animate immediately. The per-row totals
+          // already updated through the consumed[] map, but
+          // consumedTotals reads from macros.consumed (the RPC summary)
+          // and was only refreshed by onSettled — a partial optimism the
+          // audit called out.
+          macros:
+            previous.macros && oldRow
+              ? {
+                  ...previous.macros,
+                  consumed: {
+                    calories: Math.max(0, previous.macros.consumed.calories - oldRow.calories + newCal),
+                    protein: Math.max(0, previous.macros.consumed.protein - oldRow.protein + newPro),
+                    carbs: Math.max(0, previous.macros.consumed.carbs - oldRow.carbs + newCar),
+                    fat: Math.max(0, previous.macros.consumed.fat - oldRow.fat + newFat),
+                  },
+                }
+              : previous.macros,
         });
       }
       setEditingId(null);
@@ -662,8 +685,15 @@ export function MacroPage() {
               const badgeColor =
                 item.source === 'Meal Plan' ? 'bg-success-subtle text-chef-accent' : 'bg-violet-100 text-violet-700';
               const isEditing = editingId === item.id;
+              // R2 audit #9: explicit unit on the temp-item edit label so
+              // a number entered here can't be confused with a serving qty
+              // (the meal_plan rows next to it accept qty in serving/container
+              // units). Same field, different semantics — the label is the
+              // only disambiguator.
               const editLabel =
-                item.source === 'Meal Plan' ? `Qty (${item.unit ?? 'unit'})` : 'Calories (scales protein/carbs/fat)';
+                item.source === 'Meal Plan'
+                  ? `Qty (${item.unit ?? 'unit'})`
+                  : 'Calories (kcal) — scales protein/carbs/fat';
               return (
                 <div
                   key={item.id}
@@ -731,8 +761,12 @@ export function MacroPage() {
                     </div>
                     {!isEditing && (
                       <div className="flex items-start gap-1 shrink-0">
+                        {/* R2 audit #3: bumped 28px → 44px to meet the
+                            mobile touch-target guideline. Audit flagged
+                            these as the only 28px controls left after
+                            R1 widened the shopping checkboxes. */}
                         <button
-                          className="text-text-secondary hover:text-text font-semibold text-xs bg-transparent border border-border rounded cursor-pointer min-w-[44px] min-h-[28px] flex items-center justify-center px-2"
+                          className="text-text-secondary hover:text-text font-semibold text-xs bg-transparent border border-border rounded cursor-pointer min-w-[44px] min-h-[44px] flex items-center justify-center px-2"
                           data-testid={`edit-consumed-${item.id}`}
                           onClick={() => startEditQty(item)}
                           aria-label={`Edit qty for ${item.name}`}
@@ -740,7 +774,7 @@ export function MacroPage() {
                           Edit
                         </button>
                         <button
-                          className="text-danger-text hover:text-danger-text font-bold text-base bg-transparent border-none cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
+                          className="text-danger-text hover:text-danger-text font-bold text-base bg-transparent border-none cursor-pointer min-w-[44px] min-h-[44px] flex items-center justify-center"
                           data-testid={`delete-consumed-${item.id}`}
                           onClick={() => deleteMutation.mutate(item)}
                           aria-label={`Remove ${item.name}`}

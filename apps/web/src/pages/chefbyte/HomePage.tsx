@@ -24,6 +24,8 @@ import { calcCaloriesFromMacros } from '@/pages/chefbyte/MacroPage';
 import { computeRecipeMacros, computeStockStatus, type StockStatus } from '@/pages/chefbyte/RecipesPage';
 import { CardSkeleton, MacroBarSkeleton, ListSkeleton } from '@/components/SkeletonScreen';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { formatStockShortfallMessage as formatStockShortfallMessageShared } from '@/shared/stockShortfall';
+import { useToast } from '@/components/shared/Toast';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -154,23 +156,12 @@ export function rawPctOf(val: number, goal: number): number {
 /**
  * Wrap a raw RPC stock-shortfall error into actionable copy.
  *
- * The mark_meal_done RPC raises:
- *   'Insufficient stock for <name>: need <X> containers, have <Y>'
- *
- * Audit flagged this verbatim string as too generic to act on at the
- * moment the user is most rushed. We keep the specifics (which product,
- * how short) and prepend a clear next step.
- *
- * Other errors pass through untouched so we don't mask unexpected
- * failures behind a friendlier-but-wrong message.
+ * Re-exported here for backwards compatibility with existing tests
+ * (`__tests__/unit/pure/home-page-helpers.test.ts`). The implementation
+ * lives in `@/shared/stockShortfall` so cross-page consumers can import
+ * without dragging the HomePage route bundle along (R2 audit #12).
  */
-export function formatStockShortfallMessage(message: string): string {
-  if (!message) return '';
-  if (/insufficient stock/i.test(message)) {
-    return `Can't mark this meal done: ${message}. Add the missing item to your shopping list, then try again.`;
-  }
-  return message;
-}
+export const formatStockShortfallMessage = formatStockShortfallMessageShared;
 
 /**
  * Format the day-window label from a numeric `day_start_hour`.
@@ -252,6 +243,14 @@ export function HomePage() {
 
   /* ---- Prep confirm ---- */
   const [confirmPrepId, setConfirmPrepId] = useState<string | null>(null);
+
+  /* ---- Inline qty edit on Consumed Today (R2 audit #10) ---- */
+  // Same shared RPCs as MacroPage. Wired so the user can fix a wrong qty
+  // without navigating to /chef/macros mid-flow.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
+
+  const toast = useToast();
 
   /* ---------------------------------------------------------------- */
   /*  Data loading via useQuery                                        */
@@ -662,17 +661,87 @@ export function HomePage() {
       const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
       if (error) throw new Error(error.message);
     },
-    // Optimistic update: stamp completed_at locally so the badge flips
-    // instantly. Audit flagged the click → 200-500ms freeze → done badge
-    // pattern as friction on the most-clicked daily action.
+    // Full optimistic update (R2 audit #4):
+    //   1. Stamp completed_at on the meal so the badge flips instantly.
+    //   2. Seed a synthetic food_logs row so "Consumed Today" populates
+    //      in the same frame.
+    //   3. Decrement stockByProduct so the meal stock badge transitions
+    //      from "CAN MAKE" to a smaller value (or "NO STOCK") instead of
+    //      lying for ~300ms while the refetch runs.
+    //   4. Patch macros.consumed so the hero progress bars move with the
+    //      action (R2 audit #8).
+    // Rollback on error preserves all four edits via the saved `previous`
+    // snapshot.
     onMutate: async (mealId: string) => {
       await queryClient.cancelQueries({ queryKey: homeQueryKey });
       const previous = queryClient.getQueryData<HomePageData>(homeQueryKey);
       if (previous) {
         const nowIso = new Date().toISOString();
+        const meal = previous.todaysMeals.find((m) => m.meal_id === mealId);
+        const macrosPatch = meal ? computeMealEntryMacros(meal) : null;
+
+        // Build a synthetic food_logs row referencing the meal_id so the
+        // existing meal-grouping logic in `mealGroups` picks it up.
+        const seededLog: FoodLogEntry | null =
+          meal && macrosPatch
+            ? {
+                log_id: `optimistic-${mealId}`,
+                qty_consumed: meal.servings,
+                unit: 'serving',
+                calories: macrosPatch.calories,
+                protein: macrosPatch.protein,
+                carbs: macrosPatch.carbs,
+                fat: macrosPatch.fat,
+                meal_id: mealId,
+                products: null,
+                meal_plan_entries: {
+                  recipes: meal.recipes ? { name: meal.recipes.name } : null,
+                  products: meal.products ? { name: meal.products.name } : null,
+                },
+              }
+            : null;
+
+        // Optimistically deduct stock — only when the meal references a
+        // recipe with ingredients OR a single product. Floors at 0 so a
+        // server-side stock-shortfall (which would error and roll back)
+        // doesn't produce negative numbers in the cache.
+        const nextStock = new Map(previous.stockByProduct);
+        if (meal && !meal.completed_at) {
+          if (meal.recipes?.recipe_ingredients) {
+            const scale = Number(meal.servings) / (Number(meal.recipes.base_servings) || 1);
+            for (const ri of meal.recipes.recipe_ingredients) {
+              const productId = ri.product_id;
+              const spc = Number(ri.products?.servings_per_container) || 1;
+              const containers =
+                ri.unit === 'container' ? Number(ri.quantity) * scale : (Number(ri.quantity) * scale) / spc;
+              const cur = nextStock.get(productId) ?? 0;
+              nextStock.set(productId, Math.max(0, cur - containers));
+            }
+          } else if (meal.product_id && meal.products) {
+            const spc = Number(meal.products.servings_per_container) || 1;
+            const containers = Number(meal.servings) / spc;
+            const cur = nextStock.get(meal.product_id) ?? 0;
+            nextStock.set(meal.product_id, Math.max(0, cur - containers));
+          }
+        }
+
         queryClient.setQueryData<HomePageData>(homeQueryKey, {
           ...previous,
           todaysMeals: previous.todaysMeals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: nowIso } : m)),
+          foodLogs: seededLog ? [...previous.foodLogs, seededLog] : previous.foodLogs,
+          stockByProduct: nextStock,
+          macros:
+            previous.macros && macrosPatch
+              ? {
+                  ...previous.macros,
+                  consumed: {
+                    calories: previous.macros.consumed.calories + macrosPatch.calories,
+                    protein: previous.macros.consumed.protein + macrosPatch.protein,
+                    carbs: previous.macros.consumed.carbs + macrosPatch.carbs,
+                    fat: previous.macros.consumed.fat + macrosPatch.fat,
+                  },
+                }
+              : previous.macros,
         });
       }
       return { previous };
@@ -695,9 +764,47 @@ export function HomePage() {
       await queryClient.cancelQueries({ queryKey: homeQueryKey });
       const previous = queryClient.getQueryData<HomePageData>(homeQueryKey);
       if (previous) {
+        // Mirror the markDone optimism in reverse: drop the seeded log,
+        // bump macros down by its contribution, restore stock from the
+        // optimistic deduction. Real refetch reconciles afterward.
+        const seeded = previous.foodLogs.find((l) => l.log_id === `optimistic-${mealId}`);
+        const meal = previous.todaysMeals.find((m) => m.meal_id === mealId);
+        const nextStock = new Map(previous.stockByProduct);
+        if (meal) {
+          if (meal.recipes?.recipe_ingredients) {
+            const scale = Number(meal.servings) / (Number(meal.recipes.base_servings) || 1);
+            for (const ri of meal.recipes.recipe_ingredients) {
+              const productId = ri.product_id;
+              const spc = Number(ri.products?.servings_per_container) || 1;
+              const containers =
+                ri.unit === 'container' ? Number(ri.quantity) * scale : (Number(ri.quantity) * scale) / spc;
+              const cur = nextStock.get(productId) ?? 0;
+              nextStock.set(productId, cur + containers);
+            }
+          } else if (meal.product_id && meal.products) {
+            const spc = Number(meal.products.servings_per_container) || 1;
+            const containers = Number(meal.servings) / spc;
+            const cur = nextStock.get(meal.product_id) ?? 0;
+            nextStock.set(meal.product_id, cur + containers);
+          }
+        }
         queryClient.setQueryData<HomePageData>(homeQueryKey, {
           ...previous,
           todaysMeals: previous.todaysMeals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: null } : m)),
+          foodLogs: previous.foodLogs.filter((l) => l.log_id !== `optimistic-${mealId}`),
+          stockByProduct: nextStock,
+          macros:
+            previous.macros && seeded
+              ? {
+                  ...previous.macros,
+                  consumed: {
+                    calories: Math.max(0, previous.macros.consumed.calories - Number(seeded.calories)),
+                    protein: Math.max(0, previous.macros.consumed.protein - Number(seeded.protein)),
+                    carbs: Math.max(0, previous.macros.consumed.carbs - Number(seeded.carbs)),
+                    fat: Math.max(0, previous.macros.consumed.fat - Number(seeded.fat)),
+                  },
+                }
+              : previous.macros,
         });
       }
       return { previous };
@@ -816,6 +923,140 @@ export function HomePage() {
     onError: (err: Error) => setMutationError(err.message),
     onSettled: () => invalidateHome(),
   });
+
+  /* Inline qty edit (R2 audit #10) — Consumed Today section. */
+  type HomeEditArg =
+    | { kind: 'log'; log: FoodLogEntry; newQty: number }
+    | { kind: 'temp'; temp: TempItemEntry; newCalories: number };
+
+  const editQtyMutation = useMutation({
+    mutationFn: async (arg: HomeEditArg) => {
+      if (arg.kind === 'log') {
+        const { error: rpcErr } = await (chefbyte() as any).rpc('update_food_log_qty', {
+          p_log_id: arg.log.log_id,
+          p_new_qty: arg.newQty,
+        });
+        if (rpcErr) throw new Error(rpcErr.message);
+      } else {
+        const scale = arg.temp.calories > 0 ? arg.newCalories / arg.temp.calories : 1;
+        const { error: rpcErr } = await (chefbyte() as any).rpc('update_temp_item_qty', {
+          p_temp_id: arg.temp.temp_id,
+          p_scale: scale,
+        });
+        if (rpcErr) throw new Error(rpcErr.message);
+      }
+    },
+    onMutate: async (arg) => {
+      await queryClient.cancelQueries({ queryKey: homeQueryKey });
+      const previous = queryClient.getQueryData<HomePageData>(homeQueryKey);
+      if (previous) {
+        let scale = 1;
+        let oldCalories = 0;
+        let oldProtein = 0;
+        let oldCarbs = 0;
+        let oldFat = 0;
+        if (arg.kind === 'log' && Number(arg.log.qty_consumed) > 0) {
+          scale = arg.newQty / Number(arg.log.qty_consumed);
+          oldCalories = Number(arg.log.calories);
+          oldProtein = Number(arg.log.protein);
+          oldCarbs = Number(arg.log.carbs);
+          oldFat = Number(arg.log.fat);
+        } else if (arg.kind === 'temp' && arg.temp.calories > 0) {
+          scale = arg.newCalories / arg.temp.calories;
+          oldCalories = arg.temp.calories;
+          oldProtein = arg.temp.protein;
+          oldCarbs = arg.temp.carbs;
+          oldFat = arg.temp.fat;
+        }
+        const newCalories = Math.round(oldCalories * scale);
+        const newProtein = Math.round(oldProtein * scale);
+        const newCarbs = Math.round(oldCarbs * scale);
+        const newFat = Math.round(oldFat * scale);
+        queryClient.setQueryData<HomePageData>(homeQueryKey, {
+          ...previous,
+          foodLogs:
+            arg.kind === 'log'
+              ? previous.foodLogs.map((l) =>
+                  l.log_id !== arg.log.log_id
+                    ? l
+                    : {
+                        ...l,
+                        qty_consumed: arg.newQty,
+                        calories: newCalories,
+                        protein: newProtein,
+                        carbs: newCarbs,
+                        fat: newFat,
+                      },
+                )
+              : previous.foodLogs,
+          tempItems:
+            arg.kind === 'temp'
+              ? previous.tempItems.map((t) =>
+                  t.temp_id !== arg.temp.temp_id
+                    ? t
+                    : {
+                        ...t,
+                        calories: newCalories,
+                        protein: newProtein,
+                        carbs: newCarbs,
+                        fat: newFat,
+                      },
+                )
+              : previous.tempItems,
+          // Patch macros.consumed so the hero progress bars move.
+          macros: previous.macros
+            ? {
+                ...previous.macros,
+                consumed: {
+                  calories: Math.max(0, previous.macros.consumed.calories - oldCalories + newCalories),
+                  protein: Math.max(0, previous.macros.consumed.protein - oldProtein + newProtein),
+                  carbs: Math.max(0, previous.macros.consumed.carbs - oldCarbs + newCarbs),
+                  fat: Math.max(0, previous.macros.consumed.fat - oldFat + newFat),
+                },
+              }
+            : previous.macros,
+        });
+      }
+      setEditingId(null);
+      setEditValue('');
+      return { previous };
+    },
+    onError: (err: Error, _arg, context) => {
+      if (context?.previous) queryClient.setQueryData(homeQueryKey, context.previous);
+      setMutationError(err.message);
+      toast.show(`Update failed: ${err.message}`, { variant: 'error' });
+    },
+    onSettled: () => invalidateHome(),
+  });
+
+  const startEditLog = (log: FoodLogEntry) => {
+    setEditingId(`log-${log.log_id}`);
+    setEditValue(String(log.qty_consumed));
+  };
+  const startEditTemp = (item: TempItemEntry) => {
+    setEditingId(`temp-${item.temp_id}`);
+    setEditValue(String(item.calories));
+  };
+  const cancelEdit = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
+  const commitEditLog = (log: FoodLogEntry) => {
+    const parsed = Number(editValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setMutationError('Quantity must be greater than 0');
+      return;
+    }
+    editQtyMutation.mutate({ kind: 'log', log, newQty: parsed });
+  };
+  const commitEditTemp = (temp: TempItemEntry) => {
+    const parsed = Number(editValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setMutationError('Calories must be greater than 0');
+      return;
+    }
+    editQtyMutation.mutate({ kind: 'temp', temp, newCalories: parsed });
+  };
 
   /* ================================================================ */
   /*  RENDER                                                           */
@@ -1413,60 +1654,162 @@ export function HomePage() {
               );
             })}
             {/* Standalone food logs (not part of a meal) */}
-            {standaloneLogs.map((log) => (
-              <div
-                key={log.log_id}
-                data-testid={`consumed-log-${log.log_id}`}
-                className="py-2 px-3 border border-border border-l-4 border-l-success rounded-md bg-success-subtle"
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <span className="font-semibold text-sm text-text min-w-0">
-                    {log.products?.name ?? 'Unknown'}
-                    <span className="font-normal text-text-secondary text-xs ml-2">
-                      {Number(log.qty_consumed)} {log.unit}
-                      {Number(log.qty_consumed) !== 1 ? 's' : ''}
+            {standaloneLogs.map((log) => {
+              const isEditing = editingId === `log-${log.log_id}`;
+              const isOptimistic = String(log.log_id).startsWith('optimistic-');
+              return (
+                <div
+                  key={log.log_id}
+                  data-testid={`consumed-log-${log.log_id}`}
+                  className="py-2 px-3 border border-border border-l-4 border-l-success rounded-md bg-success-subtle"
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <span className="font-semibold text-sm text-text min-w-0">
+                      {log.products?.name ?? 'Unknown'}
+                      <span className="font-normal text-text-secondary text-xs ml-2">
+                        {Number(log.qty_consumed)} {log.unit}
+                        {Number(log.qty_consumed) !== 1 ? 's' : ''}
+                      </span>
                     </span>
-                  </span>
-                  <DeleteBtn
-                    id={`log-${log.log_id}`}
-                    onConfirm={async () => {
-                      deleteFoodLogMutation.mutate(log.log_id);
-                    }}
-                    testId={`delete-log-${log.log_id}`}
-                  />
+                    {!isEditing && (
+                      <div className="flex gap-1 shrink-0">
+                        {!isOptimistic && (
+                          <button
+                            onClick={() => startEditLog(log)}
+                            data-testid={`edit-log-${log.log_id}`}
+                            aria-label={`Edit qty for ${log.products?.name ?? 'log'}`}
+                            className="px-2.5 py-1 rounded text-xs font-semibold border border-border text-text-secondary hover:bg-surface-hover min-w-[44px] min-h-[44px] flex items-center justify-center"
+                          >
+                            Edit
+                          </button>
+                        )}
+                        <DeleteBtn
+                          id={`log-${log.log_id}`}
+                          onConfirm={async () => {
+                            deleteFoodLogMutation.mutate(log.log_id);
+                          }}
+                          testId={`delete-log-${log.log_id}`}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {isEditing && (
+                    <div data-testid={`edit-log-form-${log.log_id}`} className="mt-2 flex items-center gap-2 flex-wrap">
+                      <label className="text-xs text-text-tertiary">Qty ({log.unit ?? 'serving'})</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitEditLog(log);
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                        data-testid={`edit-log-input-${log.log_id}`}
+                        className="w-24 px-2 py-1 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => commitEditLog(log)}
+                        data-testid={`edit-log-save-${log.log_id}`}
+                        className="px-2.5 py-1 bg-success text-white rounded text-xs font-semibold hover:bg-success-hover"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        data-testid={`edit-log-cancel-${log.log_id}`}
+                        className="px-2.5 py-1 bg-surface border border-border-strong text-text-secondary rounded text-xs font-semibold hover:bg-surface-hover"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                  <div className="text-xs text-text-secondary mt-1">
+                    {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
+                    {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
+                  </div>
                 </div>
-                <div className="text-xs text-text-secondary mt-1">
-                  {Math.round(Number(log.calories))} cal | {Math.round(Number(log.protein))}g P |{' '}
-                  {Math.round(Number(log.carbs))}g C | {Math.round(Number(log.fat))}g F
-                </div>
-              </div>
-            ))}
+              );
+            })}
             {/* Quick-add temp items */}
-            {tempItems.map((item) => (
-              <div
-                key={item.temp_id}
-                data-testid={`consumed-temp-${item.temp_id}`}
-                className="py-2 px-3 border border-border border-l-4 border-l-amber-500 rounded-md bg-warning-subtle"
-              >
-                <div className="flex justify-between items-start gap-2">
-                  <span className="font-semibold text-sm text-text min-w-0">
-                    {item.name}
-                    <span className="font-normal text-text-tertiary text-xs ml-1.5">quick-add</span>
-                  </span>
-                  <DeleteBtn
-                    id={`temp-${item.temp_id}`}
-                    onConfirm={async () => {
-                      deleteTempItemMutation.mutate(item.temp_id);
-                    }}
-                    testId={`delete-temp-${item.temp_id}`}
-                  />
+            {tempItems.map((item) => {
+              const isEditing = editingId === `temp-${item.temp_id}`;
+              return (
+                <div
+                  key={item.temp_id}
+                  data-testid={`consumed-temp-${item.temp_id}`}
+                  className="py-2 px-3 border border-border border-l-4 border-l-amber-500 rounded-md bg-warning-subtle"
+                >
+                  <div className="flex justify-between items-start gap-2">
+                    <span className="font-semibold text-sm text-text min-w-0">
+                      {item.name}
+                      <span className="font-normal text-text-tertiary text-xs ml-1.5">quick-add</span>
+                    </span>
+                    {!isEditing && (
+                      <div className="flex gap-1 shrink-0">
+                        <button
+                          onClick={() => startEditTemp(item)}
+                          data-testid={`edit-temp-${item.temp_id}`}
+                          aria-label={`Edit calories for ${item.name}`}
+                          className="px-2.5 py-1 rounded text-xs font-semibold border border-border text-text-secondary hover:bg-surface-hover min-w-[44px] min-h-[44px] flex items-center justify-center"
+                        >
+                          Edit
+                        </button>
+                        <DeleteBtn
+                          id={`temp-${item.temp_id}`}
+                          onConfirm={async () => {
+                            deleteTempItemMutation.mutate(item.temp_id);
+                          }}
+                          testId={`delete-temp-${item.temp_id}`}
+                        />
+                      </div>
+                    )}
+                  </div>
+                  {isEditing && (
+                    <div
+                      data-testid={`edit-temp-form-${item.temp_id}`}
+                      className="mt-2 flex items-center gap-2 flex-wrap"
+                    >
+                      <label className="text-xs text-text-tertiary">Calories (kcal)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={editValue}
+                        onChange={(e) => setEditValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitEditTemp(item);
+                          if (e.key === 'Escape') cancelEdit();
+                        }}
+                        data-testid={`edit-temp-input-${item.temp_id}`}
+                        className="w-24 px-2 py-1 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
+                        autoFocus
+                      />
+                      <button
+                        onClick={() => commitEditTemp(item)}
+                        data-testid={`edit-temp-save-${item.temp_id}`}
+                        className="px-2.5 py-1 bg-success text-white rounded text-xs font-semibold hover:bg-success-hover"
+                      >
+                        Save
+                      </button>
+                      <button
+                        onClick={cancelEdit}
+                        data-testid={`edit-temp-cancel-${item.temp_id}`}
+                        className="px-2.5 py-1 bg-surface border border-border-strong text-text-secondary rounded text-xs font-semibold hover:bg-surface-hover"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  )}
+                  <div className="text-xs text-text-secondary mt-1">
+                    {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
+                    {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
+                  </div>
                 </div>
-                <div className="text-xs text-text-secondary mt-1">
-                  {Math.round(Number(item.calories))} cal | {Math.round(Number(item.protein))}g P |{' '}
-                  {Math.round(Number(item.carbs))}g C | {Math.round(Number(item.fat))}g F
-                </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}

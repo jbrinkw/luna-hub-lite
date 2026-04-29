@@ -49,12 +49,27 @@ describe('AppActivationCard', () => {
     expect(onDeactivate).not.toHaveBeenCalled();
   });
 
-  it('confirm deactivation calls onDeactivate', async () => {
+  it('confirm deactivation requires typed phrase before calling onDeactivate', async () => {
     const onDeactivate = vi.fn();
     render(<AppActivationCard {...defaultProps} active onDeactivate={onDeactivate} />);
 
     await userEvent.click(screen.getByText('Deactivate'));
-    await userEvent.click(screen.getByTestId('deactivate-confirm'));
+
+    // Without the typed phrase, the confirm button is disabled — clicking
+    // it must NOT fire onDeactivate. This is the R2 audit F8 typed-confirm
+    // gate (matches GitHub / Stripe / AWS destructive-action baseline).
+    const confirmBtn = screen.getByTestId('deactivate-confirm');
+    expect(confirmBtn).toBeDisabled();
+    await userEvent.click(confirmBtn);
+    expect(onDeactivate).not.toHaveBeenCalled();
+
+    // Type the literal phrase ("delete coachbyte" — defaultProps uses
+    // displayName="CoachByte"). The button becomes enabled and the click
+    // now fires onDeactivate.
+    const input = screen.getByTestId('deactivate-phrase-input');
+    await userEvent.type(input, 'delete coachbyte');
+    expect(confirmBtn).toBeEnabled();
+    await userEvent.click(confirmBtn);
     expect(onDeactivate).toHaveBeenCalledTimes(1);
   });
 

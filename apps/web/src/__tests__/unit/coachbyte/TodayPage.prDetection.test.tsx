@@ -161,8 +161,13 @@ vi.mock('@/shared/plateCalc', () => ({
 // Avoid noisy AudioContext + WakeLock paths in this PR-check test.
 vi.mock('@/hooks/useTimerAudio', () => ({
   fireTimerExpiredCue: vi.fn(),
+  firePrCelebrationCue: vi.fn(),
+  vibrateSetCompleted: vi.fn(),
+  vibratePr: vi.fn(),
   requestNotificationPermission: vi.fn(() => Promise.resolve('granted')),
   useScreenWakeLock: vi.fn(),
+  installAudioUnlockOnFirstGesture: vi.fn(),
+  unlockAudioContextNow: vi.fn(),
 }));
 
 import { TodayPage } from '@/pages/coachbyte/TodayPage';

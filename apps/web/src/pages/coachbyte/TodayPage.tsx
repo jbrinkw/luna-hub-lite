@@ -21,7 +21,15 @@ import { useSaveIndicator } from '@/hooks/useSaveIndicator';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
-import { fireTimerExpiredCue, requestNotificationPermission, useScreenWakeLock } from '@/hooks/useTimerAudio';
+import {
+  fireTimerExpiredCue,
+  firePrCelebrationCue,
+  installAudioUnlockOnFirstGesture,
+  requestNotificationPermission,
+  unlockAudioContextNow,
+  useScreenWakeLock,
+  vibrateSetCompleted,
+} from '@/hooks/useTimerAudio';
 
 export interface CompletedSet {
   completed_set_id: string;
@@ -325,8 +333,12 @@ export function TodayPage() {
   // Request notification permission once on mount so the rest-timer
   // expiry can later fire a system notification without a perm-prompt
   // mid-rest. Silently no-ops on unsupported browsers / denied state.
+  // Also install a one-time `pointerdown` listener that resumes the
+  // shared AudioContext — Chrome/Safari leave it suspended until a
+  // user gesture, so without this the first beep silently no-ops.
   useEffect(() => {
     void requestNotificationPermission();
+    installAudioUnlockOnFirstGesture();
   }, []);
 
   const today = todayStr(dayStartHour);
@@ -376,10 +388,15 @@ export function TodayPage() {
     staleTime: 30_000,
   });
 
-  // Keep the screen awake while the user has an active workout (any
-  // pending sets remain). Released on unmount or when all sets done.
-  const sessionActive = sets.some((s) => !s.completed);
-  useScreenWakeLock(sessionActive);
+  // Keep the screen awake ONLY during an active rest period. Acquiring
+  // the lock for the entire workout drains battery + prevents the
+  // screen from dimming while the user reads notes between sets;
+  // binding it to `running | paused` releases the lock the moment the
+  // timer expires (so the screen can dim while the user lifts) and
+  // re-acquires on the next rest start. The wake-lock hook handles
+  // visibilitychange re-acquisition itself.
+  const restActive = timer.state === 'running' || timer.state === 'paused';
+  useScreenWakeLock(restActive);
 
   // ── Exercises query ──
   const { data: exercises = [] } = useQuery({
@@ -500,8 +517,13 @@ export function TodayPage() {
 
         if (newE1RM > prevBestWithout && prevBestWithout > 0) {
           setPrToast(`NEW PR! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT} (was ${prevBestWithout})`);
+          // Audible + haptic celebration on the actual PR moment.
+          // Distinct from the rest-expiry cue (rising arpeggio + 3
+          // short pulses) so the two never feel like the same signal.
+          firePrCelebrationCue();
         } else if (newE1RM > 0 && prevBestWithout === 0) {
           setPrToast(`First record! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT}`);
+          firePrCelebrationCue();
         }
       }
 
@@ -526,6 +548,14 @@ export function TodayPage() {
 
   const handleCompleteSet = async (reps: number, load: number) => {
     if (!planId || !user) return;
+    // Force-resume the AudioContext from this known-good user gesture
+    // so the eventual rest-expiry beep isn't blocked by Chrome/Safari's
+    // suspended-until-gesture rule. Idempotent.
+    unlockAudioContextNow();
+    // Single short haptic — confirmation that the tap was received.
+    // Distinct pattern from rest-expiry vibrate so the two never feel
+    // like the same signal.
+    vibrateSetCompleted();
     completeSetMutation.mutate({ reps, load });
   };
 
@@ -544,19 +574,51 @@ export function TodayPage() {
     queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
   };
 
+  // ── Mutation helpers — optimistic update + rollback on error ──
+  // Pattern: snapshot, write to cache immediately, rollback in catch.
+  // All four planned/completed-set CRUD paths use this so the UI never
+  // sits on a round-trip beat. Server error → silent rollback + error
+  // banner; success → final invalidate to re-sync from canonical state.
+
+  const optimisticUpdatePlanCache = (mutator: (prev: DailyPlanData) => DailyPlanData): DailyPlanData | null => {
+    const queryKey = queryKeys.dailyPlan(user!.id, today);
+    const prev = queryClient.getQueryData<DailyPlanData>(queryKey);
+    if (!prev) return null;
+    queryClient.setQueryData<DailyPlanData>(queryKey, mutator(prev));
+    return prev;
+  };
+
+  const rollbackPlanCache = (snapshot: DailyPlanData | null) => {
+    if (snapshot) {
+      queryClient.setQueryData(queryKeys.dailyPlan(user!.id, today), snapshot);
+    }
+  };
+
   const updatePlannedSet = async (plannedSetId: string, field: string, value: number | null) => {
     isEditingRef.current = true;
+    const snapshot = optimisticUpdatePlanCache((prev) => ({
+      ...prev,
+      sets: prev.sets.map((s) => (s.planned_set_id === plannedSetId ? { ...s, [field]: value } : s)),
+    }));
     const { error: err } = await coachbyte()
       .from('planned_sets')
       .update({ [field]: value })
       .eq('planned_set_id', plannedSetId);
     isEditingRef.current = false;
-    if (err) setError(err.message);
+    if (err) {
+      rollbackPlanCache(snapshot);
+      setError(err.message);
+    }
   };
 
   const deletePlannedSet = async (plannedSetId: string) => {
+    const snapshot = optimisticUpdatePlanCache((prev) => ({
+      ...prev,
+      sets: prev.sets.filter((s) => s.planned_set_id !== plannedSetId),
+    }));
     const { error: err } = await coachbyte().from('planned_sets').delete().eq('planned_set_id', plannedSetId);
     if (err) {
+      rollbackPlanCache(snapshot);
       setError(err.message);
       return;
     }
@@ -566,6 +628,27 @@ export function TodayPage() {
   const addPlannedSet = async (exerciseId: string, reps: number, load: number) => {
     if (!user || !planId) return;
     const maxOrder = Math.max(...sets.map((s) => s.order), 0);
+    const exerciseName = exercises.find((e) => e.exercise_id === exerciseId)?.name ?? 'Unknown';
+    // Synthetic id flagged with 'optimistic-' so the realtime
+    // invalidate replaces it with the canonical row on the next read.
+    const tempId = `optimistic-${Date.now()}`;
+    const snapshot = optimisticUpdatePlanCache((prev) => ({
+      ...prev,
+      sets: [
+        ...prev.sets,
+        {
+          planned_set_id: tempId,
+          exercise_id: exerciseId,
+          exercise_name: exerciseName,
+          target_reps: reps,
+          target_load: load,
+          target_load_percentage: null,
+          rest_seconds: 90,
+          order: maxOrder + 1,
+          completed: false,
+        },
+      ],
+    }));
     const { error: err } = await coachbyte()
       .from('planned_sets')
       .insert({
@@ -578,6 +661,7 @@ export function TodayPage() {
         order: maxOrder + 1,
       });
     if (err) {
+      rollbackPlanCache(snapshot);
       setError(err.message);
       return;
     }
@@ -758,8 +842,24 @@ export function TodayPage() {
     }
     clearTimeout(confirmTimeoutRef.current);
     setConfirmDeleteId(null);
+    // Find the matching planned-set so we can flip it back to
+    // pending in the optimistic update (deleting a completed_set
+    // re-opens the planned slot).
+    const removed = (planData?.completedSets ?? []).find((cs) => cs.completed_set_id === completedSetId);
+    const snapshot = optimisticUpdatePlanCache((prev) => {
+      const remainingCompleted = prev.completedSets.filter((cs) => cs.completed_set_id !== completedSetId);
+      // Reverse the planned_set's `completed` flag for any planned set
+      // whose exercise_name matches the removed completed set AND was
+      // marked completed. Best-effort match — server reload reconciles.
+      const reopen = removed
+        ? prev.sets.findIndex((s) => s.completed && s.exercise_name === removed.exercise_name)
+        : -1;
+      const sets = reopen >= 0 ? prev.sets.map((s, i) => (i === reopen ? { ...s, completed: false } : s)) : prev.sets;
+      return { ...prev, sets, completedSets: remainingCompleted };
+    });
     const { error: err } = await coachbyte().from('completed_sets').delete().eq('completed_set_id', completedSetId);
     if (err) {
+      rollbackPlanCache(snapshot);
       setError(err.message);
       return;
     }
@@ -844,30 +944,38 @@ export function TodayPage() {
 
       {error && <p className="text-danger-text text-sm mb-3">{error}</p>}
 
-      {prToast && (
-        <Alert variant="success" onDismiss={() => setPrToast(null)} className="mb-4" data-testid="pr-toast">
-          <span className="font-bold">{prToast}</span>
-        </Alert>
-      )}
+      {/* Toast region — `aria-live="polite"` lets screen readers
+          announce PR + Undo without interrupting active speech. The
+          inner Alert sets role="alert" (assertive); wrapping in a
+          live region container ensures the text is queued for
+          announcement even if the alert role fails to trigger on
+          some readers. */}
+      <div aria-live="polite" aria-atomic="true" data-testid="toast-live-region">
+        {prToast && (
+          <Alert variant="success" onDismiss={() => setPrToast(null)} className="mb-4" data-testid="pr-toast">
+            <span className="font-bold">{prToast}</span>
+          </Alert>
+        )}
 
-      {undoSetId && (
-        <Alert
-          variant="info"
-          onDismiss={() => {
-            setUndoSetId(null);
-            clearTimeout(undoTimeoutRef.current);
-          }}
-          className="mb-4"
-          data-testid="undo-toast"
-        >
-          <div className="flex items-center justify-between gap-3 flex-wrap">
-            <span>Set logged.</span>
-            <Button variant="primary" size="sm" onClick={undoLastSet} data-testid="undo-set-btn">
-              Undo
-            </Button>
-          </div>
-        </Alert>
-      )}
+        {undoSetId && (
+          <Alert
+            variant="info"
+            onDismiss={() => {
+              setUndoSetId(null);
+              clearTimeout(undoTimeoutRef.current);
+            }}
+            className="mb-4"
+            data-testid="undo-toast"
+          >
+            <div className="flex items-center justify-between gap-3 flex-wrap">
+              <span>Set logged.</span>
+              <Button variant="primary" size="sm" onClick={undoLastSet} data-testid="undo-set-btn">
+                Undo
+              </Button>
+            </div>
+          </Alert>
+        )}
+      </div>
 
       <SetQueue
         sets={sets}

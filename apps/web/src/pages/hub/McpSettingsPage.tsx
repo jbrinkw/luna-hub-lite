@@ -39,7 +39,9 @@ export function McpSettingsPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [endpointCopied, setEndpointCopied] = useState(false);
-  const [snippetCopied, setSnippetCopied] = useState(false);
+  const [urlCopied, setUrlCopied] = useState(false);
+  const [tokenCopied, setTokenCopied] = useState(false);
+  const [curlCopied, setCurlCopied] = useState(false);
   const [lastTestKey, setLastTestKey] = useState<string | null>(null);
   const [testKeyInput, setTestKeyInput] = useState('');
   const [testState, setTestState] = useState<TestState>({ status: 'idle' });
@@ -170,13 +172,22 @@ export function McpSettingsPage() {
     }
   };
 
-  const claudeSnippet = `${endpointUrl}\n\nAuthorization: Bearer <paste-your-key-here>`;
+  // Claude.ai's "Add custom MCP" connector takes URL + Bearer token as
+  // SEPARATE inputs. The earlier multi-line "snippet" promised a
+  // single-paste experience that doesn't exist — the user had to
+  // manually split it in Claude.ai. R2 audit F3: surface URL and token
+  // separately so each is a one-click copy into its respective field.
+  const tokenPlaceholder = '<paste-your-key-here>';
+  // Optional power-user curl test — wraps both into a one-liner for
+  // CLI verification. Kept under "Advanced" so the primary flow stays
+  // two-button (URL + token) clean.
+  const curlSnippet = `curl -X POST '${endpointUrl}' \\\n  -H 'Authorization: Bearer ${tokenPlaceholder}' \\\n  -H 'Content-Type: application/json' \\\n  -H 'Accept: application/json, text/event-stream' \\\n  -d '{"jsonrpc":"2.0","id":1,"method":"ping"}'`;
 
-  const handleCopySnippet = async () => {
+  const copyText = async (text: string, setFlag: (v: boolean) => void) => {
     try {
-      await navigator.clipboard.writeText(claudeSnippet);
-      setSnippetCopied(true);
-      setTimeout(() => setSnippetCopied(false), 2000);
+      await navigator.clipboard.writeText(text);
+      setFlag(true);
+      setTimeout(() => setFlag(false), 2000);
     } catch {
       // Clipboard API may not be available
     }
@@ -289,25 +300,94 @@ export function McpSettingsPage() {
                 In Claude.ai, open <span className="font-medium text-text">Settings → Connectors → Add custom MCP</span>
                 .
               </li>
-              <li>Paste the endpoint and key below.</li>
+              <li>Use the URL + Bearer token copy buttons below — Claude.ai expects them as separate inputs.</li>
               <li>
                 Hit <span className="font-medium text-text">Test connection</span> here to verify before going back to
                 Claude.ai.
               </li>
             </ol>
 
-            <div className="space-y-2">
-              <p className="text-xs font-medium text-text-secondary">Snippet for Claude.ai connector:</p>
-              <pre
-                data-testid="mcp-claude-snippet"
-                className="text-xs bg-code-bg px-3 py-2 rounded-md text-code-text whitespace-pre-wrap break-all"
-              >
-                {claudeSnippet}
-              </pre>
-              <Button variant="secondary" size="sm" onClick={handleCopySnippet} data-testid="copy-snippet">
-                {snippetCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
-                {snippetCopied ? 'Copied!' : 'Copy snippet'}
-              </Button>
+            {/* Claude.ai's connector form has TWO inputs (URL + Bearer
+                token), not one. Surface each as its own one-click copy
+                so the user pastes into the right field every time. */}
+            <div className="space-y-3">
+              <p className="text-xs font-medium text-text-secondary">Paste into the Claude.ai connector form:</p>
+
+              <div className="space-y-1">
+                <label className="text-xs text-text-secondary" htmlFor="mcp-url-display">
+                  URL
+                </label>
+                <div className="flex items-center gap-2">
+                  <code
+                    id="mcp-url-display"
+                    data-testid="mcp-claude-url"
+                    className="text-xs bg-code-bg px-3 py-2 rounded-md text-code-text flex-1 break-all"
+                  >
+                    {endpointUrl}
+                  </code>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => copyText(endpointUrl, setUrlCopied)}
+                    data-testid="copy-claude-url"
+                  >
+                    {urlCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    {urlCopied ? 'Copied!' : 'Copy URL'}
+                  </Button>
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <label className="text-xs text-text-secondary" htmlFor="mcp-token-display">
+                  Bearer token
+                </label>
+                <div className="flex items-center gap-2">
+                  <code
+                    id="mcp-token-display"
+                    data-testid="mcp-claude-token"
+                    className="text-xs bg-code-bg px-3 py-2 rounded-md text-code-text flex-1 break-all"
+                  >
+                    {tokenPlaceholder}
+                  </code>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => copyText(tokenPlaceholder, setTokenCopied)}
+                    data-testid="copy-claude-token"
+                  >
+                    {tokenCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    {tokenCopied ? 'Copied!' : 'Copy Token'}
+                  </Button>
+                </div>
+                <p className="text-xs text-text-tertiary">
+                  Replace the placeholder above with the plaintext key from "Generate New Key" below.
+                </p>
+              </div>
+
+              {/* Power-user curl one-liner. Kept compact, no copy-by-default
+                  to avoid distracting the primary URL+token flow. */}
+              <details className="text-xs">
+                <summary className="cursor-pointer text-text-secondary hover:text-text">
+                  Advanced — curl test command
+                </summary>
+                <div className="mt-2 space-y-2">
+                  <pre
+                    data-testid="mcp-curl-snippet"
+                    className="text-xs bg-code-bg px-3 py-2 rounded-md text-code-text whitespace-pre-wrap break-all"
+                  >
+                    {curlSnippet}
+                  </pre>
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    onClick={() => copyText(curlSnippet, setCurlCopied)}
+                    data-testid="copy-curl-snippet"
+                  >
+                    {curlCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    {curlCopied ? 'Copied!' : 'Copy curl test'}
+                  </Button>
+                </div>
+              </details>
             </div>
 
             <a

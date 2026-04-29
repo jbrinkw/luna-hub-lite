@@ -54,6 +54,54 @@ function getAudioContext(): AudioContext | null {
  * `window.AudioContext` and verify the init path. */
 export function __resetAudioContextForTests(): void {
   audioCtx = null;
+  unlockListenerInstalled = false;
+}
+
+// ---------------------------------------------------------------------------
+// AudioContext gesture-unlock
+// ---------------------------------------------------------------------------
+
+let unlockListenerInstalled = false;
+
+/**
+ * Install a one-time `pointerdown` listener that constructs (if not yet
+ * built) the shared AudioContext and resumes it. Chrome / Safari leave
+ * a freshly-constructed context in `suspended` state until a user
+ * gesture; without this, the first beep silently no-ops because
+ * `playTimerExpiredCue` is fired from a setTimeout / realtime callback —
+ * neither of which counts as a user gesture.
+ *
+ * Idempotent: safe to call from `useEffect` on every mount; subsequent
+ * calls no-op once the listener is installed.
+ */
+export function installAudioUnlockOnFirstGesture(): void {
+  if (unlockListenerInstalled) return;
+  if (typeof window === 'undefined' || typeof document === 'undefined') return;
+  unlockListenerInstalled = true;
+
+  const handler = () => {
+    const ctx = getAudioContext();
+    if (ctx && ctx.state === 'suspended') {
+      ctx.resume().catch(() => {
+        /* ignore — next gesture will retry via unlockListenerInstalled
+           re-set when the page reloads */
+      });
+    }
+    document.removeEventListener('pointerdown', handler);
+  };
+
+  document.addEventListener('pointerdown', handler, { once: true, passive: true });
+}
+
+/** Force an immediate ctx.resume() — call from a known user-gesture
+ * handler (Complete-Set click, timer-start click). Idempotent. */
+export function unlockAudioContextNow(): void {
+  const ctx = getAudioContext();
+  if (ctx && ctx.state === 'suspended') {
+    ctx.resume().catch(() => {
+      /* ignore — fallback path is the pointerdown listener */
+    });
+  }
 }
 
 /** Play a short triple-beep cue (660 Hz, 880 Hz, 660 Hz). */
@@ -92,6 +140,55 @@ export function playTimerExpiredCue(): void {
   });
 }
 
+/**
+ * Rising fanfare for a new PR — three ascending notes (C5/E5/G5)
+ * followed by a louder C6. Audibly distinct from the rest-timer triple
+ * beep (660/880/660 Hz at uniform volume) so the user can tell from
+ * across the room which event fired.
+ */
+export function playPrCelebrationCue(): void {
+  const ctx = getAudioContext();
+  if (!ctx) return;
+  if (ctx.state === 'suspended') {
+    ctx.resume().catch(() => {
+      /* ignore */
+    });
+  }
+
+  const now = ctx.currentTime;
+  // C5, E5, G5, C6 — major triad + octave bell
+  const notes = [
+    { freq: 523.25, start: 0, duration: 0.18, gain: 0.32 },
+    { freq: 659.25, start: 0.16, duration: 0.18, gain: 0.32 },
+    { freq: 783.99, start: 0.32, duration: 0.18, gain: 0.32 },
+    { freq: 1046.5, start: 0.5, duration: 0.4, gain: 0.42 },
+  ];
+
+  for (const note of notes) {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.frequency.value = note.freq;
+    osc.type = 'triangle';
+    const start = now + note.start;
+    const stop = start + note.duration;
+    gain.gain.setValueAtTime(0, start);
+    gain.gain.linearRampToValueAtTime(note.gain, start + 0.02);
+    gain.gain.setValueAtTime(note.gain, stop - 0.05);
+    gain.gain.linearRampToValueAtTime(0, stop);
+    osc.connect(gain).connect(ctx.destination);
+    osc.start(start);
+    osc.stop(stop);
+  }
+}
+
+/** Combined PR cue — sound + distinct vibration pattern. Fires on the
+ * actual PR moment (not on every set), so it's safe to be louder /
+ * more attention-grabbing than the per-set haptic. */
+export function firePrCelebrationCue(): void {
+  playPrCelebrationCue();
+  vibratePr();
+}
+
 // ---------------------------------------------------------------------------
 // Vibration
 // ---------------------------------------------------------------------------
@@ -102,6 +199,33 @@ export function vibrateTimerExpired(): void {
   if (typeof navigator.vibrate !== 'function') return;
   try {
     navigator.vibrate([200, 100, 200]);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Single 50ms haptic pulse — fired on Complete-Set tap so the user
+ * gets a confirmation buzz as the optimistic update advances the queue.
+ * Distinct pattern from the rest-expiry cue so the two never feel like
+ * the same signal. */
+export function vibrateSetCompleted(): void {
+  if (typeof navigator === 'undefined') return;
+  if (typeof navigator.vibrate !== 'function') return;
+  try {
+    navigator.vibrate(50);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Distinct PR-celebration vibration: three quick pulses. Different
+ * cadence from the rest-timer expiry pattern so they never feel like
+ * the same signal. */
+export function vibratePr(): void {
+  if (typeof navigator === 'undefined') return;
+  if (typeof navigator.vibrate !== 'function') return;
+  try {
+    navigator.vibrate([80, 60, 80, 60, 80]);
   } catch {
     /* ignore */
   }

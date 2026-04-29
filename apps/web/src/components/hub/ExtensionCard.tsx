@@ -55,60 +55,60 @@ type CredTestState =
   | { status: 'fail'; message: string };
 
 /**
- * Live-fire a minimal read against the upstream service using the in-form
- * credentials. Returns a structured result. Network and 401/403 errors
- * are reported separately so the user can tell auth-failed from
- * unreachable.
+ * Probe credentials by hitting the MCP Worker's `/test-extension-creds`
+ * endpoint instead of calling upstream services directly from the
+ * browser. Three reasons (R2 audit F5):
+ *   1. Tests Worker → upstream reachability — which is what actually
+ *      matters at tool-call time, not browser → upstream.
+ *   2. Avoids browser CORS surprises (Todoist's REST API was a
+ *      borderline case here).
+ *   3. Lets us extend to LAN-only / Worker-only services later (HA
+ *      via outbound-only relay, self-hosted Gitea on private nets).
  *
- * Only Obsidian + Todoist are wired up here. Home Assistant is FLAGGED
- * because the cloud Worker can't always reach a user's LAN-only HA
- * instance — see UX_AUDIT_HUB_MCP_LIVETRACK_FLAGS.md FLAG-03.
+ * The Worker reads stored creds when `useStored=true`, so post-Save
+ * "test stored credentials" works without retyping. When `useStored`
+ * is false (or omitted) the Worker uses the in-form `creds` payload —
+ * useful for first-time setup before Save.
+ *
+ * Auth: Bearer the user's Supabase session JWT (already used by the
+ * /v1/chat/completions path on the same Worker).
  */
-async function probeExtensionCredentials(extensionName: string, creds: Record<string, string>): Promise<CredTestState> {
-  if (extensionName === 'obsidian') {
-    const repo = (creds.github_repo ?? '').trim();
-    const token = (creds.github_token ?? '').trim();
-    const apiBase = ((creds.github_api_url ?? '').trim() || 'https://api.github.com').replace(/\/$/, '');
-    if (!repo || !token) return { status: 'fail', message: 'Repo + Token are required.' };
-    if (!/^[\w.-]+\/[\w.-]+$/.test(repo)) {
-      return { status: 'fail', message: 'Repo must be in the form owner/repo.' };
+async function probeExtensionCredentials(
+  extensionName: string,
+  creds: Record<string, string>,
+  opts: { useStored?: boolean; bearer?: string } = {},
+): Promise<CredTestState> {
+  const baseUrl = (import.meta.env.VITE_MCP_URL as string | undefined) ?? 'https://mcp.lunahub.dev';
+  const url = `${baseUrl.replace(/\/$/, '')}/test-extension-creds`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(opts.bearer ? { Authorization: `Bearer ${opts.bearer}` } : {}),
+      },
+      body: JSON.stringify({
+        extension: extensionName,
+        creds: opts.useStored ? null : creds,
+        use_stored: opts.useStored === true,
+      }),
+    });
+    if (res.status === 401) {
+      return { status: 'fail', message: 'Sign in expired. Refresh the page and try again.' };
     }
+    let body: { ok?: boolean; message?: string } | null = null;
     try {
-      const res = await fetch(`${apiBase}/repos/${repo}`, {
-        headers: { Authorization: `Bearer ${token}`, Accept: 'application/vnd.github+json' },
-      });
-      if (res.status === 401 || res.status === 403) {
-        return { status: 'fail', message: `Authentication rejected (${res.status}). Check the token.` };
-      }
-      if (res.status === 404) {
-        return { status: 'fail', message: 'Repo not found. Check the owner/repo and that the token can see it.' };
-      }
-      if (!res.ok) return { status: 'fail', message: `Upstream returned HTTP ${res.status}.` };
-      return { status: 'ok', message: 'Repo reachable with this token.' };
-    } catch (e) {
-      return { status: 'fail', message: e instanceof Error ? e.message : 'Network error.' };
+      body = (await res.json()) as { ok?: boolean; message?: string };
+    } catch {
+      return { status: 'fail', message: `Worker returned HTTP ${res.status} (non-JSON).` };
     }
-  }
-  if (extensionName === 'todoist') {
-    const token = (creds.todoist_api_key ?? '').trim();
-    if (!token) return { status: 'fail', message: 'API token is required.' };
-    try {
-      const res = await fetch('https://api.todoist.com/rest/v2/projects', {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401 || res.status === 403) {
-        return { status: 'fail', message: `Authentication rejected (${res.status}). Check the token.` };
-      }
-      if (!res.ok) return { status: 'fail', message: `Todoist returned HTTP ${res.status}.` };
-      const json = (await res.json()) as unknown;
-      const count = Array.isArray(json) ? json.length : 0;
-      return { status: 'ok', message: `Token works. ${count} project${count === 1 ? '' : 's'} visible.` };
-    } catch (e) {
-      return { status: 'fail', message: e instanceof Error ? e.message : 'Network error.' };
+    if (body?.ok) {
+      return { status: 'ok', message: body.message ?? 'Credentials work.' };
     }
+    return { status: 'fail', message: body?.message ?? `Worker returned HTTP ${res.status}.` };
+  } catch (e) {
+    return { status: 'fail', message: e instanceof Error ? e.message : 'Network error reaching MCP Worker.' };
   }
-  // Home Assistant + anything else: not implemented in this pass.
-  return { status: 'fail', message: 'Live test not yet supported for this extension.' };
 }
 
 interface ExtensionCardProps {
@@ -121,9 +121,12 @@ interface ExtensionCardProps {
   onToggle: (enabled: boolean) => void;
   onSaveCredentials: (credentials: Record<string, string>) => Promise<{ error?: string }>;
   /**
-   * Override hook for tests: lets a unit test inject a stub probe so the
-   * test isn't dependent on real GitHub / Todoist responses. Production
-   * uses `probeExtensionCredentials` by default.
+   * Override hook for tests: lets a unit test inject a stub probe so
+   * the test isn't dependent on the live MCP Worker. Production uses
+   * `probeExtensionCredentials` (which calls the Worker's
+   * /test-extension-creds endpoint) by default. The signature matches
+   * the production probe so the unit test can assert against the
+   * exact arguments the component would have sent.
    */
   testProbe?: typeof probeExtensionCredentials;
 }
@@ -167,13 +170,22 @@ export function ExtensionCard({
       setError(result.error);
     } else {
       setSuccess(true);
-      setCredentials({});
+      // R2 audit F4: do NOT clear credentials state on save. Clearing
+      // it stranded the operator in a Save→Test dead-end where the
+      // form was empty and Test connection had no creds to send. The
+      // form retains its values until the user explicitly clears them
+      // (e.g. by re-entering different creds and saving again).
     }
   };
 
   const handleTest = async () => {
     setCredTest({ status: 'running' });
-    const result = await probe(extensionName, credentials);
+    // If the form has values, send them. If not (post-Save returning
+    // user with no in-flight edits AND saved credentials on file),
+    // ask the Worker to load stored creds and probe with those.
+    const hasInFormValues = Object.values(credentials).some((v) => v && v.trim().length > 0);
+    const useStored = !hasInFormValues && hasCredentials;
+    const result = await probe(extensionName, credentials, { useStored });
     setCredTest(result);
   };
 

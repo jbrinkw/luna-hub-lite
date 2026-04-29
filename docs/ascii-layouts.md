@@ -110,8 +110,8 @@
 |    Account       |                                                          |
 |    Apps          |  Connection Details                                      |
 |    Tools         |  +----------------------------------------------------+  |
-|  > Extensions    |  | Endpoint   https://mcp.lunahub.dev/sse             |  |
-|    MCP Settings  |  | Transport  SSE                                     |  |
+|  > Extensions    |  | Endpoint   https://mcp.lunahub.dev/mcp             |  |
+|    MCP Settings  |  | Transport  Streamable HTTP (POST /sse legacy-compat)|  |
 |                  |  +----------------------------------------------------+  |
 |                  |                                                          |
 |                  |  API Keys                                                |

@@ -15,6 +15,7 @@ interface AuthContextType {
     password: string,
     displayName?: string,
     timezone?: string,
+    dayStartHour?: number,
   ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
@@ -95,28 +96,38 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string, displayName?: string, timezone?: string) => {
-    // Pass timezone through raw_user_meta_data so the
-    // private.handle_new_user() trigger can pick it up at profile-row
-    // creation time (see supabase/migrations/20260302014004_create_schemas.sql).
-    // Without this, every new account defaults to America/New_York and
-    // a Pacific-coast user crosses 6am EST believing their day hasn't
-    // rolled over yet.
-    const meta: Record<string, string> = {};
-    if (displayName) meta.display_name = displayName;
-    if (timezone) meta.timezone = timezone;
+  const signUp = useCallback(
+    async (email: string, password: string, displayName?: string, timezone?: string, dayStartHour?: number) => {
+      // Pass timezone + day_start_hour through raw_user_meta_data so the
+      // private.handle_new_user() trigger can pick them up at profile-row
+      // creation time (see supabase/migrations/20260302014004_create_schemas.sql).
+      // Without this, every new account defaults to America/New_York
+      // and 6am day-start, regardless of the operator's intent at signup.
+      const meta: Record<string, string | number> = {};
+      if (displayName) meta.display_name = displayName;
+      if (timezone) meta.timezone = timezone;
+      if (
+        typeof dayStartHour === 'number' &&
+        Number.isFinite(dayStartHour) &&
+        dayStartHour >= 0 &&
+        dayStartHour <= 23
+      ) {
+        meta.day_start_hour = Math.floor(dayStartHour);
+      }
 
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: Object.keys(meta).length > 0 ? { data: meta } : undefined,
-    });
-    if (!error && data.session) {
-      setSession(data.session);
-      setUser(data.session.user);
-    }
-    return { error: error as Error | null };
-  }, []);
+      const { data, error } = await supabase.auth.signUp({
+        email,
+        password,
+        options: Object.keys(meta).length > 0 ? { data: meta } : undefined,
+      });
+      if (!error && data.session) {
+        setSession(data.session);
+        setUser(data.session.user);
+      }
+      return { error: error as Error | null };
+    },
+    [],
+  );
 
   const signOut = useCallback(async () => {
     await supabase.auth.signOut();

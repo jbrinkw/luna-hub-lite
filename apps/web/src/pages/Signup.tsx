@@ -27,6 +27,11 @@ export function Signup() {
   const [displayName, setDisplayName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  // R2 audit F7: capture day_start_hour at signup. Default 6 matches
+  // the trigger fallback so the operator who doesn't care can still
+  // ignore the field. Early-rise athletes can set 4; default-civic
+  // users can set 0; anyone in between is well-served.
+  const [dayStartHour, setDayStartHour] = useState<number>(6);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -65,6 +70,7 @@ export function Signup() {
         // Only pass when we actually resolved a value — passing null
         // would defeat the trigger's COALESCE-to-NY default.
         detectedTz ?? undefined,
+        dayStartHour,
       );
       if (signUpError) {
         setError(signUpError.message);
@@ -107,26 +113,44 @@ export function Signup() {
               autoComplete="new-password"
             />
             {/* Surface the detected timezone (or the fallback) before the user
-                hits Sign Up. The DB trigger COALESCEs to America/New_York and
-                day_start_hour=6 — saying so up-front avoids the "why is my
-                day rolling over at the wrong time" surprise on first use. */}
+                hits Sign Up. The DB trigger COALESCEs to America/New_York
+                when no timezone is supplied. R2 audit F7: capture
+                day_start_hour at signup so the banner promise is actionable
+                — early-rise athletes pick 4, default-civic users pick 0. */}
             <div
               data-testid="signup-tz-banner"
               className="rounded-md bg-info-subtle border border-primary px-3 py-2 text-xs text-info-text"
             >
               {detectedTz ? (
                 <>
-                  We'll set your timezone to <span className="font-mono font-semibold">{detectedTz}</span> with a 6 AM
-                  day-start. You can change both later in Hub → Account.
+                  We'll set your timezone to <span className="font-mono font-semibold">{detectedTz}</span>. Pick the
+                  hour your day rolls over below — most people use 6 AM. You can change both later in Hub → Account.
                 </>
               ) : (
                 <>
                   Couldn't detect your timezone — we'll default to{' '}
-                  <span className="font-mono font-semibold">America/New_York</span> with a 6 AM day-start. You can
-                  change both later in Hub → Account.
+                  <span className="font-mono font-semibold">America/New_York</span>. Pick the hour your day rolls over
+                  below. You can change both later in Hub → Account.
                 </>
               )}
             </div>
+            <label className="block text-sm font-medium text-text-secondary">
+              <span className="block mb-1">Day start hour (0–23)</span>
+              <input
+                type="number"
+                min={0}
+                max={23}
+                step={1}
+                value={dayStartHour}
+                onChange={(e) => {
+                  const n = Number(e.target.value);
+                  if (Number.isFinite(n)) setDayStartHour(Math.max(0, Math.min(23, Math.floor(n))));
+                }}
+                data-testid="signup-day-start-hour"
+                aria-label="Day start hour"
+                className="block w-full rounded-lg border border-border-strong bg-surface px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
+              />
+            </label>
             <Button type="submit" loading={loading} className="w-full">
               Sign Up
             </Button>

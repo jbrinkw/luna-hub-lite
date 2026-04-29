@@ -17,7 +17,7 @@ Account management, MCP server configuration, and extension management. Minimal 
 
 ### MCP Server Configuration
 
-- View MCP server connection details (endpoint URL `https://mcp.lunahub.dev/sse`, SSE transport)
+- View MCP server connection details (endpoint URL `https://mcp.lunahub.dev/mcp`, Streamable HTTP transport). The legacy `POST /sse` endpoint is preserved for backwards compatibility — the worker treats `POST /sse` and `POST /mcp` identically as stateless JSON-RPC (per `docs/mcp/guide.md`), so existing Claude.ai connectors keep working without spawning Durable Objects.
 - Generate and manage API keys (show-once pattern: plaintext displayed once, SHA-256 hash stored, multiple keys allowed, revoke individually)
 - OAuth 2.1 consent flow handled at `/oauth/consent` for MCP clients that initiate the OAuth redirect
 

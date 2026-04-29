@@ -3,6 +3,7 @@ import { createServiceClient } from './supabase';
 import { handleStatelessMcp } from './stateless';
 import { jsonRpcError } from './protocol';
 import { handleChatCompletion } from './openai-compat';
+import { handleTestExtensionCreds } from './test-extension-creds';
 import { CORS_HEADERS } from './cors';
 
 export { McpSession } from './session';
@@ -90,6 +91,14 @@ export default {
     // Health check
     if (url.pathname === '/health') {
       return new Response('ok', { headers: CORS_HEADERS });
+    }
+
+    // ─── Extension credential probe (Hub UI only) ──────────────────────
+    // Probes upstream services from the Worker (not the user's
+    // browser) so the test reflects the real tool-call path. See
+    // test-extension-creds.ts for the full rationale.
+    if (url.pathname === '/test-extension-creds' && request.method === 'POST') {
+      return handleTestExtensionCreds(request, env);
     }
 
     // ─── OpenAI-compatible Chat Completions API ────────────────────────
