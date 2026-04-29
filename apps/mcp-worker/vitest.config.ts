@@ -21,6 +21,8 @@ export default defineConfig({
       'src/__tests__/test-extension-creds.test.ts',
       // MCP-HIGH-4.1: unit tests for authenticateApiKey revoked/expired/DB-error paths
       'src/__tests__/auth.test.ts',
+      // D-01: session lifecycle, OAuth TTL proxy, SSE concurrent-connection, dispatch error paths
+      'src/__tests__/durable-object.test.ts',
     ],
     environment: 'node',
     testTimeout: 30_000,
