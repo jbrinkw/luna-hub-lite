@@ -125,10 +125,44 @@ test.describe('ChefByte Shopping', () => {
     }
   });
 
-  // TODO: No "Clear Purchased" button exists on the shopping page. Only "Import to Inventory" and "Clear All" are available.
-  test.skip('clear purchased button removes all purchased items', async () => {
-    // ShoppingPage has no dedicated "clear purchased" button.
-    // The closest functionality is "Import to Inventory" which moves purchased items to stock and removes them.
+  test('clear purchased button removes all purchased items', async ({ page }) => {
+    const { userId, cleanup, client } = await seedFullAndLogin(page, 'shop-clearpurch');
+    try {
+      const { productMap } = await seedChefByteData(client, userId);
+
+      await seedShoppingItems(client, userId, [
+        { productId: productMap['Great Value Boneless Skinless Chicken Breasts'], qtyContainers: 2 },
+        { productId: productMap['Great Value Long Grain Brown Rice'], qtyContainers: 1 },
+      ]);
+
+      await page.goto('/chef/shopping');
+      await expect(page.getByTestId('add-item-form')).toBeVisible({ timeout: 30000 });
+
+      // Mark BOTH items purchased (so we have a non-empty Purchased section)
+      const checkboxes = page.getByTestId('to-buy-list').locator('[data-testid^="check-"]');
+      await checkboxes.first().click();
+      // After the first toggle, the second item shifts position; re-grab
+      // the now-first to-buy item's checkbox.
+      await page.getByTestId('to-buy-list').locator('[data-testid^="check-"]').first().click();
+
+      // Both should have moved into Purchased
+      await expect(page.getByTestId('purchased-list')).toBeVisible({ timeout: 30000 });
+      await expect(page.getByTestId('no-purchased')).not.toBeVisible({ timeout: 30000 });
+
+      // Click "Clear Purchased" button — confirms via modal
+      await page.getByTestId('clear-purchased-btn').click();
+      const modal = page.getByRole('dialog');
+      await expect(modal).toBeVisible({ timeout: 5000 });
+      await modal.getByRole('button', { name: 'Clear Purchased' }).click();
+
+      // Purchased section now shows the empty state
+      await expect(page.getByTestId('no-purchased')).toBeVisible({ timeout: 30000 });
+
+      // To-Buy section should also be empty (all items were purchased)
+      await expect(page.getByTestId('no-to-buy')).toBeVisible({ timeout: 30000 });
+    } finally {
+      await cleanup();
+    }
   });
 
   test('clear all button removes all items', async ({ page }) => {

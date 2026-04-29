@@ -520,6 +520,66 @@ export function ShoppingPage() {
     });
   };
 
+  /**
+   * Clear all `purchased=true` non-imported rows in one shot. Distinct from
+   * "Import to Inventory" (which moves them to stock_lots) — this is the
+   * "I bought it but I don't want to track this lot" exit path. Optimistic
+   * update prunes from cache immediately; failure rolls back.
+   *
+   * Safe to call when `purchased.length === 0` — early-returns. The
+   * confirmation modal is gated on `purchased.length > 0` at the call site
+   * so users never get an empty confirm.
+   */
+  const clearPurchased = async () => {
+    if (!user || purchased.length === 0) return;
+    setError(null);
+
+    const purchasedIds = new Set(purchased.map((p) => p.cart_item_id));
+    const key = queryKeys.shoppingList(user.id);
+    // The actual query key includes a `{ showImported }` suffix so we use
+    // setQueriesData to update both filtered/unfiltered cached views.
+    const previous = queryClient.getQueriesData<ShoppingItem[]>({ queryKey: key });
+
+    queryClient.setQueriesData<ShoppingItem[]>({ queryKey: key }, (old) =>
+      (old ?? []).filter((i) => !purchasedIds.has(i.cart_item_id)),
+    );
+
+    const { error: delErr } = await chefbyte()
+      .from('shopping_list')
+      .delete()
+      .eq('user_id', user.id)
+      .eq('purchased', true)
+      .is('imported_at', null);
+    if (delErr) {
+      // Rollback all cached views on failure
+      previous.forEach(([k, data]) => queryClient.setQueryData(k, data));
+      setError(delErr.message);
+      toast.show(`Clear purchased failed: ${delErr.message}`, { variant: 'error' });
+      return;
+    }
+
+    toast.show(`Cleared ${purchasedIds.size} purchased item${purchasedIds.size === 1 ? '' : 's'}.`, {
+      variant: 'success',
+    });
+    invalidateShoppingList();
+  };
+
+  const handleClearPurchased = () => {
+    if (purchased.length === 0) return;
+    setConfirmState({
+      open: true,
+      title: 'Clear Purchased Items',
+      message: `Remove all ${purchased.length} purchased item${
+        purchased.length === 1 ? '' : 's'
+      } from the shopping list? This does not import them to inventory.`,
+      confirmLabel: 'Clear Purchased',
+      action: () => {
+        closeConfirm();
+        clearPurchased();
+      },
+    });
+  };
+
   /* ---------------------------------------------------------------- */
   /*  Helpers                                                          */
   /* ---------------------------------------------------------------- */
@@ -766,16 +826,26 @@ export function ShoppingPage() {
         {/*  PURCHASED SECTION                                            */}
         {/* ============================================================ */}
         <div data-testid="purchased-section" className="bg-surface border border-border rounded-lg p-4 mb-5">
-          <div className="flex justify-between items-center mb-3">
+          <div className="flex justify-between items-center mb-3 gap-2 flex-wrap">
             <h3 className="m-0 text-base font-semibold text-text-secondary">Purchased ({purchased.length})</h3>
             {purchased.length > 0 && (
-              <button
-                onClick={importToInventory}
-                data-testid="import-inventory-btn"
-                className="px-3 py-1.5 bg-green-600 text-white border-none rounded cursor-pointer text-[13px] font-semibold hover:bg-green-700"
-              >
-                Import to Inventory
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={handleClearPurchased}
+                  data-testid="clear-purchased-btn"
+                  className="px-3 py-1.5 bg-transparent text-text-secondary border border-border rounded cursor-pointer text-[13px] font-semibold hover:bg-surface-hover"
+                  title="Remove all purchased items from the shopping list (does NOT import to inventory)"
+                >
+                  Clear Purchased
+                </button>
+                <button
+                  onClick={importToInventory}
+                  data-testid="import-inventory-btn"
+                  className="px-3 py-1.5 bg-green-600 text-white border-none rounded cursor-pointer text-[13px] font-semibold hover:bg-green-700"
+                >
+                  Import to Inventory
+                </button>
+              </div>
             )}
           </div>
           {purchased.length === 0 ? (

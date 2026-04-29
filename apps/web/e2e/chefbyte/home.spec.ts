@@ -152,10 +152,10 @@ test.describe('ChefByte Home Page', () => {
     }
   });
 
-  // Status cards are plain divs without click handlers/links — no navigation behavior exists
-  test.skip('status card click navigates to relevant page', async ({ page }) => {
-    // TODO: Status cards are currently static display-only divs. Once they become
-    // clickable links (e.g. below-min card -> /chef/inventory), enable this test.
+  // Status cards are <Link> elements that navigate to relevant pages.
+  // card-below-min -> /chef/inventory
+  // card-expired   -> /chef/inventory#expired
+  test('status card click navigates to relevant page', async ({ page }) => {
     const { userId, cleanup, client } = await seedFullAndLogin(page, 'chef-home-card-nav');
     try {
       await seedChefByteData(client, userId);
