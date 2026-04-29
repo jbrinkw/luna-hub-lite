@@ -289,9 +289,11 @@ describe('ScannerPage — silent-error audit fixes', () => {
     });
 
     // functions.invoke was called (proves we entered the analyze-product branch).
+    // body now also includes placeholder_candidates — use objectContaining on
+    // body so the assertion stays robust to additional body fields.
     expect(invokeMock).toHaveBeenCalledWith(
       'analyze-product',
-      expect.objectContaining({ body: { barcode: '9999999999' } }),
+      expect.objectContaining({ body: expect.objectContaining({ barcode: '9999999999' }) }),
     );
 
     // products.insert was attempted (proves the success branch executed).

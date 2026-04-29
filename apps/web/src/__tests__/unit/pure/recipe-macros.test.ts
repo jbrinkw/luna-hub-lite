@@ -158,4 +158,83 @@ describe('computeRecipeMacros', () => {
     expect(macros.calories).toBe(0);
     // Filter should reject when calories is 0 (division by zero guard)
   });
+
+  /* ---- gram unit ---- */
+
+  it('gram: 200g chicken (500g container, 4spc) contributes correct macros', () => {
+    // 200g / 500g = 0.4 containers * 4 spc = 1.6 servings * 165 cal = 264 cal
+    const ingredients = [
+      {
+        quantity: 200,
+        unit: 'gram',
+        products: {
+          calories_per_serving: 165,
+          carbs_per_serving: 0,
+          protein_per_serving: 31,
+          fat_per_serving: 3.6,
+          servings_per_container: 4,
+          net_weight_g: 500,
+        },
+      },
+    ];
+    const result = computeRecipeMacros(ingredients, 1);
+    expect(result.calories).toBe(264); // round(264)
+    expect(result.protein).toBe(50); // round(1.6 * 31 = 49.6)
+  });
+
+  it('gram: ingredient with null net_weight_g is silently skipped (no throw)', () => {
+    // The page silently skips gram ingredients with missing net_weight_g so
+    // the recipe card still renders — the SQL function raises, not the UI.
+    const ingredients = [
+      {
+        quantity: 100,
+        unit: 'gram',
+        products: {
+          calories_per_serving: 100,
+          carbs_per_serving: 10,
+          protein_per_serving: 10,
+          fat_per_serving: 5,
+          servings_per_container: 4,
+          net_weight_g: null,
+        },
+      },
+    ];
+    const result = computeRecipeMacros(ingredients, 1);
+    // Ingredient skipped → all zeros
+    expect(result.calories).toBe(0);
+  });
+
+  it('gram: mixed container + gram ingredients compute correctly', () => {
+    // Rice: 1 container × 4spc × 200cal = 800 cal
+    // Chicken: 250g / 500g = 0.5 containers × 4spc × 165cal = 330 cal
+    // Total: 1130 cal / 2 base_servings = 565 cal
+    const ingredients = [
+      {
+        quantity: 1,
+        unit: 'container',
+        products: {
+          calories_per_serving: 200,
+          carbs_per_serving: 45,
+          protein_per_serving: 4,
+          fat_per_serving: 0.5,
+          servings_per_container: 4,
+          net_weight_g: null,
+        },
+      },
+      {
+        quantity: 250,
+        unit: 'gram',
+        products: {
+          calories_per_serving: 165,
+          carbs_per_serving: 0,
+          protein_per_serving: 31,
+          fat_per_serving: 3.6,
+          servings_per_container: 4,
+          net_weight_g: 500,
+        },
+      },
+    ];
+    const result = computeRecipeMacros(ingredients, 2);
+    expect(result.calories).toBe(565);
+  });
 });
