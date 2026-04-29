@@ -22,6 +22,7 @@ interface ProductSearchResult {
   fat_per_serving: number;
   servings_per_container: number;
   net_weight_g: number | null;
+  default_recipe_unit: 'gram' | 'serving' | 'container' | null;
 }
 
 interface LocalIngredient {
@@ -172,7 +173,7 @@ export function RecipeFormPage() {
       const { data } = await chefbyte()
         .from('products')
         .select(
-          'product_id, name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g',
+          'product_id, name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g, default_recipe_unit',
         )
         .eq('user_id', user.id)
         .ilike('name', `%${escapeIlike(text)}%`)
@@ -198,6 +199,25 @@ export function RecipeFormPage() {
     setSelectedProduct(product);
     setShowDropdown(false);
     setSearchResults([]);
+
+    // Smart default unit for new ingredient adds only (existing recipe loads
+    // populate ingUnit from the saved ingredient row via the useEffect above).
+    // Priority:
+    //   1. product.default_recipe_unit if non-null AND viable (gram requires net_weight_g > 0)
+    //   2. 'gram' if net_weight_g > 0
+    //   3. 'serving' (final fallback)
+    const hasWeight = (product.net_weight_g ?? 0) > 0;
+    if (product.default_recipe_unit && product.default_recipe_unit !== null) {
+      if (product.default_recipe_unit === 'gram' && !hasWeight) {
+        setIngUnit(hasWeight ? 'gram' : 'serving');
+      } else {
+        setIngUnit(product.default_recipe_unit);
+      }
+    } else if (hasWeight) {
+      setIngUnit('gram');
+    } else {
+      setIngUnit('serving');
+    }
   };
 
   /* ---------------------------------------------------------------- */
