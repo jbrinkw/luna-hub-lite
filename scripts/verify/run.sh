@@ -48,6 +48,7 @@ FAST_STEPS=(
 
 FULL_STEPS=(
   "${FAST_STEPS[@]}"
+  "deno check (supabase edge functions)|bash scripts/verify/deno_check.sh"
   "test:integration (web vs local supabase)|run_integration"
   "test:db (pgTAP)|run_pgtap"
   "Pi unit tests (pytest)|run_pi_pytest"

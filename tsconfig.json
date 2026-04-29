@@ -1,0 +1,47 @@
+{
+  // Root tsconfig for the IDE TypeScript LSP only.
+  //
+  // Each workspace package has its own tsconfig (apps/web, apps/mcp-worker,
+  // packages/*, extensions, tests/e2e). Those are the ones tsc runs against
+  // for `pnpm typecheck`. This file exists purely to give the editor's
+  // implicit/default project a sane configuration so it does NOT silently
+  // pick up files that no real project owns.
+  //
+  // Specifically: the 5 Supabase edge functions in supabase/functions/ are
+  // Deno code. They use jsr:/npm:/https: URL imports and the `Deno` global,
+  // which the TypeScript LSP can't resolve. Without an excluding tsconfig
+  // at the root, the LSP's default project picked them up and reported
+  // false-positive errors ("Cannot find module 'jsr:@supabase/supabase-js@2'",
+  // "Cannot find name 'Deno'", "Parameter 'req' implicitly has any type").
+  //
+  // `deno check` (the truth) passes — see scripts/verify/deno_check.sh,
+  // wired into `pnpm verify:full` as a pre-push gate.
+  //
+  // For the full-fidelity Deno experience inside supabase/functions/,
+  // install the `denoland.vscode-deno` extension (.vscode/extensions.json
+  // recommends it). The extension reads supabase/functions/deno.json and
+  // takes over LSP for that subtree (deno.enablePaths in
+  // .vscode/settings.json).
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true
+  },
+  // `files: []` (instead of `include: []`) suppresses TS18003 — TypeScript
+  // treats this as a "solution-style" config that owns no source files
+  // directly. The workspace tsconfigs under apps/ and packages/ remain the
+  // authoritative typecheck targets (`pnpm typecheck` runs each via Turbo).
+  "files": [],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "legacy",
+    "supabase/functions/**",
+    ".stryker-tmp",
+    ".stryker-tmp-*",
+    ".worktrees",
+    ".verify",
+    ".vercel",
+    "playwright-report-e2e",
+    "test-results-e2e"
+  ]
+}
