@@ -394,6 +394,7 @@ def test_state_aggregate_counts_match_scales(adapter, db_conn):
     for sc in state["scales"]:
         assert set(sc.keys()) == {
             "device_id", "product_id", "product_name",
+            "lot_id",
             "current_weight_g", "last_heartbeat_ts",
             "is_online", "scale_stable",
         }

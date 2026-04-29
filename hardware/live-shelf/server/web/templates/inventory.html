@@ -190,6 +190,14 @@
             <td>
               <strong>{{ product.name }}</strong>
               {% if product.barcode %}<div class="muted" style="font-size: 11px;">{{ product.barcode }}</div>{% endif %}
+              <div class="muted mono" style="font-size: 11px;">
+                lot
+                {% if lot.lot_id %}
+                  <span title="{{ lot.lot_id }}">{{ lot.lot_id[:8] }}</span>
+                {% else %}
+                  &mdash;
+                {% endif %}
+              </div>
             </td>
             <td>
               <span>{{ product.brand or '—' }}</span>
@@ -371,7 +379,6 @@
         <tr>
           <th>device</th>
           <th>paired product</th>
-          <th>lot</th>
           <th>current weight</th>
           <th>last event</th>
           <th>status</th>
@@ -382,6 +389,14 @@
           <tr data-device-id="{{ s.device_id }}">
             <td>
               <strong class="mono">{{ s.device_id }}</strong>
+              <div class="muted mono" style="font-size: 11px;">
+                lot
+                {% if s.lot_id %}
+                  <span title="{{ s.lot_id }}">{{ s.lot_id[:8] }}</span>
+                {% else %}
+                  &mdash;
+                {% endif %}
+              </div>
               {% if s.last_heartbeat_ts %}
                 <div class="muted" style="font-size: 11px;">
                   hb {{ s.last_heartbeat_ts[:19]|replace('T', ' ') }}
@@ -400,13 +415,6 @@
                 {% endif %}
               {% else %}
                 <span class="muted">(unpaired)</span>
-              {% endif %}
-            </td>
-            <td class="mono" style="font-size: 11px;">
-              {% if s.lot_id %}
-                {{ s.lot_id[:8] }}
-              {% else %}
-                <span class="muted">&mdash;</span>
               {% endif %}
             </td>
             <td class="mono">

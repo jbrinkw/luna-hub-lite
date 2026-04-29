@@ -51,6 +51,7 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from .outbox import enqueue_event
+from .payload_contracts import validate_payload_contract
 
 log = logging.getLogger(__name__)
 
@@ -416,10 +417,15 @@ class CloudEventEmitter:
     def _enqueue(self, payload: dict) -> Optional[str]:
         """Insert one outbox row. Returns the client_event_id or ``None``.
 
-        Swallows every exception — cloud observability must never bring
+        Outbox insert exceptions are swallowed — cloud observability must never bring
         down the Pi's local event pipeline. Failures surface in logs and
         will be retried by a later producer (or diagnosed via the
         ``cloud_outbox`` audit trail).
+
+        Payload contract violations are NOT swallowed. A malformed
+        payload (missing/NULL required fields for its event_kind)
+        indicates a producer-side bug that must fail fast in tests and
+        local runtime.
 
         Pass-2 audit finding #4: every ``occurred_at`` passing through
         here is run against the Pi RTC plausibility guard. A pre-NTP
@@ -431,6 +437,24 @@ class CloudEventEmitter:
         than poisoning the queue.
         """
         if not self._enabled:
+            return None
+        # Payload contract: log + drop on violation (matches the surrounding
+        # "observability is best-effort" doctrine for outbox writes). The
+        # dedicated test_payload_contracts + test_emit_payload_snapshots
+        # suites still exercise the contract via direct calls and DO fail
+        # loudly there, so producer bugs get caught at test time without
+        # taking production runtime down. Drop is asserted by the caller
+        # via cloud_outbox row-count == 0 after a bad-payload emit.
+        try:
+            validate_payload_contract(payload)
+        except Exception as exc:  # noqa: BLE001
+            log.warning(
+                "cloud emitter: dropping payload that violates contract: %s "
+                "(event_kind=%r, product_id=%r)",
+                exc,
+                payload.get("event_kind"),
+                payload.get("product_id"),
+            )
             return None
         occurred_at = payload.get("occurred_at")
         if _ts_is_pre_ntp(occurred_at):
@@ -973,6 +997,10 @@ class CloudEventEmitter:
             "scale_id": scale_id,
             "kind": kind,
             "event_kind": "live_weight_sync",
+            # Keep the canonical field explicit for cloud-side handlers /
+            # ops queries while retaining delta_g for backward compat with
+            # the existing /event validator contract.
+            "observed_weight_g": float(observed_weight_g),
             "delta_g": float(observed_weight_g),
             "pi_lot_id": pi_lot_id,
             "occurred_at": occurred_at or _iso_utc_ms(),

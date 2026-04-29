@@ -112,6 +112,13 @@
             <span class="muted mono" style="font-size: 11px;" data-role="device">
               {{ s.device_id }}
             </span>
+            <span class="muted mono" style="font-size: 11px;" data-role="lot">
+              {% if s.lot_id %}
+                <span title="{{ s.lot_id }}">{{ s.lot_id[:8] }}</span>
+              {% else %}
+                &mdash;
+              {% endif %}
+            </span>
             <span class="spacer" style="flex: 1;"></span>
             <span class="value mono" data-role="weight">
               {% if s.current_weight_g is not none %}{{ '%.0f g'|format(s.current_weight_g) }}{% else %}&mdash;{% endif %}
@@ -746,10 +753,20 @@
                                  // a full reload picks them up.
               const dot = row.querySelector('[data-role="dot"]');
               const name = row.querySelector('[data-role="name"]');
+              const lot = row.querySelector('[data-role="lot"]');
               const weight = row.querySelector('[data-role="weight"]');
               const hb = row.querySelector('[data-role="hb"]');
               if (dot) dot.className = 'dot ' + (sc.is_online ? 'on' : 'off');
               if (name) name.textContent = sc.product_name || '(unpaired)';
+              if (lot) {
+                if (typeof sc.lot_id === 'string' && sc.lot_id.length > 0) {
+                  lot.textContent = sc.lot_id.slice(0, 8);
+                  lot.title = sc.lot_id;
+                } else {
+                  lot.textContent = '—';
+                  lot.removeAttribute('title');
+                }
+              }
               if (weight) weight.textContent = fmtGrams(sc.current_weight_g);
               if (hb) {
                 hb.textContent = sc.last_heartbeat_ts

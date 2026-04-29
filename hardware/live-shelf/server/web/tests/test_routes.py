@@ -367,6 +367,7 @@ class FakeRepo:
                 "device_id": s["device_id"],
                 "product_id": s["product_id"],
                 "product_name": s["product_name"],
+                "lot_id": s["lot_id"],
                 "current_weight_g": s["current_weight_g"],
                 "last_heartbeat_ts": s["last_heartbeat_ts"],
                 "is_online": s["is_online"],
@@ -1360,7 +1361,7 @@ def test_inventory_shows_single_track_section_when_paired_scale_exists(
         repo,
         device_id="scale-single-01",
         product_id="p1",
-        lot_id="l1",
+        lot_id="8923f32f-1111-2222-3333-444444444444",
         is_online=True,
         current_weight_g=1247.0,
     )
@@ -1379,9 +1380,43 @@ def test_inventory_shows_single_track_section_when_paired_scale_exists(
     assert "scale-single-01" in body
     assert "1247 g" in body
     assert "online" in body  # status pill
-    # Lot prefix (8 chars) — l1 only has 2 chars so just check substring.
-    # Use the row marker so we don't false-positive on the catalog table.
+    # Lot hash + full UUID hover title.
+    assert "8923f32f" in body
+    assert 'title="8923f32f-1111-2222-3333-444444444444"' in body
+    # Row marker so we don't false-positive on other sections.
     assert 'data-device-id="scale-single-01"' in body
+
+
+def test_inventory_live_shelf_row_renders_lot_id_hash_with_hover_title(
+    repo, tmp_data_dir,
+):
+    """Live-shelf (multi-lot) rows render a short lot hash with the full
+    lot_id on hover so operators can correlate UI rows with cloud/Pi logs."""
+    full_lot_id = "57cd8847-aaaa-bbbb-cccc-ddddeeeeffff"
+    repo.db["lots"][full_lot_id] = {
+        "lot_id": full_lot_id,
+        "product_id": "p1",
+        "status": "on_shelf",
+        "current_weight_g": 355.0,
+        "initial_weight_g": 420.0,
+        "total_consumed_g": 65.0,
+        "placed_at": "2026-04-14T11:00:00Z",
+        "last_seen_at": "2026-04-14T12:00:00Z",
+        "last_out_at": None,
+        "notes": None,
+        "shelf_id": "live_shelf",
+    }
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        catch_all_enabled=lambda: repo.catch_all_enabled,
+    ))
+
+    body = app.test_client().get("/inventory").get_data(as_text=True)
+
+    assert "57cd8847" in body
+    assert 'title="57cd8847-aaaa-bbbb-cccc-ddddeeeeffff"' in body
 
 
 def test_inventory_single_track_unpaired_renders_placeholder(repo, tmp_data_dir):
@@ -1604,6 +1639,7 @@ def test_dashboard_shows_single_track_tile_when_paired_scale_exists(
         repo,
         device_id="scale-single-01",
         product_id="p2",  # Chobani Yogurt — distinct from /inventory tests
+        lot_id="8923f32f-1111-2222-3333-444444444444",
         is_online=True,
         current_weight_g=523.0,
     )
@@ -1624,6 +1660,8 @@ def test_dashboard_shows_single_track_tile_when_paired_scale_exists(
     # Initial server-rendered values (so the first paint isn't blank).
     assert "Chobani Yogurt" in body
     assert "523 g" in body
+    assert "8923f32f" in body
+    assert 'title="8923f32f-1111-2222-3333-444444444444"' in body
     # Poller wiring — the JS block must reference the API call.
     assert "/api/state?shelf=single_item" in body
 

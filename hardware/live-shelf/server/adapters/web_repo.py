@@ -1071,6 +1071,7 @@ class RepoWebAdapter:
               "scales": [                    # truncated dashboard list
                 {
                   "device_id", "product_id", "product_name",
+                  "lot_id",
                   "current_weight_g", "last_heartbeat_ts",
                   "is_online", "scale_stable",
                 },
@@ -1087,6 +1088,7 @@ class RepoWebAdapter:
                 "device_id": s["device_id"],
                 "product_id": s["product_id"],
                 "product_name": s["product_name"],
+                "lot_id": s["lot_id"],
                 "current_weight_g": s["current_weight_g"],
                 "last_heartbeat_ts": s["last_heartbeat_ts"],
                 "is_online": s["is_online"],

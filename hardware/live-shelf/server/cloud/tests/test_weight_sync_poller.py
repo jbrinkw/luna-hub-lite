@@ -15,6 +15,7 @@ real schema constraints.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import sys
 import uuid
@@ -32,6 +33,7 @@ from server.cloud.weight_sync_poller import (  # noqa: E402
     DEFAULT_TTL_S,
     WeightSyncPoller,
 )
+from server.cloud.integration import CloudEventEmitter  # noqa: E402
 from server.storage import init_db  # noqa: E402
 
 
@@ -184,6 +186,31 @@ def test_first_observation_emits_for_live_scale_lot_using_pairing_device_id(
     assert kwargs["kind"] == "live_scale"
     assert kwargs["scale_id"] == "scale-pi-3"
     assert kwargs["observed_weight_g"] == pytest.approx(85.0)
+
+
+def test_live_weight_sync_outbox_payload_carries_observed_weight_from_lot(conn):
+    """End-to-end: lot.current_weight_g must land in outbox JSON as
+    observed_weight_g for live_weight_sync rows."""
+    pid = _seed_product(conn, name="P2-outbox")
+    lot_id = _seed_lot(
+        conn, product_id=pid, shelf_id="live_shelf", current_weight_g=160.4355,
+    )
+    emitter = CloudEventEmitter(conn, enabled=True)
+    poller = WeightSyncPoller(emitter, conn, clock=_ManualClock())
+
+    n = poller.tick_once()
+
+    assert n == 1
+    row = conn.execute(
+        "SELECT payload_json FROM cloud_outbox ORDER BY outbox_id DESC LIMIT 1"
+    ).fetchone()
+    assert row is not None
+    payload = json.loads(row["payload_json"])
+    assert payload["event_kind"] == "live_weight_sync"
+    assert payload["pi_lot_id"] == lot_id
+    assert payload["observed_weight_g"] == pytest.approx(160.4355)
+    # Backward-compat payload key for the existing /event validator.
+    assert payload["delta_g"] == pytest.approx(160.4355)
 
 
 # ---------------------------------------------------------------------------
