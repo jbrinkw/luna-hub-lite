@@ -416,6 +416,92 @@ class LotSnapshotPoller(threading.Thread):
         with lock:
             with self._conn:
                 if is_tombstone:
+                    # Audit finding #3: before hard-deleting the
+                    # cloud_lots mirror, find the matching Pi-local
+                    # ``lots`` row and flag it to ``lost`` so the local
+                    # state machine recovers. Otherwise an in_flight Pi
+                    # lot stays in_flight forever while the cloud
+                    # considers the lot deleted.
+                    #
+                    # Mapping order (preferred first):
+                    #   1. ``cloud_lots.pickup_event_id`` ↔
+                    #      ``lots.pickup_event_id`` — exact link for
+                    #      catch-all in-flight lots.
+                    #   2. Fallback by (product_id, status='in_flight')
+                    #      heuristic — covers the case where the
+                    #      pickup_event_id link is missing on legacy
+                    #      live-shelf lots.
+                    cl_row = self._conn.execute(
+                        "SELECT pickup_event_id, product_id "
+                        "  FROM cloud_lots WHERE lot_id = ?",
+                        (lot_id,),
+                    ).fetchone()
+                    cl_pickup_event_id: Optional[str] = None
+                    cl_product_id: Optional[str] = None
+                    if cl_row is not None:
+                        cl_pickup_event_id = (
+                            cl_row["pickup_event_id"]
+                            if hasattr(cl_row, "__getitem__") else cl_row[0]
+                        )
+                        cl_product_id = (
+                            cl_row["product_id"]
+                            if hasattr(cl_row, "__getitem__") else cl_row[1]
+                        )
+
+                    pi_lot_id: Optional[str] = None
+                    if isinstance(cl_pickup_event_id, str) and cl_pickup_event_id:
+                        pi_row = self._conn.execute(
+                            "SELECT lot_id FROM lots "
+                            " WHERE pickup_event_id = ? "
+                            "   AND status IN ('on_shelf','in_flight') "
+                            " ORDER BY last_seen_at DESC LIMIT 1",
+                            (cl_pickup_event_id,),
+                        ).fetchone()
+                        if pi_row is not None:
+                            pi_lot_id = (
+                                pi_row["lot_id"]
+                                if hasattr(pi_row, "__getitem__") else pi_row[0]
+                            )
+                    if pi_lot_id is None and isinstance(cl_product_id, str) and cl_product_id:
+                        # Heuristic fallback: in_flight Pi lot for the
+                        # product. We narrow to in_flight because that's
+                        # the dangerous state — an on_shelf lot that the
+                        # cloud thinks is gone is a separate drift
+                        # symptom and shouldn't be auto-flagged from
+                        # this path.
+                        pi_row = self._conn.execute(
+                            "SELECT lot_id FROM lots "
+                            " WHERE product_id = ? "
+                            "   AND status = 'in_flight' "
+                            " ORDER BY in_flight_since DESC LIMIT 1",
+                            (cl_product_id,),
+                        ).fetchone()
+                        if pi_row is not None:
+                            pi_lot_id = (
+                                pi_row["lot_id"]
+                                if hasattr(pi_row, "__getitem__") else pi_row[0]
+                            )
+
+                    if pi_lot_id is not None:
+                        # Flag the Pi lot to ``lost`` and clear the
+                        # in-flight columns to satisfy the (status =
+                        # 'in_flight') ↔ (in_flight_since IS NOT NULL)
+                        # invariant CHECK.
+                        self._conn.execute(
+                            "UPDATE lots "
+                            "   SET status = 'lost', "
+                            "       in_flight_since = NULL, "
+                            "       last_seen_at = datetime('now') "
+                            " WHERE lot_id = ?",
+                            (pi_lot_id,),
+                        )
+                        log.info(
+                            "lot_snapshot: tombstone for cloud lot %s "
+                            "flagged Pi lot %s as lost (was in_flight "
+                            "or on_shelf)",
+                            lot_id, pi_lot_id,
+                        )
+
                     cur = self._conn.execute(
                         "DELETE FROM cloud_lots WHERE lot_id = ?",
                         (lot_id,),

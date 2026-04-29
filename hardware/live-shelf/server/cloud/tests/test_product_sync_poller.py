@@ -280,6 +280,51 @@ def test_deletion_restore_clears_tombstone(conn, tmp_path):
     assert visible[0].product_id == "p-restore"
 
 
+def test_tombstone_only_window_advances_watermark(conn, tmp_path):
+    """Audit finding #7: a window containing ONLY tombstones for rows
+    the Pi never had locally must still advance the watermark.
+    Otherwise the next tick re-fetches the same window forever.
+
+    ``upsert_product_from_cloud`` returns None for a malformed input,
+    but a well-formed tombstone for a not-yet-cached row also lands
+    None (DELETE-by-barcode runs but ON CONFLICT does an UPDATE on a
+    non-existent product_id — net effect: no row, returns the id).
+    The fix is to advance the watermark over the row's ``updated_at``
+    even when ``count`` doesn't increment for it.
+    """
+    state_path = tmp_path / "last_product_sync.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "high_watermark": "2026-04-21T09:00:00Z"})
+    )
+    client = MagicMock()
+    # A malformed product (no product_id, no name → upsert returns None
+    # at the validation gate) is the simplest reproducer of the
+    # "result is None but watermark must still move" path. Real
+    # tombstone-only deliveries hit the same code path — both must
+    # advance the cursor.
+    fake_fetch = MagicMock(
+        return_value=Catalog(
+            products=[
+                {
+                    # No product_id → upsert helper rejects, returns None.
+                    "name": "Missing pid",
+                    "updated_at": "2026-04-21T15:00:00Z",
+                },
+            ],
+        )
+    )
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path, fetch_catalog_fn=fake_fetch,
+    )
+    count = poller.tick_once()
+    assert count == 0  # nothing upserted
+    # Watermark MUST advance past the row even though count == 0.
+    # Otherwise the next tick fetches the same row forever.
+    assert poller.high_watermark == "2026-04-21T15:00:00Z"
+    state = json.loads(state_path.read_text())
+    assert state["high_watermark"] == "2026-04-21T15:00:00Z"
+
+
 def test_unreadable_state_file_degrades_to_full_resync(conn, tmp_path, caplog):
     """A corrupt state file must not crash the poller — falls back to
     ``updated_since=None`` and rewrites the file on next success."""

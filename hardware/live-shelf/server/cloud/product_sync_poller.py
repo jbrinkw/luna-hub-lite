@@ -222,13 +222,19 @@ class ProductSyncPoller(threading.Thread):
                     exc_info=True,
                 )
                 continue
-            if result is None:
-                continue
-            count += 1
-            # Advance the watermark to the max updated_at seen. The
-            # cloud strictly filters ``> updated_since``, so picking the
-            # max(updated_at) across the payload is safe — the next tick
-            # won't re-fetch these rows.
+            if result is not None:
+                count += 1
+            # Audit finding #7: advance the watermark over EVERY row
+            # the cloud sent us, not just the ones that resulted in an
+            # upsert. ``upsert_product_from_cloud`` returns None for
+            # malformed rows (missing product_id/name) AND for
+            # tombstone deliveries that happen to have no prior local
+            # row to soft-delete. Both cases must still advance the
+            # watermark — the cloud filters ``> updated_since``, so
+            # leaving the cursor stuck on a tombstone-only window means
+            # the next tick re-fetches the same window forever.
+            # Compare to lot_snapshot_poller's pattern, which advances
+            # over the row even on a malformed-skip.
             row_ts = product.get("updated_at")
             if isinstance(row_ts, str) and row_ts:
                 if max_updated_at is None or row_ts > max_updated_at:

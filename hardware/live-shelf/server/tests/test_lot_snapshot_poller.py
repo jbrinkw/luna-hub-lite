@@ -413,6 +413,125 @@ def test_settings_cache_refreshed_each_tick(conn, tmp_path):
     assert cache.get().chefbyte_classifier_fallback_enabled is False  # last good
 
 
+def test_tombstone_flags_matching_pi_lot_status_to_lost(conn, tmp_path):
+    """Audit finding #3: when the cloud tombstones a stock_lots row,
+    the matching Pi-local ``lots`` row (linked via pickup_event_id)
+    must be flagged as ``lost`` so the local state machine can recover.
+    Otherwise an in_flight Pi lot stays in_flight forever while the
+    cloud considers the lot deleted."""
+    import uuid
+    state_path = tmp_path / "last_lot_sync.json"
+    client = MagicMock()
+
+    # Seed a product + an in_flight Pi lot linked via pickup_event_id.
+    conn.execute(
+        """
+        INSERT INTO products (
+            product_id, name, net_weight_g, certified,
+            created_at, updated_at
+        ) VALUES ('prod-tomb', 'Tomb', 800.0, 1,
+                  datetime('now'), datetime('now'))
+        """,
+    )
+    pi_lot_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO lots (
+            lot_id, product_id, status, current_weight_g,
+            in_flight_since, pickup_event_id, shelf_id
+        ) VALUES (?, 'prod-tomb', 'in_flight', 600.0,
+                  '2026-04-22T08:00:00Z', 'pi-evt-TOMB', 'catch_all')
+        """,
+        (pi_lot_id,),
+    )
+    conn.commit()
+
+    # Tick 1: cloud_lots mirror lands with the pickup_event_id link.
+    fake_fetch = MagicMock(
+        return_value=_payload(
+            _lot(
+                "cloud-lot-tomb", product_id="prod-tomb", qty=1.0,
+                pickup_event_id="pi-evt-TOMB",
+                in_flight_since="2026-04-22T08:00:00Z",
+                updated_at="2026-04-22T10:00:00Z",
+            ),
+        ),
+    )
+    poller = LotSnapshotPoller(
+        client, conn, state_path=state_path, fetch_snapshot_fn=fake_fetch,
+    )
+    poller.tick_once()
+
+    # Pi lot still in_flight at this point.
+    pi_row = conn.execute(
+        "SELECT status, in_flight_since FROM lots WHERE lot_id = ?",
+        (pi_lot_id,),
+    ).fetchone()
+    assert pi_row["status"] == "in_flight"
+
+    # Tick 2: cloud tombstones the cloud_lots row.
+    fake_fetch.return_value = _payload(
+        _lot(
+            "cloud-lot-tomb", product_id="prod-tomb", qty=0.0,
+            pickup_event_id="pi-evt-TOMB",
+            updated_at="2026-04-22T11:00:00Z",
+            deleted_at="2026-04-22T11:00:00Z",
+        ),
+    )
+    poller.tick_once()
+
+    # Pi lot flagged as 'lost', in_flight columns cleared (CHECK
+    # constraint enforces (status='in_flight') ↔ (in_flight_since
+    # IS NOT NULL)).
+    pi_row_after = conn.execute(
+        "SELECT status, in_flight_since FROM lots WHERE lot_id = ?",
+        (pi_lot_id,),
+    ).fetchone()
+    assert pi_row_after["status"] == "lost"
+    assert pi_row_after["in_flight_since"] is None
+    # cloud_lots mirror gone.
+    assert _read_cloud_lot(conn, "cloud-lot-tomb") is None
+
+
+def test_tombstone_without_matching_pi_lot_only_deletes_mirror(conn, tmp_path):
+    """If no matching Pi lot exists (cloud deleted a lot the Pi never
+    materialized), the tombstone path just deletes the cloud_lots row
+    — no lots-table side effect."""
+    state_path = tmp_path / "last_lot_sync.json"
+    client = MagicMock()
+
+    # Tick 1: cloud_lots row lands with no Pi-side counterpart.
+    fake_fetch = MagicMock(
+        return_value=_payload(
+            _lot(
+                "cloud-lot-orphan", product_id="prod-x", qty=1.0,
+                pickup_event_id="pi-evt-MISSING",
+                updated_at="2026-04-22T10:00:00Z",
+            ),
+        ),
+    )
+    poller = LotSnapshotPoller(
+        client, conn, state_path=state_path, fetch_snapshot_fn=fake_fetch,
+    )
+    poller.tick_once()
+    assert _read_cloud_lot(conn, "cloud-lot-orphan") is not None
+
+    # Tick 2: tombstone. No Pi lot to flag.
+    fake_fetch.return_value = _payload(
+        _lot(
+            "cloud-lot-orphan", product_id="prod-x", qty=0.0,
+            pickup_event_id="pi-evt-MISSING",
+            updated_at="2026-04-22T11:00:00Z",
+            deleted_at="2026-04-22T11:00:00Z",
+        ),
+    )
+    count = poller.tick_once()
+    assert count == 1  # the cloud_lots delete itself counts as 1
+    assert _read_cloud_lot(conn, "cloud-lot-orphan") is None
+    # No Pi lots impacted (none existed).
+    assert conn.execute("SELECT COUNT(*) FROM lots").fetchone()[0] == 0
+
+
 def test_apply_one_handles_non_numeric_qty_as_zero(conn, tmp_path):
     """If cloud sends a non-numeric qty_containers (shouldn't happen in
     practice, but NUMERIC → JSON conversion can misbehave), fall back
