@@ -87,34 +87,46 @@ test.describe('Extensions page', () => {
     }
   });
 
-  // TODO: The current toggle handler only sets `enabled` flag — it does not clear
-  // credentials_encrypted in the DB. This test is skipped because the "disable clears creds"
-  // behavior is not yet implemented. When implemented, remove the skip.
-  test.skip('disable enabled extension clears credentials', async ({ page }) => {
+  // Disabling an extension clears its stored credentials (2026-04-29).
+  // Re-enabling forces re-entry — preferable to silently reusing a stale
+  // token after a deliberate disable. Implementation: ExtensionsPage's
+  // toggleMutation calls hub.clear_extension_credentials() when enabled
+  // becomes false (post-Vault migration; the legacy
+  // `credentials_encrypted = null` upsert is gone).
+  //
+  // NOTE: this suite was originally written against an Ionic build of the
+  // page. The current page is a Vite SPA using the ui-kit Toggle (a
+  // role="switch" button with aria-label "Enable <DisplayName>"). This
+  // test uses the modern selectors so it actually exercises the disable-
+  // clear-creds wiring; the other tests in the file targeting `ion-card`
+  // are pre-existing stale tests outside this batch's scope.
+  test('disable enabled extension clears credentials', async ({ page }) => {
     const { cleanup } = await seedAndLogin(page, 'disable-clear');
     try {
       await page.goto('/hub/extensions');
       await expect(page.getByRole('heading', { name: 'Obsidian' })).toBeVisible({ timeout: 30000 });
 
-      const obsidianCard = page.locator('ion-card', { hasText: 'Obsidian' });
+      // Click the Obsidian toggle (role=switch, aria-label="Enable Obsidian")
+      const obsidianToggle = page.getByRole('switch', { name: /enable obsidian/i });
+      await obsidianToggle.click();
 
-      // Enable Obsidian
-      await obsidianCard.locator('ion-toggle').click();
+      // Fill and save credentials. ExtensionsPage labels:
+      //   "GitHub Repo (owner/repo)", "GitHub Personal Access Token"
+      await page.getByLabel(/github repo/i).fill('owner/repo');
+      await page.getByLabel(/github personal access token/i).fill('test-token-123');
+      await page.getByRole('button', { name: /save credentials/i }).click();
 
-      // Fill and save credentials
-      await obsidianCard.getByLabel(/obsidian local rest api url/i).fill('http://localhost:27124');
-      await obsidianCard.getByLabel(/api key/i).fill('test-api-key-123');
-      await obsidianCard.getByRole('button', { name: /save credentials/i }).click();
-      await expect(obsidianCard.getByText(/credentials saved/i)).toBeVisible({ timeout: 30000 });
+      // "Credentials configured" badge should appear after save settles
+      await expect(page.getByText(/credentials configured/i)).toBeVisible({ timeout: 30000 });
 
-      // Toggle off
-      await obsidianCard.locator('ion-toggle').click();
+      // Toggle OFF — should clear the vault secret (vault_secret_id -> NULL,
+      // underlying vault.secrets row deleted by hub.clear_extension_credentials).
+      await obsidianToggle.click();
 
-      // Toggle back on — credentials should be cleared
-      await obsidianCard.locator('ion-toggle').click();
-
-      // Verify the credential fields are empty (no "credentials configured" badge)
-      await expect(obsidianCard.getByText(/credentials configured/i)).not.toBeVisible();
+      // After the optimistic update + refetch, the badge should flip back
+      // to "Not configured" since vault_secret_id is now NULL.
+      await expect(page.getByText(/not configured/i)).toBeVisible({ timeout: 30000 });
+      await expect(page.getByText(/credentials configured/i)).not.toBeVisible();
     } finally {
       await cleanup();
     }

@@ -20,7 +20,7 @@
  *      `sum + i.fat` changed to `sum + i.fat * 4` would drift the
  *      calorie total far outside the ±10 kcal bound.
  */
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, waitFor } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -28,6 +28,19 @@ import { useAppContext } from '@/shared/AppProvider';
 import { MacroPage, calcCaloriesFromMacros, type MacroPageData } from '@/pages/chefbyte/MacroPage';
 
 const mockUseAppContext = vi.mocked(useAppContext);
+
+// Mock `@/shared/dates` so we can override todayStr per-test without
+// touching vi.useFakeTimers (which deadlocks TanStack Query — see header
+// comment for the prior failure mode). Default impl preserves the rest of
+// the module so MacroPage's `toDateStr` / `formatDateDisplay` keep working.
+const mockTodayStr = vi.fn<(dsh?: number) => string>(() => '2026-04-22');
+vi.mock('@/shared/dates', async () => {
+  const actual = await vi.importActual<typeof import('@/shared/dates')>('@/shared/dates');
+  return {
+    ...actual,
+    todayStr: (dsh?: number) => mockTodayStr(dsh),
+  };
+});
 
 /* ------------------------------------------------------------------ */
 /*  Mocks                                                              */
@@ -55,24 +68,38 @@ const rpcCalls: Array<{ fn: string; args: any }> = [];
 const fromCalls: Array<{ table: string; eq: Array<[string, any]> }> = [];
 
 vi.mock('@/shared/supabase', () => {
-  const chef = () => {
-    const state: any = {
-      _eq: [] as Array<[string, any]>,
-      _table: '',
-    };
+  // Per-call builder so each .from(...) chain has its own state without
+  // bleed-over (a single shared `state` object would mix table/_eq across
+  // concurrent Promise.all queries from loadMacroPageData).
+  const makeBuilder = () => {
+    const state: { _eq: Array<[string, any]>; _table: string } = { _eq: [], _table: '' };
     const tb: any = {};
     tb.select = vi.fn(() => tb);
     tb.eq = vi.fn((col: string, val: any) => {
       state._eq.push([col, val]);
       return tb;
     });
-    tb.is = vi.fn(() => tb);
-    tb.gte = vi.fn(() => tb);
-    tb.lte = vi.fn(() => tb);
-    tb.order = vi.fn(() => {
+    // Terminal-ish helpers must resolve to a thenable so `await` in
+    // loadMacroPageData's Promise.all returns a {data,error} envelope even
+    // when a query chain ends without explicit .order()/.single()/.then().
+    const resolveQuery = () => {
       fromCalls.push({ table: state._table, eq: [...state._eq] });
       return Promise.resolve({ data: [], error: null });
+    };
+    tb.is = vi.fn(() => {
+      // .is() is the terminal call for the meal_plan_entries query
+      // (see loadMacroPageData). Return a thenable so the await in
+      // Promise.all settles with a {data,error} envelope.
+      const p: any = resolveQuery();
+      // Allow further chaining if needed
+      p.eq = tb.eq;
+      p.is = tb.is;
+      p.order = tb.order;
+      return p;
     });
+    tb.gte = vi.fn(() => tb);
+    tb.lte = vi.fn(() => tb);
+    tb.order = vi.fn(() => resolveQuery());
     tb.single = vi.fn(() => Promise.resolve({ data: null, error: null }));
     tb.insert = vi.fn(() => Promise.resolve({ error: null }));
     tb.update = vi.fn(() => Promise.resolve({ error: null }));
@@ -89,9 +116,6 @@ vi.mock('@/shared/supabase', () => {
     });
     builder.rpc = vi.fn((fn: string, args: any) => {
       rpcCalls.push({ fn, args });
-      // Pretend-zero macros — the totals assertion in test #3 uses
-      // loadMacroPageData's derived `consumed` list (food_logs / temp_items)
-      // not the RPC consumed totals. The RPC just fills the progress bars.
       return Promise.resolve({
         data: {
           calories: { consumed: 0, goal: 2000, remaining: 2000 },
@@ -104,8 +128,14 @@ vi.mock('@/shared/supabase', () => {
     });
     return builder;
   };
+
+  // MacroPage uses `asChefbyte()` which calls `supabase.schema('chefbyte')`,
+  // and other code paths use the exported `chefbyte()` factory. Both must
+  // return a builder so the data loader's 4 parallel queries resolve.
+  const chef = () => makeBuilder();
   return {
     supabase: {
+      schema: vi.fn(() => makeBuilder()),
       functions: { invoke: vi.fn(() => Promise.resolve({ data: null, error: null })) },
     },
     chefbyte: chef,
@@ -152,61 +182,33 @@ describe('MacroPage — 4-4-9 invariant via calcCaloriesFromMacros', () => {
   });
 });
 
-// FIXME: 3 tests below skipped — vitest fake timers interact badly with
-// TanStack Query's microtask-based flush, leaving `await waitFor(...)` stuck
-// even after real-timers/microtasks advance. pgTAP `consume_pipeline_invariants.test.sql`
-// covers the logical_date boundary authoritatively at the DB level, so the
-// user-observable behavior is guarded. Revisit when we move off fake timers
-// for date stubbing (preferred: mock `todayStr` directly instead of Date.now()).
-describe.skip('MacroPage — initial currentDate respects dayStartHour', () => {
-  // We deliberately avoid vi.useFakeTimers — TanStack Query's useQuery
-  // schedules refetches through microtask/setTimeout which deadlocks under
-  // faked timers. Instead, we monkey-patch the Date constructor so
-  // `new Date()` returns a fixed moment while everything else (Promise
-  // resolution, microtask queue) uses real timers.
-  const RealDate = global.Date;
-
-  function freezeClock(frozenMs: number) {
-    // Preserve arity + instanceof checks while overriding the zero-arg
-    // "new Date()" to return the frozen timestamp.
-    class FrozenDate extends RealDate {
-      constructor(...args: any[]) {
-        if (args.length === 0) {
-          super(frozenMs);
-        } else {
-          // @ts-expect-error — spreading into Date ctor
-          super(...args);
-        }
-      }
-      static now() {
-        return frozenMs;
-      }
-    }
-    // @ts-expect-error — replacing the global Date constructor for a test
-    global.Date = FrozenDate;
-  }
-
+// 2026-04-29: previously skipped due to vitest fake timers + TanStack Query
+// microtask-flush deadlock. Fix per planned-work brief: mock `todayStr`
+// directly (no fake timers, no Date constructor monkey-patch). MacroPage
+// initializes `currentDate = todayStr(dayStartHour)`; freezing that helper's
+// return value lets us assert the initial RPC `p_logical_date` matches the
+// expected logical-day boundary without touching the global timer system.
+describe('MacroPage — initial currentDate respects dayStartHour', () => {
   beforeEach(() => {
     rpcCalls.length = 0;
     fromCalls.length = 0;
-  });
-
-  afterEach(() => {
-    global.Date = RealDate;
+    mockTodayStr.mockReset();
   });
 
   it('at 05:30 local with dsh=6, queries YESTERDAY, not today', async () => {
-    // Freeze local time to 2026-04-22 05:30. With dsh=6 the logical_date
-    // is 2026-04-21. Pre-audit bug: MacroPage used `toDateStr(new Date())`
-    // (no shift) and called the RPC with '2026-04-22', missing the
-    // yesterday-stamped consumes that InventoryPage correctly logged.
-    freezeClock(new RealDate('2026-04-22T05:30:00').getTime());
+    // Pre-audit bug: MacroPage used `toDateStr(new Date())` (no shift) and
+    // called the RPC with '2026-04-22', missing the yesterday-stamped
+    // consumes that InventoryPage correctly logged. The fix calls
+    // `todayStr(dayStartHour)` which shifts back by `dayStartHour` hours.
+    // Stub it to the post-shift value so the assertion below pins the
+    // logical-date contract end-to-end (state init -> RPC -> food_logs).
+    mockTodayStr.mockImplementation((dsh = 0) => (dsh === 6 ? '2026-04-21' : '2026-04-22'));
 
     mockUseAppContext.mockReturnValue({
       activations: { coachbyte: true, chefbyte: true },
       activationsLoading: false,
       online: true,
-      lastSynced: new RealDate(),
+      lastSynced: new Date(),
       dayStartHour: 6,
       refreshActivations: vi.fn(),
       realtimeDegraded: false,
@@ -221,8 +223,6 @@ describe.skip('MacroPage — initial currentDate respects dayStartHour', () => {
 
     const macroCall = rpcCalls.find((c) => c.fn === 'get_daily_macros');
     expect(macroCall).toBeDefined();
-    // The bug would produce '2026-04-22' (calendar today). The fix shifts
-    // back by the 6-hour dsh → '2026-04-21' (logical today / yesterday cal).
     expect(macroCall!.args.p_logical_date).toBe('2026-04-21');
 
     const foodLogQuery = fromCalls.find((c) => c.table === 'food_logs');
@@ -231,13 +231,15 @@ describe.skip('MacroPage — initial currentDate respects dayStartHour', () => {
   });
 
   it('at 14:00 local with dsh=6, queries TODAY (post-rollover)', async () => {
-    freezeClock(new RealDate('2026-04-22T14:00:00').getTime());
+    // Post-rollover: 14:00 is past the 06:00 boundary so todayStr(6)
+    // returns the calendar date '2026-04-22'.
+    mockTodayStr.mockReturnValue('2026-04-22');
 
     mockUseAppContext.mockReturnValue({
       activations: { coachbyte: true, chefbyte: true },
       activationsLoading: false,
       online: true,
-      lastSynced: new RealDate(),
+      lastSynced: new Date(),
       dayStartHour: 6,
       refreshActivations: vi.fn(),
       realtimeDegraded: false,
@@ -256,13 +258,14 @@ describe.skip('MacroPage — initial currentDate respects dayStartHour', () => {
   });
 
   it('with dsh=0 (UTC-style user), uses the local calendar date', async () => {
-    freezeClock(new RealDate('2026-04-22T05:30:00').getTime());
+    // dsh=0 → no shift → calendar today.
+    mockTodayStr.mockReturnValue('2026-04-22');
 
     mockUseAppContext.mockReturnValue({
       activations: { coachbyte: true, chefbyte: true },
       activationsLoading: false,
       online: true,
-      lastSynced: new RealDate(),
+      lastSynced: new Date(),
       dayStartHour: 0,
       refreshActivations: vi.fn(),
       realtimeDegraded: false,
@@ -277,7 +280,6 @@ describe.skip('MacroPage — initial currentDate respects dayStartHour', () => {
 
     const macroCall = rpcCalls.find((c) => c.fn === 'get_daily_macros');
     expect(macroCall).toBeDefined();
-    // dsh=0 → no shift → calendar today.
     expect(macroCall!.args.p_logical_date).toBe('2026-04-22');
   });
 });
