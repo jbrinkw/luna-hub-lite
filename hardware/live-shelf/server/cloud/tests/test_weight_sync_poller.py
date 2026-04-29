@@ -114,6 +114,7 @@ def _make_poller(
     min_delta_g: float = DEFAULT_MIN_DELTA_G,
     ttl_s: float = DEFAULT_TTL_S,
     clock=None,
+    runtime_state_provider=None,
 ) -> tuple[WeightSyncPoller, MagicMock]:
     """Build a poller with a mock emitter. Returns (poller, mock_emitter)."""
     emitter = MagicMock()
@@ -128,6 +129,7 @@ def _make_poller(
         min_delta_g=min_delta_g,
         ttl_s=ttl_s,
         clock=clock,
+        runtime_state_provider=runtime_state_provider,
     )
     return poller, emitter
 
@@ -410,3 +412,232 @@ def test_negative_weight_is_skipped(conn):
     n = poller.tick_once()
     assert n == 0
     emitter.emit_live_weight_sync.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# live_scale via scale_pairings + heartbeat runtime state
+# ---------------------------------------------------------------------------
+#
+# These cover the production live_scale path that the original module
+# missed: live_scale (single_item) lots are NEVER inserted into the Pi's
+# `lots` table — the live_scale event handler in `handlers/scale_events.py`
+# emits cloud consumption events directly without lifecycle. The poller
+# therefore must read the lot↔device binding from `scale_pairings` and
+# the current weight from the in-memory heartbeat state populated by
+# `/api/scale-heartbeat`.
+
+
+def test_live_scale_pairing_emits_using_runtime_weight(conn):
+    """Live_scale lot present ONLY in scale_pairings (production path)
+    must emit using the heartbeat state weight."""
+    pid = _seed_product(conn, name="MILK")
+    lot_id = str(uuid.uuid4())
+    # Insert the lot row WITHOUT a `lots` entry — production behavior
+    # for live_scale (the lot exists in cloud but not in Pi `lots`).
+    # Foreign key in scale_pairings.lot_id → lots.lot_id requires a
+    # row, so seed a placeholder `lots` row but DON'T set shelf_id to
+    # 'single_item' (so the live_shelf branch won't pick it up). The
+    # placeholder mimics the cloud_lots mirror that real Pi has.
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status) VALUES (?, ?, 'on_shelf')",
+        (lot_id, pid),
+    )
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("scale-milk-1", "single_item", pid, lot_id),
+    )
+    conn.commit()
+
+    runtime = {"scale-milk-1": {"weight_g": 3200.5, "stable": True}}
+    poller, emitter = _make_poller(
+        conn,
+        clock=_ManualClock(),
+        runtime_state_provider=lambda: runtime,
+    )
+
+    n = poller.tick_once()
+
+    assert n == 1
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["pi_lot_id"] == lot_id
+    assert kwargs["kind"] == "live_scale"
+    assert kwargs["scale_id"] == "scale-milk-1"
+    assert kwargs["observed_weight_g"] == pytest.approx(3200.5)
+
+
+def test_live_scale_pairing_no_runtime_provider_skips(conn):
+    """Without a runtime state provider, live_scale pairings are silently
+    skipped (live_shelf-only fallback)."""
+    pid = _seed_product(conn, name="OJ")
+    lot_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status) VALUES (?, ?, 'on_shelf')",
+        (lot_id, pid),
+    )
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("scale-oj-1", "single_item", pid, lot_id),
+    )
+    conn.commit()
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    n = poller.tick_once()
+
+    assert n == 0
+    emitter.emit_live_weight_sync.assert_not_called()
+
+
+def test_live_scale_pairing_no_heartbeat_for_device_skips(conn):
+    """A pairing whose device hasn't heartbeated yet must be skipped
+    (no current weight to emit; next tick will retry once heartbeat
+    arrives)."""
+    pid = _seed_product(conn, name="WATER")
+    lot_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status) VALUES (?, ?, 'on_shelf')",
+        (lot_id, pid),
+    )
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("scale-water-1", "single_item", pid, lot_id),
+    )
+    conn.commit()
+    # Provider returns empty — device hasn't heartbeated yet.
+    poller, emitter = _make_poller(
+        conn, clock=_ManualClock(), runtime_state_provider=lambda: {},
+    )
+
+    n = poller.tick_once()
+
+    assert n == 0
+    emitter.emit_live_weight_sync.assert_not_called()
+
+
+def test_live_scale_pairing_without_lot_id_skipped(conn):
+    """A pairing with NULL lot_id (operator hasn't assigned a product
+    yet) must be skipped — there's nothing to attribute weight to."""
+    pid = _seed_product(conn, name="EMPTY")
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
+        "VALUES (?, ?, ?, NULL)",
+        ("scale-empty-1", "single_item", pid),
+    )
+    conn.commit()
+    runtime = {"scale-empty-1": {"weight_g": 100.0, "stable": True}}
+    poller, emitter = _make_poller(
+        conn,
+        clock=_ManualClock(),
+        runtime_state_provider=lambda: runtime,
+    )
+
+    n = poller.tick_once()
+
+    assert n == 0
+    emitter.emit_live_weight_sync.assert_not_called()
+
+
+def test_live_scale_pairing_significant_change_re_emits(conn):
+    """Confirm the throttle gates work for the pairings-driven path:
+    the heartbeat weight changing past the 5g threshold re-emits."""
+    pid = _seed_product(conn, name="CEREAL")
+    lot_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status) VALUES (?, ?, 'on_shelf')",
+        (lot_id, pid),
+    )
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("scale-cereal-1", "single_item", pid, lot_id),
+    )
+    conn.commit()
+
+    runtime = {"scale-cereal-1": {"weight_g": 500.0, "stable": True}}
+    poller, emitter = _make_poller(
+        conn,
+        clock=_ManualClock(),
+        runtime_state_provider=lambda: runtime,
+    )
+
+    # First tick emits.
+    assert poller.tick_once() == 1
+    # 1g drift — sub-threshold — must NOT re-emit.
+    runtime["scale-cereal-1"]["weight_g"] = 501.0
+    assert poller.tick_once() == 0
+    # 8g drop (user poured a serving) — must re-emit.
+    runtime["scale-cereal-1"]["weight_g"] = 492.0
+    assert poller.tick_once() == 1
+
+
+def test_live_scale_provider_exception_does_not_kill_tick(conn):
+    """If runtime_state_provider raises, the tick must absorb the error,
+    log, and still emit live_shelf candidates."""
+    # Seed a live_shelf candidate.
+    pid_shelf = _seed_product(conn, name="SHELF1")
+    _seed_lot(
+        conn, product_id=pid_shelf, shelf_id="live_shelf",
+        current_weight_g=200.0,
+    )
+    # Seed a live_scale candidate.
+    pid_scale = _seed_product(conn, name="SCALE1")
+    lot_id_scale = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status) VALUES (?, ?, 'on_shelf')",
+        (lot_id_scale, pid_scale),
+    )
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("scale-broken-1", "single_item", pid_scale, lot_id_scale),
+    )
+    conn.commit()
+
+    def boom():
+        raise RuntimeError("provider unavailable")
+
+    poller, emitter = _make_poller(
+        conn, clock=_ManualClock(), runtime_state_provider=boom,
+    )
+
+    n = poller.tick_once()
+
+    # Live_shelf still emits; live_scale skipped due to provider failure.
+    assert n == 1
+    kwargs_list = [
+        c.kwargs for c in emitter.emit_live_weight_sync.call_args_list
+    ]
+    assert all(k["kind"] == "live_shelf" for k in kwargs_list)
+
+
+def test_live_scale_pairing_dedup_when_lots_row_present(conn):
+    """If a lot has both a `lots` row AND a `scale_pairings` row (legacy
+    test seeding overlap), the pairings branch must dedup against the
+    `lots` branch so we emit only once."""
+    pid = _seed_product(conn, name="DUP")
+    lot_id = _seed_lot(
+        conn, product_id=pid, shelf_id="single_item", current_weight_g=85.0,
+    )
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("scale-dup-1", "single_item", pid, lot_id),
+    )
+    conn.commit()
+    runtime = {"scale-dup-1": {"weight_g": 999.0, "stable": True}}
+    poller, emitter = _make_poller(
+        conn,
+        clock=_ManualClock(),
+        runtime_state_provider=lambda: runtime,
+    )
+
+    n = poller.tick_once()
+
+    # Exactly ONE emit — the lots-row reading (85g) wins; the pairing
+    # entry is deduped out so we don't emit 999g for the same lot too.
+    assert n == 1
+    assert emitter.emit_live_weight_sync.call_count == 1
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["observed_weight_g"] == pytest.approx(85.0)

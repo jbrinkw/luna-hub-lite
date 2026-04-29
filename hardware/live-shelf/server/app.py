@@ -59,7 +59,11 @@ from .config import (
     load_config,
 )
 from .handlers.brightness import BrightnessHandler
-from .handlers.scale_events import ScaleHandler, make_scale_bp
+from .handlers.scale_events import (
+    ScaleHandler,
+    get_scale_runtime_state_snapshot,
+    make_scale_bp,
+)
 from .handlers.weight import WeightHandler
 from .intake import (
     create_blueprint as create_intake_bp,
@@ -2490,6 +2494,12 @@ def create_app(
                     cloud_emitter,
                     conn,
                     db_lock=db_lock,
+                    # live_scale lots aren't mirrored into Pi `lots` —
+                    # the only source of their current weight is the
+                    # in-memory heartbeat state populated by
+                    # /api/scale-heartbeat. Pass the snapshot accessor
+                    # so the poller can emit those alongside live_shelf.
+                    runtime_state_provider=get_scale_runtime_state_snapshot,
                 )
                 weight_sync_poller.start()
                 cloud_pollers_started.append(weight_sync_poller)

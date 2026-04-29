@@ -66,7 +66,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Mapping, Optional
 
 from ._kind_translate import (
     CLOUD_LIVE_SCALE,
@@ -78,6 +78,13 @@ from ._kind_translate import (
 from .integration import CloudEventEmitter
 
 log = logging.getLogger(__name__)
+
+# Callable that returns ``{device_id: {"weight_g": float, ...}}`` for
+# every actively-heartbeating ESP scale. Implemented in production by
+# ``server.handlers.scale_events.get_scale_runtime_state_snapshot`` (which
+# wraps ``_SCALE_RUNTIME_STATE`` with TTL freshness gating). Stubbed in
+# tests so the poller stays decoupled from the Flask handler module.
+RuntimeStateProvider = Callable[[], Mapping[str, Mapping[str, object]]]
 
 
 # Default cadence — every 30s the thread wakes and scans the lots
@@ -135,6 +142,7 @@ class WeightSyncPoller(threading.Thread):
         ttl_s: float = DEFAULT_TTL_S,
         live_shelf_scale_id: str = "scale-01",
         live_scale_scale_id: str = "scale-single",
+        runtime_state_provider: Optional[RuntimeStateProvider] = None,
         shutdown_event: Optional[threading.Event] = None,
         clock: Optional[object] = None,
     ) -> None:
@@ -164,6 +172,15 @@ class WeightSyncPoller(threading.Thread):
         live_shelf_scale_id, live_scale_scale_id:
             Scale ID strings stamped onto outbox payloads. Defaults
             mirror :meth:`ScaleHandler._scale_id_for_shelf`.
+        runtime_state_provider:
+            Callable returning ``{device_id: {"weight_g": float, ...}}``
+            for actively-heartbeating ESP scales. Required for live_scale
+            (single_item) lots: those lots are NOT mirrored into the Pi's
+            ``lots`` table (the live_scale event handler emits cloud
+            consumption events directly without lifecycle), so the only
+            source of their current weight is the in-memory heartbeat
+            state. ``None`` (default) disables live_scale streaming and
+            falls back to live_shelf-only behavior.
         shutdown_event:
             Optional :class:`threading.Event` shared with the rest of
             the app's background-thread shutdown machinery.
@@ -180,6 +197,7 @@ class WeightSyncPoller(threading.Thread):
         self._ttl_s = float(ttl_s)
         self._live_shelf_scale_id = live_shelf_scale_id
         self._live_scale_scale_id = live_scale_scale_id
+        self._runtime_state_provider = runtime_state_provider
         self._shutdown = shutdown_event or threading.Event()
         self._clock_monotonic = (
             clock.monotonic if clock is not None else time.monotonic
@@ -229,20 +247,35 @@ class WeightSyncPoller(threading.Thread):
     def _fetch_candidates(self) -> list[dict]:
         """Return one dict per candidate lot.
 
-        Filters: ``shelf_id IN ('live_shelf', 'single_item')``,
-        ``current_weight_g IS NOT NULL`` (we need a weight to report),
-        ``status IN ('on_shelf', 'in_flight')`` (in-flight live_shelf
-        lots are off-shelf physically but still meaningful — the
-        catch-all-style "lot is in flight but has been re-measured"
-        flow still wants the observation; ``out`` / ``depleted`` /
-        ``relocated`` / ``lost`` are excluded — qty is known to be
-        zero or stale).
+        Two distinct candidate sources, unioned:
 
-        For live_scale lots (``shelf_id='single_item'``) we also need
-        to know the device_id to stamp scale_id on the emit. Looked
-        up via ``scale_pairings`` on the same lot_id (the pairing's
-        device_id is the live_scale ESP). When no pairing row exists
-        we fall back to the configured default scale-id.
+        1. **live_shelf lots** — ``shelf_id='live_shelf'`` rows in the
+           Pi's ``lots`` table (mirrored from cloud_lots + lifecycle
+           managed by the live_shelf handler).
+           Filters: ``current_weight_g IS NOT NULL``,
+           ``status IN ('on_shelf', 'in_flight')``. ``out`` /
+           ``depleted`` / ``relocated`` / ``lost`` are excluded — qty
+           is known to be zero or stale. live_shelf lots may also be
+           seeded with ``shelf_id='single_item'`` in tests (legacy
+           seeding) — those continue to flow through this branch when
+           ``current_weight_g`` is non-null.
+
+        2. **live_scale lots** — ``shelf_id='single_item'`` rows in
+           ``scale_pairings`` (NOT in ``lots``: the live_scale event
+           handler in ``handlers/scale_events.py`` emits cloud
+           consumption events directly and never inserts into the Pi's
+           ``lots`` table). The current weight comes from the in-memory
+           runtime state populated by ``/api/scale-heartbeat`` keyed by
+           device_id. Requires ``runtime_state_provider`` to be wired;
+           when not wired, live_scale streaming is disabled and only
+           live_shelf is emitted.
+           A pairing must have a non-null ``lot_id`` (the operator has
+           assigned a product lot to the scale via the pairings UI) and
+           a fresh runtime weight reading (the heartbeat-state TTL gate
+           handles staleness, so we honor whatever it returns). Pairings
+           whose ``lot_id`` is already covered by a ``lots`` row (legacy
+           test seeding path) are deduped out so we don't emit twice
+           for the same lot.
 
         Catch-all is INTENTIONALLY excluded (Phase 1 audit finding
         L1/HIGH; AUDIT_FINDINGS_PHASE1.md):
@@ -254,7 +287,11 @@ class WeightSyncPoller(threading.Thread):
         NULL for catch-all rows — the cloud-UI freshness indicator on
         those rows reflects pickup_weight_g instead.
         """
-        sql = """
+        # The live_shelf branch keeps the legacy union (live_shelf +
+        # single_item rows in `lots`) so existing tests that seed a
+        # `lots` row with shelf_id='single_item' continue to work via
+        # the LEFT JOIN to scale_pairings for the device_id.
+        live_shelf_sql = """
             SELECT l.lot_id, l.shelf_id, l.current_weight_g, sp.device_id
               FROM lots l
               LEFT JOIN scale_pairings sp ON sp.lot_id = l.lot_id
@@ -262,14 +299,81 @@ class WeightSyncPoller(threading.Thread):
                AND l.current_weight_g IS NOT NULL
                AND l.status IN ('on_shelf', 'in_flight')
         """
+        # New branch: live_scale lots that ONLY exist in scale_pairings
+        # (the production case — live_scale lifecycle never creates a
+        # lots row). Joined with runtime heartbeat state in Python.
+        live_scale_sql = """
+            SELECT sp.lot_id, 'single_item' AS shelf_id,
+                   NULL AS current_weight_g, sp.device_id
+              FROM scale_pairings sp
+             WHERE sp.shelf_id = 'single_item'
+               AND sp.lot_id IS NOT NULL
+        """
         if self._db_lock is not None:
             with self._db_lock:
-                cur = self._conn.execute(sql)
-                rows = [dict(r) for r in cur.fetchall()]
+                shelf_rows = [
+                    dict(r) for r in self._conn.execute(live_shelf_sql).fetchall()
+                ]
+                scale_rows = [
+                    dict(r) for r in self._conn.execute(live_scale_sql).fetchall()
+                ]
         else:
-            cur = self._conn.execute(sql)
-            rows = [dict(r) for r in cur.fetchall()]
-        return rows
+            shelf_rows = [
+                dict(r) for r in self._conn.execute(live_shelf_sql).fetchall()
+            ]
+            scale_rows = [
+                dict(r) for r in self._conn.execute(live_scale_sql).fetchall()
+            ]
+
+        # Dedup: a lot may appear in both branches when a test seeds
+        # both a `lots` row and a `scale_pairings` row with the same
+        # lot_id. The live_shelf branch already produced an emit with a
+        # current_weight_g from `lots`; drop the duplicate from
+        # scale_rows so we don't emit twice for the same lot in one tick.
+        shelf_lot_ids = {r.get("lot_id") for r in shelf_rows}
+        if scale_rows and shelf_lot_ids:
+            scale_rows = [
+                r for r in scale_rows if r.get("lot_id") not in shelf_lot_ids
+            ]
+
+        # Splice the heartbeat weight onto each remaining live_scale
+        # candidate. Without a runtime provider we can't observe
+        # live_scale weights, so drop those rows (caller still gets
+        # live_shelf candidates).
+        if scale_rows:
+            if self._runtime_state_provider is None:
+                scale_rows = []
+            else:
+                try:
+                    snapshot = self._runtime_state_provider() or {}
+                except Exception:  # noqa: BLE001 - defensive: never kill the tick
+                    log.warning(
+                        "weight_sync: runtime_state_provider raised; "
+                        "live_scale candidates skipped this tick",
+                        exc_info=True,
+                    )
+                    snapshot = {}
+                kept: list[dict] = []
+                for row in scale_rows:
+                    device_id = row.get("device_id")
+                    if not isinstance(device_id, str) or not device_id:
+                        continue
+                    entry = snapshot.get(device_id) or {}
+                    weight_g = (
+                        entry.get("weight_g")
+                        if isinstance(entry, Mapping)
+                        else None
+                    )
+                    if weight_g is None:
+                        # No fresh heartbeat for this device — skip.
+                        # When the ESP starts heartbeating again the
+                        # next tick will pick it up (no state to clear).
+                        continue
+                    row["current_weight_g"] = weight_g
+                    kept.append(row)
+                scale_rows = kept
+
+        return shelf_rows + scale_rows
 
     def _should_emit(
         self,

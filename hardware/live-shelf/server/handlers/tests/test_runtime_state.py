@@ -133,3 +133,35 @@ class TestRuntimeStateTTL:
         _seed("scale-01", ts=fresh)
         state = scale_events.get_scale_runtime_state("scale-01")
         assert state.get("device_id") == "scale-01"
+
+
+class TestRuntimeStateSnapshot:
+    """Cover ``get_scale_runtime_state_snapshot`` — the multi-device
+    accessor wired into :class:`WeightSyncPoller` for live_scale lots."""
+
+    def test_empty_returns_empty_dict(self):
+        assert scale_events.get_scale_runtime_state_snapshot() == {}
+
+    def test_returns_only_fresh_devices(self):
+        """Stale entries are excluded from the snapshot."""
+        _seed("scale-fresh", ts=_now_iso(offset_seconds=-0.5), weight_g=120.0)
+        _seed("scale-stale", ts=_now_iso(offset_seconds=-300.0), weight_g=999.0)
+        snap = scale_events.get_scale_runtime_state_snapshot()
+        assert "scale-fresh" in snap
+        assert "scale-stale" not in snap
+        assert snap["scale-fresh"]["weight_g"] == 120.0
+
+    def test_returns_independent_copies(self):
+        """Mutating a returned entry must NOT mutate the underlying state."""
+        _seed("scale-1", ts=_now_iso(offset_seconds=-0.5), weight_g=50.0)
+        snap = scale_events.get_scale_runtime_state_snapshot()
+        snap["scale-1"]["weight_g"] = 9999.0
+        # Re-read; should still be the original value.
+        snap2 = scale_events.get_scale_runtime_state_snapshot()
+        assert snap2["scale-1"]["weight_g"] == 50.0
+
+    def test_multiple_devices_all_returned(self):
+        for i in range(3):
+            _seed(f"scale-{i}", ts=_now_iso(offset_seconds=-0.1), weight_g=i)
+        snap = scale_events.get_scale_runtime_state_snapshot()
+        assert set(snap.keys()) == {"scale-0", "scale-1", "scale-2"}

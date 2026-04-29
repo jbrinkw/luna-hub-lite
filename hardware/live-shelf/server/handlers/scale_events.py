@@ -170,6 +170,31 @@ def get_scale_runtime_state(device_id: Optional[str] = None) -> dict[str, Any]:
         return dict(entry)
 
 
+def get_scale_runtime_state_snapshot() -> dict[str, dict[str, Any]]:
+    """Return a snapshot of fresh runtime state for ALL heartbeating devices.
+
+    Returns a dict keyed by ``device_id`` whose values are deep-copied
+    state entries (``{weight_g, ts, stable, uptime_s, device_id}``).
+    Entries failing the heartbeat freshness TTL gate are excluded so
+    callers don't act on stale weights.
+
+    Wired into :class:`server.cloud.weight_sync_poller.WeightSyncPoller`
+    so live_scale (single_item) lots — which have NO row in the Pi's
+    ``lots`` table — can be streamed to the cloud by joining
+    ``scale_pairings`` with this in-memory weight source.
+    """
+    now = time.time()
+    out: dict[str, dict[str, Any]] = {}
+    with _SCALE_RUNTIME_LOCK:
+        for device_id, entry in _SCALE_RUNTIME_STATE.items():
+            if not entry:
+                continue
+            if not _runtime_entry_is_fresh(entry, now):
+                continue
+            out[device_id] = dict(entry)
+    return out
+
+
 # --- Weight-fit helpers --------------------------------------------------
 
 # Maximum relative error between |delta_g| and the summed expected weights
