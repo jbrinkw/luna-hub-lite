@@ -327,6 +327,11 @@ SELECT lives_ok(
   'case 5a: live_shelf mint event runs'
 );
 
+-- The mint path resolves expires_on via private.get_logical_date with
+-- the USER'S profile (timezone + day_start_hour), not UTC. Pull those
+-- from hub.profiles so the assertion stays correct regardless of the
+-- runner clock vs UTC offset (failed nightly between UTC midnight and
+-- local midnight when hardcoded to 'UTC').
 SELECT is(
   (SELECT expires_on
      FROM chefbyte.stock_lots
@@ -334,7 +339,15 @@ SELECT is(
       AND product_id = :'choc_milk_id'
       AND last_update_source = 'live_shelf'
     ORDER BY last_update_ts DESC LIMIT 1),
-  ((SELECT private.get_logical_date(now(), 'UTC', 0)) + 14)::date,
+  ((
+    SELECT private.get_logical_date(
+      now(),
+      COALESCE(timezone, 'UTC'),
+      COALESCE(day_start_hour, 0)
+    )
+    FROM hub.profiles
+    WHERE user_id = tests.get_supabase_uid('rot_thresh_alice')
+  ) + 14)::date,
   'case 5b: minted lot expires_on = today + default_shelf_life_days'
 );
 
