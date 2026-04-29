@@ -423,9 +423,92 @@ export function ScalesTab() {
 
   const pairScaleMutation = useMutation({
     mutationFn: async ({ pairingId, productId }: { pairingId: string; productId: string | null }) => {
+      // Pin lot_id alongside product_id at pair time. A live_scale pairing
+      // with product_id but lot_id=NULL forces apply_shelf_event into the
+      // FEFO/heuristic resolver tier — wrong the moment the user has >1
+      // lot of the same product, which causes recurring sync-drift bugs
+      // (consumed/refilled events landing on the wrong lot). The companion
+      // pgTAP invariant in
+      // ``supabase/tests/invariants/live_scale_pairing_has_lot_id.test.sql``
+      // pins this rule going forward — production is rejected with a
+      // CI-visible failure if a future code path reintroduces the gap.
+      //
+      // Lot resolution mirrors migration 20260429190000's tiered search
+      // (live_scale-sourced > qty>0 not-in-flight > qty>0 > any) so post-pair
+      // behaviour matches the live_scale apply resolver
+      // (20260429010000_live_scale_never_mints_v2.sql) it replaces.
+      let resolvedLotId: string | null = null;
+      if (productId) {
+        // Tier 1: live_scale-sourced, qty>0, FEFO.
+        const { data: tier1, error: t1err } = await chefbyte()
+          .from('stock_lots')
+          .select('lot_id')
+          .eq('user_id', user!.id)
+          .eq('product_id', productId)
+          .eq('last_update_source', 'live_scale')
+          .gt('qty_containers', 0)
+          .order('expires_on', { ascending: true, nullsFirst: false })
+          .order('last_update_ts', { ascending: true, nullsFirst: false })
+          .limit(1)
+          .maybeSingle();
+        if (t1err) throw t1err;
+        resolvedLotId = tier1?.lot_id ?? null;
+
+        // Tier 2: any qty>0 not-in-flight lot, FEFO.
+        if (!resolvedLotId) {
+          const { data: tier2, error: t2err } = await chefbyte()
+            .from('stock_lots')
+            .select('lot_id')
+            .eq('user_id', user!.id)
+            .eq('product_id', productId)
+            .is('in_flight_since', null)
+            .gt('qty_containers', 0)
+            .order('expires_on', { ascending: true, nullsFirst: false })
+            .order('last_update_ts', { ascending: true, nullsFirst: false })
+            .limit(1)
+            .maybeSingle();
+          if (t2err) throw t2err;
+          resolvedLotId = tier2?.lot_id ?? null;
+        }
+
+        // Tier 3: any qty>0 lot (in_flight allowed), FEFO.
+        if (!resolvedLotId) {
+          const { data: tier3, error: t3err } = await chefbyte()
+            .from('stock_lots')
+            .select('lot_id')
+            .eq('user_id', user!.id)
+            .eq('product_id', productId)
+            .gt('qty_containers', 0)
+            .order('expires_on', { ascending: true, nullsFirst: false })
+            .order('last_update_ts', { ascending: true, nullsFirst: false })
+            .limit(1)
+            .maybeSingle();
+          if (t3err) throw t3err;
+          resolvedLotId = tier3?.lot_id ?? null;
+        }
+
+        // Tier 4: any lot (qty=0 revive case), FEFO.
+        if (!resolvedLotId) {
+          const { data: tier4, error: t4err } = await chefbyte()
+            .from('stock_lots')
+            .select('lot_id')
+            .eq('user_id', user!.id)
+            .eq('product_id', productId)
+            .order('expires_on', { ascending: true, nullsFirst: false })
+            .order('last_update_ts', { ascending: true, nullsFirst: false })
+            .limit(1)
+            .maybeSingle();
+          if (t4err) throw t4err;
+          resolvedLotId = tier4?.lot_id ?? null;
+        }
+        // No matching lot at all → leave lot_id NULL. The first live_scale
+        // event for this scale will mint a lot and the apply path will
+        // pin lot_id then (see live_scale ADD branch tier d).
+      }
+
       const { error: err } = await chefbyte()
         .from('scale_pairings')
-        .update({ product_id: productId })
+        .update({ product_id: productId, lot_id: resolvedLotId })
         .eq('pairing_id', pairingId);
       if (err) throw err;
     },
