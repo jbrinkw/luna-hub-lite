@@ -708,16 +708,27 @@ export function SettingsPage() {
                       <div className="flex flex-col flex-1">
                         <div className="flex items-start justify-between gap-2 mb-2">
                           <h4 className="m-0 text-base font-semibold">{p.name}</h4>
-                          {p.tare_weight_g != null && (
-                            <span
-                              className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
-                              title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
-                              data-testid={`livetrack-enrolled-${p.product_id}`}
-                            >
-                              <span aria-hidden="true">✓</span>
-                              LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
-                            </span>
-                          )}
+                          <div className="flex flex-wrap items-center gap-1 justify-end">
+                            {p.is_placeholder && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200 whitespace-nowrap"
+                                title="Placeholder — macros are estimated. Will be promoted on barcode scan match."
+                                data-testid={`placeholder-badge-${p.product_id}`}
+                              >
+                                Placeholder
+                              </span>
+                            )}
+                            {p.tare_weight_g != null && (
+                              <span
+                                className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
+                                title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
+                                data-testid={`livetrack-enrolled-${p.product_id}`}
+                              >
+                                <span aria-hidden="true">✓</span>
+                                LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
+                              </span>
+                            )}
+                          </div>
                         </div>
                         {p.barcode && (
                           <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>
@@ -780,6 +791,7 @@ export function SettingsPage() {
                       onClick={() => {
                         if (deleteTarget) deleteProductMutation.mutate(deleteTarget);
                       }}
+                      autoFocus
                     >
                       Delete
                     </button>
