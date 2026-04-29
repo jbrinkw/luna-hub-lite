@@ -191,6 +191,107 @@ def mark_permanent_failure(
         )
 
 
+def mark_dead_letter(
+    conn: sqlite3.Connection, outbox_id: int, reason: str
+) -> None:
+    """Flag a row as dead-lettered after exhausting retry budget.
+
+    Called by the worker after :data:`DEAD_LETTER_ATTEMPT_THRESHOLD`
+    consecutive *transient* failures (5xx, auth, network) on the same
+    row. Distinct semantics from :func:`mark_permanent_failure` — that
+    one fires when the cloud explicitly says "this payload is bad"
+    (400/404/409); this one fires when the cloud keeps timing-out /
+    erroring without a clear root cause and we'd rather skip the row
+    than FIFO-block every event behind it indefinitely.
+
+    On disk both end up in the same ``failed_permanently=1`` slot — the
+    audit trail's ``last_error`` is the human-readable distinguisher
+    ("DEAD_LETTER: " prefix vs the bare cloud response). One column +
+    the prefix keeps the schema simple while preserving operator-facing
+    differentiation in the /admin/dead-letter UI.
+
+    The drainer's :func:`list_pending` filter (``failed_permanently=0``)
+    excludes both bucket types, so dead-letter writes are
+    immediately effective: the worker's NEXT tick skips this row and
+    proceeds to drain the rest of the queue.
+
+    Operators can manually clear a dead-lettered row by setting
+    ``failed_permanently = 0`` (and optionally ``attempts = 0``) via
+    direct SQL or the /admin/dead-letter UI's "retry" affordance — the
+    drainer will pick it up again on the next tick.
+    """
+    with conn:
+        conn.execute(
+            "UPDATE cloud_outbox "
+            "   SET failed_permanently = 1, "
+            "       last_error = ?, "
+            "       attempts = attempts + 1 "
+            " WHERE outbox_id = ?",
+            (f"DEAD_LETTER: {reason}", outbox_id),
+        )
+
+
+def list_dead_letter(
+    conn: sqlite3.Connection, *, limit: int = 100
+) -> list[OutboxRow]:
+    """Return up to ``limit`` dead-lettered + permanently-failed rows.
+
+    Used by the /admin/dead-letter UI to surface what's stuck. Includes
+    BOTH ``mark_dead_letter`` (transient retry exhaustion) and
+    ``mark_permanent_failure`` (cloud-said-bad-payload) rows. The
+    ``last_error`` ``DEAD_LETTER:`` prefix lets the UI render them
+    distinctly without a separate column.
+
+    Sorted by ``outbox_id DESC`` so the most recent failures appear
+    first — operators usually want to triage the latest breakage.
+    """
+    rows = conn.execute(
+        "SELECT outbox_id, client_event_id, payload_json, enqueued_at, "
+        "       sent_at, attempts, last_error, failed_permanently "
+        "  FROM cloud_outbox "
+        " WHERE failed_permanently = 1 "
+        " ORDER BY outbox_id DESC "
+        " LIMIT ?",
+        (limit,),
+    ).fetchall()
+    return [
+        OutboxRow(
+            outbox_id=r["outbox_id"],
+            client_event_id=r["client_event_id"],
+            payload_json=r["payload_json"],
+            enqueued_at=r["enqueued_at"],
+            sent_at=r["sent_at"],
+            attempts=r["attempts"],
+            last_error=r["last_error"],
+            failed_permanently=bool(r["failed_permanently"]),
+        )
+        for r in rows
+    ]
+
+
+def reset_dead_letter(
+    conn: sqlite3.Connection, outbox_id: int
+) -> bool:
+    """Clear ``failed_permanently`` so the worker will retry the row.
+
+    Returns True if a row was actually updated. Operator-facing affordance
+    for the /admin/dead-letter UI when a dead-lettered row should be
+    re-tried (e.g. after a cloud-side fix lands). Resets ``attempts``
+    to 0 so the dead-letter threshold counts from scratch — otherwise
+    the row would re-dead-letter after a single failure.
+    """
+    with conn:
+        cur = conn.execute(
+            "UPDATE cloud_outbox "
+            "   SET failed_permanently = 0, "
+            "       attempts = 0, "
+            "       last_error = NULL "
+            " WHERE outbox_id = ? AND failed_permanently = 1",
+            (outbox_id,),
+        )
+    return (cur.rowcount or 0) > 0
+
+
 def count_pending(conn: sqlite3.Connection) -> int:
     """Return the number of outbox rows still awaiting delivery.
 

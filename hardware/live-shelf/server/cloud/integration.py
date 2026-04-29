@@ -856,6 +856,7 @@ def backfill_missing_outbox_events(
     scale_id: str = "scale-01",
     shelf_kind: str = "live_shelf",
     window_hours: int = _BACKFILL_WINDOW_HOURS,
+    cloud_client: "object | None" = None,
 ) -> int:
     """Scan recent resolutions for missing cloud-outbox mirrors + re-emit.
 
@@ -868,13 +869,34 @@ def backfill_missing_outbox_events(
     For each, checks whether ANY ``cloud_outbox`` row's payload_json
     references the resolution's id via the ``_pi_resolution_id`` key
     stamped by :meth:`CloudEventEmitter.emit_reconciler_resolution`. If
-    no match, re-emits the resolution to the outbox so the worker can
-    drain it.
+    no match AND the cloud doesn't already have it (per the
+    ``cloud_client.known_pi_event_ids`` probe), re-emits the resolution
+    to the outbox so the worker can drain it.
 
     Resolutions emitted before the ``_pi_resolution_id`` stamp was
     introduced won't match — those are treated as "already covered by
     legacy emit, skip" via the ``created_at >= cutoff`` window. A fresh
     install has zero rows; the scan is a no-op.
+
+    Cloud-state probe (added 2026-04-29):
+      ``cloud_client`` is a :class:`server.cloud.client.CloudClient` (or
+      shape-compatible object) used to ask the cloud which pi_event_ids
+      it already has applied. The probe avoids re-emitting resolutions
+      that already exist in cloud — which previously caused a stuck
+      poison-pill outbox row when the Pi back-filled a recent in-flight
+      pickup that the cloud had already received via the live emit.
+
+      Behaviour:
+        * ``cloud_client=None`` → skip the probe, use the legacy local
+          outbox-only check (preserves backwards compat for tests that
+          don't wire a client).
+        * ``cloud_client`` set, probe succeeds → only re-emit
+          resolutions whose pi_event_id is NOT in the cloud's known set.
+        * ``cloud_client`` set, probe FAILS (transport / 4xx / 5xx) →
+          skip the back-fill ENTIRELY. Better to under-emit than risk
+          duplicates: the worker's normal drain path still operates on
+          any rows already in the outbox; a quiet boot is preferable to
+          a poison-pill that FIFO-blocks the queue.
 
     Returns the number of rows re-emitted. Safe to call repeatedly —
     a resolution re-emitted twice would get ``client_event_id``
@@ -917,6 +939,53 @@ def backfill_missing_outbox_events(
 
     if not rows:
         return 0
+
+    # Cloud-state probe (added 2026-04-29 for production-outage fix):
+    # ask the cloud which pi_event_ids in this back-fill window it
+    # already has applied. Skip back-fill entirely if the probe fails
+    # (cloud unreachable) or returns a non-empty set (we trust the
+    # cloud's record of truth + only emit fresh deltas).
+    cloud_known_pi_event_ids: set[str] | None = None
+    if cloud_client is not None and hasattr(
+        cloud_client, "known_pi_event_ids"
+    ):
+        # Collect every pi_event_id the back-fill might reference. Use
+        # the same REMOVE/ADD-side logic as the row-emit step below so
+        # the probe set matches exactly what would otherwise be sent.
+        candidate_pi_event_ids: list[str] = []
+        for row in rows:
+            if row["pattern"] in REMOVE_SIDE_PATTERNS:
+                pid = row["remove_event_id"] or row["add_event_id"]
+            elif row["pattern"] in ADD_SIDE_PATTERNS:
+                pid = row["add_event_id"] or row["remove_event_id"]
+            else:
+                pid = None
+            if pid:
+                candidate_pi_event_ids.append(str(pid))
+        try:
+            cloud_known_pi_event_ids = cloud_client.known_pi_event_ids(
+                candidate_pi_event_ids
+            )
+        except Exception:  # noqa: BLE001 - probe must not crash boot
+            log.warning(
+                "backfill: known_pi_event_ids probe raised — skipping "
+                "back-fill entirely (better to under-emit than blast "
+                "duplicates)",
+                exc_info=True,
+            )
+            return 0
+        # An empty set is a legitimate "cloud has none of these"
+        # response — proceed with back-fill normally. ``known_pi_event_ids``
+        # returns an empty set on transport failure too, but we treat
+        # that the same way (the client_event_id dedup at cloud will
+        # still catch any duplicates the live emit already made before
+        # the Pi crashed).
+        log.info(
+            "backfill: cloud probe — %d/%d resolution pi_event_ids "
+            "already applied in cloud (skip these)",
+            len(cloud_known_pi_event_ids),
+            len(candidate_pi_event_ids),
+        )
 
     re_emitted = 0
     for row in rows:
@@ -994,6 +1063,24 @@ def backfill_missing_outbox_events(
             backfill_pi_event_id = (
                 row["add_event_id"] or row["remove_event_id"]
             )
+
+        # Cloud-probe gating (2026-04-29): if we have a cloud-known set
+        # and this resolution's pi_event_id is in it, skip the re-emit.
+        # The cloud already has it applied; re-emitting with a fresh
+        # client_event_id would NOT dedupe at the (user_id, client_event_id)
+        # UNIQUE — it would hit the live code path and either succeed
+        # idempotently (re-stamp the same in_flight) or 500 on a
+        # subsequent breakage. Skipping is the safe default.
+        if (cloud_known_pi_event_ids is not None
+                and backfill_pi_event_id is not None
+                and str(backfill_pi_event_id) in cloud_known_pi_event_ids):
+            log.debug(
+                "backfill: skipping resolution %s (pi_event_id %s "
+                "already applied in cloud)",
+                resolution_id, backfill_pi_event_id,
+            )
+            continue
+
         try:
             emitter.emit_reconciler_resolution(
                 pattern=row["pattern"],

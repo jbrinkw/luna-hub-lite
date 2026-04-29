@@ -38,6 +38,31 @@ MAX_POLL_INTERVAL_S = 300.0  # 5-minute backoff ceiling during total outage
 OUTBOX_DRAIN_BATCH = 50
 RETRY_WARN_ATTEMPT_THRESHOLD = 3
 
+# Dead-letter threshold — after N consecutive transient failures (5xx,
+# auth, network) on the same outbox row, flag it ``status='dead'`` so
+# the drainer steps over it and downstream rows can land. Without this
+# guarantee, a single poison-pill event (cloud schema drift, rare RPC
+# bug) FIFO-blocks every row behind it indefinitely.
+#
+# 2026-04-29 production outage: outbox 97 racked up 10 consecutive 500s
+# (function-overload ambiguity) — rows 98 + 99 were the user's actual
+# return chain and were stuck behind it. With this threshold, row 97
+# would have been dead-lettered after the 10th attempt and rows 98 + 99
+# would have drained normally on the next tick. The operator inspects
+# dead rows manually via the /admin/dead-letter UI.
+#
+# N=10 chosen to balance:
+#   * low enough that a single broken event clears the queue within
+#     ~100s (10 attempts × ~10s base-poll-interval after backoff
+#     ramp-up) instead of multi-day stalls.
+#   * high enough that legitimate transient flakes (cloud restart, DNS
+#     blip, Pi clock skew briefly tripping the 422 'occurred_at out of
+#     range' check) still resolve themselves before the row is dead-
+#     lettered. Worst-case cloud-restart lasts ~30s; with the 5-minute
+#     backoff cap we get >10 chances spread over ~30 minutes before
+#     dead-lettering.
+DEAD_LETTER_ATTEMPT_THRESHOLD = 10
+
 # Backlog WARN threshold — above this, a non-empty outbox on every tick
 # promotes the "pending=N" log line to WARNING so operators notice a
 # sustained outage in the nightly log review.
@@ -178,7 +203,7 @@ class CloudWorker(threading.Thread):
         the drain still runs this tick.
         """
         had_error = False
-        heartbeat_failed = False  # specifically: the POST itself errored
+        heartbeat_failed = False  # specifically: a TRANSPORT-level POST failure
 
         # 1. Heartbeat. The body is assembled by the caller's provider
         # so we don't couple to app-state tables here.
@@ -194,13 +219,13 @@ class CloudWorker(threading.Thread):
                 self._client.post("/heartbeat", body)
             except CloudError as exc:
                 had_error = True
-                heartbeat_failed = True
                 # Persistent auth failure (401/403) means the device's
                 # import key is broken. Every subsequent event will
                 # queue forever with no drainer until an operator
                 # rotates/fixes the key. Log at ERROR so this shows up
                 # in nightly log review rather than drowning in INFO.
                 if exc.status_code in HEARTBEAT_AUTH_FAILURE_CODES:
+                    heartbeat_failed = True
                     log.error(
                         "cloud-worker: heartbeat AUTH FAILURE (%s): %s "
                         "— check CLOUD_IMPORT_KEY; events will queue "
@@ -208,17 +233,29 @@ class CloudWorker(threading.Thread):
                         exc.status_code, exc.body[:200],
                     )
                 elif exc.status_code < 500:
-                    # Other 4xx (e.g. 400 malformed body): operator
-                    # signal; warn but not error. A transient 408/429
-                    # falls here too — backoff will throttle retries.
+                    # Other 4xx (e.g. 400 malformed body, 408/429): the
+                    # heartbeat BODY is rejected, but the /event endpoint
+                    # is reachable and unrelated. Don't block the drain
+                    # over a heartbeat-shape problem — the queue would
+                    # stall indefinitely if (say) a registry scale kind
+                    # is unsupported by the cloud validator.
+                    # 2026-04-29 production outage repro: a stale Pi
+                    # registry entry with kind='single_item' tripped
+                    # cloud's heartbeat validator with 400 'invalid
+                    # kind' on every tick → drain was skipped → user's
+                    # in_flight_return event sat in the outbox forever.
                     log.warning(
-                        "cloud-worker: heartbeat rejected by cloud (%s): %s",
+                        "cloud-worker: heartbeat rejected by cloud (%s) "
+                        "— continuing with drain: %s",
                         exc.status_code, exc.body[:200],
                     )
+                    # heartbeat_failed stays False — drain proceeds.
                 else:
-                    # 5xx is a cloud-side problem. Still WARN so
-                    # operators see a persistent outage, but it's not
-                    # an auth problem on the Pi.
+                    # 5xx is a cloud-side problem (likely shared with
+                    # /event). Skip drain to avoid burning attempts on
+                    # rows that will fail too — the adaptive backoff is
+                    # the single throttle path during outages.
+                    heartbeat_failed = True
                     log.warning(
                         "cloud-worker: heartbeat 5xx from cloud (%s): %s",
                         exc.status_code, exc.body[:200],
@@ -289,13 +326,33 @@ class CloudWorker(threading.Thread):
                         )
                     else:
                         # 401/403/408/422/429/5xx and everything else
-                        # (other than the non-retryable set) — transient,
-                        # bump attempts and let the row stay pending.
-                        outbox.mark_failed(
-                            conn, row.outbox_id,
-                            f"{exc.status_code}: {exc.body[:200]}",
-                        )
+                        # (other than the non-retryable set) — transient.
+                        # Bump attempts and either dead-letter (if past
+                        # the threshold) or leave the row pending.
                         attempts = row.attempts + 1
+                        if attempts >= DEAD_LETTER_ATTEMPT_THRESHOLD:
+                            # Exhausted retry budget — dead-letter so
+                            # downstream rows can drain. Operator must
+                            # manually inspect via /admin/dead-letter
+                            # and either fix-and-retry or accept the
+                            # loss.
+                            outbox.mark_dead_letter(
+                                conn, row.outbox_id,
+                                f"{exc.status_code} after "
+                                f"{attempts} attempts: {exc.body[:200]}",
+                            )
+                            log.error(
+                                "cloud-worker: outbox %d DEAD-LETTERED "
+                                "after %d transient failures (last: "
+                                "%s); skipping to next row. Inspect "
+                                "via /admin/dead-letter.",
+                                row.outbox_id, attempts, exc.status_code,
+                            )
+                        else:
+                            outbox.mark_failed(
+                                conn, row.outbox_id,
+                                f"{exc.status_code}: {exc.body[:200]}",
+                            )
                         # Finding #7: a 401/403 on an /event POST means
                         # the import key is broken and every queued row
                         # will stall until an operator rotates the key.
@@ -315,7 +372,8 @@ class CloudWorker(threading.Thread):
                                 exc.status_code, stalled,
                                 exc.body[:200],
                             )
-                        elif attempts >= RETRY_WARN_ATTEMPT_THRESHOLD:
+                        elif (attempts >= RETRY_WARN_ATTEMPT_THRESHOLD
+                              and attempts < DEAD_LETTER_ATTEMPT_THRESHOLD):
                             log.warning(
                                 "cloud-worker: outbox %d failed %d times: %s",
                                 row.outbox_id, attempts, exc,
@@ -331,11 +389,30 @@ class CloudWorker(threading.Thread):
                     # followed by valid events).
                 except Exception as exc:  # noqa: BLE001 — network/unknown
                     had_error = True
-                    outbox.mark_failed(conn, row.outbox_id, repr(exc))
-                    log.warning(
-                        "cloud-worker: outbox %d raised: %s",
-                        row.outbox_id, exc,
-                    )
+                    attempts = row.attempts + 1
+                    if attempts >= DEAD_LETTER_ATTEMPT_THRESHOLD:
+                        # The row has weathered DEAD_LETTER_ATTEMPT_THRESHOLD
+                        # network errors; if the next row fails too the
+                        # loop will break before bumping its attempts.
+                        # Dead-letter this row so we don't spend another
+                        # threshold-window on it.
+                        outbox.mark_dead_letter(
+                            conn, row.outbox_id,
+                            f"network/unknown after {attempts} "
+                            f"attempts: {exc!r}"[:240],
+                        )
+                        log.error(
+                            "cloud-worker: outbox %d DEAD-LETTERED after "
+                            "%d transient failures (last: %r). Inspect "
+                            "via /admin/dead-letter.",
+                            row.outbox_id, attempts, exc,
+                        )
+                    else:
+                        outbox.mark_failed(conn, row.outbox_id, repr(exc))
+                        log.warning(
+                            "cloud-worker: outbox %d raised: %s",
+                            row.outbox_id, exc,
+                        )
                     # On a network error the next row will almost
                     # certainly fail too — stop draining this tick to
                     # avoid bumping attempts on every row.

@@ -261,3 +261,92 @@ def test_bare_list_response_wrapped_in_dict():
         client = CloudClient("https://x.y/z", "k")
         out = client.get("/weird")
         assert out == {"_list": [{"a": 1}, {"b": 2}]}
+
+
+# ---------------------------------------------------------------------------
+# known_pi_event_ids probe (added 2026-04-29 for backfill safety)
+# ---------------------------------------------------------------------------
+
+
+class TestKnownPiEventIds:
+    """The probe asks cloud which pi_event_ids in a candidate list are
+    already in shelf_event_log. Used by Pi startup back-fill to avoid
+    duplicate-emission. Empty input → empty set fast-path. Cloud error
+    or transport raise → empty set (caller treats as 'skip back-fill')."""
+
+    def test_empty_input_returns_empty_without_calling_cloud(self):
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            out = client.known_pi_event_ids([])
+            assert out == set()
+            session.get.assert_not_called()
+
+    def test_returns_set_from_cloud_known_array(self):
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.get.return_value = _response(
+                json_body={"known": ["uuid-a", "uuid-c"]},
+            )
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            out = client.known_pi_event_ids(["uuid-a", "uuid-b", "uuid-c"])
+            assert out == {"uuid-a", "uuid-c"}
+            # The probe used GET with the comma-joined ids in params.
+            call = session.get.call_args
+            assert call.args[0].endswith("/events-by-pi-id")
+            assert call.kwargs["params"]["pi_event_ids"] == (
+                "uuid-a,uuid-b,uuid-c"
+            )
+
+    def test_cloud_error_returns_empty_set_safely(self):
+        """A 500 / 404 / etc. on the probe must NOT raise — the caller
+        treats empty set as 'skip back-fill', which is the safe default."""
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.get.return_value = _response(
+                ok=False, status_code=500, text="internal error",
+            )
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            out = client.known_pi_event_ids(["uuid-a"])
+            assert out == set()
+
+    def test_network_exception_returns_empty_set(self):
+        """Bare exceptions (DNS / socket / timeout) also collapse to
+        empty set — same caller contract."""
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.get.side_effect = ConnectionError("dns")
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            out = client.known_pi_event_ids(["uuid-a"])
+            assert out == set()
+
+    def test_batches_at_200_per_request(self):
+        """Inputs larger than 200 ids are chunked + the union returned."""
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            # Each call returns the chunk's first id, so the union should
+            # contain one id per chunk.
+            calls: list[list[str]] = []
+
+            def fake_get(*args, **kwargs):
+                params = kwargs.get("params") or {}
+                ids = (params.get("pi_event_ids") or "").split(",")
+                calls.append(ids)
+                return _response(json_body={"known": [ids[0]]})
+            session.get.side_effect = fake_get
+
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            input_ids = [f"uuid-{i}" for i in range(450)]
+            out = client.known_pi_event_ids(input_ids)
+            # 3 chunks (200 + 200 + 50) → 3 calls.
+            assert len(calls) == 3
+            assert len(calls[0]) == 200
+            assert len(calls[1]) == 200
+            assert len(calls[2]) == 50
+            # Union: first id of each chunk.
+            assert out == {"uuid-0", "uuid-200", "uuid-400"}

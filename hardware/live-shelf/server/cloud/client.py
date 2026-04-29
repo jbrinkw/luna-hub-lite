@@ -300,6 +300,61 @@ class CloudClient:
         )
         return self._parse_or_raise(resp)
 
+    def known_pi_event_ids(self, pi_event_ids: list[str]) -> set[str]:
+        """Return the subset of ``pi_event_ids`` the cloud already has.
+
+        Used by ``backfill_missing_outbox_events`` on Pi startup so the
+        scan only re-emits resolutions whose pi_event_id is genuinely
+        missing from cloud — preventing the duplicate-emission bug
+        observed in the 2026-04-29 production outage where the back-
+        fill re-emitted a resolution the cloud had ALREADY applied,
+        producing a stuck poison-pill outbox row that FIFO-blocked the
+        user's actual return event.
+
+        Returns an empty set on:
+          * empty input list (trivial fast-path)
+          * cloud transport / 4xx / 5xx error (caller is expected to
+            treat unreachable cloud as "skip backfill" — better to
+            under-emit than blast duplicates).
+
+        Batches at 200 ids per request (the cloud endpoint's documented
+        cap). Larger inputs are chunked + the union returned.
+        """
+        if not pi_event_ids:
+            return set()
+        BATCH = 200
+        known: set[str] = set()
+        for i in range(0, len(pi_event_ids), BATCH):
+            chunk = pi_event_ids[i:i + BATCH]
+            try:
+                resp = self.get(
+                    "/events-by-pi-id",
+                    params={"pi_event_ids": ",".join(chunk)},
+                )
+            except CloudError as exc:
+                # Operator-fix or transient — don't fail the whole probe.
+                # The caller treats "no signal" as "don't re-emit", which
+                # is the safe default.
+                log.warning(
+                    "cloud-client: known_pi_event_ids probe failed (%s) "
+                    "for batch %d-%d: %s",
+                    exc.status_code, i, i + len(chunk), exc.body[:200],
+                )
+                return set()
+            except Exception:  # noqa: BLE001 — network/DNS/etc.
+                log.warning(
+                    "cloud-client: known_pi_event_ids probe raised "
+                    "for batch %d-%d", i, i + len(chunk),
+                    exc_info=True,
+                )
+                return set()
+            entries = resp.get("known") if isinstance(resp, dict) else None
+            if isinstance(entries, list):
+                for s in entries:
+                    if isinstance(s, str) and s:
+                        known.add(s)
+        return known
+
     def get_active_livetrack_session(self) -> dict | None:
         """Poll for the active LiveTrack Import session for this device.
 

@@ -92,6 +92,7 @@ def make_api_bp(
     delete_lot_fn: Optional[DeleteLotFn] = None,
     delete_usage_fn: Optional[DeleteUsageFn] = None,
     default_camera_device: str = "/dev/video0",
+    cloud_outbox_conn: Optional[Callable[[], Any]] = None,
 ) -> Blueprint:
     """Build the JSON API blueprint.
 
@@ -410,6 +411,68 @@ def make_api_bp(
             log.exception("wipe: session_capture.reset() failed")
         log.warning("admin wipe executed: %s", summary)
         return jsonify({"ok": True, "summary": summary})
+
+    # ----- /api/admin/dead-letter ------------------------------------------
+    #
+    # Dead-letter queue inspection + retry. The cloud worker dead-letters
+    # an outbox row after DEAD_LETTER_ATTEMPT_THRESHOLD consecutive
+    # transient failures so downstream rows can drain. Operators inspect
+    # what's stuck via this endpoint and either accept the loss or fix
+    # the root cause + click "retry" to re-enqueue. See worker.py +
+    # outbox.mark_dead_letter for the full flow.
+
+    @bp.get("/api/admin/dead-letter")
+    def api_admin_dead_letter_list():
+        """Return the dead-lettered + permanently-failed outbox rows."""
+        if cloud_outbox_conn is None:
+            return jsonify({
+                "error": "cloud outbox not configured",
+                "rows": [],
+            }), 501
+        try:
+            from ..cloud import outbox as _ob  # local import — cloud dep optional
+            conn = cloud_outbox_conn()
+            rows = _ob.list_dead_letter(conn, limit=200)
+        except Exception as exc:  # noqa: BLE001 — never crash the route
+            log.exception("dead-letter list failed: %s", exc)
+            return jsonify({"error": "dead-letter list failed", "rows": []}), 500
+        return jsonify({
+            "rows": [
+                {
+                    "outbox_id": r.outbox_id,
+                    "client_event_id": r.client_event_id,
+                    "enqueued_at": r.enqueued_at,
+                    "attempts": r.attempts,
+                    "last_error": r.last_error,
+                    "payload_json": r.payload_json,
+                }
+                for r in rows
+            ],
+        })
+
+    @bp.post("/api/admin/dead-letter/<int:outbox_id>/retry")
+    def api_admin_dead_letter_retry(outbox_id: int):
+        """Clear failed_permanently so the worker re-tries the row.
+
+        Resets ``attempts`` to 0 — without that the row would re-dead-
+        letter on the very next failure. Idempotent: returns 404 when
+        the row isn't currently in the dead-letter bucket.
+        """
+        if cloud_outbox_conn is None:
+            return jsonify({"error": "cloud outbox not configured"}), 501
+        try:
+            from ..cloud import outbox as _ob
+            conn = cloud_outbox_conn()
+            updated = _ob.reset_dead_letter(conn, outbox_id)
+        except Exception as exc:  # noqa: BLE001
+            log.exception("dead-letter retry failed for %d: %s", outbox_id, exc)
+            return jsonify({"error": "dead-letter retry failed"}), 500
+        if not updated:
+            return jsonify({"error": "row not in dead-letter state"}), 404
+        log.warning(
+            "operator retried dead-lettered outbox row %d", outbox_id,
+        )
+        return jsonify({"ok": True, "outbox_id": outbox_id})
 
     # ----- /api/product/<product_id>/tare/arm ------------------------------
     #

@@ -1091,6 +1091,11 @@ class TestEmitHandleMatrixSync:
         # to server/cloud/integration.py).
         "catch_all_first_measurement",
         "catch_all_second_measurement",
+        # Per-lot live-weight observation stream (added 2026-04-29,
+        # migration 20260429030000_live_weight_sync.sql). Updates only
+        # last_observed_weight_g + last_observed_at — no qty mutation,
+        # no food_logs.
+        "live_weight_sync",
     })
 
     # Event kinds emitted by dedicated helper methods that bypass
@@ -1109,6 +1114,8 @@ class TestEmitHandleMatrixSync:
         # emit_catch_all_first_measurement / _second_measurement
         "catch_all_first_measurement",
         "catch_all_second_measurement",
+        # emit_live_weight_sync → live_weight_sync (per-lot weight stream)
+        "live_weight_sync",
     })
 
     def test_every_pattern_map_value_is_a_valid_cloud_event_kind(self):
@@ -1215,3 +1222,228 @@ class TestEmitHandleMatrixSync:
             f"test has {self.CLOUD_VALID_EVENT_KINDS!r}; edge fn has "
             f"{literals!r}. Sync the test mirror to the edge fn."
         )
+
+
+# ---------------------------------------------------------------------------
+# Backfill probe (Problem C from 2026-04-29 production outage)
+# ---------------------------------------------------------------------------
+
+
+class TestBackfillProbe:
+    """``backfill_missing_outbox_events`` accepts a ``cloud_client`` arg
+    and uses its ``known_pi_event_ids`` method to skip resolutions the
+    cloud already has applied. This prevents the duplicate-emission bug
+    that produced a stuck poison-pill outbox row in the 2026-04-29
+    production outage.
+
+    Probe semantics:
+      * cloud_client=None       → legacy local-only check (back-compat).
+      * probe returns ids set   → re-emit only resolutions whose
+                                  pi_event_id is NOT in the set.
+      * probe returns empty set → all candidates are missing from cloud,
+                                  re-emit every one.
+      * probe raises            → skip the entire back-fill (better to
+                                  under-emit than blast duplicates).
+    """
+
+    def test_probe_skips_already_applied_resolutions(
+        self, conn, seed_session, seed_product, seed_lot,
+    ):
+        """A resolution whose pi_event_id is in the cloud-known set is
+        NOT re-emitted to the outbox."""
+        from server.cloud.integration import backfill_missing_outbox_events
+        from server.storage.models import SessionResolutionIn
+        from unittest.mock import MagicMock
+
+        # Seed a remove event + a use_return_consumed resolution.
+        event = storage_repo.record_scale_event(
+            conn,
+            ScaleEventIn(
+                session_id=seed_session,
+                ts="2026-04-19T15:00:00.000Z",
+                delta_g=-100.0,
+                before_weight_g=200.0,
+                after_weight_g=100.0,
+                direction="remove",
+                classification=None,
+                classifier_status="classified",
+            ),
+        )
+        storage_repo.write_resolution(
+            conn,
+            SessionResolutionIn(
+                session_id=seed_session,
+                pattern="use_return_consumed",
+                lot_id=seed_lot,
+                consumed_g=42.5,
+                remove_event_id=event.event_id,
+            ),
+        )
+
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cloud_client = MagicMock()
+        # Cloud already has the event_id — probe returns it.
+        cloud_client.known_pi_event_ids.return_value = {event.event_id}
+
+        count = backfill_missing_outbox_events(
+            conn, emitter,
+            window_hours=168,
+            cloud_client=cloud_client,
+        )
+        assert count == 0, (
+            "resolution must be skipped because cloud already has it"
+        )
+        assert conn.execute(
+            "SELECT COUNT(*) FROM cloud_outbox"
+        ).fetchone()[0] == 0
+        # Probe was actually called with the candidate set.
+        cloud_client.known_pi_event_ids.assert_called_once()
+        called_with = cloud_client.known_pi_event_ids.call_args.args[0]
+        assert event.event_id in called_with
+
+    def test_probe_re_emits_when_event_id_missing_from_cloud(
+        self, conn, seed_session, seed_product, seed_lot,
+    ):
+        """A resolution whose pi_event_id is NOT in the cloud-known set
+        IS re-emitted to the outbox — the legitimate use case."""
+        from server.cloud.integration import backfill_missing_outbox_events
+        from server.storage.models import SessionResolutionIn
+        from unittest.mock import MagicMock
+
+        event = storage_repo.record_scale_event(
+            conn,
+            ScaleEventIn(
+                session_id=seed_session,
+                ts="2026-04-19T15:00:00.000Z",
+                delta_g=-100.0,
+                before_weight_g=200.0,
+                after_weight_g=100.0,
+                direction="remove",
+                classification=None,
+                classifier_status="classified",
+            ),
+        )
+        storage_repo.write_resolution(
+            conn,
+            SessionResolutionIn(
+                session_id=seed_session,
+                pattern="use_return_consumed",
+                lot_id=seed_lot,
+                consumed_g=42.5,
+                remove_event_id=event.event_id,
+            ),
+        )
+
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cloud_client = MagicMock()
+        # Cloud has no record of this event — empty set.
+        cloud_client.known_pi_event_ids.return_value = set()
+
+        count = backfill_missing_outbox_events(
+            conn, emitter,
+            window_hours=168,
+            cloud_client=cloud_client,
+        )
+        assert count == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM cloud_outbox"
+        ).fetchone()[0] == 1
+
+    def test_probe_failure_skips_backfill_entirely(
+        self, conn, seed_session, seed_product, seed_lot,
+    ):
+        """If the probe raises (cloud unreachable), back-fill must
+        return 0 without re-emitting anything. Better to under-emit
+        than blast duplicates that could re-introduce the production
+        outage."""
+        from server.cloud.integration import backfill_missing_outbox_events
+        from server.storage.models import SessionResolutionIn
+        from unittest.mock import MagicMock
+
+        event = storage_repo.record_scale_event(
+            conn,
+            ScaleEventIn(
+                session_id=seed_session,
+                ts="2026-04-19T15:00:00.000Z",
+                delta_g=-100.0,
+                before_weight_g=200.0,
+                after_weight_g=100.0,
+                direction="remove",
+                classification=None,
+                classifier_status="classified",
+            ),
+        )
+        storage_repo.write_resolution(
+            conn,
+            SessionResolutionIn(
+                session_id=seed_session,
+                pattern="use_return_consumed",
+                lot_id=seed_lot,
+                consumed_g=42.5,
+                remove_event_id=event.event_id,
+            ),
+        )
+
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cloud_client = MagicMock()
+        cloud_client.known_pi_event_ids.side_effect = ConnectionError(
+            "cloud unreachable"
+        )
+
+        count = backfill_missing_outbox_events(
+            conn, emitter,
+            window_hours=168,
+            cloud_client=cloud_client,
+        )
+        assert count == 0, (
+            "probe failure must skip back-fill — better to under-emit "
+            "than risk duplicates"
+        )
+        assert conn.execute(
+            "SELECT COUNT(*) FROM cloud_outbox"
+        ).fetchone()[0] == 0
+
+    def test_probe_none_falls_back_to_legacy_local_only(
+        self, conn, seed_session, seed_product, seed_lot,
+    ):
+        """When ``cloud_client=None`` is passed (or the kwarg is omitted),
+        the back-fill skips the probe entirely and uses the legacy
+        local-outbox-only check. Preserves backwards compat for tests
+        that don't wire a client."""
+        from server.cloud.integration import backfill_missing_outbox_events
+        from server.storage.models import SessionResolutionIn
+
+        event = storage_repo.record_scale_event(
+            conn,
+            ScaleEventIn(
+                session_id=seed_session,
+                ts="2026-04-19T15:00:00.000Z",
+                delta_g=-100.0,
+                before_weight_g=200.0,
+                after_weight_g=100.0,
+                direction="remove",
+                classification=None,
+                classifier_status="classified",
+            ),
+        )
+        storage_repo.write_resolution(
+            conn,
+            SessionResolutionIn(
+                session_id=seed_session,
+                pattern="use_return_consumed",
+                lot_id=seed_lot,
+                consumed_g=42.5,
+                remove_event_id=event.event_id,
+            ),
+        )
+
+        emitter = CloudEventEmitter(conn, enabled=True)
+        # No cloud_client → legacy behaviour: re-emit because the
+        # outbox doesn't contain the resolution.
+        count = backfill_missing_outbox_events(
+            conn, emitter, window_hours=168,
+        )
+        assert count == 1
+        assert conn.execute(
+            "SELECT COUNT(*) FROM cloud_outbox"
+        ).fetchone()[0] == 1

@@ -1010,3 +1010,250 @@ class TestAppliedFalseInspection:
         ).fetchone()
         assert row["sent_at"] is not None  # marked sent
         assert row["failed_permanently"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Dead-letter (Problem B from 2026-04-29 production outage)
+# ---------------------------------------------------------------------------
+
+
+from server.cloud.worker import DEAD_LETTER_ATTEMPT_THRESHOLD  # noqa: E402
+
+
+class TestDeadLetter:
+    """A row that hits :data:`DEAD_LETTER_ATTEMPT_THRESHOLD` consecutive
+    *transient* failures (5xx, 401/403, network) is dead-lettered so
+    downstream rows can drain. Distinct from
+    :func:`mark_permanent_failure` (400/404/409 — payload-shape problems
+    that the cloud explicitly says won't ever succeed).
+
+    Production repro: outbox row 97 returned 500 on every retry due to
+    a function-overload ambiguity — rows 98 + 99 (the user's actual
+    return event) sat in FIFO behind it for hours. With dead-lettering,
+    row 97 is flagged after 10 attempts and rows 98 + 99 drain on the
+    next tick.
+    """
+
+    def test_5xx_dead_letters_after_threshold(
+        self, fake_client, conn, caplog,
+    ):
+        """Pin the threshold behaviour: row stays pending up to N-1
+        attempts, then dead-lettered on attempt N."""
+        import logging
+        outbox.enqueue_event(conn, {"n": 1})
+
+        def post_side_effect(path, body):
+            if path == "/event":
+                raise CloudError(500, "server error")
+            return {}
+        fake_client.post.side_effect = post_side_effect
+
+        w = _mk_worker(fake_client, conn)
+
+        # Tick threshold-1 times — row should stay pending+retryable.
+        for i in range(DEAD_LETTER_ATTEMPT_THRESHOLD - 1):
+            w.tick()
+            row = conn.execute(
+                "SELECT attempts, failed_permanently, sent_at "
+                "FROM cloud_outbox"
+            ).fetchone()
+            assert row["failed_permanently"] == 0, (
+                f"row dead-lettered too early at attempt {row['attempts']}"
+            )
+            assert row["sent_at"] is None
+            assert row["attempts"] == i + 1
+
+        # Final tick crosses the threshold → dead-letter.
+        with caplog.at_level(logging.DEBUG, logger="server.cloud.worker"):
+            w.tick()
+        row = conn.execute(
+            "SELECT attempts, failed_permanently, last_error FROM cloud_outbox"
+        ).fetchone()
+        assert row["failed_permanently"] == 1, (
+            "row should be dead-lettered after threshold reached"
+        )
+        assert row["attempts"] == DEAD_LETTER_ATTEMPT_THRESHOLD
+        assert "DEAD_LETTER:" in (row["last_error"] or "")
+        # Logged at ERROR with the explicit dead-letter marker so a
+        # nightly log review surfaces it.
+        dl_records = [
+            r for r in caplog.records
+            if r.name == "server.cloud.worker"
+            and "DEAD-LETTERED" in r.message
+        ]
+        assert len(dl_records) == 1
+        assert dl_records[0].levelname == "ERROR"
+
+    def test_dead_letter_skips_to_next_row(self, fake_client, conn):
+        """The CRITICAL property: once a row is dead-lettered, the
+        worker keeps draining downstream rows on the next tick. Without
+        this, dead-lettering is just slower beating-on-it.
+
+        Mirrors the production repro: row 1 = poison-pill 500, rows 2+3
+        = legitimate events. After dead-lettering row 1, rows 2+3 drain.
+        """
+        # Row 1 — poison pill that always 500s.
+        outbox.enqueue_event(conn, {"poison": True})
+        # Rows 2+3 — would-be-successful events.
+        outbox.enqueue_event(conn, {"good": 1})
+        outbox.enqueue_event(conn, {"good": 2})
+
+        # Track which payload bodies got POSTed. Row 1 always 500s; rows
+        # 2+3 always succeed.
+        def post_side_effect(path, body):
+            if path == "/event" and body.get("poison"):
+                raise CloudError(500, "poison")
+            return {}
+        fake_client.post.side_effect = post_side_effect
+
+        w = _mk_worker(fake_client, conn)
+
+        # Burn through enough ticks to dead-letter row 1.
+        for _ in range(DEAD_LETTER_ATTEMPT_THRESHOLD):
+            w.tick()
+
+        # After dead-letter: row 1 should be flagged, rows 2+3 still
+        # pending (drain stops on first /event error per the worker's
+        # break-on-network-error logic — but on the NEXT tick it should
+        # skip row 1 and drain 2+3).
+        rows = conn.execute(
+            "SELECT outbox_id, sent_at, failed_permanently FROM cloud_outbox "
+            "ORDER BY outbox_id"
+        ).fetchall()
+        assert rows[0]["failed_permanently"] == 1, "row 1 dead-lettered"
+        # Now another tick — drainer must skip row 1 (not in list_pending)
+        # and process rows 2+3.
+        w.tick()
+        rows = conn.execute(
+            "SELECT outbox_id, sent_at, failed_permanently FROM cloud_outbox "
+            "ORDER BY outbox_id"
+        ).fetchall()
+        assert rows[0]["failed_permanently"] == 1
+        assert rows[1]["sent_at"] is not None, "row 2 should drain"
+        assert rows[2]["sent_at"] is not None, "row 3 should drain"
+
+    def test_400_does_NOT_count_toward_dead_letter(self, fake_client, conn):
+        """Non-retryable 4xx (400/404/409) flag ``failed_permanently``
+        immediately on attempt 1 via the existing ``mark_permanent_failure``
+        path — they don't accumulate dead-letter attempts. This test
+        pins that 400 doesn't go through the dead-letter branch (the
+        permanent-failure code path is unchanged)."""
+        outbox.enqueue_event(conn, {"n": 1})
+
+        def post_side_effect(path, body):
+            if path == "/event":
+                raise CloudError(400, "malformed")
+            return {}
+        fake_client.post.side_effect = post_side_effect
+
+        w = _mk_worker(fake_client, conn)
+        w.tick()
+        row = conn.execute(
+            "SELECT attempts, failed_permanently, last_error FROM cloud_outbox"
+        ).fetchone()
+        assert row["failed_permanently"] == 1
+        assert row["attempts"] == 1, "attempt 1 → permanent (no dead-letter ramp)"
+        # Specifically NOT the dead-letter prefix.
+        assert "DEAD_LETTER:" not in (row["last_error"] or "")
+
+    def test_network_error_dead_letters_after_threshold(
+        self, fake_client, conn,
+    ):
+        """ConnectionError / DNS / socket — same threshold semantics as
+        5xx. Different code path (the ``except Exception`` branch) so
+        worth a separate pin to prevent regression."""
+        outbox.enqueue_event(conn, {"n": 1})
+
+        # Heartbeat passes (returns dict); /event raises ConnectionError.
+        def post_side_effect(path, body):
+            if path == "/event":
+                raise ConnectionError("dns")
+            return {}
+        fake_client.post.side_effect = post_side_effect
+
+        w = _mk_worker(fake_client, conn)
+        # Each tick raises ConnectionError on row 1, breaks the drain
+        # loop, and bumps the row's attempts by 1. After threshold ticks
+        # the row gets dead-lettered.
+        for _ in range(DEAD_LETTER_ATTEMPT_THRESHOLD):
+            w.tick()
+        row = conn.execute(
+            "SELECT attempts, failed_permanently, last_error FROM cloud_outbox"
+        ).fetchone()
+        assert row["failed_permanently"] == 1
+        assert "DEAD_LETTER:" in (row["last_error"] or "")
+        assert "network/unknown" in (row["last_error"] or "")
+
+
+# ---------------------------------------------------------------------------
+# Heartbeat-failure no-longer-blocks-drain on 4xx (production-outage fix)
+# ---------------------------------------------------------------------------
+
+
+class TestHeartbeat4xxDoesNotSkipDrain:
+    """A 400/422/429 on /heartbeat must NOT skip the drain phase.
+
+    2026-04-29 production outage: a stale Pi registry kind triggered
+    a 400 'invalid kind' on every heartbeat. The old code treated that
+    as a global outage signal and skipped drain → outbox stalled
+    indefinitely. New behaviour: 4xx heartbeat = body-validation
+    problem, /event endpoint is unrelated, drain proceeds.
+
+    5xx + auth (401/403) + network errors keep their old skip-drain
+    semantics because they ARE global signals.
+    """
+
+    def test_400_heartbeat_drain_still_runs(self, fake_client, conn):
+        """A row in the outbox should drain even when heartbeat 400s."""
+        outbox.enqueue_event(conn, {"n": 1})
+
+        # Heartbeat 400s; /event returns 200.
+        def post_side_effect(path, body):
+            if path == "/heartbeat":
+                raise CloudError(400, "invalid kind")
+            return {}
+        fake_client.post.side_effect = post_side_effect
+
+        w = _mk_worker(fake_client, conn)
+        w.tick()
+
+        # /event was called and the row was marked sent.
+        paths = [c.args[0] for c in fake_client.post.call_args_list]
+        assert "/heartbeat" in paths
+        assert "/event" in paths
+        row = conn.execute(
+            "SELECT sent_at FROM cloud_outbox"
+        ).fetchone()
+        assert row["sent_at"] is not None, (
+            "drain must run despite heartbeat 400 — production outage repro"
+        )
+
+    def test_500_heartbeat_skips_drain(self, fake_client, conn):
+        """5xx is a cloud-side signal — every /event will fail too. Skip
+        drain so the adaptive backoff is the throttle (preserves the
+        original 'don't punish individual rows for global outages'
+        behaviour)."""
+        outbox.enqueue_event(conn, {"n": 1})
+        fake_client.post.side_effect = CloudError(500, "internal")
+        w = _mk_worker(fake_client, conn)
+        w.tick()
+        paths = [c.args[0] for c in fake_client.post.call_args_list]
+        assert paths == ["/heartbeat"]  # drain NOT attempted
+        row = conn.execute(
+            "SELECT attempts, sent_at FROM cloud_outbox"
+        ).fetchone()
+        assert row["attempts"] == 0
+        assert row["sent_at"] is None
+
+    def test_401_heartbeat_skips_drain(self, fake_client, conn):
+        """Auth failure → every /event will 401 too. Skip drain."""
+        outbox.enqueue_event(conn, {"n": 1})
+        fake_client.post.side_effect = CloudError(401, "bad key")
+        w = _mk_worker(fake_client, conn)
+        w.tick()
+        paths = [c.args[0] for c in fake_client.post.call_args_list]
+        assert paths == ["/heartbeat"]
+        row = conn.execute(
+            "SELECT attempts FROM cloud_outbox"
+        ).fetchone()
+        assert row["attempts"] == 0

@@ -594,3 +594,124 @@ def test_trim_oldest_over_is_single_statement_transaction(conn):
     trim_sql_statements = [s for s in calls if "cloud_outbox" in s]
     assert len(trim_sql_statements) == 1
     assert trim_sql_statements[0].lstrip().upper().startswith("DELETE")
+
+
+# ---------------------------------------------------------------------------
+# Dead-letter helpers (added 2026-04-29 for Problem B)
+# ---------------------------------------------------------------------------
+
+
+def test_mark_dead_letter_flags_row_with_prefix(conn):
+    """The dead-letter helper sets ``failed_permanently=1`` (same column
+    as ``mark_permanent_failure``) and prefixes ``last_error`` with
+    ``DEAD_LETTER:`` so the operator UI can render the two buckets
+    distinctly without a separate column."""
+    eid = outbox.enqueue_event(conn, {"n": 1})
+    row = conn.execute(
+        "SELECT outbox_id FROM cloud_outbox WHERE client_event_id = ?",
+        (eid,),
+    ).fetchone()
+
+    outbox.mark_dead_letter(conn, row["outbox_id"], "500 after 10 attempts: gone")
+    after = conn.execute(
+        "SELECT failed_permanently, last_error, attempts "
+        "FROM cloud_outbox WHERE outbox_id = ?",
+        (row["outbox_id"],),
+    ).fetchone()
+    assert after["failed_permanently"] == 1
+    assert after["last_error"].startswith("DEAD_LETTER:")
+    assert "500 after 10 attempts" in after["last_error"]
+    assert after["attempts"] == 1  # incremented
+
+
+def test_mark_dead_letter_excludes_row_from_list_pending(conn):
+    """A dead-lettered row must not appear in the drainer's pending
+    scan — that's how the worker steps past poison-pill rows so
+    downstream events drain."""
+    e1 = outbox.enqueue_event(conn, {"n": 1})
+    e2 = outbox.enqueue_event(conn, {"n": 2})
+    r1 = conn.execute(
+        "SELECT outbox_id FROM cloud_outbox WHERE client_event_id = ?",
+        (e1,),
+    ).fetchone()
+    outbox.mark_dead_letter(conn, r1["outbox_id"], "exhausted")
+
+    pending = outbox.list_pending(conn, limit=10)
+    pending_ids = {row.client_event_id for row in pending}
+    assert pending_ids == {e2}, (
+        "dead-lettered row must NOT appear in pending — else the worker "
+        "would keep beating on it"
+    )
+
+
+def test_list_dead_letter_returns_dead_rows_newest_first(conn):
+    """The /admin/dead-letter UI lists newest-first so operators triage
+    the most recent breakage."""
+    e1 = outbox.enqueue_event(conn, {"n": 1})
+    e2 = outbox.enqueue_event(conn, {"n": 2})
+    e3 = outbox.enqueue_event(conn, {"n": 3})
+    rows = conn.execute(
+        "SELECT outbox_id, client_event_id FROM cloud_outbox ORDER BY outbox_id"
+    ).fetchall()
+    outbox.mark_dead_letter(conn, rows[0]["outbox_id"], "first failure")
+    outbox.mark_dead_letter(conn, rows[2]["outbox_id"], "third failure")
+
+    listed = outbox.list_dead_letter(conn, limit=10)
+    listed_eids = [r.client_event_id for r in listed]
+    assert listed_eids == [e3, e1], "newest-first ordering"
+    assert e2 not in listed_eids  # pending row excluded
+
+
+def test_list_dead_letter_includes_permanent_failure_rows(conn):
+    """Both ``mark_dead_letter`` and ``mark_permanent_failure`` set
+    ``failed_permanently=1``, so the operator UI lists both."""
+    e1 = outbox.enqueue_event(conn, {"n": 1})
+    e2 = outbox.enqueue_event(conn, {"n": 2})
+    rows = conn.execute(
+        "SELECT outbox_id FROM cloud_outbox ORDER BY outbox_id"
+    ).fetchall()
+    outbox.mark_dead_letter(conn, rows[0]["outbox_id"], "exhausted")
+    outbox.mark_permanent_failure(conn, rows[1]["outbox_id"], "400 malformed")
+
+    listed = outbox.list_dead_letter(conn, limit=10)
+    eids = {r.client_event_id for r in listed}
+    assert eids == {e1, e2}
+
+
+def test_reset_dead_letter_clears_flag_and_attempts(conn):
+    """The /admin/dead-letter retry button clears ``failed_permanently``
+    and resets ``attempts`` so the row gets a fresh threshold budget."""
+    eid = outbox.enqueue_event(conn, {"n": 1})
+    row = conn.execute(
+        "SELECT outbox_id FROM cloud_outbox WHERE client_event_id = ?",
+        (eid,),
+    ).fetchone()
+    outbox.mark_dead_letter(conn, row["outbox_id"], "exhausted")
+    conn.execute(
+        "UPDATE cloud_outbox SET attempts = 25 WHERE outbox_id = ?",
+        (row["outbox_id"],),
+    )
+    conn.commit()
+
+    updated = outbox.reset_dead_letter(conn, row["outbox_id"])
+    assert updated is True
+    after = conn.execute(
+        "SELECT failed_permanently, attempts, last_error "
+        "FROM cloud_outbox WHERE outbox_id = ?",
+        (row["outbox_id"],),
+    ).fetchone()
+    assert after["failed_permanently"] == 0
+    assert after["attempts"] == 0
+    assert after["last_error"] is None
+
+
+def test_reset_dead_letter_returns_false_when_row_already_pending(conn):
+    """Idempotency: resetting a row that isn't dead-lettered returns
+    False (no UPDATE), so the operator UI can show 404 cleanly."""
+    eid = outbox.enqueue_event(conn, {"n": 1})
+    row = conn.execute(
+        "SELECT outbox_id FROM cloud_outbox WHERE client_event_id = ?",
+        (eid,),
+    ).fetchone()
+    updated = outbox.reset_dead_letter(conn, row["outbox_id"])
+    assert updated is False
