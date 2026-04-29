@@ -12,17 +12,29 @@
  *
  * Realtime: subscribes to chefbyte.review_queue postgres_changes so
  * Pi-driven creates + Pi-side resolutions both land live.
+ *
+ * Image rendering (approach (a) — direct LAN fetch):
+ * The Pi serves before/after JPEGs at http://<lan_ip>:8000/event/<event_id>/<frame>.jpg
+ * (see hardware/live-shelf/server/web/routes.py event_image route). The
+ * cloud row's ``images`` JSONB carries Pi-relative paths
+ * (``events/<event_id>/<frame>.jpg``); we look up the device's lan_ip
+ * from chefbyte.live_shelf_devices, validate it via isValidLanIp (XSS
+ * fence), and build absolute URLs. Off-LAN operators silently get a
+ * gray placeholder + tooltip — no cloud storage cost. This matches the
+ * existing EventViewerPage image flow (same pattern, same security
+ * gates).
  */
 
 import { useMemo, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Check, Ban, AlertTriangle } from 'lucide-react';
+import { Check, Ban, AlertTriangle, ImageOff } from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { Alert } from '@/components/ui/Alert';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { isValidLanIp } from '@/components/chefbyte/ScalesTab';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -52,6 +64,41 @@ export interface ReviewRow {
   pi_event_id: string | null;
 }
 
+interface DeviceLite {
+  device_id: string;
+  lan_ip: string | null;
+  last_heartbeat_ts: string | null;
+}
+
+/**
+ * Translate a Pi-relative image path (``events/<event_id>/before.jpg``)
+ * to an absolute URL the browser can fetch from the Pi LAN web server
+ * (``http://<lan_ip>:8000/event/<event_id>/before.jpg``).
+ *
+ * Exported pure for testability — same XSS fence approach as
+ * InventoryPage's review-deep-link helper:
+ *   - lanIp is re-validated via isValidLanIp before interpolation
+ *   - relative path must be ``events/<id>/<frame.jpg>`` shape; anything
+ *     else (absolute URL, ../, control chars) is rejected and the
+ *     caller falls back to the placeholder
+ *
+ * Returns null when either input is unsafe — caller renders a gray
+ * placeholder with the "image unavailable" tooltip.
+ */
+export function buildPiImageUrl(lanIp: string | null, relativePath: string | null): string | null {
+  if (!lanIp || !relativePath) return null;
+  if (!isValidLanIp(lanIp)) return null;
+  // Accept ``events/<event_id>/<filename>`` only. event_id and filename
+  // each must be a single segment with no path traversal characters.
+  // The Pi route allow-lists filenames to {before.jpg, after.jpg,
+  // session.mp4} so any drift here is caught server-side too.
+  const m = /^events\/([A-Za-z0-9._-]+)\/([A-Za-z0-9._-]+)$/.exec(relativePath);
+  if (!m) return null;
+  const eventId = m[1];
+  const filename = m[2];
+  return `http://${lanIp}:8000/event/${encodeURIComponent(eventId)}/${encodeURIComponent(filename)}`;
+}
+
 const KIND_LABELS: Record<ReviewKind, string> = {
   unknown_item_add: 'Unknown item added',
   low_confidence: 'Low-confidence classifier',
@@ -70,8 +117,12 @@ export function ReviewsPage() {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const [overrideText, setOverrideText] = useState<Record<string, string>>({});
+  // Tracks per-image fetch failures so we render a placeholder + tooltip
+  // instead of a broken image icon when the operator is off-LAN.
+  const [imageErrors, setImageErrors] = useState<Record<string, boolean>>({});
 
   const queryKey = useMemo(() => ['chef-reviews', user?.id ?? 'anon'] as const, [user?.id]);
+  const devicesKey = useMemo(() => ['chef-reviews-devices', user?.id ?? 'anon'] as const, [user?.id]);
 
   const { data, isLoading, error } = useQuery({
     queryKey,
@@ -90,6 +141,35 @@ export function ReviewsPage() {
       return (res.data ?? []) as ReviewRow[];
     },
   });
+
+  // Devices: needed to resolve the Pi LAN IP for image URLs. Mirrors the
+  // EventViewerPage pattern — pick the most recently heart-beating device
+  // that has a non-empty lan_ip.
+  const { data: devices } = useQuery({
+    queryKey: devicesKey,
+    enabled: !!user,
+    staleTime: 60_000,
+    queryFn: async (): Promise<DeviceLite[]> => {
+      const res = await chefbyte()
+        .from('live_shelf_devices')
+        .select('device_id, lan_ip, last_heartbeat_ts')
+        .eq('user_id', user!.id);
+      if (res.error) throw res.error;
+      return (res.data ?? []) as DeviceLite[];
+    },
+  });
+
+  const lanIp = useMemo(() => {
+    const list = devices ?? [];
+    const fresh = [...list]
+      .filter((d) => d.lan_ip && d.lan_ip.trim() !== '' && isValidLanIp(d.lan_ip))
+      .sort((a, b) => {
+        const ta = a.last_heartbeat_ts ? new Date(a.last_heartbeat_ts).getTime() : 0;
+        const tb = b.last_heartbeat_ts ? new Date(b.last_heartbeat_ts).getTime() : 0;
+        return tb - ta;
+      });
+    return fresh[0]?.lan_ip ?? null;
+  }, [devices]);
 
   // Realtime push: any Pi-driven create or another-tab resolution
   // refetches the pending list immediately.
@@ -184,6 +264,61 @@ export function ReviewsPage() {
                     <span className="text-sm font-semibold text-text">{KIND_LABELS[row.kind]}</span>
                     <span className="text-xs text-text-tertiary">{new Date(row.created_at).toLocaleString()}</span>
                   </div>
+
+                  {/* Image strip: before/after JPEGs from the Pi LAN web server.
+                      Off-LAN or invalid lan_ip → gray placeholder + tooltip. */}
+                  {Array.isArray(row.images) && row.images.length > 0 ? (
+                    <div
+                      className="mt-2 flex flex-wrap gap-2"
+                      data-testid={`review-images-${row.review_id}`}
+                    >
+                      {row.images.map((relPath, idx) => {
+                        const url = buildPiImageUrl(lanIp, relPath);
+                        const errKey = `${row.review_id}::${idx}`;
+                        const failed = imageErrors[errKey] === true;
+                        const altLabel = relPath.endsWith('after.jpg')
+                          ? 'After'
+                          : relPath.endsWith('before.jpg')
+                            ? 'Before'
+                            : 'Image';
+                        if (!url || failed) {
+                          return (
+                            <div
+                              key={errKey}
+                              className="w-24 h-24 rounded-lg border border-border bg-surface-sunken flex flex-col items-center justify-center text-text-tertiary"
+                              title={
+                                !url
+                                  ? lanIp
+                                    ? 'Image path unavailable'
+                                    : 'Image unavailable off-LAN — open while connected to the Pi network'
+                                  : 'Image unavailable off-LAN'
+                              }
+                              data-testid={`review-image-placeholder-${row.review_id}-${idx}`}
+                            >
+                              <ImageOff className="h-5 w-5" />
+                              <span className="mt-0.5 text-[10px] uppercase tracking-wide">{altLabel}</span>
+                            </div>
+                          );
+                        }
+                        return (
+                          <figure key={errKey} className="flex flex-col items-center">
+                            <img
+                              src={url}
+                              alt={altLabel}
+                              loading="lazy"
+                              className="w-24 h-24 rounded-lg object-cover border border-border bg-surface-sunken"
+                              onError={() => setImageErrors((s) => ({ ...s, [errKey]: true }))}
+                              data-testid={`review-image-${row.review_id}-${idx}`}
+                            />
+                            <figcaption className="mt-0.5 text-[10px] uppercase tracking-wide text-text-tertiary">
+                              {altLabel}
+                            </figcaption>
+                          </figure>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+
                   {row.proposed ? (
                     <pre
                       className="mt-2 max-h-40 overflow-auto rounded bg-surface-sunken p-2 text-xs text-text-secondary whitespace-pre-wrap"
