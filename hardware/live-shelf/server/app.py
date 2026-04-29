@@ -1259,6 +1259,33 @@ def create_app(
     from .shelves import build_registry_from_config as _build_shelf_registry
     _shelf_registry = _build_shelf_registry(cfg)
 
+    # Backfill the local ``scale_pairings`` table from the static
+    # registry so the Pi UI can render every configured scale (live_shelf,
+    # catch_all, live_scale) before the cloud-side wizard or auto-register
+    # ever fires. Without this, the single-track section showed 0 even
+    # when the cloud had a paired ``live_scale`` row, because the Pi's
+    # auto-register path for live_scale ESPs was never implemented (note
+    # the "future single_item" comment in the heartbeat provider).
+    #
+    # Map cloud ``live_scale`` → Pi local ``single_item`` (the Pi schema
+    # CHECK still uses the legacy term; translation point lives in
+    # scale_events.py:3279). INSERT OR IGNORE so a row that already
+    # exists keeps its richer data (product_id, lot_id, last_heartbeat_ts).
+    try:
+        with db_lock:
+            for s in _shelf_registry.values():
+                pi_shelf_id = "single_item" if s.shelf_id == "live_scale" else s.shelf_id
+                conn.execute(
+                    "INSERT OR IGNORE INTO scale_pairings (device_id, shelf_id) "
+                    "VALUES (?, ?)",
+                    (s.device_id, pi_shelf_id),
+                )
+            conn.commit()
+    except sqlite3.OperationalError as exc:
+        # Migrations haven't run / table missing — log once and let the
+        # heartbeat-provider's existing fallback handle the rest.
+        log.warning("registry backfill skipped: %s", exc)
+
     scale_handler = ScaleHandler(
         conn=conn,
         db_lock=db_lock,
