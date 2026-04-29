@@ -214,6 +214,10 @@ COMMIT;
 --   v_meal_product_name := private.generate_meal_product_name(
 --     p_user_id, <base>, v_logical_date);
 -- in 20260424070000_mark_meal_done_atomic.sql.
+--
+-- DISCHARGED by 20260425020000_mark_meal_done_uses_name_helper.sql
+-- (Phase 1 audit finding L8/LOW; original TODO retained for migration-
+-- history archeology — do not edit out of the historical migration).
 BEGIN;
 
 CREATE OR REPLACE FUNCTION private.generate_meal_product_name(

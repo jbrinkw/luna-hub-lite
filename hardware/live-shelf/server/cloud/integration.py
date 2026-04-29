@@ -499,26 +499,17 @@ class CloudEventEmitter:
             )
             return None
 
-        # live_shelf-specific invariant (Phase 1 audit finding L1/HIGH):
-        # the cloud's apply_shelf_event in_flight_pickup branch derives
-        # ``stock_lots.pickup_weight_g = abs(delta_g)`` for live_shelf
-        # rows (migration 20260428050000_pickup_weight_g_for_live_shelf).
-        # If delta_g is zero the cloud's pickup_weight_g stays NULL and
-        # the future TTL-based macro reconciler can't subtract against
-        # the lot's pickup baseline — macros silently drop to zero.
-        # Catch the precondition here rather than after a round trip.
-        if (
-            kind == "live_shelf"
-            and event_kind == "in_flight_pickup"
-            and float(delta_g) == 0.0
-        ):
-            log.warning(
-                "cloud emitter: live_shelf in_flight_pickup with delta_g=0 "
-                "would leave stock_lots.pickup_weight_g NULL; dropping. "
-                "scale_id=%s product_id=%s",
-                scale_id, product_id,
-            )
-            return None
+        # Phase 1 audit finding L1/HIGH (AUDIT_FINDINGS_PHASE1.md):
+        # ``emit_reconciler_resolution`` is the central path for all
+        # live_shelf-emitting resolutions; per-kind invariants for
+        # live_shelf events live HERE rather than in scattered call
+        # sites. Today there are no per-kind invariants to enforce on
+        # live_shelf — in_flight_pickup intentionally allows delta_g=0
+        # (defence-in-depth path; cloud apply_shelf_event guards the
+        # pickup_weight_g assignment with `> 0`). New live_shelf-only
+        # rules (e.g. "all live_shelf consumed events MUST carry
+        # usage_kind") get added below this comment so a single review
+        # surface catches drift.
 
         payload: dict[str, Any] = {
             "scale_id": scale_id,

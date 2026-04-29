@@ -172,25 +172,45 @@ def make_api_bp(
         body = request.get_json(silent=True)
         if not isinstance(body, dict):
             return jsonify({"error": "body must be a JSON object"}), 400
+
+        # Persistence contract — Phase 1 audit finding L8/MEDIUM
+        # (AUDIT_FINDINGS_PHASE1.md): the current host-supplied
+        # ``update_config`` is in-memory only. Changes apply to the
+        # running process but do NOT survive a restart. The audit's
+        # preferred fix is "return 501 if persist=True is requested
+        # without a backing patcher, so callers can't silently expect
+        # persistence". A meta-key ``_persist`` in the request body is
+        # treated as the explicit persist hint — when it is true and
+        # we don't have a disk-backed patcher, we 501 with a clear
+        # error message rather than logging a warning + lying about
+        # the result.
+        wants_persist = bool(body.pop("_persist", False))
+        if wants_persist:
+            return (
+                jsonify({
+                    "error": "config persistence is not implemented; the "
+                             "in-memory patcher cannot honor _persist=true. "
+                             "Edit config.json directly and restart the "
+                             "service for durable changes.",
+                    "persisted": False,
+                }),
+                501,
+            )
+
         try:
             updated = update_config(body)
         except ValueError as exc:
             return jsonify({"error": str(exc)}), 400
-        # Persistence contract: the current host-supplied update_config is
-        # in-memory only — changes apply to the running process but do NOT
-        # survive a restart. Surface that to the client explicitly so the UI
-        # can show a "changes are session-only" notice if desired.
-        # TODO(persist): when the host wires up a disk-backed patcher (e.g.
-        # writing to config.json), switch to calling update_config(body,
-        # persist=True) and propagate its truthy return value into
-        # `persisted`. Until then, always False.
+        # Surface the in-memory-only nature of the write to the client
+        # explicitly so the UI can show a "changes are session-only"
+        # notice. The WARNING log entry mirrors what the deferred-fix
+        # backlog tracks.
         persisted = False
-        if not persisted:
-            log.warning(
-                "config update is in-memory only; changes will not survive "
-                "a restart (keys=%s)",
-                sorted(body.keys()),
-            )
+        log.warning(
+            "config update is in-memory only; changes will not survive "
+            "a restart (keys=%s)",
+            sorted(body.keys()),
+        )
         response: dict[str, Any] = {"ok": True, "persisted": persisted}
         # Preserve the existing contract: the updated config dict is spread
         # into the response so clients that read individual keys keep working.
