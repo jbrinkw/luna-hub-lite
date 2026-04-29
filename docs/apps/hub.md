@@ -31,6 +31,20 @@ Account management, MCP server configuration, and extension management. Minimal 
 - List of available extensions with enable/disable toggles
 - Per-extension settings forms (API credentials, configuration)
 - Extensions can be enabled without credentials — first tool call without credentials returns `isError: true` with instructions to configure in Hub. Credential validation on save is a future feature.
+- **Credentials at rest:** stored in Supabase Vault (pgsodium AEAD). The
+  `hub.extension_settings` row carries only a `vault_secret_id` UUID
+  pointer — never the secret payload. Save flow:
+  `hub.save_extension_credentials(name, json)` calls `vault.create_secret`
+  (or `vault.update_secret` on rotation). Read flow:
+  `hub.get_extension_credentials(name)` for the SPA (auth.uid() check)
+  and `hub.get_extension_credentials_admin(user_id, name)` for the MCP
+  worker (service_role). The `hub.has_extension_credentials(name)`
+  helper is the boolean the UI uses for the "Credentials configured"
+  badge — the browser never sees the decrypted payload.
+- Toggling an extension OFF calls `hub.clear_extension_credentials(name)`
+  which both nulls the pointer AND deletes the underlying vault row.
+  Re-enable forces re-entry (deliberate UX choice — stale tokens
+  outliving a disable is worse than a one-time re-entry friction).
 - "Last 5 MCP calls" tail per extension card (only when enabled + configured): reads from `hub.mcp_tool_logs` filtered by tool-name namespace (`OBSIDIAN_*`, `TODOIST_*`, `HOMEASSISTANT_*`). Each row shows the action (last segment of the tool name), duration, relative time, and a success/fail icon. Tap a row to expand the full tool name + error message. Updates live via Realtime subscription on `hub.mcp_tool_logs`. Empty state: "No calls yet — try asking Claude to use this extension."
 
 ### AI Agent

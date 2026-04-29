@@ -1,8 +1,11 @@
 BEGIN;
 SELECT plan(10);
 
--- Set encryption key for pgp_sym_encrypt/decrypt (session-level)
-SET app.settings.encryption_key = 'test-encryption-key-pgTAP';
+-- Post-Vault migration (20260429160000_extension_credentials_vault.sql):
+-- credentials are stored via vault.create_secret / vault.update_secret
+-- and read back via vault.decrypted_secrets. The legacy
+-- app.settings.encryption_key (used by pgcrypto) is no longer
+-- consulted. Vault keying is managed by Supabase's pgsodium root key.
 
 -- Setup: create two test users
 SELECT tests.create_supabase_user('cred_owner');
@@ -30,14 +33,18 @@ SELECT is(
 );
 
 --------------------------------------------------------------
--- Test 2: credentials are actually encrypted in the table
+-- Test 2: credentials are stored as a vault pointer, not in the row
 --------------------------------------------------------------
-SELECT isnt(
-  (SELECT credentials_encrypted::text FROM hub.extension_settings
+-- Post-Vault: hub.extension_settings.vault_secret_id is a UUID
+-- pointer into vault.secrets. The plaintext can never appear in this
+-- row by construction (the legacy credentials_encrypted column was
+-- dropped in 20260429160000_extension_credentials_vault.sql).
+SELECT matches(
+  (SELECT vault_secret_id::text FROM hub.extension_settings
    WHERE user_id = tests.get_supabase_uid('cred_owner')
      AND extension_name = 'obsidian'),
-  '{"vault_path":"/notes","token":"secret123"}',
-  'Stored credentials are encrypted (not plaintext)'
+  '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+  'Stored credentials reference a vault.secrets UUID, not plaintext'
 );
 
 --------------------------------------------------------------

@@ -74,6 +74,7 @@ export type Database = {
           qty_consumed: number
           source_client_event_id: string | null
           unit: string
+          usage_kind: string | null
           user_id: string
         }
         Insert: {
@@ -89,6 +90,7 @@ export type Database = {
           qty_consumed: number
           source_client_event_id?: string | null
           unit: string
+          usage_kind?: string | null
           user_id: string
         }
         Update: {
@@ -104,6 +106,7 @@ export type Database = {
           qty_consumed?: number
           source_client_event_id?: string | null
           unit?: string
+          usage_kind?: string | null
           user_id?: string
         }
         Relationships: [
@@ -120,6 +123,54 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      live_shelf_device_state_changes: {
+        Row: {
+          became_active: boolean
+          change_id: string
+          change_reason: string | null
+          changed_at: string
+          changed_by: string | null
+          device_id: string
+          user_id: string
+          was_active: boolean
+        }
+        Insert: {
+          became_active: boolean
+          change_id?: string
+          change_reason?: string | null
+          changed_at?: string
+          changed_by?: string | null
+          device_id: string
+          user_id: string
+          was_active: boolean
+        }
+        Update: {
+          became_active?: boolean
+          change_id?: string
+          change_reason?: string | null
+          changed_at?: string
+          changed_by?: string | null
+          device_id?: string
+          user_id?: string
+          was_active?: boolean
+        }
+        Relationships: [
+          {
+            foreignKeyName: "live_shelf_device_state_changes_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_device_history"
+            referencedColumns: ["device_id"]
+          },
+          {
+            foreignKeyName: "live_shelf_device_state_changes_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_devices"
+            referencedColumns: ["device_id"]
           },
         ]
       }
@@ -230,6 +281,13 @@ export type Database = {
             isOneToOne: false
             referencedRelation: "products"
             referencedColumns: ["product_id"]
+          },
+          {
+            foreignKeyName: "livetrack_import_sessions_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_device_history"
+            referencedColumns: ["device_id"]
           },
           {
             foreignKeyName: "livetrack_import_sessions_device_id_fkey"
@@ -492,6 +550,51 @@ export type Database = {
         }
         Relationships: []
       }
+      review_queue: {
+        Row: {
+          created_at: string
+          images: Json | null
+          kind: string
+          pi_event_id: string | null
+          pi_review_id: string
+          pi_session_id: string | null
+          proposed: Json | null
+          resolved_at: string | null
+          review_id: string
+          status: string
+          user_id: string
+          user_response: Json | null
+        }
+        Insert: {
+          created_at?: string
+          images?: Json | null
+          kind: string
+          pi_event_id?: string | null
+          pi_review_id: string
+          pi_session_id?: string | null
+          proposed?: Json | null
+          resolved_at?: string | null
+          review_id?: string
+          status?: string
+          user_id: string
+          user_response?: Json | null
+        }
+        Update: {
+          created_at?: string
+          images?: Json | null
+          kind?: string
+          pi_event_id?: string | null
+          pi_review_id?: string
+          pi_session_id?: string | null
+          proposed?: Json | null
+          resolved_at?: string | null
+          review_id?: string
+          status?: string
+          user_id?: string
+          user_response?: Json | null
+        }
+        Relationships: []
+      }
       scale_pairings: {
         Row: {
           device_id: string
@@ -527,6 +630,13 @@ export type Database = {
           user_id?: string
         }
         Relationships: [
+          {
+            foreignKeyName: "scale_pairings_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_device_history"
+            referencedColumns: ["device_id"]
+          },
           {
             foreignKeyName: "scale_pairings_device_id_fkey"
             columns: ["device_id"]
@@ -598,6 +708,13 @@ export type Database = {
             foreignKeyName: "shelf_event_log_device_id_fkey"
             columns: ["device_id"]
             isOneToOne: false
+            referencedRelation: "live_shelf_device_history"
+            referencedColumns: ["device_id"]
+          },
+          {
+            foreignKeyName: "shelf_event_log_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
             referencedRelation: "live_shelf_devices"
             referencedColumns: ["device_id"]
           },
@@ -648,6 +765,8 @@ export type Database = {
           expires_on: string | null
           in_flight_kind: string | null
           in_flight_since: string | null
+          last_observed_at: string | null
+          last_observed_weight_g: number | null
           last_update_source: string | null
           last_update_ts: string | null
           location_id: string
@@ -665,6 +784,8 @@ export type Database = {
           expires_on?: string | null
           in_flight_kind?: string | null
           in_flight_since?: string | null
+          last_observed_at?: string | null
+          last_observed_weight_g?: number | null
           last_update_source?: string | null
           last_update_ts?: string | null
           location_id: string
@@ -682,6 +803,8 @@ export type Database = {
           expires_on?: string | null
           in_flight_kind?: string | null
           in_flight_since?: string | null
+          last_observed_at?: string | null
+          last_observed_weight_g?: number | null
           last_update_source?: string | null
           last_update_ts?: string | null
           location_id?: string
@@ -770,9 +893,46 @@ export type Database = {
         }
         Relationships: []
       }
+      walmart_quota: {
+        Row: {
+          quota_date: string
+          updated_at: string
+          used: number
+          user_id: string
+        }
+        Insert: {
+          quota_date: string
+          updated_at?: string
+          used?: number
+          user_id: string
+        }
+        Update: {
+          quota_date?: string
+          updated_at?: string
+          used?: number
+          user_id?: string
+        }
+        Relationships: []
+      }
     }
     Views: {
-      [_ in never]: never
+      live_shelf_device_history: {
+        Row: {
+          became_active: boolean | null
+          change_id: string | null
+          change_reason: string | null
+          changed_at: string | null
+          changed_by: string | null
+          current_is_active: boolean | null
+          device_id: string | null
+          device_name: string | null
+          history_seq: number | null
+          last_heartbeat_ts: string | null
+          user_id: string | null
+          was_active: boolean | null
+        }
+        Relationships: []
+      }
     }
     Functions: {
       add_to_shopping_admin: {
@@ -819,6 +979,26 @@ export type Database = {
         }
         Returns: string
       }
+      apply_live_weight_sync_admin: {
+        Args: {
+          p_client_event_id: string
+          p_device_id: string
+          p_kind: string
+          p_observed_at: string
+          p_observed_weight_g: number
+          p_pi_event_id?: string
+          p_pi_lot_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       apply_shelf_event_admin:
         | {
             Args: {
@@ -851,6 +1031,7 @@ export type Database = {
               p_pi_event_id?: string
               p_product_id: string
               p_scale_id: string
+              p_usage_kind?: string
               p_user_id: string
             }
             Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
@@ -921,6 +1102,29 @@ export type Database = {
         }
         Returns: string
       }
+      resolve_review: {
+        Args: { p_review_id: string; p_status: string; p_user_response?: Json }
+        Returns: {
+          created_at: string
+          images: Json | null
+          kind: string
+          pi_event_id: string | null
+          pi_review_id: string
+          pi_session_id: string | null
+          proposed: Json | null
+          resolved_at: string | null
+          review_id: string
+          status: string
+          user_id: string
+          user_response: Json | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "review_queue"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       restore_chefbyte_backup: { Args: { p_backup: Json }; Returns: Json }
       retry_shelf_event: {
         Args: { p_client_event_id: string }
@@ -939,6 +1143,50 @@ export type Database = {
       unmark_meal_done: { Args: { p_meal_id: string }; Returns: Json }
       unmark_meal_done_admin: {
         Args: { p_meal_id: string; p_user_id: string }
+        Returns: Json
+      }
+      update_food_log_qty: {
+        Args: { p_log_id: string; p_new_qty: number }
+        Returns: Json
+      }
+      update_temp_item_qty: {
+        Args: { p_scale: number; p_temp_id: string }
+        Returns: Json
+      }
+      upsert_review_queue_from_pi_admin: {
+        Args: {
+          p_created_at: string
+          p_images: Json
+          p_kind: string
+          p_pi_event_id: string
+          p_pi_review_id: string
+          p_pi_session_id: string
+          p_proposed: Json
+          p_user_id: string
+        }
+        Returns: {
+          created_at: string
+          images: Json | null
+          kind: string
+          pi_event_id: string | null
+          pi_review_id: string
+          pi_session_id: string | null
+          proposed: Json | null
+          resolved_at: string | null
+          review_id: string
+          status: string
+          user_id: string
+          user_response: Json | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "review_queue"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      walmart_check_and_increment: {
+        Args: { p_max?: number; p_user_id: string }
         Returns: Json
       }
     }
@@ -1518,25 +1766,25 @@ export type Database = {
       }
       extension_settings: {
         Row: {
-          credentials_encrypted: string | null
           enabled: boolean
           extension_name: string
           id: string
           user_id: string
+          vault_secret_id: string | null
         }
         Insert: {
-          credentials_encrypted?: string | null
           enabled?: boolean
           extension_name: string
           id?: string
           user_id: string
+          vault_secret_id?: string | null
         }
         Update: {
-          credentials_encrypted?: string | null
           enabled?: boolean
           extension_name?: string
           id?: string
           user_id?: string
+          vault_secret_id?: string | null
         }
         Relationships: []
       }
@@ -1661,6 +1909,10 @@ export type Database = {
         Returns: undefined
       }
       clear_agent_anthropic_key: { Args: never; Returns: undefined }
+      clear_extension_credentials: {
+        Args: { p_extension_name: string }
+        Returns: undefined
+      }
       deactivate_app: { Args: { p_app_name: string }; Returns: undefined }
       get_agent_anthropic_key_admin: {
         Args: { p_user_id: string }
@@ -1695,6 +1947,10 @@ export type Database = {
       get_extension_credentials_admin: {
         Args: { p_extension_name: string; p_user_id: string }
         Returns: string
+      }
+      has_extension_credentials: {
+        Args: { p_extension_name: string }
+        Returns: boolean
       }
       reset_demo_dates: { Args: never; Returns: undefined }
       revoke_all_api_keys_admin: {
@@ -1770,6 +2026,26 @@ export type Database = {
         }
         Returns: string
       }
+      apply_live_weight_sync: {
+        Args: {
+          p_client_event_id: string
+          p_device_id: string
+          p_kind: string
+          p_observed_at: string
+          p_observed_weight_g: number
+          p_pi_event_id?: string
+          p_pi_lot_id: string
+          p_scale_id: string
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
+        SetofOptions: {
+          from: "*"
+          to: "shelf_event_result"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       apply_shelf_event: {
         Args: {
           p_client_event_id: string
@@ -1781,6 +2057,7 @@ export type Database = {
           p_pi_event_id?: string
           p_product_id: string
           p_scale_id: string
+          p_usage_kind?: string
           p_user_id: string
         }
         Returns: Database["chefbyte"]["CompositeTypes"]["shelf_event_result"]
@@ -1846,6 +2123,7 @@ export type Database = {
           isSetofReturn: false
         }
       }
+      expire_timer_sweep: { Args: never; Returns: number }
       export_chefbyte_backup: { Args: never; Returns: Json }
       generate_meal_product_name: {
         Args: { p_base_name: string; p_logical_date: string; p_user_id: string }
@@ -1872,6 +2150,7 @@ export type Database = {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: Json
       }
+      now_with_freeze: { Args: never; Returns: string }
       pause_timer: {
         Args: { p_user_id: string }
         Returns: Database["coachbyte"]["Tables"]["timers"]["Row"]
@@ -1956,6 +2235,14 @@ export type Database = {
         Args: { p_meal_id: string; p_user_id: string }
         Returns: Json
       }
+      update_food_log_qty: {
+        Args: { p_log_id: string; p_new_qty: number; p_user_id: string }
+        Returns: Json
+      }
+      update_temp_item_qty: {
+        Args: { p_scale: number; p_temp_id: string; p_user_id: string }
+        Returns: Json
+      }
       upsert_alert: {
         Args: {
           p_details: Json
@@ -1972,6 +2259,29 @@ export type Database = {
           isOneToOne: true
           isSetofReturn: false
         }
+      }
+      upsert_review_queue_from_pi: {
+        Args: {
+          p_created_at: string
+          p_images: Json
+          p_kind: string
+          p_pi_event_id: string
+          p_pi_review_id: string
+          p_pi_session_id: string
+          p_proposed: Json
+          p_user_id: string
+        }
+        Returns: Database["chefbyte"]["Tables"]["review_queue"]["Row"]
+        SetofOptions: {
+          from: "*"
+          to: "review_queue"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
+      walmart_check_and_increment: {
+        Args: { p_max?: number; p_user_id: string }
+        Returns: Json
       }
     }
     Enums: {

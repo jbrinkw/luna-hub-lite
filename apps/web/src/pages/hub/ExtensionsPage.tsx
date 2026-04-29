@@ -52,10 +52,15 @@ export function ExtensionsPage() {
   } = useQuery({
     queryKey: queryKeys.extensions(user!.id),
     queryFn: async () => {
+      // vault_secret_id is the post-Vault credential pointer (nullable UUID).
+      // The browser never sees the secret payload itself — that lives in
+      // vault.secrets and is only readable via the get_extension_credentials
+      // RPC (server-side, MCP worker uses the *_admin variant). Truthy
+      // UUID == "credentials configured".
       const { data, error } = await supabase
         .schema('hub')
         .from('extension_settings')
-        .select('extension_name, enabled, credentials_encrypted')
+        .select('extension_name, enabled, vault_secret_id')
         .eq('user_id', user!.id);
       if (error) throw error;
 
@@ -63,7 +68,7 @@ export function ExtensionsPage() {
       data?.forEach((row) => {
         map[row.extension_name] = {
           enabled: row.enabled,
-          hasCredentials: !!row.credentials_encrypted,
+          hasCredentials: !!row.vault_secret_id,
         };
       });
       return map;
@@ -71,21 +76,48 @@ export function ExtensionsPage() {
     enabled: !!user,
   });
 
-  // Toggle extension mutation with optimistic update
+  // Toggle extension mutation with optimistic update.
+  //
+  // Disable side-effect (2026-04-29): when toggling enabled=false, also
+  // CLEAR the vault secret so re-enabling the extension forces the user
+  // to re-enter credentials. Rationale: stale tokens/keys outliving a
+  // disable-toggle is a worse failure mode than the small re-entry friction
+  // when re-enabling. Re-enables are rare (per UX audit) and credentials
+  // can rotate / get revoked while the extension was disabled.
+  //
+  // Vault migration (20260429160000_extension_credentials_vault.sql):
+  // disable now calls hub.clear_extension_credentials(), which both nulls
+  // the vault_secret_id pointer AND deletes the underlying vault.secrets
+  // row. The legacy "set credentials_encrypted = null" upsert no longer
+  // works — the column was dropped.
   const toggleMutation = useMutation({
     mutationFn: async ({ extName, enabled }: { extName: string; enabled: boolean }) => {
-      const { error } = await supabase
+      // Always upsert the enabled flag first.
+      const { error: upsertErr } = await supabase
         .schema('hub')
         .from('extension_settings')
         .upsert({ user_id: user!.id, extension_name: extName, enabled }, { onConflict: 'user_id,extension_name' });
-      if (error) throw error;
+      if (upsertErr) throw upsertErr;
+      // Then, if disabling, clear the vault secret atomically.
+      if (!enabled) {
+        const { error: clearErr } = await supabase
+          .schema('hub')
+          .rpc('clear_extension_credentials', { p_extension_name: extName });
+        if (clearErr) throw clearErr;
+      }
     },
     onMutate: async ({ extName, enabled }) => {
       await queryClient.cancelQueries({ queryKey: queryKeys.extensions(user!.id) });
       const previous = queryClient.getQueryData<Record<string, ExtensionState>>(queryKeys.extensions(user!.id));
       queryClient.setQueryData(queryKeys.extensions(user!.id), (old: Record<string, ExtensionState> | undefined) => ({
         ...old,
-        [extName]: { ...old?.[extName], enabled, hasCredentials: old?.[extName]?.hasCredentials ?? false },
+        [extName]: {
+          ...old?.[extName],
+          enabled,
+          // On disable, optimistically reflect credential clear so the
+          // "Credentials configured" badge flips immediately.
+          hasCredentials: enabled ? (old?.[extName]?.hasCredentials ?? false) : false,
+        },
       }));
       return { previous };
     },

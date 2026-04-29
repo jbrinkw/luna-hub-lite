@@ -4,8 +4,11 @@
  * Tests the save/get_extension_credentials RPCs with real Supabase calls.
  * Verifies encryption round-trip, cross-user isolation, and admin access.
  *
- * Note: Requires app.settings.encryption_key to be set on the local DB.
- * If not set, tests will be skipped.
+ * As of migration 20260429160000_extension_credentials_vault.sql the storage
+ * backend is Supabase Vault (vault.create_secret + vault.decrypted_secrets)
+ * rather than pgcrypto. The RPC surface is unchanged; the row now carries
+ * `vault_secret_id` (UUID pointer) instead of `credentials_encrypted` (bytea
+ * cast to TEXT). Probe + assertions below were updated accordingly.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { adminClient } from '../../setup.integration';
@@ -69,19 +72,24 @@ describe('Extension Credential Encryption', () => {
     expect(JSON.parse(retrieved)).toEqual(creds);
   });
 
-  it('credentials are encrypted in storage (not plaintext)', async () => {
+  it('credentials are encrypted in storage (vault — settings row holds only a UUID pointer)', async () => {
     if (!encryptionAvailable) return;
 
     const { data: row } = await (adminClient as any)
       .schema('hub')
       .from('extension_settings')
-      .select('credentials_encrypted')
+      .select('vault_secret_id')
       .eq('user_id', userA.userId)
       .eq('extension_name', 'obsidian')
       .single();
 
     expect(row).toBeDefined();
-    expect(row.credentials_encrypted).not.toContain('obsidian_secret_123');
+    // Post-Vault: extension_settings carries only a UUID. The plaintext
+    // can never appear in this row no matter what — the secret material
+    // lives in vault.secrets and is encrypted via pgsodium AEAD.
+    expect(typeof row.vault_secret_id).toBe('string');
+    expect(row.vault_secret_id).not.toContain('obsidian_secret_123');
+    expect(row.vault_secret_id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
   });
 
   it('user B cannot read user A credentials', async () => {

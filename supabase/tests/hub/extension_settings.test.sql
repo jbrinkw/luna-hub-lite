@@ -8,9 +8,13 @@ SELECT tests.create_supabase_user('ext_intruder');
 SELECT tests.authenticate_as('ext_owner');
 
 -- Test 1: User can INSERT own extension_settings
+-- Note: post-Vault migration (20260429160000) the legacy
+-- credentials_encrypted column is gone. RLS still applies to direct
+-- inserts on the row itself; credential payloads must go through
+-- hub.save_extension_credentials() (covered by encryption_credentials.test.sql).
 SELECT lives_ok(
-  $$ INSERT INTO hub.extension_settings (user_id, extension_name, enabled, credentials_encrypted)
-     VALUES (tests.get_supabase_uid('ext_owner'), 'obsidian', true, '{"vault_path":"/notes"}') $$,
+  $$ INSERT INTO hub.extension_settings (user_id, extension_name, enabled)
+     VALUES (tests.get_supabase_uid('ext_owner'), 'obsidian', true) $$,
   'User can insert own extension_settings'
 );
 
