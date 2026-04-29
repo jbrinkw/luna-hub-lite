@@ -1324,8 +1324,16 @@ export function ScannerPage() {
       );
       return;
     }
+    // Naming the placeholder upgrades the underlying product row for
+    // EVERY queue item pointing at it — not just the row the user clicked.
+    // If the user scanned the same new item N times before naming it,
+    // all N queue rows must flip from red (unconfirmed placeholder) to
+    // green (confirmed) and lose the [!NEW] tag together.
+    const upgradedProductId = activeItem.productId;
     setQueue((prev) =>
-      prev.map((item) => (item.id === activeItem.id ? { ...item, name: trimmed, isNew: false } : item)),
+      prev.map((item) =>
+        item.productId === upgradedProductId ? { ...item, name: trimmed, isNew: false, confirmed: true } : item,
+      ),
     );
     setNameEdited(false);
   };
