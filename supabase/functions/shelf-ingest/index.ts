@@ -15,6 +15,17 @@ import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
  *   POST /shelf-ingest/event         — apply one scale event via private.apply_shelf_event
  *   POST /shelf-ingest/intake        — upsert a product (barcode flow)
  *   POST /shelf-ingest/heartbeat     — update device + scale_pairings rows
+ *   POST /shelf-ingest/review-create — UPSERT a Pi-created review_queue row
+ *                                      (sync-audit finding #5; idempotent on
+ *                                      (user_id, pi_review_id))
+ *   POST /shelf-ingest/review-resolve — Pi-driven push-back when the operator
+ *                                       resolved a review on the Pi /inventory
+ *                                       UI; cloud mirrors status+user_response
+ *   GET  /shelf-ingest/review-resolved-since?updated_since=<iso>
+ *                                      — Pi poller endpoint that returns cloud-
+ *                                       side resolutions newer than the watermark
+ *                                       so the Pi can mirror cloud UI resolutions
+ *                                       back into its local review_queue.
  */
 
 const corsHeaders = {
@@ -930,6 +941,229 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
   });
 }
 
+// ─── Review queue handlers (sync-audit finding #5) ──────────────────
+
+const VALID_REVIEW_KINDS = [
+  'unknown_item_add',
+  'low_confidence',
+  'weight_mismatch',
+  'unpaired_remove',
+  'multi_match',
+  'failed_intake',
+  'sensor_anomaly',
+] as const;
+
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isUuid(s: unknown): s is string {
+  return typeof s === 'string' && UUID_REGEX.test(s);
+}
+
+/**
+ * POST /review-create — UPSERT a review_queue row from the Pi.
+ *
+ * Called by the Pi's cloud_outbox worker for every ``review_queue_create``
+ * outbox event (one per Pi-side review row insert). Idempotent on
+ * (user_id, pi_review_id) — replays from the worker after an ambiguous
+ * timeout don't double-insert.
+ *
+ * Required body:
+ *   {
+ *     "pi_review_id": "<uuid>",
+ *     "kind": "low_confidence" | ...,
+ *     "client_event_id": "<uuid>",       // outbox dedup key (mirrored in shelf_event_log? no — review_queue uses its own dedup via pi_review_id)
+ *   }
+ *
+ * Optional:
+ *   {
+ *     "pi_session_id": "<uuid>",
+ *     "pi_event_id": "<uuid>",
+ *     "proposed": { ... },                // classifier blob — JSON object
+ *     "images": ["events/<id>/before.jpg", ...],
+ *     "created_at": "<iso8601>"           // Pi's row creation ts; falls back to now()
+ *   }
+ */
+async function handleReviewCreate(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
+  const piReviewId: string | undefined = body?.pi_review_id;
+  const kind: string | undefined = body?.kind;
+  const clientEventId: string | undefined = body?.client_event_id;
+
+  if (!isUuid(piReviewId)) {
+    return jsonResponse({ error: 'pi_review_id must be a UUID' }, 400);
+  }
+  if (!kind || !VALID_REVIEW_KINDS.includes(kind as (typeof VALID_REVIEW_KINDS)[number])) {
+    return jsonResponse({ error: 'invalid kind' }, 400);
+  }
+  if (!clientEventId || typeof clientEventId !== 'string' || clientEventId.length > MAX_CLIENT_EVENT_ID_LEN) {
+    return jsonResponse({ error: 'client_event_id required' }, 400);
+  }
+
+  const piSessionId: string | null = isUuid(body?.pi_session_id) ? body.pi_session_id : null;
+  const piEventId: string | null = isUuid(body?.pi_event_id) ? body.pi_event_id : null;
+  const proposed = body?.proposed ?? null;
+  const images = Array.isArray(body?.images) ? body.images : null;
+  const createdAtRaw: string | undefined = body?.created_at;
+  const createdAt = createdAtRaw && isValidIsoTimestamp(createdAtRaw) ? createdAtRaw : null;
+
+  console.log('shelf-ingest: review-create', {
+    client_event_id: clientEventId,
+    device_id: device.device_id,
+    pi_review_id: piReviewId,
+    kind,
+  });
+
+  const { data, error } = await (supabase as any).schema('chefbyte').rpc('upsert_review_queue_from_pi_admin', {
+    p_user_id: device.user_id,
+    p_pi_review_id: piReviewId,
+    p_kind: kind,
+    p_pi_session_id: piSessionId,
+    p_pi_event_id: piEventId,
+    p_proposed: proposed,
+    p_images: images,
+    p_created_at: createdAt,
+  });
+
+  if (error) {
+    console.error('shelf-ingest: review_queue_create failed', {
+      client_event_id: clientEventId,
+      code: (error as any).code ?? null,
+      message: (error as any).message ?? null,
+    });
+    return jsonResponse({ error: 'review_queue_create failed' }, 500);
+  }
+
+  const row = Array.isArray(data) ? data[0] : data;
+  return jsonResponse({
+    ok: true,
+    review_id: row?.review_id ?? null,
+    status: row?.status ?? null,
+  });
+}
+
+/**
+ * POST /review-resolve — Pi-side push-back when the operator resolved a review
+ * on the Pi /inventory UI. Cloud mirrors status + user_response.
+ *
+ * Required body:
+ *   {
+ *     "pi_review_id": "<uuid>",
+ *     "status": "resolved" | "dismissed",
+ *     "client_event_id": "<uuid>"      // outbox dedup
+ *   }
+ *
+ * Optional: ``user_response`` (JSON), ``resolved_at`` (iso8601).
+ */
+async function handleReviewResolve(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
+  const piReviewId: string | undefined = body?.pi_review_id;
+  const status: string | undefined = body?.status;
+  const clientEventId: string | undefined = body?.client_event_id;
+
+  if (!isUuid(piReviewId)) {
+    return jsonResponse({ error: 'pi_review_id must be a UUID' }, 400);
+  }
+  if (status !== 'resolved' && status !== 'dismissed') {
+    return jsonResponse({ error: 'status must be resolved or dismissed' }, 400);
+  }
+  if (!clientEventId || typeof clientEventId !== 'string' || clientEventId.length > MAX_CLIENT_EVENT_ID_LEN) {
+    return jsonResponse({ error: 'client_event_id required' }, 400);
+  }
+
+  const userResponse = body?.user_response ?? null;
+
+  // Look up the cloud row by (user_id, pi_review_id) so we can hand
+  // chefbyte.resolve_review the cloud's review_id (its primary key). We
+  // scope on user_id so a malicious Pi can't resolve someone else's row.
+  const { data: row, error: lookupErr } = await supabase
+    .schema('chefbyte')
+    .from('review_queue')
+    .select('review_id, status')
+    .eq('user_id', device.user_id)
+    .eq('pi_review_id', piReviewId)
+    .maybeSingle();
+
+  if (lookupErr) {
+    console.error('shelf-ingest: review-resolve lookup failed', {
+      client_event_id: clientEventId,
+      code: (lookupErr as any).code ?? null,
+    });
+    return jsonResponse({ error: 'review lookup failed' }, 500);
+  }
+
+  if (!row) {
+    // Pi resolved a review the cloud never received (ordering: outbox
+    // worker may not have drained the create yet). Surface a 409 so the
+    // Pi can retry after the create lands.
+    return jsonResponse({ error: 'review not found in cloud yet' }, 409);
+  }
+
+  // Idempotent: if already resolved/dismissed at the cloud, return ok.
+  if (row.status === 'resolved' || row.status === 'dismissed') {
+    return jsonResponse({ ok: true, review_id: row.review_id, status: row.status, idempotent: true });
+  }
+
+  const { data: resolved, error: resolveErr } = await (supabase as any).schema('chefbyte').rpc('resolve_review', {
+    p_review_id: row.review_id,
+    p_status: status,
+    p_user_response: userResponse,
+  });
+
+  if (resolveErr) {
+    console.error('shelf-ingest: review-resolve failed', {
+      client_event_id: clientEventId,
+      code: (resolveErr as any).code ?? null,
+      message: (resolveErr as any).message ?? null,
+    });
+    return jsonResponse({ error: 'review resolve failed' }, 500);
+  }
+
+  const out = Array.isArray(resolved) ? resolved[0] : resolved;
+  return jsonResponse({
+    ok: true,
+    review_id: out?.review_id ?? row.review_id,
+    status: out?.status ?? status,
+  });
+}
+
+/**
+ * GET /review-resolved-since?updated_since=<iso>
+ *
+ * Pi poller endpoint that returns cloud-side resolutions newer than the
+ * watermark so the Pi can mirror cloud UI resolutions back into its
+ * local review_queue. Bidirectional mirror — the Pi /inventory UI will
+ * see status='resolved' immediately after the user clicks Accept on the
+ * cloud /chef/reviews page.
+ *
+ * Response shape:
+ *   {
+ *     "reviews": [
+ *       { "pi_review_id", "status", "resolved_at", "user_response" }, ...
+ *     ]
+ *   }
+ *
+ * Watermark is the cloud's resolved_at; out-of-order arrivals are fine
+ * because the Pi's apply path is idempotent on the same row.
+ */
+async function handleReviewResolvedSince(supabase: SupabaseClient, device: Device, url: URL): Promise<Response> {
+  const updatedSinceRaw = url.searchParams.get('updated_since');
+  const updatedSince = updatedSinceRaw && isValidIsoTimestamp(updatedSinceRaw) ? updatedSinceRaw : null;
+
+  let q = supabase
+    .schema('chefbyte')
+    .from('review_queue')
+    .select('pi_review_id, status, resolved_at, user_response')
+    .eq('user_id', device.user_id)
+    .in('status', ['resolved', 'dismissed'])
+    .order('resolved_at', { ascending: true });
+  if (updatedSince) {
+    q = q.gt('resolved_at', updatedSince);
+  }
+
+  const { data, error } = await q;
+  if (error) throw error;
+
+  return jsonResponse({ reviews: data ?? [] });
+}
+
 async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
   const pendingReviewCount: number = typeof body?.pending_review_count === 'number' ? body.pending_review_count : 0;
   // Scenario 7: the Pi heartbeat_provider includes these two counters so
@@ -1054,6 +1288,10 @@ Deno.serve(async (req) => {
       return await handleEventsByPiId(supabase, device, url);
     }
 
+    if (req.method === 'GET' && leaf === 'review-resolved-since') {
+      return await handleReviewResolvedSince(supabase, device, url);
+    }
+
     if (req.method === 'POST') {
       const body = await req.json().catch(() => ({}));
 
@@ -1061,6 +1299,8 @@ Deno.serve(async (req) => {
       if (leaf === 'intake') return await handleIntake(supabase, device, body);
       if (leaf === 'heartbeat') return await handleHeartbeat(supabase, device, body);
       if (leaf === 'product-tare') return await handleProductTare(supabase, device, body);
+      if (leaf === 'review-create') return await handleReviewCreate(supabase, device, body);
+      if (leaf === 'review-resolve') return await handleReviewResolve(supabase, device, body);
     }
 
     return jsonResponse({ error: 'not found' }, 404);

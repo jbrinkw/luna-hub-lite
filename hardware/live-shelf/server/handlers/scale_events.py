@@ -42,6 +42,7 @@ from ..classifier.models import (
     ScaleEvent as ClsScaleEvent,
     UNKNOWN_CANDIDATE_ID,
 )
+from ..cloud._kind_translate import cloud_to_pi as _shelf_kind_cloud_to_pi
 from ..cloud.integration import CloudEventEmitter, null_emitter
 from ..cloud.settings_cache import (
     ClassifierSettingsCache,
@@ -694,6 +695,58 @@ class ScaleHandler:
             self._conn, self._db_lock, event_id,
             actor=actor, reason_code=reason_code, payload=payload,
         )
+
+    def _enqueue_review_with_emit(self, item: ReviewQueueIn) -> None:
+        """Insert a review_queue row + mirror to cloud (sync-audit #5).
+
+        Wraps the previous direct ``storage_repo.enqueue_review`` call
+        sites so the classifier / sweeper / handler paths all enqueue a
+        ``review_queue_create`` outbox event in lockstep with the local
+        insert. The cloud-side mirror upserts on ``(user_id,
+        pi_review_id)`` so worker retries are safe.
+
+        Caller MUST hold ``self._db_lock`` (matches the previous
+        contract) — the cloud emit happens AFTER we release the lock at
+        the end of this method via the local ``stored`` reference.
+        """
+        stored = storage_repo.enqueue_review(self._conn, item)
+        # Decode proposed/images so the cloud row stores structured JSONB
+        # rather than a doubly-encoded string. Failures fall back to the
+        # raw value (cloud will JSONB-store either way).
+        proposed_obj: Any = None
+        if isinstance(item.proposed, str) and item.proposed:
+            try:
+                proposed_obj = json.loads(item.proposed)
+            except Exception:  # noqa: BLE001
+                proposed_obj = item.proposed
+        elif isinstance(item.proposed, dict):
+            proposed_obj = item.proposed
+
+        images_obj: Any = None
+        if isinstance(item.images, str) and item.images:
+            try:
+                images_obj = json.loads(item.images)
+            except Exception:  # noqa: BLE001
+                images_obj = None
+        elif isinstance(item.images, list):
+            images_obj = item.images
+
+        try:
+            self._cloud_emitter.emit_review_queue_create(
+                pi_review_id=stored.review_id,
+                kind=stored.kind,
+                pi_session_id=stored.session_id,
+                pi_event_id=stored.event_id,
+                proposed=proposed_obj if isinstance(proposed_obj, dict) else None,
+                images=images_obj if isinstance(images_obj, list) else None,
+                created_at=stored.created_at,
+            )
+        except Exception:  # noqa: BLE001 - cloud emit must never break local insert
+            log.warning(
+                "_enqueue_review_with_emit: cloud emit raised for "
+                "review_id=%s",
+                stored.review_id, exc_info=True,
+            )
 
     def _lc_session(
         self,
@@ -3282,8 +3335,10 @@ class ScaleHandler:
         # writes, reconciler) sees the storage-native name. Changing the
         # storage literal would require a migration on every deployed Pi
         # DB — translation is the less-invasive fix.
-        if shelf_id == "live_scale":
-            shelf_id = "single_item"
+        #
+        # Translation table lives in ``cloud/_kind_translate.py`` per
+        # Phase 1 audit finding L10/HIGH (AUDIT_FINDINGS_PHASE1.md).
+        shelf_id = _shelf_kind_cloud_to_pi(shelf_id)
 
         # Classify direction ahead of the tare-arm branch so we can gate
         # on direction != 'noise' — noise events are sub-threshold and
@@ -4528,8 +4583,7 @@ class ScaleHandler:
                         classification=err_json,
                         classifier_status="failed",
                     )
-                    storage_repo.enqueue_review(
-                        self._conn,
+                    self._enqueue_review_with_emit(
                         ReviewQueueIn(
                             kind="sensor_anomaly",
                             event_id=event_id,
@@ -5298,8 +5352,7 @@ class ScaleHandler:
                     ),
                     classifier_status="failed",
                 )
-                storage_repo.enqueue_review(
-                    self._conn,
+                self._enqueue_review_with_emit(
                     ReviewQueueIn(
                         kind="sensor_anomaly",
                         event_id=event_id,
@@ -5402,8 +5455,7 @@ class ScaleHandler:
                     classification=err_json,
                     classifier_status="failed",
                 )
-                storage_repo.enqueue_review(
-                    self._conn,
+                self._enqueue_review_with_emit(
                     ReviewQueueIn(
                         kind="sensor_anomaly",
                         event_id=event_id,
@@ -5614,8 +5666,7 @@ class ScaleHandler:
 
             # Enqueue review row if needed.
             if review_kind is not None:
-                storage_repo.enqueue_review(
-                    self._conn,
+                self._enqueue_review_with_emit(
                     ReviewQueueIn(
                         kind=review_kind,
                         event_id=event_id,

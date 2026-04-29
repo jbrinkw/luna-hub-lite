@@ -558,7 +558,7 @@ class RepoReconcilerAdapter:
             json.dumps(item.images) if item.images is not None else None
         )
         with self._db_lock:
-            storage_repo.enqueue_review(
+            stored = storage_repo.enqueue_review(
                 self._conn,
                 ReviewQueueIn(
                     kind=item.kind,
@@ -568,6 +568,27 @@ class RepoReconcilerAdapter:
                     proposed=proposed_json,
                     images=images_json,
                 ),
+            )
+        # Sync-audit finding #5: mirror the new review row to the cloud
+        # via the outbox so the cloud /chef/reviews UI can display it.
+        # The emitter is enabled iff cloud sync is wired (NullEmitter
+        # otherwise → no-op). Failures are swallowed inside _enqueue so
+        # cloud observability never blocks the local insert.
+        try:
+            self._cloud_emitter.emit_review_queue_create(
+                pi_review_id=stored.review_id,
+                kind=stored.kind,
+                pi_session_id=stored.session_id,
+                pi_event_id=stored.event_id,
+                proposed=item.proposed if isinstance(item.proposed, dict) else None,
+                images=item.images if isinstance(item.images, list) else None,
+                created_at=stored.created_at,
+            )
+        except Exception:  # noqa: BLE001 - cloud emit must never break local insert
+            log.warning(
+                "enqueue_review: cloud emit raised for review_id=%s",
+                stored.review_id,
+                exc_info=True,
             )
 
     def update_lot_on_resolution(
