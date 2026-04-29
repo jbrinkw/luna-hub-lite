@@ -83,7 +83,17 @@ INSERT INTO _expected_kinds VALUES
   ('in_flight_return'),
   ('discarded'),
   ('catch_all_first_measurement'),
-  ('catch_all_second_measurement');
+  ('catch_all_second_measurement'),
+  -- Phase 1 audit finding L1/MEDIUM (AUDIT_FINDINGS_PHASE1.md): the
+  -- live_weight_sync event added 2026-04-29 (migration 20260429030000)
+  -- routes through private.apply_live_weight_sync_admin (a sibling
+  -- helper, NOT apply_shelf_event), so the matrix-row probe below is
+  -- skipped specifically for this kind. The matrix invariant remains
+  -- "every VALID_EVENT_KINDS literal in the edge function has a cloud-
+  -- side handle path"; for live_weight_sync that handle path is
+  -- exercised by ``live_weight_sync_never_mints.test.sql`` and
+  -- ``live_weight_sync.test.sql`` rather than this matrix test.
+  ('live_weight_sync');
 
 ------------------------------------------------------------
 -- Assertion 1 — every expected kind, when fired, produces a
@@ -126,7 +136,9 @@ BEGIN
   -- new lot) rolls back the iteration's plpgsql savepoint AND the
   -- up-front shelf_event_log audit-row INSERT — making the bag_eq
   -- falsely accuse the kind of being rejected at validation.
-  FOR k IN SELECT kind FROM _expected_kinds ORDER BY kind LOOP
+  FOR k IN SELECT kind FROM _expected_kinds
+                 WHERE kind <> 'live_weight_sync'  -- routed via apply_live_weight_sync_admin
+                 ORDER BY kind LOOP
     i := i + 1;
 
     INSERT INTO chefbyte.products (
@@ -207,10 +219,14 @@ END $$;
 -- containing event_kind = <kind>. A missing kind means apply_shelf_event
 -- raised a validation error (e.g. unknown kind) BEFORE the audit
 -- INSERT — exactly the bug class this invariant pins.
+--
+-- live_weight_sync is intentionally excluded from this assertion —
+-- see _expected_kinds comment above. Its handle path is exercised
+-- by live_weight_sync_never_mints.test.sql + live_weight_sync.test.sql.
 SELECT bag_eq(
   $$SELECT DISTINCT (payload->>'event_kind') FROM chefbyte.shelf_event_log
      WHERE user_id = tests.get_supabase_uid('matrix_alice')$$,
-  $$SELECT kind FROM _expected_kinds$$,
+  $$SELECT kind FROM _expected_kinds WHERE kind <> 'live_weight_sync'$$,
   'invariant (decisions.md #44/#56 + 2026-04-22 audit): every '
     'event_kind in VALID_EVENT_KINDS produces a shelf_event_log '
     'audit row when submitted to apply_shelf_event. A missing row '
@@ -262,10 +278,10 @@ SELECT is(
 
 SELECT cmp_ok(
   (SELECT count(*)::integer FROM _expected_kinds),
-  '=', 9,
-  'invariant: canonical event-kind catalog has 9 entries. If you '
-    'added a new kind, update both this test AND the Pi-side '
-    'CLOUD_VALID_EVENT_KINDS in '
+  '=', 10,
+  'invariant: canonical event-kind catalog has 10 entries (including '
+    'live_weight_sync, added 2026-04-29). If you added a new kind, '
+    'update both this test AND the Pi-side CLOUD_VALID_EVENT_KINDS in '
     'hardware/live-shelf/server/cloud/tests/test_integration_hooks.py '
     'AND supabase/functions/shelf-ingest/index.ts::VALID_EVENT_KINDS. '
     'The drift surfaces here as a count mismatch instead of a '

@@ -19,7 +19,7 @@
 -- ════════════════════════════════════════════════════════════════════════════
 
 BEGIN;
-SELECT plan(4);
+SELECT plan(6);
 
 ------------------------------------------------------------
 -- Setup
@@ -187,6 +187,68 @@ SELECT is(
     '× 900cal = 4500cal) MUST NOT write a food_logs row. This is '
     'the bug class that would silently inject hundreds of '
     'phantom calories into the daily total.'
+);
+
+------------------------------------------------------------
+-- Case 5: NEW lot-targeted discard path — apply_discard_with_lot_id
+--         must NOT write food_logs even though it has its own
+--         independent shelf_event_log + UPDATE branch (audit
+--         finding L11/MEDIUM, 20260428030000_discard_lot_by_id.sql).
+--
+-- The legacy apply_shelf_event branch is exercised in cases 1–4. This
+-- block pins the new helper introduced for catch-all empty-bottle
+-- routing so a regression that copies-paste from the consumed branch
+-- is caught here too.
+------------------------------------------------------------
+
+-- Use a non-default expires_on so the merge-key constraint
+-- (UNIQUE(user_id, product_id, location_id, COALESCE(expires_on, '9999-12-31')))
+-- doesn't collide with case 4's already-zeroed lot.
+INSERT INTO chefbyte.stock_lots (
+  lot_id, user_id, product_id, location_id,
+  qty_containers, last_update_source, last_update_ts,
+  expires_on
+) VALUES (
+  '55555555-5555-5555-5555-555555555555',
+  tests.get_supabase_uid('invariant_disc_alice'),
+  :'p2_id', :'loc_id', 4.000,
+  'live_shelf', now() - interval '5 minutes',
+  CURRENT_DATE + INTERVAL '60 days'
+);
+
+-- Snapshot current food_logs count for this user so the assertion is
+-- robust to anything earlier in the test that might have inserted.
+SELECT COUNT(*)::integer AS pre_discard_logs
+  FROM chefbyte.food_logs
+ WHERE user_id = tests.get_supabase_uid('invariant_disc_alice') \gset
+
+SELECT * FROM private.apply_discard_with_lot_id(
+  tests.get_supabase_uid('invariant_disc_alice'),
+  :'d_id'::UUID, 'scale-02', 'catch_all',
+  '55555555-5555-5555-5555-555555555555'::UUID,
+  :'p2_id'::UUID,
+  now()::TIMESTAMPTZ, 'invariant-disc-evt-5', NULL
+);
+
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.food_logs
+    WHERE user_id = tests.get_supabase_uid('invariant_disc_alice')),
+  :pre_discard_logs::integer,
+  'invariant (decision #44, lot-targeted): apply_discard_with_lot_id '
+    'MUST NOT write food_logs. Catch-all empty-bottle short-circuit '
+    'targets a specific lot — silently logging macros there would '
+    're-introduce the bug class the lot-targeted discard helper was '
+    'introduced to bound.'
+);
+
+-- Sanity: the lot was actually zeroed (so we know the helper ran the
+-- UPDATE branch, not just the dedup early-return).
+SELECT is(
+  (SELECT qty_containers::numeric(10,3) FROM chefbyte.stock_lots
+    WHERE lot_id = '55555555-5555-5555-5555-555555555555'),
+  0.000::numeric(10,3),
+  'apply_discard_with_lot_id zeroed qty_containers — confirms the '
+    'no-food_logs assertion above exercised the real UPDATE branch.'
 );
 
 SELECT * FROM finish();
