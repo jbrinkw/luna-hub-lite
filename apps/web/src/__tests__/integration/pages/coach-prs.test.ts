@@ -37,22 +37,47 @@ describe('CoachByte PrsPage loaders', () => {
     assertQuerySucceeds(planResult, 'setup ensure_daily_plan');
     planId = planResult.data.plan_id;
 
-    // Complete all 3 sets from split (2 Squat + 1 Bench)
-    await coachbyte(ctx.client).rpc('complete_next_set', {
+    // Complete all 3 sets from split (2 Squat + 1 Bench).
+    // W-17 fix: use canonical p_actual_reps/p_actual_load arg names — the
+    // old p_reps/p_load names were deprecated in migration
+    // 20260422030000_complete_next_set_completed_flag.sql. Using the wrong
+    // names produces PGRST202 (function not found), meaning zero sets are
+    // completed and all PR assertions below would pass vacuously on empty data.
+    const r1 = await coachbyte(ctx.client).rpc('complete_next_set', {
       p_plan_id: planId,
-      p_reps: 5,
-      p_load: 225,
+      p_actual_reps: 5,
+      p_actual_load: 225,
     });
-    await coachbyte(ctx.client).rpc('complete_next_set', {
+    assertQuerySucceeds(r1, 'complete_next_set set 1');
+    const r2 = await coachbyte(ctx.client).rpc('complete_next_set', {
       p_plan_id: planId,
-      p_reps: 5,
-      p_load: 225,
+      p_actual_reps: 5,
+      p_actual_load: 225,
     });
-    await coachbyte(ctx.client).rpc('complete_next_set', {
+    assertQuerySucceeds(r2, 'complete_next_set set 2');
+    const r3 = await coachbyte(ctx.client).rpc('complete_next_set', {
       p_plan_id: planId,
-      p_reps: 5,
-      p_load: 185,
+      p_actual_reps: 5,
+      p_actual_load: 185,
     });
+    assertQuerySucceeds(r3, 'complete_next_set set 3');
+
+    // Precondition: verify sets were actually completed before PR assertions.
+    // If the RPC arg names are wrong the calls above will throw, but this
+    // double-checks the completed_sets table is non-empty so tests can't
+    // pass vacuously on empty data.
+    const { data: completedCheck, error: checkErr } = await coachbyte(ctx.client)
+      .from('completed_sets')
+      .select('completed_set_id')
+      .eq('plan_id', planId)
+      .eq('user_id', ctx.userId);
+    if (checkErr) throw new Error(`precondition check failed: ${checkErr.message}`);
+    if (!completedCheck || completedCheck.length < 3) {
+      throw new Error(
+        `precondition failed: expected ≥3 completed sets, got ${completedCheck?.length ?? 0}. ` +
+          'PR assertions would pass vacuously on empty data.',
+      );
+    }
 
     // Insert an ad-hoc set with different reps for richer PR data
     const logDateResult = await coachbyte(ctx.client)
