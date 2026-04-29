@@ -475,7 +475,17 @@ export function ShoppingPage() {
               );
               const link = generateWalmartCartLink(toBuy);
               if (!link) {
-                alert('No items with Walmart links found.');
+                // Audit: native alert() broke the design system. Replaced
+                // with the same ConfirmModal pattern used elsewhere on the
+                // page so the message renders inside the app shell.
+                setConfirmState({
+                  open: true,
+                  title: 'No Walmart Links',
+                  message:
+                    'None of the items in your To Buy list have a Walmart link yet. Add Walmart links from Settings → Walmart, then try again.',
+                  confirmLabel: 'OK',
+                  action: () => closeConfirm(),
+                });
                 return;
               }
               if (missingLink.length > 0) {
@@ -502,19 +512,19 @@ export function ShoppingPage() {
           </button>
         </div>
 
-        {/* Auto-Add Below Min Stock CTA */}
+        {/* Auto-Add Below Min Stock CTA — re-ranked per audit.
+           Previous version was a 64px-tall billboard with dashed border + giant
+           icon, drowning out the daily action (toggle items as you walk aisles).
+           Audit notes this is a once-a-week click; collapsed to a thin
+           secondary button so the high-frequency cart actions own the visual
+           hierarchy. */}
         <button
           onClick={autoAddBelowMinStock}
           data-testid="auto-add-btn"
-          className="w-full mb-5 flex items-center gap-3 px-5 py-4 bg-success-subtle border-2 border-dashed border-emerald-300 rounded-xl cursor-pointer hover:bg-emerald-100 hover:border-emerald-400 transition-colors text-left"
+          className="mb-5 inline-flex items-center gap-2 px-3 py-2 bg-surface border border-emerald-300 rounded-md cursor-pointer hover:bg-success-subtle transition-colors text-left text-sm"
         >
-          <PackageSearch className="w-7 h-7 text-emerald-600 shrink-0" />
-          <div>
-            <span className="block text-base font-bold text-emerald-700">Auto-Add Below Min Stock</span>
-            <span className="block text-sm text-emerald-600/80 mt-0.5">
-              Add items that are below your minimum stock levels
-            </span>
-          </div>
+          <PackageSearch className="w-4 h-4 text-emerald-600 shrink-0" />
+          <span className="font-semibold text-emerald-700">Auto-Add Below Min Stock</span>
         </button>
 
         {error && <div className="text-danger-text text-sm p-2">{error}</div>}
@@ -593,21 +603,30 @@ export function ShoppingPage() {
                       justPurchased ? 'bg-success-subtle' : 'bg-surface-sunken',
                     ].join(' ')}
                   >
-                    <div className="relative flex items-center justify-center w-[28px] h-[28px]">
+                    {/* 44x44 touch target wrapper around the visible 28px
+                       checkbox — meets the 44px Apple/Material guideline for
+                       phone-side use without changing the visual size of the
+                       control. Audit flagged the prior 20px box as a thumb-
+                       miss in noisy stores. */}
+                    <label
+                      htmlFor={`check-${item.cart_item_id}`}
+                      className="relative flex items-center justify-center min-w-[44px] min-h-[44px] cursor-pointer"
+                    >
                       <input
+                        id={`check-${item.cart_item_id}`}
                         type="checkbox"
                         checked={item.purchased}
                         onChange={() => togglePurchased(item)}
                         aria-label={`Mark ${item.products?.name ?? 'Unknown Product'} as purchased`}
                         data-testid={`check-${item.cart_item_id}`}
-                        className="cursor-pointer w-5 h-5 accent-green-600"
+                        className="cursor-pointer w-7 h-7 accent-green-600"
                       />
                       {justPurchased && (
                         <span className="absolute inset-0 flex items-center justify-center pointer-events-none animate-ping text-success-text text-sm">
                           &#10003;
                         </span>
                       )}
-                    </div>
+                    </label>
                     <div className="flex-1">
                       <strong>{item.products?.name ?? 'Unknown Product'}</strong>
                       <span className="ml-3 text-text-secondary">{formatQty(item.qty_containers)}</span>
@@ -654,14 +673,20 @@ export function ShoppingPage() {
                   data-testid={`item-${item.cart_item_id}`}
                   className="flex items-center gap-3 p-2.5 bg-surface-hover rounded-md opacity-70"
                 >
-                  <input
-                    type="checkbox"
-                    checked={true}
-                    onChange={() => togglePurchased(item)}
-                    aria-label={`Unmark ${item.products?.name ?? 'Unknown Product'} as purchased`}
-                    data-testid={`check-${item.cart_item_id}`}
-                    className="cursor-pointer w-[18px] h-[18px]"
-                  />
+                  <label
+                    htmlFor={`check-${item.cart_item_id}`}
+                    className="flex items-center justify-center min-w-[44px] min-h-[44px] cursor-pointer"
+                  >
+                    <input
+                      id={`check-${item.cart_item_id}`}
+                      type="checkbox"
+                      checked={true}
+                      onChange={() => togglePurchased(item)}
+                      aria-label={`Unmark ${item.products?.name ?? 'Unknown Product'} as purchased`}
+                      data-testid={`check-${item.cart_item_id}`}
+                      className="cursor-pointer w-7 h-7 accent-green-600"
+                    />
+                  </label>
                   <div className="flex-1 line-through text-text-secondary">
                     <strong>{item.products?.name ?? 'Unknown Product'}</strong>
                     <span className="ml-3">{formatQty(item.qty_containers)}</span>

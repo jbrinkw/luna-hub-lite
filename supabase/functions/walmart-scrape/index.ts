@@ -140,15 +140,102 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Invalid store_id format' }, 400);
     }
 
+    // Per-user rate limiting (100/user/UTC-day). Spec calls for it
+    // (CLAUDE.md, docs/apps/chefbyte.md); audit found it missing.
+    // Use the service-role client to call the SECURITY DEFINER fn so
+    // the user's row gets locked + incremented atomically without
+    // depending on the user's RLS-restricted JWT having write access
+    // to the quota table.
+    const adminClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!);
+    let quotaInfo: { used: number; remaining: number; limit: number; reset_at: string } = {
+      used: 0,
+      remaining: 100,
+      limit: 100,
+      reset_at: '',
+    };
+    try {
+      const { data: quotaData, error: quotaErr } = await adminClient.rpc(
+        'walmart_check_and_increment',
+        { p_user_id: user.id, p_max: 100 },
+        { schema: 'private' as never } as never,
+      );
+      if (quotaErr) {
+        // The schema-qualified call above isn't supported by every
+        // supabase-js version; fall back to a direct postgrest call.
+        const directRes = await fetch(`${Deno.env.get('SUPABASE_URL')!}/rest/v1/rpc/walmart_check_and_increment`, {
+          method: 'POST',
+          headers: {
+            apikey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+            authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!}`,
+            'content-type': 'application/json',
+            'content-profile': 'private',
+          },
+          body: JSON.stringify({ p_user_id: user.id, p_max: 100 }),
+        });
+        if (!directRes.ok) {
+          console.error('walmart-scrape: quota RPC failed', await directRes.text());
+          return jsonResponse({ error: 'Quota check failed' }, 500);
+        }
+        const directData = await directRes.json();
+        if (!directData?.allowed) {
+          return jsonResponse(
+            {
+              error: 'Walmart search quota exceeded for today',
+              quota_exceeded: true,
+              limit: directData?.limit ?? 100,
+              used: directData?.used ?? 100,
+              remaining: 0,
+              reset_at: directData?.reset_at,
+            },
+            429,
+          );
+        }
+        quotaInfo = {
+          used: directData.used,
+          remaining: directData.remaining,
+          limit: directData.limit,
+          reset_at: directData.reset_at,
+        };
+      } else if (quotaData) {
+        const q = quotaData as {
+          allowed: boolean;
+          used: number;
+          remaining: number;
+          limit: number;
+          reset_at: string;
+        };
+        if (!q.allowed) {
+          return jsonResponse(
+            {
+              error: 'Walmart search quota exceeded for today',
+              quota_exceeded: true,
+              limit: q.limit,
+              used: q.used,
+              remaining: 0,
+              reset_at: q.reset_at,
+            },
+            429,
+          );
+        }
+        quotaInfo = { used: q.used, remaining: q.remaining, limit: q.limit, reset_at: q.reset_at };
+      }
+    } catch (qErr) {
+      console.error('walmart-scrape: quota check threw', qErr);
+      return jsonResponse({ error: 'Quota check failed' }, 500);
+    }
+
     const forced = testForceFailure(req);
     let results: unknown[];
     try {
       results = await searchWalmart(query, store_id, forced);
     } catch (err: any) {
       // SerpApi 5xx / malformed body — surface a structured 503 rather
-      // than a generic 500 so the UI can render "upstream unavailable"
-      // and the caller's quota (when implemented) isn't burned on an
-      // upstream outage.
+      // than a generic 500 so the UI can render "upstream unavailable".
+      // The quota counter was already incremented for this attempt; the
+      // user's daily budget treats an upstream failure the same as a
+      // successful call. Acceptable trade-off: the alternative would
+      // require a compensating decrement and risk under-counting if the
+      // decrement itself failed.
       if (err?.upstreamReason === 'serpapi_unavailable') {
         console.error('walmart-scrape: SerpApi unavailable', err?.message ?? err);
         return jsonResponse(
@@ -167,6 +254,7 @@ Deno.serve(async (req) => {
       query,
       store_id: store_id || null,
       results,
+      quota: quotaInfo,
     });
   } catch (error: any) {
     console.error('walmart-scrape error:', error);

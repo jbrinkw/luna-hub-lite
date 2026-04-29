@@ -66,6 +66,13 @@ export function WalmartTab() {
   const [priceFinding, setPriceFinding] = useState(false);
   const [priceResults, setPriceResults] = useState<PriceResult[]>([]);
   const [priceProgress, setPriceProgress] = useState('');
+  // Quota: surfaces the X/100 counter the audit asked for. Each successful
+  // edge-fn call returns { quota: { used, remaining, limit, reset_at } };
+  // we hydrate from the latest call so the user can see how many SerpAPI
+  // calls remain today before they kick off the next batch.
+  const [quotaUsed, setQuotaUsed] = useState<number | null>(null);
+  const [quotaLimit, setQuotaLimit] = useState<number>(100);
+  const [quotaExceeded, setQuotaExceeded] = useState(false);
 
   /* ---------------------------------------------------------------- */
   /*  Data loading                                                     */
@@ -103,6 +110,31 @@ export function WalmartTab() {
   }, [loadData]);
 
   const [error, setError] = useState<string | null>(null);
+
+  /**
+   * Common post-call handler for every supabase.functions.invoke('walmart-scrape')
+   * response. Hydrates the quota state so the X/100 counter stays fresh, and
+   * flips quotaExceeded on a 429 so the UI can disable the run-all buttons.
+   *
+   * Returns true if the call was rejected for quota; the caller should bail.
+   */
+  const handleQuotaResponse = (data: any, fnError: any): boolean => {
+    if (data?.quota_exceeded || /quota exceeded/i.test(fnError?.message ?? '')) {
+      setQuotaExceeded(true);
+      if (typeof data?.used === 'number') setQuotaUsed(data.used);
+      if (typeof data?.limit === 'number') setQuotaLimit(data.limit);
+      setError(
+        `Walmart search quota for today is full (${data?.used ?? quotaLimit}/${data?.limit ?? quotaLimit}). Try again tomorrow.`,
+      );
+      return true;
+    }
+    if (data?.quota) {
+      setQuotaUsed(data.quota.used);
+      setQuotaLimit(data.quota.limit ?? 100);
+      setQuotaExceeded((data.quota.remaining ?? 1) <= 0);
+    }
+    return false;
+  };
 
   /* ---------------------------------------------------------------- */
   /*  Load Next 5 Products + Search                                    */
@@ -150,6 +182,13 @@ export function WalmartTab() {
             const { data, error: fnError } = await supabase.functions.invoke('walmart-scrape', {
               body: { search_term: p.name },
             });
+
+            // Update the quota counter from every successful call. If the
+            // server returned 429, surface that as the per-card error and
+            // skip parsing the (empty) results list.
+            if (handleQuotaResponse(data, fnError)) {
+              return { ...p, loading: false, error: 'Daily quota exceeded' };
+            }
 
             if (fnError) throw new Error(fnError.message || 'Search failed');
 
@@ -321,6 +360,11 @@ export function WalmartTab() {
             body: { search_term: p.name },
           });
 
+          // Quota exceeded? Stop the loop — every further call would just
+          // 429 and waste round-trips. The user sees the exhausted counter
+          // in the tab header.
+          if (handleQuotaResponse(data, fnError)) break;
+
           if (!fnError && data?.results?.length > 0) {
             // Try to match the stored walmart_link first, fall back to first result
             const match = data.results.find(
@@ -424,6 +468,9 @@ export function WalmartTab() {
           body: { search_term: p.name },
         });
 
+        // Stop bulk refresh on quota exhaustion — see findMissingPrices.
+        if (handleQuotaResponse(data, fnError)) break;
+
         if (!fnError && data?.results?.length > 0) {
           const match = data.results.find(
             (r: { url: string }) =>
@@ -482,7 +529,26 @@ export function WalmartTab() {
   return (
     <>
       <div className="mb-6">
-        <h1 className="m-0 text-2xl font-bold text-text">Walmart Price Manager</h1>
+        <div className="flex items-center justify-between flex-wrap gap-2">
+          <h1 className="m-0 text-2xl font-bold text-text">Walmart Price Manager</h1>
+          {/* Per-user-per-day quota counter — audit asked for this so the
+             user has trust signal before kicking off a "Refresh All Prices"
+             over hundreds of products. Hydrated from the edge fn quota
+             field on every successful call; stays at "—" until the first
+             call lands. */}
+          <span
+            data-testid="walmart-quota-counter"
+            className={[
+              'inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-semibold border',
+              quotaExceeded
+                ? 'bg-danger-subtle text-danger-text border-danger'
+                : 'bg-surface text-text-secondary border-border',
+            ].join(' ')}
+            title={quotaExceeded ? 'Daily quota exceeded — try again tomorrow' : 'Walmart searches used today'}
+          >
+            {quotaUsed === null ? '—' : `${quotaUsed} / ${quotaLimit}`} today
+          </span>
+        </div>
         <p className="mt-2 mb-0 text-text-secondary text-sm">Link products to Walmart and manage pricing</p>
       </div>
 
@@ -500,7 +566,7 @@ export function WalmartTab() {
             <button
               className={`${primaryBtnCls} whitespace-nowrap`}
               onClick={loadNext5Products}
-              disabled={searchLoading || saving}
+              disabled={searchLoading || saving || quotaExceeded}
               data-testid="load-next-5-btn"
             >
               {searchLoading ? 'Searching Walmart...' : 'Load Next 5 Products'}
@@ -670,7 +736,7 @@ export function WalmartTab() {
             <button
               className={`${primaryBtnCls} whitespace-nowrap`}
               onClick={findMissingPrices}
-              disabled={priceFinding || missingPricesCount === 0}
+              disabled={priceFinding || missingPricesCount === 0 || quotaExceeded}
               data-testid="find-missing-prices-btn"
             >
               {priceFinding ? `Searching ${priceProgress}...` : 'Find Missing Prices'}
@@ -744,7 +810,7 @@ export function WalmartTab() {
           className={`${primaryBtnCls} py-3 px-5 text-[15px]`}
           data-testid="refresh-all-btn"
           onClick={refreshAllPrices}
-          disabled={refreshing}
+          disabled={refreshing || quotaExceeded}
         >
           {refreshing ? `Refreshing ${refreshProgress}...` : 'Start Price Update'}
         </button>

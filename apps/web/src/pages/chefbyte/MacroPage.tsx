@@ -32,6 +32,14 @@ export interface ConsumedItem {
   protein: number;
   carbs: number;
   fat: number;
+  /**
+   * Original qty_consumed for food_logs — needed to seed the inline qty
+   * editor without re-fetching the row. Always populated for 'Meal Plan'
+   * source rows; null/undefined for 'Temp Item'.
+   */
+  qty?: number | null;
+  /** unit ('container'/'serving') — display + send to update RPC. */
+  unit?: string | null;
 }
 
 export interface PlannedItem {
@@ -79,7 +87,7 @@ export async function loadMacroPageData(
     chef.rpc('get_daily_macros', { p_logical_date: logicalDate }),
     chef
       .from('food_logs')
-      .select('log_id, product_id, calories, protein, carbs, fat, products:product_id(name)')
+      .select('log_id, product_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
       .eq('user_id', userId)
       .eq('logical_date', logicalDate)
       .order('created_at'),
@@ -131,6 +139,8 @@ export async function loadMacroPageData(
       protein: Number(log.protein) || 0,
       carbs: Number(log.carbs) || 0,
       fat: Number(log.fat) || 0,
+      qty: Number(log.qty_consumed) || 0,
+      unit: log.unit ?? null,
     });
   }
   for (const ti of (tempItemsRes.data ?? []) as any[]) {
@@ -142,6 +152,8 @@ export async function loadMacroPageData(
       protein: Number(ti.protein) || 0,
       carbs: Number(ti.carbs) || 0,
       fat: Number(ti.fat) || 0,
+      qty: null,
+      unit: null,
     });
   }
 
@@ -217,6 +229,13 @@ export function MacroPage() {
   const [tasteProfile, setTasteProfile] = useState('');
 
   const [mutationError, setMutationError] = useState<string | null>(null);
+
+  /* ---- Inline qty edit on consumed items (audit fix) ---- */
+  // editingId is the row id (log_id or temp_id) currently in edit mode.
+  // editValue is the working text in the input — kept as a string so the
+  // user can type/clear without a forced numeric coercion mid-keystroke.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editValue, setEditValue] = useState<string>('');
 
   /* ---------------------------------------------------------------- */
   /*  Data loading via useQuery                                        */
@@ -316,6 +335,97 @@ export function MacroPage() {
     },
     onSettled: () => invalidateMacros(),
   });
+
+  /**
+   * Inline qty editor — calls the matching update RPC and rolls the cache
+   * forward optimistically so the totals row reflects the change instantly.
+   * Audit finding: prior workflow forced the user to delete + re-log to
+   * fix a wrong qty.
+   */
+  const editQtyMutation = useMutation({
+    mutationFn: async (args: { item: ConsumedItem; newQty: number }) => {
+      const { item, newQty } = args;
+      if (item.source === 'Meal Plan') {
+        const { error: rpcErr } = await (chefbyte() as any).rpc('update_food_log_qty', {
+          p_log_id: item.id,
+          p_new_qty: newQty,
+        });
+        if (rpcErr) throw new Error(rpcErr.message);
+      } else {
+        // For temp_items there's no inherent qty — apply a scale factor
+        // relative to the current macros (newQty interpreted as the new
+        // calorie count divided by the existing one).
+        const scale = item.calories > 0 ? newQty / item.calories : 1;
+        const { error: rpcErr } = await (chefbyte() as any).rpc('update_temp_item_qty', {
+          p_temp_id: item.id,
+          p_scale: scale,
+        });
+        if (rpcErr) throw new Error(rpcErr.message);
+      }
+    },
+    onMutate: async (args) => {
+      const fullKey = [...queryKeys.dailyMacros(userId!, currentDate), 'full'];
+      await queryClient.cancelQueries({ queryKey: queryKeys.dailyMacros(userId!, currentDate) });
+      const previous = queryClient.getQueryData<MacroPageData>(fullKey);
+      if (previous) {
+        const { item, newQty } = args;
+        let scale = 1;
+        if (item.source === 'Meal Plan' && item.qty && item.qty > 0) {
+          scale = newQty / item.qty;
+        } else if (item.source === 'Temp Item' && item.calories > 0) {
+          scale = newQty / item.calories;
+        }
+        queryClient.setQueryData<MacroPageData>(fullKey, {
+          ...previous,
+          consumed: previous.consumed.map((c) =>
+            c.id !== item.id
+              ? c
+              : {
+                  ...c,
+                  qty: item.source === 'Meal Plan' ? newQty : c.qty,
+                  calories: Math.round(c.calories * scale),
+                  protein: Math.round(c.protein * scale),
+                  carbs: Math.round(c.carbs * scale),
+                  fat: Math.round(c.fat * scale),
+                },
+          ),
+        });
+      }
+      setEditingId(null);
+      setEditValue('');
+      return { previous };
+    },
+    onError: (err: Error, _args, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData([...queryKeys.dailyMacros(userId!, currentDate), 'full'], context.previous);
+      }
+      setMutationError(err.message);
+    },
+    onSettled: () => invalidateMacros(),
+  });
+
+  const startEditQty = (item: ConsumedItem) => {
+    setEditingId(item.id);
+    if (item.source === 'Meal Plan' && item.qty != null) {
+      setEditValue(String(item.qty));
+    } else {
+      setEditValue(String(item.calories));
+    }
+  };
+
+  const commitEditQty = (item: ConsumedItem) => {
+    const parsed = Number(editValue);
+    if (!Number.isFinite(parsed) || parsed <= 0) {
+      setMutationError('Quantity must be greater than 0');
+      return;
+    }
+    editQtyMutation.mutate({ item, newQty: parsed });
+  };
+
+  const cancelEditQty = () => {
+    setEditingId(null);
+    setEditValue('');
+  };
 
   const addTempMutation = useMutation({
     mutationFn: async () => {
@@ -551,6 +661,9 @@ export function MacroPage() {
             {consumed.map((item) => {
               const badgeColor =
                 item.source === 'Meal Plan' ? 'bg-success-subtle text-chef-accent' : 'bg-violet-100 text-violet-700';
+              const isEditing = editingId === item.id;
+              const editLabel =
+                item.source === 'Meal Plan' ? `Qty (${item.unit ?? 'unit'})` : 'Calories (scales protein/carbs/fat)';
               return (
                 <div
                   key={item.id}
@@ -566,6 +679,12 @@ export function MacroPage() {
                           {item.source}
                         </span>
                         <span className="text-sm font-medium text-text">{item.name}</span>
+                        {item.source === 'Meal Plan' && item.qty != null && !isEditing && (
+                          <span data-testid={`consumed-qty-${item.id}`} className="text-xs text-text-tertiary">
+                            ({item.qty} {item.unit}
+                            {Number(item.qty) !== 1 ? 's' : ''})
+                          </span>
+                        )}
                       </div>
                       <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-text-secondary mt-1 flex-wrap">
                         <span>{item.calories} cal</span>
@@ -573,15 +692,63 @@ export function MacroPage() {
                         <span>{item.carbs}g C</span>
                         <span>{item.fat}g F</span>
                       </div>
+                      {isEditing && (
+                        <div
+                          data-testid={`edit-qty-form-${item.id}`}
+                          className="mt-2 flex items-center gap-2 flex-wrap"
+                        >
+                          <label className="text-xs text-text-tertiary">{editLabel}</label>
+                          <input
+                            type="number"
+                            min="0"
+                            step="any"
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') commitEditQty(item);
+                              if (e.key === 'Escape') cancelEditQty();
+                            }}
+                            data-testid={`edit-qty-input-${item.id}`}
+                            className="w-24 px-2 py-1 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
+                            autoFocus
+                          />
+                          <button
+                            onClick={() => commitEditQty(item)}
+                            data-testid={`edit-qty-save-${item.id}`}
+                            className="px-2.5 py-1 bg-success text-white rounded text-xs font-semibold hover:bg-success-hover"
+                          >
+                            Save
+                          </button>
+                          <button
+                            onClick={cancelEditQty}
+                            data-testid={`edit-qty-cancel-${item.id}`}
+                            className="px-2.5 py-1 bg-surface border border-border-strong text-text-secondary rounded text-xs font-semibold hover:bg-surface-hover"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      )}
                     </div>
-                    <button
-                      className="text-danger-text hover:text-danger-text font-bold text-base bg-transparent border-none cursor-pointer shrink-0 min-w-[28px] min-h-[28px] flex items-center justify-center"
-                      data-testid={`delete-consumed-${item.id}`}
-                      onClick={() => deleteMutation.mutate(item)}
-                      aria-label={`Remove ${item.name}`}
-                    >
-                      x
-                    </button>
+                    {!isEditing && (
+                      <div className="flex items-start gap-1 shrink-0">
+                        <button
+                          className="text-text-secondary hover:text-text font-semibold text-xs bg-transparent border border-border rounded cursor-pointer min-w-[44px] min-h-[28px] flex items-center justify-center px-2"
+                          data-testid={`edit-consumed-${item.id}`}
+                          onClick={() => startEditQty(item)}
+                          aria-label={`Edit qty for ${item.name}`}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          className="text-danger-text hover:text-danger-text font-bold text-base bg-transparent border-none cursor-pointer min-w-[28px] min-h-[28px] flex items-center justify-center"
+                          data-testid={`delete-consumed-${item.id}`}
+                          onClick={() => deleteMutation.mutate(item)}
+                          aria-label={`Remove ${item.name}`}
+                        >
+                          x
+                        </button>
+                      </div>
+                    )}
                   </div>
                 </div>
               );

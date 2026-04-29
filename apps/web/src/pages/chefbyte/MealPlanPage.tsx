@@ -8,6 +8,8 @@ import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { toDateStr, todayStr } from '@/shared/dates';
 import { computeRecipeMacros } from './RecipesPage';
+import { formatStockShortfallMessage } from './HomePage';
+import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
@@ -81,6 +83,13 @@ interface MealPlanData {
   meals: MealEntry[];
   foodLogs: FoodLogEntry[];
   tempItems: TempItemEntry[];
+}
+
+interface MacroGoals {
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
 }
 
 /* ------------------------------------------------------------------ */
@@ -204,6 +213,37 @@ export function MealPlanPage() {
   const meals = data?.meals;
   const foodLogs = data?.foodLogs;
   const tempItems = data?.tempItems;
+
+  /* ---------------------------------------------------------------- */
+  /*  Goals — fetched once for "vs goals" row on day-detail TOTAL     */
+  /* ---------------------------------------------------------------- */
+
+  // Audit finding: day_totals on MealPlan don't compare to goals — for a
+  // single-user setup with set targets this is the most-asked planning
+  // question and was unanswered.
+  const { data: goals } = useQuery({
+    queryKey: ['user_config_goals', userId],
+    queryFn: async (): Promise<MacroGoals> => {
+      const { data: rows } = await chefbyte()
+        .from('user_config')
+        .select('key, value')
+        .eq('user_id', userId!)
+        .in('key', ['goal_calories', 'goal_protein', 'goal_carbs', 'goal_fat']);
+      const map = new Map<string, number>();
+      for (const r of (rows ?? []) as Array<{ key: string; value: string }>) {
+        const n = Number(r.value);
+        if (Number.isFinite(n)) map.set(r.key, n);
+      }
+      return {
+        calories: map.get('goal_calories') ?? DEFAULT_MACRO_GOALS.calories,
+        protein: map.get('goal_protein') ?? DEFAULT_MACRO_GOALS.protein,
+        carbs: map.get('goal_carbs') ?? DEFAULT_MACRO_GOALS.carbs,
+        fat: map.get('goal_fat') ?? DEFAULT_MACRO_GOALS.fat,
+      };
+    },
+    enabled: !!userId,
+    staleTime: 5 * 60 * 1000,
+  });
 
   /* ---------------------------------------------------------------- */
   /*  Realtime invalidation                                            */
@@ -371,7 +411,27 @@ export function MealPlanPage() {
       const { error: rpcErr } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
       if (rpcErr) throw new Error(rpcErr.message);
     },
-    onError: (err: Error) => setError(err.message),
+    // Optimistic update — flip completed_at locally so the badge swaps
+    // instantly. Audit flagged the click → 200-500ms freeze on the most-
+    // clicked daily action. Rollback on error preserves the prior state.
+    onMutate: async (mealId: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.mealPlan(userId!, startDate) });
+      const previous = queryClient.getQueryData<MealPlanData>(queryKeys.mealPlan(userId!, startDate));
+      if (previous) {
+        const nowIso = new Date().toISOString();
+        queryClient.setQueryData<MealPlanData>(queryKeys.mealPlan(userId!, startDate), {
+          ...previous,
+          meals: previous.meals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: nowIso } : m)),
+        });
+      }
+      return { previous };
+    },
+    onError: (err: Error, _mealId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.mealPlan(userId!, startDate), context.previous);
+      }
+      setError(formatStockShortfallMessage(err.message));
+    },
     onSettled: () => invalidateMealPlan(),
   });
 
@@ -380,7 +440,23 @@ export function MealPlanPage() {
       const { error: rpcErr } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
       if (rpcErr) throw new Error(rpcErr.message);
     },
-    onError: (err: Error) => setError(err.message),
+    onMutate: async (mealId: string) => {
+      await queryClient.cancelQueries({ queryKey: queryKeys.mealPlan(userId!, startDate) });
+      const previous = queryClient.getQueryData<MealPlanData>(queryKeys.mealPlan(userId!, startDate));
+      if (previous) {
+        queryClient.setQueryData<MealPlanData>(queryKeys.mealPlan(userId!, startDate), {
+          ...previous,
+          meals: previous.meals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: null } : m)),
+        });
+      }
+      return { previous };
+    },
+    onError: (err: Error, _mealId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(queryKeys.mealPlan(userId!, startDate), context.previous);
+      }
+      setError(err.message);
+    },
     onSettled: () => invalidateMealPlan(),
   });
 
@@ -912,6 +988,47 @@ export function MealPlanPage() {
                         {dayTotals.calories} cal | {dayTotals.protein}g P | {dayTotals.carbs}g C | {dayTotals.fat}g F
                       </span>
                     </div>
+
+                    {/* VS GOAL row — audit fix.
+                       Shows headroom (under/over) per macro by reading
+                       user_config goals. Negative = over goal (red).
+                       Pure UI work — pulls already-fetched goals data. */}
+                    {goals && (
+                      <div
+                        data-testid="day-detail-vs-goal-row"
+                        className="bg-surface border border-border rounded-lg px-4 py-2 flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 text-xs"
+                      >
+                        <span className="font-semibold text-text-tertiary uppercase tracking-wide">vs goal</span>
+                        <span
+                          data-testid="day-detail-vs-goal-values"
+                          className="font-semibold tabular-nums flex flex-wrap gap-x-3"
+                        >
+                          {(() => {
+                            const diff = (consumed: number, goal: number) => goal - consumed;
+                            const fmt = (delta: number, suffix: string) => {
+                              const sign = delta < 0 ? '+' : delta > 0 ? '-' : '';
+                              const abs = Math.abs(Math.round(delta));
+                              const cls = delta < 0 ? 'text-danger-text' : 'text-success-text';
+                              return (
+                                <span className={cls}>
+                                  {sign}
+                                  {abs}
+                                  {suffix}
+                                </span>
+                              );
+                            };
+                            return (
+                              <>
+                                {fmt(diff(dayTotals.calories, goals.calories), ' cal')}
+                                {fmt(diff(dayTotals.protein, goals.protein), 'g P')}
+                                {fmt(diff(dayTotals.carbs, goals.carbs), 'g C')}
+                                {fmt(diff(dayTotals.fat, goals.fat), 'g F')}
+                              </>
+                            );
+                          })()}
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>

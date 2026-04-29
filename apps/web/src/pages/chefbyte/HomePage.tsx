@@ -131,9 +131,68 @@ interface HomePageData {
 /*  Pure helpers (exported for testing)                                 */
 /* ------------------------------------------------------------------ */
 
+/**
+ * Capped percentage (0-100). Drives bar width — a bar can't extend past
+ * 100% of its track.
+ */
 export function pctOf(val: number, goal: number): number {
   if (goal <= 0) return 0;
   return Math.min(Math.round((val / goal) * 100), 100);
+}
+
+/**
+ * Raw percentage (no cap). Used for the displayed "X%" label and for
+ * detecting the over-goal state. UX_AUDIT_CHEFBYTE_USE flagged that a
+ * capped bar makes 120% indistinguishable from 100% — disciplined
+ * macro-trackers specifically need the over-goal signal.
+ */
+export function rawPctOf(val: number, goal: number): number {
+  if (goal <= 0) return 0;
+  return Math.round((val / goal) * 100);
+}
+
+/**
+ * Wrap a raw RPC stock-shortfall error into actionable copy.
+ *
+ * The mark_meal_done RPC raises:
+ *   'Insufficient stock for <name>: need <X> containers, have <Y>'
+ *
+ * Audit flagged this verbatim string as too generic to act on at the
+ * moment the user is most rushed. We keep the specifics (which product,
+ * how short) and prepend a clear next step.
+ *
+ * Other errors pass through untouched so we don't mask unexpected
+ * failures behind a friendlier-but-wrong message.
+ */
+export function formatStockShortfallMessage(message: string): string {
+  if (!message) return '';
+  if (/insufficient stock/i.test(message)) {
+    return `Can't mark this meal done: ${message}. Add the missing item to your shopping list, then try again.`;
+  }
+  return message;
+}
+
+/**
+ * Format the day-window label from a numeric `day_start_hour`.
+ *
+ * Examples (24h hour input → human-friendly window):
+ *   6  → "6:00 AM - 5:59 AM"   (default)
+ *   4  → "4:00 AM - 3:59 AM"
+ *   0  → "12:00 AM - 11:59 PM"
+ *   12 → "12:00 PM - 11:59 AM"
+ *
+ * Audit flagged the previous hardcoded "(6:00 AM - 5:59 AM)" label as a
+ * lie for any user with a non-6 day_start_hour.
+ */
+export function formatDayWindow(dayStartHour: number): string {
+  const startH = ((dayStartHour % 24) + 24) % 24;
+  const endH = (startH + 23) % 24;
+  const fmt = (h: number, minute: string): string => {
+    const period = h < 12 ? 'AM' : 'PM';
+    const display = h === 0 ? 12 : h > 12 ? h - 12 : h;
+    return `${display}:${minute} ${period}`;
+  };
+  return `${fmt(startH, '00')} - ${fmt(endH, '59')}`;
 }
 
 export function computeMealEntryMacros(
@@ -603,7 +662,27 @@ export function HomePage() {
       const { error } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
       if (error) throw new Error(error.message);
     },
-    onError: (err: Error) => setMutationError(err.message),
+    // Optimistic update: stamp completed_at locally so the badge flips
+    // instantly. Audit flagged the click → 200-500ms freeze → done badge
+    // pattern as friction on the most-clicked daily action.
+    onMutate: async (mealId: string) => {
+      await queryClient.cancelQueries({ queryKey: homeQueryKey });
+      const previous = queryClient.getQueryData<HomePageData>(homeQueryKey);
+      if (previous) {
+        const nowIso = new Date().toISOString();
+        queryClient.setQueryData<HomePageData>(homeQueryKey, {
+          ...previous,
+          todaysMeals: previous.todaysMeals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: nowIso } : m)),
+        });
+      }
+      return { previous };
+    },
+    onError: (err: Error, _mealId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(homeQueryKey, context.previous);
+      }
+      setMutationError(formatStockShortfallMessage(err.message));
+    },
     onSettled: () => invalidateHome(),
   });
 
@@ -612,7 +691,23 @@ export function HomePage() {
       const { error } = await (chefbyte() as any).rpc('unmark_meal_done', { p_meal_id: mealId });
       if (error) throw new Error(error.message);
     },
-    onError: (err: Error) => setMutationError(err.message),
+    onMutate: async (mealId: string) => {
+      await queryClient.cancelQueries({ queryKey: homeQueryKey });
+      const previous = queryClient.getQueryData<HomePageData>(homeQueryKey);
+      if (previous) {
+        queryClient.setQueryData<HomePageData>(homeQueryKey, {
+          ...previous,
+          todaysMeals: previous.todaysMeals.map((m) => (m.meal_id === mealId ? { ...m, completed_at: null } : m)),
+        });
+      }
+      return { previous };
+    },
+    onError: (err: Error, _mealId, context) => {
+      if (context?.previous) {
+        queryClient.setQueryData(homeQueryKey, context.previous);
+      }
+      setMutationError(err.message);
+    },
     onSettled: () => invalidateHome(),
   });
 
@@ -769,7 +864,14 @@ export function HomePage() {
     fat: '#ef4444',
   } as const;
 
-  /* Helper: inline progress bar with optional planned segment */
+  /* Helper: inline progress bar with optional planned segment.
+   *
+   * Over-100% rendering (UX_AUDIT_CHEFBYTE_USE): when consumed exceeds
+   * goal, the percentage label flips to red and a "+N%" overflow chip
+   * appears next to it. The bar itself is still capped at 100% width
+   * (a bar can't extend past its track), but a 1-pixel red sliver on
+   * the right edge marks overflow visually.
+   */
   const ProgressBar = ({
     value,
     plannedValue,
@@ -790,13 +892,28 @@ export function HomePage() {
     testId: string;
   }) => {
     const pct = pctOf(value, goal);
+    const raw = rawPctOf(value, goal);
+    const overflow = Math.max(0, raw - 100);
     const plannedPct = plannedValue ? Math.min(pctOf(value + plannedValue, goal), 100) : 0;
     return (
       <div data-testid={testId} className="bg-surface/70 border border-border/60 rounded-lg p-3.5">
         <div className="flex justify-between items-center mb-1.5">
           <label className="font-semibold text-sm text-text-secondary">{label}</label>
-          <span className="text-xs font-bold tabular-nums" style={{ color }}>
-            {pct}%
+          <span
+            className="text-xs font-bold tabular-nums"
+            style={{ color: overflow > 0 ? '#ef4444' : color }}
+            data-testid={`${testId}-pct`}
+          >
+            {raw}%
+            {overflow > 0 && (
+              <span
+                data-testid={`${testId}-overflow`}
+                className="ml-1 inline-flex items-center rounded-full bg-danger px-1 py-0 text-[9px] font-bold text-white"
+                aria-label={`${overflow}% over goal`}
+              >
+                +{overflow}%
+              </span>
+            )}
           </span>
         </div>
         <div
@@ -814,6 +931,13 @@ export function HomePage() {
             className={`relative h-full rounded-full ${colorClass} transition-all duration-300`}
             style={{ width: `${pct}%` }}
           />
+          {overflow > 0 && (
+            <div
+              data-testid={`${testId}-overflow-bar`}
+              className="absolute inset-y-0 right-0 w-1 bg-danger rounded-r-full"
+              aria-hidden="true"
+            />
+          )}
         </div>
         <div className="text-xs text-text-secondary">
           {Math.round(value)}
@@ -877,7 +1001,9 @@ export function HomePage() {
           <div className="bg-gradient-to-br from-surface-sunken to-success-subtle border border-border rounded-xl p-4 shadow-sm hover:shadow transition-shadow">
             <div className="mb-3">
               <span className="font-bold text-base text-text">Today</span>{' '}
-              <span className="text-sm text-text-secondary">(6:00 AM - 5:59 AM)</span>
+              <span data-testid="day-window-label" className="text-sm text-text-secondary">
+                ({formatDayWindow(dayStartHour)})
+              </span>
             </div>
             <div data-testid="status-cards" className="grid grid-cols-2 sm:grid-cols-4 gap-2.5 sm:gap-3 cursor-pointer">
               <ProgressBar

@@ -13,9 +13,31 @@ describe('MacroProgressBar', () => {
     expect(bar).toHaveTextContent('50%');
   });
 
-  it('caps percentage at 100%', () => {
+  // After the UX_AUDIT_CHEFBYTE_USE fix: the displayed percentage label is
+  // raw (uncapped) so 125% is visually distinct from 100%. The bar fill
+  // itself is still capped to the track width (a bar can't extend past
+  // its own track), and an "+N%" overflow chip appears when raw > 100.
+  it('renders the raw percentage when consumption exceeds the goal', () => {
     render(<MacroProgressBar label="Calories" current={2500} goal={2000} color="red" testId="cal-bar" />);
-    expect(screen.getByTestId('cal-bar')).toHaveTextContent('100%');
+    const bar = screen.getByTestId('cal-bar');
+    expect(bar).toHaveTextContent('125%');
+    // The +N% overflow chip
+    expect(screen.getByTestId('cal-bar-overflow')).toHaveTextContent('+25%');
+  });
+
+  it('omits the overflow chip when consumption is at-or-under goal', () => {
+    render(<MacroProgressBar label="Calories" current={2000} goal={2000} color="red" testId="exact-bar" />);
+    expect(screen.getByTestId('exact-bar')).toHaveTextContent('100%');
+    expect(screen.queryByTestId('exact-bar-overflow')).toBeNull();
+  });
+
+  it('caps the rendered bar fill width at 100% even when raw % exceeds it', () => {
+    const { container } = render(
+      <MacroProgressBar label="Calories" current={3000} goal={1500} color="red" testId="cap-bar" />,
+    );
+    // Capped width — find the bar fill div with width inline style ≤ 100%
+    const fill = container.querySelector<HTMLElement>('[style*="width: 100%"]');
+    expect(fill).not.toBeNull();
   });
 
   it('shows 0% when goal is 0', () => {
