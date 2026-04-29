@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { QueryClientProvider } from '@tanstack/react-query';
 import { AppShell } from '@luna-hub/ui-kit';
@@ -12,14 +12,17 @@ import { ToastProvider } from './components/shared/Toast';
 import { AuthGuard } from './components/AuthGuard';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ActivationGuard } from './components/ActivationGuard';
+import { lazyWithReload } from './shared/lazyWithReload';
 import { Login } from './pages/Login';
 import { Signup } from './pages/Signup';
 import { ResetPassword } from './pages/hub/ResetPassword';
 import { OAuthConsent } from './pages/OAuthConsent';
 
-const HubRoutes = lazy(() => import('./modules/hub/routes').then((m) => ({ default: m.HubRoutes })));
-const CoachRoutes = lazy(() => import('./modules/coachbyte/routes').then((m) => ({ default: m.CoachRoutes })));
-const ChefRoutes = lazy(() => import('./modules/chefbyte/routes').then((m) => ({ default: m.ChefRoutes })));
+const HubRoutes = lazyWithReload(() => import('./modules/hub/routes').then((m) => ({ default: m.HubRoutes })));
+const CoachRoutes = lazyWithReload(() =>
+  import('./modules/coachbyte/routes').then((m) => ({ default: m.CoachRoutes })),
+);
+const ChefRoutes = lazyWithReload(() => import('./modules/chefbyte/routes').then((m) => ({ default: m.ChefRoutes })));
 
 function PageSpinner() {
   return (

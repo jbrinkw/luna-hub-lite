@@ -1,11 +1,16 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
+import { lazyWithReload } from '@/shared/lazyWithReload';
 import { Routes, Route } from 'react-router-dom';
 import { TodayPage } from '@/pages/coachbyte/TodayPage';
 
-const HistoryPage = lazy(() => import('@/pages/coachbyte/HistoryPage').then((m) => ({ default: m.HistoryPage })));
-const SplitPage = lazy(() => import('@/pages/coachbyte/SplitPage').then((m) => ({ default: m.SplitPage })));
-const PrsPage = lazy(() => import('@/pages/coachbyte/PrsPage').then((m) => ({ default: m.PrsPage })));
-const SettingsPage = lazy(() => import('@/pages/coachbyte/SettingsPage').then((m) => ({ default: m.SettingsPage })));
+const HistoryPage = lazyWithReload(() =>
+  import('@/pages/coachbyte/HistoryPage').then((m) => ({ default: m.HistoryPage })),
+);
+const SplitPage = lazyWithReload(() => import('@/pages/coachbyte/SplitPage').then((m) => ({ default: m.SplitPage })));
+const PrsPage = lazyWithReload(() => import('@/pages/coachbyte/PrsPage').then((m) => ({ default: m.PrsPage })));
+const SettingsPage = lazyWithReload(() =>
+  import('@/pages/coachbyte/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
 
 function PageSpinner() {
   return (

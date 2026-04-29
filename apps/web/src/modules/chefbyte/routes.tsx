@@ -1,24 +1,39 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
+import { lazyWithReload } from '@/shared/lazyWithReload';
 import { Routes, Route, Navigate } from 'react-router-dom';
 import { HomePage } from '@/pages/chefbyte/HomePage';
 
-const ScannerPage = lazy(() => import('@/pages/chefbyte/ScannerPage').then((m) => ({ default: m.ScannerPage })));
-const InventoryPage = lazy(() => import('@/pages/chefbyte/InventoryPage').then((m) => ({ default: m.InventoryPage })));
-const ShoppingPage = lazy(() => import('@/pages/chefbyte/ShoppingPage').then((m) => ({ default: m.ShoppingPage })));
-const MealPlanPage = lazy(() => import('@/pages/chefbyte/MealPlanPage').then((m) => ({ default: m.MealPlanPage })));
-const RecipesPage = lazy(() => import('@/pages/chefbyte/RecipesPage').then((m) => ({ default: m.RecipesPage })));
-const RecipeFormPage = lazy(() =>
+const ScannerPage = lazyWithReload(() =>
+  import('@/pages/chefbyte/ScannerPage').then((m) => ({ default: m.ScannerPage })),
+);
+const InventoryPage = lazyWithReload(() =>
+  import('@/pages/chefbyte/InventoryPage').then((m) => ({ default: m.InventoryPage })),
+);
+const ShoppingPage = lazyWithReload(() =>
+  import('@/pages/chefbyte/ShoppingPage').then((m) => ({ default: m.ShoppingPage })),
+);
+const MealPlanPage = lazyWithReload(() =>
+  import('@/pages/chefbyte/MealPlanPage').then((m) => ({ default: m.MealPlanPage })),
+);
+const RecipesPage = lazyWithReload(() =>
+  import('@/pages/chefbyte/RecipesPage').then((m) => ({ default: m.RecipesPage })),
+);
+const RecipeFormPage = lazyWithReload(() =>
   import('@/pages/chefbyte/RecipeFormPage').then((m) => ({ default: m.RecipeFormPage })),
 );
-const MacroPage = lazy(() => import('@/pages/chefbyte/MacroPage').then((m) => ({ default: m.MacroPage })));
-const SettingsPage = lazy(() => import('@/pages/chefbyte/SettingsPage').then((m) => ({ default: m.SettingsPage })));
-const LiveTrackImportPage = lazy(() =>
+const MacroPage = lazyWithReload(() => import('@/pages/chefbyte/MacroPage').then((m) => ({ default: m.MacroPage })));
+const SettingsPage = lazyWithReload(() =>
+  import('@/pages/chefbyte/SettingsPage').then((m) => ({ default: m.SettingsPage })),
+);
+const LiveTrackImportPage = lazyWithReload(() =>
   import('@/pages/chefbyte/LiveTrackImportPage').then((m) => ({ default: m.LiveTrackImportPage })),
 );
-const EventViewerPage = lazy(() =>
+const EventViewerPage = lazyWithReload(() =>
   import('@/pages/chefbyte/EventViewerPage').then((m) => ({ default: m.EventViewerPage })),
 );
-const ReviewsPage = lazy(() => import('@/pages/chefbyte/ReviewsPage').then((m) => ({ default: m.ReviewsPage })));
+const ReviewsPage = lazyWithReload(() =>
+  import('@/pages/chefbyte/ReviewsPage').then((m) => ({ default: m.ReviewsPage })),
+);
 
 function PageSpinner() {
   return (
