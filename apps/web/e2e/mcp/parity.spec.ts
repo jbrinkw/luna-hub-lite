@@ -70,8 +70,12 @@ function assertRowShape(
     numericClose?: string[];
   },
 ) {
+  const ignoreSet = new Set(opts?.ignore ?? []);
+  const requiredSet = new Set(opts?.required ?? []);
+  const numericSet = new Set(opts?.numericClose ?? []);
+
   // Assert required columns are non-null in both
-  for (const col of opts?.required ?? []) {
+  for (const col of requiredSet) {
     expect(rowA[col], `Row A missing required column: ${col}`).not.toBeNull();
     expect(rowA[col], `Row A missing required column: ${col}`).not.toBeUndefined();
     expect(rowB[col], `Row B missing required column: ${col}`).not.toBeNull();
@@ -79,10 +83,32 @@ function assertRowShape(
   }
 
   // Assert numeric columns are close
-  for (const col of opts?.numericClose ?? []) {
+  for (const col of numericSet) {
     if (rowA[col] != null && rowB[col] != null) {
       expect(Number(rowA[col])).toBeCloseTo(Number(rowB[col]), 1);
     }
+  }
+
+  // Catch-all: assert that the two rows have the exact same set of column
+  // keys (after excluding ignored columns). Any new column added to the DB
+  // schema will trigger a test failure unless it is explicitly listed in
+  // `ignore`. This prevents field parity regressions from slipping through
+  // silently.
+  const keysA = Object.keys(rowA)
+    .filter((k) => !ignoreSet.has(k))
+    .sort();
+  const keysB = Object.keys(rowB)
+    .filter((k) => !ignoreSet.has(k))
+    .sort();
+  expect(keysA, 'Row A and Row B must have the same columns (excluding ignored)').toEqual(keysB);
+
+  // For every non-ignored, non-numeric, non-required column present in both
+  // rows: assert values are strictly equal. This catches divergences like
+  // unit_type='solid' in MCP vs unit_type='liquid' in UI that were previously
+  // silent because those columns weren't in required or numericClose.
+  for (const col of keysA) {
+    if (requiredSet.has(col) || numericSet.has(col)) continue;
+    expect(rowA[col], `Column "${col}" differs between rows`).toEqual(rowB[col]);
   }
 }
 
