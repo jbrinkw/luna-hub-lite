@@ -603,6 +603,20 @@ export function ScannerPage() {
                 // null means "non-perishable / unknown" → scanner leaves
                 // expires_on unset for lots of this product.
                 const shelfLife = s?.default_shelf_life_days != null ? Number(s.default_shelf_life_days) || null : null;
+                // Wire new distinct-unit + recipe-unit fields from AI response.
+                // Defensive: only trust these when the suggestion object is present
+                // (the OFF-only fallback path doesn't produce them).
+                const isDistinctUnitItem: boolean = s?.is_distinct_unit_item === true;
+                const netWeightG: number | null =
+                  s?.net_weight_g != null && Number(s.net_weight_g) > 0 ? Number(s.net_weight_g) : null;
+                // Sanitize default_recipe_unit: 'gram' requires net_weight_g > 0.
+                let defaultRecipeUnit: string | null = null;
+                if (s?.default_recipe_unit && ['gram', 'serving', 'container'].includes(s.default_recipe_unit)) {
+                  defaultRecipeUnit = s.default_recipe_unit;
+                  if (defaultRecipeUnit === 'gram' && !netWeightG) {
+                    defaultRecipeUnit = 'serving';
+                  }
+                }
                 const productFields = {
                   barcode,
                   name: productName,
@@ -614,9 +628,12 @@ export function ScannerPage() {
                   fat_per_serving: fatVal,
                   servings_per_container: spc,
                   default_shelf_life_days: shelfLife,
+                  is_distinct_unit_item: isDistinctUnitItem,
+                  net_weight_g: netWeightG,
+                  default_recipe_unit: defaultRecipeUnit,
                 };
                 const returning =
-                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container, default_shelf_life_days';
+                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container, default_shelf_life_days, is_distinct_unit_item, net_weight_g, default_recipe_unit';
 
                 // Priority for upgrade target:
                 //   1. barcode-matched placeholder (existingPlaceholderId) — most
@@ -771,27 +788,19 @@ export function ScannerPage() {
               ),
             );
           } else {
-            // Fallback: create placeholder product
-            const { data: newProduct } = await chefbyte()
-              .from('products')
-              .insert({
-                user_id: user.id,
-                barcode,
-                name: `Unknown (${barcode})`,
-                is_placeholder: true,
-              })
-              .select('product_id, name')
-              .single();
-
+            // analyze-product failed and no placeholder exists. Scanners always
+            // have a barcode so minting a placeholder here is wrong — surfacing
+            // the error lets the user create the product properly via Settings.
+            const errMsg = `Scan failed for ${barcode}. Create the product manually in Settings.`;
             setQueue((prev) =>
               prev.map((item) =>
                 item.id === tempId
                   ? {
                       ...item,
-                      name: newProduct?.name ?? `Unknown (${barcode})`,
-                      productId: newProduct?.product_id ?? null,
-                      status: 'success',
-                      isNew: true,
+                      name: errMsg,
+                      productId: null,
+                      status: 'error',
+                      errorMsg: errMsg,
                     }
                   : item,
               ),
