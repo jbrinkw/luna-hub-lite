@@ -1251,6 +1251,28 @@ describe('TODOIST_get_completed_tasks', () => {
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Network down');
   });
+
+  it('TOD-3: returns toolError on 429 during projects lookup (multi-endpoint path used by get_morning_brief)', async () => {
+    // get_morning_brief calls get_completed_tasks (no project_id), which first
+    // hits /projects then /tasks/completed. A 429 on the projects call must
+    // surface immediately — no infinite retry loop.
+    mockFetch.mockReturnValueOnce(mockFetchResponse('', false, 429));
+
+    const result = await handler({ since: '2026-04-17', until: '2026-04-18' }, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('429');
+  });
+
+  it('TOD-3: returns toolError on 429 during completed-tasks fetch (explicit project_id path)', async () => {
+    // With project_id given, only one fetch is made (no projects lookup).
+    mockFetch.mockReturnValueOnce(mockFetchResponse('', false, 429));
+
+    const result = await handler({ since: '2026-04-17', until: '2026-04-18', project_id: 'proj-inbox' }, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('429');
+  });
 });
 
 describe('TODOIST_get_tasks', () => {
@@ -1316,6 +1338,16 @@ describe('TODOIST_get_tasks', () => {
 
     expect(result.isError).toBe(true);
     expect(result.content[0].text).toContain('Network error: Network failure');
+  });
+
+  it('TOD-3: returns toolError immediately on 429 rate-limit (no silent retry)', async () => {
+    // Todoist enforces 450 req/15 min; 429 must surface as an error, not hang.
+    mockFetch.mockReturnValueOnce(mockFetchResponse('', false, 429));
+
+    const result = await handler({}, todoistCtx());
+
+    expect(result.isError).toBe(true);
+    expect(result.content[0].text).toContain('429');
   });
 });
 
