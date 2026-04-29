@@ -790,17 +790,22 @@ describe('ChefByte HomePage queries', () => {
     // in tact is not safe when we need exact counts. Remove all and reseed.
     await chef.from('stock_lots').delete().eq('user_id', ctx.userId);
 
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toISOString().split('T')[0];
-
-    const tenDaysAgo = new Date();
-    tenDaysAgo.setDate(tenDaysAgo.getDate() - 10);
-    const tenDaysAgoStr = tenDaysAgo.toISOString().split('T')[0];
-
-    const future = new Date();
-    future.setDate(future.getDate() + 30);
-    const futureStr = future.toISOString().split('T')[0];
+    // Date strings must be computed in the same calendar as todayDate()
+    // (local time, line 840 below), otherwise crossing UTC midnight while
+    // local is still on the previous day produces a row with
+    // expires_on === today that the filter expires_on < today silently
+    // drops. Use a single local-calendar formatter.
+    const localDateStr = (offsetDays: number): string => {
+      const d = new Date();
+      d.setDate(d.getDate() + offsetDays);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${y}-${m}-${day}`;
+    };
+    const yesterdayStr = localDateStr(-1);
+    const tenDaysAgoStr = localDateStr(-10);
+    const futureStr = localDateStr(30);
 
     // Seed two expired lots (one qty=2, one qty=1) and one fresh lot.
     await chef.from('stock_lots').insert([
