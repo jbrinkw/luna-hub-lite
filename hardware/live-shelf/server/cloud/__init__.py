@@ -28,6 +28,7 @@ from .settings_cache import (
     ClassifierSettingsCache,
     get_global_cache as get_classifier_settings_cache,
 )
+from .weight_sync_poller import WeightSyncPoller
 from .worker import CloudWorker
 
 __all__ = [
@@ -43,6 +44,7 @@ __all__ = [
     "LotSnapshotPoller",
     "PairingsSyncPoller",
     "ProductSyncPoller",
+    "WeightSyncPoller",
     "enqueue_event",
     "fetch_catalog",
     "get_classifier_settings_cache",

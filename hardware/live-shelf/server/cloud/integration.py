@@ -791,6 +791,63 @@ class CloudEventEmitter:
         }
         return self._enqueue(payload)
 
+    def emit_live_weight_sync(
+        self,
+        *,
+        scale_id: str,
+        kind: str,
+        pi_lot_id: str,
+        observed_weight_g: float,
+        occurred_at: Optional[str] = None,
+        pi_event_id: Optional[str] = None,
+    ) -> Optional[str]:
+        """Emit a ``live_weight_sync`` cloud event for live_shelf / live_scale.
+
+        Continuous-ish per-lot weight stream — the live_shelf/live_scale
+        analogue of the catch-all delta-capture stream (which is event-
+        pair driven). The cloud handler updates ONLY
+        ``stock_lots.last_observed_weight_g`` + ``last_observed_at``;
+        ``qty_containers`` stays event-driven and no ``food_logs`` row
+        is written. See migration 20260429030000_live_weight_sync.sql.
+
+        ``kind`` must be ``live_shelf`` or ``live_scale`` (catch_all has
+        its own delta-capture pair). ``pi_lot_id`` is the cloud
+        ``stock_lots.lot_id`` UUID — the Pi knows it directly via the
+        ``cloud_lots`` mirror, so no product-level FEFO lookup is needed.
+
+        Protocol note: ``delta_g`` is repurposed for this event_kind to
+        carry the ABSOLUTE observed weight in grams (matches the
+        catch_all_first_measurement convention). Must be non-negative;
+        cloud rejects negative values.
+
+        Idempotent via ``shelf_event_log`` UNIQUE(user_id, client_event_id).
+        Out-of-order arrivals (older ``observed_at`` than the stored
+        ``last_observed_at``) are recorded but do not regress the lot's
+        observation columns.
+        """
+        if not pi_lot_id:
+            return None
+        if kind not in ("live_shelf", "live_scale"):
+            log.warning(
+                "emit_live_weight_sync: invalid kind=%r (must be "
+                "live_shelf or live_scale); dropping event",
+                kind,
+            )
+            return None
+        if observed_weight_g is None or observed_weight_g < 0:
+            return None
+        payload: dict[str, Any] = {
+            "scale_id": scale_id,
+            "kind": kind,
+            "event_kind": "live_weight_sync",
+            "delta_g": float(observed_weight_g),
+            "pi_lot_id": pi_lot_id,
+            "occurred_at": occurred_at or _iso_utc_ms(),
+        }
+        if pi_event_id:
+            payload["pi_event_id"] = pi_event_id
+        return self._enqueue(payload)
+
 
 def backfill_missing_outbox_events(
     conn: sqlite3.Connection,

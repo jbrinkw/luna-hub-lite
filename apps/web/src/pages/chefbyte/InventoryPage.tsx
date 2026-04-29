@@ -53,6 +53,15 @@ interface StockLot {
    * badge on the inventory page.
    */
   in_flight_since: string | null;
+  /**
+   * Most recent gram-level weight observation streamed from the Pi via
+   * the live_weight_sync flow (live_shelf + live_scale lots only —
+   * catch_all uses pickup_weight_g). NULL when the lot has never been
+   * observed. Paired with last_observed_at so the UI can render
+   * freshness alongside the value.
+   */
+  last_observed_weight_g: number | null;
+  last_observed_at: string | null;
   locations: { name: string } | null;
 }
 
@@ -361,7 +370,7 @@ export function InventoryPage() {
       const { data, error } = await chefbyte()
         .from('stock_lots')
         .select(
-          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,locations:location_id(name)',
+          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,last_observed_weight_g,last_observed_at,locations:location_id(name)',
         )
         .eq('user_id', user!.id);
       if (error) throw error;
@@ -1482,6 +1491,11 @@ export function InventoryPage() {
                           `${Number(lot.qty_containers).toFixed(1)} ctn`
                         )}
                       </span>
+                      {lot.last_observed_weight_g != null && (
+                        <span title={lot.last_observed_at ?? undefined}>
+                          On scale: {Number(lot.last_observed_weight_g).toFixed(1)}g
+                        </span>
+                      )}
                       <span>{lot.locations?.name ?? '\u2014'}</span>
                       <span>Expires: {lot.expires_on ?? '\u2014'}</span>
                     </div>

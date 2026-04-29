@@ -58,6 +58,12 @@ const VALID_EVENT_KINDS = [
   // 20260427130000_catch_all_delta_apply.sql.
   'catch_all_first_measurement',
   'catch_all_second_measurement',
+  // Per-lot live-weight observation stream from the Pi for live_shelf
+  // and live_scale lots (catch_all already streams via the delta-capture
+  // pair). Updates ONLY stock_lots.last_observed_weight_g +
+  // last_observed_at — qty stays event-driven, no food_logs. See
+  // migration 20260429030000_live_weight_sync.sql.
+  'live_weight_sync',
 ] as const;
 
 function jsonResponse(body: Record<string, unknown>, status = 200) {
@@ -445,6 +451,63 @@ async function handleSettings(supabase: SupabaseClient, device: Device): Promise
   });
 }
 
+/**
+ * GET /events-by-pi-id?pi_event_ids=<comma-separated>
+ *
+ * Return the SUBSET of supplied ``pi_event_ids`` that already exist in
+ * ``shelf_event_log`` for this device's user. Used by the Pi-side
+ * startup back-fill (server/cloud/integration.py) to avoid re-emitting
+ * resolutions the cloud already has — which previously caused
+ * duplicate stock mutations on Pi restart.
+ *
+ * Request:
+ *   ``?pi_event_ids=uuid-a,uuid-b,uuid-c`` — up to 200 ids.
+ *
+ * Response:
+ *   ``{ "known": ["uuid-a", "uuid-c"] }`` — the ids the cloud already
+ *   has applied (caller treats anything else as missing). Order is
+ *   not guaranteed; callers should set-compare.
+ *
+ * RLS: filtered explicitly on ``user_id``. shelf_event_log has an
+ * UNIQUE constraint on (user_id, client_event_id) AND a separate
+ * (user_id, pi_event_id) presence — we look up by pi_event_id since
+ * that's the stable id the Pi always knows (client_event_id rotates
+ * across restarts). pi_event_id is sometimes NULL for legacy events;
+ * those are simply absent from the response.
+ */
+async function handleEventsByPiId(supabase: SupabaseClient, device: Device, url: URL): Promise<Response> {
+  const raw = url.searchParams.get('pi_event_ids') ?? '';
+  // Accept up to 200 ids per call. The Pi's back-fill window is
+  // typically <100 resolutions in 168h so this gives plenty of head-
+  // room for batching while still capping pathological loads.
+  const ids = raw
+    .split(',')
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0)
+    .slice(0, 200);
+  if (ids.length === 0) {
+    return jsonResponse({ known: [] });
+  }
+  // Validate each id is a plausible UUID (length 36 + hex/-) — defense-
+  // in-depth so a bad client can't smuggle SQL fragments through .in().
+  const uuidRe = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  const valid = ids.filter((s) => uuidRe.test(s));
+  if (valid.length === 0) {
+    return jsonResponse({ known: [] });
+  }
+  const { data, error } = await supabase
+    .schema('chefbyte')
+    .from('shelf_event_log')
+    .select('pi_event_id')
+    .eq('user_id', device.user_id)
+    .in('pi_event_id', valid);
+  if (error) throw error;
+  const known = (data ?? [])
+    .map((r: any) => r.pi_event_id)
+    .filter((s: any): s is string => typeof s === 'string' && s.length > 0);
+  return jsonResponse({ known });
+}
+
 async function handleEvent(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
   const scaleId: string | undefined = body?.scale_id;
   const kind: string | undefined = body?.kind;
@@ -524,6 +587,76 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     return jsonResponse({ error: 'occurred_at out of range' }, 422);
   }
 
+  // pi_lot_id is forwarded by the Pi for two flows:
+  //   * Codex MEDIUM-6 (2026-04-28): catch-all empty-bottle ``discarded``
+  //     short-circuit (lot-targeted, see apply_discard_with_lot_id).
+  //   * 2026-04-29: ``live_weight_sync`` per-lot weight stream — the
+  //     live_shelf/live_scale equivalent of the catch-all delta-capture
+  //     stream. The Pi knows the cloud lot_id (cloud_lots mirror) and
+  //     names it directly so we don't need product-level FEFO.
+  const piLotId: string | null =
+    typeof body?.pi_lot_id === 'string' && body.pi_lot_id.length > 0 && body.pi_lot_id.length <= 64
+      ? body.pi_lot_id
+      : null;
+  const isLiveWeightSync = eventKind === 'live_weight_sync';
+
+  // live_weight_sync dispatch — runs BEFORE the product_id resolve/require
+  // gates because the helper looks up the lot by pi_lot_id alone (the
+  // product is implied by the lot row). Validate inputs explicitly.
+  if (isLiveWeightSync) {
+    if (kind !== 'live_shelf' && kind !== 'live_scale') {
+      return jsonResponse({ error: 'live_weight_sync requires kind in (live_shelf, live_scale)' }, 400);
+    }
+    if (!piLotId) {
+      return jsonResponse({ error: 'pi_lot_id required for live_weight_sync' }, 400);
+    }
+    // delta_g is repurposed as the absolute observed weight in grams
+    // (mirrors the catch_all_first_measurement convention so the Pi's
+    // emitter doesn't need a new payload schema). Must be non-negative.
+    if (deltaG < 0) {
+      return jsonResponse({ error: 'live_weight_sync delta_g must be non-negative (absolute observed weight)' }, 400);
+    }
+    const { data: lwsData, error: lwsError } = await (supabase as any)
+      .schema('chefbyte')
+      .rpc('apply_live_weight_sync_admin', {
+        p_user_id: device.user_id,
+        p_device_id: device.device_id,
+        p_scale_id: scaleId,
+        p_kind: kind,
+        p_pi_lot_id: piLotId,
+        p_observed_weight_g: deltaG,
+        p_observed_at: occurredAt,
+        p_client_event_id: clientEventId,
+        p_pi_event_id: piEventId,
+      });
+
+    if (lwsError) {
+      console.error('shelf-ingest: apply_live_weight_sync failed', {
+        client_event_id: clientEventId,
+        code: (lwsError as any).code ?? null,
+        message: (lwsError as any).message ?? null,
+      });
+      return jsonResponse({ error: 'apply_live_weight_sync failed' }, 500);
+    }
+
+    const row = Array.isArray(lwsData) ? lwsData[0] : lwsData;
+    const applied = Boolean(row?.applied);
+    const resolvedLotId = row?.resolved_lot_id ?? null;
+    const reason = row?.reason ?? null;
+    console.log('shelf-ingest: result', {
+      client_event_id: clientEventId,
+      applied,
+      reason,
+      resolved_lot_id: resolvedLotId,
+    });
+    return jsonResponse({
+      ok: true,
+      applied,
+      resolved_lot_id: resolvedLotId,
+      reason,
+    });
+  }
+
   // Resolve product_id for live_scale via pairing when not provided.
   // Distinguish "scale unknown" (no pairing row) from "scale known but
   // product not set" (row with NULL product_id).
@@ -557,10 +690,6 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
   // (private.apply_discard_with_lot_id) added in 20260428030000. The
   // legacy apply_shelf_event_admin path remains the default — older Pi
   // versions that don't include pi_lot_id continue to work unchanged.
-  const piLotId: string | null =
-    typeof body?.pi_lot_id === 'string' && body.pi_lot_id.length > 0 && body.pi_lot_id.length <= 64
-      ? body.pi_lot_id
-      : null;
   const isLotTargetedDiscard = eventKind === 'discarded' && kind === 'catch_all' && piLotId !== null;
 
   let data: any;
@@ -863,6 +992,10 @@ Deno.serve(async (req) => {
 
     if (req.method === 'GET' && leaf === 'settings') {
       return await handleSettings(supabase, device);
+    }
+
+    if (req.method === 'GET' && leaf === 'events-by-pi-id') {
+      return await handleEventsByPiId(supabase, device, url);
     }
 
     if (req.method === 'POST') {

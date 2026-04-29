@@ -45,6 +45,7 @@ from .cloud import (
     LotSnapshotPoller,
     PairingsSyncPoller,
     ProductSyncPoller,
+    WeightSyncPoller,
 )
 from .cloud.integration import (
     CloudEventEmitter,
@@ -1853,6 +1854,10 @@ def create_app(
         # controls). Pass the resolved live-shelf camera so the button
         # actually drives the camera that's producing session frames.
         default_camera_device=cfg.camera_device,
+        # Connection-getter for the dead-letter admin endpoints. Returns
+        # the same shared sqlite connection the worker drains against so
+        # the operator UI sees the live state without a second handle.
+        cloud_outbox_conn=lambda: conn,
     )
     app.register_blueprint(html_bp)
     app.register_blueprint(api_bp)
@@ -2133,6 +2138,11 @@ def create_app(
                     back_filled = backfill_missing_outbox_events(
                         conn, cloud_emitter,
                         window_hours=int(cfg.cloud_backfill_window_hours),
+                        # Pass the cloud client so the back-fill can
+                        # probe ``shelf_event_log`` and skip resolutions
+                        # the cloud already has — prevents the
+                        # 2026-04-29 duplicate-emission bug on Pi restart.
+                        cloud_client=cloud_client,
                     )
                 if back_filled:
                     log.info(
@@ -2291,6 +2301,34 @@ def create_app(
                     "failed to start pairings-sync poller; "
                     "cloud-side scale pairings will not reach the Pi "
                     "until reboot",
+                )
+
+            # Weight-sync poller (2026-04-29). Streams per-lot
+            # current_weight_g from live_shelf + live_scale lots to
+            # the cloud as ``live_weight_sync`` events. Mirrors the
+            # catch-all delta-capture stream so the cloud's chefbyte
+            # inventory UI can render the live gram-level reading
+            # between formal pickup/return events. Throttled by
+            # significant-change (5g) + TTL re-emit (5 min) — see
+            # weight_sync_poller module docstring. Best-effort startup,
+            # log + continue.
+            try:
+                weight_sync_poller = WeightSyncPoller(
+                    cloud_emitter,
+                    conn,
+                    db_lock=db_lock,
+                )
+                weight_sync_poller.start()
+                cloud_pollers_started.append(weight_sync_poller)
+                log.info(
+                    "weight-sync poller started (interval=30s, "
+                    "min_delta=5g, ttl=300s)",
+                )
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "failed to start weight-sync poller; live_shelf "
+                    "and live_scale lot weights will not stream to "
+                    "cloud until reboot",
                 )
         except Exception:  # pragma: no cover - defensive
             log.exception(
