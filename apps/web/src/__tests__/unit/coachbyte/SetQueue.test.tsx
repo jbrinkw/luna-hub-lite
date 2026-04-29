@@ -356,5 +356,49 @@ describe('SetQueue', () => {
       expect(screen.queryByTestId('resume-btn')).not.toBeInTheDocument();
       expect(screen.queryByTestId('reset-btn')).not.toBeInTheDocument();
     });
+
+    // W-04: illegal-transition guard tests.
+    // The DB state machine throws if the UI calls pause_timer when already
+    // paused, or resume_timer when already running. The UI must hide the
+    // button entirely (not just disable it) so these transitions can never
+    // be triggered. A UI regression that renders Pause during paused state
+    // would let the user double-pause, causing a DB exception.
+    it('does NOT render Pause button when timerState is "paused" (illegal transition guard)', () => {
+      renderQueue(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="paused"
+          timerDisplay="0:45"
+          onTimerPause={vi.fn()}
+          onTimerResume={vi.fn()}
+          onTimerReset={vi.fn()}
+        />,
+      );
+      // Pause must be absent — calling pause_timer in state=paused throws in DB
+      expect(screen.queryByTestId('pause-btn')).not.toBeInTheDocument();
+      // Resume must be present — that's the valid action from paused
+      expect(screen.getByTestId('resume-btn')).toBeInTheDocument();
+    });
+
+    it('does NOT render Resume button when timerState is "running" (illegal transition guard)', () => {
+      renderQueue(
+        <SetQueue
+          sets={makeSets()}
+          onComplete={vi.fn()}
+          onAdHoc={vi.fn()}
+          timerState="running"
+          timerDisplay="1:30"
+          onTimerPause={vi.fn()}
+          onTimerResume={vi.fn()}
+          onTimerReset={vi.fn()}
+        />,
+      );
+      // Resume must be absent — calling resume_timer in state=running throws in DB
+      expect(screen.queryByTestId('resume-btn')).not.toBeInTheDocument();
+      // Pause must be present — that's the valid action from running
+      expect(screen.getByTestId('pause-btn')).toBeInTheDocument();
+    });
   });
 });
