@@ -1256,14 +1256,16 @@ describe('TODOIST_get_completed_tasks', () => {
 describe('TODOIST_get_tasks', () => {
   const handler = todoistTools.TODOIST_get_tasks.handler;
 
-  it('sends correct URL with query params on success', async () => {
+  it('sends correct URL with query params on success — real v1 { results: [...] } shape', async () => {
+    // TOD-1: mock uses the real Todoist v1 wrapper shape, exercising the data.results branch
     const tasks = [{ id: 't1', content: 'Buy milk' }];
-    mockFetch.mockReturnValueOnce(mockFetchResponse(tasks));
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ results: tasks }));
 
     const result = await handler({ project_id: 'proj-1', filter: 'today' }, todoistCtx());
 
     expect(result.isError).toBeUndefined();
     const parsed = JSON.parse(result.content[0].text);
+    // Handler must unwrap { results: [...] } → bare array
     expect(parsed).toEqual(tasks);
 
     expect(mockFetch).toHaveBeenCalledOnce();
@@ -1273,6 +1275,21 @@ describe('TODOIST_get_tasks', () => {
     expect(url).toContain('filter=today');
     expect(opts.method).toBe('GET');
     expect(opts.headers.Authorization).toBe('Bearer todoist-key-456');
+  });
+
+  it('unwraps { results: [...] } when no filter params given', async () => {
+    // TOD-1: second assertion to pin the wrapper-unwrap path independently
+    const tasks = [
+      { id: 't2', content: 'Do laundry' },
+      { id: 't3', content: 'Buy groceries' },
+    ];
+    mockFetch.mockReturnValueOnce(mockFetchResponse({ results: tasks, next_cursor: null }));
+
+    const result = await handler({}, todoistCtx());
+
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed).toEqual(tasks);
   });
 
   it('returns toolError when credentials are missing', async () => {
