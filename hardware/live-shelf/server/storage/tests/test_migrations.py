@@ -20,62 +20,31 @@ if str(ROOT) not in sys.path:
 
 from server.storage.migrations import _apply_column_additions  # noqa: E402
 
+# Finding 8-A (MOCK_AUDIT_PI_WEB_CLASSIFIER.md): load the "old" starting
+# schema from a committed fixture file instead of an inline hand-built
+# CREATE TABLE string.  This ensures migration tests always upgrade from the
+# real historical schema shape — any drift between the fixture and the
+# inline string would be caught at review time when the fixture is updated.
+_FIXTURES_DIR = Path(__file__).parent / "fixtures"
+_SCHEMA_V1_SQL = (_FIXTURES_DIR / "schema_v1.sql").read_text()
+
 
 def _make_old_schema_conn() -> sqlite3.Connection:
-    """Create a fresh in-memory DB with the OLD scale_events CHECK
-    (no 'classifying'). Also seeds the FK-dependent tables so the
-    rebuild path has to temporarily disable FKs.
+    """Create a fresh in-memory DB from the committed v1 fixture schema.
+
+    The v1 schema predates the '_apply_column_additions' migrations:
+    no 'classifying' in scale_events.classifier_status CHECK, no
+    in-flight columns on lots, no shelf_id columns, no device_id.
+    Also seeds the FK-dependent tables so the rebuild path has to
+    temporarily disable FKs.
+
+    Finding 8-A fix: uses fixtures/schema_v1.sql instead of an inline
+    hand-rolled schema string that can drift silently from production history.
     """
     conn = sqlite3.connect(":memory:", check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA foreign_keys = ON")
-    conn.executescript(
-        """
-        CREATE TABLE products (
-          product_id TEXT PRIMARY KEY,
-          name TEXT NOT NULL
-        );
-        CREATE TABLE sessions (
-          session_id TEXT PRIMARY KEY,
-          started_at TEXT NOT NULL,
-          ended_at TEXT
-        );
-        CREATE TABLE lots (
-          lot_id TEXT PRIMARY KEY,
-          product_id TEXT NOT NULL REFERENCES products(product_id),
-          status TEXT NOT NULL
-        );
-        -- OLD scale_events: no 'classifying', no device_id.
-        CREATE TABLE scale_events (
-          event_id            TEXT PRIMARY KEY,
-          session_id          TEXT REFERENCES sessions(session_id),
-          ts                  TEXT NOT NULL,
-          delta_g             REAL NOT NULL,
-          before_weight_g     REAL NOT NULL,
-          after_weight_g      REAL NOT NULL,
-          direction           TEXT NOT NULL CHECK(direction IN ('add','remove','noise')),
-          before_frame_path   TEXT,
-          after_frame_path    TEXT,
-          classification      TEXT,
-          classifier_status   TEXT CHECK(classifier_status IN ('pending','classified','review','failed')),
-          created_at          TEXT NOT NULL DEFAULT (datetime('now'))
-        );
-        CREATE TABLE session_resolutions (
-          resolution_id TEXT PRIMARY KEY,
-          session_id TEXT NOT NULL REFERENCES sessions(session_id),
-          lot_id TEXT REFERENCES lots(lot_id),
-          pattern TEXT NOT NULL,
-          add_event_id TEXT REFERENCES scale_events(event_id),
-          remove_event_id TEXT REFERENCES scale_events(event_id)
-        );
-        CREATE TABLE review_queue (
-          review_id TEXT PRIMARY KEY,
-          kind TEXT NOT NULL,
-          status TEXT NOT NULL DEFAULT 'pending',
-          event_id TEXT REFERENCES scale_events(event_id)
-        );
-        """
-    )
+    conn.executescript(_SCHEMA_V1_SQL)
     return conn
 
 
@@ -188,3 +157,49 @@ def test_apply_column_additions_upgrades_old_check_constraint_preserving_rows():
         "SELECT event_id FROM review_queue WHERE review_id = 'RV1'"
     ).fetchone()[0]
     assert rq_ref == "E0"
+
+
+# ---------------------------------------------------------------------------
+# Finding 8-A drift guard — fixture vs production schema contract
+# ---------------------------------------------------------------------------
+
+
+def test_schema_v1_fixture_tables_are_a_strict_subset_of_current_schema():
+    """Drift guard: verify that every table in schema_v1.sql also exists in
+    the current production schema (schema.sql).  If a table is renamed or
+    dropped in production but the fixture is not updated, this test fails.
+
+    The inverse direction (new tables in production that aren't in v1) is
+    expected — migrations add columns/tables.  The guard only fires when
+    the fixture references something that no longer exists in production.
+
+    Finding 8-A (MOCK_AUDIT_PI_WEB_CLASSIFIER.md): ensures the committed
+    fixture stays in sync with production history at review time.
+    """
+    from server.storage import init_db  # noqa: E402 — heavy import, isolated here
+
+    # Build a fresh full-schema DB to collect the canonical table set.
+    full_conn = init_db(":memory:")
+    full_tables = {
+        r[0] for r in full_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    full_conn.close()
+
+    # Build the v1 fixture DB and collect its table set.
+    v1_conn = _make_old_schema_conn()
+    v1_tables = {
+        r[0] for r in v1_conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+        )
+    }
+    v1_conn.close()
+
+    # Every v1 table must still exist in the full schema.
+    missing = v1_tables - full_tables
+    assert not missing, (
+        f"schema_v1.sql fixture references table(s) that no longer exist "
+        f"in the current production schema: {missing!r}.  "
+        f"Update fixtures/schema_v1.sql to match the real historical shape."
+    )
