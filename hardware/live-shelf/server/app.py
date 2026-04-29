@@ -2121,6 +2121,12 @@ def create_app(
                 for s in _shelf_registry.values()
             ]
 
+            # Cache flag: cloud_lots may not exist on a fresh Pi (the
+            # poller hasn't run yet). Same pattern as the
+            # _pairings_state cache below — log once, suppress until
+            # the table appears.
+            _cloud_lots_state: dict[str, bool] = {"missing": False}
+
             def _heartbeat_provider() -> dict[str, Any]:
                 """Assemble the heartbeat body from live Pi state.
 
@@ -2135,10 +2141,20 @@ def create_app(
                 surface backlog state without needing a separate probe.
                 Cloud side is expected to persist these on the device
                 row (handled by a different agent).
+
+                2026-04-29 (drains "Pi-side invariant check from cloud
+                edge function" from ignore.md): the body also carries a
+                ``lots`` array — one snapshot per ``cloud_lots`` row the
+                Pi has mirrored from /lot-snapshot. Cloud upserts these
+                into ``chefbyte.pi_lot_snapshots`` so the
+                ``pi_cloud_lot_id_match`` invariant in
+                invariant-monitor can cross-check Pi mirror vs cloud
+                truth.
                 """
                 pending_count = 0
                 outbox_pending = 0
                 outbox_permanent_failures = 0
+                lots_payload: list[dict[str, Any]] = []
                 # Start with the static registry — always included so the
                 # cloud UI can render the hardware this Pi is configured
                 # for regardless of local DB state.
@@ -2186,6 +2202,82 @@ def create_app(
                         except Exception:  # noqa: BLE001
                             outbox_pending = 0
                             outbox_permanent_failures = 0
+
+                        # Per-lot snapshot delivery. We emit one entry
+                        # per cloud_lots row (Pi's mirrored view of
+                        # cloud's stock_lots) joined LEFT to the local
+                        # scale_pairings.lot_id so the cloud invariant
+                        # can cross-check (qty_containers, status,
+                        # in_flight_since) and ALSO see which scale
+                        # the Pi believes the lot is paired to.
+                        # Cloud cap is 256 lots/heartbeat — defensive
+                        # LIMIT so a pathological state doesn't blow
+                        # the heartbeat budget.
+                        if not _cloud_lots_state["missing"]:
+                            try:
+                                lot_rows = conn.execute(
+                                    """
+                                    SELECT cl.lot_id,
+                                           cl.qty_containers,
+                                           cl.in_flight_since,
+                                           cl.in_flight_kind,
+                                           sp.shelf_id AS scale_id_paired_to
+                                      FROM cloud_lots cl
+                                      LEFT JOIN scale_pairings sp
+                                        ON sp.lot_id = cl.lot_id
+                                     WHERE cl.deleted_at IS NULL
+                                     ORDER BY cl.updated_at DESC
+                                     LIMIT 256
+                                    """
+                                ).fetchall()
+                                _cloud_lots_state["missing"] = False
+                                for r in lot_rows:
+                                    cloud_lot_id = str(r["lot_id"])
+                                    status_text = (
+                                        "in_flight"
+                                        if r["in_flight_since"] is not None
+                                        else "on_shelf"
+                                    )
+                                    last_src = (
+                                        r["in_flight_kind"]
+                                        if r["in_flight_kind"] is not None
+                                        else None
+                                    )
+                                    lots_payload.append(
+                                        {
+                                            "pi_lot_id": cloud_lot_id,
+                                            "cloud_lot_id": cloud_lot_id,
+                                            "qty_containers": (
+                                                float(r["qty_containers"])
+                                                if r["qty_containers"] is not None
+                                                else None
+                                            ),
+                                            "status": status_text,
+                                            "last_update_source": last_src,
+                                            "in_flight_since": r["in_flight_since"],
+                                            "in_flight_kind": r["in_flight_kind"],
+                                            "current_weight_g": None,
+                                            "scale_id_paired_to": (
+                                                r["scale_id_paired_to"]
+                                                if "scale_id_paired_to" in r.keys()
+                                                else None
+                                            ),
+                                        }
+                                    )
+                            except sqlite3.OperationalError as exc:
+                                msg = str(exc).lower()
+                                if "no such table" in msg and (
+                                    "cloud_lots" in msg
+                                    or "scale_pairings" in msg
+                                ):
+                                    log.warning(
+                                        "heartbeat_provider: cloud_lots / "
+                                        "scale_pairings missing; lot snapshot "
+                                        "skipped until poller has run",
+                                    )
+                                    _cloud_lots_state["missing"] = True
+                                else:
+                                    raise
                     # Merge local rows on top; local takes precedence
                     # because it reflects runtime auto-registration.
                     for r in rows:
@@ -2205,6 +2297,7 @@ def create_app(
                     "scales": scales,
                     "outbox_pending_count": outbox_pending,
                     "outbox_permanent_failures": outbox_permanent_failures,
+                    "lots": lots_payload,
                 }
 
             # Finding #5 back-fill: scan recent resolutions for rows

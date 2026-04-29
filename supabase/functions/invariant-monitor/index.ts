@@ -188,22 +188,102 @@ const INVARIANTS: InvariantSpec[] = [
     severity: 'warning',
     subject_type: 'pi_cloud_pair',
     intent:
-      'Pi-side check that every cloud stock_lots row touched in the last 7 days appears in the Pi cloud_lots mirror. NOT enforceable from cloud alone — flagged as warning so the operator runs the Pi-side checker manually. Phase 3 has a parameterized version that activates when a lot-tracking simulator is wired in. Same name across both layers (post-2026-04-27 reconcile) so admin UI + tests speak the same vocabulary.',
-    check: async (_sb) => {
-      // Deferred: Pi-side data is not visible to the cloud edge function.
-      // Emit a single static warning advertising the gap so it shows up in
-      // the admin UI on every monitor run (and bumps last_seen_at — we
-      // EXPECT this one to persist until a Pi mirror table lands).
-      return [
-        {
-          subject_id: 'pi_side_check_required',
-          user_id: null,
-          details: {
-            note: 'Pi-side invariant: every cloud stock_lots row touched in last 7d should appear in Pi cloud_lots. Run hardware/live-shelf/server/cloud/lot_snapshot_check.py for verification.',
-            deferred: true,
-          },
-        },
-      ];
+      'Every cloud stock_lots row whose last_update_source is live_shelf or live_scale (touched in the last 7d) MUST have a corresponding chefbyte.pi_lot_snapshots row published by the Pi heartbeat (migration 20260429170000) with consistent (cloud_lot_id, status, qty/weight). Flag classes: missing_pi_snapshot (Pi never sent the lot), qty_drift (Pi qty != cloud qty / 4 servings — see tolerance below), status_drift (status disagrees on in_flight vs on_shelf). Pre-2026-04-29 this was a static "deferred" warning; now data-driven via pi_lot_snapshots cloud mirror.',
+    check: async (sb) => {
+      const cutoff = new Date(Date.now() - 7 * 86400_000).toISOString();
+      const { data: lots, error: lotsErr } = await sb
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id, user_id, qty_containers, last_update_source, last_update_ts, in_flight_since')
+        .in('last_update_source', ['live_shelf', 'live_scale'])
+        .gte('last_update_ts', cutoff)
+        .is('deleted_at', null)
+        .limit(2000);
+      if (lotsErr) throw lotsErr;
+      const cloudLots = lots ?? [];
+      if (cloudLots.length === 0) return [];
+
+      // Batch-fetch matching Pi snapshots by cloud_lot_id. Defensive
+      // chunking keeps the IN-list under PostgREST's URL-length cap.
+      const lotIds = Array.from(new Set(cloudLots.map((r: any) => r.lot_id).filter(Boolean)));
+      const snapshotByLotId = new Map<string, any>();
+      const CHUNK = 100;
+      for (let i = 0; i < lotIds.length; i += CHUNK) {
+        const slice = lotIds.slice(i, i + CHUNK);
+        const { data: snaps, error: snapErr } = await sb
+          .schema('chefbyte')
+          .from('pi_lot_snapshots')
+          .select(
+            'user_id, device_id, pi_lot_id, cloud_lot_id, qty_containers, status, in_flight_since, current_weight_g, observed_at',
+          )
+          .in('cloud_lot_id', slice);
+        if (snapErr) throw snapErr;
+        for (const s of snaps ?? []) {
+          // Last writer wins on duplicate cloud_lot_id (rare — should
+          // be one Pi per cloud lot). Take the freshest observed_at.
+          const prior = snapshotByLotId.get(s.cloud_lot_id);
+          if (!prior || new Date(s.observed_at) > new Date(prior.observed_at)) {
+            snapshotByLotId.set(s.cloud_lot_id, s);
+          }
+        }
+      }
+
+      const out: ViolationRow[] = [];
+      // Tolerance: cloud qty_containers vs Pi qty_containers within
+      // 0.1 containers absorbs 3-decimal rounding + transient drift.
+      // The 4-servings figure in the prior intent text was informal;
+      // the actual contract is "within rounding tolerance."
+      const QTY_TOLERANCE = 0.1;
+      for (const lot of cloudLots) {
+        const snap = snapshotByLotId.get(lot.lot_id);
+        if (!snap) {
+          out.push({
+            subject_id: lot.lot_id,
+            user_id: lot.user_id,
+            details: {
+              flag_class: 'missing_pi_snapshot',
+              cloud_qty_containers: Number(lot.qty_containers),
+              cloud_last_update_source: lot.last_update_source,
+              cloud_last_update_ts: lot.last_update_ts,
+            },
+          });
+          continue;
+        }
+        // qty drift
+        const cloudQty = Number(lot.qty_containers);
+        const piQty = snap.qty_containers === null ? null : Number(snap.qty_containers);
+        if (piQty !== null && Math.abs(cloudQty - piQty) > QTY_TOLERANCE) {
+          out.push({
+            subject_id: lot.lot_id,
+            user_id: lot.user_id,
+            details: {
+              flag_class: 'qty_drift',
+              cloud_qty_containers: cloudQty,
+              pi_qty_containers: piQty,
+              drift: Math.abs(cloudQty - piQty),
+              pi_observed_at: snap.observed_at,
+            },
+          });
+          continue;
+        }
+        // status drift: cloud's in_flight_since presence vs Pi's status
+        const cloudInFlight = lot.in_flight_since !== null;
+        const piInFlight = snap.status === 'in_flight' || snap.in_flight_since !== null;
+        if (cloudInFlight !== piInFlight) {
+          out.push({
+            subject_id: lot.lot_id,
+            user_id: lot.user_id,
+            details: {
+              flag_class: 'status_drift',
+              cloud_in_flight_since: lot.in_flight_since,
+              pi_status: snap.status,
+              pi_in_flight_since: snap.in_flight_since,
+              pi_observed_at: snap.observed_at,
+            },
+          });
+        }
+      }
+      return out;
     },
   },
   {

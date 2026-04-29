@@ -20,20 +20,6 @@ on 2026-04-29 before this triage).
 
 ---
 
-## Pi-side invariant check from cloud edge function
-
-- **Source:** `supabase/functions/invariant-monitor/index.ts:193` 2026-04-29
-- **TODO text:** "Deferred: Pi-side data is not visible to the cloud
-  edge function."
-- **Why deferred:** The `pi_cloud_lot_id_match` invariant cannot run
-  from the cloud — Pi mirror tables don't yet exist in the cloud
-  schema. The edge function emits a static warning advertising the
-  gap (so it persists in the admin UI) until a Pi mirror lands. Phase
-  3 has a parameterized version that activates when a lot-tracking
-  simulator is wired in.
-- **Effort estimate:** L (Pi mirror schema + sync poller + reconcile
-  contract).
-
 ---
 
 ## Historical migration TODOs (do not edit — already discharged)

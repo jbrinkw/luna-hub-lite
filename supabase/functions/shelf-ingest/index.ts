@@ -1196,6 +1196,48 @@ async function handleReviewResolvedSince(supabase: SupabaseClient, device: Devic
   return jsonResponse({ reviews: data ?? [] });
 }
 
+// Per-lot snapshot from the Pi heartbeat. Powers the
+// pi_cloud_lot_id_match invariant in invariant-monitor — every cloud
+// stock_lots row touched by a live_shelf/live_scale source must have a
+// matching Pi snapshot row with consistent state. See migration
+// 20260429170000_pi_lot_snapshots.sql for the table contract.
+const MAX_LOTS_PER_HEARTBEAT = 256;
+const MAX_PI_LOT_ID_LEN = 64;
+
+function sanitizeHeartbeatLots(rawLots: unknown): { ok: true; lots: any[] } | { ok: false; error: string } {
+  if (!Array.isArray(rawLots)) {
+    // Backward-compatible: older Pi heartbeats omit `lots` entirely.
+    // Treat missing array as "no snapshot delta this tick".
+    return { ok: true, lots: [] };
+  }
+  if (rawLots.length > MAX_LOTS_PER_HEARTBEAT) {
+    return { ok: false, error: 'too many lots in heartbeat' };
+  }
+  const out: any[] = [];
+  for (const raw of rawLots) {
+    if (!raw || typeof raw !== 'object') {
+      return { ok: false, error: 'invalid lots entry' };
+    }
+    const r: any = raw;
+    const piLotId = r.pi_lot_id;
+    if (typeof piLotId !== 'string' || piLotId.length === 0 || piLotId.length > MAX_PI_LOT_ID_LEN) {
+      return { ok: false, error: 'invalid pi_lot_id' };
+    }
+    out.push({
+      pi_lot_id: piLotId,
+      cloud_lot_id: typeof r.cloud_lot_id === 'string' ? r.cloud_lot_id : null,
+      qty_containers: typeof r.qty_containers === 'number' ? r.qty_containers : null,
+      status: typeof r.status === 'string' ? r.status : null,
+      last_update_source: typeof r.last_update_source === 'string' ? r.last_update_source : null,
+      in_flight_since: typeof r.in_flight_since === 'string' ? r.in_flight_since : null,
+      in_flight_kind: typeof r.in_flight_kind === 'string' ? r.in_flight_kind : null,
+      current_weight_g: typeof r.current_weight_g === 'number' ? r.current_weight_g : null,
+      scale_id_paired_to: typeof r.scale_id_paired_to === 'string' ? r.scale_id_paired_to : null,
+    });
+  }
+  return { ok: true, lots: out };
+}
+
 async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
   const pendingReviewCount: number = typeof body?.pending_review_count === 'number' ? body.pending_review_count : 0;
   // Scenario 7: the Pi heartbeat_provider includes these two counters so
@@ -1218,6 +1260,15 @@ async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: a
   if (scales.length > MAX_SCALES_PER_HEARTBEAT) {
     return jsonResponse({ error: 'too many scales in heartbeat' }, 400);
   }
+
+  // Per-lot snapshots. Older Pi clients omit ``lots`` entirely, so a
+  // missing array isn't an error — older snapshots simply persist
+  // until a newer-shape heartbeat replaces them or the row is GC'd.
+  const lotsValidation = sanitizeHeartbeatLots(body?.lots);
+  if (!lotsValidation.ok) {
+    return jsonResponse({ error: lotsValidation.error }, 400);
+  }
+  const sanitizedLots = lotsValidation.lots;
 
   // Pre-validate every scale entry so a 400 prevents partial writes.
   for (const s of scales) {
@@ -1269,6 +1320,27 @@ async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: a
         message: (hbErr as any).message ?? null,
       });
       throw hbErr;
+    }
+  }
+
+  // Per-lot snapshot UPSERT. Same admin-only RPC pattern as the
+  // pairings upsert above. Powers the pi_cloud_lot_id_match invariant.
+  if (sanitizedLots.length > 0) {
+    const { error: lotErr } = await (supabase as any).schema('chefbyte').rpc('upsert_pi_lot_snapshots_admin', {
+      p_device_id: device.device_id,
+      p_user_id: userId,
+      p_lots: sanitizedLots,
+    });
+    if (lotErr) {
+      console.error('shelf-ingest: upsert_pi_lot_snapshots_admin failed', {
+        device_id: device.device_id,
+        code: (lotErr as any).code ?? null,
+        message: (lotErr as any).message ?? null,
+      });
+      // Don't fail the whole heartbeat over a snapshot upsert error —
+      // pairings/heartbeat already landed and the next tick can retry.
+      // Worst case: the cloud invariant flags drift, which is exactly
+      // what pi_cloud_drift is for.
     }
   }
 
