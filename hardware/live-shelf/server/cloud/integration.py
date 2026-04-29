@@ -498,6 +498,19 @@ class CloudEventEmitter:
                 pattern,
             )
             return None
+
+        # Phase 1 audit finding L1/HIGH (AUDIT_FINDINGS_PHASE1.md):
+        # ``emit_reconciler_resolution`` is the central path for all
+        # live_shelf-emitting resolutions; per-kind invariants for
+        # live_shelf events live HERE rather than in scattered call
+        # sites. Today there are no per-kind invariants to enforce on
+        # live_shelf — in_flight_pickup intentionally allows delta_g=0
+        # (defence-in-depth path; cloud apply_shelf_event guards the
+        # pickup_weight_g assignment with `> 0`). New live_shelf-only
+        # rules (e.g. "all live_shelf consumed events MUST carry
+        # usage_kind") get added below this comment so a single review
+        # surface catches drift.
+
         payload: dict[str, Any] = {
             "scale_id": scale_id,
             "kind": kind,
@@ -831,6 +844,84 @@ class CloudEventEmitter:
             # event's in-flight stamp — NOT this second event's id.
             "pi_event_id": first_event_pi_event_id,
         }
+        return self._enqueue(payload)
+
+    def emit_review_queue_create(
+        self,
+        *,
+        pi_review_id: str,
+        kind: str,
+        pi_session_id: Optional[str] = None,
+        pi_event_id: Optional[str] = None,
+        proposed: Optional[dict[str, Any]] = None,
+        images: Optional[list[str]] = None,
+        created_at: Optional[str] = None,
+    ) -> Optional[str]:
+        """Emit a ``review_queue_create`` cloud event for the cloud mirror.
+
+        Sync-audit finding #5: every Pi-side review_queue row insert
+        enqueues this so the cloud's ``chefbyte.review_queue`` (cloud
+        mirror table) gets the same row. The cloud handler upserts on
+        ``(user_id, pi_review_id)`` so worker retries are safe.
+
+        ``pi_review_id`` is the Pi's local review_queue.review_id (must
+        be a UUID string). ``kind`` must be one of the allowed enum
+        values (validated again at the cloud edge function).
+        """
+        if not pi_review_id:
+            return None
+        payload: dict[str, Any] = {
+            # ``event_kind`` is the worker's path discriminator (see
+            # cloud/worker.py — review_queue_* routes to /review-create
+            # / /review-resolve instead of /event).
+            "event_kind": "review_queue_create",
+            "pi_review_id": pi_review_id,
+            "kind": kind,
+        }
+        if pi_session_id:
+            payload["pi_session_id"] = pi_session_id
+        if pi_event_id:
+            payload["pi_event_id"] = pi_event_id
+        if proposed is not None:
+            payload["proposed"] = proposed
+        if images is not None:
+            payload["images"] = images
+        if created_at:
+            payload["created_at"] = created_at
+        return self._enqueue(payload)
+
+    def emit_review_queue_resolve(
+        self,
+        *,
+        pi_review_id: str,
+        status: str,
+        user_response: Optional[dict[str, Any]] = None,
+        resolved_at: Optional[str] = None,
+    ) -> Optional[str]:
+        """Push a Pi-side review resolution back to the cloud mirror.
+
+        Called from the Pi /inventory resolve_review_item path so
+        operator-side resolutions on the Pi land in cloud immediately
+        (mirrors the cloud-poller path that pulls cloud resolutions to
+        the Pi). status MUST be 'resolved' or 'dismissed'.
+        """
+        if not pi_review_id:
+            return None
+        if status not in ("resolved", "dismissed"):
+            log.warning(
+                "emit_review_queue_resolve: invalid status=%r; dropping",
+                status,
+            )
+            return None
+        payload: dict[str, Any] = {
+            "event_kind": "review_queue_resolve",
+            "pi_review_id": pi_review_id,
+            "status": status,
+        }
+        if user_response is not None:
+            payload["user_response"] = user_response
+        if resolved_at:
+            payload["resolved_at"] = resolved_at
         return self._enqueue(payload)
 
     def emit_live_weight_sync(

@@ -308,7 +308,20 @@ class CloudWorker(threading.Thread):
             pending = outbox.list_pending(conn, limit=OUTBOX_DRAIN_BATCH)
             for row in pending:
                 try:
-                    response = self._client.post("/event", row.payload)
+                    # Sync-audit finding #5: review_queue events route to
+                    # a dedicated /review-create or /review-resolve cloud
+                    # endpoint instead of /event. Discriminator is the
+                    # outbox payload's event_kind (set by the emitter).
+                    # Older rows without event_kind = review_queue_*
+                    # default to /event so legacy outbox entries continue
+                    # to drain through the canonical scale-event path.
+                    payload_event_kind = row.payload.get("event_kind")
+                    if payload_event_kind == "review_queue_create":
+                        response = self._client.post("/review-create", row.payload)
+                    elif payload_event_kind == "review_queue_resolve":
+                        response = self._client.post("/review-resolve", row.payload)
+                    else:
+                        response = self._client.post("/event", row.payload)
                 except CloudError as exc:
                     had_error = True
                     # Non-retryable 4xx (malformed, not-found, dedupe

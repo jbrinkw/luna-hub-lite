@@ -128,6 +128,7 @@ class RepoWebAdapter:
         apply_reviewed_candidate_fn: Optional[Any] = None,
         *,
         catch_all_device_id: str = "scale-02",
+        cloud_emitter: Optional[Any] = None,
     ) -> None:
         self._conn = conn
         self._db_lock: Any = db_lock if db_lock is not None else _NullLock()
@@ -147,6 +148,17 @@ class RepoWebAdapter:
         # breaking test isolation that patched ``AppConfig`` but not
         # the environment.
         self._catch_all_device_id = str(catch_all_device_id)
+        # Sync-audit finding #5: optional cloud emitter for review
+        # resolution push-back. When wired, resolve_review_item enqueues
+        # a ``review_queue_resolve`` outbox event so a Pi-side resolution
+        # mirrors back to chefbyte.review_queue. Falls back to the
+        # null-emitter sentinel when not provided so legacy callers /
+        # tests don't have to thread cloud wiring.
+        if cloud_emitter is None:
+            from ..cloud.integration import null_emitter
+            self._cloud_emitter = null_emitter()
+        else:
+            self._cloud_emitter = cloud_emitter
 
     # ----------------------------------------------------------- app state
 
@@ -694,6 +706,21 @@ class RepoWebAdapter:
                 review_id,
                 status=new_status,
                 user_response=json.dumps(resolution, default=str),
+            )
+        # Sync-audit finding #5: mirror the resolution back to cloud so
+        # the cloud /chef/reviews UI sees Pi-side decisions live. Outside
+        # the lock — the outbox enqueue takes its own short transaction.
+        try:
+            self._cloud_emitter.emit_review_queue_resolve(
+                pi_review_id=review_id,
+                status=new_status,
+                user_response=resolution if isinstance(resolution, dict) else None,
+                resolved_at=getattr(updated, "resolved_at", None),
+            )
+        except Exception:  # noqa: BLE001 - cloud push-back must never break local resolve
+            log.warning(
+                "resolve_review_item: cloud push-back raised for review_id=%s",
+                review_id, exc_info=True,
             )
         # Apply the user-picked candidate OUTSIDE the lock (the callable
         # manages its own locking + runs the full validation/mint path).

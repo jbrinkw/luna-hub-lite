@@ -68,6 +68,13 @@ import time
 from dataclasses import dataclass
 from typing import Optional
 
+from ._kind_translate import (
+    CLOUD_LIVE_SCALE,
+    CLOUD_LIVE_SHELF,
+    PI_LIVE_SHELF,
+    PI_SINGLE_ITEM,
+    pi_to_cloud,
+)
 from .integration import CloudEventEmitter
 
 log = logging.getLogger(__name__)
@@ -236,6 +243,16 @@ class WeightSyncPoller(threading.Thread):
         up via ``scale_pairings`` on the same lot_id (the pairing's
         device_id is the live_scale ESP). When no pairing row exists
         we fall back to the configured default scale-id.
+
+        Catch-all is INTENTIONALLY excluded (Phase 1 audit finding
+        L1/HIGH; AUDIT_FINDINGS_PHASE1.md):
+        catch-all lots stream weight via the delta-capture pair (the
+        ``catch_all_first_measurement`` + ``catch_all_second_measurement``
+        events) during an active session, and outside of an active session
+        catch-all lots have no continuous weight signal to broadcast.
+        ``stock_lots.last_observed_weight_g`` is therefore deliberately
+        NULL for catch-all rows — the cloud-UI freshness indicator on
+        those rows reflects pickup_weight_g instead.
         """
         sql = """
             SELECT l.lot_id, l.shelf_id, l.current_weight_g, sp.device_id
@@ -304,12 +321,19 @@ class WeightSyncPoller(threading.Thread):
         # Map shelf_id to the cloud ``kind`` discriminator + scale_id.
         # 'live_shelf' → kind='live_shelf', scale_id='scale-01'.
         # 'single_item' → kind='live_scale', scale_id from pairing or
-        # the configured default.
-        if shelf_id == "live_shelf":
-            cloud_kind = "live_shelf"
+        # the configured default. Translation table lives in
+        # ``cloud/_kind_translate.py`` per Phase 1 audit (L10/HIGH).
+        if shelf_id == PI_LIVE_SHELF:
+            cloud_kind = pi_to_cloud(shelf_id)
+            assert cloud_kind == CLOUD_LIVE_SHELF, (
+                "kind translation drift: PI_LIVE_SHELF must map to CLOUD_LIVE_SHELF"
+            )
             scale_id = self._live_shelf_scale_id
-        elif shelf_id == "single_item":
-            cloud_kind = "live_scale"
+        elif shelf_id == PI_SINGLE_ITEM:
+            cloud_kind = pi_to_cloud(shelf_id)
+            assert cloud_kind == CLOUD_LIVE_SCALE, (
+                "kind translation drift: PI_SINGLE_ITEM must map to CLOUD_LIVE_SCALE"
+            )
             device_id = row.get("device_id")
             scale_id = (
                 str(device_id)
