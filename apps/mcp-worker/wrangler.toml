@@ -10,10 +10,16 @@ pattern = "mcp.lunahub.dev/*"
 zone_name = "lunahub.dev"
 
 [durable_objects]
-bindings = [
-  { name = "MCP_SESSION", class_name = "McpSession" }
-]
+bindings = []
 
 [[migrations]]
 tag = "v1"
 new_sqlite_classes = ["McpSession"]
+
+# v2 (2026-04-29): retired the legacy McpSession Durable Object. The stateless
+# transport (src/stateless.ts) replaced it and `env.MCP_SESSION.idFromName(...)`
+# has zero call sites. Cloudflare requires a `deleted_classes` migration so the
+# storage backing the DO is dropped on deploy.
+[[migrations]]
+tag = "v2"
+deleted_classes = ["McpSession"]

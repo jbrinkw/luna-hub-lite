@@ -6,10 +6,7 @@ import { handleChatCompletion } from './openai-compat';
 import { handleTestExtensionCreds } from './test-extension-creds';
 import { CORS_HEADERS } from './cors';
 
-export { McpSession } from './session';
-
 export interface Env {
-  MCP_SESSION: DurableObjectNamespace;
   SUPABASE_URL: string;
   SUPABASE_SERVICE_ROLE_KEY: string;
 }
