@@ -96,16 +96,12 @@ MAX_BACKOFF_S = 30.0
 # State file schema version — bumped if we ever reshape the payload.
 _STATE_SCHEMA_VERSION = 1
 
-# Cloud → Pi shelf_id translation. Cloud uses the canonical ``live_scale``
-# vocabulary; the Pi's local SQLite CHECK constraint still uses the
-# legacy ``single_item`` literal. Mirrored from
-# ``handlers/scale_events.py:3279`` so changing the mapping in one place
-# fixes both ingress paths.
-_SHELF_KIND_TRANSLATION = {
-    "live_shelf": "live_shelf",
-    "catch_all": "catch_all",
-    "live_scale": "single_item",
-}
+# Cloud → Pi shelf_id translation now lives in the central
+# ``_kind_translate`` module (Phase 1 audit finding L10/HIGH:
+# ``AUDIT_FINDINGS_PHASE1.md``). The local alias is preserved so existing
+# call sites continue to read ``_SHELF_KIND_TRANSLATION`` while sourcing
+# the table from one place.
+from ._kind_translate import CLOUD_TO_PI as _SHELF_KIND_TRANSLATION  # noqa: E402
 
 
 @dataclass

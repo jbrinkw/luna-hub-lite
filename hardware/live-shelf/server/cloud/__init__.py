@@ -14,6 +14,16 @@ Public surface:
 
 from __future__ import annotations
 
+from ._kind_translate import (
+    CLOUD_CATCH_ALL,
+    CLOUD_LIVE_SCALE,
+    CLOUD_LIVE_SHELF,
+    PI_CATCH_ALL,
+    PI_LIVE_SHELF,
+    PI_SINGLE_ITEM,
+    cloud_to_pi as cloud_to_pi_kind,
+    pi_to_cloud as pi_to_cloud_kind,
+)
 from .catalog import Catalog, fetch_catalog
 from .client import CloudClient, CloudError
 from .event_overrides_poller import EventOverridesPoller
@@ -32,6 +42,9 @@ from .weight_sync_poller import WeightSyncPoller
 from .worker import CloudWorker
 
 __all__ = [
+    "CLOUD_CATCH_ALL",
+    "CLOUD_LIVE_SCALE",
+    "CLOUD_LIVE_SHELF",
     "Catalog",
     "ClassifierSettings",
     "ClassifierSettingsCache",
@@ -42,11 +55,16 @@ __all__ = [
     "EventOverridesPoller",
     "LiveTrackPoller",
     "LotSnapshotPoller",
+    "PI_CATCH_ALL",
+    "PI_LIVE_SHELF",
+    "PI_SINGLE_ITEM",
     "PairingsSyncPoller",
     "ProductSyncPoller",
     "WeightSyncPoller",
+    "cloud_to_pi_kind",
     "enqueue_event",
     "fetch_catalog",
     "get_classifier_settings_cache",
     "null_emitter",
+    "pi_to_cloud_kind",
 ]

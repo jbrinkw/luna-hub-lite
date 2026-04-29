@@ -1264,19 +1264,20 @@ def create_app(
     # Backfill the local ``scale_pairings`` table from the static
     # registry so the Pi UI can render every configured scale (live_shelf,
     # catch_all, live_scale) before the cloud-side wizard or auto-register
-    # ever fires. Without this, the single-track section showed 0 even
-    # when the cloud had a paired ``live_scale`` row, because the Pi's
-    # auto-register path for live_scale ESPs was never implemented (note
-    # the "future single_item" comment in the heartbeat provider).
+    # ever fires. live_scale ESPs are registered only via the
+    # registry/heartbeat fallback — there is no dedicated auto-register
+    # handler (Phase 1 audit finding L8/HIGH; the "future single_item"
+    # path was retired in favour of this registry-derived approach).
     #
-    # Map cloud ``live_scale`` → Pi local ``single_item`` (the Pi schema
-    # CHECK still uses the legacy term; translation point lives in
-    # scale_events.py:3279). INSERT OR IGNORE so a row that already
-    # exists keeps its richer data (product_id, lot_id, last_heartbeat_ts).
+    # Map cloud ``live_scale`` → Pi local ``single_item`` via the central
+    # ``cloud._kind_translate`` helper (Phase 1 audit finding L10/HIGH).
+    # INSERT OR IGNORE so a row that already exists keeps its richer
+    # data (product_id, lot_id, last_heartbeat_ts).
     try:
+        from .cloud._kind_translate import cloud_to_pi as _shelf_kind_cloud_to_pi
         with db_lock:
             for s in _shelf_registry.values():
-                pi_shelf_id = "single_item" if s.shelf_id == "live_scale" else s.shelf_id
+                pi_shelf_id = _shelf_kind_cloud_to_pi(s.shelf_id)
                 conn.execute(
                     "INSERT OR IGNORE INTO scale_pairings (device_id, shelf_id) "
                     "VALUES (?, ?)",
@@ -2096,7 +2097,8 @@ def create_app(
             # the cloud UI can surface them the moment the Pi heartbeats,
             # even before any ESP event has landed in the local
             # ``scale_pairings`` table. Local rows (from auto-register
-            # handlers, future single_item) MERGE on top, preserving
+            # handlers; live_scale ESPs are registered only via this
+            # registry-derived fallback) MERGE on top, preserving
             # whatever extra scale_ids the Pi has seen.
             _registry_scales: list[dict[str, str]] = [
                 {"scale_id": s.device_id, "kind": s.shelf_id}
