@@ -19,6 +19,8 @@ export default defineConfig({
       'src/__tests__/chat-streaming.test.ts',
       'src/__tests__/session-logging.test.ts',
       'src/__tests__/test-extension-creds.test.ts',
+      // MCP-HIGH-4.1: unit tests for authenticateApiKey revoked/expired/DB-error paths
+      'src/__tests__/auth.test.ts',
     ],
     environment: 'node',
     testTimeout: 30_000,

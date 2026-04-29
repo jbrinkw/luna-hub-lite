@@ -1,12 +1,21 @@
 /**
  * ReviewsPage tests (sync-audit finding #5 cloud mirror).
  *
+ * CB-WEB-HIGH-3: Fixed drain-as-apply on "Accept removes row" test.
+ * The previous test emptied fromSelectResults.rows after the initial render
+ * so the post-mutation refetch returned [] — proving nothing about optimistic
+ * logic. The new test uses a controlled RPC promise that blocks; it asserts
+ * the row is gone from the DOM BEFORE the RPC resolves (true optimistic
+ * remove via onMutate → queryClient.setQueryData filter). A rejection path
+ * test is also added to verify onError restores the row.
+ *
  * Covers:
  *  - Renders the pending review list returned from chefbyte.review_queue.
  *  - Accept button fires resolve_review RPC with status=resolved.
  *  - Reject button fires resolve_review RPC with status=dismissed.
- *  - Optimistic UI: clicking Accept removes the row from the list before
- *    the RPC resolves.
+ *  - Optimistic UI: clicking Accept removes the row from the list BEFORE
+ *    the RPC resolves (true optimistic, not drain-as-apply).
+ *  - Rollback: if the RPC rejects, the row reappears.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor, act } from '@testing-library/react';
@@ -45,6 +54,11 @@ const rpcCalls: Array<{ fn: string; args: Record<string, unknown> }> = [];
 const fromSelectResults: { rows: any[]; error: null | Error } = { rows: [], error: null };
 const devicesResults: { rows: any[]; error: null | Error } = { rows: [], error: null };
 
+/* CB-WEB-HIGH-3: per-test RPC control gate.
+ * When rpcGate is set, the next resolve_review call blocks until
+ * rpcGate.resolve() or rpcGate.reject() is called from the test. */
+let rpcGate: { resolve: () => void; reject: (e: Error) => void } | null = null;
+
 vi.mock('@/shared/supabase', () => {
   const chef = () => {
     const builder: any = {};
@@ -72,6 +86,13 @@ vi.mock('@/shared/supabase', () => {
     });
     builder.rpc = vi.fn((fn: string, args: Record<string, unknown>) => {
       rpcCalls.push({ fn, args });
+      if (fn === 'resolve_review' && rpcGate) {
+        // Block until the test releases the gate.
+        return new Promise<{ data: unknown; error: null }>((res, rej) => {
+          rpcGate!.resolve = () => res({ data: { review_id: args.p_review_id, status: args.p_status }, error: null });
+          rpcGate!.reject = (e: Error) => rej(e);
+        });
+      }
       return Promise.resolve({ data: { review_id: args.p_review_id, status: args.p_status }, error: null });
     });
     return builder;
@@ -116,6 +137,7 @@ beforeEach(() => {
   fromSelectResults.error = null;
   devicesResults.rows = [];
   devicesResults.error = null;
+  rpcGate = null;
 });
 
 /* ------------------------------------------------------------------ */
@@ -151,33 +173,74 @@ describe('ReviewsPage', () => {
     });
   });
 
-  it('Accept button calls resolve_review RPC with status=resolved and optimistically removes the row', async () => {
+  /**
+   * CB-WEB-HIGH-3: True optimistic remove — row must disappear BEFORE
+   * the RPC resolves. The rpcGate blocks resolve_review so we can assert
+   * on the intermediate DOM state. If onMutate's optimistic filter is
+   * removed, the row stays visible while the RPC is in-flight and this
+   * test fails.
+   */
+  it('CB-WEB-HIGH-3: Accept optimistically removes the row BEFORE the RPC resolves', async () => {
     fromSelectResults.rows = [sampleRow];
+    // Install gate — resolve_review will block until we release it.
+    rpcGate = { resolve: () => {}, reject: () => {} };
+
     renderPage();
     await waitFor(() => screen.getByTestId('review-row-cloud-rev-1'));
 
-    // After the row renders, simulate the cloud row being resolved server-side
-    // so any post-mutation invalidation refetch returns no pending rows. This
-    // matches production behavior: the resolve mutation flips status to
-    // 'resolved' which falls outside the page's pending-only filter.
-    fromSelectResults.rows = [];
-
     const user = userEvent.setup();
-    await user.click(screen.getByTestId('review-accept-cloud-rev-1'));
-
-    // Row should disappear (optimistic remove during the mutation, or via the
-    // post-mutation invalidation that refetches the now-empty pending list).
-    await waitFor(() => {
-      expect(screen.queryByTestId('review-row-cloud-rev-1')).not.toBeInTheDocument();
+    // Fire the click — onMutate runs synchronously removing the row from
+    // the cache; the RPC is still pending (blocked by rpcGate).
+    await act(async () => {
+      await user.click(screen.getByTestId('review-accept-cloud-rev-1'));
     });
 
-    // RPC was called with the correct args.
-    expect(rpcCalls.length).toBeGreaterThanOrEqual(1);
+    // Row must be gone BEFORE the RPC resolves. This is what proves the
+    // optimistic remove fires — not a drain-as-apply pattern.
+    expect(screen.queryByTestId('review-row-cloud-rev-1')).not.toBeInTheDocument();
+
+    // RPC was dispatched with correct args.
     const call = rpcCalls.find((c) => c.fn === 'resolve_review');
     expect(call).toBeDefined();
     expect(call!.args.p_review_id).toBe('cloud-rev-1');
     expect(call!.args.p_status).toBe('resolved');
     expect(call!.args.p_user_response).toEqual({ decision: 'accept' });
+
+    // Release the gate so the test can clean up without hanging promises.
+    await act(async () => {
+      rpcGate!.resolve();
+    });
+  });
+
+  /**
+   * CB-WEB-HIGH-3 rollback: if resolve_review rejects, the row must
+   * reappear via onError's queryClient.setQueryData(queryKey, context.previous).
+   * If onError is removed or calls setQueryData with the wrong key, this fails.
+   */
+  it('CB-WEB-HIGH-3: rollback — row reappears when resolve_review rejects', async () => {
+    fromSelectResults.rows = [sampleRow];
+    rpcGate = { resolve: () => {}, reject: () => {} };
+
+    renderPage();
+    await waitFor(() => screen.getByTestId('review-row-cloud-rev-1'));
+
+    const user = userEvent.setup();
+    await act(async () => {
+      await user.click(screen.getByTestId('review-accept-cloud-rev-1'));
+    });
+
+    // Row is optimistically removed.
+    expect(screen.queryByTestId('review-row-cloud-rev-1')).not.toBeInTheDocument();
+
+    // Now reject the RPC — onError should restore the previous cache snapshot.
+    await act(async () => {
+      rpcGate!.reject(new Error('network error'));
+    });
+
+    // Row must reappear after rollback.
+    await waitFor(() => {
+      expect(screen.getByTestId('review-row-cloud-rev-1')).toBeInTheDocument();
+    });
   });
 
   it('Reject button calls resolve_review RPC with status=dismissed', async () => {

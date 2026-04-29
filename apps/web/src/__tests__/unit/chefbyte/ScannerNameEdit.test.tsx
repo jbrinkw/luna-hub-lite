@@ -65,9 +65,14 @@ vi.mock('@/shared/supabase', () => {
           return c;
         });
       } else if (table === 'locations') {
-        const loc = vi.fn(() => Promise.resolve({ data: { location_id: 'loc-1' }, error: null }));
-        tableBuilder.single = loc;
-        tableBuilder.maybeSingle = loc;
+        // CB-WEB-HIGH-4: Production uses .limit(1) which returns an array
+        // response { data: [...], error }, NOT .maybeSingle() which returns
+        // a single-row response. The mock must match the production query shape:
+        //   chefbyte().from('locations').select(...).eq(...).order(...).limit(1)
+        // .limit() is the terminal — return a Promise resolving to array shape.
+        tableBuilder.limit = vi.fn(() => Promise.resolve({ data: [{ location_id: 'loc-1' }], error: null }));
+        // Remove maybeSingle from the locations branch — it is never called in
+        // production. Keeping it would silently route the wrong code path.
       } else {
         const empty = vi.fn(() => Promise.resolve({ data: null, error: null }));
         tableBuilder.single = empty;

@@ -1,6 +1,15 @@
 /**
  * Lock-in tests for the silent-error-swallow audit fixes (2026-04-27).
  *
+ * CB-WEB-HIGH-2: The blanket `functions.invoke` mock returns an error for
+ * all invocations. This file covers the failure paths intentionally, but the
+ * analyze-product success → products INSERT path was structurally unreachable.
+ * Added a separate test (see "CB-WEB-HIGH-2" below) that overrides
+ * `functions.invoke` via `mockResolvedValueOnce` to succeed for one call,
+ * exercises the unknown-barcode → analyze-product → INSERT branch, and
+ * asserts the products.insert is attempted. This keeps the success branch
+ * from being permanently dark code in this file.
+ *
  * Ensures the scanner now surfaces failures rather than swallowing them:
  *
  *   1. ScannerPage:325 — products lookup uses .maybeSingle(); 0 rows is the
@@ -21,6 +30,13 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
+// CB-WEB-HIGH-2: invokeMock must be hoisted so the vi.mock factory (which is
+// lifted to the top of the module by Vitest) can reference it before any
+// const/let declarations in this file are initialized.
+const { invokeMock } = vi.hoisted(() => ({
+  invokeMock: vi.fn(() => Promise.resolve({ data: null, error: { message: 'not under test' } })),
+}));
+
 /* ------------------------------------------------------------------ */
 /*  Mock state                                                         */
 /* ------------------------------------------------------------------ */
@@ -32,12 +48,15 @@ interface MockSupabaseState {
   stockLotsDeleteShouldFail: boolean;
   // Captured queue of mutations.
   productsUpdates: Array<{ patch: any; filters: Record<string, unknown> }>;
+  // CB-WEB-HIGH-2: track products.insert calls (for success-path test).
+  productsInserts: number;
 }
 
 const mockState: MockSupabaseState = {
   productsUpdateShouldFail: false,
   stockLotsDeleteShouldFail: false,
   productsUpdates: [],
+  productsInserts: 0,
 };
 
 const productKnown = {
@@ -72,6 +91,7 @@ vi.mock('@/shared/supabase', () => {
       });
       builder.insert = vi.fn(() => {
         state.op = 'insert';
+        if (table === 'products') mockState.productsInserts++;
         return builder;
       });
       builder.delete = vi.fn(() => {
@@ -132,7 +152,7 @@ vi.mock('@/shared/supabase', () => {
   };
   return {
     supabase: {
-      functions: { invoke: vi.fn(() => Promise.resolve({ data: null, error: { message: 'not under test' } })) },
+      functions: { invoke: invokeMock },
     },
     chefbyte,
     coachbyte: vi.fn(),
@@ -178,7 +198,12 @@ beforeEach(() => {
   mockState.productsUpdateShouldFail = false;
   mockState.stockLotsDeleteShouldFail = false;
   mockState.productsUpdates.length = 0;
-  vi.clearAllMocks();
+  mockState.productsInserts = 0;
+  // Restore the blanket failure default after each test — invokeMock is a
+  // stable reference so clearAllMocks would wipe its implementation. Instead
+  // reset only its call history and ensure the default impl is in place.
+  invokeMock.mockReset();
+  invokeMock.mockResolvedValue({ data: null, error: { message: 'not under test' } });
 });
 
 /* ------------------------------------------------------------------ */
@@ -217,6 +242,60 @@ describe('ScannerPage — silent-error audit fixes', () => {
 
     // We expect at least one products.update was attempted (the nutrition push).
     expect(mockState.productsUpdates.some((u) => 'calories_per_serving' in (u.patch ?? {}))).toBe(true);
+  });
+
+  /**
+   * CB-WEB-HIGH-2: Success path — analyze-product returns a real product.
+   *
+   * The blanket invoke failure in this file makes the analyze-product →
+   * products INSERT branch structurally unreachable for all other tests.
+   * This test overrides the mock for one call via mockResolvedValueOnce,
+   * scans an unknown barcode, and asserts that:
+   *   1. functions.invoke was called (analyze-product branch reached).
+   *   2. products.insert was attempted (success branch executed, not skipped).
+   *   3. The queue row appears (no crash in the success path).
+   *
+   * If a refactor moves the invoke guard earlier and bypasses the success
+   * branch, productsInserts stays 0 and this test fails.
+   */
+  it('CB-WEB-HIGH-2: analyze-product success → products INSERT path is reachable', async () => {
+    // Override for one call only — the first invoke returns a successful
+    // AI suggestion with enough nutrition data to trigger the INSERT branch.
+    (invokeMock as any).mockResolvedValueOnce({
+      data: {
+        suggestion: {
+          name: 'AI Named Product',
+          calories_per_serving: 200,
+          protein_per_serving: 10,
+          carbs_per_serving: 25,
+          fat_per_serving: 7,
+          servings_per_container: 2,
+          default_shelf_life_days: null,
+        },
+        off: null,
+      },
+      error: null,
+    });
+
+    const user = userEvent.setup();
+    renderScanner();
+    // Scan an unknown barcode — maybeSingle returns null for products,
+    // triggering the analyze-product fallback.
+    await scanBarcode(user, '9999999999');
+
+    // Queue row must appear — success path didn't crash.
+    await waitFor(() => {
+      expect(screen.getAllByTestId(/^queue-item-/).length).toBeGreaterThan(0);
+    });
+
+    // functions.invoke was called (proves we entered the analyze-product branch).
+    expect(invokeMock).toHaveBeenCalledWith(
+      'analyze-product',
+      expect.objectContaining({ body: { barcode: '9999999999' } }),
+    );
+
+    // products.insert was attempted (proves the success branch executed).
+    expect(mockState.productsInserts).toBeGreaterThan(0);
   });
 
   it('surfaces saveName failure as a queue-row error instead of silent UI-only update', async () => {
