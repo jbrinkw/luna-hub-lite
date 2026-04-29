@@ -208,6 +208,51 @@ def test_malformed_product_skipped_without_poisoning_batch(conn, tmp_path):
     assert row["product_id"] == "good"
 
 
+def test_all_malformed_batch_still_advances_watermark(conn, tmp_path):
+    """Audit finding L11 sibling — if the cloud delivers a window where
+    EVERY product row is malformed (missing product_id / name), the
+    poller must still advance the watermark over the rows it saw.
+
+    Rationale: the cloud filters ``updated_at > updated_since`` so a
+    cursor stuck on a malformed-only window means the next tick re-fetches
+    the same skipped rows forever. Covers the "advance over every row,
+    including skipped" semantics that
+    ``test_malformed_product_skipped_without_poisoning_batch`` only
+    covers incidentally (via the good row in the same batch).
+
+    Cross-reference: ``product_sync_poller.tick_once`` advances the
+    watermark unconditionally over every row with a valid ``updated_at``
+    string, regardless of whether ``upsert_product_from_cloud`` returned
+    None (malformed / tombstone-without-local-row).
+    """
+    state_path = tmp_path / "last_product_sync.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "high_watermark": "2026-04-21T07:00:00Z"})
+    )
+    client = MagicMock()
+    # Two malformed rows — one missing product_id, one missing name.
+    # Both have valid updated_at strings the poller can use to advance.
+    fake_fetch = MagicMock(
+        return_value=Catalog(
+            products=[
+                {"name": "No id", "updated_at": "2026-04-21T08:00:00Z"},
+                {"product_id": "p-no-name", "updated_at": "2026-04-21T09:00:00Z"},
+            ],
+        )
+    )
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path, fetch_catalog_fn=fake_fetch,
+    )
+
+    count = poller.tick_once()
+    assert count == 0  # Nothing upserted — every row was skipped.
+    # Watermark MUST advance over the highest skipped-row timestamp.
+    # Without this, subsequent ticks would loop on the same malformed window.
+    assert poller.high_watermark == "2026-04-21T09:00:00Z"
+    state = json.loads(state_path.read_text())
+    assert state["high_watermark"] == "2026-04-21T09:00:00Z"
+
+
 def test_deletion_tombstone_marks_local_row_soft_deleted(conn, tmp_path):
     """Cloud tombstoned row (deleted_at set) in updated_since delta →
     Pi's local row gets deleted_at set, and subsequent list_products()

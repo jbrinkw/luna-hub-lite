@@ -286,6 +286,14 @@ class LotSnapshotPoller(threading.Thread):
         # (including tombstones — a deleted row still carries the bumped
         # updated_at and must advance the watermark so we don't re-fetch
         # it forever). An empty delta leaves the watermark untouched.
+        #
+        # Test cross-reference (audit L11 deferred sibling):
+        #   * ``test_malformed_row_skipped_without_poisoning_batch`` in
+        #     tests/test_lot_snapshot_poller.py — mixed batch.
+        #   * ``test_all_malformed_batch_still_advances_watermark`` —
+        #     all-malformed batch still advances watermark; pins this
+        #     behavior so a future regression that gates the watermark
+        #     advance on apply-success is caught.
         max_updated_at: Optional[str] = self._state.high_watermark
         applied = 0
         for lot in lots:

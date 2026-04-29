@@ -331,6 +331,48 @@ def test_malformed_row_skipped_without_poisoning_batch(conn, tmp_path):
     assert poller.high_watermark == "2026-04-22T13:00:00Z"
 
 
+def test_all_malformed_batch_still_advances_watermark(conn, tmp_path):
+    """Audit finding L11 sibling — if the cloud delivers a window where
+    EVERY row is malformed (missing lot_id / product_id / updated_at),
+    the poller must still advance the watermark over the rows it saw.
+
+    Rationale: the cloud filters ``updated_at > updated_since`` so a
+    cursor stuck on a malformed-only window means the next tick re-fetches
+    the same skipped rows forever. Confirms the deliberate "advance over
+    every row, including skipped" semantics that
+    ``test_malformed_row_skipped_without_poisoning_batch`` only covers
+    incidentally (via the good row in the same batch).
+
+    Cross-reference: lot_snapshot_poller advances the watermark
+    unconditionally over every row with a valid ``updated_at`` string,
+    regardless of whether the row was upserted, tombstoned, or skipped
+    as malformed.
+    """
+    state_path = tmp_path / "last_lot_sync.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "high_watermark": "2026-04-22T08:00:00Z"})
+    )
+    client = MagicMock()
+    # Two malformed rows — one missing lot_id, one missing product_id.
+    # Both have valid updated_at strings the poller can use to advance.
+    fake_fetch = MagicMock(
+        return_value=_payload(
+            {"product_id": "prod-x", "updated_at": "2026-04-22T09:00:00Z"},
+            {"lot_id": "lot-y", "updated_at": "2026-04-22T10:00:00Z"},
+        )
+    )
+    poller = LotSnapshotPoller(
+        client, conn, state_path=state_path, fetch_snapshot_fn=fake_fetch,
+    )
+    count = poller.tick_once()
+    assert count == 0  # Nothing upserted — every row was skipped.
+    # Watermark MUST advance over the highest skipped-row timestamp.
+    # Without this, subsequent ticks would loop on the same malformed window.
+    assert poller.high_watermark == "2026-04-22T10:00:00Z"
+    state = json.loads(state_path.read_text())
+    assert state["high_watermark"] == "2026-04-22T10:00:00Z"
+
+
 def test_non_dict_payload_does_not_advance_watermark(conn, tmp_path):
     """If the cloud returns a non-object (list, string, etc.) we log
     and skip — watermark must not advance, rows must not be touched."""

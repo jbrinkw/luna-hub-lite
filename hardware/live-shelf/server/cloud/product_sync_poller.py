@@ -235,6 +235,14 @@ class ProductSyncPoller(threading.Thread):
             # the next tick re-fetches the same window forever.
             # Compare to lot_snapshot_poller's pattern, which advances
             # over the row even on a malformed-skip.
+            #
+            # Test cross-reference (audit L11 deferred sibling):
+            #   * ``test_malformed_product_skipped_without_poisoning_batch``
+            #     in tests/test_product_sync_poller.py — mixed batch.
+            #   * ``test_all_malformed_batch_still_advances_watermark`` —
+            #     all-malformed batch still advances watermark; pins
+            #     this behavior so a future regression that gates the
+            #     watermark advance on upsert success is caught.
             row_ts = product.get("updated_at")
             if isinstance(row_ts, str) and row_ts:
                 if max_updated_at is None or row_ts > max_updated_at:
