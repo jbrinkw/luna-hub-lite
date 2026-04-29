@@ -6,6 +6,7 @@ export const queryKeys = {
   tools: (userId: string) => ['tools', userId] as const,
   extensions: (userId: string) => ['extensions', userId] as const,
   agentSettings: (userId: string) => ['agent-settings', userId] as const,
+  mcpToolLogs: (userId: string, namespace: string) => ['mcp-tool-logs', userId, namespace] as const,
 
   // CoachByte
   exercises: (userId: string) => ['exercises', userId] as const,

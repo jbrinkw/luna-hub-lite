@@ -1,11 +1,57 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { Toggle } from '@/components/ui/Toggle';
 import { Input } from '@/components/ui/Input';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
 import { Badge } from '@/components/ui/Badge';
-import { ExternalLink, PlugZap } from 'lucide-react';
+import { ExternalLink, PlugZap, CheckCircle2, XCircle, ChevronDown, ChevronRight } from 'lucide-react';
+import { supabase } from '@/shared/supabase';
+import { useAuth } from '@/shared/auth/AuthProvider';
+import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+
+/**
+ * Map extension UI name → MCP tool-name namespace prefix. Tool names in
+ * `hub.mcp_tool_logs` follow the convention `<NAMESPACE>_<action>`
+ * (uppercase namespace, e.g. `OBSIDIAN_create_project`). The namespace is
+ * what we filter on for the per-extension call tail.
+ */
+const EXTENSION_NAMESPACE: Record<string, string> = {
+  obsidian: 'OBSIDIAN',
+  todoist: 'TODOIST',
+  homeassistant: 'HOMEASSISTANT',
+};
+
+/** Row shape for the recent-calls query. Only fields the UI renders. */
+interface McpToolLogRow {
+  id: number;
+  tool_name: string;
+  status: 'ok' | 'tool_error' | 'exception';
+  error_message: string | null;
+  duration_ms: number;
+  created_at: string;
+}
+
+/** Relative time string ("5s ago", "2m ago", "1h ago", "3d ago"). */
+function relativeTime(iso: string): string {
+  const now = Date.now();
+  const then = new Date(iso).getTime();
+  const deltaSec = Math.max(0, Math.floor((now - then) / 1000));
+  if (deltaSec < 60) return `${deltaSec}s ago`;
+  const deltaMin = Math.floor(deltaSec / 60);
+  if (deltaMin < 60) return `${deltaMin}m ago`;
+  const deltaHr = Math.floor(deltaMin / 60);
+  if (deltaHr < 24) return `${deltaHr}h ago`;
+  return `${Math.floor(deltaHr / 24)}d ago`;
+}
+
+/** Drop the `OBSIDIAN_` prefix so the action ("create_project") renders. */
+function shortToolName(toolName: string, namespace: string): string {
+  const prefix = `${namespace}_`;
+  return toolName.startsWith(prefix) ? toolName.slice(prefix.length) : toolName;
+}
 
 /** Credential field keys that represent URLs (not secrets) */
 const URL_FIELD_KEYS = new Set(['ha_url', 'github_api_url', 'github_repo']);
@@ -147,9 +193,55 @@ export function ExtensionCard({
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [credTest, setCredTest] = useState<CredTestState>({ status: 'idle' });
+  const [expandedLogId, setExpandedLogId] = useState<number | null>(null);
+  const { user } = useAuth();
 
   const setupHint = SETUP_HINTS[extensionName];
   const probe = testProbe ?? probeExtensionCredentials;
+
+  // Tool-name namespace prefix for `hub.mcp_tool_logs` filtering. Tools
+  // not in the EXTENSION_NAMESPACE map (e.g. future extensions) won't get
+  // a tail until the map is updated — this is a deliberate fail-closed
+  // default rather than guessing the prefix from `extensionName`.
+  const toolNamespace = EXTENSION_NAMESPACE[extensionName];
+  const showTail = enabled && hasCredentials && !!toolNamespace && !!user;
+  const tailQueryKey = useMemo(
+    () => queryKeys.mcpToolLogs(user?.id ?? '', toolNamespace ?? ''),
+    [user?.id, toolNamespace],
+  );
+
+  // Realtime: invalidate the tail query whenever a new log row lands for
+  // this user. Default filter `user_id=eq.<uid>` already scopes by user;
+  // we still cull non-matching namespaces client-side via the `like`
+  // filter on the SELECT below. Mounting the subscription only when the
+  // tail itself is shown avoids opening per-extension channels for
+  // disabled/unconfigured cards.
+  useRealtimeInvalidation(`extension-tail-${extensionName}`, [
+    {
+      schema: 'hub',
+      table: 'mcp_tool_logs',
+      queryKeys: showTail ? [tailQueryKey] : [],
+    },
+  ]);
+
+  const { data: recentCalls = [] } = useQuery<McpToolLogRow[]>({
+    queryKey: tailQueryKey,
+    queryFn: async () => {
+      // Filter by `tool_name LIKE 'OBSIDIAN_%'` so this card only shows
+      // calls for ITS extension's namespace. RLS handles the user scoping.
+      const { data, error: queryError } = await supabase
+        .schema('hub')
+        .from('mcp_tool_logs')
+        .select('id, tool_name, status, error_message, duration_ms, created_at')
+        .like('tool_name', `${toolNamespace}\\_%`)
+        .order('created_at', { ascending: false })
+        .limit(5);
+      if (queryError) throw queryError;
+      return (data ?? []) as McpToolLogRow[];
+    },
+    enabled: showTail,
+    staleTime: 30 * 1000,
+  });
 
   const handleSave = async () => {
     setError(null);
@@ -257,6 +349,71 @@ export function ExtensionCard({
             {success && <Alert variant="success">Credentials saved</Alert>}
             {credTest.status === 'ok' && <Alert variant="success">{credTest.message}</Alert>}
             {credTest.status === 'fail' && <Alert variant="error">{credTest.message}</Alert>}
+
+            {showTail && (
+              <div
+                className="space-y-2 pt-3 mt-1 border-t border-border-light"
+                data-testid={`extension-tail-${extensionName}`}
+              >
+                <p className="text-xs font-semibold text-text-secondary uppercase tracking-wide">Last 5 MCP calls</p>
+                {recentCalls.length === 0 ? (
+                  <p className="text-xs text-text-tertiary italic">
+                    No calls yet — try asking Claude to use this extension.
+                  </p>
+                ) : (
+                  <ul className="space-y-1">
+                    {recentCalls.map((row) => {
+                      const ok = row.status === 'ok';
+                      const isExpanded = expandedLogId === row.id;
+                      return (
+                        <li
+                          key={row.id}
+                          className="rounded border border-border-light bg-surface-sunken text-xs"
+                          data-testid={`extension-tail-row-${row.id}`}
+                          data-status={row.status}
+                        >
+                          <button
+                            type="button"
+                            onClick={() => setExpandedLogId(isExpanded ? null : row.id)}
+                            className="w-full flex items-center gap-2 p-2 text-left hover:bg-surface-hover transition-colors min-w-0"
+                            aria-expanded={isExpanded}
+                          >
+                            <span
+                              className="shrink-0"
+                              data-testid={`extension-tail-status-${row.id}`}
+                              data-status-color={ok ? 'success' : 'danger'}
+                              aria-label={ok ? 'success' : 'failed'}
+                            >
+                              {ok ? (
+                                <CheckCircle2 size={14} className="text-success" />
+                              ) : (
+                                <XCircle size={14} className="text-danger" />
+                              )}
+                            </span>
+                            <span className="font-mono truncate flex-1 min-w-0 text-text-primary">
+                              {shortToolName(row.tool_name, toolNamespace)}
+                            </span>
+                            <span className="shrink-0 text-text-tertiary tabular-nums">{row.duration_ms}ms</span>
+                            <span className="shrink-0 text-text-tertiary">{relativeTime(row.created_at)}</span>
+                            <span className="shrink-0 text-text-tertiary">
+                              {isExpanded ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                            </span>
+                          </button>
+                          {isExpanded && (
+                            <div className="border-t border-border-light px-2 py-2 space-y-1">
+                              <div className="font-mono text-text-secondary break-all">{row.tool_name}</div>
+                              {!ok && row.error_message && (
+                                <div className="text-danger break-words whitespace-pre-wrap">{row.error_message}</div>
+                              )}
+                            </div>
+                          )}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                )}
+              </div>
+            )}
           </div>
         )}
       </CardContent>
