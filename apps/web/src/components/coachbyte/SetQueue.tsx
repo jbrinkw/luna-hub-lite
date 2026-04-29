@@ -1,6 +1,6 @@
 import { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
-import { ChevronDown, ChevronUp, Timer, Play, Pause, RotateCcw } from 'lucide-react';
+import { ChevronDown, ChevronUp, Timer, Play, Pause, RotateCcw, SkipForward, Clock } from 'lucide-react';
 import { WEIGHT_UNIT } from '@/shared/constants';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
 import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
@@ -18,6 +18,15 @@ export interface PlannedSet {
   completed: boolean;
 }
 
+export interface LastTimeStat {
+  reps: number;
+  load: number;
+  daysAgo: number;
+}
+
+const TIMER_PRESETS = [60, 90, 120, 180];
+const TIMER_EXTEND_SECONDS = [15, 30];
+
 interface SetQueueProps {
   sets: PlannedSet[];
   onComplete: (reps: number, load: number) => void;
@@ -28,11 +37,24 @@ interface SetQueueProps {
   timerState?: 'running' | 'paused' | 'expired' | 'idle';
   timerDisplay?: string;
   disabled?: boolean;
+  /** Most recent set the user did for the upcoming exercise. Surfaced
+   * directly under the prefilled targets — single most useful number
+   * to show a lifter mid-workout. */
+  lastTimeStat?: LastTimeStat | null;
+  /** True while the Complete-Set mutation is in flight — used to flip
+   * the button into a "Saving..." state. */
+  completing?: boolean;
   // Timer control callbacks (inline controls)
   onTimerStart?: (seconds: number) => void;
   onTimerPause?: () => void;
   onTimerResume?: () => void;
   onTimerReset?: () => void;
+  /** Add seconds to a running/paused timer (relative). When unset the
+   * +15s / +30s buttons are hidden. */
+  onTimerExtend?: (seconds: number) => void;
+  /** Skip rest = end timer + jump to "ready for next set" without
+   * deleting the sequence. Distinct from Reset. */
+  onTimerSkip?: () => void;
 }
 
 export function SetQueue({
@@ -45,10 +67,14 @@ export function SetQueue({
   timerState,
   timerDisplay,
   disabled,
+  lastTimeStat,
+  completing,
   onTimerStart,
   onTimerPause,
   onTimerResume,
   onTimerReset,
+  onTimerExtend,
+  onTimerSkip,
 }: SetQueueProps) {
   const nextSet = sets.find((s) => !s.completed);
   const [reps, setReps] = useState<string>(nextSet?.target_reps?.toString() ?? '');
@@ -165,69 +191,115 @@ export function SetQueue({
               </div>
             </div>
 
-            {/* Inline Timer Controls */}
+            {/* Inline Timer Controls — `lg` size (44px) for sweaty-hand
+                mid-workout taps. Skip is distinct from Reset; +15s/+30s
+                let users non-destructively extend rest. */}
             <div className="flex gap-2 items-center flex-wrap mb-4" data-testid="timer-controls">
               {timerState === 'running' && onTimerPause && (
-                <Button variant="secondary" size="sm" onClick={onTimerPause} data-testid="pause-btn">
-                  <Pause className="w-3.5 h-3.5 mr-1 inline" />
+                <Button variant="secondary" size="lg" onClick={onTimerPause} data-testid="pause-btn">
+                  <Pause className="w-4 h-4 mr-1 inline" />
                   Pause
                 </Button>
               )}
               {timerState === 'paused' && onTimerResume && (
-                <Button variant="secondary" size="sm" onClick={onTimerResume} data-testid="resume-btn">
-                  <Play className="w-3.5 h-3.5 mr-1 inline" />
+                <Button variant="secondary" size="lg" onClick={onTimerResume} data-testid="resume-btn">
+                  <Play className="w-4 h-4 mr-1 inline" />
                   Resume
                 </Button>
               )}
+              {(timerState === 'running' || timerState === 'paused') &&
+                onTimerExtend &&
+                TIMER_EXTEND_SECONDS.map((s) => (
+                  <Button
+                    key={s}
+                    variant="secondary"
+                    size="lg"
+                    onClick={() => onTimerExtend(s)}
+                    data-testid={`extend-${s}-btn`}
+                    aria-label={`Add ${s} seconds to timer`}
+                  >
+                    +{s}s
+                  </Button>
+                ))}
+              {(timerState === 'running' || timerState === 'paused' || timerState === 'expired') && onTimerSkip && (
+                <Button variant="primary" size="lg" onClick={onTimerSkip} data-testid="skip-btn">
+                  <SkipForward className="w-4 h-4 mr-1 inline" />
+                  Skip
+                </Button>
+              )}
               {(timerState === 'running' || timerState === 'paused' || timerState === 'expired') && onTimerReset && (
-                <Button variant="secondary" size="sm" onClick={onTimerReset} data-testid="reset-btn">
-                  <RotateCcw className="w-3.5 h-3.5 mr-1 inline" />
+                <Button variant="secondary" size="lg" onClick={onTimerReset} data-testid="reset-btn">
+                  <RotateCcw className="w-4 h-4 mr-1 inline" />
                   Reset
                 </Button>
               )}
               {(timerState === 'idle' || timerState === 'expired') && onTimerStart && (
-                <div className="flex gap-1.5 items-center ml-auto">
+                <div className="flex flex-wrap gap-1.5 items-center ml-auto" data-testid="timer-presets">
                   <Timer className="w-4 h-4 text-text-tertiary" />
+                  {TIMER_PRESETS.map((preset) => (
+                    <button
+                      key={preset}
+                      type="button"
+                      onClick={() => onTimerStart(preset)}
+                      className="px-3 py-2 text-sm rounded border border-border-strong text-text-secondary bg-surface-sunken hover:bg-surface-hover hover:border-border-strong min-h-[40px] min-w-[44px]"
+                      data-testid={`timer-preset-${preset}`}
+                      aria-label={`Start ${preset} second timer`}
+                    >
+                      {preset}s
+                    </button>
+                  ))}
                   <input
                     type="number"
                     value={customDuration}
                     onChange={(e) => setCustomDuration(e.target.value)}
                     placeholder="sec"
-                    className="w-16 px-2 py-1 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
+                    className="w-16 px-2 py-2 text-sm border border-border-strong rounded-md focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary min-h-[40px]"
                     data-testid="custom-duration-input"
                   />
-                  <Button variant="secondary" size="sm" onClick={handleCustomTimerStart} data-testid="custom-start-btn">
-                    Start Timer
+                  <Button variant="secondary" size="lg" onClick={handleCustomTimerStart} data-testid="custom-start-btn">
+                    Start
                   </Button>
                 </div>
               )}
             </div>
 
+            {lastTimeStat && (
+              <div className="flex items-center gap-2 text-sm text-text-secondary mb-3" data-testid="last-time-stat">
+                <Clock className="w-3.5 h-3.5" />
+                <span>
+                  Last time:{' '}
+                  <strong className="text-text">
+                    {lastTimeStat.reps}r @ {lastTimeStat.load} {WEIGHT_UNIT}
+                  </strong>{' '}
+                  <span className="text-text-tertiary">
+                    (
+                    {lastTimeStat.daysAgo === 0
+                      ? 'today'
+                      : lastTimeStat.daysAgo === 1
+                        ? 'yesterday'
+                        : `${lastTimeStat.daysAgo}d ago`}
+                    )
+                  </span>
+                </span>
+              </div>
+            )}
+
             <form
-              className="grid grid-cols-2 sm:grid-cols-[1fr_auto_auto_auto_auto] gap-2 items-end"
+              className="grid grid-cols-2 sm:grid-cols-[auto_auto_1fr_auto] gap-2 items-end"
               onSubmit={(e) => {
                 e.preventDefault();
                 handleComplete();
               }}
               data-testid="completion-form"
             >
-              <div className="flex flex-col gap-1 col-span-2 sm:col-span-1">
-                <label className="text-sm font-semibold text-text-secondary">Exercise</label>
-                <input
-                  type="text"
-                  value={nextSet.exercise_name}
-                  readOnly
-                  className="w-full px-3 py-2 text-base border border-border-strong rounded-lg bg-surface-sunken text-text"
-                  data-testid="override-exercise"
-                />
-              </div>
               <div className="flex flex-col gap-1">
                 <label className="text-sm font-semibold text-text-secondary">Reps Done</label>
                 <input
                   type="number"
+                  inputMode="numeric"
                   value={reps}
                   onChange={(e) => setReps(e.target.value)}
-                  className="w-full px-3 py-2 text-base text-center border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
+                  className="w-full px-3 py-3 text-base text-center border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary min-h-[44px]"
                   data-testid="override-reps"
                 />
               </div>
@@ -235,16 +307,32 @@ export function SetQueue({
                 <label className="text-sm font-semibold text-text-secondary">Weight ({WEIGHT_UNIT})</label>
                 <input
                   type="number"
+                  inputMode="decimal"
                   value={load}
                   onChange={(e) => setLoad(e.target.value)}
-                  className="w-full px-3 py-2 text-base text-center border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary"
+                  className="w-full px-3 py-3 text-base text-center border border-border-strong rounded-lg focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary min-h-[44px]"
                   data-testid="override-load"
                 />
               </div>
-              <Button type="submit" variant="success" size="lg" disabled={disabled} data-testid="complete-set-btn">
-                Complete Set
+              <Button
+                type="submit"
+                variant="success"
+                size="xl"
+                disabled={disabled}
+                loading={completing}
+                data-testid="complete-set-btn"
+                className="col-span-2 sm:col-span-1"
+              >
+                {completing ? 'Saving…' : 'Complete Set'}
               </Button>
-              <Button variant="primary" onClick={onAdHoc} disabled={disabled} data-testid="adhoc-btn">
+              <Button
+                variant="secondary"
+                size="lg"
+                onClick={onAdHoc}
+                disabled={disabled}
+                data-testid="adhoc-btn"
+                className="col-span-2 sm:col-span-1"
+              >
                 + Ad-Hoc Set
               </Button>
             </form>
@@ -387,9 +475,10 @@ export function SetQueue({
                           <td className="px-3 py-2 align-middle">
                             <Button
                               variant="danger"
-                              size="sm"
+                              size="md"
                               onClick={() => onDeleteSet?.(set.planned_set_id)}
                               data-testid={`delete-set-${set.order}`}
+                              aria-label={`Remove set ${set.order}: ${set.exercise_name}`}
                             >
                               Remove
                             </Button>

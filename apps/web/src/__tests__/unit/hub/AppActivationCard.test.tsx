@@ -35,13 +35,16 @@ describe('AppActivationCard', () => {
     expect(onActivate).toHaveBeenCalledTimes(1);
   });
 
-  it('deactivate shows confirmation first', async () => {
+  it('deactivate shows confirmation first with destructive copy', async () => {
     const onDeactivate = vi.fn();
     render(<AppActivationCard {...defaultProps} active onDeactivate={onDeactivate} />);
 
     await userEvent.click(screen.getByText('Deactivate'));
-    // Confirmation modal should appear
-    expect(screen.getByText(/are you sure/i)).toBeInTheDocument();
+    // Confirmation modal should appear with explicit destructive language
+    expect(screen.getByText(/permanently delete all of its data/i)).toBeInTheDocument();
+    expect(screen.getByText(/This cannot be undone/i)).toBeInTheDocument();
+    // CoachByte-specific deletion bullets surface
+    expect(screen.getByTestId('deactivate-data-list')).toBeInTheDocument();
     // onDeactivate not called yet
     expect(onDeactivate).not.toHaveBeenCalled();
   });
@@ -51,7 +54,7 @@ describe('AppActivationCard', () => {
     render(<AppActivationCard {...defaultProps} active onDeactivate={onDeactivate} />);
 
     await userEvent.click(screen.getByText('Deactivate'));
-    await userEvent.click(screen.getByText('Confirm'));
+    await userEvent.click(screen.getByTestId('deactivate-confirm'));
     expect(onDeactivate).toHaveBeenCalledTimes(1);
   });
 
@@ -62,6 +65,13 @@ describe('AppActivationCard', () => {
     await userEvent.click(screen.getByText('Deactivate'));
     await userEvent.click(screen.getByText('Cancel'));
     expect(onDeactivate).not.toHaveBeenCalled();
+  });
+
+  it('shows ChefByte-specific deletion bullets', async () => {
+    render(<AppActivationCard {...defaultProps} appName="chefbyte" displayName="ChefByte" active />);
+    await userEvent.click(screen.getByText('Deactivate'));
+    expect(screen.getByText(/Inventory, products, and recipes/i)).toBeInTheDocument();
+    expect(screen.getByText(/Meal plans, macro logs, and shopping list/i)).toBeInTheDocument();
   });
 
   it('loading disables buttons', () => {

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ChevronDown, ChevronUp } from 'lucide-react';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
-import { SetQueue, type PlannedSet } from '@/components/coachbyte/SetQueue';
+import { SetQueue, type PlannedSet, type LastTimeStat } from '@/components/coachbyte/SetQueue';
 import { formatTime } from '@/shared/formatTime';
 import { AdHocSetForm, type Exercise } from '@/components/coachbyte/AdHocSetForm';
 import { useAuth } from '@/shared/auth/AuthProvider';
@@ -11,7 +11,7 @@ import { useAppContext } from '@/shared/AppProvider';
 import { supabase, coachbyte } from '@/shared/supabase';
 import { todayStr } from '@/shared/dates';
 import { WEIGHT_UNIT } from '@/shared/constants';
-import { epley1RM } from '@/pages/coachbyte/PrsPage';
+import { epley1RM } from '@/shared/epley';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
 import { Card, CardContent } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
@@ -21,6 +21,7 @@ import { useSaveIndicator } from '@/hooks/useSaveIndicator';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { fireTimerExpiredCue, requestNotificationPermission, useScreenWakeLock } from '@/hooks/useTimerAudio';
 
 export interface CompletedSet {
   completed_set_id: string;
@@ -145,6 +146,40 @@ export async function loadTimerState(userId: string, client?: SupabaseClient<any
   };
 }
 
+/** Load the most recent completed-set for one exercise (single row,
+ * newest first). Used to surface "last time you did this" on the Today
+ * next-in-queue card.
+ *
+ * Returns null when:
+ *   - no completed_sets row matches (first time doing this exercise)
+ *   - no exercise_id passed (next set has no exercise yet — shouldn't
+ *     happen, but defensive)
+ */
+export async function loadLastTimeForExercise(
+  userId: string,
+  exerciseId: string | null | undefined,
+  client?: SupabaseClient<any>,
+): Promise<LastTimeStat | null> {
+  if (!exerciseId) return null;
+  const { data } = await asCoachbyte(client)
+    .from('completed_sets')
+    .select('actual_reps, actual_load, completed_at')
+    .eq('user_id', userId)
+    .eq('exercise_id', exerciseId)
+    .order('completed_at', { ascending: false })
+    .limit(1);
+
+  const row = (data as { actual_reps: number; actual_load: string | number; completed_at: string }[] | null)?.[0];
+  if (!row) return null;
+  const completedAt = new Date(row.completed_at).getTime();
+  const daysAgo = Math.max(0, Math.floor((Date.now() - completedAt) / 86_400_000));
+  return {
+    reps: row.actual_reps,
+    load: Number(row.actual_load),
+    daysAgo,
+  };
+}
+
 /** Load global + user-owned exercises for the AdHocSetForm. */
 export async function loadExercisesForToday(userId: string, client?: SupabaseClient<any>): Promise<Exercise[]> {
   const { data, error } = await asCoachbyte(client)
@@ -217,6 +252,32 @@ export async function expireTimerRpc(client?: SupabaseClient<any>): Promise<Time
   return { error: null };
 }
 
+/** Extend a running/paused timer by N seconds. The migration doesn't
+ * have a dedicated RPC for this, but `start_timer` replaces the row
+ * with a fresh end_time, so we can compute (remaining + extra) and
+ * call start_timer with the new total.
+ *
+ * Caller must pass the current `timer` so we can compute remaining
+ * accurately (avoids extra DB roundtrip + race with realtime updates).
+ */
+export async function extendTimerRpc(
+  timer: TimerState,
+  extraSeconds: number,
+  client?: SupabaseClient<any>,
+): Promise<TimerDispatchResult> {
+  let remaining = 0;
+  if (timer.state === 'running' && timer.end_time) {
+    remaining = Math.max(0, Math.ceil((new Date(timer.end_time).getTime() - Date.now()) / 1000));
+  } else if (timer.state === 'paused') {
+    remaining = Math.max(0, timer.duration_seconds - timer.elapsed_before_pause);
+  } else {
+    // No active timer to extend — caller should have hidden the button
+    return { error: null };
+  }
+  const newDuration = remaining + extraSeconds;
+  return startTimerRpc(newDuration, client);
+}
+
 export function TodayPage() {
   const { user } = useAuth();
   const { dayStartHour } = useAppContext();
@@ -230,6 +291,13 @@ export function TodayPage() {
   const [completedExpanded, setCompletedExpanded] = useState(false);
   const [notesExpanded, setNotesExpanded] = useState(false);
   const [summaryExpanded, setSummaryExpanded] = useState(false);
+  // Undo toast — shown for 5s after a successful Complete-Set so the
+  // user can revert without expanding the Completed section.
+  const [undoSetId, setUndoSetId] = useState<string | null>(null);
+  const undoTimeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  // Track running→expired transition so we fire the audio/vibration/
+  // notification cue exactly once per timer expiry (not every render).
+  const lastTimerStateRef = useRef<string | null>(null);
   const { showSaved: notesSaved, flash: flashNotes } = useSaveIndicator();
   const { showSaved: summarySaved, flash: flashSummary } = useSaveIndicator();
   const summaryRef = useRef('');
@@ -250,7 +318,15 @@ export function TodayPage() {
       if (notesDebounceRef.current) clearTimeout(notesDebounceRef.current);
       if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
       if (resetTimeoutRef.current) clearTimeout(resetTimeoutRef.current);
+      if (undoTimeoutRef.current) clearTimeout(undoTimeoutRef.current);
     };
+  }, []);
+
+  // Request notification permission once on mount so the rest-timer
+  // expiry can later fire a system notification without a perm-prompt
+  // mid-rest. Silently no-ops on unsupported browsers / denied state.
+  useEffect(() => {
+    void requestNotificationPermission();
   }, []);
 
   const today = todayStr(dayStartHour);
@@ -281,6 +357,7 @@ export function TodayPage() {
   const planId = planData?.planId ?? null;
   const sets = planData?.sets ?? [];
   const completedSets = planData?.completedSets ?? [];
+  const nextSet = sets.find((s) => !s.completed);
 
   // ── Timer query ──
   const { data: timer = DEFAULT_TIMER } = useQuery({
@@ -288,6 +365,21 @@ export function TodayPage() {
     queryFn: () => loadTimerState(user!.id),
     enabled: !!user,
   });
+
+  // ── Last-time-you-did-this query ──
+  // Single most useful number to show a lifter mid-workout. Re-fetches
+  // when nextSet changes (i.e. one set is logged → next prefills).
+  const { data: lastTimeStat = null } = useQuery({
+    queryKey: ['last-time', user!.id, nextSet?.exercise_id ?? null],
+    queryFn: () => loadLastTimeForExercise(user!.id, nextSet?.exercise_id),
+    enabled: !!user && !!nextSet?.exercise_id,
+    staleTime: 30_000,
+  });
+
+  // Keep the screen awake while the user has an active workout (any
+  // pending sets remain). Released on unmount or when all sets done.
+  const sessionActive = sets.some((s) => !s.completed);
+  useScreenWakeLock(sessionActive);
 
   // ── Exercises query ──
   const { data: exercises = [] } = useQuery({
@@ -315,6 +407,14 @@ export function TodayPage() {
   }, [user, today, queryClient]);
 
   // ── Complete set mutation ──
+  // OPTIMISTIC UPDATE PATH:
+  //   onMutate: flip the next pending set's `completed` flag in-cache
+  //     and append a synthetic completed_sets row so the UI advances
+  //     to the NEXT next-set immediately. Stash the rollback snapshot.
+  //   onSuccess: replace the synthetic row with the real one (using
+  //     completed_set_id from the RPC response), kick the rest timer,
+  //     run PR detection, and show the 5s undo toast.
+  //   onError:   rollback to the snapshot.
   const completeSetMutation = useMutation({
     mutationFn: async ({ reps, load }: { reps: number; load: number }) => {
       const { data, error: err } = await coachbyte().rpc('complete_next_set', {
@@ -323,34 +423,77 @@ export function TodayPage() {
         p_actual_load: load,
       });
       if (err) throw err;
-      return data as { rest_seconds: number | null }[] | null;
+      // The RPC returns: [{ completed_set_id, planned_set_id, rest_seconds, ... }]
+      return data as
+        | {
+            rest_seconds: number | null;
+            completed_set_id?: string;
+            planned_set_id?: string;
+          }[]
+        | null;
     },
-    onSuccess: async (data, { reps, load }) => {
+    onMutate: async ({ reps, load }) => {
+      // Snapshot the previous cache so onError can restore it.
+      const queryKey = queryKeys.dailyPlan(user!.id, today);
+      await queryClient.cancelQueries({ queryKey });
+      const prev = queryClient.getQueryData<DailyPlanData>(queryKey);
+      if (!prev) return { prev };
+
+      const targetSet = prev.sets.find((s) => !s.completed);
+      if (!targetSet) return { prev };
+
+      const optimisticSet: CompletedSet = {
+        completed_set_id: `optimistic-${targetSet.planned_set_id}`,
+        exercise_name: targetSet.exercise_name,
+        actual_reps: reps,
+        actual_load: load,
+        completed_at: new Date().toISOString(),
+      };
+
+      queryClient.setQueryData<DailyPlanData>(queryKey, {
+        ...prev,
+        sets: prev.sets.map((s) => (s.planned_set_id === targetSet.planned_set_id ? { ...s, completed: true } : s)),
+        completedSets: [...prev.completedSets, optimisticSet],
+      });
+
+      return { prev, targetSet };
+    },
+    onSuccess: async (data, { reps, load }, ctx) => {
       const result = data;
       const restSeconds = result?.[0]?.rest_seconds;
+      const completedSetId = result?.[0]?.completed_set_id;
       if (restSeconds && restSeconds > 0) {
         await startTimer(restSeconds);
       }
 
-      // PR check
-      const nextSet = sets.find((s) => !s.completed);
-      const completedExerciseId = nextSet?.exercise_id;
-      const completedExerciseName = nextSet?.exercise_name;
+      // PR check — ``ctx.targetSet`` is the planned-set we just logged
+      // (captured during onMutate before the optimistic update fired).
+      const completedExerciseId = ctx?.targetSet?.exercise_id;
+      const completedExerciseName = ctx?.targetSet?.exercise_name;
 
       if (completedExerciseId && reps > 0 && load > 0) {
         const newE1RM = epley1RM(load, reps);
 
+        // Pull the just-logged completed_set_id back along with the
+        // history rows so we can exclude it by ID instead of
+        // reps×load equality (the old code mistakenly excluded any
+        // previous set that happened to match the same reps×load).
         const { data: prevSets } = await coachbyte()
           .from('completed_sets')
-          .select('actual_reps, actual_load')
+          .select('completed_set_id, actual_reps, actual_load')
           .eq('exercise_id', completedExerciseId)
           .eq('user_id', user!.id);
 
         let prevBestWithout = 0;
-        for (const ps of (prevSets ?? []) as { actual_reps: number; actual_load: string | number }[]) {
+        for (const ps of (prevSets ?? []) as {
+          completed_set_id: string;
+          actual_reps: number;
+          actual_load: string | number;
+        }[]) {
+          // Exclude only THIS set — by id, not by value-equality.
+          if (completedSetId && ps.completed_set_id === completedSetId) continue;
           const r = ps.actual_reps;
           const l = Number(ps.actual_load);
-          if (r === reps && l === load) continue;
           const e = epley1RM(l, r);
           if (e > prevBestWithout) prevBestWithout = e;
         }
@@ -362,9 +505,21 @@ export function TodayPage() {
         }
       }
 
+      // Show "Undo" toast for 5s. Tapping it deletes the just-logged
+      // completed_set row.
+      if (completedSetId) {
+        setUndoSetId(completedSetId);
+        clearTimeout(undoTimeoutRef.current);
+        undoTimeoutRef.current = setTimeout(() => setUndoSetId(null), 5000);
+      }
+
       queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
     },
-    onError: (err: any) => {
+    onError: (err: any, _vars, ctx) => {
+      // Rollback the optimistic mutation
+      if (ctx?.prev) {
+        queryClient.setQueryData(queryKeys.dailyPlan(user!.id, today), ctx.prev);
+      }
       setError(err.message);
     },
   });
@@ -372,6 +527,21 @@ export function TodayPage() {
   const handleCompleteSet = async (reps: number, load: number) => {
     if (!planId || !user) return;
     completeSetMutation.mutate({ reps, load });
+  };
+
+  // Undo a just-completed set. Looks up by completed_set_id captured
+  // from the RPC response.
+  const undoLastSet = async () => {
+    if (!undoSetId || !user) return;
+    const idToUndo = undoSetId;
+    setUndoSetId(null);
+    clearTimeout(undoTimeoutRef.current);
+    const { error: err } = await coachbyte().from('completed_sets').delete().eq('completed_set_id', idToUndo);
+    if (err) {
+      setError(err.message);
+      return;
+    }
+    queryClient.invalidateQueries({ queryKey: queryKeys.dailyPlan(user!.id, today) });
   };
 
   const updatePlannedSet = async (plannedSetId: string, field: string, value: number | null) => {
@@ -457,9 +627,35 @@ export function TodayPage() {
     if (err) setError(err);
   }, [user]);
 
-  // Timer expired detection — runs when timer is running and hits 0
+  // Extend a running/paused timer by N seconds (non-destructive).
+  const extendTimer = async (extra: number) => {
+    if (!user) return;
+    const { error: err } = await extendTimerRpc(timer, extra);
+    if (err) setError(err);
+    else queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
+  };
+
+  // Skip rest = "I'm ready, drop the timer". Distinct from Reset
+  // semantically — same DB effect (delete row) but the user-facing
+  // affordance is "I'm ready to lift" instead of "wipe and start over".
+  const skipTimer = async () => {
+    if (!user) return;
+    const { error: err } = await resetTimerRpc();
+    if (err) setError(err);
+    else queryClient.invalidateQueries({ queryKey: queryKeys.timer(user.id) });
+  };
+
+  // Timer expired detection — runs when timer is running and hits 0.
+  // Also fires the audio + vibration + system-notification cue exactly
+  // once on the running→expired transition.
   /* eslint-disable react-hooks/set-state-in-effect -- timer expiry triggers server-side mutation + state update */
   useEffect(() => {
+    // Edge-trigger the cue only when transitioning INTO expired
+    if (timer.state === 'expired' && lastTimerStateRef.current !== 'expired') {
+      fireTimerExpiredCue();
+    }
+    lastTimerStateRef.current = timer.state;
+
     if (timer.state !== 'running' || !timer.end_time) return;
 
     const remaining = Math.max(0, Math.ceil((new Date(timer.end_time).getTime() - Date.now()) / 1000));
@@ -616,18 +812,19 @@ export function TodayPage() {
   return (
     <CoachLayout title="Today">
       <div className="flex justify-between items-center flex-wrap gap-2 border-b-2 border-border pb-2.5 mb-5">
-        <h2 className="text-2xl font-bold text-text m-0">Today's Workout</h2>
-        <div className="flex gap-2.5 items-center">
-          <span className="text-text-secondary text-sm">{today}</span>
-          <Button
-            variant={confirmReset ? 'danger' : 'secondary'}
-            size="sm"
-            onClick={resetPlan}
-            data-testid="reset-plan-btn"
-          >
-            {confirmReset ? 'Confirm Reset?' : 'Reset Plan'}
-          </Button>
+        <div>
+          <h2 className="text-2xl font-bold text-text m-0">Today's Workout</h2>
+          <span className="text-text-secondary text-xs">{today}</span>
         </div>
+        <Button
+          variant={confirmReset ? 'danger' : 'ghost'}
+          size="sm"
+          onClick={resetPlan}
+          data-testid="reset-plan-btn"
+          aria-label="Reset today's plan"
+        >
+          {confirmReset ? 'Confirm Reset?' : 'Reset Plan'}
+        </Button>
       </div>
 
       {planError && (
@@ -653,6 +850,25 @@ export function TodayPage() {
         </Alert>
       )}
 
+      {undoSetId && (
+        <Alert
+          variant="info"
+          onDismiss={() => {
+            setUndoSetId(null);
+            clearTimeout(undoTimeoutRef.current);
+          }}
+          className="mb-4"
+          data-testid="undo-toast"
+        >
+          <div className="flex items-center justify-between gap-3 flex-wrap">
+            <span>Set logged.</span>
+            <Button variant="primary" size="sm" onClick={undoLastSet} data-testid="undo-set-btn">
+              Undo
+            </Button>
+          </div>
+        </Alert>
+      )}
+
       <SetQueue
         sets={sets}
         onComplete={handleCompleteSet}
@@ -669,10 +885,14 @@ export function TodayPage() {
               : undefined
         }
         disabled={false}
+        completing={completeSetMutation.isPending}
+        lastTimeStat={lastTimeStat}
         onTimerStart={(secs) => startTimer(secs)}
         onTimerPause={pauseTimer}
         onTimerResume={resumeTimer}
         onTimerReset={resetTimer}
+        onTimerExtend={extendTimer}
+        onTimerSkip={skipTimer}
       />
 
       {showAdHoc && (

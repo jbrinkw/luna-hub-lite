@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/Badge';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { Settings, ChevronDown, ChevronRight } from 'lucide-react';
 import { queryKeys } from '@/shared/queryKeys';
+import { epley1RM } from '@/shared/epley';
 
 export interface ExercisePR {
   exercise_id: string;
@@ -19,12 +20,11 @@ export interface ExercisePR {
   rep_records: { reps: number; load: number }[];
 }
 
-/** Epley 1RM formula: load x (1 + reps/30) */
-export function epley1RM(load: number, reps: number): number {
-  if (reps <= 0 || load <= 0) return 0;
-  if (reps === 1) return load;
-  return Math.round(load * (1 + reps / 30));
-}
+// Re-export so existing test imports (`import { epley1RM } from
+// '@/pages/coachbyte/PrsPage'`) continue to compile after the move
+// to shared/. Production code should import from `@/shared/epley`.
+// eslint-disable-next-line react-refresh/only-export-components
+export { epley1RM };
 
 // ---------------------------------------------------------------------------
 // Exported data loaders — PrsPage's queries pulled out of ``queryFn``

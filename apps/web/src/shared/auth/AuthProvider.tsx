@@ -10,7 +10,12 @@ interface AuthContextType {
   sessionError: string | null;
   clearSessionError: () => void;
   signIn: (email: string, password: string) => Promise<{ error: Error | null }>;
-  signUp: (email: string, password: string, displayName?: string) => Promise<{ error: Error | null }>;
+  signUp: (
+    email: string,
+    password: string,
+    displayName?: string,
+    timezone?: string,
+  ) => Promise<{ error: Error | null }>;
   signOut: () => Promise<void>;
 }
 
@@ -90,11 +95,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return { error: error as Error | null };
   }, []);
 
-  const signUp = useCallback(async (email: string, password: string, displayName?: string) => {
+  const signUp = useCallback(async (email: string, password: string, displayName?: string, timezone?: string) => {
+    // Pass timezone through raw_user_meta_data so the
+    // private.handle_new_user() trigger can pick it up at profile-row
+    // creation time (see supabase/migrations/20260302014004_create_schemas.sql).
+    // Without this, every new account defaults to America/New_York and
+    // a Pacific-coast user crosses 6am EST believing their day hasn't
+    // rolled over yet.
+    const meta: Record<string, string> = {};
+    if (displayName) meta.display_name = displayName;
+    if (timezone) meta.timezone = timezone;
+
     const { data, error } = await supabase.auth.signUp({
       email,
       password,
-      options: displayName ? { data: { display_name: displayName } } : undefined,
+      options: Object.keys(meta).length > 0 ? { data: meta } : undefined,
     });
     if (!error && data.session) {
       setSession(data.session);

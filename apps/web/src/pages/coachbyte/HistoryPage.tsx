@@ -9,6 +9,7 @@ import { Card } from '@/components/ui/Card';
 import { Button } from '@/components/ui/Button';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { formatDateDisplay } from '@/shared/dates';
+import { formatWeightWithPlates } from '@/shared/plateCalc';
 import { queryKeys } from '@/shared/queryKeys';
 
 export interface HistoryDay {
@@ -361,7 +362,7 @@ export function HistoryPage() {
                                 <span className="font-medium">{d.exercise_name}</span>
                               </div>
                               <div className="text-xs text-text-secondary shrink-0 tabular-nums">
-                                {d.actual_reps}r @ {d.actual_load} {WEIGHT_UNIT}
+                                {d.actual_reps}r @ {formatWeightWithPlates(d.actual_load)} {WEIGHT_UNIT}
                                 <span className="text-text-tertiary ml-1.5">
                                   {timeFormatter.format(new Date(d.completed_at))}
                                 </span>
@@ -479,7 +480,7 @@ export function HistoryPage() {
                                         <td className="px-2 py-1 align-middle font-medium">{d.exercise_name}</td>
                                         <td className="px-2 py-1 align-middle font-medium">{d.actual_reps}</td>
                                         <td className="px-2 py-1 align-middle font-medium">
-                                          {d.actual_load} {WEIGHT_UNIT}
+                                          {formatWeightWithPlates(d.actual_load)} {WEIGHT_UNIT}
                                         </td>
                                         <td className="px-2 py-1 align-middle">
                                           <span className="text-text-secondary text-xs">

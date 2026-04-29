@@ -1,11 +1,12 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { supabase } from '@/shared/supabase';
 import { Button } from '@/components/ui/Button';
 import { TableSkeleton } from '@/components/ui/Skeleton';
-import { ChevronDown, ChevronRight } from 'lucide-react';
+import { SaveIndicator } from '@/components/ui/SaveIndicator';
+import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
 import { queryKeys } from '@/shared/queryKeys';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -40,6 +41,26 @@ export function SplitPage() {
   const [savingDay, setSavingDay] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [collapsedDays, setCollapsedDays] = useState<Set<number>>(new Set());
+  // Per-day "Saved" badge — flashes for 1.5s after autosave fires.
+  const [savedDays, setSavedDays] = useState<Set<number>>(new Set());
+  const savedFlashTimeoutsRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  // Per-day debounce timers. autoSaveSplit is dispatched on every state
+  // change; the debounce coalesces rapid-fire updates into one DB write.
+  const autoSaveTimeoutsRef = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+  // Drag-reorder state — `dragIndex` is the source position within the
+  // active day. We also track the active weekday because drag events
+  // should only fire within a single day's table.
+  const dragRef = useRef<{ weekday: number; index: number } | null>(null);
+
+  // Cleanup timers on unmount
+  useEffect(() => {
+    return () => {
+      savedFlashTimeoutsRef.current.forEach(clearTimeout);
+      savedFlashTimeoutsRef.current.clear();
+      autoSaveTimeoutsRef.current.forEach(clearTimeout);
+      autoSaveTimeoutsRef.current.clear();
+    };
+  }, []);
 
   const toggleDay = (weekday: number) => {
     setCollapsedDays((prev) => {
@@ -144,11 +165,30 @@ export function SplitPage() {
       setSavingDay(day.weekday);
       setSaveError(null);
     },
-    onSuccess: (result) => {
+    onSuccess: (result, day) => {
       if (result) {
         setSplits((prev) => prev.map((s) => (s.weekday === result.weekday ? { ...s, split_id: result.split_id } : s)));
       }
       setSavingDay(null);
+      // Flash "Saved" indicator for 1.5s. Per-weekday so concurrent
+      // saves on different days don't clobber each other's flash.
+      const weekday = day.weekday;
+      setSavedDays((prev) => {
+        const next = new Set(prev);
+        next.add(weekday);
+        return next;
+      });
+      const existing = savedFlashTimeoutsRef.current.get(weekday);
+      if (existing) clearTimeout(existing);
+      const timer = setTimeout(() => {
+        setSavedDays((prev) => {
+          const next = new Set(prev);
+          next.delete(weekday);
+          return next;
+        });
+        savedFlashTimeoutsRef.current.delete(weekday);
+      }, 1500);
+      savedFlashTimeoutsRef.current.set(weekday, timer);
     },
     onError: (err: any) => {
       setSaveError(err.message);
@@ -160,20 +200,37 @@ export function SplitPage() {
     saveSplitMutation.mutate(day);
   };
 
+  /** Auto-save with 600ms debounce per weekday. Invoked from every
+   * splits-state mutation so the user no longer needs to remember to
+   * tap Save; mirrors the auto-save-on-blur pattern in SettingsPage. */
+  const triggerAutoSave = (weekday: number, nextSplits: DaySplit[]) => {
+    const day = nextSplits.find((s) => s.weekday === weekday);
+    if (!day) return;
+    const existing = autoSaveTimeoutsRef.current.get(weekday);
+    if (existing) clearTimeout(existing);
+    const timer = setTimeout(() => {
+      saveSplitMutation.mutate(day);
+      autoSaveTimeoutsRef.current.delete(weekday);
+    }, 600);
+    autoSaveTimeoutsRef.current.set(weekday, timer);
+  };
+
   const updateSet = (weekday: number, setIndex: number, field: string, value: any) => {
-    setSplits((prev) =>
-      prev.map((s) => {
+    setSplits((prev) => {
+      const next = prev.map((s) => {
         if (s.weekday !== weekday) return s;
         const sets = [...s.template_sets];
         sets[setIndex] = { ...sets[setIndex], [field]: value };
         return { ...s, template_sets: sets };
-      }),
-    );
+      });
+      triggerAutoSave(weekday, next);
+      return next;
+    });
   };
 
   const addSet = (weekday: number) => {
-    setSplits((prev) =>
-      prev.map((s) => {
+    setSplits((prev) => {
+      const next = prev.map((s) => {
         if (s.weekday !== weekday) return s;
         const newSet: TemplateSet = {
           exercise_id: exercises[0]?.exercise_id ?? '',
@@ -185,8 +242,10 @@ export function SplitPage() {
           order: s.template_sets.length + 1,
         };
         return { ...s, template_sets: [...s.template_sets, newSet] };
-      }),
-    );
+      });
+      triggerAutoSave(weekday, next);
+      return next;
+    });
     // Expand the day when adding a set
     setCollapsedDays((prev) => {
       const next = new Set(prev);
@@ -196,17 +255,63 @@ export function SplitPage() {
   };
 
   const removeSet = (weekday: number, setIndex: number) => {
-    setSplits((prev) =>
-      prev.map((s) => {
+    setSplits((prev) => {
+      const next = prev.map((s) => {
         if (s.weekday !== weekday) return s;
         const sets = s.template_sets.filter((_, i) => i !== setIndex).map((set, i) => ({ ...set, order: i + 1 }));
         return { ...s, template_sets: sets };
-      }),
-    );
+      });
+      triggerAutoSave(weekday, next);
+      return next;
+    });
+  };
+
+  /** Move a template-set from `fromIndex` to `toIndex` within one
+   * weekday and re-sequence `order`. Used by drag-drop reorder. */
+  const reorderSets = (weekday: number, fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    setSplits((prev) => {
+      const next = prev.map((s) => {
+        if (s.weekday !== weekday) return s;
+        const sets = [...s.template_sets];
+        const [moved] = sets.splice(fromIndex, 1);
+        sets.splice(toIndex, 0, moved);
+        return { ...s, template_sets: sets.map((set, i) => ({ ...set, order: i + 1 })) };
+      });
+      triggerAutoSave(weekday, next);
+      return next;
+    });
   };
 
   const updateNotes = (weekday: number, notes: string) => {
-    setSplits((prev) => prev.map((s) => (s.weekday === weekday ? { ...s, split_notes: notes } : s)));
+    setSplits((prev) => {
+      const next = prev.map((s) => (s.weekday === weekday ? { ...s, split_notes: notes } : s));
+      triggerAutoSave(weekday, next);
+      return next;
+    });
+  };
+
+  // ── Drag handlers — HTML5 native drag, no new dep ──
+  const onDragStart = (weekday: number, index: number) => (e: React.DragEvent) => {
+    dragRef.current = { weekday, index };
+    e.dataTransfer.effectAllowed = 'move';
+    // Some browsers need a payload to start the drag
+    try {
+      e.dataTransfer.setData('text/plain', String(index));
+    } catch {
+      /* ignore */
+    }
+  };
+  const onDragOver = (weekday: number) => (e: React.DragEvent) => {
+    if (!dragRef.current || dragRef.current.weekday !== weekday) return;
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+  };
+  const onDrop = (weekday: number, dropIndex: number) => (e: React.DragEvent) => {
+    if (!dragRef.current || dragRef.current.weekday !== weekday) return;
+    e.preventDefault();
+    reorderSets(weekday, dragRef.current.index, dropIndex);
+    dragRef.current = null;
   };
 
   if (loading) {
@@ -292,9 +397,20 @@ export function SplitPage() {
                             key={i}
                             data-testid={`day-${day.weekday}-set-${i}`}
                             className="border-b border-border-light last:border-b-0"
+                            draggable
+                            onDragStart={onDragStart(day.weekday, i)}
+                            onDragOver={onDragOver(day.weekday)}
+                            onDrop={onDrop(day.weekday, i)}
                           >
                             <td className="px-3 py-2 align-middle" data-testid={`day-${day.weekday}-set-${i}-order`}>
-                              {set.order}
+                              <span className="inline-flex items-center gap-1.5 text-text-tertiary">
+                                <GripVertical
+                                  className="w-3.5 h-3.5 cursor-grab"
+                                  aria-label="Drag to reorder"
+                                  data-testid={`day-${day.weekday}-set-${i}-drag`}
+                                />
+                                {set.order}
+                              </span>
                             </td>
                             <td className="px-3 py-2 align-middle">
                               <select
@@ -624,7 +740,7 @@ export function SplitPage() {
                   </div>
                 )}
 
-                <div className="mt-2 flex gap-2 sm:ml-7">
+                <div className="mt-2 flex gap-2 items-center sm:ml-7">
                   <Button
                     variant="success"
                     size="sm"
@@ -634,14 +750,28 @@ export function SplitPage() {
                   >
                     + Add Exercise
                   </Button>
+                  {/* Auto-save status — flashes "Saving..." while in
+                      flight, then "Saved" for 1.5s. Manual Save still
+                      available as a "force save now" affordance. */}
+                  <span
+                    className="text-xs text-text-tertiary inline-flex items-center gap-1.5"
+                    data-testid={`day-${day.weekday}-save-status`}
+                  >
+                    {savingDay === day.weekday ? (
+                      <span>Saving…</span>
+                    ) : savedDays.has(day.weekday) ? (
+                      <SaveIndicator show={true} />
+                    ) : null}
+                  </span>
                   <Button
-                    variant="secondary"
+                    variant="ghost"
                     size="sm"
                     onClick={() => saveSplit(day)}
                     disabled={savingDay === day.weekday}
                     data-testid={`day-${day.weekday}-save`}
+                    className="ml-auto"
                   >
-                    {savingDay === day.weekday ? 'Saving...' : 'Save'}
+                    Save now
                   </Button>
                 </div>
 

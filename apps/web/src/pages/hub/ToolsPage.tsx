@@ -73,22 +73,36 @@ const TOOL_GROUPS: ToolGroup[] = [
       defineTool('CHEFBYTE_get_cookable', 'List cookable recipes'),
     ],
   },
+  // Extension lists are kept in sync with the actual worker registry —
+  // see extensions/{obsidian,todoist,homeassistant}/tools/index.ts. The
+  // audit caught the prior list claiming OBSIDIAN_search_notes /
+  // OBSIDIAN_create_note / OBSIDIAN_get_note / OBSIDIAN_update_note —
+  // none of which exist on the worker. If you add or remove a tool in
+  // an extension's tools/index.ts, update the matching block here.
   {
     label: 'Obsidian',
     tools: [
-      defineTool('OBSIDIAN_search_notes', 'Search vault notes'),
-      defineTool('OBSIDIAN_create_note', 'Create a new note'),
-      defineTool('OBSIDIAN_get_note', 'Read a note'),
-      defineTool('OBSIDIAN_update_note', 'Update an existing note'),
+      defineTool('OBSIDIAN_usage_guide', 'Read Obsidian extension usage guide'),
+      defineTool('OBSIDIAN_get_morning_brief', 'Generate a morning briefing from your vault'),
+      defineTool('OBSIDIAN_get_project_hierarchy', 'List projects and their structure'),
+      defineTool('OBSIDIAN_get_project_text', 'Read full project markdown'),
+      defineTool('OBSIDIAN_get_notes_by_date_range', 'Pull notes by date range'),
+      defineTool('OBSIDIAN_create_project', 'Create a new project note'),
+      defineTool('OBSIDIAN_update_project_note', 'Update an existing project note'),
+      defineTool('OBSIDIAN_patch_file', 'Apply a structured patch to a file'),
     ],
   },
   {
     label: 'Todoist',
     tools: [
-      defineTool('TODOIST_get_tasks', 'Get tasks from Todoist'),
+      defineTool('TODOIST_get_tasks', 'Get active tasks'),
+      defineTool('TODOIST_get_task', 'Get a single task by ID'),
+      defineTool('TODOIST_get_completed_tasks', 'List recently completed tasks'),
       defineTool('TODOIST_create_task', 'Create a new task'),
+      defineTool('TODOIST_update_task', 'Update task fields'),
       defineTool('TODOIST_complete_task', 'Mark task complete'),
       defineTool('TODOIST_get_projects', 'List Todoist projects'),
+      defineTool('TODOIST_get_sections', 'List sections within a project'),
     ],
   },
   {

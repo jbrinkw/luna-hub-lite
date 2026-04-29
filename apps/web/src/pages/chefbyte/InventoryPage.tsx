@@ -1,7 +1,18 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect, useRef, type MouseEvent as ReactMouseEvent } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { ChevronDown, ChevronRight, Activity, AlertTriangle, Scale, CheckCircle2 } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  Activity,
+  AlertTriangle,
+  Scale,
+  CheckCircle2,
+  X,
+  Info,
+  Plus,
+  Minus,
+} from 'lucide-react';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ListSkeleton } from '@/components/ui/Skeleton';
@@ -328,6 +339,48 @@ export function InventoryPage() {
 
   /* ---- Mutation error state ---- */
   const [error, setError] = useState<string | null>(null);
+
+  /* ---- Status (aria-live) for successful mutations.
+     The audit called out that trust signals are weak: most mutations
+     commit silently. This polite-live region is read by screen readers
+     and visually surfaces a transient toast for sighted users. Cleared
+     after 4 s by the timer below. */
+  const [statusMessage, setStatusMessage] = useState<string | null>(null);
+  const statusTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const announceStatus = (msg: string) => {
+    setStatusMessage(msg);
+    if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    statusTimerRef.current = setTimeout(() => setStatusMessage(null), 4000);
+  };
+  useEffect(() => {
+    return () => {
+      if (statusTimerRef.current) clearTimeout(statusTimerRef.current);
+    };
+  }, []);
+
+  /* ---- Badge legend (one-time dismissible).
+     Five badge meanings (Certified / On Scale / In Flight / source pill /
+     stock dot) are never explained; tooltips work on desktop and silently
+     fail on mobile. The legend is shown to first-time viewers and a
+     localStorage flag persists "got it" so frequent users don't see
+     repeated noise. Read defensively — Safari private-mode + SSR raise. */
+  const [legendDismissed, setLegendDismissed] = useState(() => {
+    try {
+      return localStorage.getItem('chefbyte_inv_legend_dismissed') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const dismissLegend = () => {
+    setLegendDismissed(true);
+    try {
+      localStorage.setItem('chefbyte_inv_legend_dismissed', '1');
+    } catch {
+      /* Safari private — ephemerally dismiss for the session, accept the
+         next-load reappearance. Fail-soft is correct here since a
+         dismissed legend is a comfort optimization, not a correctness one. */
+    }
+  };
 
   /* ---- Close-in-flight modal state ----
      The In-Flight badge is a button that opens this modal scoped to a
@@ -732,8 +785,10 @@ export function InventoryPage() {
     onError: (err: any) => {
       setError(err.message ?? String(err));
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       setError(null);
+      const name = products.find((p) => p.product_id === vars.productId)?.name ?? 'item';
+      announceStatus(`Added ${vars.qtyContainers} ctn of ${name}`);
     },
     onSettled: () => {
       invalidateInventory();
@@ -751,7 +806,17 @@ export function InventoryPage() {
   };
 
   const consumeStockMutation = useMutation({
-    mutationFn: async ({ productId, qty, unit }: { productId: string; qty: number; unit: 'container' | 'serving' }) => {
+    mutationFn: async ({
+      productId,
+      qty,
+      unit,
+    }: {
+      productId: string;
+      qty: number;
+      unit: 'container' | 'serving';
+      // productName carried for the status announcement only — not sent to the RPC.
+      productName?: string;
+    }) => {
       const { error: err } = await (chefbyte() as any).rpc('consume_product', {
         p_product_id: productId,
         p_qty: qty,
@@ -764,8 +829,10 @@ export function InventoryPage() {
     onError: (err: any) => {
       setError(err.message ?? String(err));
     },
-    onSuccess: () => {
+    onSuccess: (_data, vars) => {
       setError(null);
+      const name = vars.productName ?? 'item';
+      announceStatus(`Removed ${vars.qty} ${vars.unit}${vars.qty === 1 ? '' : 's'} of ${name}`);
     },
     onSettled: () => {
       invalidateInventory();
@@ -783,12 +850,15 @@ export function InventoryPage() {
    * scopes by user_id, the UPDATE is safe to issue from the client.
    */
   const discardLotMutation = useMutation({
-    mutationFn: async ({ lotId }: { lotId: string }) => {
+    mutationFn: async ({ lotId, productName: _productName }: { lotId: string; productName?: string }) => {
       const { error: err } = await chefbyte().from('stock_lots').update({ qty_containers: 0 }).eq('lot_id', lotId);
       if (err) throw err;
     },
     onError: (err: any) => setError(err.message ?? String(err)),
-    onSuccess: () => setError(null),
+    onSuccess: (_data, vars) => {
+      setError(null);
+      announceStatus(`Tossed ${vars.productName ?? 'expired lot'}`);
+    },
     onSettled: () => invalidateInventory(),
   });
 
@@ -1012,6 +1082,89 @@ export function InventoryPage() {
       )}
       {error && <p className="text-danger-text">{error}</p>}
 
+      {/* aria-live status region for successful mutations. Visible toast
+          for sighted users + announced by screen readers. The audit
+          called out that trust signals are weak — this is the cheapest
+          high-impact fix: every successful add/consume/discard now has
+          an explicit confirmation. */}
+      <div
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="inventory-status"
+        className={[
+          'transition-all duration-200 overflow-hidden',
+          statusMessage ? 'mb-3 max-h-12 opacity-100' : 'mb-0 max-h-0 opacity-0',
+        ].join(' ')}
+      >
+        {statusMessage && (
+          <div className="bg-success-subtle border border-emerald-300 text-emerald-800 rounded-md px-3 py-1.5 text-sm font-medium inline-flex items-center gap-2">
+            <CheckCircle2 className="w-4 h-4 shrink-0" aria-hidden="true" />
+            {statusMessage}
+          </div>
+        )}
+      </div>
+
+      {/* Badge legend (one-time dismissible). Shown until the user
+          dismisses; persists "got it" via localStorage. The audit called
+          out five badge meanings (Certified / On Scale / In Flight /
+          source pill / stock dot) with zero explanation surface. */}
+      {!legendDismissed && (
+        <div
+          data-testid="inventory-legend"
+          className="bg-surface border border-border rounded-lg px-4 py-3 mb-3 flex items-start gap-3"
+        >
+          <Info className="w-4 h-4 text-info-text shrink-0 mt-0.5" aria-hidden="true" />
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-semibold text-text m-0 mb-1">Quick legend</p>
+            <ul className="text-xs text-text-secondary space-y-0.5 m-0 pl-0 list-none">
+              <li>
+                <span className="inline-flex items-center gap-1 mr-2">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-success align-middle" />{' '}
+                  <span>Stock OK</span>
+                </span>
+                <span className="inline-flex items-center gap-1 mr-2">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-warning align-middle" />{' '}
+                  <span>Below min</span>
+                </span>
+                <span className="inline-flex items-center gap-1">
+                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-danger align-middle" />{' '}
+                  <span>Out of stock</span>
+                </span>
+              </li>
+              <li>
+                <CheckCircle2 className="inline w-3 h-3 text-emerald-700 align-middle" aria-hidden="true" />{' '}
+                <strong>Certified</strong> — calibrated for live shelf tracking.
+              </li>
+              <li>
+                <Scale className="inline w-3 h-3 text-sky-700 align-middle" aria-hidden="true" />{' '}
+                <strong>On Scale</strong> — currently sitting on a paired live scale.
+              </li>
+              <li>
+                <Activity className="inline w-3 h-3 text-amber-700 align-middle" aria-hidden="true" />{' '}
+                <strong>In Flight</strong> — picked up off the shelf, click to close out.
+              </li>
+              <li>
+                <span className="inline-block px-1 rounded bg-info-subtle text-info-text text-[10px] font-semibold uppercase mr-1">
+                  source
+                </span>
+                <strong>Source pill</strong> — most recent automated source for the lot (live shelf / live scale /
+                catch-all).
+              </li>
+            </ul>
+          </div>
+          <button
+            type="button"
+            onClick={dismissLegend}
+            data-testid="inventory-legend-dismiss"
+            aria-label="Dismiss legend"
+            className="p-1 rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text transition-colors shrink-0"
+          >
+            <X className="w-4 h-4" aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
       {/* View toggle */}
       <div className="flex gap-2 mb-4" data-testid="inventory-view-toggle">
         <button
@@ -1101,11 +1254,12 @@ export function InventoryPage() {
                   </div>
                   <div className="flex gap-1.5 shrink-0">
                     <button
-                      onClick={() => discardLotMutation.mutate({ lotId: lot.lot_id })}
+                      onClick={() => discardLotMutation.mutate({ lotId: lot.lot_id, productName: lot.productName })}
                       data-testid={`discard-lot-${lot.lot_id}`}
+                      title="Mark this lot as tossed (qty → 0). Macros are NOT logged."
                       className="px-2.5 py-1 bg-danger text-white rounded text-xs font-semibold hover:bg-danger-hover transition-colors"
                     >
-                      Log as discarded
+                      Mark as tossed
                     </button>
                     <button
                       onClick={() =>
@@ -1169,16 +1323,43 @@ export function InventoryPage() {
                       })
                     : '\u2014';
 
+                  // Quick-edit (±) handlers — close over the product to avoid passing
+                  // the loop var through callbacks. These fire the EXISTING add /
+                  // consume mutations directly, no modal, default qty 1 ctn so
+                  // the common case "I just bought another / used another" is a
+                  // single tap. Modal still wins when you need to set an
+                  // explicit expiry.
+                  const onQuickAdd = (e: ReactMouseEvent) => {
+                    e.stopPropagation();
+                    if (!user || !locationId) return;
+                    addStockMutation.mutate({ productId: product.product_id, qtyContainers: 1, expiresOn: null });
+                  };
+                  const onQuickSub = (e: ReactMouseEvent) => {
+                    e.stopPropagation();
+                    consumeStockMutation.mutate({
+                      productId: product.product_id,
+                      qty: 1,
+                      unit: 'container',
+                      productName: product.name,
+                    });
+                  };
+
                   return (
                     <div
                       key={product.product_id}
                       data-testid={`inv-product-${product.product_id}`}
-                      className={`${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock && !isPickedUp ? 'opacity-50' : ''}`}
+                      className={`relative ${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock && !isPickedUp ? 'opacity-50' : ''}`}
                     >
-                      {/* Collapsed row — always visible, clickable to toggle */}
+                      {/* Collapsed row — always visible, clickable to toggle.
+                          Inline ±-quick-edit buttons (below) sit ABOVE this
+                          button via z-index + an end-padding to reserve room,
+                          so a tap on a quick-edit button never bubbles to
+                          the row toggle. Removes the modal-open requirement
+                          for the common "+1 / -1 ctn" case (audit's #2 highest
+                          impact change). */}
                       <button
                         type="button"
-                        className={`grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover transition-colors ${isExpanded ? 'bg-surface-hover' : ''}`}
+                        className={`grid grid-cols-[24px_1fr_80px] sm:grid-cols-[24px_1fr_100px_80px] gap-0 px-3 py-2.5 pr-[100px] items-center text-sm w-full text-left bg-transparent border-none cursor-pointer hover:bg-surface-hover transition-colors ${isExpanded ? 'bg-surface-hover' : ''}`}
                         onClick={() => setExpandedProductId(isExpanded ? null : product.product_id)}
                         aria-expanded={isExpanded}
                         data-testid={`inv-row-toggle-${product.product_id}`}
@@ -1300,10 +1481,18 @@ export function InventoryPage() {
 
                         {/* Stock — "(picked up)" replaces the "0.0 ctn" numeric
                           when the product is zero-stock BUT in-flight. Keeps
-                          the user from thinking the system lost the item. */}
+                          the user from thinking the system lost the item.
+                          The hand emoji + title explain that the stock is
+                          off-shelf, not lost — addresses the audit finding
+                          that the bare label looks like an error. */}
                         <span data-testid={`stock-badge-${product.product_id}`} className="font-semibold text-sm">
                           {isPickedUp ? (
-                            <span className="text-amber-800 italic">(picked up)</span>
+                            <span
+                              className="text-amber-800 italic"
+                              title="Off-shelf right now — open the In Flight badge to close out (return / consume / discard)."
+                            >
+                              <span aria-hidden="true">✋ </span>(picked up)
+                            </span>
                           ) : (
                             `${totalStock.toFixed(1)} ctn`
                           )}
@@ -1317,6 +1506,41 @@ export function InventoryPage() {
                           {expiryLabel}
                         </span>
                       </button>
+
+                      {/* Inline ±-quick-edit. Absolutely positioned over the
+                          row's right edge — siblings of the <button> so they
+                          don't create invalid nested-button DOM. The toggle
+                          button reserves space via its right-padding so the
+                          icons don't overlap content. Default qty is 1 ctn;
+                          modal still opens via the chevron expand for an
+                          explicit expiry. */}
+                      <div
+                        className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center gap-1"
+                        data-testid={`quick-edit-${product.product_id}`}
+                      >
+                        <button
+                          type="button"
+                          onClick={onQuickSub}
+                          disabled={isPickedUp || consumeStockMutation.isPending || isZeroStock}
+                          aria-label={`Remove one container of ${product.name}`}
+                          title="Remove 1 container"
+                          data-testid={`quick-sub-${product.product_id}`}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-border-strong bg-surface text-danger-text hover:bg-danger-subtle disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <Minus className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={onQuickAdd}
+                          disabled={addStockMutation.isPending || !locationId}
+                          aria-label={`Add one container of ${product.name}`}
+                          title="Add 1 container"
+                          data-testid={`quick-add-${product.product_id}`}
+                          className="inline-flex items-center justify-center w-8 h-8 rounded-md border border-emerald-300 bg-success-subtle text-emerald-700 hover:bg-emerald-100 disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                        >
+                          <Plus className="w-3.5 h-3.5" aria-hidden="true" />
+                        </button>
+                      </div>
 
                       {/* Expanded detail panel */}
                       {isExpanded && (
@@ -1486,7 +1710,12 @@ export function InventoryPage() {
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-secondary">
                       <span>
                         {Number(lot.qty_containers) <= 0 && lot.in_flight_since !== null ? (
-                          <span className="text-amber-800 italic">(picked up)</span>
+                          <span
+                            className="text-amber-800 italic"
+                            title="Off-shelf right now — close out via the In Flight badge."
+                          >
+                            <span aria-hidden="true">✋ </span>(picked up)
+                          </span>
                         ) : (
                           `${Number(lot.qty_containers).toFixed(1)} ctn`
                         )}
@@ -1586,7 +1815,12 @@ export function InventoryPage() {
                         <td className="p-3">{lot.locations?.name ?? '\u2014'}</td>
                         <td className="text-right p-3">
                           {Number(lot.qty_containers) <= 0 && lot.in_flight_since !== null ? (
-                            <span className="text-amber-800 italic">(picked up)</span>
+                            <span
+                              className="text-amber-800 italic"
+                              title="Off-shelf right now — close out via the In Flight badge."
+                            >
+                              <span aria-hidden="true">✋ </span>(picked up)
+                            </span>
                           ) : (
                             Number(lot.qty_containers).toFixed(1)
                           )}

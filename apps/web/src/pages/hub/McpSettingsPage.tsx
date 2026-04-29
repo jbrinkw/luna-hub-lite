@@ -9,7 +9,7 @@ import { Card, CardHeader, CardTitle, CardContent } from '@/components/ui/Card';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { Button } from '@/components/ui/Button';
 import { Alert } from '@/components/ui/Alert';
-import { Copy, Check } from 'lucide-react';
+import { Copy, Check, ExternalLink, PlugZap, AlertCircle } from 'lucide-react';
 
 interface ActiveKey {
   id: string;
@@ -19,6 +19,12 @@ interface ActiveKey {
 }
 
 const MAX_ACTIVE_KEYS = 10;
+
+type TestState =
+  | { status: 'idle' }
+  | { status: 'running' }
+  | { status: 'ok'; ms: number }
+  | { status: 'fail'; message: string };
 
 async function sha256(text: string): Promise<string> {
   const encoded = new TextEncoder().encode(text);
@@ -33,8 +39,16 @@ export function McpSettingsPage() {
   const queryClient = useQueryClient();
   const [error, setError] = useState<string | null>(null);
   const [endpointCopied, setEndpointCopied] = useState(false);
+  const [snippetCopied, setSnippetCopied] = useState(false);
+  const [lastTestKey, setLastTestKey] = useState<string | null>(null);
+  const [testKeyInput, setTestKeyInput] = useState('');
+  const [testState, setTestState] = useState<TestState>({ status: 'idle' });
 
-  const endpointUrl = `${import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev'}/sse`;
+  // Use the recommended Streamable HTTP endpoint at /mcp. The legacy /sse
+  // path still works on the worker but burns Durable Object duration billing
+  // (per docs/mcp/guide.md). UI defaults users to the cheaper transport.
+  const baseUrl = import.meta.env.VITE_MCP_URL ?? 'https://mcp.lunahub.dev';
+  const endpointUrl = `${baseUrl}/mcp`;
 
   // Load active API keys via useQuery
   const {
@@ -156,6 +170,68 @@ export function McpSettingsPage() {
     }
   };
 
+  const claudeSnippet = `${endpointUrl}\n\nAuthorization: Bearer <paste-your-key-here>`;
+
+  const handleCopySnippet = async () => {
+    try {
+      await navigator.clipboard.writeText(claudeSnippet);
+      setSnippetCopied(true);
+      setTimeout(() => setSnippetCopied(false), 2000);
+    } catch {
+      // Clipboard API may not be available
+    }
+  };
+
+  /**
+   * Fire a JSON-RPC `ping` against POST /mcp using the supplied bearer key.
+   * The worker handles `ping` in stateless.ts and returns an empty success
+   * body — round-trip latency confirms both auth and reachability.
+   */
+  const handleTestConnection = async (apiKey: string) => {
+    const trimmed = apiKey.trim();
+    if (!trimmed) {
+      setTestState({ status: 'fail', message: 'Paste an API key to test.' });
+      return;
+    }
+    setLastTestKey(trimmed);
+    setTestState({ status: 'running' });
+    const start = Date.now();
+    try {
+      const res = await fetch(endpointUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${trimmed}`,
+          Accept: 'application/json, text/event-stream',
+        },
+        body: JSON.stringify({ jsonrpc: '2.0', id: 'hub-test', method: 'ping' }),
+      });
+      const ms = Date.now() - start;
+      if (!res.ok) {
+        if (res.status === 401) {
+          setTestState({ status: 'fail', message: 'Authentication failed (401). Check the key.' });
+        } else {
+          setTestState({ status: 'fail', message: `HTTP ${res.status} from MCP endpoint.` });
+        }
+        return;
+      }
+      // ping returns either {jsonrpc:..., result: {}} or a similar shape.
+      // We don't enforce the body — the 200 + JSON parse confirms the call.
+      try {
+        await res.json();
+      } catch {
+        setTestState({ status: 'fail', message: 'MCP endpoint returned non-JSON response.' });
+        return;
+      }
+      setTestState({ status: 'ok', ms });
+    } catch (e) {
+      setTestState({
+        status: 'fail',
+        message: e instanceof Error ? e.message : 'Network error reaching MCP endpoint.',
+      });
+    }
+  };
+
   const handleGenerate = async (label: string): Promise<string | null> => {
     setError(null);
     try {
@@ -182,7 +258,7 @@ export function McpSettingsPage() {
           <CardHeader>
             <CardTitle>Endpoint</CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="space-y-3">
             <div className="flex items-center gap-2">
               <code className="text-sm bg-code-bg px-3 py-1.5 rounded-md text-code-text flex-1 break-all">
                 {endpointUrl}
@@ -192,6 +268,112 @@ export function McpSettingsPage() {
                 {endpointCopied ? 'Copied!' : 'Copy'}
               </Button>
             </div>
+            <p className="text-xs text-text-secondary">
+              Streamable HTTP transport (recommended). Authenticate every request with an{' '}
+              <code className="text-xs">Authorization: Bearer &lt;key&gt;</code> header.
+            </p>
+          </CardContent>
+        </Card>
+
+        {/* Quick Start: copy-pasteable Claude.ai setup snippet. Closes the
+            biggest documented dead-end in the audit — "Hub gives me a key
+            and tells me nothing about how to plug it into Claude.ai." */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Quick Start — Connect Claude.ai</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <ol className="list-decimal pl-5 space-y-1 text-sm text-text-secondary">
+              <li>Generate a key below (or reuse one). Copy the plaintext value — it's only shown once.</li>
+              <li>
+                In Claude.ai, open <span className="font-medium text-text">Settings → Connectors → Add custom MCP</span>
+                .
+              </li>
+              <li>Paste the endpoint and key below.</li>
+              <li>
+                Hit <span className="font-medium text-text">Test connection</span> here to verify before going back to
+                Claude.ai.
+              </li>
+            </ol>
+
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-text-secondary">Snippet for Claude.ai connector:</p>
+              <pre
+                data-testid="mcp-claude-snippet"
+                className="text-xs bg-code-bg px-3 py-2 rounded-md text-code-text whitespace-pre-wrap break-all"
+              >
+                {claudeSnippet}
+              </pre>
+              <Button variant="secondary" size="sm" onClick={handleCopySnippet} data-testid="copy-snippet">
+                {snippetCopied ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                {snippetCopied ? 'Copied!' : 'Copy snippet'}
+              </Button>
+            </div>
+
+            <a
+              href="https://docs.lunahub.dev/mcp/guide"
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1 text-xs text-primary hover:underline"
+            >
+              Full MCP setup guide
+              <ExternalLink className="h-3 w-3" />
+            </a>
+          </CardContent>
+        </Card>
+
+        {/* Test connection: fires a JSON-RPC ping against POST /mcp.
+            Confirms both reachability and auth in one round-trip so the
+            user doesn't need to bounce to Claude.ai to confirm the key
+            works. */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Test connection</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            <p className="text-sm text-text-secondary">
+              Paste a freshly generated key to verify the endpoint accepts it. We send a JSON-RPC{' '}
+              <code className="text-xs">ping</code> — no tools are invoked.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="password"
+                placeholder="lh_..."
+                value={testKeyInput}
+                onChange={(e) => setTestKeyInput(e.target.value)}
+                data-testid="mcp-test-key-input"
+                className="flex-1 rounded-md border border-border bg-surface px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                aria-label="API key to test"
+              />
+              <Button
+                variant="primary"
+                size="sm"
+                onClick={() => handleTestConnection(testKeyInput)}
+                loading={testState.status === 'running'}
+                disabled={testState.status === 'running' || testKeyInput.trim().length === 0}
+                data-testid="mcp-test-connection"
+              >
+                <PlugZap className="h-4 w-4" />
+                Test
+              </Button>
+            </div>
+            {testState.status === 'ok' && (
+              <Alert variant="success" data-testid="mcp-test-result-ok">
+                Connected. MCP responded in {testState.ms}ms.
+              </Alert>
+            )}
+            {testState.status === 'fail' && (
+              <Alert variant="error" data-testid="mcp-test-result-fail">
+                <span className="inline-flex items-center gap-1">
+                  <AlertCircle className="h-4 w-4" />
+                  {testState.message}
+                </span>
+              </Alert>
+            )}
+            {/* Hidden marker so the test/integration suite can confirm the
+                last key tested matches the one passed in (mostly for
+                debugging — not user-facing). */}
+            {lastTestKey && <span className="hidden" data-testid="mcp-test-last-key" />}
           </CardContent>
         </Card>
 

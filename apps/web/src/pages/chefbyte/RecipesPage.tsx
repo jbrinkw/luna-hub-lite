@@ -4,8 +4,11 @@ import { Link } from 'react-router-dom';
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
 import { CardSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { todayStr } from '@/shared/dates';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -29,6 +32,13 @@ interface RecipeIngredient {
   products: ProductInfo | null;
 }
 
+interface MissingIngredient {
+  product_id: string;
+  product_name: string;
+  required: number;
+  haveContainers: number;
+}
+
 interface Recipe {
   recipe_id: string;
   user_id: string;
@@ -40,6 +50,19 @@ interface Recipe {
   instructions: string | null;
   recipe_ingredients: RecipeIngredient[];
 }
+
+/* ------------------------------------------------------------------ */
+/*  Constants                                                          */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Window (in days, inclusive) for the "Uses expiring stock" filter.
+ * Recipes that pull in any ingredient whose lot expires within this
+ * many days from today's logical date are flagged. 7 days is a good
+ * default — long enough to catch the weekend cook, short enough to be
+ * actionable.
+ */
+export const EXPIRING_WINDOW_DAYS = 7;
 
 /* ------------------------------------------------------------------ */
 /*  Macro computation helper (exported for testing)                    */
@@ -122,6 +145,63 @@ export function computeStockStatus(
   return 'NO STOCK';
 }
 
+/**
+ * Compute the list of missing/insufficient ingredients for a recipe.
+ * Surfaces "PARTIAL (N missing)" + tooltip listing on the recipe card so
+ * the user knows what's blocking the recipe instead of just seeing an
+ * amber badge. Mirrors the qty math in `computeStockStatus`.
+ *
+ * Exported for unit testing.
+ */
+export function computeMissingIngredients(
+  ingredients: Array<{
+    product_id: string;
+    quantity: number;
+    unit: string;
+    products: { name: string; servings_per_container: number } | null;
+  }>,
+  stockByProduct: Map<string, number>,
+): MissingIngredient[] {
+  const missing: MissingIngredient[] = [];
+  for (const ing of ingredients) {
+    if (!ing.products) continue;
+    const currentStock = stockByProduct.get(ing.product_id) ?? 0;
+    let requiredContainers = Number(ing.quantity);
+    if (ing.unit === 'serving') {
+      requiredContainers = Number(ing.quantity) / Number(ing.products.servings_per_container || 1);
+    }
+    if (currentStock < requiredContainers) {
+      missing.push({
+        product_id: ing.product_id,
+        product_name: ing.products.name,
+        required: requiredContainers,
+        haveContainers: currentStock,
+      });
+    }
+  }
+  return missing;
+}
+
+/**
+ * Decide whether a recipe uses an ingredient with stock that is expiring
+ * within `daysAhead` days from `today` (YYYY-MM-DD strings). Returns true
+ * if AT LEAST ONE ingredient has a stock_lot whose expires_on is in the
+ * window [today, today+daysAhead]. Recipes that pull in soon-to-expire
+ * stock surface first when the "Uses expiring" chip is on so food gets
+ * eaten before it goes bad — the highest-impact missing recipe filter.
+ *
+ * Exported for unit testing.
+ */
+export function recipeUsesExpiringStock(
+  ingredients: Array<{ product_id: string }>,
+  expiringProductIds: ReadonlySet<string>,
+): boolean {
+  for (const ing of ingredients) {
+    if (expiringProductIds.has(ing.product_id)) return true;
+  }
+  return false;
+}
+
 function stockBadgeClass(status: StockStatus): string {
   const base = 'inline-block px-2 py-0.5 rounded text-xs font-semibold text-white';
   switch (status) {
@@ -142,11 +222,13 @@ function stockBadgeClass(status: StockStatus): string {
 
 export function RecipesPage() {
   const { user } = useAuth();
+  const { dayStartHour } = useAppContext();
 
   /* ---- Filter state ---- */
   const [searchText, setSearchText] = useState('');
   const [maxActiveTime, setMaxActiveTime] = useState<number | null>(null);
   const [canBeMadeOnly, setCanBeMadeOnly] = useState(false);
+  const [usesExpiringOnly, setUsesExpiringOnly] = useState(false);
   const [highProteinOnly, setHighProteinOnly] = useState(false);
   const [highCarbsOnly, setHighCarbsOnly] = useState(false);
 
@@ -193,20 +275,49 @@ export function RecipesPage() {
           )
           .eq('user_id', user!.id)
           .order('name'),
-        chefbyte().from('stock_lots').select('product_id, qty_containers').eq('user_id', user!.id),
+        chefbyte().from('stock_lots').select('product_id, qty_containers, expires_on').eq('user_id', user!.id),
       ]);
 
       if (recipeRes.error) throw recipeRes.error;
 
       const stockMap = new Map<string, number>();
-      for (const lot of (stockRes.data ?? []) as Array<{ product_id: string; qty_containers: number }>) {
+      const stockLots = (stockRes.data ?? []) as Array<{
+        product_id: string;
+        qty_containers: number;
+        expires_on: string | null;
+      }>;
+      for (const lot of stockLots) {
         const current = stockMap.get(lot.product_id) ?? 0;
         stockMap.set(lot.product_id, current + Number(lot.qty_containers));
+      }
+
+      // Build the "expiring within N days" product set used by the
+      // "Uses expiring" chip. Window = today .. today+EXPIRING_WINDOW_DAYS
+      // computed against the user's logical date so day-boundary works
+      // correctly. A product is in the set if at least one of its lots
+      // has qty>0 and an expires_on inside the window.
+      const today = todayStr(dayStartHour);
+      const horizon = (() => {
+        const d = new Date(today + 'T00:00:00');
+        d.setDate(d.getDate() + EXPIRING_WINDOW_DAYS);
+        const y = d.getFullYear();
+        const m = String(d.getMonth() + 1).padStart(2, '0');
+        const day = String(d.getDate()).padStart(2, '0');
+        return `${y}-${m}-${day}`;
+      })();
+      const expiring = new Set<string>();
+      for (const lot of stockLots) {
+        if (Number(lot.qty_containers) <= 0) continue;
+        if (!lot.expires_on) continue;
+        if (lot.expires_on >= today && lot.expires_on <= horizon) {
+          expiring.add(lot.product_id);
+        }
       }
 
       return {
         recipes: (recipeRes.data ?? []) as Recipe[],
         stockByProduct: stockMap,
+        expiringProductIds: expiring,
       };
     },
     enabled: !!user,
@@ -214,7 +325,21 @@ export function RecipesPage() {
 
   const recipes = queryData?.recipes;
   const stockByProduct = queryData?.stockByProduct;
+  const expiringProductIds = queryData?.expiringProductIds ?? new Set<string>();
   const loadError = loadErrorObj ? (loadErrorObj as Error).message : null;
+
+  /* ---------------------------------------------------------------- */
+  /*  Realtime subscriptions — stock_lots changes invalidate the      */
+  /*  recipes query so live-shelf consume / inventory edits keep the  */
+  /*  Can-Make / expiring badges fresh without polling. recipes +     */
+  /*  recipe_ingredients are also subscribed so a new recipe inserted */
+  /*  via MCP shows up without a manual refresh.                       */
+  /* ---------------------------------------------------------------- */
+  useRealtimeInvalidation('chef-recipes', [
+    { schema: 'chefbyte', table: 'stock_lots', queryKeys: [queryKeys.recipes(user!.id)] },
+    { schema: 'chefbyte', table: 'recipes', queryKeys: [queryKeys.recipes(user!.id)] },
+    { schema: 'chefbyte', table: 'recipe_ingredients', queryKeys: [queryKeys.recipes(user!.id)] },
+  ]);
 
   /* ---------------------------------------------------------------- */
   /*  Filtering                                                        */
@@ -235,9 +360,16 @@ export function RecipesPage() {
       result = result.filter((r) => r.active_time !== null && r.active_time <= maxActiveTime);
     }
 
-    // Can be made filter
+    // Can be made filter (top-level chip + popover entry both bind to it)
     if (canBeMadeOnly) {
       result = result.filter((r) => computeStockStatus(r.recipe_ingredients, stock) === 'CAN MAKE');
+    }
+
+    // Uses expiring stock filter — promotes "I should cook this NOW or
+    // it goes bad" recipes to the front. Cross-references each recipe's
+    // ingredient list against the precomputed `expiringProductIds` set.
+    if (usesExpiringOnly) {
+      result = result.filter((r) => recipeUsesExpiringStock(r.recipe_ingredients, expiringProductIds));
     }
 
     // High protein filter (g protein per 100 cal >= threshold)
@@ -264,6 +396,8 @@ export function RecipesPage() {
     searchText,
     maxActiveTime,
     canBeMadeOnly,
+    usesExpiringOnly,
+    expiringProductIds,
     stockByProduct,
     highProteinOnly,
     highCarbsOnly,
@@ -271,10 +405,10 @@ export function RecipesPage() {
     carbsThreshold,
   ]);
 
-  /* ---- Active filter count ---- */
-  const activeFilterCount = [canBeMadeOnly, maxActiveTime === 30, highProteinOnly, highCarbsOnly].filter(
-    Boolean,
-  ).length;
+  /* ---- Active filter count (popover-only filters; the top-level chips
+     for Cookable + Uses expiring read directly off state and don't add
+     to the badge count). ---- */
+  const activeFilterCount = [maxActiveTime === 30, highProteinOnly, highCarbsOnly].filter(Boolean).length;
 
   /* ---- Close filter popover on outside click ---- */
   useEffect(() => {
@@ -362,29 +496,11 @@ export function RecipesPage() {
                 data-testid="filters-popover"
                 className="absolute right-0 top-full mt-1 w-72 max-w-[calc(100vw-2rem)] bg-surface border border-border rounded-xl shadow-lg z-20 p-4"
               >
-                <h4 className="m-0 mb-3 text-sm font-bold text-text">Filter Recipes</h4>
+                <h4 className="m-0 mb-3 text-sm font-bold text-text">More Filters</h4>
+                <p className="m-0 mb-3 text-xs text-text-tertiary">
+                  Cookable now and Uses expiring are now top-level chips above.
+                </p>
                 <div className="space-y-3">
-                  {/* Can Be Made toggle */}
-                  <label className="flex items-center justify-between cursor-pointer" data-testid="can-be-made-filter">
-                    <span className="text-sm text-text-secondary">Can Be Made</span>
-                    <div
-                      role="switch"
-                      aria-checked={canBeMadeOnly}
-                      onClick={() => setCanBeMadeOnly(!canBeMadeOnly)}
-                      className={[
-                        'w-10 h-5 rounded-full relative transition-colors cursor-pointer',
-                        canBeMadeOnly ? 'bg-green-600' : 'bg-border-strong',
-                      ].join(' ')}
-                    >
-                      <div
-                        className={[
-                          'absolute top-0.5 w-4 h-4 bg-white rounded-full shadow transition-transform',
-                          canBeMadeOnly ? 'translate-x-5' : 'translate-x-0.5',
-                        ].join(' ')}
-                      />
-                    </div>
-                  </label>
-
                   {/* Quick (< 30 min) toggle */}
                   <label className="flex items-center justify-between cursor-pointer" data-testid="active-time-filter">
                     <span className="text-sm text-text-secondary">Quick (&lt; 30 min)</span>
@@ -527,6 +643,43 @@ export function RecipesPage() {
             )}
           </div>
         </div>
+
+        {/* Top-level chip row — Cookable now + Uses expiring promoted out
+            of the popover. These are the two highest-intent filters per
+            the UX audit: "what can I make?" and "what should I cook
+            before it spoils?". The macro / time density filters stay
+            inside the popover where they don't clutter the primary row. */}
+        <div className="flex gap-2 flex-wrap" data-testid="recipes-chip-row">
+          <button
+            type="button"
+            onClick={() => setCanBeMadeOnly((v) => !v)}
+            data-testid="chip-cookable-now"
+            aria-pressed={canBeMadeOnly}
+            className={[
+              'px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors',
+              canBeMadeOnly
+                ? 'bg-green-600 text-white border-green-600'
+                : 'bg-surface text-text-secondary border-border-strong hover:bg-surface-hover',
+            ].join(' ')}
+          >
+            Cookable now
+          </button>
+          <button
+            type="button"
+            onClick={() => setUsesExpiringOnly((v) => !v)}
+            data-testid="chip-uses-expiring"
+            aria-pressed={usesExpiringOnly}
+            title={`Recipes using stock expiring in the next ${EXPIRING_WINDOW_DAYS} days`}
+            className={[
+              'px-3 py-1.5 rounded-full text-xs font-semibold border transition-colors',
+              usesExpiringOnly
+                ? 'bg-amber-500 text-white border-amber-500'
+                : 'bg-surface text-text-secondary border-border-strong hover:bg-surface-hover',
+            ].join(' ')}
+          >
+            Uses expiring stock
+          </button>
+        </div>
       </div>
 
       {/* ============================================================ */}
@@ -535,7 +688,12 @@ export function RecipesPage() {
       <div data-testid="recipe-list" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {filteredRecipes.length === 0 && (
           <div data-testid="no-recipes" className="text-text-secondary">
-            {searchText || maxActiveTime !== null || canBeMadeOnly || highProteinOnly || highCarbsOnly ? (
+            {searchText ||
+            maxActiveTime !== null ||
+            canBeMadeOnly ||
+            usesExpiringOnly ||
+            highProteinOnly ||
+            highCarbsOnly ? (
               <p>No recipes match the current filters.</p>
             ) : (
               <p>
@@ -550,7 +708,20 @@ export function RecipesPage() {
 
         {filteredRecipes.map((recipe) => {
           const macros = computeRecipeMacros(recipe.recipe_ingredients, Number(recipe.base_servings));
-          const status = computeStockStatus(recipe.recipe_ingredients, stockByProduct ?? new Map());
+          const stock = stockByProduct ?? new Map();
+          const status = computeStockStatus(recipe.recipe_ingredients, stock);
+          // Surface concrete missing-ingredient counts for PARTIAL so the
+          // user knows what's blocking the recipe instead of just seeing
+          // an opaque amber badge. NO STOCK also lists every ingredient
+          // (still useful for the tooltip), but the count is suppressed
+          // since the badge label already conveys the worst case.
+          const missing =
+            status === 'PARTIAL' || status === 'NO STOCK'
+              ? computeMissingIngredients(recipe.recipe_ingredients, stock)
+              : [];
+          const missingTooltip = missing.length
+            ? 'Missing: ' + missing.map((m) => m.product_name).join(', ')
+            : undefined;
 
           return (
             <Link
@@ -605,10 +776,16 @@ export function RecipesPage() {
                 </div>
               </div>
 
-              {/* Stock status */}
+              {/* Stock status — PARTIAL shows the concrete missing count
+                  with a tooltip listing names so the user knows exactly
+                  what's blocking the recipe. */}
               <div className="mb-2">
-                <span className={stockBadgeClass(status)} data-testid={`stock-status-${recipe.recipe_id}`}>
-                  {status}
+                <span
+                  className={stockBadgeClass(status)}
+                  data-testid={`stock-status-${recipe.recipe_id}`}
+                  title={missingTooltip}
+                >
+                  {status === 'PARTIAL' && missing.length > 0 ? `PARTIAL (${missing.length} missing)` : status}
                 </span>
               </div>
             </Link>
