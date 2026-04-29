@@ -1553,15 +1553,15 @@ export function ScannerPage() {
           {/* Mode selector — labels rewritten per the R1 audit (mode-name
               decoding was the single biggest silent-intake-error source).
               Canonical: "Add to stock" (purchase), "I just ate this"
-              (consume_macros), "Eat (no macros)" (consume_no_macros),
-              "Shopping list" (shopping). The intent-named labels reduce
+              (consume_macros), "Remove from stock (no macros)"
+              (consume_no_macros), "Shopping list" (shopping). The intent-named labels reduce
               the translation step the user does every scan. */}
           <div data-testid="mode-selector" className="grid grid-cols-2 gap-2">
             {(
               [
                 { key: 'purchase', label: 'Add to stock' },
                 { key: 'consume_macros', label: 'I just ate this' },
-                { key: 'consume_no_macros', label: 'Eat (no macros)' },
+                { key: 'consume_no_macros', label: 'Remove from stock (no macros)' },
                 { key: 'shopping', label: 'Shopping list' },
               ] as const
             ).map((m) => (

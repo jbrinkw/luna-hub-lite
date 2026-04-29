@@ -5,7 +5,7 @@
  *   Buy / Eat (Track) / Eat (Skip) / Add to List
  * forced a translation step every scan. R2 audit confirmed nothing
  * had been done about this. Renamed to intent-named labels:
- *   Add to stock / I just ate this / Eat (no macros) / Shopping list
+ *   Add to stock / I just ate this / Remove from stock (no macros) / Shopping list
  *
  * Tests assert each `mode-*` button renders with the new label so a
  * regression that flips a label back gets caught immediately. The
@@ -88,10 +88,10 @@ describe('ScannerPage — mode labels (R1 #1 / R2 #8)', () => {
     expect(btn.textContent).not.toContain('Eat (Track)');
   });
 
-  it('consume_no_macros mode is labeled "Eat (no macros)", not "Eat (Skip)"', () => {
+  it('consume_no_macros mode is labeled "Remove from stock (no macros)", not "Eat (Skip)"', () => {
     renderScanner();
     const btn = screen.getByTestId('mode-consume_no_macros');
-    expect(btn.textContent).toContain('Eat (no macros)');
+    expect(btn.textContent).toContain('Remove from stock (no macros)');
     expect(btn.textContent).not.toContain('Eat (Skip)');
   });
 
