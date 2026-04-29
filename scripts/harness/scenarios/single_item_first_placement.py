@@ -1,45 +1,38 @@
 """Scenario: single-item first placement on scale-03 paired to product.
 
-Pins the 2026-04-22 regression.
+Pins the 2026-04-29 single_track-never-mints contract (commit ddde56d /
+migration 20260429010000_live_scale_never_mints_v2.sql).
 
-Bug replayed
-------------
-Scale-03 is paired via ``chefbyte.scale_pairings`` to a product whose
-``net_weight_g > 0``. There is no existing ``stock_lots`` row for that
-product (user just provisioned it). When the user places a fresh
-container on scale-03:
+User-facing rule
+----------------
+"Single track scale should never mint a new item — it should either pull
+from existing non-tracked inventory or just ignore whatever event it has."
 
-  * Pi fires a +N gram scale_event with ``delta_g > refill_threshold``.
-  * Pi's ``handle_scale_event`` takes the single-item short-circuit:
-    ``kind='live_scale'``, ``event_kind='refilled'``, ``product_id``
-    OMITTED (cloud resolves via ``scale_pairings``).
-  * Cloud's ``apply_shelf_event`` must handle the "refilled with no
-    existing lot" branch by CREATING a lot with the delta as the
-    initial ``qty_containers`` computation.
+Bug it prevents (originally hit at the kitchen on 2026-04-29)
+-------------------------------------------------------------
+User scans a gallon of milk → cloud has qty=1 lot. User places that
+gallon on the live_scale paired to milk. PRE-fix: the cloud `refilled`
+branch minted a SECOND lot from the placement weight → qty=2. POST-fix:
+the live_scale ADD branch never mints — it claims an existing lot if
+one matches the paired product, or no-ops with applied=true and reason
+'live_scale_no_lot_no_op' when no lot exists.
 
-Pre-fix (commit 0d23dbc): the cloud "refilled" branch tried to UPDATE
-the most recent lot in place. With zero lots to pick up, it errored
-(or no-op'd), leaving ``stock_lots`` empty. The inventory page showed
-nothing. Fix: revive-empty-lot-on-refill in migration
-``20260425070000_resolve_add_reuse_empty_lot.sql`` (actually the
-branch was reworked in ``20260425080000_shelf_event_in_flight_pickup.sql``
-too; the resolve-add-reuse migration is where the first-lot path was
-explicitly handled).
-
-Harness verification
---------------------
+Harness verification (this scenario covers the no-prior-lot case)
+-----------------------------------------------------------------
   1. Seed user + device + product (net_weight_g=1000), pair scale-03
-     to the product, no ``stock_lots`` rows.
+     to the product, no ``stock_lots`` rows for it (the "first
+     placement before any scan" case).
   2. Fire a +1000g scale_event via ``ScaleHandler.handle_scale_event``
-     — this is the on-Pi ingress, same as the ESP firing.
+     — the on-Pi ingress, same as the ESP firing.
   3. Tick ``pi_worker.tick()`` once to drain the outbox into the real
      cloud edge function.
-  4. Assert ``stock_lots`` now has one row with ``qty_containers > 0``
-     for the paired product.
+  4. Assert NO stock_lots row was created (the no-mint guarantee), and
+     that ``shelf_event_log`` has applied=true / reason='live_scale_no_lot_no_op'
+     / resolved_lot_id IS NULL.
 
-Pre-fix failure path: step 4's query returns 0 rows OR qty_containers=0.
-Post-fix: exactly 1 row with qty_containers=1 (the delta/net_weight_g
-ratio yields 1 container).
+If this scenario starts seeing a minted lot, something has re-broken
+the single_track-never-mints rule. The user already lost trust in this
+exact flow once tonight; the harness pin keeps it from happening again.
 """
 
 from __future__ import annotations
@@ -172,9 +165,16 @@ def _single_item_first_placement(ctx: HarnessContext) -> None:
         evidence=f"expected 0 pending after drain; got {pending_after}",
     )
 
-    # 4. Cloud-side state: stock_lots must now have at least one row for
-    # this product with qty_containers > 0. This is THE assertion that
-    # flips across the 0d23dbc / resolve-add-reuse-empty-lot boundary.
+    # 4. Cloud-side state: per the 2026-04-29 single_track-never-mints
+    # design (commit ddde56d, migration 20260429010000), live_scale ADD
+    # events MUST NEVER mint a new stock_lots row. With no existing lot
+    # at all, the apply branch acks the event (applied=true) but creates
+    # nothing. Reason: 'live_scale_no_lot_no_op'.
+    #
+    # User-facing rule: "single track scale should never mint a new
+    # item — it should either pull from existing non-tracked inventory
+    # or just ignore". On a first placement with no prior inventory,
+    # there's nothing to pull → ignore.
     post = ctx.q_all(
         "SELECT lot_id, qty_containers::text "
         "  FROM chefbyte.stock_lots "
@@ -182,24 +182,16 @@ def _single_item_first_placement(ctx: HarnessContext) -> None:
         (ctx.user_id, product_id),
     )
     ctx.check(
-        "cloud_stock_lot_created",
-        len(post) >= 1,
+        "cloud_no_lot_minted",
+        len(post) == 0,
         evidence=(
-            f"expected >= 1 stock_lots row for paired product after "
-            f"refill event; got {len(post)} rows {post!r}. Pre-fix: "
-            f"empty-lot revive branch was missing, so no row landed."
-        ),
-    )
-    ctx.check(
-        "cloud_qty_positive",
-        all(float(row[1] or 0) > 0 for row in post),
-        evidence=(
-            f"expected qty_containers > 0 on every created lot; got "
-            f"rows={post!r}"
+            f"single_track-never-mints: expected 0 stock_lots rows after "
+            f"first-placement refill event; got {len(post)} rows {post!r}. "
+            f"If this fires, the no-mint guarantee is broken."
         ),
     )
 
-    # Finally: shelf_event_log row reflects the applied=true application.
+    # shelf_event_log row reflects applied=true with the no-op reason.
     log_row = ctx.q_one(
         "SELECT applied, reason, resolved_lot_id "
         "  FROM chefbyte.shelf_event_log "
@@ -212,5 +204,21 @@ def _single_item_first_placement(ctx: HarnessContext) -> None:
         log_row is not None and bool(log_row[0]),
         evidence=(
             f"shelf_event_log row must have applied=true; got {log_row!r}"
+        ),
+    )
+    ctx.check(
+        "shelf_event_log_no_op_reason",
+        log_row is not None and log_row[1] == 'live_scale_no_lot_no_op',
+        evidence=(
+            f"expected reason='live_scale_no_lot_no_op'; got {log_row[1]!r}"
+            if log_row else f"got log_row={log_row!r}"
+        ),
+    )
+    ctx.check(
+        "shelf_event_log_no_resolved_lot",
+        log_row is not None and log_row[2] is None,
+        evidence=(
+            f"expected resolved_lot_id IS NULL on no-op; got {log_row[2]!r}"
+            if log_row else f"got log_row={log_row!r}"
         ),
     )

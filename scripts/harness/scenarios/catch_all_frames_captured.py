@@ -1,4 +1,4 @@
-"""Scenario: catch-all event captures before.jpg + after.jpg on Pi disk.
+"""Scenario: catch-all event captures only after.jpg on Pi disk (single-frame).
 
 Bug class
 ---------
@@ -203,8 +203,11 @@ def _catch_all_frames_captured(ctx: HarnessContext) -> None:
         evidence=f"status={status} resp={resp!r}",
     )
 
-    # 4. On-disk: before.jpg + after.jpg exist under data/events/<id>/.
-    # The handler writes them inline from the ring-miss fallback.
+    # 4. On-disk: catch-all writes ONLY after.jpg (single-frame model
+    # per commit 2d7a819 / 2026-04-29). The shelf-flavored before/after
+    # delta math doesn't apply to catch-all events — the catch-all
+    # classifier prompt is single-image and works against absolute scale
+    # weight, not delta.
     event_dirs = [p for p in events_root.iterdir() if p.is_dir()]
     ctx.check(
         "event_dir_created",
@@ -219,18 +222,19 @@ def _catch_all_frames_captured(ctx: HarnessContext) -> None:
         before = event_dir / "before.jpg"
         after = event_dir / "after.jpg"
         ctx.check(
-            "before_jpg_exists",
-            before.is_file() and before.stat().st_size > 0,
-            evidence=(
-                f"before.jpg missing or empty at {before} "
-                f"(dir contents: {sorted(p.name for p in event_dir.iterdir())})"
-            ),
-        )
-        ctx.check(
             "after_jpg_exists",
             after.is_file() and after.stat().st_size > 0,
             evidence=(
                 f"after.jpg missing or empty at {after} "
+                f"(dir contents: {sorted(p.name for p in event_dir.iterdir())})"
+            ),
+        )
+        ctx.check(
+            "before_jpg_NOT_present",
+            not before.exists(),
+            evidence=(
+                f"single-frame contract: before.jpg must NOT be written "
+                f"for catch-all events. Found at {before}. "
                 f"(dir contents: {sorted(p.name for p in event_dir.iterdir())})"
             ),
         )
