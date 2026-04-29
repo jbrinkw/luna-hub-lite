@@ -29,7 +29,7 @@ from .models import (
     ScaleEvent,
     SecondaryCandidate,
 )
-from .prompt import build_messages_payload
+from .prompt import build_catch_all_messages_payload, build_messages_payload
 
 logger = logging.getLogger(__name__)
 
@@ -469,7 +469,18 @@ def classify_event(
             "No candidates available for this event direction", pool, meta
         )
 
-    payload = build_messages_payload(event, pool)
+    # Catch-all events use a single-frame, visual-primary prompt that
+    # frames the task as "identify the item in this image" — NOT a
+    # before/after delta comparison. ``ctx.shelf_id == "catch_all"``
+    # is set by the apply path's ClassifierContext construction (see
+    # handlers/scale_events.py:_classify_recorded_event). Live_shelf
+    # events keep the original delta-comparison prompt unchanged.
+    if getattr(ctx, "shelf_id", None) == "catch_all":
+        payload = build_catch_all_messages_payload(event, pool)
+        prompt_variant = "catch_all"
+    else:
+        payload = build_messages_payload(event, pool)
+        prompt_variant = "shelf"
     _lc(
         event.event_id,
         actor="classifier",
@@ -477,6 +488,7 @@ def classify_event(
         payload={
             "prompt_hash": _prompt_hash(payload),
             "pool_size": len(pool),
+            "prompt_variant": prompt_variant,
         },
     )
 

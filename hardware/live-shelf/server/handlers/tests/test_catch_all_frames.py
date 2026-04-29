@@ -131,10 +131,21 @@ def _make_handler(
 # ---------------------------------------------------------------------------
 
 
-def test_catch_all_ingress_writes_before_and_after_jpgs(tmp_path: Path):
-    """A scale-02 non-noise ingress must produce before.jpg + after.jpg
-    in the event dir; before the fix neither existed and the UI showed
-    placeholder tiles forever."""
+def test_catch_all_ingress_writes_only_after_jpg(tmp_path: Path):
+    """A scale-02 non-noise ingress must produce a SINGLE JPEG
+    (``after.jpg``) in the event dir. Pre-fix the helper wrote BOTH
+    ``before.jpg`` and ``after.jpg`` (same bytes, just duplicated for a
+    delta-style classifier prompt). Catch-all is a single-moment event;
+    there is no before frame. The single-frame model:
+      - saves an image-token round-trip per classifier call,
+      - removes the redundant copy that the ``114396a`` same-file guard
+        was masking,
+      - lets the classifier dispatcher route catch-all events to a
+        single-image prompt instead of a delta prompt.
+
+    Mutation guard: reverting ``_capture_catch_all_frames`` to write
+    both files makes ``before.jpg`` exist again — this assertion flips.
+    """
     conn = init_db(":memory:")
 
     daemon = CameraDaemon(DaemonConfig(capture_fps=10, ring_seconds=30))
@@ -169,19 +180,24 @@ def test_catch_all_ingress_writes_before_and_after_jpgs(tmp_path: Path):
     assert row is not None
     assert row[0] == "catch_all"
 
-    # Core assertion: both JPEGs exist on disk at the canonical path the
-    # web UI + cloud viewer serve from.
+    # Core assertion: ONLY after.jpg exists. before.jpg is intentionally
+    # never created for catch-all (single-frame model).
     events_root = tmp_path / "events"
     before = events_root / event_id / "before.jpg"
     after = events_root / event_id / "after.jpg"
-    assert before.is_file(), f"before.jpg missing at {before}"
     assert after.is_file(), f"after.jpg missing at {after}"
-    # Decode so we know they're not zero-byte / corrupt.
-    assert cv2.imread(str(before)) is not None
+    assert not before.exists(), (
+        f"before.jpg should NOT be written for catch-all (single-frame "
+        f"model); found at {before}"
+    )
+    # Decode so we know after.jpg is not zero-byte / corrupt.
     assert cv2.imread(str(after)) is not None
-    # The two files share bytes (single-frame model — see docstring on
-    # ScaleHandler._capture_catch_all_frames).
-    assert before.read_bytes() == after.read_bytes()
+    # Exactly one JPEG in the event dir.
+    jpegs = sorted(p.name for p in (events_root / event_id).iterdir()
+                   if p.suffix == ".jpg")
+    assert jpegs == ["after.jpg"], (
+        f"catch-all event dir should contain only after.jpg, got {jpegs}"
+    )
 
 
 def test_catch_all_ingress_falls_back_to_current_frame_when_ring_miss(tmp_path: Path):
@@ -212,8 +228,11 @@ def test_catch_all_ingress_falls_back_to_current_frame_when_ring_miss(tmp_path: 
     events_root = tmp_path / "events"
     before = events_root / event_id / "before.jpg"
     after = events_root / event_id / "after.jpg"
-    assert before.is_file(), "fallback current_frame should still write before.jpg"
     assert after.is_file(), "fallback current_frame should still write after.jpg"
+    # Single-frame model: before.jpg is intentionally never created.
+    assert not before.exists(), (
+        "before.jpg should NOT be written for catch-all (single-frame model)"
+    )
 
 
 def test_catch_all_ingress_without_camera_does_not_block(tmp_path: Path):
@@ -239,6 +258,63 @@ def test_catch_all_ingress_without_camera_does_not_block(tmp_path: Path):
     # No frames — that's expected when the camera is absent.
     assert not (events_root / event_id / "before.jpg").exists()
     assert not (events_root / event_id / "after.jpg").exists()
+
+
+def test_capture_catch_all_frames_returns_single_path_tuple(tmp_path: Path):
+    """Unit-level test for ``ScaleHandler._capture_catch_all_frames``:
+    the helper must return ``(None, after_path)`` — never a non-None
+    before path. This pins the contract independently of the ingress
+    flow (which the integration test above also covers).
+
+    Mutation guard:
+      * Reverting to the dual-frame implementation (writing both
+        before.jpg AND after.jpg, returning ``(before, after)``) flips
+        the ``before is None`` assertion.
+      * Returning ``(after_path, after_path)`` (paths equal) — the
+        legacy "duplicate same path into both slots" behavior — also
+        flips the explicit None check on slot 0.
+    """
+    conn = init_db(":memory:")
+    daemon = CameraDaemon(DaemonConfig(capture_fps=10, ring_seconds=30))
+    base = datetime.now(timezone.utc) - timedelta(seconds=3)
+    timestamps = _seed_ring(daemon, 30, 10, base)
+    handler = _make_handler(conn, tmp_path, catch_all_camera=daemon)
+
+    event_id = "evt-unit-001"
+    before, after = handler._capture_catch_all_frames(
+        event_id, pi_received_ts=timestamps[15],
+    )
+
+    # Single-frame contract: the before slot is intentionally None.
+    assert before is None, (
+        f"_capture_catch_all_frames must return before=None "
+        f"(single-frame model), got {before!r}"
+    )
+    assert after is not None and after.endswith("after.jpg")
+    assert Path(after).is_file()
+
+    # Disk side: only after.jpg under the event dir; before.jpg never created.
+    event_dir = tmp_path / "events" / event_id
+    jpegs = sorted(p.name for p in event_dir.iterdir() if p.suffix == ".jpg")
+    assert jpegs == ["after.jpg"], (
+        f"event dir should contain only after.jpg, got {jpegs}"
+    )
+
+
+def test_capture_catch_all_frames_no_camera_returns_none_pair(tmp_path: Path):
+    """When the catch-all camera is None (USB unplugged / disabled)
+    the helper returns ``(None, None)`` — both slots are absent. The
+    handler treats this as "no frames available" and lets the row
+    sit at NULL frame paths.
+    """
+    conn = init_db(":memory:")
+    handler = _make_handler(conn, tmp_path, catch_all_camera=None)
+
+    before, after = handler._capture_catch_all_frames(
+        "evt-no-cam-001", pi_received_ts="2026-04-28T12:00:00.000Z",
+    )
+    assert before is None
+    assert after is None
 
 
 def test_catch_all_ingress_does_not_affect_live_shelf(tmp_path: Path):

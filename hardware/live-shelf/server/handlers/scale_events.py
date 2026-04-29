@@ -898,27 +898,37 @@ class ScaleHandler:
         event_id: str,
         pi_received_ts: str,
     ) -> tuple[Optional[str], Optional[str]]:
-        """Write before/after JPEGs for a catch-all event from the ring buffer.
+        """Write a single JPEG for a catch-all event from the ring buffer.
 
         Catch-all events have no brightness-driven ``session_capture``
         pipeline (the catch-all ``CameraDaemon`` is constructed with
         ``brightness_detection_enabled=False`` in ``server.app`` and
         ``session_capture.register`` is wired to the live-shelf daemon
         only). Without this inline capture, catch-all events never get
-        JPEGs on disk — so the Pi's ``/event/<event_id>/before.jpg``
+        JPEGs on disk — so the Pi's ``/event/<event_id>/after.jpg``
         route 404s and the cloud event viewer shows placeholder tiles.
 
-        We grab a single frame from the catch-all camera's ring buffer
-        at ``pi_received_ts + photo_delay`` and copy it to both
-        ``before.jpg`` and ``after.jpg``. The two filenames are the same
-        frame by design — the catch-all weight-session is a single-state
-        interaction (user places item → ESP fires event). Before/after
-        is a live-shelf concept (door open → multi-event session →
-        door close) that doesn't map onto the catch-all model.
+        Catch-all events are a SINGLE moment in time — the user placed
+        an item on the countertop scale, the ESP declared stability,
+        and we want one image of what's there. There is no "before"
+        frame the way there is for a multi-event live_shelf session.
+        Previously this helper wrote the same frame to BOTH
+        ``before.jpg`` and ``after.jpg`` — that duplication confused
+        the classifier (which then used a delta-style "compare before
+        vs after" prompt) and burned 2x the image tokens for no reason.
 
-        Returns ``(before_path, after_path)`` — both may be None when
-        the camera is absent, the ring is empty, or the write fails.
-        Never raises; on any failure we log and return (None, None).
+        We grab a single frame from the catch-all camera's ring buffer
+        at ``pi_received_ts + photo_delay`` and write it to
+        ``after.jpg`` only (the ``/event/<id>/after.jpg`` URL stays
+        stable for the local + cloud event viewers). ``before.jpg`` is
+        intentionally NOT created.
+
+        Returns ``(before_path, after_path)`` for callsite-shape
+        compatibility — ``before_path`` is ALWAYS ``None`` for
+        catch-all events (single-frame model). ``after_path`` may be
+        None when the camera is absent, the ring is empty, or the
+        write fails. Never raises; on any failure we log and return
+        (None, None).
         """
         camera = self._catch_all_camera
         if camera is None:
@@ -973,37 +983,33 @@ class ScaleHandler:
             return None, None
         if jpeg_path is None or not jpeg_path.is_file():
             return None, None
-        # Copy the single captured frame to the canonical before/after
-        # names. Same bytes on disk — the catch-all has a single-frame
-        # model; the duplication is for the Flask + cloud routes that
-        # expect ``before.jpg`` AND ``after.jpg`` per event.
-        before_path: Optional[str] = None
+        # Catch-all single-frame model: write only ``after.jpg``. The
+        # filename is preserved so the existing /event/<id>/after.jpg
+        # route + cloud viewer URL keep working unchanged. ``before.jpg``
+        # is intentionally NOT created — see docstring above for the
+        # rationale (single-moment event, no delta).
         after_path: Optional[str] = None
         try:
-            before_dst = out_dir / "before.jpg"
-            shutil.copyfile(jpeg_path, before_dst)
-            before_path = str(before_dst.resolve())
-        except OSError:
-            log.warning(
-                "catch_all frames: copy to before.jpg failed for %s",
-                event_id, exc_info=True,
-            )
-        try:
             after_dst = out_dir / "after.jpg"
-            shutil.copyfile(jpeg_path, after_dst)
+            # If the ring-extract already wrote to after.jpg, we'd hit
+            # SameFileError on copy. Guard with resolve()-equality.
+            if jpeg_path.resolve() != after_dst.resolve():
+                shutil.copyfile(jpeg_path, after_dst)
             after_path = str(after_dst.resolve())
-        except OSError:
+        except (OSError, shutil.SameFileError):
             log.warning(
                 "catch_all frames: copy to after.jpg failed for %s",
                 event_id, exc_info=True,
             )
         # The intermediate ring-capture file is redundant once copied —
-        # clean it up so the event dir only contains the canonical pair.
+        # clean it up so the event dir only contains after.jpg. Skip
+        # when the ring-extract wrote directly to after.jpg (no temp).
         try:
-            jpeg_path.unlink()
+            if jpeg_path.resolve() != (out_dir / "after.jpg").resolve():
+                jpeg_path.unlink()
         except OSError:
             pass
-        return before_path, after_path
+        return None, after_path
 
     def _capture_frames(
         self,
@@ -3785,11 +3791,15 @@ class ScaleHandler:
             #
             # Best-effort: if the capture didn't produce both frames,
             # let the sweeper's catch-all recovery branch try again.
-            if ca_before is not None and ca_after is not None:
+            # Catch-all single-frame model: ``ca_before`` is ALWAYS
+            # None — only ``ca_after`` carries the captured frame.
+            # Dispatch when the after frame is present (we don't need
+            # a before frame for catch-all classification).
+            if ca_after is not None:
                 synthetic_session = {
                     "open_ts": pi_received_ts,
                     "close_ts": pi_received_ts,
-                    "before_path": ca_before,
+                    "before_path": None,
                     "after_path": ca_after,
                     "video_path": None,
                     "shelf_id": "catch_all",
@@ -4297,14 +4307,24 @@ class ScaleHandler:
             # capture happened but the dispatch threw, or a Pi restart
             # interrupted the dispatch). Re-dispatch with the persisted
             # paths instead of going through session_capture.
+            # Catch-all single-frame model: only ``after_frame_path`` is
+            # required for classification. ``before_frame_path`` is
+            # NULL on every catch-all row written under the new model
+            # (older rows from before the single-frame migration may
+            # still have a before path; we tolerate either by keying
+            # the recovery branch on ``after_frame_path`` alone).
             if (
                 row_shelf_id == "catch_all"
-                and row_before_frame
                 and row_after_frame
             ):
                 synthetic_session = {
                     "open_ts": row_pi_received_ts or created_at_iso,
                     "close_ts": row_pi_received_ts or created_at_iso,
+                    # Pass through whatever's on the row — for legacy
+                    # rows this is the same JPEG copied to before.jpg
+                    # (still safe; the dispatcher's catch-all branch
+                    # only looks at after_path). Newly-captured rows
+                    # have before=NULL.
                     "before_path": row_before_frame,
                     "after_path": row_after_frame,
                     "video_path": None,
@@ -5189,6 +5209,22 @@ class ScaleHandler:
         before_path, after_path, frame_err = self._capture_frames(
             event_id, before_src, after_src,
         )
+        # Catch-all single-frame model: there is intentionally no
+        # before frame for a catch-all event (the user placed an item
+        # on the countertop scale; there's only one moment to capture).
+        # ``_capture_frames`` returns ``frame_err = "no before frame
+        # available..."`` when ``before_src is None``, which would
+        # otherwise mark the event failed in the live_shelf-flavored
+        # check below. For catch-all that's expected — clear it so the
+        # classifier can run on the single after frame.
+        if (
+            event_shelf_id == "catch_all"
+            and after_path is not None
+            and before_path is None
+            and frame_err is not None
+            and "no before frame" in frame_err
+        ):
+            frame_err = None
         self._lc_event(
             event_id,
             actor="classifier",

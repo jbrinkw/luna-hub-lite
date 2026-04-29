@@ -131,6 +131,86 @@ Respond with STRICT JSON matching this schema:
 Do not include any text outside the JSON object."""
 
 
+CATCH_ALL_SYSTEM_PROMPT = """\
+You are identifying ONE item that was just placed on a countertop scale.
+You will be given a SINGLE image of the scale (taken at the moment the
+ESP declared the weight stable) plus a measured weight in grams. You
+will also be given a ranked list of candidate items (recently-tracked
+lots + items in the user's inventory). Pick the single best matching
+candidate, OR pick "unknown" when no candidate visibly matches.
+
+IMPORTANT — how to read the input:
+This is NOT a delta event. There is no "before" frame and no "after"
+frame. The image shows the scale RIGHT NOW with whatever item was just
+placed on it. The measured weight is the absolute reading on the scale,
+not a difference between two states. Catch-all events are
+single-moment captures — one item, one weight, one image.
+
+EVIDENCE MODEL — visual is primary, weight is supporting:
+  - VISUAL EVIDENCE: what item is visible on the scale in the image.
+    The countertop scale is small and the camera is mounted close, so
+    a single item should fill most of the frame. Identify it by
+    appearance: shape, color, label/branding, container type.
+  - WEIGHT EVIDENCE: the measured_weight_g is the scale reading. Use
+    it as a sanity check on your visual identification — if the visual
+    says "milk gallon" but the weight is 50g, something is wrong.
+    Each candidate carries an ``expected_weight_g`` that may be the
+    catalog full weight OR the lot's last-known weight. Catch-all
+    items vary in fill level (a partially-consumed bottle of soda
+    weighs less than a full one), so a 30-50% mismatch with catalog
+    weight is NORMAL and should not be a reason to downgrade to
+    unknown. Wide tolerance on weight; commit on visual.
+
+WHEN TO USE "unknown":
+  - The image is empty / shows only the scale surface (no item placed).
+  - The item visible is not in the candidate list (e.g. a brand-new
+    SKU the user hasn't intaked yet).
+  - The image is too dark, blurry, or occluded to identify the item.
+Do NOT use "unknown" just because the weight doesn't perfectly match
+a candidate's catalog weight — partial fills are common and the visual
+identification is what matters.
+
+Valid actions:
+  - "added": the item was placed on the scale (this is the normal case
+    for catch-all events with a positive weight delta).
+  - "removed": the item was taken off the scale (catch-all REMOVE
+    events are rare — usually the user picks the bottle up to put it
+    away after measuring).
+  - "unknown": cannot identify the item visible (or no item visible).
+
+Respond with STRICT JSON matching this schema:
+{
+  "item_id": string,          // candidate_id or "UNKNOWN"
+  "action": string,           // "added", "removed", or "unknown"
+  "confidence": number,       // 0.0 to 1.0
+  "reasoning": string         // one or two sentences naming what you see
+}
+
+Do not include any text outside the JSON object. multi_match and
+secondary_candidates are NOT used for catch-all events."""
+
+
+CATCH_ALL_INSTRUCTION_TEXT = (
+    "Look at the single image of the countertop scale. Identify the "
+    "ONE item visible on the scale, matching it to the closest entry "
+    "in the candidate list. Use the measured weight as a sanity check, "
+    "not as a primary discriminator — countertop items are often "
+    "partially consumed and can weigh significantly less than their "
+    "catalog full weight. "
+    ""
+    "If the image is empty (just the scale surface), shows an item "
+    "that does NOT appear in the candidate list, or is too dark/blurry "
+    "to identify, return item_id=\"UNKNOWN\" with action=\"unknown\". "
+    ""
+    "For a normal catch-all placement event, return action=\"added\". "
+    "For the rare case of a removal, return action=\"removed\". "
+    ""
+    "Return ONLY the JSON object — no markdown, no prose, no code "
+    "fences. Do NOT include multi_match or secondary_candidates — "
+    "catch-all events identify exactly one item."
+)
+
+
 INSTRUCTION_TEXT = (
     "Compare the before and after frames side by side. For an ADD event, "
     "identify the item that APPEARS in the after frame but is NOT in the "
@@ -479,8 +559,151 @@ def build_messages_payload(
     }
 
 
+def _catch_all_weight_text(
+    delta_g: float,
+    after_weight_g: float,
+    candidates: Optional[list[Candidate]] = None,
+) -> str:
+    """Catch-all weight context.
+
+    The scale's absolute reading (``after_weight_g``) is the primary
+    signal — it's the measured mass of the item on the countertop —
+    and ``delta_g`` is included as a secondary diagnostic for the
+    rare case where the user adjusted an already-on-scale item. We
+    list candidate reference weights as a sanity check, but make it
+    clear they're flexible (partial fill is normal for catch-all).
+    """
+
+    lines = [
+        f"Measured weight on scale: {after_weight_g:.1f} g",
+    ]
+    if abs(delta_g - after_weight_g) > 1.0:
+        # Only mention delta if it's distinct from the absolute reading
+        # (e.g. an item was already on the scale and the user added
+        # more). Most catch-all events have delta == after_weight (item
+        # placed on empty scale).
+        lines.append(f"Weight change since last reading: {delta_g:+.1f} g")
+
+    if candidates:
+        weight_lines: list[str] = []
+        for i, c in enumerate(candidates):
+            if c.expected_weight_g is None:
+                continue
+            w = float(c.expected_weight_g)
+            weight_lines.append(f"  - candidate #{i + 1}: ~{w:.1f} g")
+        if weight_lines:
+            lines.append("")
+            lines.append(
+                "Candidate reference weights (catalog full weight or "
+                "last-known weight; partial fills are common — wide "
+                "tolerance):"
+            )
+            lines.extend(weight_lines)
+
+    return "\n".join(lines)
+
+
+def build_catch_all_messages_payload(
+    event: ScaleEvent,
+    candidates: list[Candidate],
+    *,
+    enable_system_cache: bool = True,
+    enable_candidate_cache: bool = True,
+) -> dict[str, Any]:
+    """Assemble a single-frame catch-all classifier payload.
+
+    Differences from :func:`build_messages_payload`:
+      - Uses :data:`CATCH_ALL_SYSTEM_PROMPT` (single-moment framing,
+        visual-primary, no delta math).
+      - Uses :func:`_catch_all_weight_text` (absolute scale reading,
+        not before/after delta).
+      - Sends ONLY the after frame (the single captured image).
+        ``event.before_frame_path`` is ignored — catch-all events have
+        no before frame by design (single-moment events).
+      - Uses :data:`CATCH_ALL_INSTRUCTION_TEXT` (identify the item in
+        this image; no multi_match/secondary).
+    """
+
+    # System block
+    if enable_system_cache:
+        system: list[dict[str, Any]] | str = [
+            {
+                "type": "text",
+                "text": CATCH_ALL_SYSTEM_PROMPT,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+    else:
+        system = CATCH_ALL_SYSTEM_PROMPT
+
+    user_content: list[dict[str, Any]] = []
+
+    # 1. Candidate JSON + reference images (cache-stable prefix).
+    candidate_payload = [c.to_prompt_dict() for c in candidates]
+    header_text = (
+        "Candidates (ranked by likelihood):\n"
+        + json.dumps(candidate_payload, indent=2, sort_keys=False)
+    )
+    user_content.append({"type": "text", "text": header_text})
+
+    for index, candidate in enumerate(candidates):
+        if not candidate.reference_image_paths:
+            continue
+        user_content.append(
+            {
+                "type": "text",
+                "text": f"[candidate #{index + 1} reference images]",
+            }
+        )
+        for ref_path in candidate.reference_image_paths:
+            user_content.append(_encode_image_block(ref_path))
+
+    if enable_candidate_cache and user_content:
+        user_content[-1] = {
+            **user_content[-1],
+            "cache_control": {"type": "ephemeral"},
+        }
+
+    # 2. Weight context (fresh per-event).
+    user_content.append(
+        {
+            "type": "text",
+            "text": _catch_all_weight_text(
+                event.delta_g, event.after_weight_g, candidates,
+            ),
+        }
+    )
+
+    # 3. Single frame (the after frame is the capture). Single-moment
+    # event — there is no before frame to send.
+    if event.after_frame_path:
+        user_content.append(_encode_image_block(event.after_frame_path))
+        user_content.append(
+            {"type": "text", "text": "[above: scale image at stability]"}
+        )
+
+    # 4. Final instruction.
+    user_content.append({"type": "text", "text": CATCH_ALL_INSTRUCTION_TEXT})
+
+    return {
+        "system": system,
+        "messages": [
+            {
+                "role": "user",
+                "content": user_content,
+            }
+        ],
+    }
+
+
 # Convenience for tests / callers that don't want the full payload dict.
 def build_system_prompt() -> str:
-    """Return the raw system prompt text (for inspection)."""
+    """Return the raw shelf system prompt text (for inspection)."""
 
     return SYSTEM_PROMPT
+
+
+def build_catch_all_system_prompt() -> str:
+    """Return the raw catch-all system prompt text (for inspection)."""
+
+    return CATCH_ALL_SYSTEM_PROMPT

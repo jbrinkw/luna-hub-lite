@@ -151,10 +151,13 @@ def test_catch_all_ingress_persists_frame_paths_on_scale_events(tmp_path: Path):
         (event_id,),
     ).fetchone()
     assert row is not None
-    assert row[0] is not None and row[0].endswith("before.jpg")
+    # Single-frame catch-all model: before_frame_path is intentionally
+    # NULL on the row (no before frame is captured). after_frame_path
+    # carries the single captured image and points at a real file.
+    assert row[0] is None, (
+        f"catch-all rows should have before_frame_path=NULL, got {row[0]!r}"
+    )
     assert row[1] is not None and row[1].endswith("after.jpg")
-    # Both paths point at real files on disk.
-    assert Path(row[0]).is_file()
     assert Path(row[1]).is_file()
 
 
@@ -198,15 +201,18 @@ def test_catch_all_ingress_dispatches_classifier_inline(tmp_path: Path):
     event_id = resp["event_id"]
 
     # Dispatch was invoked exactly once with the synthetic session
-    # carrying the inline-captured frame paths.
+    # carrying the inline-captured frame path. Single-frame model:
+    # ``before_path`` is None — only ``after_path`` carries the image.
     assert len(dispatch_calls) == 1
     call = dispatch_calls[0]
     assert call["event_id"] == event_id
     sess = call["session"]
     assert sess["shelf_id"] == "catch_all"
-    assert sess["before_path"] is not None
+    assert sess["before_path"] is None, (
+        f"catch-all synthetic session should have before_path=None "
+        f"(single-frame model), got {sess['before_path']!r}"
+    )
     assert sess["after_path"] is not None
-    assert Path(sess["before_path"]).is_file()
     assert Path(sess["after_path"]).is_file()
 
 
