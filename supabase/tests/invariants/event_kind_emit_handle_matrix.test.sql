@@ -84,16 +84,19 @@ INSERT INTO _expected_kinds VALUES
   ('discarded'),
   ('catch_all_first_measurement'),
   ('catch_all_second_measurement'),
-  -- Phase 1 audit finding L1/MEDIUM (AUDIT_FINDINGS_PHASE1.md): the
-  -- live_weight_sync event added 2026-04-29 (migration 20260429030000)
-  -- routes through private.apply_live_weight_sync_admin (a sibling
-  -- helper, NOT apply_shelf_event), so the matrix-row probe below is
-  -- skipped specifically for this kind. The matrix invariant remains
-  -- "every VALID_EVENT_KINDS literal in the edge function has a cloud-
-  -- side handle path"; for live_weight_sync that handle path is
-  -- exercised by ``live_weight_sync_never_mints.test.sql`` and
-  -- ``live_weight_sync.test.sql`` rather than this matrix test.
-  ('live_weight_sync');
+  -- CB-PG-01 (MOCK_AUDIT_CHEFBYTE_SERVER.md, 2026-04-29):
+  -- live_weight_sync routes through private.apply_live_weight_sync_admin
+  -- (NOT apply_shelf_event); exercised by live_weight_sync.test.sql.
+  ('live_weight_sync'),
+  -- CB-PG-01: review_queue_create and review_queue_resolve are Pi
+  -- outbox event-kinds handled by the edge function's /review-create and
+  -- /review-sync routes respectively — they bypass apply_shelf_event
+  -- entirely (no audit row written via that path). Their cloud-side
+  -- handle path is exercised by review_queue_mirror.test.sql. Adding
+  -- them here makes the count sentinel catch a new kind being silently
+  -- added on either side without a matching test carve-out.
+  ('review_queue_create'),
+  ('review_queue_resolve');
 
 ------------------------------------------------------------
 -- Assertion 1 — every expected kind, when fired, produces a
@@ -137,7 +140,9 @@ BEGIN
   -- up-front shelf_event_log audit-row INSERT — making the bag_eq
   -- falsely accuse the kind of being rejected at validation.
   FOR k IN SELECT kind FROM _expected_kinds
-                 WHERE kind <> 'live_weight_sync'  -- routed via apply_live_weight_sync_admin
+                 -- live_weight_sync: routed via apply_live_weight_sync_admin, not apply_shelf_event
+                 -- review_queue_create/resolve: handled by /review-create and /review-sync edge routes
+                 WHERE kind NOT IN ('live_weight_sync', 'review_queue_create', 'review_queue_resolve')
                  ORDER BY kind LOOP
     i := i + 1;
 
@@ -226,7 +231,8 @@ END $$;
 SELECT bag_eq(
   $$SELECT DISTINCT (payload->>'event_kind') FROM chefbyte.shelf_event_log
      WHERE user_id = tests.get_supabase_uid('matrix_alice')$$,
-  $$SELECT kind FROM _expected_kinds WHERE kind <> 'live_weight_sync'$$,
+  $$SELECT kind FROM _expected_kinds
+     WHERE kind NOT IN ('live_weight_sync', 'review_queue_create', 'review_queue_resolve')$$,
   'invariant (decisions.md #44/#56 + 2026-04-22 audit): every '
     'event_kind in VALID_EVENT_KINDS produces a shelf_event_log '
     'audit row when submitted to apply_shelf_event. A missing row '
@@ -278,14 +284,16 @@ SELECT is(
 
 SELECT cmp_ok(
   (SELECT count(*)::integer FROM _expected_kinds),
-  '=', 10,
-  'invariant: canonical event-kind catalog has 10 entries (including '
-    'live_weight_sync, added 2026-04-29). If you added a new kind, '
-    'update both this test AND the Pi-side CLOUD_VALID_EVENT_KINDS in '
-    'hardware/live-shelf/server/cloud/tests/test_integration_hooks.py '
+  '=', 12,
+  'invariant: canonical event-kind catalog has 12 entries (9 routed '
+    'through apply_shelf_event + live_weight_sync via '
+    'apply_live_weight_sync_admin + review_queue_create + '
+    'review_queue_resolve via edge /review-* routes). If you add a '
+    'new kind, update this test, the Pi-side CLOUD_VALID_EVENT_KINDS '
+    'in hardware/live-shelf/server/cloud/tests/test_integration_hooks.py '
     'AND supabase/functions/shelf-ingest/index.ts::VALID_EVENT_KINDS. '
     'The drift surfaces here as a count mismatch instead of a '
-    'silent prod brick.'
+    'silent prod brick. CB-PG-01 (MOCK_AUDIT_CHEFBYTE_SERVER.md 2026-04-29).'
 );
 
 SELECT * FROM finish();
