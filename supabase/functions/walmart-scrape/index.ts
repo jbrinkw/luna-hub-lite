@@ -154,21 +154,23 @@ Deno.serve(async (req) => {
       reset_at: '',
     };
     try {
-      const { data: quotaData, error: quotaErr } = await adminClient.rpc(
-        'walmart_check_and_increment',
-        { p_user_id: user.id, p_max: 100 },
-        { schema: 'private' as never } as never,
-      );
+      // Quota lives in private.walmart_check_and_increment. PostgREST
+      // doesn't expose the private schema, so we call the
+      // chefbyte.walmart_check_and_increment wrapper (added by migration
+      // 20260429070000) which is just a SECURITY DEFINER pass-through.
+      const { data: quotaData, error: quotaErr } = await adminClient
+        .schema('chefbyte' as never)
+        .rpc('walmart_check_and_increment', { p_user_id: user.id, p_max: 100 });
       if (quotaErr) {
-        // The schema-qualified call above isn't supported by every
-        // supabase-js version; fall back to a direct postgrest call.
+        // Fallback: some supabase-js versions don't expose .schema(); use
+        // a direct PostgREST call with content-profile.
         const directRes = await fetch(`${Deno.env.get('SUPABASE_URL')!}/rest/v1/rpc/walmart_check_and_increment`, {
           method: 'POST',
           headers: {
             apikey: Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
             authorization: `Bearer ${Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!}`,
             'content-type': 'application/json',
-            'content-profile': 'private',
+            'content-profile': 'chefbyte',
           },
           body: JSON.stringify({ p_user_id: user.id, p_max: 100 }),
         });

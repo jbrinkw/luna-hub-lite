@@ -604,17 +604,24 @@ describe('shelf-ingest Edge Function', () => {
       .single();
     expect(logRow).toBeTruthy();
     expect(logRow.applied).toBe(true);
-    expect(logRow.reason).toBe('revived_empty_lot');
+    // 2026-04-29 (commit ddde56d): live_scale ADD branch is no-mint —
+    // claims the empty lot but does NOT set qty from delta_g. The
+    // user's rule: "single track scale should never mint a new item".
+    // Reason flipped from `revived_empty_lot` → `live_scale_claim` and
+    // qty stays at 0; subsequent direct-consumption events on the
+    // claimed lot track stock via the existing flow.
+    expect(logRow.reason).toBe('live_scale_claim');
     expect(logRow.resolved_lot_id).toBe(emptyLot.lot_id);
 
-    // Empty lot now has stock — 1000g / net_weight_g(1000) = 1 container.
+    // Lot was claimed (last_update_source flipped to live_scale, FEFO
+    // pinning available) but qty stays at 0 — the no-mint guarantee.
     const { data: revivedLot } = await (adminClient as any)
       .schema('chefbyte')
       .from('stock_lots')
       .select('qty_containers, last_update_source')
       .eq('lot_id', emptyLot.lot_id)
       .single();
-    expect(Number(revivedLot.qty_containers)).toBeCloseTo(1.0, 3);
+    expect(Number(revivedLot.qty_containers)).toBeCloseTo(0.0, 3);
     expect(revivedLot.last_update_source).toBe('live_scale');
 
     // Exactly one lot for this product: the resurrected one. The
