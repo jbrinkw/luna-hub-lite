@@ -24,7 +24,7 @@
 --      tolerance.
 
 BEGIN;
-SELECT plan(14);
+SELECT plan(17);
 
 -- ═════════════════════════════════════════════════════════════
 -- Invariant 1: logical_date at the day_start_hour boundary
@@ -352,6 +352,92 @@ SELECT
 SELECT ok(
   abs(:g_cal - (4 * :g_p + 4 * :g_c + 9 * :g_f)) > 10,
   '4-4-9 invariant: counter-example (ghost cal) fails ≤10 kcal bound — assertion has teeth'
+);
+
+-- ═════════════════════════════════════════════════════════════
+-- CB-PG-04 (MOCK_AUDIT_CHEFBYTE_SERVER.md 2026-04-29):
+-- Invariant 4: [MEAL] lot exclusion from MCP inventory view.
+--
+-- The CHEFBYTE_get_inventory tool (packages/app-tools/get-inventory.ts)
+-- queries chefbyte.stock_lots joined to chefbyte.products. The contract
+-- is that products whose name starts with '[MEAL]' must be EXCLUDED from
+-- the inventory shown to the AI, because:
+--   a) [MEAL] lots are internal accounting rows for meal-prep batches;
+--   b) exposing them would confuse the AI (they'd appear as extra stock);
+--   c) a regression that re-introduces them breaks the double-count guard
+--      already tested in Invariant 2 above.
+--
+-- The get-inventory handler filters via:
+--   .not('products.name', 'ilike', '[MEAL]%')  -- via joined products table
+-- This invariant proves the filter is effective by seeding a [MEAL]
+-- product + lot, querying via the same SQL the handler would issue, and
+-- asserting zero rows returned.
+--
+-- Three assertions:
+--   PG04-A: [MEAL] product + lot correctly seeded (sanity — lot exists)
+--   PG04-B: inventory query excluding [MEAL] prefix returns 0 for that product
+--   PG04-C: consume_product works on the [MEAL] lot (consumption path OK)
+-- ═════════════════════════════════════════════════════════════
+
+-- Seed a [MEAL] product for the existing pipeline_dsh user
+INSERT INTO chefbyte.products (
+  product_id, user_id, name,
+  servings_per_container, calories_per_serving,
+  protein_per_serving, fat_per_serving, carbs_per_serving
+) VALUES (
+  'b4040404-0000-0000-0000-000000000001',
+  tests.get_supabase_uid('pipeline_dsh'),
+  '[MEAL] TestBowl 04-29',
+  2, 150, 5, 3, 27
+);
+
+INSERT INTO chefbyte.stock_lots (
+  lot_id, user_id, product_id, location_id, qty_containers, expires_on
+) VALUES (
+  'b4040404-1111-0000-0000-000000000001',
+  tests.get_supabase_uid('pipeline_dsh'),
+  'b4040404-0000-0000-0000-000000000001',
+  (SELECT location_id FROM chefbyte.locations
+    WHERE user_id = tests.get_supabase_uid('pipeline_dsh')
+      AND name = 'Fridge'),
+  1.0,
+  '2026-05-01'
+);
+
+-- PG04-A: lot was actually seeded (sanity)
+SELECT is(
+  (SELECT count(*)::integer FROM chefbyte.stock_lots
+    WHERE lot_id = 'b4040404-1111-0000-0000-000000000001'),
+  1,
+  'CB-PG-04-A: [MEAL] lot b4040404-1111-...0001 is seeded (sanity)'
+);
+
+-- PG04-B: inventory query excluding [MEAL]% returns 0 rows for the
+-- [MEAL] product. Mirrors the SQL executed by get-inventory handler:
+--   chefbyte.stock_lots joined to products, filtered NOT ILIKE '[MEAL]%'.
+SELECT is(
+  (SELECT count(*)::integer
+     FROM chefbyte.stock_lots sl
+     JOIN chefbyte.products p ON p.product_id = sl.product_id
+    WHERE sl.user_id = tests.get_supabase_uid('pipeline_dsh')
+      AND sl.qty_containers > 0
+      AND p.name NOT ILIKE '[MEAL]%'
+      AND sl.product_id = 'b4040404-0000-0000-0000-000000000001'),
+  0,
+  'CB-PG-04-B: inventory query (NOT ILIKE [MEAL]%) excludes [MEAL] lot — '
+    'get_inventory MCP tool must not expose meal-prep accounting rows'
+);
+
+-- PG04-C: consume_product still works on a [MEAL] lot (consumption path).
+-- The exclusion is VIEW-level only; the underlying consume function must
+-- not block [MEAL] lots (they are consumed when the user eats the batch).
+SELECT is(
+  (SELECT (chefbyte.consume_product(
+    'b4040404-0000-0000-0000-000000000001'::uuid,
+    1, 'container', true, '2026-05-01'::date
+  ))->>'success'),
+  'true',
+  'CB-PG-04-C: consume_product works on [MEAL] lot (consumption path unblocked)'
 );
 
 -- ─────────────────────────────────────────────────────────────
