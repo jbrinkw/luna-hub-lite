@@ -310,6 +310,24 @@ export function ScannerPage() {
   // handleBarcodeSubmit is defined below but referenced here via ref
   const barcodeSubmitRef = useRef<(barcode: string) => void>(() => {});
 
+  /**
+   * In-flight barcode dedup. While a scan for barcode X is mid-pipeline
+   * (products lookup → analyze-product → DB write), subsequent scans of
+   * the SAME barcode are silently dropped with a transient toast. Without
+   * this guard, a user rapid-firing the same barcode against a brand-new
+   * product spawns parallel analyze-product calls and parallel placeholder
+   * INSERTs because the products lookup races resolve before the first
+   * pipeline has had a chance to commit its row — yielding 2-3 duplicate
+   * `Unknown (<barcode>)` products + duplicate `stock_lots` for one
+   * physical scan event.
+   *
+   * Cleared in a `finally` block at the bottom of `handleBarcodeSubmit`
+   * so a thrown error doesn't leave the barcode permanently locked. Held
+   * in a ref (not state) so the synchronous scan handler reads the latest
+   * value without waiting for a re-render.
+   */
+  const inFlightBarcodesRef = useRef<Set<string>>(new Set());
+
   /* ---- Scanner drop observability ----
    *
    * `droppedScan` records the most recent silent-drop event so the UI can
@@ -361,6 +379,33 @@ export function ScannerPage() {
   const handleBarcodeSubmit = useCallback(
     async (barcode: string) => {
       if (!barcode.trim() || !user) return;
+
+      // In-flight dedup: if this exact barcode is already mid-pipeline
+      // (products lookup or analyze-product or DB write), drop the new
+      // scan instead of starting a parallel pipeline. The "Scanning..."
+      // toast surfaces the drop so the user knows the second trigger
+      // wasn't lost — it's intentionally suppressed because the first
+      // one is still running.
+      const trimmedBarcode = barcode.trim();
+      if (inFlightBarcodesRef.current.has(trimmedBarcode)) {
+        setDroppedScan({
+          reason: 'protected-target',
+          detail: {},
+          timestamp: Date.now(),
+          message: `Scanning ${trimmedBarcode}...`,
+        });
+        if (droppedClearTimerRef.current) clearTimeout(droppedClearTimerRef.current);
+        droppedClearTimerRef.current = setTimeout(() => {
+          setDroppedScan(null);
+          droppedClearTimerRef.current = null;
+        }, DROPPED_SCAN_TOAST_MS);
+        if (barcodeRef.current) {
+          barcodeRef.current.value = '';
+          barcodeRef.current.focus();
+        }
+        return;
+      }
+      inFlightBarcodesRef.current.add(trimmedBarcode);
 
       const qty = parseFloat(screenValue) || 1;
       const tempId = Date.now().toString();
@@ -705,6 +750,13 @@ export function ScannerPage() {
               : item,
           ),
         );
+      } finally {
+        // Always release the in-flight lock — even when the pipeline threw
+        // — so a transient failure doesn't permanently block re-scanning
+        // the same barcode. The user's stated rule was "don't double-
+        // process while in flight", not "lock forever on the first
+        // attempt". A retry after a real error must be allowed.
+        inFlightBarcodesRef.current.delete(trimmedBarcode);
       }
     },
     [user, mode, screenValue, unit, nutrition, defaultLocationId],
