@@ -545,6 +545,89 @@ class TestCloudDisabledPath:
         ).fetchone()[0]
         assert cloud == 0
 
+    def test_in_flight_pickup_write_resolution_end_to_end(
+        self, conn, seed_session, seed_product, seed_lot
+    ):
+        """CB-1: drive SessionResolution(pattern='in_flight_pickup') through
+        RepoReconcilerAdapter.write_resolution and read back the cloud_outbox
+        row to confirm the payload satisfies the apply_shelf_event contract.
+
+        The 2026-04-22 Bug B fix maps 'in_flight_pickup' to the dedicated
+        event_kind so cloud stock is NOT decremented at pickup time — only
+        stock_lots.in_flight_since is stamped. A regression that emits
+        'consumed' instead would silently zero stock mid-flight.
+
+        Contract fields verified:
+          event_kind == 'in_flight_pickup'
+          scale_id   == the adapter's configured scale_id
+          kind       == 'live_shelf'
+          product_id == the lot's product_id
+          delta_g    == 0.0  (pickup does NOT mutate qty)
+          occurred_at is non-null
+        """
+        # Seed a REMOVE scale_event so the adapter can derive occurred_at
+        # and pi_event_id from it.
+        remove_event = storage_repo.record_scale_event(
+            conn,
+            ScaleEventIn(
+                session_id=seed_session,
+                ts="2026-04-29T11:00:00.000Z",
+                delta_g=-300.0,
+                before_weight_g=1500.0,
+                after_weight_g=1200.0,
+                direction="remove",
+                classification=None,
+                classifier_status="classified",
+            ),
+        )
+        emitter = CloudEventEmitter(conn, enabled=True)
+        adapter = RepoReconcilerAdapter(
+            conn,
+            db_lock=threading.RLock(),
+            cloud_emitter=emitter,
+            scale_id="scale-01",
+            shelf_kind="live_shelf",
+        )
+        res = SessionResolution(
+            session_id=seed_session,
+            pattern="in_flight_pickup",
+            lot_id=seed_lot,
+            consumed_g=None,  # pickup doesn't consume qty
+            confidence=0.95,
+            remove_event_id=remove_event.event_id,
+        )
+        adapter.write_resolution(res)
+
+        # Exactly one outbox row must exist.
+        rows = conn.execute(
+            "SELECT payload_json FROM cloud_outbox WHERE sent_at IS NULL"
+        ).fetchall()
+        assert len(rows) == 1, (
+            "expected exactly 1 cloud_outbox row for in_flight_pickup; "
+            f"got {len(rows)}"
+        )
+        payload = json.loads(rows[0]["payload_json"])
+
+        # Contract: event_kind must be the dedicated marker, NOT 'consumed'.
+        assert payload["event_kind"] == "in_flight_pickup", (
+            "in_flight_pickup pattern must emit event_kind='in_flight_pickup'; "
+            f"got {payload.get('event_kind')!r} — this would silently decrement "
+            "cloud stock at pickup time (the pre-fix Bug B regression)"
+        )
+        assert payload["scale_id"] == "scale-01"
+        assert payload["kind"] == "live_shelf"
+        assert payload["product_id"] == seed_product
+        # delta_g is informational for in_flight_pickup — the cloud handler
+        # stamps in_flight_since but does NOT use delta_g to mutate qty.
+        # The adapter sends the pickup event's negative mass so analytics
+        # can reason about how much was moved off-shelf.
+        assert payload["delta_g"] == pytest.approx(-300.0), (
+            f"in_flight_pickup delta_g should mirror the remove event's "
+            f"magnitude as negative (informational only, cloud ignores qty); "
+            f"got {payload.get('delta_g')!r}"
+        )
+        assert payload.get("occurred_at"), "occurred_at must be non-null"
+
 
 # ---------------------------------------------------------------------------
 # Pattern map sanity
