@@ -26,11 +26,60 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Any
 
 log = logging.getLogger(__name__)
+
+
+# ---------------------------------------------------------------------------
+# count_pending in-memory cache (sync-audit finding #11)
+# ---------------------------------------------------------------------------
+#
+# ``count_pending`` is read from two hot paths every heartbeat tick:
+#   * ``app.py`` heartbeat_provider (~5s cadence)
+#   * ``cloud/worker.py`` drain loop (~5s cadence)
+# In steady state the count rarely changes — every read otherwise
+# triggers a full ``SELECT COUNT(*)`` against ``cloud_outbox`` filtered
+# by the partial-pending index. Cache it per-connection in-memory and
+# invalidate from any mutating helper in this module so reads stay
+# O(1) once warm. The cache is keyed by ``id(conn)`` so cross-process
+# / cross-connection state cannot leak: each Pi process gets its own
+# entry.
+#
+# Thread-safety: every helper here is invoked under the orchestrator's
+# ``db_lock``, but we still wrap the cache dict in a lock so any future
+# caller that bypasses ``db_lock`` (e.g. an admin route on a fresh
+# connection) doesn't observe a torn read. Locks are cheap when
+# uncontended.
+_PENDING_COUNT_CACHE: dict[int, int] = {}
+_PENDING_COUNT_LOCK = threading.Lock()
+
+
+def _invalidate_pending_count(conn: sqlite3.Connection) -> None:
+    """Drop the cached pending-count for ``conn``.
+
+    Called from every mutating helper (enqueue + mark_*). Cheap and
+    branch-free: a missing key is a no-op via ``pop(default=None)``.
+    Operators / tests that want to force a fresh count can also call
+    this directly.
+    """
+    with _PENDING_COUNT_LOCK:
+        _PENDING_COUNT_CACHE.pop(id(conn), None)
+
+
+def reset_pending_count_cache() -> None:
+    """Clear the entire in-memory pending-count cache.
+
+    Test affordance — a unit test that mutates ``cloud_outbox`` via
+    raw SQL (bypassing the helpers) and then calls ``count_pending``
+    needs to drop any stale entry first. Production code never needs
+    this; the per-mutation invalidate keeps the cache coherent.
+    """
+    with _PENDING_COUNT_LOCK:
+        _PENDING_COUNT_CACHE.clear()
 
 
 @dataclass
@@ -93,6 +142,9 @@ def enqueue_event(conn: sqlite3.Connection, payload: dict) -> str:
             "VALUES (?, ?)",
             (client_event_id, payload_json),
         )
+    # Pending pool grew by one; drop the cached count so the next
+    # ``count_pending`` re-queries.
+    _invalidate_pending_count(conn)
     return client_event_id
 
 
@@ -148,6 +200,8 @@ def mark_sent(conn: sqlite3.Connection, outbox_id: int) -> None:
             " WHERE outbox_id = ?",
             (outbox_id,),
         )
+    # Row left the pending pool — invalidate the cache.
+    _invalidate_pending_count(conn)
 
 
 def mark_failed(
@@ -167,6 +221,12 @@ def mark_failed(
             " WHERE outbox_id = ?",
             (error, outbox_id),
         )
+    # Row stays pending (sent_at is still NULL, failed_permanently is
+    # still 0) — the count itself doesn't change. We still invalidate
+    # so any future change to mark_failed semantics (e.g. flipping a
+    # row out of the pending pool after N attempts) stays correct
+    # without touching this call site again.
+    _invalidate_pending_count(conn)
 
 
 def mark_permanent_failure(
@@ -189,6 +249,8 @@ def mark_permanent_failure(
             " WHERE outbox_id = ?",
             (reason, outbox_id),
         )
+    # Row left the pending pool — invalidate the cache.
+    _invalidate_pending_count(conn)
 
 
 def mark_dead_letter(
@@ -229,6 +291,8 @@ def mark_dead_letter(
             " WHERE outbox_id = ?",
             (f"DEAD_LETTER: {reason}", outbox_id),
         )
+    # Row left the pending pool — invalidate the cache.
+    _invalidate_pending_count(conn)
 
 
 def list_dead_letter(
@@ -289,7 +353,11 @@ def reset_dead_letter(
             " WHERE outbox_id = ? AND failed_permanently = 1",
             (outbox_id,),
         )
-    return (cur.rowcount or 0) > 0
+    rowcount = cur.rowcount or 0
+    if rowcount > 0:
+        # Row re-entered the pending pool — invalidate.
+        _invalidate_pending_count(conn)
+    return rowcount > 0
 
 
 def count_pending(conn: sqlite3.Connection) -> int:
@@ -299,12 +367,31 @@ def count_pending(conn: sqlite3.Connection) -> int:
     ``failed_permanently`` is excluded from this count because the
     drainer will never touch it again; reporting it as "pending" would
     confuse the /healthz backlog signal.
+
+    Caches the result in-memory keyed by ``id(conn)`` (sync-audit
+    finding #11). Invalidated by :func:`enqueue_event`,
+    :func:`mark_sent`, :func:`mark_failed`,
+    :func:`mark_permanent_failure`, :func:`mark_dead_letter`, and
+    :func:`reset_dead_letter`. The heartbeat + worker drain hot paths
+    therefore amortise to O(1) once warm.
+
+    Direct-SQL mutations of ``cloud_outbox`` (tests, ad-hoc admin DML)
+    bypass the invalidation; callers that do that must invoke
+    :func:`reset_pending_count_cache` before relying on the count.
     """
+    conn_key = id(conn)
+    with _PENDING_COUNT_LOCK:
+        cached = _PENDING_COUNT_CACHE.get(conn_key)
+    if cached is not None:
+        return cached
     row = conn.execute(
         "SELECT COUNT(*) AS c FROM cloud_outbox "
         "WHERE sent_at IS NULL AND failed_permanently = 0"
     ).fetchone()
-    return int(row["c"] if row is not None else 0)
+    count = int(row["c"] if row is not None else 0)
+    with _PENDING_COUNT_LOCK:
+        _PENDING_COUNT_CACHE[conn_key] = count
+    return count
 
 
 def count_permanent_failures(conn: sqlite3.Connection) -> int:

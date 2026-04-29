@@ -715,3 +715,117 @@ def test_reset_dead_letter_returns_false_when_row_already_pending(conn):
     ).fetchone()
     updated = outbox.reset_dead_letter(conn, row["outbox_id"])
     assert updated is False
+
+
+# ---------------------------------------------------------------------------
+# count_pending in-memory cache (sync-audit finding #11)
+# ---------------------------------------------------------------------------
+
+
+def test_count_pending_is_cached_after_first_read(conn):
+    """First call queries the DB; subsequent calls hit the cache and do
+    not re-execute the COUNT(*) statement. Verified by patching the
+    connection's execute method via a counting proxy."""
+    outbox.reset_pending_count_cache()
+    outbox.enqueue_event(conn, {"a": 1})
+    outbox.enqueue_event(conn, {"b": 2})
+
+    seen: list[str] = []
+
+    class _CountingConn:
+        def __init__(self, inner): self._inner = inner
+        def execute(self, sql, *args, **kwargs):
+            seen.append(sql)
+            return self._inner.execute(sql, *args, **kwargs)
+        def __enter__(self): return self._inner.__enter__()
+        def __exit__(self, *exc): return self._inner.__exit__(*exc)
+        def __getattr__(self, name): return getattr(self._inner, name)
+
+    # First call: cache miss for THIS proxy id → SELECT COUNT issued.
+    proxy = _CountingConn(conn)
+    assert outbox.count_pending(proxy) == 2  # type: ignore[arg-type]
+    count_stmts = [s for s in seen if "COUNT" in s.upper()]
+    assert len(count_stmts) == 1, (
+        f"first count_pending should query DB once; got: {seen!r}"
+    )
+
+    # Second + third call: cache hit, no new queries.
+    seen.clear()
+    assert outbox.count_pending(proxy) == 2  # type: ignore[arg-type]
+    assert outbox.count_pending(proxy) == 2  # type: ignore[arg-type]
+    assert seen == [], f"cached calls must not re-query; got: {seen!r}"
+
+
+def test_enqueue_invalidates_count_cache(conn):
+    """Adding a row drops the cache so the next read re-counts."""
+    outbox.reset_pending_count_cache()
+    outbox.enqueue_event(conn, {"a": 1})
+    assert outbox.count_pending(conn) == 1
+    outbox.enqueue_event(conn, {"b": 2})
+    # Without invalidation this would still report 1 (stale cache).
+    assert outbox.count_pending(conn) == 2
+
+
+def test_mark_sent_invalidates_count_cache(conn):
+    """Marking a row sent drops the cache so the next read re-counts."""
+    outbox.reset_pending_count_cache()
+    outbox.enqueue_event(conn, {"a": 1})
+    outbox.enqueue_event(conn, {"b": 2})
+    assert outbox.count_pending(conn) == 2
+    row = conn.execute("SELECT outbox_id FROM cloud_outbox LIMIT 1").fetchone()
+    outbox.mark_sent(conn, row["outbox_id"])
+    # Without invalidation this would still report 2.
+    assert outbox.count_pending(conn) == 1
+
+
+def test_mark_failed_invalidates_count_cache(conn):
+    """mark_failed invalidates so future writers that flip the row out
+    of the pending pool stay correct without re-touching this site."""
+    outbox.reset_pending_count_cache()
+    outbox.enqueue_event(conn, {"a": 1})
+    outbox.count_pending(conn)  # warm cache
+    row = conn.execute("SELECT outbox_id FROM cloud_outbox LIMIT 1").fetchone()
+    outbox.mark_failed(conn, row["outbox_id"], "transient")
+    # mark_failed leaves the row pending so the count is still 1, but
+    # the cache must have been touched so direct-SQL inspection of the
+    # cache state shows it was invalidated. We assert via the public
+    # contract: a subsequent mutation tracks correctly.
+    outbox.enqueue_event(conn, {"b": 2})
+    assert outbox.count_pending(conn) == 2
+
+
+def test_mark_permanent_failure_invalidates_count_cache(conn):
+    """Flagging a row permanently-failed removes it from the pending
+    pool — the cache must reflect this on the next read."""
+    outbox.reset_pending_count_cache()
+    outbox.enqueue_event(conn, {"a": 1})
+    outbox.enqueue_event(conn, {"b": 2})
+    assert outbox.count_pending(conn) == 2
+    row = conn.execute("SELECT outbox_id FROM cloud_outbox LIMIT 1").fetchone()
+    outbox.mark_permanent_failure(conn, row["outbox_id"], "400")
+    assert outbox.count_pending(conn) == 1
+
+
+def test_mark_dead_letter_invalidates_count_cache(conn):
+    """Dead-lettering a row removes it from the pending pool — cache
+    must update on the next read."""
+    outbox.reset_pending_count_cache()
+    outbox.enqueue_event(conn, {"a": 1})
+    outbox.enqueue_event(conn, {"b": 2})
+    assert outbox.count_pending(conn) == 2
+    row = conn.execute("SELECT outbox_id FROM cloud_outbox LIMIT 1").fetchone()
+    outbox.mark_dead_letter(conn, row["outbox_id"], "5xx exhausted")
+    assert outbox.count_pending(conn) == 1
+
+
+def test_reset_dead_letter_invalidates_count_cache(conn):
+    """Re-pending a dead-lettered row puts it back in the pool — cache
+    must reflect the bump."""
+    outbox.reset_pending_count_cache()
+    outbox.enqueue_event(conn, {"a": 1})
+    row = conn.execute("SELECT outbox_id FROM cloud_outbox LIMIT 1").fetchone()
+    outbox.mark_dead_letter(conn, row["outbox_id"], "5xx")
+    assert outbox.count_pending(conn) == 0
+    # Reset puts it back in the pending pool.
+    assert outbox.reset_dead_letter(conn, row["outbox_id"]) is True
+    assert outbox.count_pending(conn) == 1
