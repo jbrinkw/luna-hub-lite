@@ -756,6 +756,68 @@ describe('ChefByte ScannerPage queries', () => {
   });
 
   // -------------------------------------------------------------------
+  // ScannerPage: rapid same-barcode dedup — DB unique constraint is the
+  // last-line safety net for the in-flight dedup bug (2026-04-29).
+  //
+  // Even if the in-flight Set guard in handleBarcodeSubmit fails to
+  // suppress a duplicate (race conditions, ref reset edge cases), the
+  // partial unique index `products_user_barcode_unique` on
+  // (user_id, barcode) WHERE barcode IS NOT NULL must reject the second
+  // INSERT — so a single physical barcode never produces two product
+  // rows in the catalog.
+  //
+  // Source: 20260303040000_chefbyte_tables.sql line 174-176
+  //   CREATE UNIQUE INDEX products_user_barcode_unique
+  //     ON chefbyte.products (user_id, barcode)
+  //     WHERE barcode IS NOT NULL;
+  // -------------------------------------------------------------------
+  it('two rapid same-barcode INSERTs hit unique-violation → only 1 product row', async () => {
+    const barcode = `DEDUP-${Date.now()}`;
+
+    // First INSERT — succeeds.
+    const first = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: `Unknown (${barcode})`,
+        is_placeholder: true,
+      })
+      .select('product_id')
+      .single();
+    const firstData = assertQuerySucceeds(first, 'first dedup insert');
+    expect(typeof firstData.product_id).toBe('string');
+
+    // Second INSERT — same (user_id, barcode) → unique-violation. The
+    // partial unique index is the DB-level safety net for the rapid-
+    // same-barcode-scan bug. Without it, a UI dedup miss would persist
+    // a duplicate Unknown row in the catalog forever.
+    const second = await chefbyte(ctx.client)
+      .from('products')
+      .insert({
+        user_id: ctx.userId,
+        barcode,
+        name: `Unknown (${barcode})`,
+        is_placeholder: true,
+      })
+      .select('product_id')
+      .single();
+    expect(second.error).not.toBeNull();
+    // PostgREST surfaces unique-violation as `code: '23505'`.
+    expect((second.error as { code?: string } | null)?.code).toBe('23505');
+
+    // Verify exactly one row exists for this barcode.
+    const readResult = await chefbyte(ctx.client)
+      .from('products')
+      .select('product_id')
+      .eq('user_id', ctx.userId)
+      .eq('barcode', barcode);
+    const rows = assertQuerySucceeds(readResult, 'dedup readback');
+    expect(rows.length).toBe(1);
+    expect(rows[0].product_id).toBe(firstData.product_id);
+  });
+
+  // -------------------------------------------------------------------
   // ScannerPage: undo shopping add — delete shopping list item
   // Source: ScannerPage.tsx undoScan (shopping mode)
   //   .from('shopping_list').delete().eq('cart_item_id', cartItemId)
