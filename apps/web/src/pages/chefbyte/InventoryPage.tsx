@@ -23,6 +23,7 @@ import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { useChefbyteProducts, type ChefbyteProduct } from '@/shared/useChefbyteProducts';
 import { todayStr } from '@/shared/dates';
 import { isValidLanIp } from '@/components/chefbyte/ScalesTab';
 
@@ -30,25 +31,9 @@ import { isValidLanIp } from '@/components/chefbyte/ScalesTab';
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface Product {
-  product_id: string;
-  user_id: string;
-  name: string;
-  barcode: string | null;
-  servings_per_container: number;
-  min_stock_amount: number;
-  /**
-   * Non-null when the product has been through LiveTrack Import — drives
-   * the small ✓ LiveTrack badge next to the product name.
-   */
-  tare_weight_g: number | null;
-  /**
-   * True when the product has been calibrated through the LiveTrack /
-   * scale enrollment flow and is ready to participate in shelf events.
-   * Drives the per-product ✓ Certified badge.
-   */
-  certified: boolean | null;
-}
+// Product type comes from the shared hook — re-export a local alias so
+// the rest of this file can keep using the short name.
+type Product = ChefbyteProduct;
 
 interface StockLot {
   lot_id: string;
@@ -430,23 +415,11 @@ export function InventoryPage() {
   /*  Data loading via TanStack Query                                  */
   /* ---------------------------------------------------------------- */
 
-  const {
-    data: products = [],
-    isLoading: productsLoading,
-    error: productsError,
-  } = useQuery({
-    queryKey: queryKeys.products(user!.id),
-    queryFn: async () => {
-      const { data, error } = await chefbyte()
-        .from('products')
-        .select('product_id,user_id,name,barcode,servings_per_container,min_stock_amount,tare_weight_g,certified')
-        .eq('user_id', user!.id)
-        .order('name');
-      if (error) throw error;
-      return (data ?? []) as Product[];
-    },
-    enabled: !!user,
-  });
+  // Use the shared hook — applies deleted_at IS NULL + [MEAL] exclusion,
+  // matching SettingsPage exactly. This was the root cause of the bug where
+  // soft-deleted products (e.g. Bacon, Extra Sharp Cheddar) appeared at
+  // "0.0 ctn" in inventory but were missing from Settings → Products.
+  const { data: products = [], isLoading: productsLoading, error: productsError } = useChefbyteProducts();
 
   const { data: lots = [], isLoading: lotsLoading } = useQuery({
     queryKey: queryKeys.stockLots(user!.id),

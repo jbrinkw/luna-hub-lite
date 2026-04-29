@@ -11,40 +11,15 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { useChefbyteProducts, type ChefbyteProduct } from '@/shared/useChefbyteProducts';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
 /* ------------------------------------------------------------------ */
 
-interface Product {
-  product_id: string;
-  user_id: string;
-  name: string;
-  barcode: string | null;
-  description: string | null;
-  servings_per_container: number;
-  calories_per_serving: number;
-  carbs_per_serving: number;
-  protein_per_serving: number;
-  fat_per_serving: number;
-  min_stock_amount: number;
-  is_placeholder: boolean;
-  walmart_link: string | null;
-  price: number | null;
-  /** Net weight of full container in grams. Used for gram-unit recipe ingredients. */
-  net_weight_g: number | null;
-  /** True when sold as discrete countable pieces (eggs, buns, slices, bars). */
-  is_distinct_unit_item: boolean;
-  /** Initial unit when this product is added to a recipe. */
-  default_recipe_unit: 'gram' | 'serving' | 'container' | null;
-  /**
-   * When non-null, this product has been through the LiveTrack Import
-   * wizard and has a captured container tare — used for auto-deducting
-   * container weight from live-scale readings. Presence drives the
-   * "LiveTrack enrolled" badge in this page and the Inventory list.
-   */
-  tare_weight_g: number | null;
-}
+// Product type comes from the shared hook — re-export a local alias so
+// the rest of this file can keep using the short name.
+type Product = ChefbyteProduct;
 
 // LiquidTrack retired 2026-04-21 — replaced by LiveTrack (live_scale kind
 // under Scales tab + LiveTrack Import wizard). See
@@ -91,6 +66,7 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
   is_distinct_unit_item: false,
   default_recipe_unit: null,
   tare_weight_g: null,
+  certified: null,
 });
 
 /* ================================================================== */
@@ -122,21 +98,10 @@ export function SettingsPage() {
   /*  Data loading via TanStack Query                                  */
   /* ---------------------------------------------------------------- */
 
-  const { data: products = [], isLoading: productsLoading } = useQuery({
-    queryKey: queryKeys.chefSettings(user!.id),
-    queryFn: async () => {
-      const { data, error: loadErr } = await chefbyte()
-        .from('products')
-        .select('*')
-        .eq('user_id', user!.id)
-        .is('deleted_at', null)
-        .not('name', 'ilike', '[MEAL]%')
-        .order('name');
-      if (loadErr) throw loadErr;
-      return (data ?? []) as Product[];
-    },
-    enabled: !!user,
-  });
+  // Use the shared hook — applies deleted_at IS NULL + [MEAL] exclusion,
+  // matching InventoryPage exactly. The shared hook uses queryKeys.products
+  // which is already invalidated by all mutation onSettled calls below.
+  const { data: products = [], isLoading: productsLoading } = useChefbyteProducts();
 
   const { data: locations = [], isLoading: locationsLoading } = useQuery({
     queryKey: queryKeys.locations(user!.id),
@@ -160,7 +125,7 @@ export function SettingsPage() {
     {
       schema: 'chefbyte',
       table: 'products',
-      queryKeys: [queryKeys.chefSettings(user!.id), queryKeys.products(user!.id)],
+      queryKeys: [queryKeys.products(user!.id)],
     },
     {
       schema: 'chefbyte',
@@ -189,7 +154,6 @@ export function SettingsPage() {
     onSuccess: () => {
       setEditingId(null);
       setEditForm({});
-      queryClient.invalidateQueries({ queryKey: queryKeys.chefSettings(user!.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
     },
   });
@@ -208,7 +172,6 @@ export function SettingsPage() {
     onSuccess: () => {
       setAddForm(blankProduct());
       setShowAddProduct(false);
-      queryClient.invalidateQueries({ queryKey: queryKeys.chefSettings(user!.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
     },
   });
@@ -229,21 +192,22 @@ export function SettingsPage() {
       if (deleteErr) throw deleteErr;
     },
     onMutate: async (productId) => {
-      const key = queryKeys.chefSettings(user!.id);
+      // Optimistic update operates on queryKeys.products — the cache key
+      // used by useChefbyteProducts (same key invalidated by all mutations).
+      const key = queryKeys.products(user!.id);
       await queryClient.cancelQueries({ queryKey: key });
       const previous = queryClient.getQueryData(key);
       queryClient.setQueryData(key, (old: Product[] | undefined) => old?.filter((p) => p.product_id !== productId));
       return { previous };
     },
     onError: (err: any, _id, context) => {
-      queryClient.setQueryData(queryKeys.chefSettings(user!.id), context?.previous);
+      queryClient.setQueryData(queryKeys.products(user!.id), context?.previous);
       setError(err.message ?? String(err));
     },
     onSuccess: () => {
       setDeleteTarget(null);
     },
     onSettled: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.chefSettings(user!.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
     },
   });
