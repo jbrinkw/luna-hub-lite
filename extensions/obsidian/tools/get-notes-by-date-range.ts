@@ -111,7 +111,7 @@ export const OBSIDIAN_get_notes_by_date_range: ExtensionToolDefinition = {
       const omittedCount = truncated ? candidates.length - MAX_NOTES_FILES : 0;
       const toFetch = candidates.slice(0, MAX_NOTES_FILES);
 
-      const fileContents = await getMultipleBlobs(creds, toFetch, MAX_NOTES_FILES);
+      const { blobs: fileContents, failedCount } = await getMultipleBlobs(creds, toFetch, MAX_NOTES_FILES);
 
       const results: Array<{ file: string; date: string; date_str: string; content: string }> = [];
       for (const [path, { content }] of fileContents) {
@@ -131,9 +131,9 @@ export const OBSIDIAN_get_notes_by_date_range: ExtensionToolDefinition = {
       results.sort((a, b) => b.date.localeCompare(a.date));
 
       return toolSuccess({
-        status: truncated ? 'partial' : 'success',
+        status: truncated || failedCount > 0 ? 'partial' : 'success',
         truncated,
-        omitted_notes_files: omittedCount,
+        omitted_notes_files: omittedCount + failedCount,
         scope: args.project_id ? `project: ${args.project_id}` : 'all',
         start_date: args.start_date,
         end_date: args.end_date,

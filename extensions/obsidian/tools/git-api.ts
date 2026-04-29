@@ -99,24 +99,30 @@ export async function getBlobContent(creds: GitCredentials, sha: string): Promis
 /**
  * Fetch multiple files by SHA in parallel. Capped at maxFiles to stay within
  * the Cloudflare Workers subrequest limit.
+ *
+ * Returns both the successfully-fetched content map and a `failedCount` so
+ * callers can surface partial-failure metadata to the LLM instead of silently
+ * dropping files that fail to fetch.
  */
 export async function getMultipleBlobs(
   creds: GitCredentials,
   entries: Array<{ path: string; sha: string }>,
   maxFiles = 40,
-): Promise<Map<string, { content: string; sha: string }>> {
-  const results = new Map<string, { content: string; sha: string }>();
+): Promise<{ blobs: Map<string, { content: string; sha: string }>; failedCount: number }> {
+  const blobs = new Map<string, { content: string; sha: string }>();
+  let failedCount = 0;
   const toFetch = entries.slice(0, maxFiles);
   const fetches = toFetch.map(async (e) => {
     try {
       const content = await getBlobContent(creds, e.sha);
-      results.set(e.path, { content, sha: e.sha });
+      blobs.set(e.path, { content, sha: e.sha });
     } catch {
-      // Skip files that fail to fetch
+      // Count the failure so callers can surface omission metadata
+      failedCount++;
     }
   });
   await Promise.all(fetches);
-  return results;
+  return { blobs, failedCount };
 }
 
 /** Fetch a single file's content by path via Contents API. Returns null if 404. */

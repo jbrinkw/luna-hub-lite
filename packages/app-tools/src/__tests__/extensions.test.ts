@@ -1099,6 +1099,68 @@ Top school PhD.
     expect(parsed.recent_notes.truncated).toBe(true);
     expect(parsed.recent_notes.omitted_notes_files).toBeGreaterThan(0);
   });
+
+  it('OBS-3: partial blob fetch failure (500 on one Notes.md) surfaces in omitted_notes_files, not silently dropped', async () => {
+    // Set up a vault with two projects each having a Notes.md.
+    // The second Notes.md blob fetch will return a 500 error.
+    // The handler must complete successfully and report omitted_notes_files > 0.
+    const today = mmddyy(offsetDate(0));
+    const notesContent1 = `---\nnote_project_id: Daily Review\n---\n\n${today}\nGood note.\n`;
+    const notesContent2 = `---\nnote_project_id: Journal\n---\n\n${today}\nWould-be-lost note.\n`;
+
+    // Build the files list and derive SHAs so we can intercept one.
+    const sha = (path: string) => `sha-${path.replace(/[/.]/g, '-')}`;
+    const files = [
+      { path: 'Daily Review/Daily Review.md', content: ROOT_DOC },
+      { path: 'Daily Review/Notes.md', content: notesContent1 },
+      { path: 'Journal/Journal.md', content: '# Journal\n' },
+      { path: 'Journal/Notes.md', content: notesContent2 },
+    ];
+    const failingSha = sha('Journal/Notes.md');
+
+    // UTF-8-safe base64 helper
+    const utf8b64 = (s: string) => {
+      const bytes = new TextEncoder().encode(s);
+      let bin = '';
+      for (const b of bytes) bin += String.fromCharCode(b);
+      return btoa(bin);
+    };
+
+    // Custom mock: inject a 500 for the failing blob; success for everything else.
+    const bySha = new Map(files.map((f) => [sha(f.path), f.content]));
+    const treeEntries = files.map((f) => ({ type: 'blob', path: f.path, sha: sha(f.path) }));
+    mockFetch.mockImplementation((url: unknown) => {
+      if (typeof url !== 'string') return mockFetchResponse({}, false, 404);
+      if (url.includes('/git/trees/')) {
+        return mockFetchResponse({ tree: treeEntries });
+      }
+      const m = url.match(/\/git\/blobs\/([^/?]+)/);
+      if (m) {
+        if (m[1] === failingSha) return mockFetchResponse('Internal Server Error', false, 500);
+        const content = bySha.get(m[1]);
+        if (content === undefined) return mockFetchResponse({}, false, 404);
+        return mockFetchResponse({ content: utf8b64(content), encoding: 'base64' });
+      }
+      return mockFetchResponse({}, false, 404);
+    });
+
+    const result = await handler({}, obsidianCtx());
+
+    // Tool must succeed — a per-file error must NOT bubble up as a tool-level error.
+    expect(result.isError).toBeUndefined();
+    const parsed = JSON.parse(result.content[0].text);
+    expect(parsed.status).toBe('success');
+
+    // The failed file must be counted in omitted_notes_files, not silently lost.
+    expect(parsed.recent_notes.omitted_notes_files).toBeGreaterThan(0);
+
+    // The successful Notes.md entries are still returned.
+    expect(parsed.recent_notes.entries.some((e: { content: string }) => e.content.includes('Good note'))).toBe(true);
+    // The failed Notes.md entries are absent (file was skipped).
+    expect(parsed.recent_notes.entries.some((e: { content: string }) => e.content.includes('Would-be-lost'))).toBe(
+      false,
+    );
+  });
 });
 
 // ===========================================================================

@@ -254,7 +254,7 @@ export const OBSIDIAN_get_morning_brief: ExtensionToolDefinition = {
       const toFetchNotes = noteFileEntries.slice(0, MAX_NOTES);
 
       // Parallel fetch: root doc by SHA + all Notes.md files by SHA.
-      const [rootText, notesContents] = await Promise.all([
+      const [rootText, { blobs: notesContents, failedCount }] = await Promise.all([
         getBlobContent(creds, project.rootFileSha),
         getMultipleBlobs(creds, toFetchNotes, MAX_NOTES),
       ]);
@@ -292,7 +292,9 @@ export const OBSIDIAN_get_morning_brief: ExtensionToolDefinition = {
           window_days: WINDOW_DAYS,
           entries,
           truncated,
-          omitted_notes_files: omitted,
+          // omitted_notes_files counts both cap-truncated files and per-file
+          // fetch failures so the LLM knows the brief may be incomplete.
+          omitted_notes_files: omitted + failedCount,
         },
         routine_instructions: ROUTINE_INSTRUCTIONS,
       });
