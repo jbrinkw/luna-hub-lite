@@ -32,8 +32,13 @@ interface RpcCall {
 
 const rpcCalls: RpcCall[] = [];
 
+// W-08: allow individual tests to inject a complete_next_set failure so
+// we can verify the onError rollback path.
+let completeNextSetError: { message: string; code?: string } | null = null;
+
 function resetState() {
   rpcCalls.length = 0;
+  completeNextSetError = null;
 }
 
 const PLAN_ID = 'plan-fixture-1';
@@ -66,6 +71,10 @@ vi.mock('@/shared/supabase', () => {
         return Promise.resolve({ data: { plan_id: PLAN_ID, status: 'created' }, error: null });
       }
       if (name === 'complete_next_set') {
+        // W-08: return injected error if set, otherwise success.
+        if (completeNextSetError) {
+          return Promise.resolve({ data: null, error: completeNextSetError });
+        }
         // Mirror the real RPC's success shape (rest_seconds + completed).
         return Promise.resolve({ data: [{ rest_seconds: 90, completed: true }], error: null });
       }
@@ -229,5 +238,54 @@ describe('TodayPage — complete_next_set RPC contract (Bug B)', () => {
     // would 404 (PGRST202: function not found in schema cache).
     expect(args).not.toHaveProperty('p_reps');
     expect(args).not.toHaveProperty('p_load');
+  });
+});
+
+// W-08: onError rollback test.
+// Real production behavior: if the RPC fails (JWT expired, plan not found,
+// DB error) the optimistic update that marked a set as completed must be
+// reverted so the UI doesn't show a false completed state permanently.
+describe('TodayPage — complete_next_set onError rollback (W-08)', () => {
+  beforeEach(() => {
+    resetState();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('reverts the optimistic completed flag when complete_next_set RPC returns an error', async () => {
+    const user = userEvent.setup();
+    renderToday();
+
+    // Wait for the plan to load and show the first set as incomplete.
+    await waitFor(() => {
+      expect(screen.getByTestId('next-in-queue')).toBeInTheDocument();
+    });
+
+    // Inject a failure before clicking — simulates JWT expiry / plan-not-found.
+    completeNextSetError = { message: 'Plan not found or not owned by user', code: '42501' };
+
+    await user.click(screen.getByTestId('complete-set-btn'));
+
+    // Allow the mutation onError callback to flush + rollback.
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 100));
+    });
+
+    // The RPC was attempted (arg-name contract is still exercised).
+    const completeCalls = rpcCalls.filter((c) => c.name === 'complete_next_set');
+    expect(completeCalls.length).toBeGreaterThan(0);
+
+    // After rollback the SetQueue must still show the first set in the queue
+    // (the "next-in-queue" card must be present — the optimistic advance was
+    // rolled back). If the UI showed a permanently advanced state here the
+    // user would see a ghost-completed set with no server record.
+    await waitFor(() => {
+      expect(screen.getByTestId('next-in-queue')).toBeInTheDocument();
+    });
+
+    // The undo-toast must NOT appear on error (it only shows on success).
+    expect(screen.queryByTestId('undo-toast')).not.toBeInTheDocument();
   });
 });
