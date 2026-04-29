@@ -188,9 +188,13 @@ def test_emit_catch_all_second_measurement_payload_snapshot(conn):
     _assert_non_null(payload, (
         "scale_id", "kind", "event_kind", "product_id", "delta_g",
         "occurred_at", "pi_event_id", "client_event_id",
+        "first_event_pi_event_id",  # CB-3: pairing key for cloud consumed_delta calc
     ))
     assert payload["event_kind"] == "catch_all_second_measurement"
     assert payload["delta_g"] == pytest.approx(200.25)
+    # CB-3: the pairing key must carry the first event's id verbatim so the
+    # cloud can compute consumed_g = first.delta_g - second.delta_g.
+    assert payload["first_event_pi_event_id"] == "evt-first-2"
 
 
 def test_emit_review_queue_create_payload_snapshot(conn):

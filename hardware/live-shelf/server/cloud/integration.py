@@ -867,6 +867,10 @@ class CloudEventEmitter:
             # The cloud uses pi_event_id to find the matching first
             # event's in-flight stamp — NOT this second event's id.
             "pi_event_id": first_event_pi_event_id,
+            # CB-3 fix: also include the explicit pairing key so the cloud
+            # apply_shelf_event handler can look up the first measurement row
+            # by its dedicated column without relying on pi_event_id aliasing.
+            "first_event_pi_event_id": first_event_pi_event_id,
         }
         return self._enqueue(payload)
 
