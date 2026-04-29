@@ -526,8 +526,16 @@ export function ScannerPage() {
           let analyzedProduct: any = null;
           let hardAiError: { message: string; reason: string } | null = null;
           try {
+            // Fetch the user's placeholder products so the AI can match by
+            // name/description in the same call — zero extra HTTP requests.
+            const { data: placeholderCandidates } = await chefbyte()
+              .from('products')
+              .select('product_id, name, description')
+              .eq('user_id', user.id)
+              .eq('is_placeholder', true);
+
             const { data: efData, error: efError } = await supabase.functions.invoke('analyze-product', {
-              body: { barcode },
+              body: { barcode, placeholder_candidates: placeholderCandidates ?? [] },
             });
 
             // supabase-js returns 4xx/5xx as `efError` (FunctionsHttpError). If
@@ -555,6 +563,17 @@ export function ScannerPage() {
               const off = efData.off;
               const productName = s?.name || off?.product_name || `Product (${barcode})`;
               const hasNutrition = !!(s?.calories_per_serving != null || off?.nutriments);
+
+              // AI-matched placeholder: the model identified a name-based match
+              // among the user's placeholder products. Use that id as the upgrade
+              // target — same code path as barcode-based placeholder upgrade, so
+              // all FK references (recipe_ingredients, meal_plan_entries, etc.)
+              // survive intact. The barcode-matched id takes precedence if both
+              // exist (shouldn't happen, but be explicit).
+              const aiMatchedPlaceholderId: string | null =
+                typeof efData.matched_placeholder_id === 'string' && efData.matched_placeholder_id.length > 0
+                  ? efData.matched_placeholder_id
+                  : null;
 
               // Build nutrition from AI suggestion or raw OFF nutriments
               let cals: number | null = null;
@@ -599,18 +618,55 @@ export function ScannerPage() {
                 const returning =
                   'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container, default_shelf_life_days';
 
+                // Priority for upgrade target:
+                //   1. barcode-matched placeholder (existingPlaceholderId) — most
+                //      specific, this barcode was previously scanned and failed.
+                //   2. AI name-matched placeholder (aiMatchedPlaceholderId) — new
+                //      path: model matched by semantic name similarity.
+                //   3. No match → INSERT a new product row.
+                const upgradeTargetId = existingPlaceholderId ?? aiMatchedPlaceholderId ?? null;
+
                 let resultRow: any = null;
-                if (existingPlaceholderId) {
-                  // Upgrade the stale placeholder row instead of creating a
-                  // duplicate — preserves stock lots / food logs referencing
-                  // the placeholder id.
+                if (upgradeTargetId) {
+                  // Upgrade the placeholder row instead of creating a duplicate —
+                  // preserves all FK references (stock lots, food logs, recipe
+                  // ingredients, meal plan entries) referencing the placeholder id.
                   const { data: updated } = await chefbyte()
                     .from('products')
                     .update(productFields)
-                    .eq('product_id', existingPlaceholderId)
+                    .eq('product_id', upgradeTargetId)
                     .select(returning)
                     .single();
                   resultRow = updated;
+
+                  // Surface the AI name-match promotion to the user so they
+                  // know the placeholder was promoted rather than a new row
+                  // created. Only fires for the AI-matched case (barcode-matched
+                  // placeholder upgrades are invisible — the user already knew
+                  // the product existed).
+                  if (!existingPlaceholderId && aiMatchedPlaceholderId && resultRow) {
+                    // Find the old placeholder name from the candidates list for
+                    // the toast copy ("Greek Yogurt" → "Chobani Greek Yogurt 0%").
+                    const matchedCandidate = (placeholderCandidates ?? []).find(
+                      (c: { product_id: string; name: string; description?: string | null }) =>
+                        c.product_id === aiMatchedPlaceholderId,
+                    );
+                    const oldName = matchedCandidate?.name ?? 'placeholder';
+                    // Use the dropped-scan toast mechanism to surface a transient
+                    // confirmation — reusing the existing toast infra avoids a new
+                    // state variable. The message is informational, not an error.
+                    setDroppedScan({
+                      reason: 'protected-target',
+                      detail: {},
+                      timestamp: Date.now(),
+                      message: `Promoted "${oldName}" → "${resultRow.name}"`,
+                    });
+                    if (droppedClearTimerRef.current) clearTimeout(droppedClearTimerRef.current);
+                    droppedClearTimerRef.current = setTimeout(() => {
+                      setDroppedScan(null);
+                      droppedClearTimerRef.current = null;
+                    }, 5000);
+                  }
                 } else {
                   const { data: created } = await chefbyte()
                     .from('products')
