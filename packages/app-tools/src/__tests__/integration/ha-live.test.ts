@@ -446,6 +446,24 @@ describe.skipIf(skip)('Home Assistant Live Integration Tests', () => {
     expect(typeof status.formatted).toBe('string');
     expect(status.formatted.length).toBeGreaterThan(0);
 
+    // HA-1: Assert that the raw /api/states response includes last_changed,
+    // last_updated, and context — required fields on every HA state object
+    // since HA >= 0.114. These are NOT currently read by handlers, but pinning
+    // them here catches upstream shape drift before it reaches formatters that
+    // might access them in future.
+    const rawStateResp = await fetch(`${HA_URL}/api/states/light.luna_test_light`, {
+      headers: { Authorization: `Bearer ${HA_TOKEN}`, 'Content-Type': 'application/json' },
+    });
+    expect(rawStateResp.ok).toBe(true);
+    const rawState = await rawStateResp.json();
+    expect(typeof rawState.last_changed).toBe('string');
+    expect(rawState.last_changed.length).toBeGreaterThan(0);
+    expect(typeof rawState.last_updated).toBe('string');
+    expect(rawState.last_updated.length).toBeGreaterThan(0);
+    expect(typeof rawState.context).toBe('object');
+    expect(rawState.context).not.toBeNull();
+    expect(typeof rawState.context.id).toBe('string');
+
     // Verify attributes shape on the richer media_player seeded in test 8b
     // (stays around in shared state across tests). This is the most
     // contract-sensitive path because media_player formatting reads five

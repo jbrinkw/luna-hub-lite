@@ -1771,22 +1771,35 @@ describe('TODOIST_get_sections', () => {
 // Home Assistant
 // ===========================================================================
 
+// HA-1: HA state objects must include last_changed, last_updated, and context —
+// these fields are guaranteed present on every /api/states entity in HA >= 0.114.
+// Omitting them lets a future formatter that reads last_changed pass mocked tests
+// while failing in production with `undefined`.
 const haEntityLight = {
   entity_id: 'light.living_room',
   state: 'on',
   attributes: { friendly_name: 'Living Room Light', brightness: 255 },
+  last_changed: '2026-04-29T10:00:00.000Z',
+  last_updated: '2026-04-29T10:00:00.000Z',
+  context: { id: 'ctx-light-01', parent_id: null, user_id: null },
 };
 
 const haEntitySwitch = {
   entity_id: 'switch.bedroom_fan',
   state: 'off',
   attributes: { friendly_name: 'Bedroom Fan' },
+  last_changed: '2026-04-29T08:30:00.000Z',
+  last_updated: '2026-04-29T08:30:00.000Z',
+  context: { id: 'ctx-switch-01', parent_id: null, user_id: null },
 };
 
 const haEntitySensor = {
   entity_id: 'sensor.temperature',
   state: '22.5',
   attributes: { friendly_name: 'Temperature' },
+  last_changed: '2026-04-29T09:45:00.000Z',
+  last_updated: '2026-04-29T09:45:00.000Z',
+  context: { id: 'ctx-sensor-01', parent_id: null, user_id: null },
 };
 
 describe('HOMEASSISTANT_get_devices', () => {
