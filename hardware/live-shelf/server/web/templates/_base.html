@@ -295,10 +295,44 @@
     <a class="nlink {% if request.path.startswith('/intake') %}active{% endif %}" href="/intake">intake</a>
     <span class="spacer"></span>
     <span class="meta" id="nav-meta">connecting&hellip;</span>
-    <button id="wipe-btn" onclick="wipeAllData()" title="Delete all products, lots, events, sessions, review items + associated files. Keeps camera calibration + app state."
-            style="margin-left:12px;padding:4px 10px;font-size:11px;background:#2a1115;color:#ff6b6b;border:1px solid #5c1a22;border-radius:3px;cursor:pointer;font-family:inherit;letter-spacing:1px;text-transform:uppercase;">
-      wipe
-    </button>
+    {# Wipe button — UX audit (2026-04-28) flagged this as dangerously
+       prominent for a thermonuclear action that fits next to /inventory
+       and /events in the same nav row. Tucked behind a discreet menu so
+       it's still 1-click reachable without screaming "click me" at every
+       page. The two-step confirm + WIPE typing remains intact, so the
+       safety floor is the same. #}
+    <details class="nav-admin-menu"
+             style="margin-left: 12px; position: relative;">
+      <summary class="muted"
+               style="cursor: pointer; padding: 2px 6px; font-size: 11px;
+                      letter-spacing: 0.05em; text-transform: uppercase;
+                      list-style: none; user-select: none;"
+               title="admin actions">
+        admin &#x25BE;
+      </summary>
+      <div style="position: absolute; right: 0; top: 100%; z-index: 50;
+                  background: var(--panel); border: 1px solid var(--border);
+                  border-radius: 3px; padding: 6px; min-width: 220px;
+                  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4); margin-top: 4px;">
+        <a href="/api/debug/health" target="_blank"
+           style="display: block; padding: 4px 8px; font-size: 11px;">
+          /api/debug/health
+        </a>
+        <a href="/api/debug/invariants" target="_blank"
+           style="display: block; padding: 4px 8px; font-size: 11px;">
+          /api/debug/invariants
+        </a>
+        <hr style="border: 0; border-top: 1px solid var(--border); margin: 4px 0;">
+        <button id="wipe-btn" onclick="wipeAllData()"
+                title="Delete all products, lots, events, sessions, review items + associated files. Keeps camera calibration + app state."
+                style="width: 100%; padding: 6px 10px; font-size: 11px;
+                       background:#2a1115;color:#ff6b6b;border:1px solid #5c1a22;
+                       border-radius:3px;cursor:pointer;font-family:inherit;
+                       letter-spacing:1px;text-transform:uppercase;">
+          wipe all data
+        </button>
+      </div>
+    </details>
   </header>
   <main>
     {% block content %}{% endblock %}

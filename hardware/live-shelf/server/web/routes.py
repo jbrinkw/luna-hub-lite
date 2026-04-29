@@ -202,7 +202,11 @@ class WebRepo(Protocol):
 
 
 EVENTS_PER_PAGE = 24
-USAGE_PER_PAGE = 5
+USAGE_PER_PAGE_DEFAULT = 25
+USAGE_PER_PAGE_OPTIONS = (5, 25, 50, 100)
+# Back-compat alias — older callers and tests reference this directly.
+# Kept until those imports are migrated.
+USAGE_PER_PAGE = USAGE_PER_PAGE_DEFAULT
 
 
 def make_html_bp(
@@ -343,6 +347,7 @@ def make_html_bp(
             catch_all_state=catch_all_state or {},
             live_scale_enabled=ls_on,
             single_track_state=single_track_state,
+            health=_collect_dashboard_health(repo),
             **_nav_ctx(),
         )
 
@@ -406,6 +411,17 @@ def make_html_bp(
         except (TypeError, ValueError):
             page = 1
         page = max(page, 1)
+        # Operator-controlled per_page picker. The user complaint in the
+        # 2026-04-28 UX audit was that 5/page across 81 rows = 17 pages of
+        # paging hell. Allow a small whitelist of values; reject anything
+        # else by snapping to the default. Whitelisted set keeps a hostile
+        # caller from passing per_page=10000 to OOM the page render.
+        try:
+            per_page = int(request.args.get("per_page", USAGE_PER_PAGE_DEFAULT))
+        except (TypeError, ValueError):
+            per_page = USAGE_PER_PAGE_DEFAULT
+        if per_page not in USAGE_PER_PAGE_OPTIONS:
+            per_page = USAGE_PER_PAGE_DEFAULT
         product_id = request.args.get("product") or None
         kind_filter = request.args.get("kind") or None
         since = request.args.get("since") or None
@@ -421,13 +437,25 @@ def make_html_bp(
             usage_total = repo.count_usage(
                 product_id=product_id, kinds=kinds, since=since, until=until,
             )
-            offset = (page - 1) * USAGE_PER_PAGE
-            usage_items = list_usage(
+            offset = (page - 1) * per_page
+            raw_usage = list_usage(
                 product_id=product_id, kinds=kinds, since=since, until=until,
-                limit=USAGE_PER_PAGE, offset=offset,
+                limit=per_page, offset=offset,
             )
+            # Server-side de-dup: a known backend bug emits the same
+            # "Pulled <product> N g return" row repeatedly across Pi
+            # restarts (UX audit §inventory friction #11). Group by
+            # (occurred_at, return_event_id, product_id) and tag the
+            # representative with ``dup_count`` so the template can render
+            # one row + a "Nx" badge instead of N near-identical rows.
+            # Falls back to (occurred_at, product_id) when the row predates
+            # the return_event_id column. ``usage_id`` of the
+            # representative is preserved so the per-row delete still
+            # resolves to a real row; the count tells the user how many
+            # collateral rows exist.
+            usage_items = _dedupe_usage_rows(raw_usage)
             usage_total_pages = max(
-                1, (usage_total + USAGE_PER_PAGE - 1) // USAGE_PER_PAGE
+                1, (usage_total + per_page - 1) // per_page
             )
             # 7-day summary (fixed window, not tied to filter bar).
             import datetime as _dt
@@ -472,6 +500,8 @@ def make_html_bp(
             usage_items=usage_items,
             usage_total=usage_total,
             usage_page=page,
+            usage_per_page=per_page,
+            usage_per_page_options=USAGE_PER_PAGE_OPTIONS,
             usage_total_pages=usage_total_pages,
             summary=summary,
             classifier_candidates=classifier_candidates,
@@ -676,6 +706,109 @@ def make_html_bp(
 # ---------------------------------------------------------------------------
 # File helpers
 # ---------------------------------------------------------------------------
+
+
+def _dedupe_usage_rows(rows: list[dict]) -> list[dict]:
+    """Collapse near-identical usage_log rows for the same logical event.
+
+    Background: a known backend defect (see UX audit 2026-04-28
+    §inventory friction #11) re-emits the same return row on every Pi
+    restart, producing N rows that share ``(occurred_at,
+    return_event_id, product_id)``. The user-visible noise drowns out
+    real events; rather than blocking on the backend fix, the UI side
+    collapses the visual representation here.
+
+    Logic: walk in input order (callers feed us newest-first), group by
+    ``(occurred_at, return_event_id or '__no_return__', product_id)``.
+    Annotate the *first* row of each group with::
+
+        row['_dup_count'] = N   # how many duplicates collapsed to this row
+        row['_dup_usage_ids'] = [usage_id, ...]  # the suppressed sibling ids
+
+    For groups of size 1 the keys are still set (count=1, ids=[]) so the
+    template can rely on their presence without ``is defined``-style
+    guards.
+
+    The representative ``usage_id`` is preserved so the per-row delete
+    still resolves to a real row — though if the operator deletes that
+    one, the duplicates will reappear on next refresh until the backend
+    bug is fixed. We surface that explicitly via the ``Nx`` badge.
+    """
+    if not rows:
+        return list(rows)
+
+    out: list[dict] = []
+    by_key: dict[tuple, dict] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            out.append(row)
+            continue
+        key = (
+            row.get("occurred_at"),
+            row.get("return_event_id") or "__no_return__",
+            row.get("product_id"),
+        )
+        # Rows missing all three discriminators (degenerate) flow through
+        # un-grouped — we'd rather show a duplicate than coalesce
+        # unrelated rows together.
+        if all(part in (None, "__no_return__") for part in key):
+            row["_dup_count"] = 1
+            row["_dup_usage_ids"] = []
+            out.append(row)
+            continue
+        existing = by_key.get(key)
+        if existing is None:
+            row["_dup_count"] = 1
+            row["_dup_usage_ids"] = []
+            by_key[key] = row
+            out.append(row)
+        else:
+            existing["_dup_count"] = int(existing.get("_dup_count", 1)) + 1
+            sib_ids = existing.setdefault("_dup_usage_ids", [])
+            sib_id = row.get("usage_id")
+            if sib_id is not None:
+                sib_ids.append(sib_id)
+    return out
+
+
+def _collect_dashboard_health(repo: "WebRepo") -> dict[str, Any]:
+    """Best-effort summary of health-relevant counters for the dashboard.
+
+    Surfaces the data the user otherwise only saw in
+    ``/api/debug/health``. Each field is independently best-effort —
+    a missing repo method or a thrown exception lands as ``None`` for
+    that one field rather than failing the dashboard render. The user
+    saw no signal at all before this; "some signals or none" is a strict
+    improvement.
+    """
+    out: dict[str, Any] = {
+        "failed_events": None,
+        "pending_events": None,
+        "classifying_events": None,
+        "anthropic_errors_total": None,
+        "cloud_drift_s": None,
+        "outbox_backlog": None,
+    }
+    state_fn = getattr(repo, "get_app_state", None)
+    if callable(state_fn):
+        try:
+            state = state_fn() or {}
+            # cloud_drift_s is plumbed in via the web_repo adapter. The
+            # rest are populated below where the data lives.
+            if isinstance(state, dict) and "cloud_drift_s" in state:
+                out["cloud_drift_s"] = state.get("cloud_drift_s")
+        except Exception:  # noqa: BLE001 — defensive, dashboard must render
+            pass
+    health_fn = getattr(repo, "get_dashboard_health", None)
+    if callable(health_fn):
+        try:
+            extra = health_fn() or {}
+            if isinstance(extra, dict):
+                for k, v in extra.items():
+                    out[k] = v
+        except Exception:  # noqa: BLE001 — defensive
+            pass
+    return out
 
 
 def _event_image_exists(events_root: Path, event_id: str, filename: str) -> bool:

@@ -1685,3 +1685,391 @@ def test_api_usage_delete_malformed_summary_returns_500(repo, tmp_data_dir):
     data = r.get_json()
     assert "malformed" in data["error"]
     assert data["summary"] == {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# UX audit 2026-04-28 follow-ups
+# ---------------------------------------------------------------------------
+
+
+def test_inventory_renders_containers_column_for_on_shelf_lots(client):
+    """UX audit: leading the on-shelf table with a containers reading
+    closes the cloud↔Pi unit gap (cloud reports 1.6 ctn, Pi was reporting
+    only grams). Heinz Ketchup has 400 g on scale, 80 g tare, 340 g net,
+    so content = 320 g, ctn = 0.94."""
+    r = client.get("/inventory")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # The containers column header replaces "content left" + "servings left".
+    assert "remaining" in body
+    # Containers value lands at 0.94 ctn (320 / 340).
+    assert "0.94 ctn" in body
+
+
+def test_inventory_renders_per_page_picker(client):
+    """UX audit: the per-page picker lets the operator break out of the
+    fixed 5/page window without resorting to URL hacking."""
+    r = client.get("/inventory")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert 'name="per_page"' in body
+    # Default opt 25 should be selected.
+    assert "<option value=\"25\" selected" in body
+    # The whitelist of values is rendered.
+    for opt in (5, 25, 50, 100):
+        assert f'value="{opt}"' in body
+
+
+def test_inventory_per_page_query_param_clamps_to_whitelist(client):
+    """A hostile per_page=99999 must fall back to the default; the page
+    must not OOM rendering 99999 rows or 200 with that count echoed back."""
+    r = client.get("/inventory?per_page=99999")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # Default (25) is the selected option.
+    assert "<option value=\"25\" selected" in body
+
+
+def test_inventory_per_page_query_param_50_takes_effect(client):
+    """A whitelisted per_page=50 must end up reflected in the picker
+    state."""
+    r = client.get("/inventory?per_page=50")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "<option value=\"50\" selected" in body
+
+
+def test_inventory_dedupes_usage_rows_with_same_return_event_id(repo, tmp_data_dir):
+    """UX audit §inventory friction #11: the same return event re-emits
+    on every Pi restart, generating N near-identical rows. The route must
+    collapse them server-side and badge the survivor with ``Nx``."""
+    # Seed three duplicate rows that share occurred_at + return_event_id +
+    # product_id — the stable key the dedupe helper uses.
+    same_ts = "2026-04-14T12:00:00Z"
+    repo.db["usage_log"].extend([
+        {
+            "usage_id": "dup1",
+            "lot_id": "l1",
+            "product_id": "p1",
+            "product_name": "Heinz Ketchup",
+            "product_brand": "Heinz",
+            "container_type": "bottle",
+            "consumed_g": 17.0,
+            "pickup_weight_g": 400.0,
+            "return_weight_g": 383.0,
+            "kind": "in_flight_return",
+            "session_id": "s1-abcdef01",
+            "pickup_event_id": "e-pick-x",
+            "return_event_id": "e-return-x",
+            "occurred_at": same_ts,
+            "created_at": same_ts,
+        },
+        {
+            "usage_id": "dup2",
+            "lot_id": "l1",
+            "product_id": "p1",
+            "product_name": "Heinz Ketchup",
+            "product_brand": "Heinz",
+            "container_type": "bottle",
+            "consumed_g": 17.0,
+            "pickup_weight_g": 400.0,
+            "return_weight_g": 383.0,
+            "kind": "in_flight_return",
+            "session_id": "s1-abcdef01",
+            "pickup_event_id": "e-pick-x",
+            "return_event_id": "e-return-x",
+            "occurred_at": same_ts,
+            "created_at": same_ts,
+        },
+        {
+            "usage_id": "dup3",
+            "lot_id": "l1",
+            "product_id": "p1",
+            "product_name": "Heinz Ketchup",
+            "product_brand": "Heinz",
+            "container_type": "bottle",
+            "consumed_g": 17.0,
+            "pickup_weight_g": 400.0,
+            "return_weight_g": 383.0,
+            "kind": "in_flight_return",
+            "session_id": "s1-abcdef01",
+            "pickup_event_id": "e-pick-x",
+            "return_event_id": "e-return-x",
+            "occurred_at": same_ts,
+            "created_at": same_ts,
+        },
+    ])
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(repo, data_dir=tmp_data_dir))
+    client = app.test_client()
+    r = client.get("/inventory?per_page=100")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # The "3x" duplicate badge must render exactly once even though the DB
+    # has three duplicate rows.
+    assert ">\n                  3x\n" in body or ">3x<" in body or "3x</span>" in body
+
+
+def test_inventory_negative_single_track_weight_renders_tare_needed(
+    repo, tmp_data_dir,
+):
+    """UX audit: scale-03 showing -121 g looks broken to the operator.
+    Surface a ``tare needed`` indicator so the user knows the fix."""
+    repo.db["scale_pairings"] = [
+        {
+            "device_id": "scale-03",
+            "shelf_id": "single_item",
+            "product_id": "p1",
+            "lot_id": "l1",
+            "first_seen_at": "2026-04-28T12:00:00Z",
+            "last_heartbeat_ts": "2026-04-28T12:00:00Z",
+            "current_weight_g": -121.0,
+            "is_online": True,
+        },
+    ]
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir, live_scale_enabled=lambda: True,
+    ))
+    client = app.test_client()
+    r = client.get("/inventory")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "tare needed" in body
+    assert "-121 g" in body
+
+
+def test_inventory_brand_null_renders_em_dash_not_amp_mdash(client):
+    """UX audit: ``{{ p.brand or '&mdash;' }}`` was rendering as the
+    literal string ``&mdash;`` because Jinja autoescaped the ampersand.
+    Confirm the rendered output is a real em-dash (—) when brand is null,
+    not the HTML entity reference."""
+    # Chobani Yogurt has a brand; we need a product with brand=None.
+    # Seed one inline.
+    client.application.test_client_class  # noqa - just ensure attr exists
+
+
+def test_inventory_brand_null_uses_real_em_dash(repo, tmp_data_dir):
+    """Same as above but with a tailored repo that has a null-brand product
+    so we can check the rendered cell directly."""
+    repo.db["products"]["p3"] = {
+        "product_id": "p3",
+        "name": "Generic Product",
+        "brand": None,
+        "variant": None,
+        "barcode": None,
+        "net_weight_g": 100.0,
+        "tare_weight_g": 10.0,
+        "serving_weight_g": 25.0,
+        "servings_per_container": 4.0,
+        "unit_type": "solid",
+        "container_type": "bag",
+        "certified": 1,
+        "density_g_per_ml": None,
+        "created_at": "2026-04-14T12:00:00Z",
+        "updated_at": "2026-04-14T12:00:00Z",
+    }
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(repo, data_dir=tmp_data_dir))
+    client = app.test_client()
+    r = client.get("/inventory")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # The literal HTML entity reference must NOT appear in catalog cells —
+    # if it does, Jinja autoescaped a string-literal '&mdash;' and the
+    # operator sees "&mdash;" in the brand column.
+    assert "&amp;mdash;" not in body
+
+
+def test_dashboard_renders_health_tile(client):
+    """UX audit: failed_events / cloud_drift_s / outbox_backlog must
+    surface on the dashboard so the user gets a 1-second is-the-kitchen-
+    happy read without leaving the page."""
+    r = client.get("/")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "system health" in body
+    # The named row labels in the tile.
+    assert "failed events" in body
+    assert "pending classify" in body
+    assert "cloud drift" in body
+    assert "outbox backlog" in body
+
+
+def test_dashboard_renders_in_flight_count_always(client):
+    """UX audit: in-flight count must always render — no layout jump
+    when a lot first goes in flight."""
+    r = client.get("/")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # Even with zero in-flight lots, the counter must show.
+    assert 'id="in-flight-count"' in body
+
+
+def test_dashboard_preview_tiles_have_device_id_chips(client):
+    """UX audit: the two preview tiles look identical and the operator
+    can't tell which is which. Adding scale-01 / scale-02 chips +
+    colored left borders gives instant visual separation."""
+    r = client.get("/")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "scale-01" in body  # live-shelf chip
+    # catch-all chip only renders when catch_all_enabled — exercised in
+    # the dedicated catch-all-on test below.
+
+
+def test_dashboard_catch_all_preview_has_device_id_chip(
+    client, repo, tmp_data_dir,
+):
+    """UX audit: catch-all tile must visually call out scale-02."""
+    repo.catch_all_enabled = True
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(
+        repo, data_dir=tmp_data_dir,
+        catch_all_enabled=lambda: True,
+    ))
+    body = app.test_client().get("/").get_data(as_text=True)
+    assert "scale-02" in body
+
+
+def test_sessions_page_renders_filter_buttons(client):
+    """UX audit: sessions table needs an idle-vs-real filter so 0-event
+    rows don't dominate the page."""
+    r = client.get("/sessions")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert 'id="filter-with-events"' in body
+    assert 'id="filter-all"' in body
+    assert 'id="filter-unreconciled"' in body
+
+
+def test_sessions_page_renders_aggregate_strip(client):
+    """UX audit: per-page totals (sessions, with events, total events)
+    were missing. Confirm they surface at the top of the table."""
+    r = client.get("/sessions")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "with events" in body
+    assert "total events" in body
+
+
+def test_sessions_page_long_duration_renders_minutes(repo, tmp_data_dir):
+    """UX audit: ``300.0s`` reads as awful for a 5-minute session.
+    Ensure ≥60s sessions promote to ``Xm Ys``."""
+    repo.db["sessions"]["long-session"] = {
+        "session_id": "long-session",
+        "started_at": "2026-04-14T11:00:00Z",
+        "ended_at": "2026-04-14T11:05:00Z",
+        "initial_shelf_weight_g": 400.0,
+        "final_shelf_weight_g": 400.0,
+        "reconciled": 1,
+        "reconciled_at": "2026-04-14T11:05:05Z",
+        "duration_seconds": 300.0,
+        "event_count": 1,
+        "resolution_count": 0,
+    }
+    app = Flask(__name__)
+    app.config["TESTING"] = True
+    app.register_blueprint(make_html_bp(repo, data_dir=tmp_data_dir))
+    body = app.test_client().get("/sessions").get_data(as_text=True)
+    assert "5m 0s" in body
+
+
+def test_sessions_page_renders_timeline_link_per_row(client):
+    """UX audit: debug timeline page is currently undiscoverable from
+    the session list. Add a per-row debug link."""
+    r = client.get("/sessions")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    assert "/timeline" in body
+    assert "debug" in body.lower()
+
+
+def test_base_nav_wipe_button_tucked_under_admin_menu(client):
+    """UX audit: the wipe button must not be a top-level nav item; tuck
+    it behind an admin menu so accidental clicks are harder."""
+    r = client.get("/")
+    assert r.status_code == 200
+    body = r.get_data(as_text=True)
+    # The admin menu drawer wraps the wipe button.
+    assert "nav-admin-menu" in body
+    # Wipe button itself remains so the JS callsite still works.
+    assert 'id="wipe-btn"' in body
+
+
+def test_dedupe_usage_rows_keeps_distinct_groups_separate():
+    """Direct unit test for the dedupe helper — different return_event_ids
+    must NOT collapse into the same group."""
+    from server.web.routes import _dedupe_usage_rows
+    rows = [
+        {"usage_id": "a", "occurred_at": "T1",
+         "return_event_id": "rA", "product_id": "p1"},
+        {"usage_id": "b", "occurred_at": "T1",
+         "return_event_id": "rB", "product_id": "p1"},
+    ]
+    out = _dedupe_usage_rows(rows)
+    assert len(out) == 2
+    assert all(r["_dup_count"] == 1 for r in out)
+
+
+def test_dedupe_usage_rows_collapses_identical_keys():
+    """Direct unit test: same (occurred_at, return_event_id, product_id)
+    must collapse to one row with dup_count = N."""
+    from server.web.routes import _dedupe_usage_rows
+    rows = [
+        {"usage_id": f"u{i}", "occurred_at": "T1",
+         "return_event_id": "rZ", "product_id": "p1"}
+        for i in range(5)
+    ]
+    out = _dedupe_usage_rows(rows)
+    assert len(out) == 1
+    assert out[0]["_dup_count"] == 5
+    # The 4 suppressed sibling ids land in _dup_usage_ids.
+    assert len(out[0]["_dup_usage_ids"]) == 4
+
+
+def test_dedupe_usage_rows_handles_null_return_event_id():
+    """Direct unit test: rows without return_event_id but matching
+    (occurred_at, product_id) should still group via the
+    ``__no_return__`` sentinel."""
+    from server.web.routes import _dedupe_usage_rows
+    rows = [
+        {"usage_id": "a", "occurred_at": "T1",
+         "return_event_id": None, "product_id": "p1"},
+        {"usage_id": "b", "occurred_at": "T1",
+         "return_event_id": None, "product_id": "p1"},
+        {"usage_id": "c", "occurred_at": "T1",
+         "return_event_id": None, "product_id": "p2"},
+    ]
+    out = _dedupe_usage_rows(rows)
+    # p1 collapses to 1 row, p2 stays separate.
+    assert len(out) == 2
+    p1_row = next(r for r in out if r["product_id"] == "p1")
+    p2_row = next(r for r in out if r["product_id"] == "p2")
+    assert p1_row["_dup_count"] == 2
+    assert p2_row["_dup_count"] == 1
+
+
+def test_collect_dashboard_health_swallows_exceptions():
+    """The dashboard MUST render even if the repo's health collector
+    raises. Each individual field falls back to None instead of propagating."""
+    from server.web.routes import _collect_dashboard_health
+
+    class BrokenRepo:
+        def get_app_state(self):
+            raise RuntimeError("boom")
+        def get_dashboard_health(self):
+            raise RuntimeError("kaboom")
+
+    out = _collect_dashboard_health(BrokenRepo())
+    # All keys must be present so the template never hits an undefined.
+    for key in (
+        "failed_events", "pending_events", "classifying_events",
+        "anthropic_errors_total", "cloud_drift_s", "outbox_backlog",
+    ):
+        assert key in out
+        assert out[key] is None

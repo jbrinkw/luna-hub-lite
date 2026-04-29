@@ -5,8 +5,12 @@
 
 <div class="row">
   <div class="col" style="flex: 2; min-width: 420px;">
-    <div class="panel">
-      <h3>live preview{% if catch_all_enabled %} &mdash; live shelf{% endif %}</h3>
+    <div class="panel" id="live-shelf-preview"
+         style="border-left: 3px solid var(--accent);">
+      <h3>
+        live preview{% if catch_all_enabled %} — live shelf{% endif %}
+        <span class="pill ok" style="margin-left: 8px; font-size: 10px;">scale-01</span>
+      </h3>
       <div class="preview-wrap">
         <img src="/live.mjpg" alt="live camera preview" />
       </div>
@@ -41,8 +45,12 @@
        to the catch-all's /dev/video device. State polled from
        /api/state?shelf=catch_all (handled by refreshCatchAll below). #}
     {% if catch_all_enabled %}
-    <div class="panel" id="catch-all-preview">
-      <h3>live preview &mdash; catch-all</h3>
+    <div class="panel" id="catch-all-preview"
+         style="border-left: 3px solid var(--info);">
+      <h3>
+        live preview — catch-all
+        <span class="pill info" style="margin-left: 8px; font-size: 10px;">scale-02</span>
+      </h3>
       <div class="preview-wrap">
         <img src="/live.mjpg?shelf=catch_all" alt="catch-all camera preview" />
       </div>
@@ -121,7 +129,106 @@
         <span class="stat"><span class="label">pending review:</span>
           <span class="value">{{ state.pending_reviews|default(pending_reviews|default(0)) }}</span>
         </span>
+        {# Always-on in-flight counter. UX audit (2026-04-28) noted that
+           the in-flight panel only renders when non-empty, so the user
+           gets no visible "0 lots in flight" / "all at rest" signal —
+           and "1 in flight" makes the page jump on first appearance. #}
+        <span class="stat"><span class="label">in flight:</span>
+          <span class="value" id="in-flight-count">{{ in_flight|length }}</span>
+        </span>
       </div>
+    </div>
+
+    {# UX-FLAG: anthropic_calls_total / _errors_total + camera daemon
+       liveness — deferred (see UX_AUDIT_PI_LIVESHELF_FLAGS.md Flag 3).
+       These live in the runtime classifier subsystem, not the SQLite DB
+       that the web_repo reads, so adding them needs either a JS-side
+       fetch of /api/debug/health or a host-supplied collector callable.
+       The tile is built so adding more rows is a 1-row diff later. #}
+    {# System health tile — UX audit (2026-04-28) flagged that
+       /api/debug/health exposes failed_events / pending_events /
+       cloud_drift_s / outbox_backlog but none of it surfaces on the
+       dashboard. The user gets a 1-second "is the kitchen happy?"
+       read here without leaving the page. Each row is muted-grey when
+       healthy / nominal, warn-amber when there's something to look
+       at. ``health`` comes from ``routes._collect_dashboard_health``;
+       missing fields fall through as muted dashes. #}
+    <div class="panel" id="health-tile">
+      <h3>system health</h3>
+      <table>
+        <tbody>
+          <tr>
+            <th>failed events</th>
+            <td>
+              {% if health.failed_events is none %}
+                <span class="muted">—</span>
+              {% elif health.failed_events == 0 %}
+                <span class="pill ok">{{ health.failed_events }}</span>
+              {% else %}
+                <span class="pill warn" title="scale_events with classifier_status='failed' — manual review or reset needed">
+                  {{ health.failed_events }}
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>pending classify</th>
+            <td>
+              {% if health.pending_events is none %}
+                <span class="muted">—</span>
+              {% elif health.pending_events == 0 %}
+                <span class="pill ok">{{ health.pending_events }}</span>
+              {% else %}
+                <span class="pill info" title="scale_events still queued for classification (Anthropic call in flight)">
+                  {{ health.pending_events }}
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>classifying now</th>
+            <td>
+              {% if health.classifying_events is none %}
+                <span class="muted">—</span>
+              {% elif health.classifying_events == 0 %}
+                <span class="pill ok">{{ health.classifying_events }}</span>
+              {% else %}
+                <span class="pill info">{{ health.classifying_events }}</span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>cloud drift</th>
+            <td>
+              {% if health.cloud_drift_s is none %}
+                <span class="muted">—</span>
+              {% elif health.cloud_drift_s|abs < 2 %}
+                <span class="pill ok mono">{{ '%+.2fs'|format(health.cloud_drift_s) }}</span>
+              {% else %}
+                <span class="pill warn mono"
+                      title="absolute drift between Pi clock and cloud is over 2 seconds — check NTP">
+                  {{ '%+.2fs'|format(health.cloud_drift_s) }}
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+          <tr>
+            <th>outbox backlog</th>
+            <td>
+              {% if health.outbox_backlog is none %}
+                <span class="muted">—</span>
+              {% elif health.outbox_backlog == 0 %}
+                <span class="pill ok">{{ health.outbox_backlog }}</span>
+              {% else %}
+                <span class="pill warn"
+                      title="undelivered cloud_outbox rows — cloud sync is behind">
+                  {{ health.outbox_backlog }}
+                </span>
+              {% endif %}
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
 
     {# In-flight tracker section (IN_FLIGHT_TRACKER_PLAN.md §10.1).
@@ -324,6 +431,11 @@
         const stableDot = document.getElementById('stable-dot');
         const stableLabel = document.getElementById('stable-label');
         if (stableDot && stableLabel) {
+          // UX-FLAG: stable-indicator hysteresis — deferred (see
+          // UX_AUDIT_PI_LIVESHELF_FLAGS.md Flag 2). The display flips
+          // every couple of seconds because the underlying weight
+          // oscillates around the door-closed mean. Tuning where to
+          // dampen (handler vs poller) is queued for the user.
           if (s.scale_stable === true) {
             stableDot.className = 'dot on';
             stableLabel.textContent = 'STABLE';

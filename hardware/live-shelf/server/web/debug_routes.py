@@ -274,6 +274,12 @@ def _render_timeline_html(
         url, label = related_link
         back = f'<p><a href="{_escape(url)}">&larr; {_escape(label)}</a></p>'
     count = len(timeline)
+    # UX-FLAG: debug timeline pages have a light-mode style that
+    # contrasts hard with the rest of the dark-themed app — see
+    # UX_AUDIT_PI_LIVESHELF_FLAGS.md Flag 5. Decision deferred: keep
+    # the loud visual break (intentional "you've left the app" signal)
+    # OR migrate to extend _base.html for nav continuity. Both are
+    # defensible per the audit.
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">

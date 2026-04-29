@@ -160,9 +160,8 @@
         <tr>
           <th>product</th>
           <th>brand / variant</th>
+          <th>remaining</th>
           <th>on scale</th>
-          <th>content left</th>
-          <th>servings left</th>
           <th>% full</th>
           <th>consumed</th>
           <th>last seen</th>
@@ -177,38 +176,61 @@
           {% set tare = product.tare_weight_g %}
           {% set net = product.net_weight_g %}
           {% set srv = product.serving_weight_g %}
+          {% set spc = product.servings_per_container %}
           {% set content = (cur - tare) if (cur is not none and tare is not none) else none %}
           {% set servings_left = (content / srv) if (content is not none and srv and srv > 0) else none %}
           {% set pct_full = (content / net * 100) if (content is not none and net and net > 0) else none %}
+          {# Containers: full container = net_weight_g of content. The cloud
+             stores qty_containers; the Pi only knows weight. Derive a
+             containers-left value here so the operator can read the same
+             unit on both surfaces ("1.6 ctn cloud == 1.6 ctn Pi") and
+             stop translating in their head. #}
+          {% set ctn_left = (content / net) if (content is not none and net and net > 0) else none %}
           <tr data-lot-id="{{ lot.lot_id }}">
             <td>
               <strong>{{ product.name }}</strong>
               {% if product.barcode %}<div class="muted" style="font-size: 11px;">{{ product.barcode }}</div>{% endif %}
             </td>
             <td>
-              <span>{{ product.brand or '&mdash;' }}</span>
+              <span>{{ product.brand or '—' }}</span>
               {% if product.variant %}<div class="muted" style="font-size: 11px;">{{ product.variant }}</div>{% endif %}
             </td>
+            {# Containers-first display. UX audit (2026-04-28) flagged
+               that the cloud thinks in containers (1.6 ctn) but the Pi
+               UI exposed only grams — making the user mentally translate
+               between two unit systems. Lead with ctn, surface servings
+               as a secondary line, and put grams in the next column for
+               anyone who needs the literal scale reading. #}
             <td class="mono">
-              {% if cur is not none %}{{ '%.1f g'|format(cur) }}{% else %}&mdash;{% endif %}
-            </td>
-            <td class="mono">
-              {% if content is not none %}
-                <strong>{{ '%.1f g'|format(content if content > 0 else 0) }}</strong>
-                {% if net %}<div class="muted" style="font-size: 11px;">of {{ '%.0f g'|format(net) }} full</div>{% endif %}
+              {% if ctn_left is not none %}
+                <strong>{{ '%.2f ctn'|format(ctn_left if ctn_left > 0 else 0) }}</strong>
+                {% if servings_left is not none %}
+                  <div class="muted" style="font-size: 11px;">
+                    {{ '%.1f srv'|format(servings_left if servings_left > 0 else 0) }}{% if spc %} / {{ '%g'|format(spc) }}{% endif %}
+                  </div>
+                {% elif net %}
+                  <div class="muted" style="font-size: 11px;">{{ '%.0f g'|format(net) }} per ctn</div>
+                {% endif %}
+              {% elif servings_left is not none %}
+                <strong>{{ '%.1f srv'|format(servings_left if servings_left > 0 else 0) }}</strong>
+                {% if spc %}<div class="muted" style="font-size: 11px;">of {{ '%g'|format(spc) }}</div>{% endif %}
               {% else %}
-                <span class="muted">&mdash;</span>
+                <span class="muted">—</span>
                 <div class="muted" style="font-size: 11px;">
                   {% if tare is none %}no tare{% elif cur is none %}no weight{% endif %}
                 </div>
               {% endif %}
             </td>
             <td class="mono">
-              {% if servings_left is not none %}
-                <strong>{{ '%.1f'|format(servings_left if servings_left > 0 else 0) }}</strong>
-                {% if product.servings_per_container %}<div class="muted" style="font-size: 11px;">of {{ '%g'|format(product.servings_per_container) }}</div>{% endif %}
+              {% if cur is not none %}
+                {{ '%.1f g'|format(cur) }}
+                {% if content is not none %}
+                  <div class="muted" style="font-size: 11px;">
+                    {{ '%.1f g'|format(content if content > 0 else 0) }} content{% if net %} / {{ '%.0f'|format(net) }}{% endif %}
+                  </div>
+                {% endif %}
               {% else %}
-                <span class="muted">&mdash;</span>
+                —
               {% endif %}
             </td>
             <td class="mono">
@@ -216,7 +238,7 @@
                 {% set pct_shown = pct_full if pct_full > 0 else 0 %}
                 {% if pct_shown >= 50 %}<span style="color: var(--accent)">{% elif pct_shown >= 20 %}<span style="color: #d79b00">{% else %}<span style="color: #ff6b6b">{% endif %}{{ '%.0f%%'|format(pct_shown) }}</span>
               {% else %}
-                <span class="muted">&mdash;</span>
+                <span class="muted">—</span>
               {% endif %}
             </td>
             <td class="mono muted">
@@ -389,9 +411,23 @@
             </td>
             <td class="mono">
               {% if s.current_weight_g is not none %}
-                <strong>{{ '%.0f g'|format(s.current_weight_g) }}</strong>
+                {# Negative weight = scale reading is below the captured
+                   tare zero. UX audit (2026-04-28) flagged that scale-03
+                   showing "-121 g" with no explanation looks broken to the
+                   operator. Surface a "tare needed" pill so the user knows
+                   to recapture the empty-scale baseline rather than
+                   reaching for the power cord. Threshold is -5 g — small
+                   transient noise around zero stays neutral. #}
+                {% if s.current_weight_g < -5 %}
+                  <span style="color: var(--warn);"><strong>{{ '%.0f g'|format(s.current_weight_g) }}</strong></span>
+                  <div class="muted" style="font-size: 11px; color: var(--warn);">
+                    tare needed (below zero)
+                  </div>
+                {% else %}
+                  <strong>{{ '%.0f g'|format(s.current_weight_g) }}</strong>
+                {% endif %}
               {% else %}
-                <span class="muted">&mdash;</span>
+                <span class="muted">—</span>
               {% endif %}
             </td>
             <td class="mono" style="font-size: 11px;">
@@ -463,6 +499,25 @@
     {% endif %}
     <button type="submit">filter</button>
     <a href="/inventory" class="muted" style="align-self: center;">reset</a>
+    {# Quick-window presets — UX audit (2026-04-28) flagged the absence of
+       "today" / "last 24h" defaults, since those are the most common
+       slices the operator wants. Buttons resolve to ?since=YYYY-MM-DD
+       on the client so we don't need to plumb a new server endpoint. #}
+    <button type="button" id="preset-today" class="muted"
+            style="margin-left: auto; font-size: 11px; padding: 2px 6px;"
+            title="filter to entries from today onward (local time)">
+      today
+    </button>
+    <button type="button" id="preset-24h" class="muted"
+            style="font-size: 11px; padding: 2px 6px;"
+            title="filter to entries from the last 24 hours">
+      24h
+    </button>
+    <button type="button" id="preset-7d" class="muted"
+            style="font-size: 11px; padding: 2px 6px;"
+            title="filter to entries from the last 7 days">
+      7d
+    </button>
   </form>
 
   {% if usage_items %}
@@ -488,6 +543,18 @@
               {% if r.product_brand %}
                 <span class="muted" style="font-size: 0.85em;">
                   ({{ r.product_brand }})
+                </span>
+              {% endif %}
+              {% if r._dup_count is defined and r._dup_count and r._dup_count > 1 %}
+                {# UX audit (2026-04-28) §inventory friction #11: a backend
+                   bug re-emits the same return row on each Pi restart. We
+                   collapse them server-side and badge the survivor with
+                   the count so the user can see "this is one event
+                   recorded N times" instead of N rows of visual noise. #}
+                <span class="pill warn"
+                      title="{{ r._dup_count }} duplicate inserts collapsed (likely a Pi-restart re-emission bug). The other rows are still in the DB; deleting this one will leave them behind."
+                      style="font-size: 10px; margin-left: 6px;">
+                  {{ r._dup_count }}x
                 </span>
               {% endif %}
             </td>
@@ -546,22 +613,68 @@
       </tbody>
     </table>
 
-    {% if usage_total_pages > 1 %}
-      <div style="display: flex; gap: 8px; margin-top: 12px; align-items: center;">
-        {% set qs %}{% if filters.product %}&amp;product={{ filters.product }}{% endif %}{% if filters.kind %}&amp;kind={{ filters.kind }}{% endif %}{% if filters.since %}&amp;since={{ filters.since }}{% endif %}{% if filters.until %}&amp;until={{ filters.until }}{% endif %}{% endset %}
+    {# Pagination + per-page picker. UX audit (2026-04-28) flagged the
+       hard-coded 5/page setting created 17 pages of paging with no way
+       to jump or change page size. We default to 25 now, expose the
+       picker, and add a numeric jump field for the long history case. #}
+    {% set qs %}{% if filters.product %}&amp;product={{ filters.product }}{% endif %}{% if filters.kind %}&amp;kind={{ filters.kind }}{% endif %}{% if filters.since %}&amp;since={{ filters.since }}{% endif %}{% if filters.until %}&amp;until={{ filters.until }}{% endif %}{% endset %}
+    <div style="display: flex; gap: 12px; margin-top: 12px; align-items: center; flex-wrap: wrap;">
+      {% if usage_total_pages > 1 %}
         {% if usage_page > 1 %}
-          <a href="/inventory?page={{ usage_page - 1 }}{{ qs }}">&larr; prev</a>
+          <a href="/inventory?page={{ usage_page - 1 }}&amp;per_page={{ usage_per_page }}{{ qs }}">&larr; prev</a>
+        {% else %}
+          <span class="muted" style="opacity: 0.5;">&larr; prev</span>
         {% endif %}
         <span class="muted">page {{ usage_page }} / {{ usage_total_pages }}</span>
         {% if usage_page < usage_total_pages %}
-          <a href="/inventory?page={{ usage_page + 1 }}{{ qs }}">next &rarr;</a>
+          <a href="/inventory?page={{ usage_page + 1 }}&amp;per_page={{ usage_per_page }}{{ qs }}">next &rarr;</a>
+        {% else %}
+          <span class="muted" style="opacity: 0.5;">next &rarr;</span>
         {% endif %}
-      </div>
-    {% endif %}
+        {% if usage_total_pages > 5 %}
+          <form method="get" action="/inventory" style="display: inline-flex; align-items: center; gap: 4px; margin-left: 8px;">
+            <span class="muted" style="font-size: 11px;">jump to</span>
+            <input type="number" name="page" min="1" max="{{ usage_total_pages }}"
+                   value="{{ usage_page }}"
+                   style="width: 60px;" />
+            <input type="hidden" name="per_page" value="{{ usage_per_page }}" />
+            {% if filters.product %}<input type="hidden" name="product" value="{{ filters.product }}" />{% endif %}
+            {% if filters.kind %}<input type="hidden" name="kind" value="{{ filters.kind }}" />{% endif %}
+            {% if filters.since %}<input type="hidden" name="since" value="{{ filters.since }}" />{% endif %}
+            {% if filters.until %}<input type="hidden" name="until" value="{{ filters.until }}" />{% endif %}
+            <button type="submit" style="font-size: 11px; padding: 2px 6px;">go</button>
+          </form>
+        {% endif %}
+      {% endif %}
+      <form method="get" action="/inventory"
+            style="display: inline-flex; align-items: center; gap: 4px; margin-left: auto;">
+        <span class="muted" style="font-size: 11px;">show</span>
+        <select name="per_page" onchange="this.form.submit()">
+          {% for opt in usage_per_page_options %}
+            <option value="{{ opt }}" {% if opt == usage_per_page %}selected{% endif %}>{{ opt }}</option>
+          {% endfor %}
+        </select>
+        <span class="muted" style="font-size: 11px;">/ page</span>
+        {% if filters.product %}<input type="hidden" name="product" value="{{ filters.product }}" />{% endif %}
+        {% if filters.kind %}<input type="hidden" name="kind" value="{{ filters.kind }}" />{% endif %}
+        {% if filters.since %}<input type="hidden" name="since" value="{{ filters.since }}" />{% endif %}
+        {% if filters.until %}<input type="hidden" name="until" value="{{ filters.until }}" />{% endif %}
+        <noscript>
+          <button type="submit" style="font-size: 11px; padding: 2px 6px;">apply</button>
+        </noscript>
+      </form>
+    </div>
   {% else %}
     <p class="muted">no usage rows match the current filters.</p>
   {% endif %}
 </div>
+
+{# UX-FLAG: auto-refresh of usage-log + on-shelf tables — deferred (see UX_AUDIT_PI_LIVESHELF_FLAGS.md Flag 1).
+   Currently the live-preview tile updates every 300 ms, but this table
+   only refreshes on a manual reload — leading to "the live preview says
+   +160 g chicken added but the on-shelf table still says only milk".
+   Fix is multi-day (polling vs SSE, cache-key strategy, partial-render
+   semantics) so the call is queued for the user. #}
 
 {# -- Per-product summary ------------------------------------------- #}
 {% if summary %}
@@ -649,22 +762,22 @@
               <strong>{{ p.name }}</strong>
               {% if p.variant %}<div class="muted" style="font-size: 11px;">{{ p.variant }}</div>{% endif %}
             </td>
-            <td>{{ p.brand or '&mdash;' }}</td>
-            <td class="mono">{{ p.barcode or '&mdash;' }}</td>
+            <td>{{ p.brand or '—' }}</td>
+            <td class="mono">{{ p.barcode or '—' }}</td>
             <td class="mono">
-              {% if p.net_weight_g is not none %}{{ '%.1f g'|format(p.net_weight_g) }}{% else %}&mdash;{% endif %}
+              {% if p.net_weight_g is not none %}{{ '%.1f g'|format(p.net_weight_g) }}{% else %}—{% endif %}
             </td>
             <td class="mono tare-cell">
-              {% if p.tare_weight_g is not none %}{{ '%.1f g'|format(p.tare_weight_g) }}{% else %}<span class="muted">&mdash;</span>{% endif %}
+              {% if p.tare_weight_g is not none %}{{ '%.1f g'|format(p.tare_weight_g) }}{% else %}<span class="muted">—</span>{% endif %}
             </td>
             <td class="mono">
-              {% if p.serving_weight_g is not none %}{{ '%.1f g'|format(p.serving_weight_g) }}{% else %}&mdash;{% endif %}
+              {% if p.serving_weight_g is not none %}{{ '%.1f g'|format(p.serving_weight_g) }}{% else %}—{% endif %}
             </td>
             <td class="mono">
-              {% if p.servings_per_container is not none %}{{ '%g'|format(p.servings_per_container) }}{% else %}&mdash;{% endif %}
+              {% if p.servings_per_container is not none %}{{ '%g'|format(p.servings_per_container) }}{% else %}—{% endif %}
             </td>
-            <td><span class="pill muted">{{ p.container_type or '&mdash;' }}</span></td>
-            <td><span class="pill muted">{{ p.unit_type or '&mdash;' }}</span></td>
+            <td><span class="pill muted">{{ p.container_type or '—' }}</span></td>
+            <td><span class="pill muted">{{ p.unit_type or '—' }}</span></td>
             <td>
               <button
                 class="arm-tare"
@@ -699,6 +812,45 @@
 
 {% block scripts %}
 <script>
+  // Quick-window presets for the usage-log filter.
+  // We resolve to YYYY-MM-DD strings client-side so the existing
+  // server-side ?since= / ?until= handling keeps working unmodified.
+  (function () {
+    function todayIso() {
+      const d = new Date();
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + day;
+    }
+    function isoDaysAgo(days) {
+      const d = new Date(Date.now() - days * 86400000);
+      const y = d.getFullYear();
+      const m = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return y + '-' + m + '-' + day;
+    }
+    function applyPreset(since) {
+      const params = new URLSearchParams(window.location.search);
+      params.set('since', since);
+      params.delete('until');
+      params.delete('page');
+      window.location.search = params.toString();
+    }
+    const todayBtn = document.getElementById('preset-today');
+    if (todayBtn) todayBtn.addEventListener('click', function () {
+      applyPreset(todayIso());
+    });
+    const h24Btn = document.getElementById('preset-24h');
+    if (h24Btn) h24Btn.addEventListener('click', function () {
+      applyPreset(isoDaysAgo(1));
+    });
+    const d7Btn = document.getElementById('preset-7d');
+    if (d7Btn) d7Btn.addEventListener('click', function () {
+      applyPreset(isoDaysAgo(7));
+    });
+  })();
+
   // Per-row catalog delete.
   document.querySelectorAll('button.del-product').forEach(function (btn) {
     btn.addEventListener('click', async function () {

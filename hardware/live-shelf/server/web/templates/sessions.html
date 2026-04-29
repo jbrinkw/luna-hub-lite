@@ -4,13 +4,66 @@
 <h1>sessions</h1>
 
 <div class="panel">
+  {# Aggregate strip — UX audit (2026-04-28) flagged that the operator
+     can't tell at a glance how many sessions had real activity vs. were
+     idle door-opens. Compute totals from the rendered window so the
+     numbers always agree with what's on screen. #}
+  {% set total_events = namespace(v=0) %}
+  {% set total_with_events = namespace(v=0) %}
+  {% set total_unreconciled = namespace(v=0) %}
+  {% for s in sessions %}
+    {% set total_events.v = total_events.v + (s.event_count|default(0)) %}
+    {% if (s.event_count|default(0)) > 0 %}
+      {% set total_with_events.v = total_with_events.v + 1 %}
+    {% endif %}
+    {% if not s.reconciled and s.ended_at %}
+      {% set total_unreconciled.v = total_unreconciled.v + 1 %}
+    {% endif %}
+  {% endfor %}
+  <div style="display: flex; gap: 18px; flex-wrap: wrap; margin-bottom: 10px;">
+    <span class="stat"><span class="label">sessions:</span>
+      <span class="value">{{ sessions|length }}</span>
+    </span>
+    <span class="stat"><span class="label">with events:</span>
+      <span class="value">{{ total_with_events.v }}</span>
+    </span>
+    <span class="stat"><span class="label">total events:</span>
+      <span class="value">{{ total_events.v }}</span>
+    </span>
+    {% if total_unreconciled.v %}
+      <span class="stat"><span class="label">unreconciled:</span>
+        <span class="value" style="color: var(--warn);">{{ total_unreconciled.v }}</span>
+      </span>
+    {% endif %}
+  </div>
   <p class="muted" style="margin-top: 0;">
-    {{ sessions|length }} session{{ '' if sessions|length == 1 else 's' }}.
     Each session is a single door-open &rarr; door-close window.
+    Use the toggle to filter out 0-event idle openings.
   </p>
 
+  {# Client-side filter toggle. UX audit (2026-04-28) flagged that idle
+     0-event sessions outnumber real ones in the demo data. We default
+     to "with events" so the page leads with signal, and let the
+     operator flip to "all" with one click. The filter is applied via
+     CSS classes so paging state isn't lost. #}
+  <div style="display: flex; gap: 8px; align-items: center; margin-bottom: 8px;">
+    <span class="muted" style="font-size: 11px;">show:</span>
+    <button type="button" id="filter-with-events" class="primary"
+            style="font-size: 11px; padding: 2px 8px;">
+      with events
+    </button>
+    <button type="button" id="filter-all"
+            style="font-size: 11px; padding: 2px 8px;">
+      all
+    </button>
+    <button type="button" id="filter-unreconciled"
+            style="font-size: 11px; padding: 2px 8px;">
+      unreconciled
+    </button>
+  </div>
+
   {% if sessions %}
-    <table>
+    <table id="sessions-table">
       <thead>
         <tr>
           <th>id</th>
@@ -23,11 +76,18 @@
           <th>final</th>
           <th>delta</th>
           <th>reconciled</th>
+          <th>timeline</th>
         </tr>
       </thead>
       <tbody>
         {% for s in sessions %}
-          <tr onclick="window.location='/session/{{ s.session_id }}'" style="cursor: pointer;">
+          {% set has_events = (s.event_count|default(0)) > 0 %}
+          {% set is_unreconciled = (not s.reconciled and s.ended_at) %}
+          {% set duration_sec = s.duration_seconds %}
+          <tr data-has-events="{{ '1' if has_events else '0' }}"
+              data-unreconciled="{{ '1' if is_unreconciled else '0' }}"
+              onclick="window.location='/session/{{ s.session_id }}'"
+              style="cursor: pointer;{% if is_unreconciled %} background: rgba(255, 179, 71, 0.05);{% endif %}">
             <td class="mono">
               <a href="/session/{{ s.session_id }}">{{ s.session_id[:8] }}</a>
             </td>
@@ -36,19 +96,26 @@
               {% if s.ended_at %}{{ s.ended_at[:19]|replace('T', ' ') }}{% else %}<span class="pill info">live</span>{% endif %}
             </td>
             <td class="mono">
-              {% if s.duration_seconds is defined and s.duration_seconds is not none %}
-                {{ '%.1fs'|format(s.duration_seconds) }}
+              {# UX audit (2026-04-28): "8.0s" is fine for short sessions
+                 but a 5-minute door-open reads as "300.0s" which is
+                 awful. Promote to "Xm Ys" when ≥ 60s. #}
+              {% if duration_sec is defined and duration_sec is not none %}
+                {% if duration_sec >= 60 %}
+                  {{ (duration_sec|int) // 60 }}m {{ (duration_sec|int) % 60 }}s
+                {% else %}
+                  {{ '%.1fs'|format(duration_sec) }}
+                {% endif %}
               {% else %}
-                &mdash;
+                —
               {% endif %}
             </td>
             <td class="mono">{{ s.event_count|default(0) }}</td>
             <td class="mono">{{ s.resolution_count|default(0) }}</td>
             <td class="mono">
-              {% if s.initial_shelf_weight_g is not none %}{{ '%.1f g'|format(s.initial_shelf_weight_g) }}{% else %}&mdash;{% endif %}
+              {% if s.initial_shelf_weight_g is not none %}{{ '%.1f g'|format(s.initial_shelf_weight_g) }}{% else %}—{% endif %}
             </td>
             <td class="mono">
-              {% if s.final_shelf_weight_g is not none %}{{ '%.1f g'|format(s.final_shelf_weight_g) }}{% else %}&mdash;{% endif %}
+              {% if s.final_shelf_weight_g is not none %}{{ '%.1f g'|format(s.final_shelf_weight_g) }}{% else %}—{% endif %}
             </td>
             <td class="mono">
               {% if s.final_shelf_weight_g is not none and s.initial_shelf_weight_g is not none %}
@@ -56,14 +123,24 @@
                 <span class="{% if d > 0 %}mono{% elif d < 0 %}mono{% endif %}" style="color: {% if d > 0 %}var(--accent){% elif d < 0 %}var(--warn){% else %}var(--muted){% endif %};">
                   {{ '%+.1f g'|format(d) }}
                 </span>
-              {% else %}&mdash;{% endif %}
+              {% else %}—{% endif %}
             </td>
             <td>
               {% if s.reconciled %}
                 <span class="pill ok">yes</span>
+              {% elif s.ended_at %}
+                <span class="pill warn">no</span>
               {% else %}
-                <span class="pill muted">no</span>
+                <span class="pill muted">live</span>
               {% endif %}
+            </td>
+            <td onclick="event.stopPropagation();">
+              <a href="/session/{{ s.session_id }}/timeline"
+                 class="muted"
+                 style="font-size: 11px;"
+                 title="open lifecycle audit timeline (debug view)">
+                debug &rarr;
+              </a>
             </td>
           </tr>
         {% endfor %}
@@ -73,4 +150,54 @@
     <p class="muted">no sessions yet. open the door to start one.</p>
   {% endif %}
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Client-side row filter. We don't want to plumb new server-side
+  // filter params for the MVP, so we keep all rows in the DOM and
+  // toggle visibility via data-attributes. The buttons swap their
+  // ``primary`` class so the active filter is obvious.
+  (function () {
+    const table = document.getElementById('sessions-table');
+    if (!table) return;
+    const rows = table.querySelectorAll('tbody tr');
+    const buttons = {
+      'with-events': document.getElementById('filter-with-events'),
+      'all': document.getElementById('filter-all'),
+      'unreconciled': document.getElementById('filter-unreconciled'),
+    };
+    function setActive(name) {
+      Object.keys(buttons).forEach(function (k) {
+        const btn = buttons[k];
+        if (!btn) return;
+        if (k === name) btn.classList.add('primary');
+        else btn.classList.remove('primary');
+      });
+    }
+    function applyFilter(name) {
+      rows.forEach(function (tr) {
+        const hasEvents = tr.getAttribute('data-has-events') === '1';
+        const unreconciled = tr.getAttribute('data-unreconciled') === '1';
+        let show = true;
+        if (name === 'with-events') show = hasEvents;
+        else if (name === 'unreconciled') show = unreconciled;
+        // 'all' shows everything
+        tr.style.display = show ? '' : 'none';
+      });
+      setActive(name);
+    }
+    if (buttons['with-events']) buttons['with-events'].addEventListener(
+      'click', function () { applyFilter('with-events'); }
+    );
+    if (buttons['all']) buttons['all'].addEventListener(
+      'click', function () { applyFilter('all'); }
+    );
+    if (buttons['unreconciled']) buttons['unreconciled'].addEventListener(
+      'click', function () { applyFilter('unreconciled'); }
+    );
+    // Default to "with events" — leads with signal.
+    applyFilter('with-events');
+  })();
+</script>
 {% endblock %}

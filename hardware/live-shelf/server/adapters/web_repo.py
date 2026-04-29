@@ -746,6 +746,59 @@ class RepoWebAdapter:
             "last_error": arm.last_error,
         }
 
+    # --------------------------------------------------- dashboard health
+    # UX audit 2026-04-28: ``/api/debug/health`` already exposes
+    # ``failed_events`` / ``pending_events`` / ``classifying_events`` etc.
+    # but the dashboard never surfaced them. This helper collects the
+    # best-effort counts in a single read so ``routes._collect_dashboard_health``
+    # can render a small "system health" tile next to "shelf totals".
+    # Each individual count is wrapped so a missing column / view doesn't
+    # poison the others — the dashboard MUST render even if every count
+    # comes back NULL.
+    def get_dashboard_health(self) -> dict[str, Any]:
+        out: dict[str, Any] = {
+            "failed_events": None,
+            "pending_events": None,
+            "classifying_events": None,
+            "outbox_backlog": None,
+        }
+        with self._db_lock:
+            for key, sql in (
+                (
+                    "failed_events",
+                    "SELECT COUNT(*) AS c FROM scale_events "
+                    "WHERE classifier_status = 'failed'",
+                ),
+                (
+                    "pending_events",
+                    "SELECT COUNT(*) AS c FROM scale_events "
+                    "WHERE classifier_status = 'pending'",
+                ),
+                (
+                    "classifying_events",
+                    "SELECT COUNT(*) AS c FROM scale_events "
+                    "WHERE classifier_status = 'classifying'",
+                ),
+            ):
+                try:
+                    row = self._conn.execute(sql).fetchone()
+                    out[key] = int(row["c"] if row is not None else 0)
+                except Exception:  # noqa: BLE001 — best-effort tile
+                    out[key] = None
+            # Outbox backlog: rows the cloud worker hasn't drained yet.
+            # ``cloud_outbox`` may not exist on every install (older DBs,
+            # tests using a stripped-down schema) so we tolerate the
+            # missing-table error explicitly.
+            try:
+                row = self._conn.execute(
+                    "SELECT COUNT(*) AS c FROM cloud_outbox "
+                    "WHERE delivered_at IS NULL"
+                ).fetchone()
+                out["outbox_backlog"] = int(row["c"] if row is not None else 0)
+            except Exception:  # noqa: BLE001 — table may be absent
+                out["outbox_backlog"] = None
+        return out
+
     def get_active_tare_arm(self) -> Optional[dict[str, Any]]:
         """Dict-form active arm (or None). Used by ``inventory()`` to
         render the sticky banner + highlight the armed button without a
