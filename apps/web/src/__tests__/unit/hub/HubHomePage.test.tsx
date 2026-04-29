@@ -10,12 +10,24 @@ import { HubHomePage } from '@/pages/hub/HubHomePage';
 // imported hook as a Vitest mock so we can override its return value per test.
 const mockUseAppContext = vi.mocked(useAppContext);
 
-// Mock AuthProvider
+// HUB-U-02: mock useAuth with full AuthContextType shape (user + session) so
+// any component path that reads session.access_token or session.expires_at is
+// exercised rather than silently receiving undefined.
 const mockSignOut = vi.fn();
 vi.mock('@/shared/auth/AuthProvider', () => ({
   useAuth: () => ({
     user: { id: 'user-1', email: 'test@test.com' },
+    session: {
+      access_token: 'test-access-token-abc123',
+      refresh_token: 'test-refresh-token-xyz',
+      token_type: 'bearer',
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: 'user-1', email: 'test@test.com' },
+    },
     loading: false,
+    sessionError: null,
+    clearSessionError: vi.fn(),
     signIn: vi.fn(),
     signUp: vi.fn(),
     signOut: mockSignOut,

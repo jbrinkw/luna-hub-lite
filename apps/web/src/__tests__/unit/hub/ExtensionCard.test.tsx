@@ -6,9 +6,27 @@ import { QueryClient, QueryClientProvider, useQueryClient } from '@tanstack/reac
 import { ExtensionCard } from '@/components/hub/ExtensionCard';
 import { queryKeys } from '@/shared/queryKeys';
 
-// Stub auth: the tail query needs a logged-in user to enable.
+// HUB-U-02: mock useAuth with full AuthContextType shape (user + session) so
+// any component path that reads session.access_token or session.expires_at is
+// exercised rather than silently receiving undefined.
 vi.mock('@/shared/auth/AuthProvider', () => ({
-  useAuth: () => ({ user: { id: 'user-1', email: 'test@test.com' } }),
+  useAuth: () => ({
+    user: { id: 'user-1', email: 'test@test.com' },
+    session: {
+      access_token: 'test-access-token-abc123',
+      refresh_token: 'test-refresh-token-xyz',
+      token_type: 'bearer',
+      expires_in: 3600,
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user: { id: 'user-1', email: 'test@test.com' },
+    },
+    loading: false,
+    sessionError: null,
+    clearSessionError: vi.fn(),
+    signIn: vi.fn(),
+    signUp: vi.fn(),
+    signOut: vi.fn(),
+  }),
 }));
 
 // Capture realtime subscriptions so we can assert (a) the hook is wired,
