@@ -268,10 +268,7 @@ export function ReviewsPage() {
                   {/* Image strip: before/after JPEGs from the Pi LAN web server.
                       Off-LAN or invalid lan_ip → gray placeholder + tooltip. */}
                   {Array.isArray(row.images) && row.images.length > 0 ? (
-                    <div
-                      className="mt-2 flex flex-wrap gap-2"
-                      data-testid={`review-images-${row.review_id}`}
-                    >
+                    <div className="mt-2 flex flex-wrap gap-2" data-testid={`review-images-${row.review_id}`}>
                       {row.images.map((relPath, idx) => {
                         const url = buildPiImageUrl(lanIp, relPath);
                         const errKey = `${row.review_id}::${idx}`;

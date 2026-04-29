@@ -34,7 +34,12 @@ INSERT INTO _sec_allowlist VALUES
   ('private.set_products_updated_at()',
     'Trigger helper — runs as table owner on every DML. No escalation needed.'),
   ('private.set_stock_lots_updated_at()',
-    'Trigger helper — runs as table owner on every DML. No escalation needed.');
+    'Trigger helper — runs as table owner on every DML. No escalation needed.'),
+  ('private.now_with_freeze()',
+    'Read-only helper for L7 clock-freeze harness. Returns coalesce('
+    'current_setting(''app.frozen_now'', true)::timestamptz, now()). '
+    'No state mutation, no escalation, no user-id parameter — '
+    'SECURITY INVOKER is correct.');
 
 -- ----------------------------------------------------------------------------
 -- 2. Audit table — every private function with classification.

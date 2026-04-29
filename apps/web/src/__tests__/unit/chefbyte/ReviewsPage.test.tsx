@@ -222,9 +222,7 @@ describe('ReviewsPage', () => {
         images: ['events/event-99/before.jpg', 'events/event-99/after.jpg'],
       },
     ];
-    devicesResults.rows = [
-      { device_id: 'dev-1', lan_ip: '192.168.0.181', last_heartbeat_ts: '2026-04-29T12:00:00Z' },
-    ];
+    devicesResults.rows = [{ device_id: 'dev-1', lan_ip: '192.168.0.181', last_heartbeat_ts: '2026-04-29T12:00:00Z' }];
     renderPage();
 
     await waitFor(() => screen.getByTestId('review-row-cloud-rev-1'));
@@ -235,12 +233,8 @@ describe('ReviewsPage', () => {
 
     expect(before).toBeInTheDocument();
     expect(after).toBeInTheDocument();
-    expect((before as HTMLImageElement).src).toBe(
-      'http://192.168.0.181:8000/event/event-99/before.jpg',
-    );
-    expect((after as HTMLImageElement).src).toBe(
-      'http://192.168.0.181:8000/event/event-99/after.jpg',
-    );
+    expect((before as HTMLImageElement).src).toBe('http://192.168.0.181:8000/event/event-99/before.jpg');
+    expect((after as HTMLImageElement).src).toBe('http://192.168.0.181:8000/event/event-99/after.jpg');
     // alt text matches the filename suffix
     expect((before as HTMLImageElement).alt).toBe('Before');
     expect((after as HTMLImageElement).alt).toBe('After');
@@ -271,9 +265,7 @@ describe('ReviewsPage', () => {
         images: ['events/event-99/before.jpg'],
       },
     ];
-    devicesResults.rows = [
-      { device_id: 'dev-1', lan_ip: '192.168.0.181', last_heartbeat_ts: '2026-04-29T12:00:00Z' },
-    ];
+    devicesResults.rows = [{ device_id: 'dev-1', lan_ip: '192.168.0.181', last_heartbeat_ts: '2026-04-29T12:00:00Z' }];
     renderPage();
 
     await waitFor(() => screen.getByTestId('review-row-cloud-rev-1'));
