@@ -21,14 +21,17 @@ import { render, screen, act, waitFor } from '@testing-library/react';
 // vi.mock factory (vi.mock is hoisted to the top by Vitest).
 // ---------------------------------------------------------------------------
 
-const { mockSupabase, mockUnsubscribe, fireAuthEvent } = vi.hoisted(() => {
+const { mockSupabase, mockUnsubscribe, callbacks } = vi.hoisted(() => {
   const mockUnsubscribe = vi.fn();
-  let authStateCallback: ((event: string, session: any) => void) | null = null;
+  // Shared mutable object — both the mock implementation and fireAuthEvent
+  // access the same reference so they always agree on which callback is live.
+  const callbacks = { current: null as ((event: string, session: any) => void) | null };
 
   const mockSupabase = {
+    _callbacks: callbacks,
     auth: {
       onAuthStateChange: vi.fn((cb: (event: string, session: any) => void) => {
-        authStateCallback = cb;
+        callbacks.current = cb;
         return { data: { subscription: { unsubscribe: mockUnsubscribe } } };
       }),
       signInWithPassword: vi.fn().mockResolvedValue({ data: { session: null }, error: null }),
@@ -38,11 +41,7 @@ const { mockSupabase, mockUnsubscribe, fireAuthEvent } = vi.hoisted(() => {
     },
   };
 
-  const fireAuthEvent = (event: string, session: any) => {
-    if (authStateCallback) authStateCallback(event, session);
-  };
-
-  return { mockSupabase, mockUnsubscribe, fireAuthEvent };
+  return { mockSupabase, mockUnsubscribe, callbacks };
 });
 
 vi.mock('@/shared/supabase', () => ({
@@ -85,14 +84,21 @@ const mockSession = {
   user: { id: 'user-123', email: 'test@example.com' },
 };
 
+function fireAuthEvent(event: string, session: any) {
+  if (!callbacks.current) {
+    throw new Error('fireAuthEvent: onAuthStateChange callback not yet registered');
+  }
+  callbacks.current(event, session);
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
-  // Reset onAuthStateChange mock to re-capture the callback
+  callbacks.current = null;
+  // Re-install the implementation after clearAllMocks (which wipes the spy).
   mockSupabase.auth.onAuthStateChange.mockImplementation((cb: (event: string, session: any) => void) => {
-    (fireAuthEvent as any)._cb = cb;
+    callbacks.current = cb;
     return { data: { subscription: { unsubscribe: mockUnsubscribe } } };
   });
-  (fireAuthEvent as any)._cb = null;
 });
 
 afterEach(() => {
@@ -217,17 +223,18 @@ describe('AuthProvider — subscription cleanup', () => {
 
 describe('AuthProvider — timeout fallback', () => {
   it('clears loading after 10s even if no auth event fires', async () => {
-    vi.useFakeTimers();
+    // shouldAdvanceTime lets testing-library's waitFor polling work while
+    // fake timers are active. Without it, waitFor's internal setInterval
+    // never fires and the test times out.
+    vi.useFakeTimers({ shouldAdvanceTime: true });
 
     renderWithProvider();
     expect(screen.getByTestId('loading').textContent).toBe('loading');
 
-    act(() => {
+    await act(async () => {
       vi.advanceTimersByTime(10_001);
     });
 
-    await waitFor(() => {
-      expect(screen.getByTestId('loading').textContent).toBe('ready');
-    });
+    expect(screen.getByTestId('loading').textContent).toBe('ready');
   });
 });
