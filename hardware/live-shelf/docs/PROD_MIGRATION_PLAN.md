@@ -229,9 +229,42 @@ The `discarded` kind exists specifically so the Pi `/inventory` remove
 button can propagate to cloud WITHOUT polluting macros. Decision
 rationale: see `decisions.md` #44.
 
+## 9. Cloud image relay (mixed-content fix, 2026-04-29)
+
+Chrome blocks HTTP image fetches from an HTTPS page (mixed-content). The web
+app at https://lunahub.dev was rendering `http://<pi-ip>:8000/…` URLs that
+silently fail in the browser.
+
+**Fix**: the Pi uploads `before.jpg` + `after.jpg` to the
+`chefbyte-event-images` Supabase Storage bucket after each outbox event
+drains. The web app then serves HTTPS URLs; the LAN URL path is kept as a
+fallback for events whose images haven't been uploaded yet.
+
+**Pi configuration** — add to `.env`:
+
+```
+CLOUD_SUPABASE_URL=https://<project>.supabase.co
+CLOUD_SERVICE_ROLE_KEY=<service_role JWT>
+```
+
+Both keys must be set. If either is empty, image upload is silently disabled
+(LAN URL fallback stays active).
+
+**Backfill** — for events that existed before this feature was deployed,
+run from the Pi (or any host on the same LAN with the Pi reachable):
+
+```
+pip install requests python-dotenv
+SUPABASE_URL=https://... SUPABASE_SERVICE_ROLE_KEY=... PI_LAN_IP=192.168.0.181 \
+  python scripts/backfill_event_images.py
+```
+
+Do a dry-run first with `DRY_RUN=1` to see what would be uploaded. See
+`scripts/backfill_event_images.py` for full documentation.
+
 ## 7. What v1 explicitly does NOT do
 
-- No photo/video upload
+- ~~No photo/video upload~~ — before/after JPEGs are now uploaded to Supabase Storage (§9)
 - No cloud UI for review triage — review stays Pi-local
 - No bidirectional commands (cloud → Pi)
 - No Realtime subscriptions from Pi — pull-per-event is enough

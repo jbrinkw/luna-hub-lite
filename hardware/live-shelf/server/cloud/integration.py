@@ -884,6 +884,8 @@ class CloudEventEmitter:
         proposed: Optional[dict[str, Any]] = None,
         images: Optional[list[str]] = None,
         created_at: Optional[str] = None,
+        before_image_url: Optional[str] = None,
+        after_image_url: Optional[str] = None,
     ) -> Optional[str]:
         """Emit a ``review_queue_create`` cloud event for the cloud mirror.
 
@@ -916,6 +918,10 @@ class CloudEventEmitter:
             payload["images"] = images
         if created_at:
             payload["created_at"] = created_at
+        if before_image_url:
+            payload["before_image_url"] = before_image_url
+        if after_image_url:
+            payload["after_image_url"] = after_image_url
         return self._enqueue(payload)
 
     def emit_review_queue_resolve(

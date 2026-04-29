@@ -62,6 +62,10 @@ export interface ReviewRow {
   resolved_at: string | null;
   user_response: Record<string, unknown> | null;
   pi_event_id: string | null;
+  /** HTTPS cloud URL for before image. Null until Pi uploads. */
+  before_image_url: string | null;
+  /** HTTPS cloud URL for after image. Null until Pi uploads. */
+  after_image_url: string | null;
 }
 
 interface DeviceLite {
@@ -132,7 +136,7 @@ export function ReviewsPage() {
       const res = await chefbyte()
         .from('review_queue')
         .select(
-          'review_id, pi_review_id, kind, status, proposed, images, created_at, resolved_at, user_response, pi_event_id',
+          'review_id, pi_review_id, kind, status, proposed, images, created_at, resolved_at, user_response, pi_event_id, before_image_url, after_image_url',
         )
         .eq('user_id', user!.id)
         .eq('status', 'pending')
@@ -265,30 +269,39 @@ export function ReviewsPage() {
                     <span className="text-xs text-text-tertiary">{new Date(row.created_at).toLocaleString()}</span>
                   </div>
 
-                  {/* Image strip: before/after JPEGs from the Pi LAN web server.
-                      Off-LAN or invalid lan_ip → gray placeholder + tooltip. */}
-                  {Array.isArray(row.images) && row.images.length > 0 ? (
+                  {/* Image strip — priority: cloud HTTPS > LAN fallback > placeholder.
+                      Cloud URLs (before_image_url / after_image_url) are set by the Pi
+                      after uploading to Supabase Storage; they work everywhere with no
+                      mixed-content blocking. LAN fallback only fires when cloud URLs are
+                      null AND the operator has a valid lan_ip (on-LAN only). */}
+                  {(Array.isArray(row.images) && row.images.length > 0) ||
+                  row.before_image_url ||
+                  row.after_image_url ? (
                     <div className="mt-2 flex flex-wrap gap-2" data-testid={`review-images-${row.review_id}`}>
-                      {row.images.map((relPath, idx) => {
-                        const url = buildPiImageUrl(lanIp, relPath);
+                      {/* Build a unified image list: cloud URLs take priority per slot;
+                          fall back to the images[] LAN paths for any slot without a cloud URL. */}
+                      {(['before', 'after'] as const).map((slot, idx) => {
+                        const cloudUrl = slot === 'before' ? row.before_image_url : row.after_image_url;
+                        const relPath = Array.isArray(row.images)
+                          ? (row.images.find((p) => p.endsWith(`${slot}.jpg`)) ?? null)
+                          : null;
+                        // Cloud URL: use directly (HTTPS, no mixed-content).
+                        const resolvedUrl: string | null = cloudUrl ?? buildPiImageUrl(lanIp, relPath);
                         const errKey = `${row.review_id}::${idx}`;
                         const failed = imageErrors[errKey] === true;
-                        const altLabel = relPath.endsWith('after.jpg')
-                          ? 'After'
-                          : relPath.endsWith('before.jpg')
-                            ? 'Before'
-                            : 'Image';
-                        if (!url || failed) {
+                        const altLabel = slot === 'before' ? 'Before' : 'After';
+
+                        if (!resolvedUrl || failed) {
                           return (
                             <div
                               key={errKey}
                               className="w-24 h-24 rounded-lg border border-border bg-surface-sunken flex flex-col items-center justify-center text-text-tertiary"
                               title={
-                                !url
+                                !resolvedUrl
                                   ? lanIp
-                                    ? 'Image path unavailable'
-                                    : 'Image unavailable off-LAN — open while connected to the Pi network'
-                                  : 'Image unavailable off-LAN'
+                                    ? 'Image not available yet'
+                                    : 'Image unavailable — connect to the Pi network or wait for cloud upload'
+                                  : 'Image unavailable'
                               }
                               data-testid={`review-image-placeholder-${row.review_id}-${idx}`}
                             >
@@ -300,7 +313,7 @@ export function ReviewsPage() {
                         return (
                           <figure key={errKey} className="flex flex-col items-center">
                             <img
-                              src={url}
+                              src={resolvedUrl}
                               alt={altLabel}
                               loading="lazy"
                               className="w-24 h-24 rounded-lg object-cover border border-border bg-surface-sunken"

@@ -31,6 +31,7 @@ from typing import Callable
 
 from . import outbox
 from .client import CloudClient, CloudError
+from .image_uploader import ImageUploader, write_image_urls_to_cloud
 
 log = logging.getLogger(__name__)
 
@@ -153,6 +154,9 @@ class CloudWorker(threading.Thread):
         *,
         poll_interval_s: float = 5.0,
         shutdown_event: threading.Event | None = None,
+        image_uploader: "ImageUploader | None" = None,
+        supabase_url: str = "",
+        service_role_key: str = "",
     ) -> None:
         super().__init__(daemon=True, name=self.name)
         self._client = client
@@ -161,6 +165,9 @@ class CloudWorker(threading.Thread):
         self._base_poll_interval_s = float(poll_interval_s)
         self._current_poll_interval_s = float(poll_interval_s)
         self._shutdown = shutdown_event or threading.Event()
+        self._image_uploader: ImageUploader | None = image_uploader
+        self._supabase_url = supabase_url
+        self._service_role_key = service_role_key
 
     # ------------------------------------------------------------------
     # Public control
@@ -450,6 +457,13 @@ class CloudWorker(threading.Thread):
                                 row.outbox_id, reason, response,
                             )
                     outbox.mark_sent(conn, row.outbox_id)
+                    # Image upload (mixed-content fix). Attempt after the
+                    # outbox row is marked sent so a failed upload never
+                    # blocks the drain or re-queues the event. Only fires
+                    # for /event rows that carry a pi_event_id and where the
+                    # cloud returned an event_id (the cloud-side UUID for the
+                    # shelf_event_log row).
+                    self._try_upload_images(row, response)
 
         # 3. Adapt cadence. Exponential backoff on failures, reset on
         # any successful tick.
@@ -465,6 +479,61 @@ class CloudWorker(threading.Thread):
     def current_poll_interval_s(self) -> float:
         """Expose the currently-adapted poll interval for tests/metrics."""
         return self._current_poll_interval_s
+
+    # ------------------------------------------------------------------
+    # Image upload (mixed-content fix)
+    # ------------------------------------------------------------------
+
+    def _try_upload_images(self, row: "object", response: "object") -> None:
+        """Upload before/after JPEGs to Storage after a successful drain.
+
+        Non-fatal: any exception is swallowed so the drain loop continues.
+        Skips when:
+          * ``_image_uploader`` is None (not configured)
+          * outbox payload has no ``pi_event_id``
+          * cloud response has no ``event_id`` (can't address the DB row)
+          * event_kind is not one that produces event images (review_queue_*)
+        """
+        if self._image_uploader is None:
+            return
+        try:
+            payload = getattr(row, "payload", None) or {}
+            pi_event_id: str | None = payload.get("pi_event_id")
+            if not pi_event_id:
+                return
+            # review_queue_* events don't have classifier images via
+            # the /event path — they're handled separately.
+            event_kind = payload.get("event_kind", "")
+            if event_kind.startswith("review_queue_"):
+                return
+            # Cloud returns event_id in the /event response for the
+            # shelf_event_log row.
+            if not isinstance(response, dict):
+                return
+            cloud_event_id: str | None = response.get("event_id")
+            user_id: str | None = response.get("user_id")
+            if not cloud_event_id or not user_id:
+                return
+            before_url, after_url = self._image_uploader.upload_event_images(
+                user_id=user_id,
+                cloud_event_id=cloud_event_id,
+                pi_event_id=pi_event_id,
+            )
+            if not before_url and not after_url:
+                return
+            write_image_urls_to_cloud(
+                supabase_url=self._supabase_url,
+                service_role_key=self._service_role_key,
+                cloud_event_id=cloud_event_id,
+                before_url=before_url,
+                after_url=after_url,
+            )
+        except Exception:  # noqa: BLE001 — image upload must never kill drain
+            log.warning(
+                "cloud-worker: image upload raised unexpectedly — "
+                "skipping (LAN URL fallback still usable)",
+                exc_info=True,
+            )
 
     # ------------------------------------------------------------------
     # Thread entrypoint

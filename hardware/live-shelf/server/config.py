@@ -78,6 +78,13 @@ DEFAULTS: dict[str, Any] = {
     # a week of offline time, short enough to keep the scan cheap as
     # the Pi accumulates resolution history.
     "CLOUD_BACKFILL_WINDOW_HOURS": 168,
+    # Image upload to Supabase Storage (mixed-content fix).
+    # CLOUD_SUPABASE_URL: project base URL, e.g. https://abc.supabase.co
+    # CLOUD_SERVICE_ROLE_KEY: service_role JWT (never sent to browser).
+    # Both must be set for image upload to work; if either is empty the
+    # upload is skipped and the web app falls back to the LAN URL.
+    "CLOUD_SUPABASE_URL": "",
+    "CLOUD_SERVICE_ROLE_KEY": "",
 }
 
 
@@ -202,6 +209,8 @@ class AppConfig:
     cloud_import_key: str = ""
     cloud_heartbeat_interval_s: int = 30
     cloud_backfill_window_hours: int = 168
+    cloud_supabase_url: str = ""
+    cloud_service_role_key: str = ""
     # Path roots — computed post-load.
     data_root: Path = field(default_factory=lambda: Path("./data").resolve())
     refs_root: Path = field(default_factory=lambda: Path("./data/refs").resolve())
@@ -227,9 +236,11 @@ class AppConfig:
         # Anthropic key is redacted in UI context.
         if out.get("anthropic_api_key"):
             out["anthropic_api_key"] = "***redacted***"
-        # Cloud import key is also a secret — same redaction policy.
+        # Cloud import key and service_role key are secrets — same redaction.
         if out.get("cloud_import_key"):
             out["cloud_import_key"] = "***redacted***"
+        if out.get("cloud_service_role_key"):
+            out["cloud_service_role_key"] = "***redacted***"
         return out
 
 

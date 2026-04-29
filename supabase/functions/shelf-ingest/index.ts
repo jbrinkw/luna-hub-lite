@@ -1036,12 +1036,18 @@ async function handleReviewCreate(supabase: SupabaseClient, device: Device, body
   const images = Array.isArray(body?.images) ? body.images : null;
   const createdAtRaw: string | undefined = body?.created_at;
   const createdAt = createdAtRaw && isValidIsoTimestamp(createdAtRaw) ? createdAtRaw : null;
+  // Cloud image URLs (mixed-content fix) — populated by Pi after Storage upload.
+  const beforeImageUrl: string | null =
+    typeof body?.before_image_url === 'string' && body.before_image_url ? body.before_image_url : null;
+  const afterImageUrl: string | null =
+    typeof body?.after_image_url === 'string' && body.after_image_url ? body.after_image_url : null;
 
   console.log('shelf-ingest: review-create', {
     client_event_id: clientEventId,
     device_id: device.device_id,
     pi_review_id: piReviewId,
     kind,
+    has_cloud_images: !!(beforeImageUrl || afterImageUrl),
   });
 
   const { data, error } = await (supabase as any).schema('chefbyte').rpc('upsert_review_queue_from_pi_admin', {
@@ -1053,6 +1059,8 @@ async function handleReviewCreate(supabase: SupabaseClient, device: Device, body
     p_proposed: proposed,
     p_images: images,
     p_created_at: createdAt,
+    p_before_image_url: beforeImageUrl,
+    p_after_image_url: afterImageUrl,
   });
 
   if (error) {

@@ -47,6 +47,7 @@ from .cloud import (
     ProductSyncPoller,
     WeightSyncPoller,
 )
+from .cloud.image_uploader import ImageUploader
 from .cloud.integration import (
     CloudEventEmitter,
     backfill_missing_outbox_events,
@@ -2338,6 +2339,9 @@ def create_app(
                 conn_factory=lambda: conn,
                 heartbeat_provider=_heartbeat_provider,
                 poll_interval_s=float(cfg.cloud_heartbeat_interval_s),
+                image_uploader=ImageUploader.from_config(cfg),
+                supabase_url=cfg.cloud_supabase_url,
+                service_role_key=cfg.cloud_service_role_key,
             )
             cloud_worker.start()
             # Late-bind into the /healthz closure so the route can

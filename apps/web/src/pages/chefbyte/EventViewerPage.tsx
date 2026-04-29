@@ -77,6 +77,10 @@ interface EventRow {
     delta_g?: number;
     occurred_at?: string;
   } | null;
+  /** HTTPS URL in Supabase Storage. Null until Pi uploads the image. */
+  before_image_url: string | null;
+  /** HTTPS URL in Supabase Storage. Null until Pi uploads the image. */
+  after_image_url: string | null;
 }
 
 interface OverrideRow {
@@ -285,7 +289,7 @@ export function EventViewerPage() {
       let q = chefbyte()
         .from('shelf_event_log')
         .select(
-          'event_id,client_event_id,pi_event_id,applied,reason,created_at,classifier_status,classification,payload',
+          'event_id,client_event_id,pi_event_id,applied,reason,created_at,classifier_status,classification,payload,before_image_url,after_image_url',
         )
         .eq('user_id', user!.id)
         .order('created_at', { ascending: false })
@@ -713,7 +717,16 @@ function EventCard(props: EventCardProps) {
   } = row;
   const occurredAt = event.payload?.occurred_at ?? event.created_at;
   const piEventId = event.pi_event_id;
-  const imgBase = lanIp && piEventId ? `http://${lanIp}:8000/event/${encodeURIComponent(piEventId)}` : null;
+
+  // Image URL priority:
+  //   1. Cloud HTTPS URL (Supabase Storage) — no mixed-content, works everywhere
+  //   2. LAN fallback (http://pi-ip:8000) — only when cloud URL not yet populated
+  //      and lanIp is available (on-LAN only; Chrome will block off-LAN)
+  //   3. Placeholder — "Image not available yet"
+  const cloudBeforeUrl = event.before_image_url ?? null;
+  const cloudAfterUrl = event.after_image_url ?? null;
+  const lanImgBase =
+    !cloudBeforeUrl && lanIp && piEventId ? `http://${lanIp}:8000/event/${encodeURIComponent(piEventId)}` : null;
 
   const borderCls = needsAction
     ? 'border-warning-subtle ring-1 ring-warning-subtle'
@@ -734,12 +747,12 @@ function EventCard(props: EventCardProps) {
     >
       {/* Header row */}
       <div className="flex items-start gap-3 p-4">
-        {/* Images */}
+        {/* Images — priority: cloud HTTPS > LAN fallback > placeholder */}
         <div className="flex gap-2 shrink-0">
-          {imgBase ? (
+          {cloudBeforeUrl || cloudAfterUrl ? (
             <Fragment>
               <img
-                src={`${imgBase}/before.jpg`}
+                src={cloudBeforeUrl ?? `${lanImgBase}/before.jpg`}
                 alt="Before"
                 loading="lazy"
                 className="w-16 h-16 rounded-lg object-cover border border-border bg-surface-sunken"
@@ -747,7 +760,26 @@ function EventCard(props: EventCardProps) {
                 data-testid="event-image-before"
               />
               <img
-                src={`${imgBase}/after.jpg`}
+                src={cloudAfterUrl ?? `${lanImgBase}/after.jpg`}
+                alt="After"
+                loading="lazy"
+                className="w-16 h-16 rounded-lg object-cover border border-border bg-surface-sunken"
+                onError={onImageError}
+                data-testid="event-image-after"
+              />
+            </Fragment>
+          ) : lanImgBase ? (
+            <Fragment>
+              <img
+                src={`${lanImgBase}/before.jpg`}
+                alt="Before"
+                loading="lazy"
+                className="w-16 h-16 rounded-lg object-cover border border-border bg-surface-sunken"
+                onError={onImageError}
+                data-testid="event-image-before"
+              />
+              <img
+                src={`${lanImgBase}/after.jpg`}
                 alt="After"
                 loading="lazy"
                 className="w-16 h-16 rounded-lg object-cover border border-border bg-surface-sunken"
@@ -758,6 +790,7 @@ function EventCard(props: EventCardProps) {
           ) : (
             <div
               className="w-16 h-16 rounded-lg border border-border bg-surface-sunken flex items-center justify-center text-text-tertiary"
+              title="Image not available yet"
               data-testid="event-image-placeholder"
             >
               <ImageOff className="h-5 w-5" />
