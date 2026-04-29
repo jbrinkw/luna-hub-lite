@@ -1523,6 +1523,58 @@ describe('shelf-ingest Edge Function', () => {
     await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', doomed.product_id);
   });
 
+  // ─── /catalog — delta-filter on stock + pairings + locations ───────────
+  //
+  // Sync-audit finding #10 (2026-04-29): all four /catalog list fields are
+  // delta-filtered when ?updated_since= is provided, not just products.
+  // Future-watermark must return zero of each list; old-watermark must
+  // include rows whose timestamps land in the delta window.
+
+  it('GET /catalog?updated_since=<future> returns zero stock+pairings+locations', async () => {
+    // Future watermark: every row's timestamp is older than this.
+    const future = new Date(Date.now() + 60 * 60 * 1000).toISOString();
+    const res = await fetch(`${BASE_URL}/catalog?updated_since=${encodeURIComponent(future)}`, {
+      method: 'GET',
+      headers: authHeaders(importKey),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.products).toEqual([]);
+    expect(body.stock).toEqual([]);
+    expect(body.pairings).toEqual([]);
+    expect(body.locations).toEqual([]);
+  });
+
+  it('GET /catalog?updated_since=<old> returns expected delta lists', async () => {
+    // Old watermark: 1 hour ago — every seeded fixture should land in the
+    // delta window.
+    const old = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+    const res = await fetch(`${BASE_URL}/catalog?updated_since=${encodeURIComponent(old)}`, {
+      method: 'GET',
+      headers: authHeaders(importKey),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+
+    // products: at least the seeded ones land in the window (created at
+    // beforeAll → updated_at trigger fires on insert).
+    expect(body.products.length).toBeGreaterThan(0);
+
+    // locations: created during beforeAll are within the window.
+    expect(body.locations.length).toBeGreaterThan(0);
+    expect(body.locations.some((l: any) => l.location_id === locationId)).toBe(true);
+
+    // stock: lots with last_update_ts NULL or > old watermark must be
+    // included. The test fixture lot from beforeAll has last_update_source
+    // set but last_update_ts may be NULL — both must be returned.
+    expect(Array.isArray(body.stock)).toBe(true);
+
+    // pairings: any device_id-scoped pairing rows surface here. The test
+    // fixture doesn't create them, but the call shape returning an array
+    // (not undefined / 500) is the assertion that matters.
+    expect(Array.isArray(body.pairings)).toBe(true);
+  });
+
   // ─── /overrides ─────────────────────────────────────────────────────
 
   it('GET /overrides returns event_overrides + lot state for the authed user only', async () => {

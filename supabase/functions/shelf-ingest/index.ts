@@ -124,9 +124,24 @@ async function handleCatalog(supabase: SupabaseClient, device: Device, url: URL)
   const userId = device.user_id;
 
   // Delta-sync support: when the Pi's product_sync_poller sends
-  // ?updated_since=<iso8601>, narrow the products query to rows touched
-  // since that timestamp. The other three lists (stock/pairings/locations)
-  // are small + change constantly via scale events — no delta filter.
+  // ?updated_since=<iso8601>, narrow each list query to rows touched
+  // since that timestamp.
+  //
+  // Sync-audit finding #10 (2026-04-29): all four lists are now delta-
+  // filtered (previously only ``products`` was). The watermark column
+  // per list:
+  //   * products    — updated_at (set by the products_set_updated_at trigger)
+  //   * stock_lots  — last_update_ts (stamped by apply_shelf_event on every
+  //                   mutation; NULL on rows that haven't been touched
+  //                   since the column was added → treated as "always
+  //                   newer than the watermark" for safety)
+  //   * scale_pairings — last_heartbeat_ts (stamped on heartbeat /
+  //                   pairing). NULL on never-paired rows → same fallback.
+  //   * locations   — created_at (locations don't have updated_at; their
+  //                   only mutation is rename, which is rare; created_at
+  //                   is sufficient to bring a fresh location to the Pi
+  //                   on first sync).
+  //
   // An invalid timestamp silently falls back to a full pull rather than
   // 400'ing; a stuck poller re-establishing its watermark is less painful
   // than a hard error at startup.
@@ -171,21 +186,45 @@ async function handleCatalog(supabase: SupabaseClient, device: Device, url: URL)
     productsQuery = productsQuery.is('deleted_at', null);
   }
 
+  // Build each delta-aware query separately so the .or(...) fallback for
+  // NULL watermark columns stays readable. The .or() expression
+  // accepts only string filters, so we use ``last_update_ts.is.null``
+  // alongside the gt clause to keep rows that have never been touched
+  // (those would otherwise drop out and the Pi would never see them).
+  let stockQuery = supabase
+    .schema('chefbyte')
+    .from('stock_lots')
+    .select('lot_id, product_id, location_id, qty_containers, expires_on, last_update_source, last_update_ts')
+    .eq('user_id', userId)
+    .gt('qty_containers', 0);
+  if (updatedSince) {
+    stockQuery = stockQuery.or(`last_update_ts.gt.${updatedSince},last_update_ts.is.null`);
+  }
+
+  let pairingsQuery = supabase
+    .schema('chefbyte')
+    .from('scale_pairings')
+    .select('scale_id, kind, product_id, lot_id, last_heartbeat_ts')
+    .eq('user_id', userId)
+    .eq('device_id', device.device_id);
+  if (updatedSince) {
+    pairingsQuery = pairingsQuery.or(`last_heartbeat_ts.gt.${updatedSince},last_heartbeat_ts.is.null`);
+  }
+
+  let locationsQuery = supabase
+    .schema('chefbyte')
+    .from('locations')
+    .select('location_id, name, created_at')
+    .eq('user_id', userId);
+  if (updatedSince) {
+    locationsQuery = locationsQuery.gt('created_at', updatedSince);
+  }
+
   const [productsRes, stockRes, pairingsRes, locationsRes] = await Promise.all([
     productsQuery,
-    supabase
-      .schema('chefbyte')
-      .from('stock_lots')
-      .select('lot_id, product_id, location_id, qty_containers, expires_on, last_update_source, last_update_ts')
-      .eq('user_id', userId)
-      .gt('qty_containers', 0),
-    supabase
-      .schema('chefbyte')
-      .from('scale_pairings')
-      .select('scale_id, kind, product_id, lot_id')
-      .eq('user_id', userId)
-      .eq('device_id', device.device_id),
-    supabase.schema('chefbyte').from('locations').select('location_id, name').eq('user_id', userId),
+    stockQuery,
+    pairingsQuery,
+    locationsQuery,
   ]);
 
   if (productsRes.error) throw productsRes.error;

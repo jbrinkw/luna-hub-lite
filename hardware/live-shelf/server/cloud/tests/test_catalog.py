@@ -105,3 +105,25 @@ def test_fetch_catalog_rejects_wrapped_list_shape():
     }
     with pytest.raises(TypeError, match="catalog field must be"):
         fetch_catalog(client)
+
+
+def test_fetch_catalog_forwards_updated_since_watermark():
+    """Sync-audit finding #10 (2026-04-29): the cloud /catalog endpoint
+    now delta-filters all four lists — products, stock, pairings,
+    locations — when the Pi sends ``updated_since``. The Pi caller must
+    forward the watermark unchanged via ``params={'updated_since': ...}``
+    so the cloud can apply the gt-filter. This test pins that contract
+    so a future refactor can't silently drop the param.
+    """
+    client = MagicMock()
+    client.get.return_value = {
+        "products": [],
+        "stock": [],
+        "pairings": [],
+        "locations": [],
+    }
+    watermark = "2026-04-28T12:00:00Z"
+    fetch_catalog(client, updated_since=watermark)
+    client.get.assert_called_once_with(
+        "/catalog", params={"updated_since": watermark}
+    )

@@ -80,10 +80,18 @@ def fetch_catalog(
         Authenticated :class:`CloudClient`.
     updated_since:
         Optional ISO-8601 timestamp. When supplied, the cloud narrows
-        the ``products`` list to rows whose ``updated_at`` is strictly
-        greater than this value — used by the 30s background poller to
-        pull deltas only. ``stock``/``pairings``/``locations`` are never
-        filtered (they churn continuously and are small).
+        ALL FOUR lists to rows touched since the watermark
+        (sync-audit finding #10, 2026-04-29):
+          * ``products``: ``updated_at > updated_since``
+          * ``stock``:    ``stock_lots.last_update_ts > updated_since``
+                          (NULL ts kept — never-touched lots fall through)
+          * ``pairings``: ``scale_pairings.last_heartbeat_ts > updated_since``
+                          (NULL ts kept — never-heartbeated pairings)
+          * ``locations``: ``locations.created_at > updated_since``
+        Used by the 30s background poller to pull deltas only. The
+        first call (no watermark) returns the full state; subsequent
+        calls return only deltas, dramatically reducing payload size
+        on the steady-state Pi.
 
     Propagates :class:`~server.cloud.client.CloudError` on any non-2xx
     response so the caller can decide whether to fall back to the last
