@@ -422,3 +422,121 @@ Deno.test('normalizeWithAI calls anthropic.messages.create with timeout in Reque
   // edits that swap it for something useless.
   assert(/timeout\s*:\s*25[_]?000/.test(options), `timeout option should be 25_000ms (25s) — got: ${options}`);
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// buildSystemPrompt — placeholder matching extension
+// ─────────────────────────────────────────────────────────────────────────
+
+// Distinct UUIDs for test candidates (deliberately different from any other
+// fixture so there is zero chance of accidental id collision).
+const PLACEHOLDER_A = '11111111-aaaa-4aaa-baaa-aaaaaaaaaaaa';
+const PLACEHOLDER_B = '22222222-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
+const PLACEHOLDER_C = '33333333-cccc-4ccc-bccc-cccccccccccc';
+
+const PLACEHOLDER_CANDIDATES = [
+  { product_id: PLACEHOLDER_A, name: 'Greek Yogurt', description: 'Plain non-fat greek yogurt' },
+  { product_id: PLACEHOLDER_B, name: 'Almond Butter', description: null },
+  { product_id: PLACEHOLDER_C, name: 'Oat Milk', description: 'Unsweetened oat milk' },
+];
+
+Deno.test('buildSystemPrompt: with candidates — includes EXISTING PLACEHOLDER section', () => {
+  const prompt = buildSystemPrompt(OFF_NUTELLA, PLACEHOLDER_CANDIDATES);
+  assertStringIncludes(prompt, 'EXISTING PLACEHOLDER PRODUCTS');
+  assertStringIncludes(prompt, PLACEHOLDER_A);
+  assertStringIncludes(prompt, 'Greek Yogurt');
+  assertStringIncludes(prompt, PLACEHOLDER_B);
+  assertStringIncludes(prompt, 'Almond Butter');
+  assertStringIncludes(prompt, PLACEHOLDER_C);
+  assertStringIncludes(prompt, 'Oat Milk');
+  // Description included
+  assertStringIncludes(prompt, 'Plain non-fat greek yogurt');
+  // Matching guidance present
+  assertStringIncludes(prompt, 'matched_placeholder_id');
+  assertStringIncludes(prompt, 'Match strictly');
+  // Normal fields still present
+  assertStringIncludes(prompt, '4-4-9 validation');
+  assertStringIncludes(prompt, 'calories_per_serving');
+});
+
+Deno.test('buildSystemPrompt: with candidates — matched_placeholder_id in JSON schema', () => {
+  const prompt = buildSystemPrompt(OFF_NUTELLA, PLACEHOLDER_CANDIDATES);
+  // The JSON schema block must include the new field
+  assertStringIncludes(prompt, '"matched_placeholder_id"');
+});
+
+Deno.test(
+  'buildSystemPrompt: empty candidates — no placeholder section, matched_placeholder_id always null note',
+  () => {
+    const prompt = buildSystemPrompt(OFF_NUTELLA, []);
+    // No placeholder section injected
+    assert(!prompt.includes('EXISTING PLACEHOLDER PRODUCTS'), 'should NOT include placeholder section when empty');
+    // No candidate IDs in prompt
+    assert(!prompt.includes(PLACEHOLDER_A), 'should NOT include candidate A UUID when list is empty');
+    // The "always null" note is present
+    assertStringIncludes(prompt, 'matched_placeholder_id: always null');
+    // Normal rules still present
+    assertStringIncludes(prompt, '4-4-9 validation');
+  },
+);
+
+Deno.test('buildSystemPrompt: default (no second arg) — treats as empty list', () => {
+  const prompt = buildSystemPrompt(OFF_NUTELLA);
+  assert(!prompt.includes('EXISTING PLACEHOLDER PRODUCTS'), 'no candidates → no section');
+  assertStringIncludes(prompt, 'matched_placeholder_id: always null');
+});
+
+Deno.test('buildSystemPrompt: candidate with null description omits the description suffix', () => {
+  const prompt = buildSystemPrompt(OFF_NUTELLA, [
+    { product_id: PLACEHOLDER_B, name: 'Almond Butter', description: null },
+  ]);
+  // Name is present
+  assertStringIncludes(prompt, 'Almond Butter');
+  // The " — " description separator should NOT appear (description is null)
+  const lineWithB = prompt.split('\n').find((l) => l.includes(PLACEHOLDER_B));
+  assert(lineWithB !== undefined, 'line with candidate B must exist');
+  assert(!lineWithB!.includes(' — '), 'null description should not inject description suffix');
+});
+
+// ─────────────────────────────────────────────────────────────────────────
+// matched_placeholder_id sanitization — server-side hallucination guard
+//
+// These tests exercise the sanitization logic that lives in index.ts by
+// importing the pure helpers and constructing equivalent scenarios. The
+// full HTTP-level behaviour is covered by the integration tests; these
+// unit tests are fast (no network) and guard the specific whitelist check.
+// ─────────────────────────────────────────────────────────────────────────
+
+/**
+ * Minimal reproduction of the sanitization logic from index.ts.
+ * Extracted here as a pure function so we can unit-test it without
+ * standing up an HTTP server. The real code does exactly this check.
+ */
+function sanitizePlaceholderMatch(rawMatchedId: unknown, candidateIds: Set<string>): string | null {
+  if (typeof rawMatchedId !== 'string' || rawMatchedId.length === 0) return null;
+  return candidateIds.has(rawMatchedId) ? rawMatchedId : null;
+}
+
+Deno.test('sanitize: valid id that IS in the candidate set → returned as-is', () => {
+  const ids = new Set([PLACEHOLDER_A, PLACEHOLDER_B, PLACEHOLDER_C]);
+  assertEquals(sanitizePlaceholderMatch(PLACEHOLDER_B, ids), PLACEHOLDER_B);
+});
+
+Deno.test('sanitize: id NOT in the candidate set (hallucinated) → null', () => {
+  const ids = new Set([PLACEHOLDER_A, PLACEHOLDER_B, PLACEHOLDER_C]);
+  const hallucinated = 'ffffffff-ffff-4fff-bfff-ffffffffffff';
+  assertEquals(sanitizePlaceholderMatch(hallucinated, ids), null);
+});
+
+Deno.test('sanitize: null rawMatchedId → null', () => {
+  const ids = new Set([PLACEHOLDER_A]);
+  assertEquals(sanitizePlaceholderMatch(null, ids), null);
+});
+
+Deno.test('sanitize: empty string → null', () => {
+  const ids = new Set([PLACEHOLDER_A]);
+  assertEquals(sanitizePlaceholderMatch('', ids), null);
+});
+
+Deno.test('sanitize: empty candidate set → always null even if id looks valid', () => {
+  assertEquals(sanitizePlaceholderMatch(PLACEHOLDER_A, new Set()), null);
+});

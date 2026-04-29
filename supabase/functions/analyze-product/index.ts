@@ -1,6 +1,6 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import Anthropic from 'npm:@anthropic-ai/sdk';
-import { buildSystemPrompt, buildUserPrompt } from './_prompt.ts';
+import { buildSystemPrompt, buildUserPrompt, type PlaceholderCandidate } from './_prompt.ts';
 import { parseAIResponse, validateSuggestion } from './_normalize.ts';
 
 const corsHeaders = {
@@ -199,8 +199,12 @@ async function fetchOpenFoodFacts(barcode: string, forceFailure: string | null =
   return json.product;
 }
 
-/** Call Claude Haiku 4.5 to normalize OFF product data */
-async function normalizeWithAI(offProduct: any, forceFailure: string | null = null): Promise<any> {
+/** Call Claude Haiku 4.5 to normalize OFF product data and optionally match a placeholder. */
+async function normalizeWithAI(
+  offProduct: any,
+  forceFailure: string | null = null,
+  placeholderCandidates: PlaceholderCandidate[] = [],
+): Promise<any> {
   // Test-only simulated failures. `anthropic_timeout` is a SOFT failure —
   // the caller falls through to `ai_degraded:true`. `anthropic_malformed`
   // mirrors the real code path where Claude returns text that won't
@@ -230,7 +234,7 @@ async function normalizeWithAI(offProduct: any, forceFailure: string | null = nu
   try {
     const anthropic = new Anthropic({ apiKey });
 
-    const systemPrompt = buildSystemPrompt(offProduct);
+    const systemPrompt = buildSystemPrompt(offProduct, placeholderCandidates);
     const userPrompt = buildUserPrompt(offProduct);
 
     // Anthropic Node SDK signature: messages.create(body, options).
@@ -306,10 +310,21 @@ Deno.serve(async (req) => {
     }
 
     // Parse body
-    const { barcode } = await req.json();
+    const { barcode, placeholder_candidates } = await req.json();
     if (!barcode) {
       return jsonResponse({ error: 'Barcode is required' }, 400);
     }
+
+    // Validate and sanitize placeholder_candidates. Accept only well-formed
+    // entries (product_id must be a non-empty string, name must be a string).
+    // Invalid entries are silently dropped — a partial list is better than 400.
+    const rawCandidates: PlaceholderCandidate[] = Array.isArray(placeholder_candidates)
+      ? (placeholder_candidates as any[]).filter(
+          (c) => c && typeof c.product_id === 'string' && c.product_id.length > 0 && typeof c.name === 'string',
+        )
+      : [];
+    // Build a set of valid ids for post-response hallucination check.
+    const candidateIds = new Set<string>(rawCandidates.map((c) => c.product_id));
 
     // Validate barcode: must be a string, alphanumeric only, max 50 chars
     const barcodeStr = String(barcode);
@@ -394,7 +409,7 @@ Deno.serve(async (req) => {
     let suggestion: any = null;
     let aiDegradedReason: string | null = null;
     try {
-      suggestion = await normalizeWithAI(offProduct, forced);
+      suggestion = await normalizeWithAI(offProduct, forced, rawCandidates);
     } catch (err: any) {
       const reason: string = err?.aiReason ?? 'transient';
       if (HARD_FAILURES.has(reason)) {
@@ -411,6 +426,26 @@ Deno.serve(async (req) => {
       aiDegradedReason = reason;
     }
 
+    // Extract and sanitize matched_placeholder_id before stripping it from
+    // the suggestion. The AI is told to include it in the JSON response, but
+    // it must not bleed into the product fields written to the DB.
+    let matchedPlaceholderId: string | null = null;
+    if (suggestion && typeof suggestion.matched_placeholder_id === 'string') {
+      const rawMatch = suggestion.matched_placeholder_id;
+      // Defensive: only accept IDs that were actually in the candidate list.
+      // If Haiku hallucinated a UUID that wasn't provided, drop it.
+      if (candidateIds.has(rawMatch)) {
+        matchedPlaceholderId = rawMatch;
+      } else if (rawMatch.length > 0) {
+        console.warn(
+          'analyze-product: Haiku returned matched_placeholder_id not in candidate set — dropping',
+          rawMatch,
+        );
+      }
+      // Remove from suggestion so it doesn't pollute DB writes downstream.
+      delete suggestion.matched_placeholder_id;
+    }
+
     // Validate required fields in AI response before returning
     if (suggestion) {
       const validation = validateSuggestion(suggestion);
@@ -424,6 +459,7 @@ Deno.serve(async (req) => {
     return jsonResponse({
       source: 'ai',
       suggestion,
+      matched_placeholder_id: matchedPlaceholderId,
       ai_degraded: aiDegradedReason !== null,
       ai_reason: aiDegradedReason,
       off: {

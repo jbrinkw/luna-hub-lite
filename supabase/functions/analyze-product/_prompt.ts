@@ -5,6 +5,13 @@
 // OpenFoodFacts, or Anthropic. index.ts imports + uses the exports below
 // unchanged — the runtime HTTP entry point still lives in index.ts.
 
+/** A placeholder product candidate for AI-assisted matching. */
+export interface PlaceholderCandidate {
+  product_id: string;
+  name: string;
+  description?: string | null;
+}
+
 /** The only 4-macro + energy keys we keep from OFF's massive nutriments
  * object. The raw OFF nutriments object for a typical product is 10–20 KB
  * (dozens of vitamins/minerals + variant suffixes) which makes Claude
@@ -48,14 +55,23 @@ export function proposedName(offProduct: { brands?: unknown; product_name?: unkn
 /**
  * Build the Claude Haiku system prompt that tells the model how to return
  * normalized product data. Pure function of the OFF product — no I/O.
+ *
+ * When `placeholderCandidates` is non-empty the prompt gains an extra section
+ * asking the model whether the scanned product matches one of the user's
+ * existing placeholder products. The model returns `matched_placeholder_id`
+ * alongside the normal fields. Zero extra HTTP calls — one call does both jobs.
  */
-export function buildSystemPrompt(offProduct: {
-  brands?: unknown;
-  product_name?: unknown;
-  generic_name?: unknown;
-}): string {
+export function buildSystemPrompt(
+  offProduct: {
+    brands?: unknown;
+    product_name?: unknown;
+    generic_name?: unknown;
+  },
+  placeholderCandidates: PlaceholderCandidate[] = [],
+): string {
   const proposed = proposedName(offProduct);
-  return [
+
+  const lines = [
     'You normalize Open Food Facts product data into a structured JSON format.',
     'Return STRICT JSON only, no markdown, no explanation:',
     '{',
@@ -66,7 +82,8 @@ export function buildSystemPrompt(offProduct: {
     '  "protein_per_serving": <number>,',
     '  "fat_per_serving": <number>,',
     '  "description": "<brief 1-line description>",',
-    '  "default_shelf_life_days": <integer 1-3650, or null>',
+    '  "default_shelf_life_days": <integer 1-3650, or null>,',
+    '  "matched_placeholder_id": "<uuid or null>"',
     '}',
     '',
     'Rules:',
@@ -85,7 +102,31 @@ export function buildSystemPrompt(offProduct: {
     '    condiments, jarred sauces (unopened): 365',
     '    canned goods, dried pasta/rice, spices, shelf-stable snacks: null',
     '  Use null when genuinely uncertain OR shelf-stable. Never guess wildly.',
-  ].join('\n');
+  ];
+
+  if (placeholderCandidates.length > 0) {
+    lines.push(
+      '',
+      'EXISTING PLACEHOLDER PRODUCTS (the user has these placeholder products',
+      'with estimated macros; if the scanned product is the same item as one',
+      'of these, return its product_id in `matched_placeholder_id`):',
+    );
+    placeholderCandidates.forEach((c, i) => {
+      const desc = c.description ? ` — ${c.description}` : '';
+      lines.push(`  ${i + 1}. id=${c.product_id} name="${c.name}"${desc}`);
+    });
+    lines.push(
+      '',
+      'If no good match (different item, ambiguous), return `matched_placeholder_id: null`.',
+      "Match strictly — only when you're confident the scanned product is",
+      'THE SAME item the placeholder represents. A "Greek Yogurt" placeholder',
+      'matches "Chobani Greek Yogurt" but NOT "Greek Yogurt Granola".',
+    );
+  } else {
+    lines.push('- matched_placeholder_id: always null (no placeholder candidates provided).');
+  }
+
+  return lines.join('\n');
 }
 
 /**
