@@ -1304,13 +1304,16 @@ def _seed_single_track_pairing(
     )
 
 
-def test_inventory_hides_single_track_section_when_no_pairings(client):
-    """Default seed has ``scale_pairings = []`` → /inventory must NOT
-    render the single-track section. Mirrors the catch-all-disabled
-    invariant (single-shelf deployments stay clean)."""
+def test_inventory_shows_single_track_section_with_empty_state_when_no_pairings(client):
+    """Default seed has ``scale_pairings = []`` → /inventory STILL
+    renders the single-track section so the operator can see the
+    empty state and verify setup. The section must show the
+    ``no single-track scales paired yet.`` empty-state message
+    instead of the per-row table."""
     body = client.get("/inventory").get_data(as_text=True)
-    assert "Single-track scales" not in body
-    # And the section's table headers must NOT bleed in either.
+    assert "single-track" in body.lower()
+    assert "no single-track scales paired yet." in body
+    # The per-row table must NOT render with no data.
     assert "paired product" not in body
 
 
@@ -1543,20 +1546,19 @@ def test_api_state_single_item_returns_501_when_repo_lacks_method(
     assert "single-track" in r.get_json()["error"]
 
 
-def test_dashboard_hides_single_track_tile_when_no_pairings(client):
-    """Default seed: zero paired single-track scales → no tile.
-
-    The poller JS is always present (matching the catch-all pattern:
-    the poller is gated by a ``document.getElementById`` check), so
-    we assert specifically that the load-bearing DOM ids the JS reads
-    + writes are ABSENT. Without those ids the poller's branch never
-    fires — so even though ``shelf=single_item`` appears textually in
-    the JS, no traffic is generated."""
+def test_dashboard_shows_single_track_tile_with_zero_state_when_no_pairings(client):
+    """Default seed: zero paired single-track scales → tile STILL
+    renders so the operator can confirm the surface is wired before
+    any ESP has heartbeated. Online/total counters render as 0/0,
+    the empty-state ``no scales paired yet.`` message is visible,
+    and the load-bearing DOM ids the poller targets are present so
+    the moment a pairing arrives, the next poll fills them in."""
     body = client.get("/").get_data(as_text=True)
-    assert 'id="single-track-preview"' not in body
-    assert 'id="single-track-list"' not in body
-    assert 'id="single-track-online"' not in body
-    assert 'id="single-track-total"' not in body
+    assert 'id="single-track-preview"' in body
+    assert 'id="single-track-list"' in body
+    assert 'id="single-track-online"' in body
+    assert 'id="single-track-total"' in body
+    assert "no scales paired yet." in body
 
 
 def test_dashboard_shows_single_track_tile_when_paired_scale_exists(

@@ -76,9 +76,12 @@
     {% if live_scale_enabled %}
     <div class="panel" id="single-track-preview">
       <h3>single-track scales <span class="muted">(<span id="single-track-online">{{ single_track_state.scales_online|default(0) }}</span> / <span id="single-track-total">{{ single_track_state.scales_total|default(0) }}</span> online)</span></h3>
-      {% if single_track_state.scales %}
+      {# Both list + empty-state always render so the poller can bind
+         to ``#single-track-list`` regardless of initial pairing count.
+         The empty-state ``<p>`` is hidden when at least one scale is
+         present and revealed by the poller when the count drops to 0. #}
       <ul id="single-track-list" style="list-style: none; margin: 0; padding: 0;">
-        {% for s in single_track_state.scales %}
+        {% for s in single_track_state.scales or [] %}
           <li data-device-id="{{ s.device_id }}"
               style="padding: 4px 0; border-bottom: 1px solid var(--border); display: flex; gap: 8px; align-items: center;">
             <span class="dot {% if s.is_online %}on{% else %}off{% endif %}"
@@ -99,9 +102,10 @@
           </li>
         {% endfor %}
       </ul>
-      {% else %}
-      <p class="muted" id="single-track-empty">no scales paired yet.</p>
-      {% endif %}
+      <p class="muted" id="single-track-empty"
+         {% if single_track_state.scales %}style="display: none;"{% endif %}>
+        no scales paired yet.
+      </p>
     </div>
     {% endif %}
 
@@ -467,6 +471,14 @@
           }
           if (totalEl && typeof s.scales_total === 'number') {
             totalEl.textContent = s.scales_total;
+          }
+          // Toggle the empty-state <p> based on current pairing count.
+          // Server-rendered initial paint shows it when zero; once a
+          // scale is paired, hide it. Reveals again if all scales
+          // are unpaired (rare but possible during operator setup).
+          const emptyEl = document.getElementById('single-track-empty');
+          if (emptyEl && typeof s.scales_total === 'number') {
+            emptyEl.style.display = s.scales_total > 0 ? 'none' : '';
           }
           const list = document.getElementById('single-track-list');
           if (list && Array.isArray(s.scales)) {

@@ -202,7 +202,7 @@ class WebRepo(Protocol):
 
 
 EVENTS_PER_PAGE = 24
-USAGE_PER_PAGE = 50
+USAGE_PER_PAGE = 5
 
 
 def make_html_bp(
@@ -271,25 +271,18 @@ def make_html_bp(
         except Exception:  # pragma: no cover — UI must never crash on this
             return False
 
-    # Resolve the single-track flag each request. When the host doesn't
-    # supply an explicit callable, auto-derive it from "is there at
-    # least one paired single_item scale?" — so the section appears the
-    # moment a LiveTrack ESP first heartbeats and the auto-register
-    # handler mints a ``scale_pairings`` row. Failures are swallowed
-    # (UI must never crash on this).
+    # Resolve the single-track flag each request. Default ON — the
+    # operator wants the section visible even before any ESP has paired
+    # so they can see the empty state and confirm setup is wired
+    # correctly. Hosts can still pass an explicit callable (e.g.
+    # single-shelf deployments that want to hide the surface entirely).
     def _live_scale_on() -> bool:
         if live_scale_enabled is not None:
             try:
                 return bool(live_scale_enabled())
             except Exception:  # pragma: no cover — UI must never crash on this
-                return False
-        get_scales = getattr(repo, "get_single_track_scales", None)
-        if not callable(get_scales):
-            return False
-        try:
-            return len(get_scales()) > 0
-        except Exception:  # pragma: no cover — defensive
-            return False
+                return True
+        return True
 
     # ----- shared helper ---------------------------------------------------
 
