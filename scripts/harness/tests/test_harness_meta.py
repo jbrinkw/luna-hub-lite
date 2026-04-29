@@ -160,14 +160,27 @@ def test_passing_sentinel_succeeds_visibly(tmp_path):
 
 
 def test_list_flag_prints_registered_scenarios(tmp_path):
-    """``run.py --list`` must print every registered scenario name.
+    """``run.py --list`` must include every importable scenario file.
 
-    Guards against a regression where scenario discovery silently drops
-    modules — if a scenario fails to import, it won't be in the list,
-    but neither will it appear as a failure in the artifact. The list
-    flag is the simplest way for CI to verify "the harness sees all
-    expected scenarios".
+    Guards against a regression where scenario discovery silently drops a
+    module — if a scenario has a broken import, it disappears from the
+    registry without any test failure. This test dynamically enumerates
+    ``scenarios/`` and asserts that every non-sentinel, non-dunder ``.py``
+    file appears in the --list output, proving all files were importable.
+
+    A broken import in any scenario WILL cause the listing to miss that
+    scenario, failing this assertion. This is the desired behaviour.
     """
+    SCENARIO_DIR = REPO_ROOT / "scripts" / "harness" / "scenarios"
+
+    # Collect all .py basenames (excluding __init__.py and dunder files).
+    found_files = {
+        p.stem
+        for p in SCENARIO_DIR.glob("*.py")
+        if not p.name.startswith("_")
+    }
+    assert found_files, "No scenario files found — check SCENARIO_DIR path"
+
     env = os.environ.copy()
     result = subprocess.run(
         [sys.executable, str(RUN_PY), "--list", "--skip-supabase-check"],
@@ -181,19 +194,32 @@ def test_list_flag_prints_registered_scenarios(tmp_path):
         f"stderr={result.stderr!r}"
     )
     listed = set(result.stdout.strip().splitlines())
-    expected = {
-        "broken_sentinel",
-        "passing_sentinel",
-        "livetrack_heartbeat_state_machine",
-        "single_item_first_placement",
-        "catch_all_frames_captured",
-        "live_shelf_reunite",
-        "device_delete_propagates",
-    }
-    missing = expected - listed
-    assert not missing, (
-        f"--list is missing scenarios: {missing}. "
+
+    # Every file on disk must be in the registered listing. If a file is
+    # present but not listed, its @scenario decorator is missing or its
+    # import failed silently.
+    missing_from_list = found_files - listed
+    assert not missing_from_list, (
+        f"These scenario files are on disk but NOT registered (broken import "
+        f"or missing @scenario decorator): {sorted(missing_from_list)}. "
         f"Listed: {sorted(listed)}"
+    )
+
+    # Every listed name must correspond to a file on disk. Guards against a
+    # scenario being registered twice or from a stale cached module.
+    extra_in_list = listed - found_files
+    assert not extra_in_list, (
+        f"These names appear in --list but have no matching .py file: "
+        f"{sorted(extra_in_list)}"
+    )
+
+    # Count parity: len(listed) == len(found_files).
+    # A broken import causes the module to be absent from the registry, so
+    # len(listed) < len(found_files) — this assertion catches that too.
+    assert len(listed) == len(found_files), (
+        f"Registered scenario count ({len(listed)}) != file count "
+        f"({len(found_files)}). A file may have a broken import that causes "
+        f"it to be silently dropped from the registry."
     )
 
 
