@@ -295,7 +295,7 @@ def _render_timeline_html(
             except Exception:
                 payload_rendered = str(payload)
         rows_html.append(
-            f"<tr style=\"background-color:{color}\">"
+            f'<tr data-swatch="{_escape(reason)}" style="background-color:{color}">'
             f"<td>{_escape(row.get('ts'))}</td>"
             f"<td>{_escape(row.get('actor'))}</td>"
             f"<td><code>{_escape(reason)}</code></td>"
@@ -307,35 +307,116 @@ def _render_timeline_html(
         url, label = related_link
         back = f'<p><a href="{_escape(url)}">&larr; {_escape(label)}</a></p>'
     count = len(timeline)
-    # UX-FLAG: debug timeline pages have a light-mode style that
-    # contrasts hard with the rest of the dark-themed app — see
-    # UX_AUDIT_PI_LIVESHELF_FLAGS.md Flag 5. Decision deferred: keep
-    # the loud visual break (intentional "you've left the app" signal)
-    # OR migrate to extend _base.html for nav continuity. Both are
-    # defensible per the audit.
+    # Dark-theme styling matches `_base.html` (UX_AUDIT_PI_LIVESHELF_FLAGS
+    # Flag 5 — chosen the dark match for nav continuity) and also surfaces
+    # the reason-code legend on-page (Flag 8). The page stays self-contained
+    # (no Jinja inheritance) so the route works without a templates_dir,
+    # which is the original docstring contract for this helper. CSS values
+    # mirror `_base.html`'s :root variables.
+    legend_items = "".join(
+        f'<li><span class="legend-swatch" style="background-color:{color}"></span>'
+        f'<code>{_escape(reason)}</code></li>'
+        for reason, color in sorted(_REASON_COLORS.items())
+    )
     return f"""<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
 <title>{_escape(title)}</title>
 <style>
-  body {{ font-family: -apple-system, Segoe UI, sans-serif; margin: 24px; }}
-  h1 {{ font-size: 20px; }}
-  dl.meta {{ display: grid; grid-template-columns: max-content 1fr; gap: 4px 12px; margin-bottom: 16px; }}
-  dl.meta dt {{ font-weight: bold; color: #555; }}
-  table {{ border-collapse: collapse; width: 100%; font-size: 13px; }}
-  th, td {{ text-align: left; vertical-align: top; padding: 6px 8px; border-bottom: 1px solid #ddd; }}
-  pre {{ margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word; }}
+  :root {{
+    --bg:       #0f1115;
+    --panel:    #151822;
+    --panel-2:  #1b1f2b;
+    --border:   #232837;
+    --text:     #d8e2dc;
+    --muted:    #7f8c87;
+    --accent:   #00e676;
+  }}
+  * {{ box-sizing: border-box; }}
+  html, body {{
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: ui-monospace, SFMono-Regular, Menlo, Consolas,
+                 "Liberation Mono", monospace;
+    font-size: 13px;
+    line-height: 1.45;
+  }}
+  main {{ padding: 16px; max-width: 1280px; margin: 0 auto; }}
+  a {{ color: var(--accent); text-decoration: none; }}
+  a:hover {{ text-decoration: underline; }}
+  h1 {{ font-size: 18px; color: var(--accent); letter-spacing: 0.06em;
+       text-transform: uppercase; margin: 0 0 10px 0; }}
+  details.legend {{
+    background: var(--panel);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    font-size: 12px;
+  }}
+  details.legend summary {{
+    cursor: pointer;
+    color: var(--muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 11px;
+    user-select: none;
+  }}
+  details.legend ul {{
+    list-style: none;
+    margin: 8px 0 0 0;
+    padding: 0;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+    gap: 4px 12px;
+  }}
+  details.legend li {{
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }}
+  .legend-swatch {{
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    flex-shrink: 0;
+  }}
+  dl.meta {{ display: grid; grid-template-columns: max-content 1fr;
+            gap: 4px 12px; margin-bottom: 16px; }}
+  dl.meta dt {{ font-weight: bold; color: var(--muted); }}
+  table {{ border-collapse: collapse; width: 100%; font-size: 13px;
+          background: var(--panel); border: 1px solid var(--border);
+          border-radius: 4px; overflow: hidden; }}
+  th, td {{ text-align: left; vertical-align: top; padding: 6px 8px;
+           border-bottom: 1px solid var(--border); color: var(--text); }}
+  th {{ color: var(--muted); font-weight: 500; text-transform: uppercase;
+       letter-spacing: 0.05em; font-size: 11px; background: var(--panel-2); }}
+  /* Reason-code background swatches (set per-row inline) need dark-text
+     contrast — the swatch colors come from _REASON_COLORS and are
+     intentionally pastel. Keep the row text in a near-black for legibility. */
+  tr[data-swatch] td {{ color: #08090c; }}
+  pre {{ margin: 0; font-size: 12px; white-space: pre-wrap; word-break: break-word;
+        font-family: inherit; }}
   code {{ font-family: ui-monospace, Menlo, Consolas, monospace; }}
 </style>
 </head><body>
+<main>
 <h1>{_escape(title)}</h1>
 {back}
 {header_html}
 <p><strong>{count}</strong> lifecycle rows</p>
+<details class="legend">
+  <summary>reason-code legend ({len(_REASON_COLORS)})</summary>
+  <ul>{legend_items}</ul>
+</details>
 <table>
   <thead><tr><th>ts</th><th>actor</th><th>reason_code</th><th>payload</th></tr></thead>
   <tbody>{''.join(rows_html) or '<tr><td colspan="4">(no rows)</td></tr>'}</tbody>
 </table>
+</main>
 </body></html>"""
 
 

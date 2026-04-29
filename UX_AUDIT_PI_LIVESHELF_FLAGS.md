@@ -27,11 +27,10 @@ Implementation pass date: 2026-04-28
 - **Why deferred:** The audit suggests adding context like "84 reviews from today" or "84 across N days". Doing this well needs a query the badge currently doesn't have — a `MIN(created_at)` over the pending bucket — plus a hover tooltip / sub-badge. That's a small but non-zero UI addition.
 - **Question for user:** What context does the badge need? A min-age (e.g., "oldest from 3 days ago"), a stale-count breakdown, or a one-line tooltip? Is the operator's mental model "process newest first" or "process oldest first"?
 
-## Flag 5: Debug timeline pages — dark-theme + nav continuity
+## Flag 5: Debug timeline pages — dark-theme + nav continuity — CLOSED 2026-04-29
 
 - **Source:** Per-page → Debug timelines → Friction list, "The styling jump (dark-mode app → light-mode page) is jarring".
-- **Why deferred:** `debug_routes._render_timeline_html` constructs a self-contained HTML string with inline `<style>` so the route works without a templates_dir. Migrating it to extend `_base.html` is straightforward but changes the assumption that debug routes are template-less (one of the reasons cited in the docstring is keeping the "debug surface self-contained"). Either decision is defensible.
-- **Question for user:** Match the dark theme + nav, or label loudly as "DEBUG VIEW"? The audit suggests either — they're equally good answers.
+- **Resolution:** `_render_timeline_html` now uses dark-theme CSS variables matching `_base.html` (background, text, accent, panel, border). The route is still self-contained (no Jinja inheritance) so it keeps working without a `templates_dir`. The dark-text-on-pastel-swatch pattern stays — those reason-code colors come from `_REASON_COLORS` and need a near-black foreground for legibility.
 
 ## Flag 6: Recent events grid — last-hour summary line
 
@@ -45,11 +44,10 @@ Implementation pass date: 2026-04-28
 - **Why deferred:** The per-row × button + confirm already does this; the audit asks for a faster path. The right shape is unclear — keyboard shortcut? Bulk-select with checkboxes? A "drop all in flight" admin button?
 - **Question for user:** What's the operator's actual workflow when they need to drop a lot? Is the bottleneck the confirm dialog (which we already keep for safety) or the fact that every lot drop is per-row and N drops = N confirms?
 
-## Flag 8: Reconciler row reason-code dictionary
+## Flag 8: Reconciler row reason-code dictionary — CLOSED 2026-04-29
 
 - **Source:** Per-page → Debug timelines → Friction list, "Reason-code color legend isn't documented on-page".
-- **Why deferred:** `_REASON_COLORS` in `debug_routes.py` is the de-facto color legend. Surfacing it on-page (a small table at the top of each timeline view) is a tidy fix but I'd rather defer pending the dark-theme question (Flag 5) — solving both at once is cleaner than two passes.
-- **Question for user:** Bundle this with Flag 5 (timeline view facelift)?
+- **Resolution:** Bundled with Flag 5. `_render_timeline_html` now renders a `<details class="legend">` block above the rows table that lists every entry in `_REASON_COLORS` (sorted alphabetically) with a swatch + monospace reason-code label. Collapsed by default to avoid stealing attention from the timeline rows.
 
 ## Flag 9: Mobile-friendly nav / table layout
 
