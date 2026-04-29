@@ -21,6 +21,7 @@ from .integration import CloudEventEmitter, null_emitter
 from .livetrack_poller import LiveTrackPoller
 from .lot_snapshot_poller import LotSnapshotPoller
 from .outbox import enqueue_event
+from .pairings_sync_poller import PairingsSyncPoller
 from .product_sync_poller import ProductSyncPoller
 from .settings_cache import (
     ClassifierSettings,
@@ -40,6 +41,7 @@ __all__ = [
     "EventOverridesPoller",
     "LiveTrackPoller",
     "LotSnapshotPoller",
+    "PairingsSyncPoller",
     "ProductSyncPoller",
     "enqueue_event",
     "fetch_catalog",

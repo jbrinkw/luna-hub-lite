@@ -43,6 +43,7 @@ from .cloud import (
     EventOverridesPoller,
     LiveTrackPoller,
     LotSnapshotPoller,
+    PairingsSyncPoller,
     ProductSyncPoller,
 )
 from .cloud.integration import (
@@ -2261,6 +2262,34 @@ def create_app(
                 log.exception(
                     "failed to start lot-snapshot poller; "
                     "cloud stock_lots drift will not be reconciled "
+                    "until reboot",
+                )
+
+            # Pairings-sync poller. Pulls cloud ``chefbyte.scale_pairings``
+            # rows for THIS Pi (filtered server-side via x-api-key →
+            # device_id) every 60s and reconciles into the local
+            # ``scale_pairings`` table. Without this, the static-registry
+            # backfill (added in 124fb1c) seeds device_id + shelf_id only
+            # — product_id / lot_id never reach the Pi from the LiveTrack
+            # wizard until reboot. Cloud is source of truth for
+            # shelf_id / product_id / lot_id; Pi-local
+            # ``last_heartbeat_ts`` is preserved (different signal —
+            # Pi tracks ESP→Pi LAN heartbeat, cloud tracks Pi→cloud
+            # heartbeat). Best-effort startup, log + continue.
+            try:
+                pairings_sync_poller = PairingsSyncPoller(
+                    cloud_client,
+                    conn,
+                    state_path=cfg.data_root / "last_pairings_sync.json",
+                    db_lock=db_lock,
+                )
+                pairings_sync_poller.start()
+                cloud_pollers_started.append(pairings_sync_poller)
+                log.info("pairings-sync poller started (interval=60s)")
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "failed to start pairings-sync poller; "
+                    "cloud-side scale pairings will not reach the Pi "
                     "until reboot",
                 )
         except Exception:  # pragma: no cover - defensive
