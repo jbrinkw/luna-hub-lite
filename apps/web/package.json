@@ -37,6 +37,7 @@
     "@types/react-dom": "^18.3.7",
     "@vitejs/plugin-react": "^5.1.4",
     "@vitest/coverage-v8": "^4.0.18",
+    "fast-check": "^4.7.0",
     "jsdom": "^27.2.0",
     "tailwindcss": "^4.2.1",
     "typescript": "~5.7.0",
