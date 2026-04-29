@@ -19,23 +19,18 @@ import { epley1RM } from '@/pages/coachbyte/PrsPage';
 // mutation paths (insert/update/delete) remain as direct RPC calls —
 // those aren't query replicas, they're CRUD round-trip checks.
 
-// ``complete_next_set`` exists in two signatures during the 2026-04-25
-// migration window (p_reps/p_load vs p_actual_reps/p_actual_load). Adapt
-// at the call-site so either lands.
+// W-16 fix: removed legacy p_reps/p_load fallback shim. The migration
+// 20260425040000_timer_state_machine_rpcs.sql has been stable since
+// 2026-04-25. The compat shim allowed the wrong (deprecated) signature to
+// silently succeed via the fallback path — masking any re-introduction of
+// the old signature. Integration tests must use the canonical arg names
+// exclusively so PGRST202 would surface immediately.
 async function completeNextSet(ctx: PageTestContext, planId: string, reps: number, load: number): Promise<any> {
-  let r: any = await coachbyte(ctx.client).rpc('complete_next_set', {
+  return coachbyte(ctx.client).rpc('complete_next_set', {
     p_plan_id: planId,
-    p_reps: reps,
-    p_load: load,
+    p_actual_reps: reps,
+    p_actual_load: load,
   });
-  if (r.error && r.error.code === 'PGRST202') {
-    r = await coachbyte(ctx.client).rpc('complete_next_set', {
-      p_plan_id: planId,
-      p_actual_reps: reps,
-      p_actual_load: load,
-    });
-  }
-  return r;
 }
 
 describe('CoachByte TodayPage loaders + mutations', () => {
