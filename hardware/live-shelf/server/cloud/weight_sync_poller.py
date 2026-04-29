@@ -251,7 +251,13 @@ class WeightSyncPoller(threading.Thread):
 
         1. **live_shelf lots** — ``shelf_id='live_shelf'`` rows in the
            Pi's ``lots`` table (mirrored from cloud_lots + lifecycle
-           managed by the live_shelf handler).
+           managed by the live_shelf handler). The Pi-local ``lots.lot_id``
+           is a DIFFERENT UUID from the cloud's ``stock_lots.lot_id`` for
+           the same physical lot — so we MUST resolve the cloud lot_id
+           via the ``cloud_lots`` mirror (joined on ``product_id``) before
+           emitting. The emitted ``pi_lot_id`` field is, despite its name,
+           the cloud-side ``stock_lots.lot_id`` (the cloud's
+           ``apply_live_weight_sync`` function looks it up directly there).
            Filters: ``current_weight_g IS NOT NULL``,
            ``status IN ('on_shelf', 'in_flight')``. ``out`` /
            ``depleted`` / ``relocated`` / ``lost`` are excluded — qty
@@ -259,6 +265,12 @@ class WeightSyncPoller(threading.Thread):
            seeded with ``shelf_id='single_item'`` in tests (legacy
            seeding) — those continue to flow through this branch when
            ``current_weight_g`` is non-null.
+           Lot resolution rule: the JOIN against ``cloud_lots`` requires
+           ``deleted_at IS NULL`` and orders by
+           ``qty_containers DESC, created_at DESC`` to pick the freshest
+           live-stock cloud lot for the product. If no cloud_lots row
+           matches, the row is SKIPPED (we don't emit a payload guaranteed
+           to fail at the cloud's lot_id lookup).
 
         2. **live_scale lots** — ``shelf_id='single_item'`` rows in
            ``scale_pairings`` (NOT in ``lots``: the live_scale event
@@ -269,6 +281,10 @@ class WeightSyncPoller(threading.Thread):
            device_id. Requires ``runtime_state_provider`` to be wired;
            when not wired, live_scale streaming is disabled and only
            live_shelf is emitted.
+           ``scale_pairings.lot_id`` is ALREADY the cloud-side
+           ``stock_lots.lot_id`` (the FK to local ``lots(lot_id)`` was
+           dropped in migration 20260429... specifically because of this),
+           so this branch passes it through unchanged.
            A pairing must have a non-null ``lot_id`` (the operator has
            assigned a product lot to the scale via the pairings UI) and
            a fresh runtime weight reading (the heartbeat-state TTL gate
@@ -287,14 +303,37 @@ class WeightSyncPoller(threading.Thread):
         NULL for catch-all rows — the cloud-UI freshness indicator on
         those rows reflects pickup_weight_g instead.
         """
-        # The live_shelf branch keeps the legacy union (live_shelf +
-        # single_item rows in `lots`) so existing tests that seed a
-        # `lots` row with shelf_id='single_item' continue to work via
-        # the LEFT JOIN to scale_pairings for the device_id.
+        # The live_shelf branch JOINs cloud_lots on product_id to resolve
+        # the cloud-side stock_lots.lot_id. The Pi-local lots.lot_id is a
+        # DIFFERENT UUID space than the cloud's stock_lots.lot_id, so
+        # emitting lots.lot_id would always miss in the cloud handler
+        # (root-cause of the 'lot_id not found' applied=false bug).
+        # Resolution rule: prefer the cloud lot with the largest current
+        # qty_containers, breaking ties by most recent created_at — this
+        # picks the live "current" stock lot for the product. If no
+        # cloud_lots row matches the product, we DROP the row from the
+        # candidate list (skipping the emit is strictly better than
+        # firing a payload that's guaranteed to fail).
         live_shelf_sql = """
-            SELECT l.lot_id, l.shelf_id, l.current_weight_g, sp.device_id
+            SELECT l.lot_id AS pi_local_lot_id,
+                   cl.lot_id AS cloud_lot_id,
+                   l.shelf_id,
+                   l.current_weight_g,
+                   sp.device_id
               FROM lots l
-              LEFT JOIN scale_pairings sp ON sp.lot_id = l.lot_id
+              JOIN cloud_lots cl
+                ON cl.product_id = l.product_id
+               AND cl.deleted_at IS NULL
+               AND cl.lot_id = (
+                 SELECT inner_cl.lot_id
+                   FROM cloud_lots inner_cl
+                  WHERE inner_cl.product_id = l.product_id
+                    AND inner_cl.deleted_at IS NULL
+                  ORDER BY inner_cl.qty_containers DESC,
+                           inner_cl.created_at DESC
+                  LIMIT 1
+               )
+              LEFT JOIN scale_pairings sp ON sp.lot_id = cl.lot_id
              WHERE l.shelf_id IN ('live_shelf', 'single_item')
                AND l.current_weight_g IS NOT NULL
                AND l.status IN ('on_shelf', 'in_flight')
@@ -311,19 +350,35 @@ class WeightSyncPoller(threading.Thread):
         """
         if self._db_lock is not None:
             with self._db_lock:
-                shelf_rows = [
+                shelf_raw = [
                     dict(r) for r in self._conn.execute(live_shelf_sql).fetchall()
                 ]
                 scale_rows = [
                     dict(r) for r in self._conn.execute(live_scale_sql).fetchall()
                 ]
         else:
-            shelf_rows = [
+            shelf_raw = [
                 dict(r) for r in self._conn.execute(live_shelf_sql).fetchall()
             ]
             scale_rows = [
                 dict(r) for r in self._conn.execute(live_scale_sql).fetchall()
             ]
+
+        # Normalize the shelf branch: the SQL returns the cloud lot_id
+        # under ``cloud_lot_id`` (resolved via cloud_lots JOIN). Promote
+        # it to ``lot_id`` for downstream code so the throttle memory
+        # and emit path key off the cloud UUID — the same UUID that
+        # cloud's apply_live_weight_sync looks up in stock_lots.
+        shelf_rows: list[dict] = []
+        for r in shelf_raw:
+            cloud_lot_id = r.get("cloud_lot_id")
+            if not isinstance(cloud_lot_id, str) or not cloud_lot_id:
+                # Defense-in-depth: the JOIN already excludes rows
+                # without a matching cloud_lots row, but if a NULL
+                # somehow arrives just drop it.
+                continue
+            r["lot_id"] = cloud_lot_id
+            shelf_rows.append(r)
 
         # Dedup: a lot may appear in both branches when a test seeds
         # both a `lots` row and a `scale_pairings` row with the same

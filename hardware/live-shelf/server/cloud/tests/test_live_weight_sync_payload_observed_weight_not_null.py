@@ -51,20 +51,41 @@ def _seed_product(conn: sqlite3.Connection) -> str:
     return pid
 
 
-def _seed_lot(conn: sqlite3.Connection, *, product_id: str, weight_g: float) -> str:
-    lot_id = str(uuid.uuid4())
+def _seed_lot(
+    conn: sqlite3.Connection, *, product_id: str, weight_g: float
+) -> tuple[str, str]:
+    """Seed a Pi-local `lots` row AND a distinct cloud_lots mirror row.
+
+    Returns (pi_local_lot_id, cloud_lot_id). They are different UUIDs
+    by design: the poller must resolve the cloud_lot_id via the
+    cloud_lots JOIN — emitting the Pi-local one was the 2026-04-29
+    production bug.
+    """
+    pi_local_lot_id = str(uuid.uuid4())
+    cloud_lot_id = str(uuid.uuid4())
+    assert pi_local_lot_id != cloud_lot_id
     conn.execute(
         "INSERT INTO lots (lot_id, product_id, status, current_weight_g, shelf_id) "
         "VALUES (?, ?, 'on_shelf', ?, 'live_shelf')",
-        (lot_id, product_id, weight_g),
+        (pi_local_lot_id, product_id, weight_g),
+    )
+    conn.execute(
+        """
+        INSERT INTO cloud_lots (
+          lot_id, product_id, qty_containers, created_at, updated_at
+        ) VALUES (?, ?, 1.0, '2026-04-29T00:00:00Z', '2026-04-29T00:00:00Z')
+        """,
+        (cloud_lot_id, product_id),
     )
     conn.commit()
-    return lot_id
+    return pi_local_lot_id, cloud_lot_id
 
 
 def test_live_weight_sync_payload_observed_weight_is_non_null(conn):
     product_id = _seed_product(conn)
-    lot_id = _seed_lot(conn, product_id=product_id, weight_g=187.625)
+    pi_local_lot_id, cloud_lot_id = _seed_lot(
+        conn, product_id=product_id, weight_g=187.625,
+    )
 
     emitter = CloudEventEmitter(conn, enabled=True)
     poller = WeightSyncPoller(emitter, conn, clock=_ManualClock())
@@ -78,7 +99,11 @@ def test_live_weight_sync_payload_observed_weight_is_non_null(conn):
     payload = json.loads(row["payload_json"])
 
     assert payload["event_kind"] == "live_weight_sync"
-    assert payload["pi_lot_id"] == lot_id
+    # pi_lot_id field carries the CLOUD lot_id — see weight_sync_poller
+    # 2026-04-29 fix (the field name is misleading; it has always been
+    # the cloud-side stock_lots.lot_id from the cloud's perspective).
+    assert payload["pi_lot_id"] == cloud_lot_id
+    assert payload["pi_lot_id"] != pi_local_lot_id
     assert payload["observed_weight_g"] is not None
     assert payload["observed_weight_g"] == pytest.approx(187.625)
     assert payload["delta_g"] == pytest.approx(187.625)

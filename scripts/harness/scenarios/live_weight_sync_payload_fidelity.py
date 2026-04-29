@@ -42,9 +42,17 @@ def _live_weight_sync_payload_fidelity(ctx: HarnessContext) -> None:
     ctx.seed_cloud_user()
     ctx.seed_device()
     product_id = ctx.seed_product(name="Live-weight test", net_weight_g=500.0)
-    lot_id = ctx.seed_stock_lot(product_id=product_id, qty_containers=1.0)
+    cloud_lot_id = ctx.seed_stock_lot(product_id=product_id, qty_containers=1.0)
 
     # 2) Mirror product+lot on Pi with known current_weight_g.
+    #    Pi-local `lots.lot_id` is a DIFFERENT UUID from the cloud's
+    #    `stock_lots.lot_id` for the same physical lot — that's the
+    #    production reality. The poller resolves the cloud lot_id via
+    #    the Pi's `cloud_lots` mirror, which we seed alongside `lots`.
+    import uuid as _uuid
+
+    pi_local_lot_id = str(_uuid.uuid4())
+    assert pi_local_lot_id != cloud_lot_id
     pi_weight_g = 187.625
     pi_conn = ctx.pi_sqlite
     with pi_conn:
@@ -64,8 +72,20 @@ def _live_weight_sync_payload_fidelity(ctx: HarnessContext) -> None:
                 initial_weight_g, total_consumed_g, shelf_id
             ) VALUES (?, ?, 'on_shelf', ?, ?, 0.0, 'live_shelf')
             """,
-            (lot_id, product_id, pi_weight_g, pi_weight_g),
+            (pi_local_lot_id, product_id, pi_weight_g, pi_weight_g),
         )
+        # Mirror the cloud lot into the Pi's `cloud_lots` table so the
+        # poller can resolve cloud_lot_id via the product_id JOIN.
+        pi_conn.execute(
+            """
+            INSERT INTO cloud_lots (
+                lot_id, product_id, qty_containers,
+                created_at, updated_at
+            ) VALUES (?, ?, 1.0, ?, ?)
+            """,
+            (cloud_lot_id, product_id, _now_iso(), _now_iso()),
+        )
+    lot_id = cloud_lot_id  # what cloud-side asserts query against
 
     # 3) Fire the relevant Pi action: poller tick.
     poller = WeightSyncPoller(ctx.pi_emitter, pi_conn, clock=_ManualClock())

@@ -74,6 +74,32 @@ def _seed_product(conn: sqlite3.Connection, *, name: str = "Test") -> str:
     return pid
 
 
+def _seed_cloud_lot(
+    conn: sqlite3.Connection,
+    *,
+    product_id: str,
+    qty_containers: float = 1.0,
+    deleted_at: str = None,
+    created_at: str = "2026-04-29T00:00:00Z",
+    updated_at: str = "2026-04-29T00:00:00Z",
+    lot_id: str = None,
+) -> str:
+    """Seed a cloud_lots mirror row. Returns the cloud lot_id."""
+    if lot_id is None:
+        lot_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO cloud_lots (
+          lot_id, product_id, qty_containers,
+          deleted_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (lot_id, product_id, qty_containers, deleted_at, created_at, updated_at),
+    )
+    conn.commit()
+    return lot_id
+
+
 def _seed_lot(
     conn: sqlite3.Connection,
     *,
@@ -84,7 +110,23 @@ def _seed_lot(
     in_flight_since: str = None,
     pickup_weight_g: float = None,
     pickup_event_id: str = None,
+    seed_cloud_mirror: bool = True,
+    cloud_lot_id: str = None,
 ) -> str:
+    """Seed a Pi-local `lots` row.
+
+    When ``seed_cloud_mirror`` is True (default), ALSO seeds a
+    cloud_lots row for the same product with a DIFFERENT lot_id. This
+    matches production: the Pi-local UUID and the cloud UUID for the
+    "same" physical lot are distinct UUID spaces (see
+    weight_sync_poller bug fix 2026-04-29 — the poller must emit the
+    cloud lot_id, not the Pi-local one). Tests that need the legacy
+    collide-UUIDs shape can pass ``seed_cloud_mirror=False`` and seed
+    cloud_lots manually.
+
+    Returns the Pi-local lot_id (NOT the cloud lot_id — callers wanting
+    that should use ``_seed_cloud_lot`` directly).
+    """
     lot_id = str(uuid.uuid4())
     conn.execute(
         """
@@ -104,6 +146,13 @@ def _seed_lot(
             pickup_event_id,
         ),
     )
+    if seed_cloud_mirror:
+        _seed_cloud_lot(
+            conn,
+            product_id=product_id,
+            qty_containers=1.0,
+            lot_id=cloud_lot_id,
+        )
     conn.commit()
     return lot_id
 
@@ -142,11 +191,17 @@ def _make_poller(
 
 
 def test_first_observation_emits_for_live_shelf_lot(conn):
-    """Fresh poller with no memory must emit on the first scan."""
+    """Fresh poller with no memory must emit on the first scan, and
+    the emitted pi_lot_id must be the CLOUD lot_id (resolved from
+    cloud_lots), NOT the Pi-local lots.lot_id."""
     pid = _seed_product(conn, name="P1")
-    lot_id = _seed_lot(
+    pi_lot = _seed_lot(
         conn, product_id=pid, shelf_id="live_shelf", current_weight_g=160.4,
     )
+    cloud_lot_id = conn.execute(
+        "SELECT lot_id FROM cloud_lots WHERE product_id = ?", (pid,)
+    ).fetchone()["lot_id"]
+    assert cloud_lot_id != pi_lot, "fixture must seed distinct UUIDs"
     poller, emitter = _make_poller(conn, clock=_ManualClock())
 
     n = poller.tick_once()
@@ -154,7 +209,8 @@ def test_first_observation_emits_for_live_shelf_lot(conn):
     assert n == 1
     emitter.emit_live_weight_sync.assert_called_once()
     kwargs = emitter.emit_live_weight_sync.call_args.kwargs
-    assert kwargs["pi_lot_id"] == lot_id
+    assert kwargs["pi_lot_id"] == cloud_lot_id
+    assert kwargs["pi_lot_id"] != pi_lot
     assert kwargs["kind"] == "live_shelf"
     assert kwargs["scale_id"] == "scale-01"
     # delta_g is repurposed for live_weight_sync as absolute weight.
@@ -164,16 +220,27 @@ def test_first_observation_emits_for_live_shelf_lot(conn):
 def test_first_observation_emits_for_live_scale_lot_using_pairing_device_id(
     conn,
 ):
-    """live_scale (single_item) lot uses scale_pairings.device_id as scale_id."""
+    """live_scale (single_item) lot uses scale_pairings.device_id as scale_id.
+
+    This is the legacy seeding path where a `lots` row with
+    shelf_id='single_item' is present alongside scale_pairings; it flows
+    through the live_shelf branch (which now resolves cloud_lot_id via
+    cloud_lots JOIN). The pairing is rebound to the cloud_lot_id so
+    the LEFT JOIN still produces the device_id.
+    """
     pid = _seed_product(conn, name="P2")
-    lot_id = _seed_lot(
+    pi_lot = _seed_lot(
         conn, product_id=pid, shelf_id="single_item", current_weight_g=85.0,
     )
-    # Seed a paired ESP for this lot.
+    cloud_lot_id = conn.execute(
+        "SELECT lot_id FROM cloud_lots WHERE product_id = ?", (pid,)
+    ).fetchone()["lot_id"]
+    assert cloud_lot_id != pi_lot
+    # Seed a paired ESP keyed by cloud_lot_id (post-FK-drop convention).
     conn.execute(
         "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
         "VALUES (?, ?, ?, ?)",
-        ("scale-pi-3", "single_item", pid, lot_id),
+        ("scale-pi-3", "single_item", pid, cloud_lot_id),
     )
     conn.commit()
     poller, emitter = _make_poller(conn, clock=_ManualClock())
@@ -182,7 +249,7 @@ def test_first_observation_emits_for_live_scale_lot_using_pairing_device_id(
 
     assert n == 1
     kwargs = emitter.emit_live_weight_sync.call_args.kwargs
-    assert kwargs["pi_lot_id"] == lot_id
+    assert kwargs["pi_lot_id"] == cloud_lot_id
     assert kwargs["kind"] == "live_scale"
     assert kwargs["scale_id"] == "scale-pi-3"
     assert kwargs["observed_weight_g"] == pytest.approx(85.0)
@@ -190,11 +257,16 @@ def test_first_observation_emits_for_live_scale_lot_using_pairing_device_id(
 
 def test_live_weight_sync_outbox_payload_carries_observed_weight_from_lot(conn):
     """End-to-end: lot.current_weight_g must land in outbox JSON as
-    observed_weight_g for live_weight_sync rows."""
+    observed_weight_g for live_weight_sync rows, and pi_lot_id must be
+    the CLOUD lot_id."""
     pid = _seed_product(conn, name="P2-outbox")
-    lot_id = _seed_lot(
+    pi_lot = _seed_lot(
         conn, product_id=pid, shelf_id="live_shelf", current_weight_g=160.4355,
     )
+    cloud_lot_id = conn.execute(
+        "SELECT lot_id FROM cloud_lots WHERE product_id = ?", (pid,)
+    ).fetchone()["lot_id"]
+    assert cloud_lot_id != pi_lot
     emitter = CloudEventEmitter(conn, enabled=True)
     poller = WeightSyncPoller(emitter, conn, clock=_ManualClock())
 
@@ -207,7 +279,7 @@ def test_live_weight_sync_outbox_payload_carries_observed_weight_from_lot(conn):
     assert row is not None
     payload = json.loads(row["payload_json"])
     assert payload["event_kind"] == "live_weight_sync"
-    assert payload["pi_lot_id"] == lot_id
+    assert payload["pi_lot_id"] == cloud_lot_id
     assert payload["observed_weight_g"] == pytest.approx(160.4355)
     # Backward-compat payload key for the existing /event validator.
     assert payload["delta_g"] == pytest.approx(160.4355)
@@ -640,17 +712,21 @@ def test_live_scale_provider_exception_does_not_kill_tick(conn):
 
 
 def test_live_scale_pairing_dedup_when_lots_row_present(conn):
-    """If a lot has both a `lots` row AND a `scale_pairings` row (legacy
-    test seeding overlap), the pairings branch must dedup against the
+    """If a lot has both a `lots` row AND a `scale_pairings` row keyed
+    by the same cloud_lot_id, the pairings branch must dedup against the
     `lots` branch so we emit only once."""
     pid = _seed_product(conn, name="DUP")
-    lot_id = _seed_lot(
+    _seed_lot(
         conn, product_id=pid, shelf_id="single_item", current_weight_g=85.0,
     )
+    cloud_lot_id = conn.execute(
+        "SELECT lot_id FROM cloud_lots WHERE product_id = ?", (pid,)
+    ).fetchone()["lot_id"]
+    # Pairings.lot_id holds the cloud lot_id (FK to local lots was dropped).
     conn.execute(
         "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
         "VALUES (?, ?, ?, ?)",
-        ("scale-dup-1", "single_item", pid, lot_id),
+        ("scale-dup-1", "single_item", pid, cloud_lot_id),
     )
     conn.commit()
     runtime = {"scale-dup-1": {"weight_g": 999.0, "stable": True}}
@@ -668,3 +744,159 @@ def test_live_scale_pairing_dedup_when_lots_row_present(conn):
     assert emitter.emit_live_weight_sync.call_count == 1
     kwargs = emitter.emit_live_weight_sync.call_args.kwargs
     assert kwargs["observed_weight_g"] == pytest.approx(85.0)
+    assert kwargs["pi_lot_id"] == cloud_lot_id
+
+
+# ---------------------------------------------------------------------------
+# Production-shape regression tests (2026-04-29)
+# ---------------------------------------------------------------------------
+#
+# Before this batch the live_shelf branch emitted ``lots.lot_id`` (Pi-local
+# UUID space) as ``pi_lot_id``. Cloud's ``apply_live_weight_sync`` looks
+# up ``stock_lots.lot_id`` directly with that value, but the cloud's UUID
+# for the same physical lot is DIFFERENT from the Pi's — every emit
+# returned ``applied=false reason='lot_id not found'`` and
+# ``last_observed_weight_g`` never updated. Confirmed prod state:
+#   Pi lots.lot_id      = 8923f32f-37f6-400b-ae07-e5fc25faee55
+#   cloud stock_lots    = afc2ab94-e63d-4404-9f3c-39b4c6e347ae  (same product)
+# The fix: JOIN cloud_lots on product_id, emit cloud_lots.lot_id.
+#
+# Old fixtures (above) used a single uuid for both the Pi `lots` row and
+# any seeded `cloud_lots` row — they could not have caught this bug.
+# These tests deliberately seed DISTINCT UUIDs.
+
+
+def test_emits_cloud_lot_id_not_pi_local_lot_id_for_live_shelf(conn):
+    """Production-shape regression: when Pi `lots` and `cloud_lots`
+    have DIFFERENT UUIDs for the same physical lot, the poller MUST
+    emit the cloud lot_id (so cloud's apply_live_weight_sync finds it).
+
+    Bug reference: 2026-04-29 — emitting lots.lot_id caused every
+    live_weight_sync to return applied=false 'lot_id not found' and
+    last_observed_weight_g never updated in production.
+    """
+    pid = _seed_product(conn, name="CHICKEN")
+    pi_local_lot_id = "8923f32f-37f6-400b-ae07-e5fc25faee55"
+    cloud_lot_id = "afc2ab94-e63d-4404-9f3c-39b4c6e347ae"
+    conn.execute(
+        """
+        INSERT INTO lots (
+          lot_id, product_id, status, current_weight_g, shelf_id
+        ) VALUES (?, ?, 'on_shelf', 1234.5, 'live_shelf')
+        """,
+        (pi_local_lot_id, pid),
+    )
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=1.0, lot_id=cloud_lot_id,
+    )
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    n = poller.tick_once()
+
+    assert n == 1
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["pi_lot_id"] == cloud_lot_id, (
+        "poller must emit the cloud lot_id, not the Pi-local lots.lot_id"
+    )
+    assert kwargs["pi_lot_id"] != pi_local_lot_id
+    assert kwargs["observed_weight_g"] == pytest.approx(1234.5)
+
+
+def test_skips_emit_when_no_matching_cloud_lots_row(conn):
+    """If no cloud_lots row exists for the product, the poller MUST
+    skip the row entirely — emitting a Pi-local UUID is guaranteed to
+    fail at the cloud's stock_lots lookup, so don't waste an outbox
+    slot on a dead-letter."""
+    pid = _seed_product(conn, name="ORPHAN")
+    # Seed lots row but NO cloud_lots row for this product.
+    _seed_lot(
+        conn,
+        product_id=pid,
+        shelf_id="live_shelf",
+        current_weight_g=200.0,
+        seed_cloud_mirror=False,
+    )
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    n = poller.tick_once()
+
+    assert n == 0
+    emitter.emit_live_weight_sync.assert_not_called()
+
+
+def test_picks_freshest_cloud_lot_when_multiple_match(conn):
+    """When several cloud_lots rows exist for the same product, the
+    poller picks the one with highest qty_containers (and breaks ties
+    by most recent created_at). Deleted rows are excluded entirely."""
+    pid = _seed_product(conn, name="GATORADE")
+    pi_local_lot_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO lots (
+          lot_id, product_id, status, current_weight_g, shelf_id
+        ) VALUES (?, ?, 'on_shelf', 600.0, 'live_shelf')
+        """,
+        (pi_local_lot_id, pid),
+    )
+    # Three cloud_lots for the same product:
+    #   - "old": stale, fully consumed (qty=0).
+    #   - "deleted": tombstoned, must be ignored.
+    #   - "fresh": current live stock, must be picked.
+    old_lot = "11111111-1111-1111-1111-111111111111"
+    deleted_lot = "22222222-2222-2222-2222-222222222222"
+    fresh_lot = "33333333-3333-3333-3333-333333333333"
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=0.0, lot_id=old_lot,
+        created_at="2026-04-01T00:00:00Z",
+    )
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=5.0, lot_id=deleted_lot,
+        created_at="2026-04-25T00:00:00Z",
+        deleted_at="2026-04-26T00:00:00Z",
+    )
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=2.0, lot_id=fresh_lot,
+        created_at="2026-04-28T00:00:00Z",
+    )
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    n = poller.tick_once()
+
+    assert n == 1
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["pi_lot_id"] == fresh_lot
+    assert kwargs["pi_lot_id"] != old_lot
+    assert kwargs["pi_lot_id"] != deleted_lot
+
+
+def test_live_scale_branch_passes_through_scale_pairings_lot_id(conn):
+    """live_scale regression: the scale_pairings branch must emit
+    scale_pairings.lot_id directly (which is already the cloud
+    stock_lots.lot_id — the FK to local lots(lot_id) was dropped in
+    migration 20260429... specifically because of this).
+    """
+    pid = _seed_product(conn, name="MILK-PROD")
+    cloud_lot_id = "44444444-4444-4444-4444-444444444444"
+    # Production live_scale path: NO `lots` row, only scale_pairings.
+    # The pairings.lot_id is the cloud lot_id (post-FK-drop).
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id, lot_id) "
+        "VALUES (?, ?, ?, ?)",
+        ("scale-milk-prod", "single_item", pid, cloud_lot_id),
+    )
+    conn.commit()
+    runtime = {"scale-milk-prod": {"weight_g": 1800.0, "stable": True}}
+    poller, emitter = _make_poller(
+        conn,
+        clock=_ManualClock(),
+        runtime_state_provider=lambda: runtime,
+    )
+
+    n = poller.tick_once()
+
+    assert n == 1
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["pi_lot_id"] == cloud_lot_id
+    assert kwargs["kind"] == "live_scale"
+    assert kwargs["scale_id"] == "scale-milk-prod"
+    assert kwargs["observed_weight_g"] == pytest.approx(1800.0)
