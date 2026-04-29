@@ -1447,3 +1447,193 @@ class TestBackfillProbe:
         assert conn.execute(
             "SELECT COUNT(*) FROM cloud_outbox"
         ).fetchone()[0] == 1
+
+
+# ---------------------------------------------------------------------------
+# Sync-audit finding #6 — usage_kind discriminator forwarded to cloud
+# ---------------------------------------------------------------------------
+
+
+class TestUsageKindForwarding:
+    """Pi emitters stamp ``usage_kind`` so cloud food_logs.usage_kind
+    carries the same provenance label as the Pi's usage_log.kind."""
+
+    def test_emit_reconciler_resolution_use_return_consumed_carries_usage_kind(
+        self, conn,
+    ):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_reconciler_resolution(
+            pattern="use_return_consumed",
+            product_id="prod-1",
+            scale_id="scale-01",
+            kind="live_shelf",
+            delta_g=-42.5,
+        )
+        assert cid is not None
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert payload["usage_kind"] == "reconciler_use_return"
+
+    def test_emit_reconciler_resolution_in_flight_return_carries_usage_kind(
+        self, conn,
+    ):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_reconciler_resolution(
+            pattern="in_flight_return",
+            product_id="prod-1",
+            scale_id="scale-01",
+            kind="live_shelf",
+            delta_g=-100.0,
+        )
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert payload["usage_kind"] == "in_flight_return"
+
+    def test_emit_reconciler_resolution_in_flight_replaced_carries_usage_kind(
+        self, conn,
+    ):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_reconciler_resolution(
+            pattern="in_flight_replaced_new_item",
+            product_id="prod-1",
+            scale_id="scale-01",
+            kind="live_shelf",
+            delta_g=-200.0,
+        )
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert payload["usage_kind"] == "in_flight_replaced_new_item"
+
+    def test_emit_reconciler_resolution_in_flight_ttl_expired_carries_usage_kind(
+        self, conn,
+    ):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_reconciler_resolution(
+            pattern="in_flight_ttl_expired",
+            product_id="prod-1",
+            scale_id="scale-01",
+            kind="live_shelf",
+            delta_g=-300.0,
+        )
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert payload["usage_kind"] == "in_flight_ttl_expired"
+
+    def test_emit_reconciler_resolution_topped_up_omits_usage_kind(
+        self, conn,
+    ):
+        """Refilled events don't write food_logs on the cloud, and the
+        Pi's usage_log doesn't track refill provenance — the Pi-side
+        contract is "no usage_kind for topped_up"."""
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_reconciler_resolution(
+            pattern="topped_up",
+            product_id="prod-1",
+            scale_id="scale-01",
+            kind="live_shelf",
+            delta_g=60.0,
+        )
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert "usage_kind" not in payload
+
+    def test_emit_in_flight_reap_stamps_ttl_expired_usage_kind(self, conn):
+        """TTL reap path is the cloud analogue of the Pi's
+        in_flight_ttl_expired usage_log row."""
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_in_flight_reap(
+            scale_id="scale-01",
+            product_id="prod-1",
+            consumed_g=250.0,
+        )
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert payload["usage_kind"] == "in_flight_ttl_expired"
+
+    def test_emit_single_item_consumed_stamps_single_item_consumed_usage_kind(
+        self, conn,
+    ):
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_single_item_event(
+            scale_id="scale-single",
+            product_id="prod-1",
+            delta_g=-50.0,
+            noise_floor_g=2.0,
+            refill_threshold_g=15.0,
+            depleted=False,
+        )
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert payload["usage_kind"] == "single_item_consumed"
+
+    def test_emit_single_item_depleted_stamps_single_item_consumed_usage_kind(
+        self, conn,
+    ):
+        """``depleted`` writes food_logs on the cloud (the lot was emptied
+        in one go) so it carries the same usage_kind as a normal consumed
+        single-item event."""
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_single_item_event(
+            scale_id="scale-single",
+            product_id="prod-1",
+            delta_g=500.0,  # magnitude — depleted=True negates
+            noise_floor_g=2.0,
+            refill_threshold_g=15.0,
+            depleted=True,
+        )
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert payload["usage_kind"] == "single_item_consumed"
+
+    def test_emit_single_item_refilled_omits_usage_kind(self, conn):
+        """Refill doesn't write food_logs on the cloud — usage_kind
+        stays unset so cloud-side analytics don't see a phantom
+        consumption-style provenance label on a stock-up row."""
+        emitter = CloudEventEmitter(conn, enabled=True)
+        cid = emitter.emit_single_item_event(
+            scale_id="scale-single",
+            product_id="prod-1",
+            delta_g=80.0,  # > refill_threshold
+            noise_floor_g=2.0,
+            refill_threshold_g=15.0,
+            depleted=False,
+        )
+        payload = json.loads(
+            conn.execute(
+                "SELECT payload_json FROM cloud_outbox WHERE client_event_id = ?",
+                (cid,),
+            ).fetchone()["payload_json"],
+        )
+        assert "usage_kind" not in payload

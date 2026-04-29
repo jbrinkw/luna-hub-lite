@@ -60,9 +60,14 @@ SELECT is(
     'numeric'::regtype::oid,
     'timestamp with time zone'::regtype::oid,
     'text'::regtype::oid,
+    'text'::regtype::oid,
+    -- 2026-04-29: sync-audit finding #6 added p_usage_kind TEXT
+    -- DEFAULT NULL as the 11th parameter so Pi-emitted consumed
+    -- events can stamp ``food_logs.usage_kind`` with the Pi
+    -- ``usage_log.kind`` provenance discriminator.
     'text'::regtype::oid
   ], ' '),
-  'surviving overload has canonical 10-arg signature'
+  'surviving overload has canonical 11-arg signature'
 );
 
 SELECT * FROM finish();

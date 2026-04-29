@@ -563,6 +563,17 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     typeof body?.pi_event_id === 'string' && body.pi_event_id.length > 0 && body.pi_event_id.length <= 128
       ? body.pi_event_id
       : null;
+  // Sync-audit finding #6 (2026-04-29): the Pi's usage_log.kind
+  // discriminator (in_flight_ttl_expired / in_flight_return /
+  // reconciler_use_return / single_item_consumed / etc.) propagates to
+  // cloud food_logs.usage_kind so cloud-side analytics + Chef UI can
+  // distinguish provenance. Optional — older Pi binaries omit the
+  // field and the cloud writes NULL (matches the historical row shape).
+  // Length cap mirrors the longest known enum value with headroom.
+  const usageKind: string | null =
+    typeof body?.usage_kind === 'string' && body.usage_kind.length > 0 && body.usage_kind.length <= 64
+      ? body.usage_kind
+      : null;
   let productId: string | null = body?.product_id ?? null;
 
   if (!scaleId || !kind || !eventKind || deltaG === undefined || !occurredAt) {
@@ -760,6 +771,9 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
       p_occurred_at: occurredAt,
       p_client_event_id: clientEventId,
       p_pi_event_id: piEventId,
+      // Sync-audit finding #6: forward Pi-side usage_log.kind so the
+      // resulting food_logs row carries the same provenance discriminator.
+      p_usage_kind: usageKind,
     }));
   }
 

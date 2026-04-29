@@ -225,6 +225,31 @@ PATTERN_TO_EVENT_KIND: dict[str, Optional[str]] = {
 }
 
 
+# Sync-audit finding #6 (2026-04-29): map reconciler ``pattern`` to the
+# Pi ``usage_log.kind`` discriminator so cloud ``food_logs.usage_kind``
+# carries the same provenance label. The set is a strict subset of
+# :data:`PATTERN_TO_EVENT_KIND` — only patterns that produce a
+# ``consumed`` cloud event populate usage_kind (the cloud column is
+# meaningful only for food_logs rows, and those are only written on
+# the consumed branches of apply_shelf_event).
+#
+# Patterns that don't appear here either don't write food_logs
+# (in_flight_pickup, in_flight_return-clear, manual_discard, swap_*,
+# relocation, no_op, unknown) or use_return_no_consumption which is
+# explicitly stock-unchanged.
+PATTERN_TO_USAGE_KIND: dict[str, str] = {
+    "use_return_consumed": "reconciler_use_return",
+    "consumed_or_removed": "reconciler_use_return",
+    "in_flight_return": "in_flight_return",
+    "in_flight_replaced_new_item": "in_flight_replaced_new_item",
+    "in_flight_ttl_expired": "in_flight_ttl_expired",
+    # ``topped_up`` produces an ADD-side food_logs row only when the
+    # cloud derives a "negative consumption" (refill replacing prior
+    # contents). The Pi's usage_log doesn't track refill provenance —
+    # leave usage_kind NULL on the cloud row.
+}
+
+
 # Cloud-side single-winner resolution (2026-04-22 dual-emit dedup).
 #
 # Background: a single physical REMOVE event can produce MULTIPLE
@@ -481,6 +506,13 @@ class CloudEventEmitter:
             "delta_g": float(delta_g),
             "occurred_at": occurred_at or _iso_utc_ms(),
         }
+        # Sync-audit finding #6: stamp usage_kind so cloud
+        # food_logs.usage_kind carries the Pi provenance discriminator
+        # (mirrors the Pi's usage_log.kind column). NULL when the
+        # pattern doesn't have a usage_log analogue.
+        usage_kind = PATTERN_TO_USAGE_KIND.get(pattern)
+        if usage_kind is not None:
+            payload["usage_kind"] = usage_kind
         # Finding #5 back-fill support: embed the resolution_id so the
         # startup self-heal scan can cross-reference outbox rows against
         # session_resolutions without walking the full event. The cloud
@@ -547,6 +579,13 @@ class CloudEventEmitter:
             "delta_g": emit_delta,
             "occurred_at": occurred_at or _iso_utc_ms(),
         }
+        # Sync-audit finding #6: only the ``consumed`` and ``depleted``
+        # branches write food_logs on the cloud, and both have the same
+        # Pi usage_log.kind = 'single_item_consumed'. Refilled events
+        # don't write food_logs (they're stock-up, not consumption) so
+        # we leave usage_kind unset for that branch.
+        if event_kind in ("consumed", "depleted"):
+            payload["usage_kind"] = "single_item_consumed"
         # Pi can omit product_id — cloud's shelf-ingest /event resolves it
         # via scale_pairings. Only include when the caller already knows.
         if product_id is not None:
@@ -585,6 +624,9 @@ class CloudEventEmitter:
             "product_id": product_id,
             "delta_g": -abs(float(consumed_g)),
             "occurred_at": occurred_at or _iso_utc_ms(),
+            # Sync-audit finding #6: TTL reap → ``in_flight_ttl_expired``
+            # in the Pi's usage_log; mirror onto cloud food_logs.usage_kind.
+            "usage_kind": "in_flight_ttl_expired",
         }
         if pi_event_id:
             payload["pi_event_id"] = pi_event_id
