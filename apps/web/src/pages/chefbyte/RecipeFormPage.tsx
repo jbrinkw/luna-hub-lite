@@ -20,6 +20,7 @@ interface ProductSearchResult {
   protein_per_serving: number;
   fat_per_serving: number;
   servings_per_container: number;
+  net_weight_g: number | null;
 }
 
 interface LocalIngredient {
@@ -34,6 +35,7 @@ interface LocalIngredient {
   protein_per_serving: number;
   fat_per_serving: number;
   servings_per_container: number;
+  net_weight_g: number | null;
 }
 
 /* ================================================================== */
@@ -85,7 +87,7 @@ export function RecipeFormPage() {
       const { data: recipe, error } = await chefbyte()
         .from('recipes')
         .select(
-          '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
+          '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g))',
         )
         .eq('recipe_id', id!)
         .eq('user_id', user!.id)
@@ -125,6 +127,7 @@ export function RecipeFormPage() {
       protein_per_serving: Number(ri.products?.protein_per_serving ?? 0),
       fat_per_serving: Number(ri.products?.fat_per_serving ?? 0),
       servings_per_container: Number(ri.products?.servings_per_container ?? 1),
+      net_weight_g: ri.products?.net_weight_g != null ? Number(ri.products.net_weight_g) : null,
     }));
     setIngredients(ings);
     setFormPopulated(true);
@@ -162,7 +165,7 @@ export function RecipeFormPage() {
       const { data } = await chefbyte()
         .from('products')
         .select(
-          'product_id, name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container',
+          'product_id, name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g',
         )
         .eq('user_id', user.id)
         .ilike('name', `%${escapeIlike(text)}%`)
@@ -208,6 +211,7 @@ export function RecipeFormPage() {
       protein_per_serving: Number(selectedProduct.protein_per_serving),
       fat_per_serving: Number(selectedProduct.fat_per_serving),
       servings_per_container: Number(selectedProduct.servings_per_container),
+      net_weight_g: selectedProduct.net_weight_g != null ? Number(selectedProduct.net_weight_g) : null,
     };
 
     setIngredients((prev) => [...prev, newIng]);
@@ -240,6 +244,7 @@ export function RecipeFormPage() {
         protein_per_serving: ing.protein_per_serving,
         fat_per_serving: ing.fat_per_serving,
         servings_per_container: ing.servings_per_container,
+        net_weight_g: ing.net_weight_g,
       },
     }));
     return computeRecipeMacros(mapped, baseServings);
@@ -255,6 +260,7 @@ export function RecipeFormPage() {
         protein_per_serving: ing.protein_per_serving,
         fat_per_serving: ing.fat_per_serving,
         servings_per_container: ing.servings_per_container,
+        net_weight_g: ing.net_weight_g,
       },
     }));
     return computeRecipeMacros(mapped, 1);
@@ -403,6 +409,9 @@ export function RecipeFormPage() {
     );
   }
 
+  // Helper: is gram unit available for a product?
+  const gramAvailable = (netWeightG: number | null) => netWeightG != null && netWeightG > 0;
+
   return (
     <ChefLayout title={isEdit ? 'Edit Recipe' : 'New Recipe'}>
       <div className="mb-6">
@@ -548,7 +557,23 @@ export function RecipeFormPage() {
               >
                 <option value="serving">Serving</option>
                 <option value="container">Container</option>
+                <option
+                  value="gram"
+                  disabled={!gramAvailable(selectedProduct?.net_weight_g ?? null)}
+                  title={
+                    !gramAvailable(selectedProduct?.net_weight_g ?? null)
+                      ? 'Set net weight on the product first'
+                      : undefined
+                  }
+                >
+                  g (gram)
+                </option>
               </select>
+              {ingUnit === 'gram' && selectedProduct && !gramAvailable(selectedProduct.net_weight_g) && (
+                <p className="mt-1 text-xs text-danger-text" data-testid="gram-unit-missing-weight-error">
+                  This product has no net weight. Set net_weight_g on the product to use gram unit.
+                </p>
+              )}
             </div>
           </div>
           <div className="md:w-[120px]">
@@ -612,13 +637,28 @@ export function RecipeFormPage() {
                     >
                       <option value="serving">Serving</option>
                       <option value="container">Container</option>
+                      <option
+                        value="gram"
+                        disabled={!gramAvailable(ing.net_weight_g)}
+                        title={!gramAvailable(ing.net_weight_g) ? 'Set net weight on the product first' : undefined}
+                      >
+                        g (gram)
+                      </option>
                     </select>
+                    {ing.unit === 'gram' && !gramAvailable(ing.net_weight_g) && (
+                      <p
+                        className="mt-0.5 text-[10px] text-danger-text leading-tight"
+                        data-testid={`gram-unit-missing-weight-error-${idx}`}
+                      >
+                        Set net weight on product first
+                      </p>
+                    )}
                   </div>
                   <div className="flex-1 min-w-[100px]">
                     <label className="block text-[11px] text-text-tertiary mb-0.5">Note</label>
                     <input
                       value={ing.note}
-                      placeholder={'\u2014'}
+                      placeholder={'—'}
                       onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
                       className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
                       data-testid={`edit-note-${idx}`}

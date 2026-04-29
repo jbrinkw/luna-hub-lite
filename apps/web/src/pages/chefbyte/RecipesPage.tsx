@@ -21,6 +21,7 @@ interface ProductInfo {
   protein_per_serving: number;
   fat_per_serving: number;
   servings_per_container: number;
+  net_weight_g: number | null;
 }
 
 interface RecipeIngredient {
@@ -77,6 +78,36 @@ export const EXPIRING_WINDOW_DAYS = 7;
 export const EXPIRING_LOOKBACK_DAYS = 7;
 
 /* ------------------------------------------------------------------ */
+/*  Gram-unit conversion helper (exported for testing)                 */
+/* ------------------------------------------------------------------ */
+
+/**
+ * Convert an ingredient quantity (in its stored unit) to a container count.
+ * This is the single source of truth for unit conversion across computeMacros,
+ * computeStockStatus, and computeMissingIngredients.
+ *
+ * - 'container': 1:1 pass-through
+ * - 'serving':   quantity / servings_per_container
+ * - 'gram':      quantity / net_weight_g  (throws if net_weight_g is missing)
+ */
+export function convertIngredientToContainers(args: {
+  quantity: number;
+  unit: 'container' | 'serving' | 'gram';
+  servings_per_container: number;
+  net_weight_g: number | null;
+}): number {
+  if (args.unit === 'container') return args.quantity;
+  if (args.unit === 'serving') return args.quantity / Math.max(args.servings_per_container, 0.001);
+  if (args.unit === 'gram') {
+    if (!args.net_weight_g || args.net_weight_g <= 0) {
+      throw new Error('gram unit requires product.net_weight_g > 0');
+    }
+    return args.quantity / args.net_weight_g;
+  }
+  throw new Error(`unknown unit: ${args.unit}`);
+}
+
+/* ------------------------------------------------------------------ */
 /*  Macro computation helper (exported for testing)                    */
 /* ------------------------------------------------------------------ */
 
@@ -90,6 +121,7 @@ export function computeRecipeMacros(
       protein_per_serving: number;
       fat_per_serving: number;
       servings_per_container: number;
+      net_weight_g?: number | null;
     } | null;
   }>,
   baseServings: number,
@@ -100,12 +132,24 @@ export function computeRecipeMacros(
   let totalFat = 0;
 
   for (const ing of ingredients) {
-    const multiplier =
-      ing.unit === 'serving' ? ing.quantity : ing.quantity * (ing.products?.servings_per_container ?? 1);
-    totalCal += multiplier * (ing.products?.calories_per_serving ?? 0);
-    totalCarbs += multiplier * (ing.products?.carbs_per_serving ?? 0);
-    totalProtein += multiplier * (ing.products?.protein_per_serving ?? 0);
-    totalFat += multiplier * (ing.products?.fat_per_serving ?? 0);
+    if (!ing.products) continue;
+    let containers: number;
+    try {
+      containers = convertIngredientToContainers({
+        quantity: ing.quantity,
+        unit: ing.unit as 'container' | 'serving' | 'gram',
+        servings_per_container: ing.products.servings_per_container ?? 1,
+        net_weight_g: ing.products.net_weight_g ?? null,
+      });
+    } catch {
+      // gram unit with missing net_weight_g: skip this ingredient's macro contribution
+      continue;
+    }
+    const servings = containers * (ing.products.servings_per_container ?? 1);
+    totalCal += servings * (ing.products.calories_per_serving ?? 0);
+    totalCarbs += servings * (ing.products.carbs_per_serving ?? 0);
+    totalProtein += servings * (ing.products.protein_per_serving ?? 0);
+    totalFat += servings * (ing.products.fat_per_serving ?? 0);
   }
 
   const divisor = Math.max(baseServings, 1);
@@ -128,7 +172,7 @@ export function computeStockStatus(
     product_id: string;
     quantity: number;
     unit: string;
-    products: { servings_per_container: number } | null;
+    products: { servings_per_container: number; net_weight_g?: number | null } | null;
   }>,
   stockByProduct: Map<string, number>,
 ): StockStatus {
@@ -141,11 +185,17 @@ export function computeStockStatus(
   let inStockCount = 0;
   for (const ing of linkedIngredients) {
     const currentStock = stockByProduct.get(ing.product_id) ?? 0;
-    // Ingredient quantity is in containers or servings -- compare against container stock
-    // For 'serving' unit, convert required qty to containers
-    let requiredContainers = Number(ing.quantity);
-    if (ing.unit === 'serving' && ing.products) {
-      requiredContainers = Number(ing.quantity) / Number(ing.products.servings_per_container || 1);
+    let requiredContainers: number;
+    try {
+      requiredContainers = convertIngredientToContainers({
+        quantity: Number(ing.quantity),
+        unit: ing.unit as 'container' | 'serving' | 'gram',
+        servings_per_container: Number(ing.products?.servings_per_container ?? 1),
+        net_weight_g: ing.products?.net_weight_g ?? null,
+      });
+    } catch {
+      // gram unit with missing net_weight_g: treat as out of stock
+      continue;
     }
     if (currentStock >= requiredContainers) {
       inStockCount++;
@@ -170,7 +220,7 @@ export function computeMissingIngredients(
     product_id: string;
     quantity: number;
     unit: string;
-    products: { name: string; servings_per_container: number } | null;
+    products: { name: string; servings_per_container: number; net_weight_g?: number | null } | null;
   }>,
   stockByProduct: Map<string, number>,
 ): MissingIngredient[] {
@@ -178,9 +228,23 @@ export function computeMissingIngredients(
   for (const ing of ingredients) {
     if (!ing.products) continue;
     const currentStock = stockByProduct.get(ing.product_id) ?? 0;
-    let requiredContainers = Number(ing.quantity);
-    if (ing.unit === 'serving') {
-      requiredContainers = Number(ing.quantity) / Number(ing.products.servings_per_container || 1);
+    let requiredContainers: number;
+    try {
+      requiredContainers = convertIngredientToContainers({
+        quantity: Number(ing.quantity),
+        unit: ing.unit as 'container' | 'serving' | 'gram',
+        servings_per_container: Number(ing.products.servings_per_container ?? 1),
+        net_weight_g: ing.products.net_weight_g ?? null,
+      });
+    } catch {
+      // gram unit with missing net_weight_g: flag as missing (can't compute requirement)
+      missing.push({
+        product_id: ing.product_id,
+        product_name: ing.products.name,
+        required: Infinity,
+        haveContainers: currentStock,
+      });
+      continue;
     }
     if (currentStock < requiredContainers) {
       missing.push({
@@ -320,7 +384,7 @@ export function RecipesPage() {
         chefbyte()
           .from('recipes')
           .select(
-            '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container))',
+            '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g))',
           )
           .eq('user_id', user!.id)
           .order('name'),
@@ -785,7 +849,7 @@ export function RecipesPage() {
             ? 'Missing: ' +
               missing
                 .map((m) => {
-                  const need = m.required.toFixed(m.required >= 10 ? 0 : 1);
+                  const need = isFinite(m.required) ? m.required.toFixed(m.required >= 10 ? 0 : 1) : '?';
                   const have = m.haveContainers.toFixed(m.haveContainers >= 10 ? 0 : 1);
                   return `${m.product_name} (need ${need}, have ${have})`;
                 })
