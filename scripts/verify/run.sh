@@ -53,6 +53,7 @@ FULL_STEPS=(
   "test:db (pgTAP)|run_pgtap"
   "Pi unit tests (pytest)|run_pi_pytest"
   "harness (Pi <-> cloud loopback)|pnpm harness"
+  "parity_assert (L2 self-test)|run_parity_assert"
   "test:e2e (Phase 2, guarded)|run_e2e_guarded"
 )
 
@@ -120,6 +121,42 @@ run_pi_pytest() {
       server/cloud/tests/ \
       server/classifier/tests/
   )
+}
+
+run_parity_assert() {
+  # Runs the parity_assert.py self-test scenario in sandbox (pure in-memory
+  # SQLite — no real Pi DB or Supabase connection required). The self-test
+  # deliberately seeds the "160.4 g Pi vs 1.6 ctn cloud" unit-mismatch class
+  # and asserts the diff engine detects it. Exit non-zero means drift was
+  # found or the engine itself errored.
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo "  ERROR: python3 not on PATH; can't run parity_assert."
+    return 1
+  fi
+  # The self-test scenario always expects DELTAS (it seeds a mismatch on
+  # purpose to prove detection works). parity_assert.py exits 1 when deltas
+  # are found — which is the DESIRED outcome for self-test. We invert that:
+  # if the self-test exits 0 (no deltas detected), the gate was blind and we
+  # fail loudly. If it exits 1 (deltas detected = engine works), the gate
+  # passes. Any other exit code (2 = usage/import error) also fails.
+  local out
+  out=$(python3 scripts/harness/parity_assert.py self-test --quiet 2>&1)
+  local ec=$?
+  if [[ $ec -eq 1 ]]; then
+    # Expected: engine caught the mismatch — gate passes.
+    echo "  parity_assert self-test: deltas detected as expected (engine OK)"
+    return 0
+  elif [[ $ec -eq 0 ]]; then
+    echo "  ERROR: parity_assert self-test reported NO deltas — the engine"
+    echo "  failed to detect the seeded Pi<->cloud unit mismatch. Either the"
+    echo "  self-test scenario was modified or the diff engine has regressed."
+    echo "  Output: $out"
+    return 1
+  else
+    echo "  ERROR: parity_assert.py exited with code $ec (import/usage error)."
+    echo "  Output: $out"
+    return 1
+  fi
 }
 
 run_e2e_guarded() {
