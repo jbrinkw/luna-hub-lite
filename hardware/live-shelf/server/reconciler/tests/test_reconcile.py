@@ -27,6 +27,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
+import pytest
+
 # Make `server.reconciler` importable when running pytest from the repo root.
 # The tests live at `hardware/live-shelf/server/reconciler/tests/...` — the
 # package root for `server` is `hardware/live-shelf/`.
@@ -79,10 +81,24 @@ class FakeSession:
 
 @dataclass
 class FakeLot:
+    """Mirror the production Lot field set that reconciler code touches.
+
+    CB-2 / Finding 2-A: previously missing in-flight fields caused the
+    reconciler to silently see None for in_flight_since / pickup_weight_g /
+    pickup_event_id instead of raising AttributeError — masking any code
+    path that reads those columns from a lot.
+    """
+
     lot_id: str
     product_id: str = "product-x"
     status: str = "on_shelf"
     current_weight_g: Optional[float] = 340.0
+    # In-flight tracker fields (IN_FLIGHT_TRACKER_PLAN.md §3.1).
+    # Non-None only when status == 'in_flight'.
+    in_flight_since: Optional[str] = None
+    pickup_weight_g: Optional[float] = None
+    pickup_event_id: Optional[str] = None
+    in_flight_ttl_seconds: int = 600
 
 
 @dataclass
@@ -966,3 +982,62 @@ def test_h4_reap_exception_does_not_break_reconcile():
     # Must not raise, must still emit the regular consumed_or_removed.
     out = reconcile_session("S1", repo)
     assert "consumed_or_removed" in _patterns(out)
+
+
+# ---------------------------------------------------------------------------
+# CB-2 / Finding 2-A — in-flight FakeLot fields exercised end-to-end
+# ---------------------------------------------------------------------------
+
+
+def test_use_return_consumed_resolution_carries_correct_consumed_g():
+    """CB-2: FakeLot now carries in_flight_since / pickup_weight_g /
+    pickup_event_id. Verify the reconciler passes the correct consumed_g
+    through ``update_lot_on_resolution`` so a regression that substitutes
+    the shelf delta for the lot consumption delta would be caught.
+
+    Scenario: a lot weighing 340g is removed and returned at 280g — 60g
+    consumed. The ``SessionResolution`` must report ``consumed_g == 60.0``
+    and the same value must appear in the ``lot_updates`` captured by
+    ``FakeRepo.update_lot_on_resolution``.
+    """
+    remove = _mk_event(
+        "E-rm", "2026-04-15T12:01:00Z", -340.0, 2000.0, 1660.0,
+        "remove", classification=_cls("lot-milk"),
+    )
+    add = _mk_event(
+        "E-add", "2026-04-15T12:02:00Z", +280.0, 1660.0, 1940.0,
+        "add", classification=_cls("lot-milk"),
+    )
+    # Seed an in-flight lot (status the lot would have in production when
+    # the reconciler runs after a REMOVE that triggered the fast-path handler).
+    lot = FakeLot(
+        "lot-milk",
+        status="in_flight",
+        current_weight_g=340.0,
+        in_flight_since="2026-04-15T12:01:00.000Z",
+        pickup_weight_g=340.0,
+        pickup_event_id="E-rm",
+    )
+    repo = _make_repo(
+        [remove, add],
+        initial_w=2000.0,
+        final_w=1940.0,
+        lots={"lot-milk": lot},
+    )
+    out = reconcile_session("S1", repo)
+
+    assert _patterns(out) == ["use_return_consumed"]
+    resolution = out[0]
+    assert resolution.consumed_g == pytest.approx(60.0), (
+        "reconciler must compute consumed_g = |remove.delta_g| - |add.delta_g| "
+        "= 340 - 280 = 60; got {!r}".format(resolution.consumed_g)
+    )
+    # update_lot_on_resolution must have been called once, with the correct
+    # resolution carrying the 60g consumed value.
+    assert len(repo.lot_updates) == 1
+    recorded_resolution, recorded_lot = repo.lot_updates[0]
+    assert recorded_resolution.consumed_g == pytest.approx(60.0), (
+        "consumed_g in lot_updates must match the resolution — "
+        "a regression substituting shelf_delta would produce a different value"
+    )
+    assert recorded_lot is lot  # same FakeLot object, not a copy
