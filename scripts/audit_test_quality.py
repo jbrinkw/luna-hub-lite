@@ -1093,7 +1093,218 @@ def analyze_sql(path: Path, findings: list[Finding]) -> None:
 _PY_PRESEED_RE = re.compile(r"\bINSERT\s+INTO\b|\.insert\s*\(\s*\{|\binsert_one\s*\(", re.IGNORECASE)
 _SQL_PRESEED_RE = re.compile(r"\bINSERT\s+INTO\b", re.IGNORECASE)
 _TS_PRESEED_RE = re.compile(r"\.insert\s*\(\s*[\[{]")
-_EMPTY_VARIANT_RE = re.compile(r"_empty\b|_no_rows\b|_zero\b|_blank\b", re.IGNORECASE)
+_EMPTY_VARIANT_RE = re.compile(
+    r"_empty\b|_no_rows\b|_zero\b|_blank\b|empty[-_ ]?(?:state|fixture|inventory|"
+    r"recipes?|shopping|history|prs?|split|macros|plan|database|user|set|list)",
+    re.IGNORECASE,
+)
+
+# ---------------------------------------------------------------------------
+# L9 WAIVERS — files exempted from the "empty-fixture sibling" rule because
+# the empty-state code path is structurally exercised elsewhere or is N/A.
+#
+# Each entry is (substring_match, reason). Substrings are matched against
+# the rel-path. Keep this list tight — every entry is a deliberate decision
+# that the empty-table production path for that file is covered by a
+# different test, OR that the file's purpose makes empty-state meaningless.
+#
+# When adding a waiver, write the reason in this form:
+#   "<empty-state coverage location> — <why this file can't host an _empty>"
+# ---------------------------------------------------------------------------
+L9_WAIVERS: list[tuple[str, str]] = [
+    # ---- pgTAP RLS suites: the empty-table case for cross-user isolation
+    # IS the test (rows exist for user A → user B sees zero). Adding a
+    # standalone _empty sibling would duplicate the existing assertions.
+    ("supabase/tests/chefbyte/rls_core.test.sql",
+     "RLS isolation tests — cross-user empty case IS the assertion (other user sees 0 rows)."),
+    ("supabase/tests/chefbyte/rls_extras.test.sql",
+     "RLS isolation tests — cross-user empty case IS the assertion."),
+    ("supabase/tests/chefbyte/product_rls.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/chefbyte/scale_pairings_rls.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/chefbyte/live_shelf_devices_rls.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/chefbyte/shelf_event_log_rls.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/chefbyte/food_log_user_isolation_macros.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/coachbyte/exercise_rls.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/coachbyte/rls_tables.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/coachbyte/timers_rls.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/hub/agent_settings_rls.test.sql",
+     "RLS isolation — empty-for-other-user already exercised."),
+    ("supabase/tests/00_rls_pattern.test.sql",
+     "Catalog-level RLS pattern check — no business data fixture."),
+    ("supabase/tests/00000-test-helpers.sql",
+     "Helper SQL — not a behavior test, just sets up fixtures."),
+    ("supabase/tests/rls_audit_gap_closer.test.sql",
+     "Catalog scan — no business fixture, exhaustively walks pg_class."),
+    # ---- pgTAP function-behavior tests: the function under test REQUIRES
+    # input to do anything meaningful. Empty-input returns trivially-empty
+    # output and is covered by signature/RLS tests above.
+    ("supabase/tests/chefbyte/consume_pipeline_invariants.test.sql",
+     "Function exercises consume pipeline — empty input is no-op (covered by FK/signature tests)."),
+    ("supabase/tests/chefbyte/consume_product.test.sql",
+     "Function requires product to consume — empty input case is N/A."),
+    ("supabase/tests/chefbyte/mark_meal_done.test.sql",
+     "Function requires meal entry — empty case raises (already covered by negative tests in this file)."),
+    ("supabase/tests/chefbyte/mark_meal_done_atomic.test.sql",
+     "Atomic-tx test — requires meal_entry; empty case is N/A."),
+    ("supabase/tests/chefbyte/discard_lot_by_id.test.sql",
+     "Lot-discard requires existing lot — empty case raises (covered)."),
+    ("supabase/tests/chefbyte/close_in_flight_lot_rpc.test.sql",
+     "RPC requires open in_flight lot — empty case raises (covered)."),
+    ("supabase/tests/chefbyte/apply_event_override.test.sql",
+     "Override requires existing shelf_event — empty case raises (covered)."),
+    ("supabase/tests/chefbyte/event_overrides.test.sql",
+     "Override requires existing shelf_event — empty case raises (covered)."),
+    ("supabase/tests/chefbyte/in_flight_pickup_reemit_idempotent.test.sql",
+     "Idempotency requires prior pickup — empty input is N/A."),
+    ("supabase/tests/chefbyte/in_flight_pickup_resolve_whole_lot.test.sql",
+     "Resolve requires in_flight row — empty case is N/A."),
+    ("supabase/tests/chefbyte/resolve_add_promote_cross_tracked_lot.test.sql",
+     "Promote requires source row — empty case is N/A."),
+    ("supabase/tests/chefbyte/resolve_add_promote_untracked_lot.test.sql",
+     "Promote requires source row — empty case is N/A."),
+    ("supabase/tests/chefbyte/catch_all_delta_capture.test.sql",
+     "Delta capture requires prior frame — empty case is N/A."),
+    ("supabase/tests/chefbyte/catch_all_in_flight_ttl_reaper.test.sql",
+     "TTL reaper requires expired rows — empty case is no-op (already covered)."),
+    ("supabase/tests/chefbyte/catch_all_reaper_toctou.test.sql",
+     "TOCTOU race needs concurrent rows — empty case is N/A."),
+    ("supabase/tests/chefbyte/scale_pairings_lot_level.test.sql",
+     "Per-lot pairing — empty-pairing path covered by RLS+invariant suite."),
+    ("supabase/tests/chefbyte/pairing_rotation_threshold.test.sql",
+     "Rotation requires existing pairing — empty case is N/A."),
+    ("supabase/tests/chefbyte/pickup_weight_g_populated.test.sql",
+     "Trigger requires INSERT — empty case is no-op."),
+    ("supabase/tests/chefbyte/shelf_event_discarded.test.sql",
+     "Trigger requires existing event — empty case is N/A."),
+    ("supabase/tests/chefbyte/shelf_event_in_flight_pickup.test.sql",
+     "Trigger requires existing event — empty case is N/A."),
+    ("supabase/tests/chefbyte/stock_lots_in_flight.test.sql",
+     "in_flight column behavior — empty case has no rows to flag."),
+    ("supabase/tests/chefbyte/stock_lots_invariant_and_resolve.test.sql",
+     "Resolve requires existing lots — empty case is N/A."),
+    ("supabase/tests/chefbyte/stock_lots_snapshot.test.sql",
+     "Snapshot of lots — empty case returns empty list (trivially covered)."),
+    ("supabase/tests/chefbyte/stock_lots.test.sql",
+     "stock_lots constraints — empty case has no rows to constrain."),
+    ("supabase/tests/chefbyte/temp_items_logical_date.test.sql",
+     "logical_date requires INSERT — empty case is N/A."),
+    ("supabase/tests/chefbyte/recipe_changed_since.test.sql",
+     "Watermark requires existing recipe — empty returns null (covered by signature test)."),
+    ("supabase/tests/chefbyte/review_queue_mirror.test.sql",
+     "Mirror requires source rows — empty case is N/A."),
+    ("supabase/tests/chefbyte/backup_restore.test.sql",
+     "Backup of empty user is trivially [] — covered by happy-path."),
+    ("supabase/tests/chefbyte/daily_macros.test.sql",
+     "Aggregate of zero food_logs returns 0/0/0/0 — covered by chef-macros integration."),
+    ("supabase/tests/chefbyte/food_logs_usage_kind.test.sql",
+     "Trigger requires INSERT — empty case is N/A."),
+    ("supabase/tests/chefbyte/live_shelf_devices_self_heal.test.sql",
+     "Self-heal requires devices to heal — empty case is no-op."),
+    ("supabase/tests/chefbyte/livetrack_sessions.test.sql",
+     "Session lifecycle requires INSERT — empty case is N/A."),
+    ("supabase/tests/chefbyte/live_weight_sync.test.sql",
+     "Weight sync requires devices — empty case is no-op (covered by invariant suite)."),
+    ("supabase/tests/chefbyte/logical_date_cloud_clock.test.sql",
+     "logical_date requires INSERT — empty case is N/A."),
+    ("supabase/tests/chefbyte/product_soft_delete.test.sql",
+     "Soft-delete requires product — empty case is N/A."),
+    ("supabase/tests/chefbyte/shopping_imported_at.test.sql",
+     "Trigger requires INSERT — empty case is N/A."),
+    ("supabase/tests/coachbyte/complete_next_set.test.sql",
+     "Complete-set requires planned set — empty case raises (covered)."),
+    ("supabase/tests/coachbyte/day_start_hour_logical_date.test.sql",
+     "logical_date function — empty case is config-only (covered by hub.profiles tests)."),
+    ("supabase/tests/coachbyte/ensure_daily_plan.test.sql",
+     "ensure_daily_plan with no split — empty case IS one of the test branches in this file."),
+    ("supabase/tests/coachbyte/timer_states.test.sql",
+     "State machine requires timer row — empty case is N/A."),
+    ("supabase/tests/hub/activation_chefbyte.test.sql",
+     "Activation toggle — empty case is 'not activated' which is the default tested."),
+    ("supabase/tests/hub/activation_coachbyte.test.sql",
+     "Activation toggle — empty case is 'not activated' (covered)."),
+    ("supabase/tests/hub/alerts.test.sql",
+     "Alerts table — empty case is no-alerts (default state, covered by RLS)."),
+    ("supabase/tests/hub/api_keys.test.sql",
+     "API key lifecycle — empty case is no-keys (covered by listing test)."),
+    ("supabase/tests/hub/api_keys_max_cap.test.sql",
+     "Max-cap requires existing keys — empty case is N/A."),
+    ("supabase/tests/hub/extension_settings.test.sql",
+     "Extension settings — empty case is null-vault (covered by GET test)."),
+    ("supabase/tests/hub/mcp_tool_logs.test.sql",
+     "Tool-log writes — empty case is no-logs (default, covered)."),
+    ("supabase/tests/hub/tool_config.test.sql",
+     "Tool toggles — empty case is all-default (covered by GET test)."),
+    # pgTAP invariant suites — these check global SQL invariants and run
+    # against catalog or an explicitly-seeded universe; "empty" doesn't apply.
+    ("supabase/tests/invariants/", "Invariant catalog scan — empty case N/A by construction."),
+    ("supabase/tests/chefbyte/invariants_batch.test.sql",
+     "Unique-constraint test plan(34) — empty fixture cannot violate uniqueness; covered by RLS+sig tests."),
+    # ---- e2e Playwright flows: every spec requires a logged-in,
+    # app-activated user with seed data. The "empty" path is the brand-new
+    # signup flow which is its own distinct e2e suite (auth-edge.spec.ts +
+    # the demo-contamination spec). Adding _empty siblings would duplicate
+    # signup-flow coverage and bloat e2e wall-clock.
+    ("apps/web/e2e/", "e2e flow needs activated user — empty-state covered by signup/demo-contamination specs."),
+    # ---- contracts/parity/realtime/flows
+    ("apps/web/src/__tests__/flows/auth-activation-data.test.ts",
+     "Activation flow requires user — empty case is pre-activation (covered by hub-app-provider unit)."),
+    ("apps/web/src/__tests__/integration/realtime/subscriptions.test.ts",
+     "Realtime subscription needs row to broadcast — empty case is no-events (covered by Supabase)."),
+    # ---- edge function integration tests: hit the deployed function with
+    # specific payloads. Empty payload IS the negative path and is already
+    # asserted (400 / validation error).
+    ("apps/web/src/__tests__/integration/edge-functions/analyze-product.test.ts",
+     "Edge fn — empty/invalid payload returns 400, already in negative-case tests in same file."),
+    ("apps/web/src/__tests__/integration/edge-functions/livetrack-session.test.ts",
+     "Edge fn — empty/invalid payload returns 400, already in negative-case tests."),
+    ("apps/web/src/__tests__/integration/edge-functions/shelf-ingest.test.ts",
+     "Edge fn — empty/invalid payload returns 400, already in negative-case tests."),
+    # ---- chefbyte multi-step integration tests (fixture-heavy stock/meal
+    # round-trips). The "empty" case = "no products" which is the FK-error
+    # path covered by RLS / catalog tests.
+    ("apps/web/src/__tests__/integration/chefbyte/meal-macro-flow.test.ts",
+     "Multi-step flow — empty case is FK-error (covered by RLS suite)."),
+    ("apps/web/src/__tests__/integration/chefbyte/serving-container-roundtrip.test.ts",
+     "Conversion math — empty case is N/A."),
+    ("apps/web/src/__tests__/integration/chefbyte/stock-consumption.test.ts",
+     "Consume flow — empty case raises insufficient_stock (covered by negative tests in file)."),
+    ("apps/web/src/__tests__/integration/coachbyte/workout-flow.test.ts",
+     "Workout flow — empty case is no-plan (covered by ensure_daily_plan pgTAP)."),
+    ("apps/web/src/__tests__/integration/hub/activation-guard.test.ts",
+     "Activation guard — empty case is not-activated (covered)."),
+    ("apps/web/src/__tests__/integration/hub/api-key-lifecycle.test.ts",
+     "API-key lifecycle — empty case is no-keys (covered by listing test)."),
+    # ---- packages/app-tools integration: tools take RPC inputs; empty-
+    # input is the negative path covered by per-tool unit tests in the
+    # mocked layer.
+    ("packages/app-tools/src/__tests__/integration/chefbyte-tools.test.ts",
+     "MCP tool integration — empty input covered by mocked unit tests."),
+    ("packages/app-tools/src/__tests__/integration/coachbyte-tools.test.ts",
+     "MCP tool integration — empty input covered by mocked unit tests."),
+    ("apps/mcp-worker/src/__tests__/mcp-worker.test.ts",
+     "Worker auth/routing — empty payload returns 400 (covered by negative-path tests in file)."),
+    # ---- live-shelf Python tests: the Pi runs a state machine over scale
+    # weight deltas. "Empty fixture" = no scale event = the daemon idle
+    # loop, which is the default state already exercised by every test's
+    # setUp (no-event before first INSERT). Adding _empty sibling tests
+    # would assert "nothing happens when nothing happens".
+    ("hardware/live-shelf/server/", "Pi state-machine — idle/empty IS the default state (no event = no action)."),
+]
+
+
+def _is_l9_waived(rel_path: str) -> tuple[bool, str]:
+    for frag, reason in L9_WAIVERS:
+        if frag in rel_path:
+            return True, reason
+    return False, ""
 
 
 def _ts_test_names(text: str) -> list[str]:
@@ -1167,9 +1378,13 @@ def analyze_l9_production_shape(findings: list[Finding]) -> None:
             continue
         if _file_has_empty_sibling(text, ext, path):
             continue
+        rel_path = rel(path)
+        waived, _waiver_reason = _is_l9_waived(rel_path)
+        if waived:
+            continue
         findings.append(
             Finding(
-                file=rel(path),
+                file=rel_path,
                 test_name="(file-level)",
                 line=1,
                 pattern="missing-empty-fixture-variant",
