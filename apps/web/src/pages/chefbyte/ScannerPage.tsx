@@ -1527,7 +1527,7 @@ export function ScannerPage() {
                 </div>
                 <div className="text-[0.8em] text-text-secondary">
                   {item.mode === 'purchase'
-                    ? 'Added to fridge'
+                    ? 'Added to stock'
                     : item.mode === 'shopping'
                       ? 'Added to cart'
                       : 'Consumed'}{' '}
@@ -1544,14 +1544,14 @@ export function ScannerPage() {
         <div data-testid="keypad-panel" className="flex flex-col gap-2.5">
           {/* Mode selector — labels rewritten per the R1 audit (mode-name
               decoding was the single biggest silent-intake-error source).
-              Canonical: "Add to fridge" (purchase), "I just ate this"
+              Canonical: "Add to stock" (purchase), "I just ate this"
               (consume_macros), "Eat (no macros)" (consume_no_macros),
               "Shopping list" (shopping). The intent-named labels reduce
               the translation step the user does every scan. */}
           <div data-testid="mode-selector" className="grid grid-cols-2 gap-2">
             {(
               [
-                { key: 'purchase', label: 'Add to fridge' },
+                { key: 'purchase', label: 'Add to stock' },
                 { key: 'consume_macros', label: 'I just ate this' },
                 { key: 'consume_no_macros', label: 'Eat (no macros)' },
                 { key: 'shopping', label: 'Shopping list' },

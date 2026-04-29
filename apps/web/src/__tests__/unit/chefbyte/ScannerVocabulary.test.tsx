@@ -5,7 +5,7 @@
  *   Buy / Eat (Track) / Eat (Skip) / Add to List
  * forced a translation step every scan. R2 audit confirmed nothing
  * had been done about this. Renamed to intent-named labels:
- *   Add to fridge / I just ate this / Eat (no macros) / Shopping list
+ *   Add to stock / I just ate this / Eat (no macros) / Shopping list
  *
  * Tests assert each `mode-*` button renders with the new label so a
  * regression that flips a label back gets caught immediately. The
@@ -14,7 +14,7 @@
  * `?mode=purchase` etc. continues to work.
  *
  * Also covers R2 #8 vocabulary drift on the queue confirmation line:
- * "Purchased 1 ctn" → "Added to fridge 1 container". (Tested via the
+ * "Purchased 1 ctn" → "Added to stock 1 container". (Tested via the
  * scanner's pure-helpers / data-testid chain.)
  */
 import { describe, it, expect, vi } from 'vitest';
@@ -74,10 +74,10 @@ function renderScanner() {
 }
 
 describe('ScannerPage — mode labels (R1 #1 / R2 #8)', () => {
-  it('purchase mode is labeled "Add to fridge", not "Buy"', () => {
+  it('purchase mode is labeled "Add to stock", not "Buy"', () => {
     renderScanner();
     const btn = screen.getByTestId('mode-purchase');
-    expect(btn.textContent).toContain('Add to fridge');
+    expect(btn.textContent).toContain('Add to stock');
     expect(btn.textContent).not.toContain('Buy');
   });
 
