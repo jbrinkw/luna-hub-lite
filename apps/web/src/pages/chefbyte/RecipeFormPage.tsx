@@ -7,6 +7,7 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { computeRecipeMacros } from './RecipesPage';
+import { formatIngredientDisplay } from '@/shared/recipes/formatIngredientDisplay';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -29,6 +30,8 @@ interface LocalIngredient {
   quantity: number;
   unit: string;
   note: string;
+  visual_unit_label: string | null;
+  visual_quantity: number | null;
   // Macro info for display
   calories_per_serving: number;
   carbs_per_serving: number;
@@ -69,6 +72,8 @@ export function RecipeFormPage() {
   const [ingQuantity, setIngQuantity] = useState(1);
   const [ingUnit, setIngUnit] = useState<string>('serving');
   const [ingNote, setIngNote] = useState('');
+  const [ingVisualLabel, setIngVisualLabel] = useState('');
+  const [ingVisualQty, setIngVisualQty] = useState<string>('');
 
   /* ---- Delete confirmation ---- */
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
@@ -87,7 +92,7 @@ export function RecipeFormPage() {
       const { data: recipe, error } = await chefbyte()
         .from('recipes')
         .select(
-          '*, recipe_ingredients(*, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g))',
+          '*, recipe_ingredients(ingredient_id, product_id, quantity, unit, note, visual_unit_label, visual_quantity, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g))',
         )
         .eq('recipe_id', id!)
         .eq('user_id', user!.id)
@@ -122,6 +127,8 @@ export function RecipeFormPage() {
       quantity: Number(ri.quantity),
       unit: ri.unit,
       note: ri.note ?? '',
+      visual_unit_label: ri.visual_unit_label ?? null,
+      visual_quantity: ri.visual_quantity != null ? Number(ri.visual_quantity) : null,
       calories_per_serving: Number(ri.products?.calories_per_serving ?? 0),
       carbs_per_serving: Number(ri.products?.carbs_per_serving ?? 0),
       protein_per_serving: Number(ri.products?.protein_per_serving ?? 0),
@@ -200,12 +207,23 @@ export function RecipeFormPage() {
   const addIngredient = () => {
     if (!selectedProduct || ingQuantity <= 0) return;
 
+    // Resolve visual pair: both must be set, or both cleared
+    const parsedVisualQty = ingVisualQty.trim() !== '' ? parseFloat(ingVisualQty) : null;
+    const parsedVisualLabel = ingVisualLabel.trim() !== '' ? ingVisualLabel.trim() : null;
+    const visualPairValid =
+      (parsedVisualQty == null && parsedVisualLabel == null) ||
+      (parsedVisualQty != null && !isNaN(parsedVisualQty) && parsedVisualQty > 0 && parsedVisualLabel != null);
+
+    if (!visualPairValid) return; // guard: UI already shows inline error
+
     const newIng: LocalIngredient = {
       product_id: selectedProduct.product_id,
       product_name: selectedProduct.name,
       quantity: ingQuantity,
       unit: ingUnit,
       note: ingNote,
+      visual_unit_label: parsedVisualLabel,
+      visual_quantity: parsedVisualQty,
       calories_per_serving: Number(selectedProduct.calories_per_serving),
       carbs_per_serving: Number(selectedProduct.carbs_per_serving),
       protein_per_serving: Number(selectedProduct.protein_per_serving),
@@ -220,6 +238,8 @@ export function RecipeFormPage() {
     setIngQuantity(1);
     setIngUnit('serving');
     setIngNote('');
+    setIngVisualLabel('');
+    setIngVisualQty('');
   };
 
   const removeIngredient = (index: number) => {
@@ -309,6 +329,8 @@ export function RecipeFormPage() {
               quantity: ing.quantity,
               unit: ing.unit,
               note: ing.note || null,
+              visual_unit_label: ing.visual_unit_label || null,
+              visual_quantity: ing.visual_quantity ?? null,
             })),
           });
           if (ingErr) throw ingErr;
@@ -339,6 +361,8 @@ export function RecipeFormPage() {
               quantity: ing.quantity,
               unit: ing.unit,
               note: ing.note || null,
+              visual_unit_label: ing.visual_unit_label || null,
+              visual_quantity: ing.visual_quantity ?? null,
             })),
           });
           if (ingErr) throw ingErr;
@@ -596,6 +620,78 @@ export function RecipeFormPage() {
           </button>
         </div>
 
+        {/* Visual unit override (new-ingredient, optional) */}
+        {selectedProduct && (
+          <div
+            data-testid="visual-override-section"
+            className="mb-4 p-3 bg-surface-sunken rounded-lg border border-border-light"
+          >
+            <p className="m-0 mb-2 text-xs font-semibold text-text-secondary uppercase tracking-wide">
+              Display override (optional)
+            </p>
+            <p className="m-0 mb-2 text-xs text-text-tertiary">
+              Optional — shows as &ldquo;1 slice&rdquo; instead of &ldquo;30g&rdquo;. Math always uses the canonical
+              amount.
+            </p>
+            <div className="flex flex-wrap gap-2 items-end">
+              <div className="w-24">
+                <label className="block text-[11px] text-text-tertiary mb-0.5">Display qty</label>
+                <input
+                  type="number"
+                  min="0.001"
+                  step="any"
+                  value={ingVisualQty}
+                  onChange={(e) => setIngVisualQty(e.target.value)}
+                  data-testid="ing-visual-qty"
+                  placeholder="e.g. 1"
+                  className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                />
+              </div>
+              <div className="flex-1 min-w-[100px]">
+                <label className="block text-[11px] text-text-tertiary mb-0.5">Display label</label>
+                <input
+                  type="text"
+                  value={ingVisualLabel}
+                  onChange={(e) => setIngVisualLabel(e.target.value)}
+                  data-testid="ing-visual-label"
+                  placeholder="e.g. slice, scoop, tbsp"
+                  className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                />
+              </div>
+            </div>
+            {/* Pair validation */}
+            {(() => {
+              const hasLabel = ingVisualLabel.trim() !== '';
+              const hasQty = ingVisualQty.trim() !== '' && parseFloat(ingVisualQty) > 0;
+              const partialSet = hasLabel !== hasQty;
+              return partialSet ? (
+                <p className="mt-1.5 text-xs text-amber-600" data-testid="visual-pair-error">
+                  Set both or neither — display qty and label must be paired.
+                </p>
+              ) : null;
+            })()}
+            {/* Live preview */}
+            {selectedProduct &&
+              (ingVisualLabel.trim() || ingVisualQty.trim()) &&
+              (() => {
+                const vQty = parseFloat(ingVisualQty) || null;
+                const vLabel = ingVisualLabel.trim() || null;
+                const preview = formatIngredientDisplay({
+                  quantity: ingQuantity,
+                  unit: ingUnit as 'container' | 'serving' | 'gram',
+                  visual_quantity: vQty,
+                  visual_unit_label: vLabel,
+                  productName: selectedProduct.name,
+                });
+                return (
+                  <p className="mt-1.5 text-xs text-text-secondary italic" data-testid="visual-preview">
+                    Preview: {preview}
+                  </p>
+                );
+              })()}
+          </div>
+        )}
+
         {/* Ingredient cards */}
         {ingredients.length > 0 && (
           <div className="space-y-2 mb-3" data-testid="ingredients-table">
@@ -664,6 +760,61 @@ export function RecipeFormPage() {
                       data-testid={`edit-note-${idx}`}
                     />
                   </div>
+                </div>
+                {/* Visual display override — per existing ingredient */}
+                <div className="mt-2 pt-2 border-t border-border-light">
+                  <p className="mb-1 text-[10px] text-text-tertiary font-semibold uppercase tracking-wide">
+                    Display override (optional)
+                  </p>
+                  <div className="flex flex-wrap gap-2 items-end">
+                    <div className="w-20">
+                      <label className="block text-[11px] text-text-tertiary mb-0.5">Display qty</label>
+                      <input
+                        type="number"
+                        min="0.001"
+                        step="any"
+                        value={ing.visual_quantity ?? ''}
+                        onChange={(e) => {
+                          const val = e.target.value === '' ? null : parseFloat(e.target.value);
+                          updateIngredient(idx, 'visual_quantity', val as any);
+                        }}
+                        placeholder="—"
+                        className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                        data-testid={`edit-visual-qty-${idx}`}
+                      />
+                    </div>
+                    <div className="flex-1 min-w-[100px]">
+                      <label className="block text-[11px] text-text-tertiary mb-0.5">Display label</label>
+                      <input
+                        type="text"
+                        value={ing.visual_unit_label ?? ''}
+                        onChange={(e) => updateIngredient(idx, 'visual_unit_label', e.target.value || (null as any))}
+                        placeholder="slice, scoop, tbsp…"
+                        className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                        data-testid={`edit-visual-label-${idx}`}
+                      />
+                    </div>
+                  </div>
+                  {/* Pair validation */}
+                  {(() => {
+                    const hasLabel = !!ing.visual_unit_label;
+                    const hasQty = ing.visual_quantity != null && ing.visual_quantity > 0;
+                    return hasLabel !== hasQty ? (
+                      <p className="mt-1 text-[10px] text-amber-600" data-testid={`visual-pair-error-${idx}`}>
+                        Set both or neither.
+                      </p>
+                    ) : null;
+                  })()}
+                  {/* Live preview */}
+                  <p className="mt-1 text-[10px] text-text-tertiary italic" data-testid={`visual-preview-${idx}`}>
+                    {formatIngredientDisplay({
+                      quantity: ing.quantity,
+                      unit: ing.unit as 'container' | 'serving' | 'gram',
+                      visual_quantity: ing.visual_quantity,
+                      visual_unit_label: ing.visual_unit_label,
+                      productName: ing.product_name,
+                    })}
+                  </p>
                 </div>
               </div>
             ))}
