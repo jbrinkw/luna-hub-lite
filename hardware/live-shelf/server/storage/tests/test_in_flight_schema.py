@@ -401,6 +401,63 @@ def test_list_expired_in_flight_lots_respects_ttl():
     assert expired_long_ttl == []
 
 
+def test_list_expired_in_flight_lots_for_session_filters_by_session():
+    """H4 storage helper — only returns lots whose pickup_session_id
+    matches and whose age exceeds TTL. Cross-session in-flight lots
+    are intentionally excluded so the global sweeper still owns them.
+    """
+    conn = init_db(":memory:")
+    lot_a = _setup_on_shelf_lot(conn)
+    lot_b = _setup_on_shelf_lot(conn)
+    lot_c = _setup_on_shelf_lot(conn)
+    # All three lots in-flight, but only A + B share session S1; C is on S2.
+    conn.executescript(
+        f"""
+        UPDATE lots SET status='in_flight',
+               in_flight_since = datetime('now', '-1 hour'),
+               pickup_weight_g = 100.0,
+               pickup_event_id = 'EA',
+               pickup_session_id = 'S1'
+         WHERE lot_id = '{lot_a.lot_id}';
+        UPDATE lots SET status='in_flight',
+               in_flight_since = datetime('now', '-1 hour'),
+               pickup_weight_g = 100.0,
+               pickup_event_id = 'EB',
+               pickup_session_id = 'S1'
+         WHERE lot_id = '{lot_b.lot_id}';
+        UPDATE lots SET status='in_flight',
+               in_flight_since = datetime('now', '-1 hour'),
+               pickup_weight_g = 100.0,
+               pickup_event_id = 'EC',
+               pickup_session_id = 'S2'
+         WHERE lot_id = '{lot_c.lot_id}';
+        """
+    )
+    conn.commit()
+
+    s1_expired = storage_repo.list_expired_in_flight_lots_for_session(
+        conn, "S1", ttl_seconds=1,
+    )
+    assert sorted(l.lot_id for l in s1_expired) == sorted([lot_a.lot_id, lot_b.lot_id])
+
+    s2_expired = storage_repo.list_expired_in_flight_lots_for_session(
+        conn, "S2", ttl_seconds=1,
+    )
+    assert [l.lot_id for l in s2_expired] == [lot_c.lot_id]
+
+    # Long TTL → no expirations even though the rows exist.
+    none_expired = storage_repo.list_expired_in_flight_lots_for_session(
+        conn, "S1", ttl_seconds=86400,
+    )
+    assert none_expired == []
+
+    # Unknown session → empty.
+    unknown = storage_repo.list_expired_in_flight_lots_for_session(
+        conn, "S-DOES-NOT-EXIST", ttl_seconds=1,
+    )
+    assert unknown == []
+
+
 def test_create_lot_on_shelf_leaves_in_flight_columns_null():
     conn = init_db(":memory:")
     lot = _setup_on_shelf_lot(conn)

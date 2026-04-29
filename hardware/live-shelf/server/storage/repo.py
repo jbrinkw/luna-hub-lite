@@ -979,6 +979,43 @@ def list_expired_in_flight_lots(
     return [_row_to_lot(r) for r in rows]
 
 
+def list_expired_in_flight_lots_for_session(
+    conn: sqlite3.Connection,
+    session_id: str,
+    *,
+    ttl_seconds: int,
+    limit: int = 50,
+) -> list[Lot]:
+    """Return in-flight lots from ``session_id`` whose age > ttl_seconds.
+
+    Reconciler Pass-4a (H4) uses this at session-close to reap any
+    lots whose ``pickup_session_id == session_id`` AND in-flight age
+    already exceeds the TTL — i.e. the session lasted long enough that
+    the user picked up an item, took it away from the shelf for >TTL,
+    and never returned it. Without H4 these stay stuck in
+    ``status='in_flight'`` until the next 5s sweeper tick. The race
+    window is small in practice (sweeper tick + reconcile latency)
+    but observable on long demos / sessions that close exactly between
+    ticks.
+
+    Filtered to the same session so the reconciler doesn't reap
+    cross-session lots (that's the global sweeper's job — different
+    pickup_session_id means a different session's accounting).
+    """
+    rows = conn.execute(
+        """
+        SELECT * FROM lots
+         WHERE status='in_flight'
+           AND pickup_session_id = ?
+           AND (julianday('now') - julianday(in_flight_since)) * 86400.0 > ?
+         ORDER BY in_flight_since ASC
+         LIMIT ?
+        """,
+        (session_id, ttl_seconds, limit),
+    ).fetchall()
+    return [_row_to_lot(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # Joined "view" queries — per §4.4
 # ---------------------------------------------------------------------------

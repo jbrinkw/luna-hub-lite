@@ -1226,6 +1226,11 @@ def create_app(
         conn,
         db_lock=db_lock,
         cloud_emitter=cloud_emitter,
+        # H4: same-session in-flight TTL reap (Pass-4a). Mirrors the
+        # global sweeper's TTL so the reconciler closes the inter-tick
+        # race for sessions that end exactly between two 5s sweeper
+        # ticks. See reconciler.reconcile_session Pass-4a.
+        in_flight_ttl_seconds=cfg.in_flight_ttl_seconds,
     )
     # web_repo is constructed AFTER scale_handler below so we can pass in
     # ScaleHandler.apply_user_reviewed_candidate as the review-resolve

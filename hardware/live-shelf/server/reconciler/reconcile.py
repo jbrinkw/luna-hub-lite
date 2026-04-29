@@ -186,6 +186,30 @@ class ReconcilerRepo(Protocol):
         """
         ...
 
+    def reap_expired_in_flight_for_session(
+        self, session_id: str, *, ttl_seconds: int
+    ) -> int:
+        """H4 — reap same-session in-flight lots whose age > TTL.
+
+        Pass 4a of the reconciler. Closes the inter-tick race between a
+        session's close+reconcile and the next 5s sweeper tick: lots
+        with ``pickup_session_id == session_id`` whose
+        ``in_flight_since + ttl_seconds < now`` are flipped to ``out``,
+        a ``in_flight_ttl_expired`` resolution is written, the cloud is
+        notified, and ``total_consumed_g`` is bumped by the pickup mass.
+
+        Mirrors the bookkeeping of
+        ``handlers.scale_events.ScaleHandler._reap_expired_in_flight``
+        but scoped to a single session. Implementations should be safe
+        to call before Pass 4 (weight sanity) — emitted resolutions
+        feed the cloud emit just like other reconciler writes.
+
+        Older test stubs without the method are tolerated; the
+        reconciler reaches for it via ``getattr``. Returns the number
+        of lots actually reaped this call.
+        """
+        ...
+
 
 # -- Helpers --------------------------------------------------------------
 
@@ -699,22 +723,40 @@ def _reconcile_session_locked(
             )
         _remove(ev)
 
-    # ---- Pass 4 (DEFERRED: same-session TTL reap) -----------------------
-    # TODO(H4): Flip lots that are still ``status='in_flight'`` with
-    # ``pickup_session_id == session_id`` AND in-flight duration exceeding
-    # ``cfg.in_flight_ttl_seconds`` to ``out`` + write
-    # ``in_flight_ttl_expired`` resolution + usage_log row + increment
-    # ``total_consumed_g``.
+    # ---- Pass 4a (H4): same-session in-flight TTL reap ------------------
+    # Flip lots still ``status='in_flight'`` with
+    # ``pickup_session_id == session_id`` AND in-flight age >
+    # ``in_flight_ttl_seconds`` to ``out`` + write
+    # ``in_flight_ttl_expired`` resolution + bump total_consumed_g + emit
+    # cloud event. Closes the inter-tick race between session close and
+    # the next 5s sweeper tick (handlers/scale_events.py
+    # _reap_expired_in_flight). Without H4, sessions that close exactly
+    # between ticks leave their expired in_flight lots stuck in
+    # ``in_flight`` until the next sweeper tick fires.
     #
-    # Gap: sessions that close and reconcile between two sweeper ticks
-    # skip the existing TTL reaper for that window. The sweeper runs on a
-    # 5s interval, so the race window is small. Deferred to avoid
-    # threading a new TTL config through the reconciler signature +
-    # extending the ReconcilerRepo protocol with a new storage method.
-    # The existing 5s-tick reaper (scale_events.py _reap_expired_in_flight)
-    # still covers the TTL case end-to-end; Pass 4 here would only close
-    # a narrow inter-tick race that the operator wouldn't observe.
-    #
+    # The reaper logic lives in the repo adapter so the reconciler
+    # itself stays storage-agnostic. Older test stubs that don't
+    # implement the method are tolerated — getattr() fall-through skips
+    # the pass cleanly. The TTL value is read from the repo (which the
+    # adapter loads from cfg.in_flight_ttl_seconds at construction).
+    _reap = getattr(repo, "reap_expired_in_flight_for_session", None)
+    if callable(_reap):
+        try:
+            reaped = _reap(session_id)
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "reconciler H4: reap_expired_in_flight_for_session "
+                "raised for %s; continuing",
+                session_id,
+            )
+            reaped = 0
+        if reaped:
+            log.info(
+                "reconciler H4: reaped %d expired in-flight lot(s) "
+                "for session %s",
+                reaped, session_id,
+            )
+
     # ---- Pass 4 (existing): weight sanity check -------------------------
     initial_w = session.initial_shelf_weight_g
     final_w = session.final_shelf_weight_g

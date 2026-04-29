@@ -127,6 +127,7 @@ class RepoReconcilerAdapter:
         cloud_emitter: Optional[CloudEventEmitter] = None,
         scale_id: str = "scale-01",
         shelf_kind: str = "live_shelf",
+        in_flight_ttl_seconds: int = 21_600,
     ) -> None:
         self._conn = conn
         # ``contextlib.nullcontext`` is a zero-cost no-op — tests that pass
@@ -141,6 +142,11 @@ class RepoReconcilerAdapter:
         )
         self._scale_id = scale_id
         self._shelf_kind = shelf_kind
+        # H4 TTL — the reconciler's same-session in-flight reaper uses this
+        # threshold (mirrors handlers.scale_events.ScaleHandler._reap_expired_in_flight).
+        # Defaults to 6h matching ScaleHandler. ``app.py`` propagates
+        # cfg.in_flight_ttl_seconds explicitly so both reapers stay in sync.
+        self._in_flight_ttl_seconds = int(in_flight_ttl_seconds)
 
     # ---------------------------------------------------------- reads
 
@@ -590,6 +596,166 @@ class RepoReconcilerAdapter:
                 stored.review_id,
                 exc_info=True,
             )
+
+    def reap_expired_in_flight_for_session(
+        self, session_id: str, *, ttl_seconds: Optional[int] = None,
+    ) -> int:
+        """H4: reap same-session in-flight lots whose age exceeds TTL.
+
+        Pass-4a hook called from ``reconcile.reconcile_session``. Mirrors
+        the bookkeeping that lives on
+        ``handlers.scale_events.ScaleHandler._reap_expired_in_flight``,
+        but scoped to ``pickup_session_id == session_id`` so cross-session
+        in-flight lots stay the global sweeper's job. Closes the
+        narrow inter-tick race between session close + reconcile and
+        the next 5s sweeper tick.
+
+        ``ttl_seconds`` defaults to the adapter's constructor value
+        (sourced from ``cfg.in_flight_ttl_seconds`` in app.py). Test
+        callers can override per call to drive expiry without sleeping.
+
+        Returns the number of lots actually flipped to ``out`` in this
+        call. Each reaped lot:
+          * is flipped via ``reap_in_flight_lot_as_consumed`` (race-
+            guarded with ``status='in_flight'``) — concurrent ADD that
+            already returned the lot is detected by the post-update
+            status check + skipped, matching the global reaper.
+          * gets a ``in_flight_ttl_expired`` ``session_resolutions`` row
+            written via the existing ``write_resolution`` path so the
+            cloud mirror runs through ``_emit_cloud_for_resolution``
+            and the standard ``in_flight_return_marker`` follow-up
+            (clearing cloud's ``stock_lots.in_flight_since``).
+
+        Test-time convenience: callable with ``ttl_seconds=0`` and a
+        synthetic ``in_flight_since`` that's already in the past. The
+        SQLite julianday-diff filter still resolves correctly.
+        """
+        ttl = int(ttl_seconds) if ttl_seconds is not None else self._in_flight_ttl_seconds
+        if ttl < 0:
+            return 0
+        try:
+            with self._db_lock:
+                expired = storage_repo.list_expired_in_flight_lots_for_session(
+                    self._conn, session_id, ttl_seconds=ttl,
+                )
+        except Exception:  # pragma: no cover - defensive
+            log.exception(
+                "reconciler H4: list_expired_in_flight_lots_for_session "
+                "raised on session %s", session_id,
+            )
+            return 0
+        if not expired:
+            return 0
+
+        # Lazy import — keeps the adapter module free of a hard
+        # dependency on the camera daemon (the only place
+        # ``now_iso_utc_ms`` lives). Top-level imports here would force
+        # storage-only test contexts to install the camera deps.
+        try:
+            from ..camera.daemon import now_iso_utc_ms
+        except Exception:  # pragma: no cover - defensive
+            from datetime import datetime, timezone
+            def now_iso_utc_ms() -> str:  # type: ignore[no-redef]
+                return (
+                    datetime.now(timezone.utc)
+                    .strftime("%Y-%m-%dT%H:%M:%S.") + "000Z"
+                )
+
+        reaped = 0
+        now_ts = now_iso_utc_ms()
+        for lot in expired:
+            try:
+                with self._db_lock:
+                    presumed_consumed = float(lot.pickup_weight_g or 0.0)
+                    returned_lot = storage_repo.reap_in_flight_lot_as_consumed(
+                        self._conn, lot.lot_id,
+                        consumed_g=presumed_consumed,
+                        last_out_at=now_ts,
+                    )
+                    # Race guard mirrors ScaleHandler — concurrent ADD
+                    # already returned the lot ⇒ skip. The reap helper
+                    # uses ``WHERE status='in_flight'`` so the UPDATE
+                    # is a no-op in that case.
+                    if returned_lot is None or returned_lot.status != "out":
+                        log.info(
+                            "reconciler H4: lot %s already resolved by "
+                            "concurrent ADD; skipping",
+                            lot.lot_id,
+                        )
+                        continue
+
+                # Write the resolution through the standard path so the
+                # cloud mirror, dedup precedence, and the
+                # ``in_flight_return_marker`` follow-up all kick in.
+                # ``write_resolution`` releases db_lock around the
+                # cloud emit just like every other reconciler write.
+                self.write_resolution(
+                    SessionResolution(
+                        session_id=session_id,
+                        pattern="in_flight_ttl_expired",
+                        lot_id=lot.lot_id,
+                        consumed_g=presumed_consumed,
+                        confidence=None,
+                        add_event_id=None,
+                        remove_event_id=lot.pickup_event_id,
+                    )
+                )
+
+                # Companion ``in_flight_return`` cloud event — the
+                # ``consumed`` event the resolution wrote zeros qty but
+                # does NOT clear cloud's ``stock_lots.in_flight_since``
+                # (EMIT→HANDLE matrix fix 2026-04-27). Without this the
+                # lot would render as in-flight forever in the cloud UI.
+                # Mirrors ScaleHandler._reap_expired_in_flight emission.
+                if self._cloud_emitter.enabled and lot.product_id:
+                    try:
+                        self._cloud_emitter.emit_in_flight_return_marker(
+                            scale_id=self._scale_id_for_lot(lot),
+                            product_id=lot.product_id,
+                            kind=self._shelf_kind_for_lot(lot),
+                            occurred_at=now_ts,
+                            pi_event_id=lot.pickup_event_id,
+                        )
+                    except Exception:  # pragma: no cover - defensive
+                        log.warning(
+                            "reconciler H4: in_flight_return_marker "
+                            "emit failed for lot %s", lot.lot_id,
+                            exc_info=True,
+                        )
+
+                reaped += 1
+                log.info(
+                    "reconciler H4: lot %s expired (since=%s, ttl=%ds, "
+                    "session=%s)",
+                    lot.lot_id[:8], lot.in_flight_since, ttl, session_id,
+                )
+            except Exception:  # pragma: no cover - defensive
+                log.exception(
+                    "reconciler H4: failed to reap lot %s", lot.lot_id,
+                )
+        return reaped
+
+    def _scale_id_for_lot(self, lot: Any) -> str:
+        """Map the lot's shelf_id to the configured scale device_id.
+
+        The reconciler adapter doesn't have access to the shelf registry
+        the ScaleHandler holds, but the static fallback covers the
+        single-shelf demo + the catch-all/single-item rooms. When
+        ``shelf_id`` is None we use the adapter's default ``scale_id``.
+        """
+        sid = getattr(lot, "shelf_id", None)
+        if sid == "catch_all":
+            return "scale-02"
+        if sid == "single_item":
+            return "scale-single"
+        return self._scale_id
+
+    def _shelf_kind_for_lot(self, lot: Any) -> str:
+        """Map the lot's shelf_id to the cloud shelf_kind enum."""
+        sid = getattr(lot, "shelf_id", None)
+        if sid == "single_item":
+            return "live_scale"
+        return self._shelf_kind
 
     def update_lot_on_resolution(
         self,

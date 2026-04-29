@@ -892,3 +892,77 @@ def test_ts_ordering_prevents_pairing_add_before_remove():
     assert "topped_up" not in patterns
     assert "new_arrival" in patterns
     assert "consumed_or_removed" in patterns
+
+
+# ---------------------------------------------------------------------------
+# H4 — same-session in-flight TTL reaper hook
+# ---------------------------------------------------------------------------
+
+
+def test_h4_reap_called_with_session_id_when_repo_supports_it():
+    """H4 wires Pass 4a — the reconciler invokes
+    ``reap_expired_in_flight_for_session(session_id)`` on the repo when
+    the method exists.
+
+    Closes the inter-tick race between session close+reconcile and the
+    next 5s sweeper tick: lots whose ``pickup_session_id == session_id``
+    AND in-flight age > TTL get flipped synchronously instead of
+    waiting up to 5s.
+    """
+    remove = _mk_event(
+        "E1", "2026-04-15T12:01:00Z", -200.0, 2000.0, 1800.0,
+        "remove", classification=_cls("lot-x"),
+    )
+    repo = _make_repo(
+        [remove], initial_w=2000.0, final_w=1800.0,
+        lots={"lot-x": FakeLot("lot-x")},
+    )
+    reap_calls: list[str] = []
+    repo.reap_expired_in_flight_for_session = (  # type: ignore[attr-defined]
+        lambda sid: reap_calls.append(sid) or 1
+    )
+    reconcile_session("S1", repo)
+    assert reap_calls == ["S1"]
+
+
+def test_h4_reap_skipped_when_repo_lacks_method():
+    """Older test stubs without ``reap_expired_in_flight_for_session``
+    must not crash the reconciler — the getattr() fall-through skips
+    Pass 4a cleanly. This confirms the new method is OPTIONAL on the
+    protocol so existing FakeRepo callers stay compiling.
+    """
+    remove = _mk_event(
+        "E1", "2026-04-15T12:01:00Z", -200.0, 2000.0, 1800.0,
+        "remove", classification=_cls("lot-x"),
+    )
+    repo = _make_repo(
+        [remove], initial_w=2000.0, final_w=1800.0,
+        lots={"lot-x": FakeLot("lot-x")},
+    )
+    # FakeRepo intentionally has no reap_expired_in_flight_for_session.
+    # Reconcile must complete without raising.
+    out = reconcile_session("S1", repo)
+    assert "consumed_or_removed" in _patterns(out)
+
+
+def test_h4_reap_exception_does_not_break_reconcile():
+    """A raising reap implementation must not abort the reconcile —
+    Pass 4a is a best-effort optimisation; any failure must log and
+    continue so the rest of the session still reconciles.
+    """
+    remove = _mk_event(
+        "E1", "2026-04-15T12:01:00Z", -200.0, 2000.0, 1800.0,
+        "remove", classification=_cls("lot-x"),
+    )
+    repo = _make_repo(
+        [remove], initial_w=2000.0, final_w=1800.0,
+        lots={"lot-x": FakeLot("lot-x")},
+    )
+
+    def _boom(_sid: str) -> int:
+        raise RuntimeError("reaper deliberately broke")
+
+    repo.reap_expired_in_flight_for_session = _boom  # type: ignore[attr-defined]
+    # Must not raise, must still emit the regular consumed_or_removed.
+    out = reconcile_session("S1", repo)
+    assert "consumed_or_removed" in _patterns(out)
