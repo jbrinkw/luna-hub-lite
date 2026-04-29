@@ -56,13 +56,25 @@ interface Recipe {
 /* ------------------------------------------------------------------ */
 
 /**
- * Window (in days, inclusive) for the "Uses expiring stock" filter.
- * Recipes that pull in any ingredient whose lot expires within this
+ * Forward-looking window (in days, inclusive) for the "Uses expiring stock"
+ * filter. Recipes that pull in any ingredient whose lot expires within this
  * many days from today's logical date are flagged. 7 days is a good
  * default — long enough to catch the weekend cook, short enough to be
  * actionable.
  */
 export const EXPIRING_WINDOW_DAYS = 7;
+
+/**
+ * Backward-looking lookback (in days, inclusive) for the "Uses expiring
+ * stock" filter. Already-expired lots that the user is staring at in the
+ * "expired — discard" section need to count too — otherwise the chip lies
+ * about which recipes can use the food the user is about to throw out.
+ * R2 audit explicitly called this out: a user with 4 expired yogurts
+ * toggling the chip currently sees zero matches because the prior
+ * `today..today+7` window excluded everything ≤ today-1. Window is now
+ * `today - EXPIRING_LOOKBACK_DAYS .. today + EXPIRING_WINDOW_DAYS`.
+ */
+export const EXPIRING_LOOKBACK_DAYS = 7;
 
 /* ------------------------------------------------------------------ */
 /*  Macro computation helper (exported for testing)                    */
@@ -227,10 +239,47 @@ export function RecipesPage() {
   /* ---- Filter state ---- */
   const [searchText, setSearchText] = useState('');
   const [maxActiveTime, setMaxActiveTime] = useState<number | null>(null);
-  const [canBeMadeOnly, setCanBeMadeOnly] = useState(false);
-  const [usesExpiringOnly, setUsesExpiringOnly] = useState(false);
+  /* Cookable + Uses-expiring chips persist across reloads — they're the
+     two highest-intent filters per the audit, and the asymmetric prior
+     behaviour (macro thresholds persisted, chips reset) was exactly
+     backwards. localStorage reads are wrapped in try/catch for Safari
+     private mode, mirroring the existing `chefbyte_protein_threshold`
+     pattern. */
+  const [canBeMadeOnly, setCanBeMadeOnly] = useState(() => {
+    try {
+      return localStorage.getItem('chefbyte_recipes_cookable') === '1';
+    } catch {
+      return false;
+    }
+  });
+  const [usesExpiringOnly, setUsesExpiringOnly] = useState(() => {
+    try {
+      return localStorage.getItem('chefbyte_recipes_expiring') === '1';
+    } catch {
+      return false;
+    }
+  });
   const [highProteinOnly, setHighProteinOnly] = useState(false);
   const [highCarbsOnly, setHighCarbsOnly] = useState(false);
+
+  /* Persist Cookable / Uses-expiring chip toggles. Effect-based so a
+     direct setState (e.g. from a "Reset filters" button later) still
+     persists, and so React StrictMode's double-render in dev doesn't
+     double-write (effects only run after commit). */
+  useEffect(() => {
+    try {
+      localStorage.setItem('chefbyte_recipes_cookable', canBeMadeOnly ? '1' : '0');
+    } catch {
+      /* Safari private — fail-soft. */
+    }
+  }, [canBeMadeOnly]);
+  useEffect(() => {
+    try {
+      localStorage.setItem('chefbyte_recipes_expiring', usesExpiringOnly ? '1' : '0');
+    } catch {
+      /* Safari private — fail-soft. */
+    }
+  }, [usesExpiringOnly]);
 
   /* ---- Macro density thresholds (g per 100 cal, persisted) ---- */
   const [proteinThreshold, setProteinThreshold] = useState(() => {
@@ -292,24 +341,33 @@ export function RecipesPage() {
       }
 
       // Build the "expiring within N days" product set used by the
-      // "Uses expiring" chip. Window = today .. today+EXPIRING_WINDOW_DAYS
-      // computed against the user's logical date so day-boundary works
-      // correctly. A product is in the set if at least one of its lots
-      // has qty>0 and an expires_on inside the window.
+      // "Uses expiring" chip. Window = today-EXPIRING_LOOKBACK_DAYS ..
+      // today+EXPIRING_WINDOW_DAYS computed against the user's logical
+      // date so day-boundary works correctly. A product is in the set
+      // if at least one of its lots has qty>0 and an expires_on inside
+      // the window.
+      //
+      // R2 fix: the lookback half (today - LOOKBACK) was added so that
+      // already-expired lots in the user's "expired — discard" section
+      // also count. Without it a user with 4 expired yogurts would
+      // toggle the chip and see ZERO matches — the exact recipes the
+      // chip is meant to surface.
       const today = todayStr(dayStartHour);
-      const horizon = (() => {
+      const ymd = (offsetDays: number) => {
         const d = new Date(today + 'T00:00:00');
-        d.setDate(d.getDate() + EXPIRING_WINDOW_DAYS);
+        d.setDate(d.getDate() + offsetDays);
         const y = d.getFullYear();
         const m = String(d.getMonth() + 1).padStart(2, '0');
         const day = String(d.getDate()).padStart(2, '0');
         return `${y}-${m}-${day}`;
-      })();
+      };
+      const lowerBound = ymd(-EXPIRING_LOOKBACK_DAYS);
+      const horizon = ymd(EXPIRING_WINDOW_DAYS);
       const expiring = new Set<string>();
       for (const lot of stockLots) {
         if (Number(lot.qty_containers) <= 0) continue;
         if (!lot.expires_on) continue;
-        if (lot.expires_on >= today && lot.expires_on <= horizon) {
+        if (lot.expires_on >= lowerBound && lot.expires_on <= horizon) {
           expiring.add(lot.product_id);
         }
       }
@@ -719,9 +777,26 @@ export function RecipesPage() {
             status === 'PARTIAL' || status === 'NO STOCK'
               ? computeMissingIngredients(recipe.recipe_ingredients, stock)
               : [];
+          // Tooltip carries qty detail (need / have) for desktop hover —
+          // mobile users get the same info inline below the badge per the
+          // R2 audit (tooltips don't render on touch). Truncate at 4
+          // ingredients to keep the line short, with "+N more" overflow.
           const missingTooltip = missing.length
-            ? 'Missing: ' + missing.map((m) => m.product_name).join(', ')
+            ? 'Missing: ' +
+              missing
+                .map((m) => {
+                  const need = m.required.toFixed(m.required >= 10 ? 0 : 1);
+                  const have = m.haveContainers.toFixed(m.haveContainers >= 10 ? 0 : 1);
+                  return `${m.product_name} (need ${need}, have ${have})`;
+                })
+                .join('; ')
             : undefined;
+          const missingInlineNames = (() => {
+            if (!missing.length) return null;
+            const head = missing.slice(0, 4).map((m) => m.product_name);
+            const overflow = missing.length - head.length;
+            return overflow > 0 ? `${head.join(', ')} +${overflow} more` : head.join(', ');
+          })();
 
           return (
             <Link
@@ -778,7 +853,11 @@ export function RecipesPage() {
 
               {/* Stock status — PARTIAL shows the concrete missing count
                   with a tooltip listing names so the user knows exactly
-                  what's blocking the recipe. */}
+                  what's blocking the recipe. R2 fix: a desktop-only
+                  tooltip is invisible on mobile (touch can't trigger
+                  `title`), so the missing names also render as a small
+                  inline line below the badge. Tooltip still carries
+                  the qty (need / have) detail for desktop. */}
               <div className="mb-2">
                 <span
                   className={stockBadgeClass(status)}
@@ -787,6 +866,14 @@ export function RecipesPage() {
                 >
                   {status === 'PARTIAL' && missing.length > 0 ? `PARTIAL (${missing.length} missing)` : status}
                 </span>
+                {missingInlineNames && (
+                  <p
+                    data-testid={`missing-names-${recipe.recipe_id}`}
+                    className="m-0 mt-1 text-[11px] text-text-tertiary leading-snug"
+                  >
+                    Missing: {missingInlineNames}
+                  </p>
+                )}
               </div>
             </Link>
           );

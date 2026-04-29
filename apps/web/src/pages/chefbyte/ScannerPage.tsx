@@ -1409,8 +1409,12 @@ export function ScannerPage() {
                   </button>
                 </div>
                 <div className="text-[0.8em] text-text-secondary">
-                  {item.mode === 'purchase' ? 'Purchased' : item.mode === 'shopping' ? 'Added to cart' : 'Consumed'}{' '}
-                  {item.quantity} {item.unit}
+                  {item.mode === 'purchase'
+                    ? 'Added to fridge'
+                    : item.mode === 'shopping'
+                      ? 'Added to cart'
+                      : 'Consumed'}{' '}
+                  {item.quantity} {item.unit === 'container' ? `container${item.quantity === 1 ? '' : 's'}` : item.unit}
                 </div>
               </div>
             ))}
@@ -1421,14 +1425,19 @@ export function ScannerPage() {
         {/*  RIGHT COLUMN — KEYPAD                                      */}
         {/* ========================================================== */}
         <div data-testid="keypad-panel" className="flex flex-col gap-2.5">
-          {/* Mode selector */}
+          {/* Mode selector — labels rewritten per the R1 audit (mode-name
+              decoding was the single biggest silent-intake-error source).
+              Canonical: "Add to fridge" (purchase), "I just ate this"
+              (consume_macros), "Eat (no macros)" (consume_no_macros),
+              "Shopping list" (shopping). The intent-named labels reduce
+              the translation step the user does every scan. */}
           <div data-testid="mode-selector" className="grid grid-cols-2 gap-2">
             {(
               [
-                { key: 'purchase', label: 'Buy' },
-                { key: 'consume_macros', label: 'Eat (Track)' },
-                { key: 'consume_no_macros', label: 'Eat (Skip)' },
-                { key: 'shopping', label: 'Add to List' },
+                { key: 'purchase', label: 'Add to fridge' },
+                { key: 'consume_macros', label: 'I just ate this' },
+                { key: 'consume_no_macros', label: 'Eat (no macros)' },
+                { key: 'shopping', label: 'Shopping list' },
               ] as const
             ).map((m) => (
               <button

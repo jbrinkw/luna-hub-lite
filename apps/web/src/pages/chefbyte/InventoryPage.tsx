@@ -358,29 +358,60 @@ export function InventoryPage() {
     };
   }, []);
 
-  /* ---- Badge legend (one-time dismissible).
+  /* ---- Badge legend (collapse-by-default + permanently dismissible).
+     R2: the always-visible 6-line legend pushed the actual data below
+     the fold on a phone-at-fridge first paint. Now collapsed by default
+     under a single "What do these badges mean?" trigger; once the user
+     toggles "Got it", we persist a flag so the trigger stops appearing.
      Five badge meanings (Certified / On Scale / In Flight / source pill /
-     stock dot) are never explained; tooltips work on desktop and silently
-     fail on mobile. The legend is shown to first-time viewers and a
-     localStorage flag persists "got it" so frequent users don't see
-     repeated noise. Read defensively — Safari private-mode + SSR raise. */
+     stock dot) are still surfaced — just on demand. localStorage is
+     scoped by user_id so a shared device with multiple Supabase accounts
+     doesn't hide the legend across users. Reads are defensive (Safari
+     private + SSR-safe). */
+  const legendStorageKey = user ? `chefbyte_inv_legend_dismissed:${user.id}` : 'chefbyte_inv_legend_dismissed';
   const [legendDismissed, setLegendDismissed] = useState(() => {
     try {
-      return localStorage.getItem('chefbyte_inv_legend_dismissed') === '1';
+      return localStorage.getItem(legendStorageKey) === '1';
     } catch {
       return false;
     }
   });
+  const [legendOpen, setLegendOpen] = useState(false);
   const dismissLegend = () => {
     setLegendDismissed(true);
+    setLegendOpen(false);
     try {
-      localStorage.setItem('chefbyte_inv_legend_dismissed', '1');
+      localStorage.setItem(legendStorageKey, '1');
     } catch {
       /* Safari private — ephemerally dismiss for the session, accept the
          next-load reappearance. Fail-soft is correct here since a
          dismissed legend is a comfort optimization, not a correctness one. */
     }
   };
+
+  /* ---- Realtime pulse tracking.
+     Realtime is wired (stock_lots invalidation refetches transparently)
+     but the data updates were silent — a Pi consume re-rendered the row
+     with no visual feedback. R2 #6 addresses this with a brief 600ms
+     pulse on the rows whose lots changed since the last data snapshot.
+     We compare a simple fingerprint per product_id (sum-of-qty +
+     in_flight_since presence) on every render; rows whose fingerprint
+     changes get added to `pulsingProductIds` for one frame and the
+     animation class fires. The first non-empty render is treated as the
+     baseline so a fresh page load doesn't flash everything green.
+
+     Skipping the pulse when the user just kicked off a mutation locally
+     (within ~1.5s) keeps the toast as the canonical confirmation —
+     otherwise the same event fires both surfaces. */
+  const [pulsingProductIds, setPulsingProductIds] = useState<ReadonlySet<string>>(new Set());
+  const lastFingerprintRef = useRef<Map<string, string> | null>(null);
+  const pulseClearRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastLocalMutationAtRef = useRef<number>(0);
+  useEffect(() => {
+    return () => {
+      if (pulseClearRef.current) clearTimeout(pulseClearRef.current);
+    };
+  }, []);
 
   /* ---- Close-in-flight modal state ----
      The In-Flight badge is a button that opens this modal scoped to a
@@ -583,6 +614,51 @@ export function InventoryPage() {
       };
     });
   }, [products, lots, liveScalePairedProductIds, pairedLotIds]);
+
+  /* ---- Realtime pulse fingerprint detection.
+     Compute a per-product fingerprint that captures the bits the user
+     would notice changing (total qty, in-flight presence, lot count).
+     On every lots-array change we diff against the prior snapshot and
+     mark changed products as pulsing for 600ms. The first non-empty
+     snapshot is treated as the baseline (no pulse) so a fresh page load
+     doesn't flash everything. Local mutations within the last 1.5s
+     suppress the pulse so the toast remains the canonical confirmation
+     for user-initiated changes. */
+  /* eslint-disable react-hooks/set-state-in-effect -- legitimate: realtime data delta → transient UI flash */
+  useEffect(() => {
+    if (lots.length === 0 && lastFingerprintRef.current === null) return;
+
+    const fingerprint = new Map<string, string>();
+    for (const g of grouped) {
+      fingerprint.set(g.product.product_id, `${g.totalStock.toFixed(3)}|${g.lotCount}|${g.inFlightSince ?? ''}`);
+    }
+
+    const prior = lastFingerprintRef.current;
+    lastFingerprintRef.current = fingerprint;
+
+    if (!prior) return; // baseline snapshot — no pulse
+
+    // Suppress pulses fired close on the heels of a local mutation —
+    // the toast already announced what happened.
+    if (Date.now() - lastLocalMutationAtRef.current < 1500) return;
+
+    const changed = new Set<string>();
+    for (const [pid, fp] of fingerprint) {
+      if (prior.get(pid) !== fp) changed.add(pid);
+    }
+    // Also pulse rows whose products were just removed (stock fully
+    // consumed) — they may still render briefly via min-stock reminder.
+    for (const pid of prior.keys()) {
+      if (!fingerprint.has(pid)) changed.add(pid);
+    }
+
+    if (changed.size === 0) return;
+
+    setPulsingProductIds(changed);
+    if (pulseClearRef.current) clearTimeout(pulseClearRef.current);
+    pulseClearRef.current = setTimeout(() => setPulsingProductIds(new Set()), 700);
+  }, [lots, grouped]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   /* ---------------------------------------------------------------- */
   /*  Expired lots — rendered as their own "discard" section at the   */
@@ -788,7 +864,9 @@ export function InventoryPage() {
     onSuccess: (_data, vars) => {
       setError(null);
       const name = products.find((p) => p.product_id === vars.productId)?.name ?? 'item';
-      announceStatus(`Added ${vars.qtyContainers} ctn of ${name}`);
+      announceStatus(`Added ${vars.qtyContainers} container${vars.qtyContainers === 1 ? '' : 's'} of ${name}`);
+      // Toast suppresses the realtime pulse — see pulse fingerprint effect.
+      lastLocalMutationAtRef.current = Date.now();
     },
     onSettled: () => {
       invalidateInventory();
@@ -833,6 +911,8 @@ export function InventoryPage() {
       setError(null);
       const name = vars.productName ?? 'item';
       announceStatus(`Removed ${vars.qty} ${vars.unit}${vars.qty === 1 ? '' : 's'} of ${name}`);
+      // Toast suppresses the realtime pulse — see pulse fingerprint effect.
+      lastLocalMutationAtRef.current = Date.now();
     },
     onSettled: () => {
       invalidateInventory();
@@ -1105,66 +1185,6 @@ export function InventoryPage() {
         )}
       </div>
 
-      {/* Badge legend (one-time dismissible). Shown until the user
-          dismisses; persists "got it" via localStorage. The audit called
-          out five badge meanings (Certified / On Scale / In Flight /
-          source pill / stock dot) with zero explanation surface. */}
-      {!legendDismissed && (
-        <div
-          data-testid="inventory-legend"
-          className="bg-surface border border-border rounded-lg px-4 py-3 mb-3 flex items-start gap-3"
-        >
-          <Info className="w-4 h-4 text-info-text shrink-0 mt-0.5" aria-hidden="true" />
-          <div className="flex-1 min-w-0">
-            <p className="text-sm font-semibold text-text m-0 mb-1">Quick legend</p>
-            <ul className="text-xs text-text-secondary space-y-0.5 m-0 pl-0 list-none">
-              <li>
-                <span className="inline-flex items-center gap-1 mr-2">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-success align-middle" />{' '}
-                  <span>Stock OK</span>
-                </span>
-                <span className="inline-flex items-center gap-1 mr-2">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-warning align-middle" />{' '}
-                  <span>Below min</span>
-                </span>
-                <span className="inline-flex items-center gap-1">
-                  <span className="inline-block w-2.5 h-2.5 rounded-full bg-danger align-middle" />{' '}
-                  <span>Out of stock</span>
-                </span>
-              </li>
-              <li>
-                <CheckCircle2 className="inline w-3 h-3 text-emerald-700 align-middle" aria-hidden="true" />{' '}
-                <strong>Certified</strong> — calibrated for live shelf tracking.
-              </li>
-              <li>
-                <Scale className="inline w-3 h-3 text-sky-700 align-middle" aria-hidden="true" />{' '}
-                <strong>On Scale</strong> — currently sitting on a paired live scale.
-              </li>
-              <li>
-                <Activity className="inline w-3 h-3 text-amber-700 align-middle" aria-hidden="true" />{' '}
-                <strong>In Flight</strong> — picked up off the shelf, click to close out.
-              </li>
-              <li>
-                <span className="inline-block px-1 rounded bg-info-subtle text-info-text text-[10px] font-semibold uppercase mr-1">
-                  source
-                </span>
-                <strong>Source pill</strong> — most recent automated source for the lot (live shelf / live scale /
-                catch-all).
-              </li>
-            </ul>
-          </div>
-          <button
-            type="button"
-            onClick={dismissLegend}
-            data-testid="inventory-legend-dismiss"
-            aria-label="Dismiss legend"
-            className="p-1 rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text transition-colors shrink-0"
-          >
-            <X className="w-4 h-4" aria-hidden="true" />
-          </button>
-        </div>
-      )}
-
       {/* View toggle */}
       <div className="flex gap-2 mb-4" data-testid="inventory-view-toggle">
         <button
@@ -1211,6 +1231,91 @@ export function InventoryPage() {
           className={inputCls}
         />
       </div>
+
+      {/* Badge legend (collapse-by-default + permanently dismissible).
+          R2: was always-rendered above the view toggle and pushed actual
+          data below the fold on a phone-at-fridge first paint. Now lives
+          below the toggle + search row, collapsed under a single
+          "What do these badges mean?" trigger. After "Got it" the trigger
+          stops appearing entirely (legendDismissed). The popped-out
+          panel covers the same five badge meanings (Certified / On Scale
+          / In Flight / source pill / stock dot) on demand. */}
+      {!legendDismissed && (
+        <div data-testid="inventory-legend-wrapper" className="mb-3">
+          <button
+            type="button"
+            data-testid="inventory-legend-toggle"
+            aria-expanded={legendOpen}
+            aria-controls="inventory-legend-panel"
+            onClick={() => setLegendOpen((v) => !v)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium text-text-secondary hover:text-text underline-offset-2 hover:underline transition-colors"
+          >
+            <Info className="w-3.5 h-3.5" aria-hidden="true" />
+            {legendOpen ? 'Hide legend' : 'What do these badges mean?'}
+          </button>
+          {legendOpen && (
+            <div
+              id="inventory-legend-panel"
+              data-testid="inventory-legend"
+              className="bg-surface border border-border rounded-lg px-4 py-3 mt-2 flex items-start gap-3"
+            >
+              <Info className="w-4 h-4 text-info-text shrink-0 mt-0.5" aria-hidden="true" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold text-text m-0 mb-1">Quick legend</p>
+                <ul className="text-xs text-text-secondary space-y-0.5 m-0 pl-0 list-none">
+                  <li>
+                    <span className="inline-flex items-center gap-1 mr-2">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-success align-middle" />{' '}
+                      <span>In stock</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1 mr-2">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-warning align-middle" />{' '}
+                      <span>Low stock</span>
+                    </span>
+                    <span className="inline-flex items-center gap-1">
+                      <span className="inline-block w-2.5 h-2.5 rounded-full bg-danger align-middle" />{' '}
+                      <span>Out of stock</span>
+                    </span>
+                  </li>
+                  <li>
+                    <CheckCircle2 className="inline w-3 h-3 text-emerald-700 align-middle" aria-hidden="true" />{' '}
+                    <strong>Certified</strong> — calibrated for live shelf tracking.
+                  </li>
+                  <li>
+                    <Scale className="inline w-3 h-3 text-sky-700 align-middle" aria-hidden="true" />{' '}
+                    <strong>On Scale</strong> — currently sitting on a paired live scale.
+                  </li>
+                  <li>
+                    <Activity className="inline w-3 h-3 text-amber-700 align-middle" aria-hidden="true" />{' '}
+                    <strong>In Flight</strong> — picked up off the shelf (✋ "picked up — awaiting reunite"); click the
+                    badge to close out.
+                  </li>
+                  <li>
+                    <span className="inline-block px-1 rounded bg-info-subtle text-info-text text-[10px] font-semibold uppercase mr-1">
+                      source
+                    </span>
+                    <strong>Source pill</strong> — most recent automated source for the lot (live shelf / live scale /
+                    catch-all).
+                  </li>
+                  <li className="text-text-tertiary italic">
+                    "container" (ctn) = one packaged unit of the product (e.g. one carton of milk).
+                  </li>
+                </ul>
+              </div>
+              <button
+                type="button"
+                onClick={dismissLegend}
+                data-testid="inventory-legend-dismiss"
+                aria-label="Got it — stop showing legend"
+                title="Got it — stop showing this legend"
+                className="p-1 rounded-md text-text-tertiary hover:bg-surface-hover hover:text-text transition-colors shrink-0"
+              >
+                <X className="w-4 h-4" aria-hidden="true" />
+              </button>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ========================================================== */}
       {/*  EXPIRED — DISCARD SECTION (top of list)                    */}
@@ -1344,11 +1449,13 @@ export function InventoryPage() {
                     });
                   };
 
+                  const isPulsing = pulsingProductIds.has(product.product_id);
                   return (
                     <div
                       key={product.product_id}
                       data-testid={`inv-product-${product.product_id}`}
-                      className={`relative ${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock && !isPickedUp ? 'opacity-50' : ''}`}
+                      data-pulsing={isPulsing ? 'true' : undefined}
+                      className={`relative ${idx < filteredGrouped.length - 1 ? 'border-b border-border-light' : ''} ${isZeroStock && !isPickedUp ? 'opacity-50' : ''} ${isPulsing ? 'animate-realtime-pulse' : ''}`}
                     >
                       {/* Collapsed row — always visible, clickable to toggle.
                           Inline ±-quick-edit buttons (below) sit ABOVE this
@@ -1586,6 +1693,7 @@ export function InventoryPage() {
                                   productId: product.product_id,
                                   qty: 1,
                                   unit: 'container',
+                                  productName: product.name,
                                 });
                               }}
                               data-testid={`sub-ctn-${product.product_id}`}
@@ -1606,7 +1714,12 @@ export function InventoryPage() {
                               className="flex items-center justify-center gap-1.5 bg-surface text-danger-text border-2 border-danger px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-subtle transition-colors"
                               onClick={(e) => {
                                 e.stopPropagation();
-                                consumeStockMutation.mutate({ productId: product.product_id, qty: 1, unit: 'serving' });
+                                consumeStockMutation.mutate({
+                                  productId: product.product_id,
+                                  qty: 1,
+                                  unit: 'serving',
+                                  productName: product.name,
+                                });
                               }}
                               data-testid={`sub-srv-${product.product_id}`}
                             >

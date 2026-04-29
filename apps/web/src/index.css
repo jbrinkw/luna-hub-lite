@@ -153,6 +153,36 @@
   }
 }
 
+/*
+ * Realtime-pulse animation. Applied to inventory rows after the
+ * `stock_lots` realtime channel invalidates the query so the user sees
+ * which row just refreshed instead of staring at a silently-updating
+ * page. ~600ms total: short flash, then linger long enough that even a
+ * glance catches it. Fully respects `prefers-reduced-motion`. The class
+ * is applied programmatically via a brief useState window on the page.
+ */
+@keyframes realtime-pulse {
+  0% {
+    background-color: transparent;
+  }
+  20% {
+    background-color: rgba(16, 185, 129, 0.18); /* emerald-500 @ 18% */
+  }
+  100% {
+    background-color: transparent;
+  }
+}
+
+.animate-realtime-pulse {
+  animation: realtime-pulse 600ms ease-out;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-realtime-pulse {
+    animation: none;
+  }
+}
+
 body {
   font-family: var(--font-sans);
   background-color: var(--color-surface-sunken);

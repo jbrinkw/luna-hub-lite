@@ -153,6 +153,12 @@ export function RecipeFormPage() {
         setShowDropdown(false);
         return;
       }
+      // Exclude `[MEAL]` carve-outs — these are meal-prep allocation
+      // products that mirror real ingredients only for inventory
+      // bookkeeping. Selecting one as a recipe ingredient pollutes
+      // recipes with placeholder rows that disappear when the meal is
+      // cleared. SettingsPage applies the same exclusion when listing
+      // products (`SettingsPage.tsx:124`).
       const { data } = await chefbyte()
         .from('products')
         .select(
@@ -160,6 +166,7 @@ export function RecipeFormPage() {
         )
         .eq('user_id', user.id)
         .ilike('name', `%${escapeIlike(text)}%`)
+        .not('name', 'ilike', '[MEAL]%')
         .order('name');
 
       const results = (data ?? []) as ProductSearchResult[];

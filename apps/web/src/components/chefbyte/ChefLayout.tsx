@@ -8,7 +8,7 @@ import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { chefbyte } from '@/shared/supabase';
 import { Tabs, type TabItem } from '@/components/ui/Tabs';
 import { Alert } from '@/components/ui/Alert';
-import { Menu, X, Camera } from 'lucide-react';
+import { Menu, X, ScanLine } from 'lucide-react';
 
 interface ChefLayoutProps {
   title: string;
@@ -121,6 +121,12 @@ export function ChefLayout({ children }: ChefLayoutProps) {
           </Link>
         </div>
         <div className="flex items-center gap-2.5">
+          {/* Scanner button — uses ScanLine (barcode strip) icon rather
+              than Camera. The previous Camera icon implied a phone-camera
+              scanner that doesn't exist (no BarcodeDetector / getUserMedia
+              wired up); the barcode icon correctly reflects the
+              hardware-USB / manual-typed scan flow that ScannerPage
+              actually supports. */}
           <button
             className={[
               'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-semibold transition-colors',
@@ -129,7 +135,7 @@ export function ChefLayout({ children }: ChefLayoutProps) {
             onClick={() => navigate('/chef/scanner')}
             data-testid="scanner-btn"
           >
-            <Camera className="h-4 w-4" />
+            <ScanLine className="h-4 w-4" />
             Scanner
           </button>
           <button
