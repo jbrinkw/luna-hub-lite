@@ -35,6 +35,29 @@ describe('RestTimer', () => {
     expect(screen.getByTestId('timer-display')).toHaveTextContent('1:30');
   });
 
+  // W-05 fix: inject endTime independent from durationSeconds to prove the
+  // component reads end_time (server-authoritative) rather than counting
+  // down from durationSeconds (local clock).
+  //
+  // Construction: pin Date.now() BEFORE render, set endTime to +87s from
+  // that pin, but pass durationSeconds=90. If the component correctly uses
+  // end_time the display reads 1:27 (87s), not 1:30 (90s). If it ignores
+  // end_time and uses durationSeconds it would read 1:30 — test fails.
+  it('uses end_time (server-authoritative) not durationSeconds for countdown display', () => {
+    // Capture a fixed "now" reference before fake-timers freeze it.
+    // vi.useFakeTimers() is active via beforeEach, so Date.now() here is
+    // whatever vitest froze it to — the key is endTime is 87s from THAT
+    // value, while durationSeconds is 90.
+    const frozenNow = Date.now();
+    const endTime = new Date(frozenNow + 87_000).toISOString();
+    render(<RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={90} />);
+
+    // Component must display 87s remaining (= 1:27), not 90s (= 1:30).
+    // Confirms the component subtracts Date.now() from end_time, not from
+    // a local countdown seeded with durationSeconds.
+    expect(screen.getByTestId('timer-display')).toHaveTextContent('1:27');
+  });
+
   it('shows Pause button when running', () => {
     const endTime = new Date(Date.now() + 60_000).toISOString();
     render(<RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={60} />);
