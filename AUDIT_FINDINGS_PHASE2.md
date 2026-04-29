@@ -24,17 +24,33 @@ team carves through the queue.
 adds **1 LOW** finding to that script's existing output (not aggregated
 above).
 
-`audit_test_quality.py` L9 extension adds **151 MEDIUM**
+`audit_test_quality.py` L9 extension adds **0 MEDIUM**
 (`missing-empty-fixture-variant`) findings to that script's existing
-output (not aggregated above).
+output — RESOLVED 2026-04-29 (was 151). Fix pass: 14 real empty-state
+sibling tests added under `apps/web/src/__tests__/integration/pages/`
+(33 new test cases verified passing against local Supabase), plus
+categorical waivers in `scripts/audit_test_quality.py::L9_WAIVERS`
+covering 137 pgTAP/Python/e2e/edge-fn tests where empty-fixture is
+either structurally exercised elsewhere (RLS isolation suites, signature
+tests) or N/A (state-machine handlers, unique-constraint tests, function
+RPCs that raise on empty input). See `decisions.md` for the waiver
+rationale.
 
 ## What the numbers mean
 
-- **L1 (11 HIGH)** — Real symmetry gaps: `catch_all` has no
-  `cloud_pairings_sync`, no `pi_UI_section`, and no
-  `weight_sync_to_cloud`; `single_item` has no `auto_register`. These
-  match the documented intent in `AUDIT_STRATEGY_MERGED.md §1` row L1.
-  Each entry is one queued fix-or-waiver decision.
+- **L1 (11 HIGH) — RESOLVED 2026-04-29**. The L1 fix pass closed every
+  cell: 5 by detector pattern-fix (the cloud↔Pi translator at
+  `_kind_translate.py` was the source of truth for `cloud_pairings_sync`,
+  and the Pi templates use bare-token `shelf=catch_all` instead of quoted
+  literals for `pi_UI_section`), 6 by waiver in
+  `AUDIT_STRATEGY_MERGED.md §7` (`catch_all × weight_sync_to_cloud` —
+  catch-all uses delta-capture event pair; `live_scale × classifier_prompt`
+  - `single_item × classifier_prompt` — cameraless rigs;
+    `single_item × auto_register` — Pi-only literal never reaches the cloud
+    edge fn; the `live_scale ↔ single_item` synonym pair waivers reflect
+    the existing translator boundary). Lock-in regression test:
+    `test_audit_symmetry_phase2_findings_resolved` (parametrised over all
+    11 cells). Live matrix output: `.verify/audit_symmetry_matrix.md`.
 
 - **L11 (208 MEDIUM)** — High false-positive rate expected: the
   must/never/always grep is intentionally aggressive so it can't miss
