@@ -438,23 +438,37 @@ class CloudEventEmitter:
         """
         if not self._enabled:
             return None
-        # Payload contract: log + drop on violation (matches the surrounding
-        # "observability is best-effort" doctrine for outbox writes). The
-        # dedicated test_payload_contracts + test_emit_payload_snapshots
-        # suites still exercise the contract via direct calls and DO fail
-        # loudly there, so producer bugs get caught at test time without
-        # taking production runtime down. Drop is asserted by the caller
-        # via cloud_outbox row-count == 0 after a bad-payload emit.
+        # Payload contract: insert a dead-letter outbox row on violation so
+        # the event is visible to the operator via the outbox audit trail
+        # rather than silently vanishing. The row is flagged failed_permanently
+        # with attempts=99 (above the worker's retry threshold) so the drainer
+        # never picks it up; it exists only for observability.
         try:
             validate_payload_contract(payload)
         except Exception as exc:  # noqa: BLE001
+            error_msg = f"PRODUCER_DROP: contract violation: {exc}"
             log.warning(
-                "cloud emitter: dropping payload that violates contract: %s "
+                "cloud emitter: dead-lettering payload that violates contract: %s "
                 "(event_kind=%r, product_id=%r)",
                 exc,
                 payload.get("event_kind"),
                 payload.get("product_id"),
             )
+            # Construct a dead-letter row. We use a fresh UUID so the UNIQUE
+            # constraint is satisfied even if the same bad payload is retried.
+            import uuid as _uuid  # noqa: PLC0415 - local import avoids top-level dep confusion
+            dead_client_id = str(_uuid.uuid4())
+            stamped = {**payload, "client_event_id": dead_client_id}
+            payload_json = json.dumps(stamped, separators=(",", ":"), default=str)
+            # If the DB insert itself fails we cannot dead-letter to a broken DB;
+            # surface the failure so the operator can act on it.
+            with self._conn:
+                self._conn.execute(
+                    "INSERT INTO cloud_outbox "
+                    "  (client_event_id, payload_json, attempts, last_error, failed_permanently) "
+                    "VALUES (?, ?, 99, ?, 1)",
+                    (dead_client_id, payload_json, error_msg),
+                )
             return None
         occurred_at = payload.get("occurred_at")
         if _ts_is_pre_ntp(occurred_at):
@@ -467,13 +481,13 @@ class CloudEventEmitter:
             return None
         try:
             return enqueue_event(self._conn, payload)
-        except Exception:  # noqa: BLE001 - observability is best-effort
-            log.warning(
+        except Exception:  # noqa: BLE001 - observability is best-effort; surface as raised
+            log.error(
                 "cloud emitter: enqueue_event raised for payload keys=%r",
                 list(payload.keys()),
                 exc_info=True,
             )
-            return None
+            raise
 
     # ------------------------------------------------------------------
     # Public emit helpers

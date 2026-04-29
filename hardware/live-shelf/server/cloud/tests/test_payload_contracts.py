@@ -252,11 +252,13 @@ def test_invalid_payload_raises_before_enqueue(conn):
         "occurred_at": "2026-04-29T12:31:00.000Z",
     }
 
-    # Contract validation is log+drop at runtime (matches outbox
-    # observability-is-best-effort doctrine). The contract itself still
-    # raises — covered by the direct validate_payload_contract tests
-    # above — but the EMITTER swallows-and-drops so a producer bug can't
-    # take prod runtime down. Assert the drop via row-count == 0.
+    # Contract violations now produce a dead-letter outbox row instead of
+    # silently vanishing. The emitter still returns None (caller sees "no
+    # event id emitted") but the row is recorded for operator inspection.
     result = emitter._enqueue(bad_payload)
-    assert result is None, "emitter must drop invalid payload, return None"
-    assert conn.execute("SELECT COUNT(*) FROM cloud_outbox").fetchone()[0] == 0
+    assert result is None, "emitter must return None for a dead-lettered payload"
+    rows = conn.execute("SELECT COUNT(*), last_error, failed_permanently, attempts FROM cloud_outbox").fetchone()
+    assert rows[0] == 1, "exactly one dead-letter row must be inserted"
+    assert rows[1].startswith("PRODUCER_DROP:"), f"last_error must start with PRODUCER_DROP: — got {rows[1]!r}"
+    assert rows[2] == 1, "failed_permanently must be 1 (dead-lettered)"
+    assert rows[3] == 99, "attempts must be 99 (above retry threshold)"
