@@ -30,6 +30,11 @@ const TIMER_EXTEND_SECONDS = [15, 30];
 interface SetQueueProps {
   sets: PlannedSet[];
   onComplete: (reps: number, load: number) => void;
+  /** "Failed" affordance — submits the set with `actual_reps = 0` plus
+   * the user's typed-in load. Server-side PR detection skips zero-rep
+   * rows (`coachbyte_functions.sql:110`), so this records the attempt
+   * for history without triggering a false PR. Closes CoachByte FLAG F1. */
+  onFailed?: (load: number) => void;
   onAdHoc: () => void;
   onUpdateSet?: (plannedSetId: string, field: string, value: number | null) => void;
   onDeleteSet?: (plannedSetId: string) => void;
@@ -60,6 +65,7 @@ interface SetQueueProps {
 export function SetQueue({
   sets,
   onComplete,
+  onFailed,
   onAdHoc,
   onUpdateSet,
   onDeleteSet,
@@ -127,6 +133,20 @@ export function SetQueue({
     }
     setValidationError(null);
     onComplete(r, l);
+  };
+
+  // Failed-set path — records `actual_reps = 0` so PR detection skips
+  // the row (filter at coachbyte_functions.sql:110) but the attempt is
+  // still recorded for history. Load defaults to whatever's typed; if
+  // the field is empty we fall back to `target_load` so the user
+  // doesn't have to type anything to mark a failure.
+  const handleFailed = () => {
+    if (!onFailed) return;
+    const typedLoad = parseFloat(load);
+    const fallbackLoad = nextSet?.target_load ?? 0;
+    const l = isNaN(typedLoad) ? fallbackLoad : typedLoad;
+    setValidationError(null);
+    onFailed(l);
   };
 
   const handleCustomTimerStart = () => {
@@ -343,6 +363,28 @@ export function SetQueue({
                 + Ad-Hoc Set
               </Button>
             </form>
+
+            {/* "Failed" affordance — closes CoachByte FLAG F1. Records
+                the set with `actual_reps = 0` so PR detection skips it
+                (filter at coachbyte_functions.sql:110). Distinct from
+                "Complete Set" so accidental zero-rep entries can't be
+                confused with intentional failures. */}
+            {onFailed && (
+              <div className="mt-3">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="md"
+                  onClick={handleFailed}
+                  disabled={disabled || completing}
+                  data-testid="failed-set-btn"
+                  className="text-text-secondary"
+                  aria-label="Mark set as failed (records 0 reps)"
+                >
+                  Mark as failed
+                </Button>
+              </div>
+            )}
 
             {validationError && (
               <p className="text-danger-text text-sm mt-2" data-testid="validation-error">

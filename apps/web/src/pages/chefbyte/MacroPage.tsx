@@ -14,6 +14,7 @@ import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { computeRecipeMacros } from './RecipesPage';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { macroDelta } from '@/shared/macroValidation';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -632,7 +633,31 @@ export function MacroPage() {
       {/*  DAY SUMMARY -- PROGRESS BARS                                 */}
       {/* ============================================================ */}
       <div data-testid="macro-summary" className="mb-6">
-        <h3 className="text-lg font-semibold text-text mb-3">Day Summary</h3>
+        <div className="flex items-baseline justify-between mb-3 flex-wrap gap-2">
+          <h3 className="text-lg font-semibold text-text m-0">Day Summary</h3>
+          {/* FLAG (CHEFBYTE_USE) — "Remaining" inline tile next to
+              consumed totals. Single-line summary so the user can read
+              "headroom for the rest of the day" without doing the
+              subtraction in their head. Negative values are floored to
+              0 + flagged in red so over-budget days read clearly. */}
+          <div
+            className="text-xs text-text-secondary tabular-nums flex gap-3 flex-wrap"
+            data-testid="macro-remaining-tile"
+          >
+            {(['calories', 'protein', 'carbs', 'fat'] as const).map((k) => {
+              const remaining = (goals as any)[k] - (consumedTotals as any)[k];
+              const over = remaining < 0;
+              const label = k === 'calories' ? 'cal' : k === 'protein' ? 'P' : k === 'carbs' ? 'C' : 'F';
+              return (
+                <span key={k} className={over ? 'text-danger-text font-semibold' : ''} data-testid={`remaining-${k}`}>
+                  {over ? '+' : ''}
+                  {Math.abs(Math.round(remaining))}
+                  {k === 'calories' ? '' : 'g'} {label} {over ? 'over' : 'left'}
+                </span>
+              );
+            })}
+          </div>
+        </div>
         <MacroProgressBar
           label="Calories"
           current={consumedTotals.calories}
@@ -716,11 +741,31 @@ export function MacroPage() {
                           </span>
                         )}
                       </div>
-                      <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-text-secondary mt-1 flex-wrap">
+                      <div className="flex gap-2 sm:gap-3 text-xs tabular-nums text-text-secondary mt-1 flex-wrap items-center">
                         <span>{item.calories} cal</span>
                         <span>{item.protein}g P</span>
                         <span>{item.carbs}g C</span>
                         <span>{item.fat}g F</span>
+                        {/* FLAG (CHEFBYTE_USE) — 4-4-9 validation indicator.
+                            Soft warning when calories disagree with
+                            4·protein+4·carbs+9·fat by >25%. Helps catch
+                            LLM extraction bugs + unit mismatches without
+                            being noisy on real foods (avocado, nuts). */}
+                        {(() => {
+                          const delta = macroDelta(item.calories, item.protein, item.carbs, item.fat);
+                          if (!delta) return null;
+                          const sign = delta.delta > 0 ? '+' : '';
+                          return (
+                            <span
+                              className="text-[10px] font-semibold px-1.5 py-0.5 rounded bg-warn-subtle text-warn-text"
+                              data-testid={`macro-449-warn-${item.id}`}
+                              title={`Calories disagree with 4·P + 4·C + 9·F by ${sign}${delta.delta} (expected ${delta.expected}). Possible logging error.`}
+                            >
+                              4·4·9 off {sign}
+                              {Math.round(delta.pctOff * 100)}%
+                            </span>
+                          );
+                        })()}
                       </div>
                       {isEditing && (
                         <div

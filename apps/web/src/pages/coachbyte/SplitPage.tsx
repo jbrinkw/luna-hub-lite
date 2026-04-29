@@ -2,11 +2,13 @@ import { useEffect, useRef, useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { CoachLayout } from '@/components/coachbyte/CoachLayout';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useAppContext } from '@/shared/AppProvider';
 import { supabase } from '@/shared/supabase';
+import { todayStr } from '@/shared/dates';
 import { Button } from '@/components/ui/Button';
 import { TableSkeleton } from '@/components/ui/Skeleton';
 import { SaveIndicator } from '@/components/ui/SaveIndicator';
-import { ChevronDown, ChevronRight, GripVertical } from 'lucide-react';
+import { ChevronDown, ChevronRight, GripVertical, Info } from 'lucide-react';
 import { queryKeys } from '@/shared/queryKeys';
 
 const WEEKDAYS = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
@@ -37,6 +39,12 @@ interface Exercise {
 
 export function SplitPage() {
   const { user } = useAuth();
+  const { dayStartHour } = useAppContext();
+  // Today's weekday (0..6) computed against the user's logical-date so
+  // late-night editing past midnight UTC still maps to the right day.
+  // Drives the FLAG F5 passive hint banner ("editing today's split
+  // doesn't propagate to today's plan").
+  const todayWeekday = new Date(`${todayStr(dayStartHour)}T00:00:00`).getDay();
   const [splits, setSplits] = useState<DaySplit[]>([]);
   const [savingDay, setSavingDay] = useState<number | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -333,6 +341,7 @@ export function SplitPage() {
       {splits.map((day) => {
         const isCollapsed = collapsedDays.has(day.weekday);
         const isRestDay = day.template_sets.length === 0;
+        const isToday = day.weekday === todayWeekday;
 
         return (
           <div className="mb-6" key={day.weekday} data-testid={`day-${day.weekday}`}>
@@ -348,6 +357,14 @@ export function SplitPage() {
                 <ChevronDown className="w-5 h-5 text-text-tertiary group-hover:text-text-secondary transition-colors" />
               )}
               <h3 className="text-lg font-semibold text-text m-0">{WEEKDAYS[day.weekday]}</h3>
+              {isToday && (
+                <span
+                  className="text-xs font-medium px-2 py-0.5 rounded-full bg-coach-accent/10 text-coach-accent"
+                  data-testid={`day-${day.weekday}-today-badge`}
+                >
+                  Today
+                </span>
+              )}
               {isRestDay && <span className="text-sm text-text-tertiary italic ml-1">Rest day</span>}
               {!isRestDay && (
                 <span className="text-sm text-text-secondary ml-1">
@@ -355,6 +372,25 @@ export function SplitPage() {
                 </span>
               )}
             </button>
+
+            {/* CoachByte FLAG F5 — passive hint when editing today's
+                split. Spec is bootstrap-once-per-day; in-place edits to
+                this row do NOT propagate to today's already-bootstrapped
+                plan. Hint is only shown when expanded so it doesn't
+                clutter the collapsed all-week view. */}
+            {isToday && !isCollapsed && (
+              <div
+                className="ml-7 mt-1 mb-2 flex items-start gap-2 text-xs text-text-secondary bg-info-subtle/40 border border-info/30 rounded-md px-2.5 py-1.5"
+                data-testid={`day-${day.weekday}-today-hint`}
+                role="note"
+              >
+                <Info className="w-3.5 h-3.5 shrink-0 mt-0.5 text-info-text" aria-hidden="true" />
+                <span>
+                  Edits here apply to <strong>next {WEEKDAYS[day.weekday]}</strong>. To change today's plan, edit it
+                  directly on the Today page or use Reset Plan.
+                </span>
+              </div>
+            )}
 
             {!isCollapsed && (
               <>

@@ -7,6 +7,7 @@ import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { toDateStr, todayStr } from '@/shared/dates';
+import { mealTypeFromHour } from '@/shared/mealTypeFromHour';
 import { computeRecipeMacros } from './RecipesPage';
 import { formatStockShortfallMessage } from '@/shared/stockShortfall';
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
@@ -624,12 +625,29 @@ export function MealPlanPage() {
   /*  Delete consumed items (two-click confirm)                        */
   /* ---------------------------------------------------------------- */
 
+  // FLAG (CHEFBYTE_USE) — two-click delete cross-row collision fix.
+  // Each click on a "Delete" button starts a 4s confirm window. If the
+  // user clicks a different row's button mid-window, row A silently
+  // reverts to "Delete" and row B becomes "You sure?" — matching the
+  // visual mental model. Auto-clear after 4s so a button left in the
+  // pre-confirmed state doesn't persist visually.
+  const confirmTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
+    };
+  }, []);
   const handleDelete = (id: string, doDelete: () => Promise<void>) => {
     if (confirmDeleteId === id) {
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
       setConfirmDeleteId(null);
       doDelete();
     } else {
+      if (confirmTimeoutRef.current) clearTimeout(confirmTimeoutRef.current);
       setConfirmDeleteId(id);
+      confirmTimeoutRef.current = setTimeout(() => {
+        setConfirmDeleteId((current) => (current === id ? null : current));
+      }, 4000);
     }
   };
 
@@ -831,7 +849,9 @@ export function MealPlanPage() {
     setAddSelected(null);
     setAddServings(1);
     setAddMealPrep(false);
-    setAddMealType(null);
+    // ChefByte FLAG (CHEFBYTE_USE) — pre-fill meal_type from local
+    // time. See `mealTypeFromHour` for the windowing rules.
+    setAddMealType(mealTypeFromHour(new Date().getHours()));
     setAddShowDropdown(false);
     // Default date: selected day or today's logical date
     setAddDate(selectedDay || todayLogical);

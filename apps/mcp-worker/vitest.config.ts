@@ -18,6 +18,7 @@ export default defineConfig({
       'src/__tests__/voice-ack.test.ts',
       'src/__tests__/chat-streaming.test.ts',
       'src/__tests__/session-logging.test.ts',
+      'src/__tests__/test-extension-creds.test.ts',
     ],
     environment: 'node',
     testTimeout: 30_000,

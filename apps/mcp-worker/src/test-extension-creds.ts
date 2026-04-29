@@ -104,7 +104,69 @@ export async function probeUpstream(extension: string, creds: Record<string, str
       return { ok: false, message: e instanceof Error ? e.message : 'Network error.' };
     }
   }
-  // Home Assistant + anything else: deferred — see FLAG-03.
+  if (extension === 'homeassistant') {
+    // FLAG-03 closure. Probe `{ha_url}/api/` with the long-lived token.
+    // HA returns `{"message":"API running."}` on success. The Worker
+    // can only reach internet-accessible HA instances; LAN-only setups
+    // (192.168.*, 10.*, *.local, homeassistant.local) will time out
+    // here. We surface that as a clear "LAN-only host" message instead
+    // of a generic Network error so the user knows the cred itself
+    // might be valid.
+    const url = (creds.ha_url ?? '').trim();
+    const token = (creds.ha_token ?? '').trim();
+    if (!url || !token) return { ok: false, message: 'Base URL + token are required.' };
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      return { ok: false, message: 'Base URL is not a valid URL (include http:// or https://).' };
+    }
+    const host = parsed.hostname;
+    const isPrivate =
+      /^(192\.168\.|10\.|127\.|172\.(1[6-9]|2\d|3[01])\.)/.test(host) ||
+      host === 'localhost' ||
+      host.endsWith('.local') ||
+      host.endsWith('.lan') ||
+      host.endsWith('.internal');
+    if (isPrivate) {
+      return {
+        ok: false,
+        message:
+          "Your HA URL points to a private/LAN address. The cloud Worker can't reach LAN-only hosts; expose HA via a public hostname (Cloudflare Tunnel, Nabu Casa, etc.) to enable testing.",
+      };
+    }
+    try {
+      const apiBase = url.replace(/\/$/, '');
+      const res = await fetch(`${apiBase}/api/`, {
+        headers: { Authorization: `Bearer ${token}`, Accept: 'application/json' },
+        // Short timeout so a stalled HA box doesn't burn 30s of Worker
+        // CPU. AbortSignal.timeout is supported on Cloudflare Workers.
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.status === 401 || res.status === 403) {
+        return { ok: false, message: `Authentication rejected (${res.status}). Check the long-lived token.` };
+      }
+      if (res.status === 404) {
+        return {
+          ok: false,
+          message: '404 from /api/. Confirm the base URL points to your HA root (no trailing /api).',
+        };
+      }
+      if (!res.ok) return { ok: false, message: `HA returned HTTP ${res.status}.` };
+      return { ok: true, message: 'HA reachable with this token.' };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : 'Network error.';
+      // AbortSignal.timeout produces a TimeoutError which surfaces as
+      // a clear "host is unreachable" signal; bubble it as a hint.
+      if (msg.includes('timeout') || msg.includes('aborted')) {
+        return {
+          ok: false,
+          message: 'Timed out reaching HA. Confirm the URL is publicly accessible and HA is running.',
+        };
+      }
+      return { ok: false, message: msg };
+    }
+  }
   return { ok: false, message: 'Live test not yet supported for this extension.' };
 }
 

@@ -31,6 +31,25 @@ import {
   vibrateSetCompleted,
 } from '@/hooks/useTimerAudio';
 
+// Weekday names for the split-breadcrumb hint (FLAG F7). Order matches
+// JS Date.getDay() (0 = Sunday … 6 = Saturday).
+export const WEEKDAYS_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'] as const;
+
+/** Warm-up heuristic for the first-record toast (CoachByte FLAG F6).
+ *
+ * Suppresses the "First record!" toast on probable warm-up sets so a
+ * 12×45lb opening doesn't fire a meaningless first-record cue. Real
+ * working-set first-records (135×5 squat, 95×5 bench, etc.) sit
+ * outside the envelope (`load >= 100` in WEIGHT_UNIT, OR `reps <= 8`).
+ *
+ * Defensive false negatives: only suppress the warm-up toast — once
+ * the lifter does a real working set, e1RM rolls forward and the
+ * genuine PR fires.
+ */
+export function isLikelyWarmupSet(reps: number, load: number): boolean {
+  return load < 100 && reps > 8;
+}
+
 export interface CompletedSet {
   completed_set_id: string;
   exercise_name: string;
@@ -522,8 +541,12 @@ export function TodayPage() {
           // short pulses) so the two never feel like the same signal.
           firePrCelebrationCue();
         } else if (newE1RM > 0 && prevBestWithout === 0) {
-          setPrToast(`First record! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT}`);
-          firePrCelebrationCue();
+          // CoachByte FLAG F6 — suppress "first record" toast for
+          // probable warm-ups. See isLikelyWarmupSet() for envelope.
+          if (!isLikelyWarmupSet(reps, load)) {
+            setPrToast(`First record! ${completedExerciseName} e1RM: ${newE1RM} ${WEIGHT_UNIT}`);
+            firePrCelebrationCue();
+          }
         }
       }
 
@@ -557,6 +580,16 @@ export function TodayPage() {
     // like the same signal.
     vibrateSetCompleted();
     completeSetMutation.mutate({ reps, load });
+  };
+
+  // Failed-set path (CoachByte FLAG F1). Submits via the same RPC with
+  // actual_reps=0; PR detection in onSuccess skips the entry (the
+  // `reps > 0 && load > 0` guard) so no false "first record" toast.
+  const handleFailedSet = async (load: number) => {
+    if (!planId || !user) return;
+    unlockAudioContextNow();
+    vibrateSetCompleted();
+    completeSetMutation.mutate({ reps: 0, load });
   };
 
   // Undo a just-completed set. Looks up by completed_set_id captured
@@ -914,7 +947,20 @@ export function TodayPage() {
       <div className="flex justify-between items-center flex-wrap gap-2 border-b-2 border-border pb-2.5 mb-5">
         <div>
           <h2 className="text-2xl font-bold text-text m-0">Today's Workout</h2>
-          <span className="text-text-secondary text-xs">{today}</span>
+          <span className="text-text-secondary text-xs">
+            {today}
+            {/* CoachByte FLAG F7 — split breadcrumb. Persisted column
+                doesn't exist; we infer the source weekday from the
+                logical_date the plan was bootstrapped on. Bootstrap
+                always uses (logical_date getDay() in user's tz), and
+                the typical plan is created same-day, so the weekday
+                of `today` is a near-perfect heuristic. Stale across
+                explicit Reset Plan + DST edges; cheaper than a
+                migration. */}
+            <span className="ml-2 text-text-tertiary" data-testid="split-breadcrumb">
+              · from {WEEKDAYS_LONG[new Date(`${today}T00:00:00`).getDay()]} split
+            </span>
+          </span>
         </div>
         <Button
           variant={confirmReset ? 'danger' : 'ghost'}
@@ -980,6 +1026,7 @@ export function TodayPage() {
       <SetQueue
         sets={sets}
         onComplete={handleCompleteSet}
+        onFailed={handleFailedSet}
         onAdHoc={() => setShowAdHoc(true)}
         onUpdateSet={updatePlannedSet}
         onDeleteSet={deletePlannedSet}
