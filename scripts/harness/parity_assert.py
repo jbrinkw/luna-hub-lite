@@ -96,6 +96,83 @@ class TablePair:
 # appear in both schemas — the test cross-references the actual
 # columns. Add new pairs as parity surfaces are claimed by the audit.
 
+# ---------------------------------------------------------------------------
+# Invariant: catch-all namespace isolation.
+# ---------------------------------------------------------------------------
+#
+# The catch-all pool builder keys candidates by *cloud lot_id*, so the
+# classifier's ``item_id`` for a catch-all event IS a cloud ``lot_id``.
+# ``_dispatch_catch_all_add`` must translate that lot_id → product_id via
+# the ``cloud_lots`` mirror BEFORE building the emit payload.  If it ever
+# passes the raw ``item_id`` (= lot_id) to the emitter as ``product_id``,
+# the cloud ``apply_shelf_event`` RPC will return applied=false
+# ("product not found").
+#
+# Invariant (2026-04-29 regression):
+#   ∀ row r in cloud_lots: r.lot_id ∉ { s.product_id | s ∈ cloud_stock_lots }
+#
+# If this fires it means one of:
+#   (a) The dispatcher sent a lot_id as product_id and the cloud
+#       incorrectly stored it — unlikely given server-side validation.
+#   (b) The Pi mirror has a row whose lot_id field accidentally contains
+#       the same UUID that another lot's product_id uses — a UUID
+#       namespace collision worth investigating.
+#
+# The invariant is cheap (two in-memory sets) and runs as part of the
+# normal _run engine alongside the diff-pair checks.
+
+
+def assert_catch_all_namespace_invariant(
+    pi_conn: sqlite3.Connection,
+    cloud_conn: Any,
+) -> list["FieldDelta"]:
+    """Return a FieldDelta for every cloud_lots.lot_id found as a
+    product_id in cloud stock_lots.
+
+    In correct operation this list is ALWAYS empty.  A non-empty result
+    means a lot_id was used where a product_id was expected — the bug
+    class from 2026-04-29.
+
+    Works in both sandbox mode (sqlite cloud_conn) and real-Postgres mode.
+    """
+    # Read Pi cloud_lots mirror rows (lot_id, product_id).
+    cloud_lots_pi_rows = _read_pi_rows(pi_conn, "cloud_lots")
+    if not cloud_lots_pi_rows:
+        return []
+
+    # Read cloud stock_lots (lot_id, product_id).
+    cloud_stock_rows = _read_cloud_rows(cloud_conn, "chefbyte.stock_lots")
+
+    # Build set of product_ids that appear in cloud stock_lots.
+    cloud_product_ids: set[str] = set()
+    for r in cloud_stock_rows:
+        pid = r.get("product_id") if isinstance(r, dict) else r["product_id"]
+        if pid is not None:
+            cloud_product_ids.add(str(pid))
+
+    deltas: list["FieldDelta"] = []
+    for row in cloud_lots_pi_rows:
+        lot_id = str(row["lot_id"])
+        product_id = str(row["product_id"]) if row["product_id"] is not None else None
+        if lot_id in cloud_product_ids:
+            deltas.append(
+                FieldDelta(
+                    table="catch_all_namespace",
+                    key={"lot_id": lot_id},
+                    field="product_id",
+                    pi_value=lot_id,
+                    cloud_value=f"product_id={product_id}",
+                    description=(
+                        f"cloud_lots.lot_id={lot_id!r} appears as a product_id in "
+                        "cloud stock_lots — lot_id/product_id UUID namespace conflation "
+                        "(2026-04-29 regression). The catch-all dispatcher must extract "
+                        "product_id from cloud_lots.product_id, NOT pass the lot_id."
+                    ),
+                )
+            )
+    return deltas
+
+
 TABLE_PAIRS: tuple[TablePair, ...] = (
     TablePair(
         name="products",
@@ -340,6 +417,12 @@ def _make_sandbox() -> tuple[sqlite3.Connection, sqlite3.Connection]:
             kind TEXT,
             status TEXT
         );
+        -- Pi mirror of cloud stock_lots, keyed by cloud lot_id.
+        -- Used by the catch_all_namespace invariant.
+        CREATE TABLE cloud_lots (
+            lot_id TEXT PRIMARY KEY,
+            product_id TEXT NOT NULL
+        );
         """
     )
     cloud = sqlite3.connect(":memory:")
@@ -396,6 +479,43 @@ def scenario(name: str) -> Callable:
         SCENARIOS[name] = fn
         return fn
     return deco
+
+
+@scenario("namespace-invariant")
+def _scenario_namespace_invariant(pi_conn: sqlite3.Connection, cloud_conn: Any) -> None:
+    """Seed a deliberately conflated fixture: a cloud_lots row whose
+    ``lot_id`` appears as a ``product_id`` in cloud stock_lots.
+
+    This simulates the 2026-04-29 regression where the catch-all dispatcher
+    passed the classifier's ``item_id`` (= cloud lot_id) directly as
+    ``product_id`` to ``emit_catch_all_first_measurement``.
+
+    The invariant check MUST flag this — exit code 1 is the correct outcome
+    when running this scenario, just as exit 1 is correct for ``self-test``.
+    """
+    # Three deliberately distinct UUIDs (mirrors test_catch_all_state_machine.py).
+    CLOUD_LOT_UUID    = "cccccccc-0000-0000-0000-000000000003"
+    CLOUD_PRODUCT_UUID = "bbbbbbbb-0000-0000-0000-000000000002"
+
+    # Pi cloud_lots mirror: lot_id=CLOUD_LOT_UUID, product_id=CLOUD_PRODUCT_UUID.
+    pi_conn.execute(
+        "INSERT INTO cloud_lots(lot_id, product_id) VALUES (?, ?)",
+        (CLOUD_LOT_UUID, CLOUD_PRODUCT_UUID),
+    )
+    pi_conn.commit()
+
+    # Conflated cloud row: product_id == CLOUD_LOT_UUID (the bug — lot_id
+    # was used where product_id was expected).
+    if isinstance(cloud_conn, sqlite3.Connection):
+        cloud_conn.execute(
+            "INSERT INTO chefbyte_stock_lots(lot_id, product_id, qty_containers, status) "
+            "VALUES (?, ?, ?, ?)",
+            ("lot-cloud-1", CLOUD_LOT_UUID, 0.5, "on_shelf"),
+        )
+        cloud_conn.commit()
+    # For real Postgres we don't mutate production data — the invariant
+    # relies on the Pi mirror having a lot_id that matches a cloud product_id,
+    # which would only happen if a real conflation event had occurred.
 
 
 @scenario("self-test")
@@ -479,6 +599,11 @@ def _run(scenario_name: str, sandbox: bool, *, quiet: bool = False) -> int:
         per_table[pair.name] = pair_deltas
         deltas.extend(pair_deltas)
 
+    # Catch-all namespace invariant: lot_id must never appear as product_id.
+    ns_deltas = assert_catch_all_namespace_invariant(pi_conn, cloud_conn)
+    per_table["catch_all_namespace"] = ns_deltas
+    deltas.extend(ns_deltas)
+
     deltas.sort(key=lambda d: (d.table, json.dumps(d.key, sort_keys=True), d.field))
 
     artifact = {
@@ -545,7 +670,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
     if not args.scenario:
         ap.error("scenario name required (or pass --list)")
-    sandbox = args.sandbox or args.scenario == "self-test"
+    # Both self-test and namespace-invariant are pure-sandbox scenarios:
+    # they seed synthetic fixtures and never need a real Pi DB or Postgres.
+    sandbox = args.sandbox or args.scenario in ("self-test", "namespace-invariant")
     return _run(args.scenario, sandbox=sandbox, quiet=args.quiet)
 
 

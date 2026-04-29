@@ -408,6 +408,44 @@ def test_parity_assert_list_scenarios():
     assert "self-test" in res.stdout
 
 
+def test_parity_assert_namespace_invariant_catches_conflation(tmp_path):
+    """The ``namespace-invariant`` scenario seeds a deliberately conflated
+    fixture: cloud_lots.lot_id == cloud stock_lots.product_id.
+
+    The engine MUST exit 1 and surface a ``catch_all_namespace`` finding.
+    This is the Pi/cloud namespace conflation regression from 2026-04-29
+    (hamburger-buns event: lot_id was passed as product_id).
+
+    Pre-fix: if ``assert_catch_all_namespace_invariant`` were removed or
+    broken, the engine would exit 0 and produce no findings — this test
+    would fail.
+    Post-fix (current): engine exits 1, findings include catch_all_namespace.
+    """
+    art = REPO / ".verify" / "parity_assert.json"
+    res = _run(
+        [
+            sys.executable,
+            str(SCRIPTS / "harness" / "parity_assert.py"),
+            "namespace-invariant",
+            "--quiet",
+        ]
+    )
+    # Conflated fixture means the invariant fires → exit 1.
+    assert res.returncode == 1, (
+        f"expected exit 1 (invariant catches conflation), got {res.returncode}.\n"
+        f"stdout: {res.stdout}\nstderr: {res.stderr}"
+    )
+    data = json.loads(art.read_text())
+    assert data["gate"] == "parity_assert"
+    assert data["ok"] is False
+    assert data["scenario"] == "namespace-invariant"
+    flagged_tables = {f["table"] for f in data["findings"]}
+    assert "catch_all_namespace" in flagged_tables, (
+        f"invariant finding missing; flagged tables: {flagged_tables}\n"
+        "This means the catch-all namespace conflation would go undetected."
+    )
+
+
 # ---------------------------------------------------------------------------
 # 7. extended audit_schema_drift.py (FLOW G — L10)
 # ---------------------------------------------------------------------------

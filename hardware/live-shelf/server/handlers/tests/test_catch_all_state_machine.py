@@ -28,6 +28,8 @@ ROOT = Path(__file__).resolve().parents[2]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+import pytest  # noqa: E402
+
 from server.handlers.scale_events import ScaleHandler  # noqa: E402
 from server.shelves import DEFAULT_REGISTRY  # noqa: E402
 from server.storage import init_db  # noqa: E402
@@ -740,3 +742,257 @@ def test_empty_bottle_discard_includes_lot_id_in_emit(tmp_path):
     )
     assert kwargs.get("product_id") == "prod-1"
     assert kwargs.get("kind") == "catch_all"
+
+
+# ----------------------------------------------------------------------
+# Namespace invariant — Pi lot_id vs cloud product_id vs cloud lot_id
+# (regression for 2026-04-29 hamburger-buns bug)
+# ----------------------------------------------------------------------
+#
+# The catch-all pool builder keys candidates by cloud lot_id (not
+# product_id), so the classifier's item_id IS a lot_id.  The
+# _dispatch_catch_all_add must translate item_id → product_id via the
+# cloud_lots mirror BEFORE building the emit payload.  Pre-regression the
+# dispatch used `item_id` directly as `product_id`, which would send the
+# lot_id to the cloud and cause apply_shelf_event to return
+# applied=false ("product not found").
+#
+# Verification strategy: use three completely distinct UUID-shaped strings
+# for the Pi-local product reference, the cloud product_id, and the cloud
+# lot_id.  The emit must carry cloud_product_id (never cloud_lot_id or the
+# Pi-local product ref).  Pre-fix this test fails because the code would
+# pass `item_id` (= CLOUD_LOT_UUID) as `product_id` to the emitter.
+
+# Three deliberately distinct UUIDs — no two are equal.
+_PI_LOCAL_PRODUCT_UUID = "aaaaaaaa-0000-0000-0000-000000000001"
+_CLOUD_PRODUCT_UUID    = "bbbbbbbb-0000-0000-0000-000000000002"
+_CLOUD_LOT_UUID        = "cccccccc-0000-0000-0000-000000000003"
+
+
+def _seed_product_with_explicit_product_id(
+    conn,
+    *,
+    pi_product_id: str,
+    net: float = 500.0,
+    tare: float = 25.0,
+) -> None:
+    """Seed a products row with a caller-supplied product_id UUID."""
+    from server.storage.models import ProductIn  # local import for clarity
+    storage_repo.create_product(
+        conn,
+        ProductIn(
+            barcode="NSP-NS-001",
+            name="Namespace Test Item",
+            net_weight_g=net,
+            gross_weight_g=net + tare,
+            tare_weight_g=tare,
+            unit_type="solid",
+            container_type="bag",
+            certified=1,
+        ),
+    )
+    with conn:
+        conn.execute(
+            "UPDATE products SET product_id = ? WHERE barcode = ?",
+            (pi_product_id, "NSP-NS-001"),
+        )
+
+
+def test_dispatch_sends_cloud_product_id_not_lot_id_in_first_measurement(
+    tmp_path,
+):
+    """Regression: catch_all first-measurement emit must carry the cloud
+    product_id extracted from cloud_lots, NOT the classifier's item_id
+    (which is the cloud lot_id).
+
+    Uses three deliberately distinct UUIDs:
+      * Pi-local products.product_id = _PI_LOCAL_PRODUCT_UUID  (not used
+        by dispatch — it goes through cloud_lots.product_id instead)
+      * cloud_lots.product_id        = _CLOUD_PRODUCT_UUID
+      * cloud_lots.lot_id            = _CLOUD_LOT_UUID  (= item_id)
+
+    Pre-fix: _dispatch_catch_all_add called
+      emit_catch_all_first_measurement(product_id=cid)
+    where `cid` was the item_id from classification — i.e. _CLOUD_LOT_UUID.
+    The cloud apply_shelf_event would get "product not found" and return
+    applied=false, leaving cloud stock_lots.pickup_event_id = NULL.
+
+    Post-fix: the dispatch looks up cloud_lots by lot_id=cid, reads
+    product_id from that row, and passes _CLOUD_PRODUCT_UUID to the emit.
+    """
+    handler, conn, emitter = _make_handler(tmp_path)
+
+    # Pi-local product row — its product_id deliberately differs from the
+    # cloud product_id to prove the dispatch reads from cloud_lots, not
+    # from the local products table.
+    _seed_product_with_explicit_product_id(conn, pi_product_id=_PI_LOCAL_PRODUCT_UUID)
+
+    # Cloud_lots row: lot_id = _CLOUD_LOT_UUID, product_id = _CLOUD_PRODUCT_UUID.
+    # The JOIN inside list_certified_not_on_shelf_lots_by_oldest_created
+    # requires products.product_id == cloud_lots.product_id; here we seed
+    # directly and bypass the pool builder so we can test _dispatch_catch_all_add
+    # in isolation.
+    _seed_cloud_lot(
+        conn,
+        lot_id=_CLOUD_LOT_UUID,
+        product_id=_CLOUD_PRODUCT_UUID,
+        qty=0.662,
+        in_flight_kind=None,
+    )
+
+    # Classifier returns item_id = cloud lot_id (this is the correct
+    # catch_all pool contract — pool_for_catch_all keys candidates by lot_id).
+    classification = {
+        "item_id": _CLOUD_LOT_UUID,
+        "candidate_pool_used": [
+            {
+                "candidate_id": _CLOUD_LOT_UUID,
+                "lot_id": _CLOUD_LOT_UUID,
+                "product_id": _CLOUD_PRODUCT_UUID,
+                "why_candidate": "inventory_only",
+                "expected_weight_g": 337.0,
+            }
+        ],
+    }
+
+    handled = handler._dispatch_catch_all_add(
+        classification=classification,
+        delta_g=337.7,
+        event_ts="2026-04-29T22:47:15.376Z",
+        event_id="9e692a0a-0e33-4d85-8cea-5e49e23393d6",
+        session_id="sess-ns-1",
+    )
+
+    assert handled is True, "dispatch must return True (FIRST measurement)"
+    emitter.emit_catch_all_first_measurement.assert_called_once()
+    kwargs = emitter.emit_catch_all_first_measurement.call_args.kwargs
+
+    # THE CORE INVARIANT: product_id in the emit must be the cloud product_id
+    # (from cloud_lots.product_id), NOT the lot_id / item_id.
+    assert kwargs["product_id"] == _CLOUD_PRODUCT_UUID, (
+        f"emit must carry cloud product_id={_CLOUD_PRODUCT_UUID!r}, "
+        f"got {kwargs.get('product_id')!r}; "
+        "if this is the lot_id the cloud handler will return 'product not found'"
+    )
+    assert kwargs["product_id"] != _CLOUD_LOT_UUID, (
+        "emit must NOT carry the cloud lot_id as product_id"
+    )
+    assert kwargs["product_id"] != _PI_LOCAL_PRODUCT_UUID, (
+        "emit must NOT carry the Pi-local product UUID (it differs from cloud's)"
+    )
+    assert kwargs["measured_weight_g"] == pytest.approx(337.7)
+    assert kwargs["pi_event_id"] == "9e692a0a-0e33-4d85-8cea-5e49e23393d6"
+
+
+def test_dispatch_sends_cloud_product_id_not_lot_id_in_second_measurement(
+    tmp_path,
+):
+    """Same namespace invariant for the SECOND measurement path.
+
+    The picked candidate's cloud_lots row has in_flight_kind='catch_all'.
+    The emit must carry cloud product_id, not the lot_id that arrived as
+    item_id.
+    """
+    handler, conn, emitter = _make_handler(tmp_path)
+    _seed_product_with_explicit_product_id(conn, pi_product_id=_PI_LOCAL_PRODUCT_UUID)
+    _seed_cloud_lot(
+        conn,
+        lot_id=_CLOUD_LOT_UUID,
+        product_id=_CLOUD_PRODUCT_UUID,
+        qty=0.662,
+        in_flight_kind="catch_all",
+        pickup_event_id="9e692a0a-0e33-4d85-8cea-5e49e23393d6",
+    )
+
+    classification = {
+        "item_id": _CLOUD_LOT_UUID,
+        "candidate_pool_used": [
+            {
+                "candidate_id": _CLOUD_LOT_UUID,
+                "lot_id": _CLOUD_LOT_UUID,
+                "product_id": _CLOUD_PRODUCT_UUID,
+                "why_candidate": "in_flight",
+                "expected_weight_g": 337.0,
+            }
+        ],
+    }
+
+    handled = handler._dispatch_catch_all_add(
+        classification=classification,
+        delta_g=200.0,
+        event_ts="2026-04-29T22:49:02.757Z",
+        event_id="50959097-dd99-421f-b004-e5e0d8f10016",
+        session_id="sess-ns-2",
+    )
+
+    assert handled is True, "dispatch must return True (SECOND measurement)"
+    emitter.emit_catch_all_second_measurement.assert_called_once()
+    kwargs = emitter.emit_catch_all_second_measurement.call_args.kwargs
+
+    assert kwargs["product_id"] == _CLOUD_PRODUCT_UUID, (
+        f"SECOND emit must carry cloud product_id={_CLOUD_PRODUCT_UUID!r}, "
+        f"got {kwargs.get('product_id')!r}"
+    )
+    assert kwargs["product_id"] != _CLOUD_LOT_UUID
+    assert kwargs["first_event_pi_event_id"] == "9e692a0a-0e33-4d85-8cea-5e49e23393d6"
+
+
+def test_dispatch_sends_cloud_product_id_not_lot_id_in_empty_bottle_discard(
+    tmp_path,
+):
+    """Same namespace invariant for the empty-bottle discard path."""
+    handler, conn, emitter = _make_handler(tmp_path)
+    _seed_product_with_explicit_product_id(
+        conn, pi_product_id=_PI_LOCAL_PRODUCT_UUID, net=500.0, tare=25.0,
+    )
+    _seed_cloud_lot(
+        conn,
+        lot_id=_CLOUD_LOT_UUID,
+        product_id=_CLOUD_PRODUCT_UUID,
+        qty=0.662,
+        in_flight_kind=None,
+    )
+
+    # We need the products table to have _CLOUD_PRODUCT_UUID so tare lookup
+    # works (get_product called with product_id from cloud_lots.product_id).
+    # Re-seed with _CLOUD_PRODUCT_UUID so the dispatch can resolve tare.
+    with conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO products "
+            "(product_id, name, net_weight_g, gross_weight_g, "
+            " tare_weight_g, unit_type, container_type, certified) "
+            "VALUES (?, 'NSP Cloud Product', 500.0, 525.0, 25.0, "
+            "        'solid', 'bag', 1)",
+            (_CLOUD_PRODUCT_UUID,),
+        )
+
+    classification = {
+        "item_id": _CLOUD_LOT_UUID,
+        "candidate_pool_used": [
+            {
+                "candidate_id": _CLOUD_LOT_UUID,
+                "lot_id": _CLOUD_LOT_UUID,
+                "product_id": _CLOUD_PRODUCT_UUID,
+                "why_candidate": "inventory_only",
+                "expected_weight_g": 525.0,
+            }
+        ],
+    }
+
+    # 25g = tare, well within ±5% of (25+500)=525 → empty-bottle window.
+    handled = handler._dispatch_catch_all_add(
+        classification=classification,
+        delta_g=25.0,
+        event_ts="2026-04-29T23:00:00.000Z",
+        event_id="evt-ns-discard",
+        session_id="sess-ns-3",
+    )
+
+    assert handled is True, "empty-bottle discard must be handled"
+    emitter.emit_manual_discard.assert_called_once()
+    kwargs = emitter.emit_manual_discard.call_args.kwargs
+
+    assert kwargs["product_id"] == _CLOUD_PRODUCT_UUID, (
+        f"discard emit must carry cloud product_id, got {kwargs.get('product_id')!r}"
+    )
+    assert kwargs["product_id"] != _CLOUD_LOT_UUID
