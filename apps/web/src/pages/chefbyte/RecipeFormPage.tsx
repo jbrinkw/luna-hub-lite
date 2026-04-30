@@ -8,7 +8,7 @@ import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { computeRecipeMacros } from './RecipesPage';
 import { formatIngredientDisplay } from '@/shared/recipes/formatIngredientDisplay';
-import { GripVertical, Trash2, Eye, Pencil } from 'lucide-react';
+import { Trash2, Pencil } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -81,8 +81,25 @@ export function RecipeFormPage() {
   const [ingUnit, setIngUnit] = useState<string>('serving');
   const [ingNote, setIngNote] = useState('');
 
-  /* ---- Display vs edit mode for ingredients ---- */
-  const [ingredientMode, setIngredientMode] = useState<'view' | 'edit'>('edit');
+  /* ---- Page mode (view vs. edit). New recipes land in `edit` (nothing to view).
+         Existing recipes land in `view` and switch to `edit` via the header
+         action button. Cancel / save in edit mode return to `view`. ---- */
+  const [pageMode, setPageMode] = useState<'view' | 'edit'>(isEdit ? 'view' : 'edit');
+
+  /* ---- Snapshot of the originally-loaded data so Cancel can revert local form
+         state without re-fetching. Captured after the first server-data
+         population, and re-captured every time we re-enter `edit` from `view`
+         (so a saved-then-cancel cycle works correctly). ---- */
+  type Snapshot = {
+    name: string;
+    description: string;
+    baseServings: number;
+    activeTime: number | null;
+    totalTime: number | null;
+    instructions: string;
+    ingredients: LocalIngredient[];
+  };
+  const snapshotRef = useRef<Snapshot | null>(null);
 
   /* ---- Delete confirmation ---- */
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
@@ -123,12 +140,19 @@ export function RecipeFormPage() {
     if (!isEdit || formPopulated || !cachedRecipe) return;
     const recipe = cachedRecipe as any;
 
-    setName(recipe.name ?? '');
-    setDescription(recipe.description ?? '');
-    setBaseServings(Number(recipe.base_servings) || 1);
-    setActiveTime(recipe.active_time != null ? Number(recipe.active_time) : null);
-    setTotalTime(recipe.total_time != null ? Number(recipe.total_time) : null);
-    setInstructions(recipe.instructions ?? '');
+    const loadedName = recipe.name ?? '';
+    const loadedDesc = recipe.description ?? '';
+    const loadedBase = Number(recipe.base_servings) || 1;
+    const loadedActive = recipe.active_time != null ? Number(recipe.active_time) : null;
+    const loadedTotal = recipe.total_time != null ? Number(recipe.total_time) : null;
+    const loadedInstr = recipe.instructions ?? '';
+
+    setName(loadedName);
+    setDescription(loadedDesc);
+    setBaseServings(loadedBase);
+    setActiveTime(loadedActive);
+    setTotalTime(loadedTotal);
+    setInstructions(loadedInstr);
 
     const ings: LocalIngredient[] = (recipe.recipe_ingredients ?? []).map((ri: any) => ({
       product_id: ri.product_id,
@@ -147,6 +171,15 @@ export function RecipeFormPage() {
         ri.products?.visual_units_per_serving != null ? Number(ri.products.visual_units_per_serving) : null,
     }));
     setIngredients(ings);
+    snapshotRef.current = {
+      name: loadedName,
+      description: loadedDesc,
+      baseServings: loadedBase,
+      activeTime: loadedActive,
+      totalTime: loadedTotal,
+      instructions: loadedInstr,
+      ingredients: ings,
+    };
     setFormPopulated(true);
   }, [isEdit, cachedRecipe, formPopulated]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -267,16 +300,6 @@ export function RecipeFormPage() {
 
   const updateIngredient = (index: number, field: keyof LocalIngredient, value: string | number) => {
     setIngredients((prev) => prev.map((ing, i) => (i === index ? { ...ing, [field]: value } : ing)));
-  };
-
-  const moveIngredient = (fromIdx: number, toIdx: number) => {
-    setIngredients((prev) => {
-      if (toIdx < 0 || toIdx >= prev.length) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(fromIdx, 1);
-      next.splice(toIdx, 0, moved);
-      return next;
-    });
   };
 
   /* ---------------------------------------------------------------- */
@@ -401,7 +424,23 @@ export function RecipeFormPage() {
       // Invalidate recipe-related queries
       queryClient.invalidateQueries({ queryKey: queryKeys.recipes(user!.id) });
       if (id) queryClient.invalidateQueries({ queryKey: queryKeys.recipe(id) });
-      navigate('/chef/recipes');
+      if (isEdit) {
+        // Re-snapshot saved state and drop back to view mode so the user can
+        // see their work without bouncing back to the recipe list.
+        snapshotRef.current = {
+          name,
+          description,
+          baseServings,
+          activeTime,
+          totalTime,
+          instructions,
+          ingredients,
+        };
+        setPageMode('view');
+      } else {
+        // New recipe: navigate to the recipe list as before.
+        navigate('/chef/recipes');
+      }
     },
   });
 
@@ -413,6 +452,56 @@ export function RecipeFormPage() {
     }
     setSaveError(null);
     saveMutation.mutate();
+  };
+
+  /* ---------------------------------------------------------------- */
+  /*  View / Edit toggle helpers                                       */
+  /* ---------------------------------------------------------------- */
+
+  const enterEditMode = () => {
+    // Re-capture the snapshot from current state so a Cancel later reverts
+    // exactly to what the user is seeing now (covers the post-save case
+    // where the snapshot needs to align with the freshly persisted data).
+    snapshotRef.current = {
+      name,
+      description,
+      baseServings,
+      activeTime,
+      totalTime,
+      instructions,
+      ingredients,
+    };
+    setSaveError(null);
+    setPageMode('edit');
+  };
+
+  const cancelEdit = () => {
+    if (!isEdit) {
+      // Cancel on the new-recipe page acts as "discard and go back".
+      navigate('/chef/recipes');
+      return;
+    }
+    const snap = snapshotRef.current;
+    if (snap) {
+      setName(snap.name);
+      setDescription(snap.description);
+      setBaseServings(snap.baseServings);
+      setActiveTime(snap.activeTime);
+      setTotalTime(snap.totalTime);
+      setInstructions(snap.instructions);
+      setIngredients(snap.ingredients);
+    }
+    // Reset add-ingredient inline form so a half-typed entry doesn't survive
+    // the cancel.
+    setSearchText('');
+    setSelectedProduct(null);
+    setSearchResults([]);
+    setShowDropdown(false);
+    setIngQuantity(1);
+    setIngUnit('serving');
+    setIngNote('');
+    setSaveError(null);
+    setPageMode('view');
   };
 
   /* ---------------------------------------------------------------- */
@@ -461,13 +550,31 @@ export function RecipeFormPage() {
   // Helper: is gram unit available for a product?
   const gramAvailable = (netWeightG: number | null) => netWeightG != null && netWeightG > 0;
 
+  const isViewMode = pageMode === 'view';
+
   return (
-    <ChefLayout title={isEdit ? 'Edit Recipe' : 'New Recipe'}>
-      <div className="mb-6">
-        <Link to="/chef/recipes" className="text-sm font-medium text-emerald-600 hover:text-emerald-700 no-underline">
-          &larr; Recipes
-        </Link>
-        <h1 className="mt-2 mb-0 text-2xl font-bold text-text">{isEdit ? 'Edit Recipe' : 'New Recipe'}</h1>
+    <ChefLayout title={isEdit ? (isViewMode ? 'Recipe' : 'Edit Recipe') : 'New Recipe'}>
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div>
+          <Link to="/chef/recipes" className="text-sm font-medium text-emerald-600 hover:text-emerald-700 no-underline">
+            &larr; Recipes
+          </Link>
+          <h1 className="mt-2 mb-0 text-2xl font-bold text-text" data-testid="recipe-page-heading">
+            {isEdit ? (isViewMode ? name || 'Recipe' : 'Edit Recipe') : 'New Recipe'}
+          </h1>
+        </div>
+        {/* Top-right action: Edit button when viewing an existing recipe.
+            New recipes have no view mode, so no toggle is rendered there. */}
+        {isEdit && isViewMode && (
+          <button
+            type="button"
+            onClick={enterEditMode}
+            data-testid="enter-edit-mode-btn"
+            className="inline-flex items-center gap-1.5 px-4 py-2 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors"
+          >
+            <Pencil className="h-4 w-4" /> Edit
+          </button>
+        )}
       </div>
 
       {saveError && (
@@ -478,72 +585,106 @@ export function RecipeFormPage() {
       {/*  RECIPE FIELDS                                                */}
       {/* ============================================================ */}
       <div data-testid="recipe-fields" className="bg-surface border border-border rounded-lg p-5 mb-4">
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="md:col-span-3">
-            <label className={labelCls}>Name</label>
-            <input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              data-testid="recipe-name"
-              required
-              placeholder="Recipe name"
-              className={inputCls}
-            />
+        {isViewMode ? (
+          /* ---- VIEW: read-only field rendering ---- */
+          <div data-testid="recipe-fields-view" className="space-y-3">
+            {description && (
+              <p className="m-0 text-sm text-text-secondary" data-testid="recipe-description-view">
+                {description}
+              </p>
+            )}
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-sm text-text-tertiary">
+              <span data-testid="recipe-base-servings-view">
+                <span className="font-semibold text-text">{baseServings}</span> serving
+                {baseServings === 1 ? '' : 's'}
+              </span>
+              {activeTime != null && (
+                <span data-testid="recipe-active-time-view">
+                  Active: <span className="font-semibold text-text">{activeTime}</span> min
+                </span>
+              )}
+              {totalTime != null && (
+                <span data-testid="recipe-total-time-view">
+                  Total: <span className="font-semibold text-text">{totalTime}</span> min
+                </span>
+              )}
+            </div>
+            {instructions && (
+              <div data-testid="recipe-instructions-view">
+                <h4 className="m-0 mb-1 text-sm font-semibold text-text-secondary">Instructions</h4>
+                <p className="m-0 whitespace-pre-wrap text-sm text-text">{instructions}</p>
+              </div>
+            )}
           </div>
-          <div className="md:col-span-3">
-            <label className={labelCls}>Description</label>
-            <textarea
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              data-testid="recipe-description"
-              placeholder="Brief description"
-              className={`${inputCls} resize-y min-h-[60px]`}
-            />
+        ) : (
+          /* ---- EDIT: full input form ---- */
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="md:col-span-3">
+              <label className={labelCls}>Name</label>
+              <input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                data-testid="recipe-name"
+                required
+                placeholder="Recipe name"
+                className={inputCls}
+              />
+            </div>
+            <div className="md:col-span-3">
+              <label className={labelCls}>Description</label>
+              <textarea
+                value={description}
+                onChange={(e) => setDescription(e.target.value)}
+                data-testid="recipe-description"
+                placeholder="Brief description"
+                className={`${inputCls} resize-y min-h-[60px]`}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Base Servings</label>
+              <input
+                type="number"
+                min="0"
+                value={baseServings}
+                onChange={(e) => setBaseServings(Number(e.target.value) || 1)}
+                data-testid="recipe-base-servings"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Active Time (min)</label>
+              <input
+                type="number"
+                min="0"
+                value={activeTime ?? ''}
+                onChange={(e) => setActiveTime(e.target.value ? Number(e.target.value) : null)}
+                data-testid="recipe-active-time"
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>Total Time (min)</label>
+              <input
+                type="number"
+                min="0"
+                value={totalTime ?? ''}
+                onChange={(e) => setTotalTime(e.target.value ? Number(e.target.value) : null)}
+                data-testid="recipe-total-time"
+                className={inputCls}
+              />
+            </div>
+            <div className="md:col-span-3">
+              <label className={labelCls}>Instructions</label>
+              <textarea
+                value={instructions}
+                onChange={(e) => setInstructions(e.target.value)}
+                data-testid="recipe-instructions"
+                placeholder="Step-by-step instructions"
+                className={`${inputCls} resize-y min-h-[100px]`}
+              />
+            </div>
           </div>
-          <div>
-            <label className={labelCls}>Base Servings</label>
-            <input
-              type="number"
-              min="0"
-              value={baseServings}
-              onChange={(e) => setBaseServings(Number(e.target.value) || 1)}
-              data-testid="recipe-base-servings"
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Active Time (min)</label>
-            <input
-              type="number"
-              min="0"
-              value={activeTime ?? ''}
-              onChange={(e) => setActiveTime(e.target.value ? Number(e.target.value) : null)}
-              data-testid="recipe-active-time"
-              className={inputCls}
-            />
-          </div>
-          <div>
-            <label className={labelCls}>Total Time (min)</label>
-            <input
-              type="number"
-              min="0"
-              value={totalTime ?? ''}
-              onChange={(e) => setTotalTime(e.target.value ? Number(e.target.value) : null)}
-              data-testid="recipe-total-time"
-              className={inputCls}
-            />
-          </div>
-          <div className="md:col-span-3">
-            <label className={labelCls}>Instructions</label>
-            <textarea
-              value={instructions}
-              onChange={(e) => setInstructions(e.target.value)}
-              data-testid="recipe-instructions"
-              placeholder="Step-by-step instructions"
-              className={`${inputCls} resize-y min-h-[100px]`}
-            />
-          </div>
-        </div>
+        )}
       </div>
 
       {/* ============================================================ */}
@@ -552,65 +693,42 @@ export function RecipeFormPage() {
       <div data-testid="ingredients-section" className="bg-surface border border-border rounded-lg p-5 mb-4">
         <div className="flex items-center justify-between mb-4">
           <h3 className="m-0 text-lg font-bold text-text">Ingredients</h3>
-          {ingredients.length > 0 && (
-            <button
-              type="button"
-              onClick={() => setIngredientMode((m) => (m === 'view' ? 'edit' : 'view'))}
-              data-testid="ingredient-mode-toggle"
-              className={[
-                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
-                ingredientMode === 'edit'
-                  ? 'bg-surface border-border-strong text-text-secondary hover:bg-surface-hover'
-                  : 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100',
-              ].join(' ')}
-            >
-              {ingredientMode === 'edit' ? (
-                <>
-                  <Eye className="h-3.5 w-3.5" /> View
-                </>
-              ) : (
-                <>
-                  <Pencil className="h-3.5 w-3.5" /> Edit
-                </>
-              )}
-            </button>
-          )}
         </div>
 
-        {/* Add ingredient form — stacks vertically on mobile */}
-        <div
-          data-testid="add-ingredient-form"
-          className="flex flex-col md:flex-row gap-2 md:flex-wrap md:items-end mb-4"
-        >
-          <div className="flex-1 min-w-[150px] relative">
-            <label className={labelCls}>Product</label>
-            <input
-              value={searchText}
-              onChange={(e) => handleSearchInput(e.target.value)}
-              data-testid="ingredient-product-search"
-              placeholder="Search products..."
-              className={inputCls}
-            />
-            {showDropdown && (
-              <div
-                data-testid="ingredient-product-dropdown"
-                className="absolute top-full left-0 right-0 bg-surface border border-border-strong rounded shadow-lg z-10 max-h-[200px] overflow-auto"
-              >
-                {searchResults.map((p) => (
-                  <div
-                    key={p.product_id}
-                    onClick={() => selectProduct(p)}
-                    data-testid={`ing-dropdown-item-${p.product_id}`}
-                    className="px-3 py-2 cursor-pointer border-b border-border-light hover:bg-surface-hover text-sm"
-                  >
-                    {p.name}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-          <div className="flex gap-2">
-            <div className="flex-1 md:w-20 md:flex-none">
+        {/* Add ingredient form (edit mode only) — single horizontal row.
+            Layout per spec: [product picker (flex-1)] [qty (w-20)] [unit (w-24)]
+            [add btn]. Note becomes a per-row inline field on already-added
+            ingredients, not a separate column on the add form. */}
+        {!isViewMode && (
+          <div data-testid="add-ingredient-form" className="flex items-end gap-2 mb-4">
+            <div className="flex-1 min-w-[150px] relative">
+              <label className={labelCls}>Product</label>
+              <input
+                value={searchText}
+                onChange={(e) => handleSearchInput(e.target.value)}
+                data-testid="ingredient-product-search"
+                placeholder="Search products..."
+                className={inputCls}
+              />
+              {showDropdown && (
+                <div
+                  data-testid="ingredient-product-dropdown"
+                  className="absolute top-full left-0 right-0 bg-surface border border-border-strong rounded shadow-lg z-10 max-h-[200px] overflow-auto"
+                >
+                  {searchResults.map((p) => (
+                    <div
+                      key={p.product_id}
+                      onClick={() => selectProduct(p)}
+                      data-testid={`ing-dropdown-item-${p.product_id}`}
+                      className="px-3 py-2 cursor-pointer border-b border-border-light hover:bg-surface-hover text-sm"
+                    >
+                      {p.name}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+            <div className="w-20 shrink-0">
               <label className={labelCls}>Qty</label>
               <input
                 type="number"
@@ -621,7 +739,7 @@ export function RecipeFormPage() {
                 className={inputCls}
               />
             </div>
-            <div className="flex-1 md:w-[120px] md:flex-none">
+            <div className="w-24 shrink-0">
               <label className={labelCls}>Unit</label>
               <select
                 value={ingUnit}
@@ -643,81 +761,34 @@ export function RecipeFormPage() {
                   g (gram)
                 </option>
               </select>
-              {ingUnit === 'gram' && selectedProduct && !gramAvailable(selectedProduct.net_weight_g) && (
-                <p className="mt-1 text-xs text-danger-text" data-testid="gram-unit-missing-weight-error">
-                  This product has no net weight. Set net_weight_g on the product to use gram unit.
-                </p>
-              )}
             </div>
+            <button
+              onClick={addIngredient}
+              disabled={!selectedProduct}
+              data-testid="add-ingredient-btn"
+              className="shrink-0 px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50"
+            >
+              Add
+            </button>
           </div>
-          <div className="md:w-[120px]">
-            <label className={labelCls}>Note</label>
-            <input
-              value={ingNote}
-              onChange={(e) => setIngNote(e.target.value)}
-              data-testid="ingredient-note"
-              placeholder="Optional"
-              className={inputCls}
-            />
-          </div>
-          <button
-            onClick={addIngredient}
-            disabled={!selectedProduct}
-            data-testid="add-ingredient-btn"
-            className="px-4 py-2.5 bg-emerald-600 text-white rounded-md font-semibold text-sm hover:bg-emerald-700 transition-colors disabled:opacity-50 md:self-end"
-          >
-            Add
-          </button>
-        </div>
-
-        {/* Display preview (read-only) — surfaces what each ingredient will
-            render as. The visual unit lives on the product itself
-            (chefbyte.products.visual_unit_label + visual_units_per_serving)
-            so this preview reads from the selected product. To customise the
-            display, edit the product in Settings → Products. */}
-        {selectedProduct && (
-          <div
-            data-testid="visual-preview-section"
-            className="mb-4 p-3 bg-surface-sunken rounded-lg border border-border-light"
-          >
-            <p className="m-0 mb-1 text-xs font-semibold text-text-secondary uppercase tracking-wide">
-              Display preview
-            </p>
-            <p className="m-0 text-xs text-text-secondary italic" data-testid="visual-preview">
-              {formatIngredientDisplay({
-                quantity: ingQuantity,
-                unit: ingUnit as 'container' | 'serving' | 'gram',
-                productName: selectedProduct.name,
-                visualUnitLabel: selectedProduct.visual_unit_label ?? null,
-                visualUnitsPerServing:
-                  selectedProduct.visual_units_per_serving != null
-                    ? Number(selectedProduct.visual_units_per_serving)
-                    : null,
-                servingsPerContainer: Number(selectedProduct.servings_per_container) || 1,
-              })}
-            </p>
-            {selectedProduct.visual_unit_label == null && (
-              <p className="m-0 mt-1 text-[11px] text-text-tertiary">
-                To display this product as e.g. &ldquo;2 eggs&rdquo;, set its visual unit in Settings &rarr; Products.
-              </p>
-            )}
-          </div>
+        )}
+        {/* Gram-unit missing weight error sits below the row so it doesn't
+            disturb the single-line layout. */}
+        {!isViewMode && ingUnit === 'gram' && selectedProduct && !gramAvailable(selectedProduct.net_weight_g) && (
+          <p className="mb-3 text-xs text-danger-text" data-testid="gram-unit-missing-weight-error">
+            This product has no net weight. Set net_weight_g on the product to use gram unit.
+          </p>
         )}
 
         {/* Ingredient list */}
         {ingredients.length > 0 && (
           <div className="mb-3" data-testid="ingredients-table">
-            {ingredientMode === 'view' ? (
-              /* ---- VIEW MODE: clean 1-row read-only list ---- */
-              <div className="divide-y divide-border-light border border-border rounded-lg overflow-hidden">
+            {isViewMode ? (
+              /* ---- VIEW MODE: plain bulleted read-only list ---- */
+              <ul data-testid="ingredients-list-view" className="m-0 pl-5 list-disc space-y-1 text-sm text-text">
                 {ingredients.map((ing, idx) => (
-                  <div
-                    key={`${ing.product_id}-${idx}`}
-                    data-testid={`ingredient-row-${idx}`}
-                    className="flex items-center gap-3 px-3 py-2.5 bg-surface"
-                  >
-                    <span className="flex-1 font-medium text-sm text-text">{ing.product_name}</span>
-                    <span className="text-sm text-text-secondary tabular-nums">
+                  <li key={`${ing.product_id}-${idx}`} data-testid={`ingredient-row-${idx}`}>
+                    <span className="tabular-nums">
                       {formatIngredientDisplay({
                         quantity: ing.quantity,
                         unit: ing.unit as 'container' | 'serving' | 'gram',
@@ -727,118 +798,72 @@ export function RecipeFormPage() {
                         servingsPerContainer: ing.servings_per_container,
                       })}
                     </span>
-                    {ing.note && (
-                      <span className="text-xs text-text-tertiary italic truncate max-w-[100px]">{ing.note}</span>
-                    )}
-                  </div>
+                    {ing.note && <span className="ml-2 text-xs text-text-tertiary italic">&bull; {ing.note}</span>}
+                  </li>
                 ))}
-              </div>
+              </ul>
             ) : (
-              /* ---- EDIT MODE: 1-row controls + drag handles + remove ---- */
+              /* ---- EDIT MODE: 1-row per ingredient (product, qty, unit, note, remove) ---- */
               <div className="space-y-1.5">
                 {ingredients.map((ing, idx) => (
                   <div
                     key={`${ing.product_id}-${idx}`}
                     data-testid={`ingredient-row-${idx}`}
-                    className="bg-surface border border-border rounded-lg px-2 py-2"
+                    className="flex items-center gap-2 bg-surface border border-border rounded-lg px-3 py-2"
                   >
-                    <div className="flex items-center gap-2">
-                      {/* Drag handle (up/down arrows as lightweight reorder) */}
-                      <div className="flex flex-col gap-0.5 shrink-0">
-                        <button
-                          type="button"
-                          onClick={() => moveIngredient(idx, idx - 1)}
-                          disabled={idx === 0}
-                          aria-label="Move ingredient up"
-                          data-testid={`move-up-${idx}`}
-                          className="p-0.5 text-text-tertiary hover:text-text disabled:opacity-20 disabled:cursor-not-allowed"
-                        >
-                          ▲
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => moveIngredient(idx, idx + 1)}
-                          disabled={idx === ingredients.length - 1}
-                          aria-label="Move ingredient down"
-                          data-testid={`move-down-${idx}`}
-                          className="p-0.5 text-text-tertiary hover:text-text disabled:opacity-20 disabled:cursor-not-allowed"
-                        >
-                          ▼
-                        </button>
-                      </div>
+                    {/* Product name */}
+                    <span className="font-medium text-sm text-text flex-1 truncate">{ing.product_name}</span>
 
-                      <GripVertical className="h-4 w-4 text-text-tertiary shrink-0" aria-hidden="true" />
+                    {/* Qty */}
+                    <input
+                      type="number"
+                      min="0"
+                      value={ing.quantity}
+                      onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
+                      className="w-20 px-2 py-1.5 border border-border-strong rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
+                      data-testid={`edit-qty-${idx}`}
+                      aria-label={`Quantity for ${ing.product_name}`}
+                    />
 
-                      {/* Product name */}
-                      <span className="font-medium text-sm text-text min-w-[100px] flex-1 truncate">
-                        {ing.product_name}
-                      </span>
-
-                      {/* Qty */}
-                      <input
-                        type="number"
-                        min="0"
-                        value={ing.quantity}
-                        onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
-                        className="w-16 px-2 py-1.5 border border-border-strong rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
-                        data-testid={`edit-qty-${idx}`}
-                      />
-
-                      {/* Unit */}
-                      <select
-                        value={ing.unit}
-                        onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
-                        data-testid={`edit-unit-${idx}`}
-                        className="w-[100px] px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
-                      >
-                        <option value="serving">Serving</option>
-                        <option value="container">Container</option>
-                        <option
-                          value="gram"
-                          disabled={!gramAvailable(ing.net_weight_g)}
-                          title={!gramAvailable(ing.net_weight_g) ? 'Set net weight on the product first' : undefined}
-                        >
-                          g (gram)
-                        </option>
-                      </select>
-
-                      {/* Note */}
-                      <input
-                        value={ing.note}
-                        placeholder="Note"
-                        onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
-                        className="w-24 px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0 hidden sm:block"
-                        data-testid={`edit-note-${idx}`}
-                      />
-
-                      {/* Remove */}
-                      <button
-                        type="button"
-                        onClick={() => removeIngredient(idx)}
-                        data-testid={`remove-ingredient-${idx}`}
-                        aria-label={`Remove ${ing.product_name}`}
-                        className="shrink-0 p-1.5 text-danger-text hover:text-red-700 hover:bg-danger-subtle rounded transition-colors"
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </button>
-                    </div>
-                    {/* Read-only display preview — uses the product's visual
-                        unit (if set) so the user sees the rendered recipe
-                        line under each editable row. */}
-                    <p
-                      data-testid={`ingredient-preview-${idx}`}
-                      className="m-0 mt-1.5 ml-7 text-[11px] text-text-tertiary italic"
+                    {/* Unit */}
+                    <select
+                      value={ing.unit}
+                      onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
+                      data-testid={`edit-unit-${idx}`}
+                      aria-label={`Unit for ${ing.product_name}`}
+                      className="w-24 px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
                     >
-                      Display:{' '}
-                      {formatIngredientDisplay({
-                        quantity: Number(ing.quantity) || 0,
-                        unit: ing.unit as 'container' | 'serving' | 'gram',
-                        productName: ing.product_name,
-                        visualUnitLabel: ing.visual_unit_label,
-                        visualUnitsPerServing: ing.visual_units_per_serving,
-                        servingsPerContainer: ing.servings_per_container,
-                      })}
-                    </p>
+                      <option value="serving">Serving</option>
+                      <option value="container">Container</option>
+                      <option
+                        value="gram"
+                        disabled={!gramAvailable(ing.net_weight_g)}
+                        title={!gramAvailable(ing.net_weight_g) ? 'Set net weight on the product first' : undefined}
+                      >
+                        g (gram)
+                      </option>
+                    </select>
+
+                    {/* Note (optional, hidden on narrow viewports) */}
+                    <input
+                      value={ing.note}
+                      placeholder="Note"
+                      onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
+                      className="w-28 px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0 hidden sm:block"
+                      data-testid={`edit-note-${idx}`}
+                      aria-label={`Note for ${ing.product_name}`}
+                    />
+
+                    {/* Remove */}
+                    <button
+                      type="button"
+                      onClick={() => removeIngredient(idx)}
+                      data-testid={`remove-ingredient-${idx}`}
+                      aria-label={`Remove ${ing.product_name}`}
+                      className="shrink-0 p-1.5 text-danger-text hover:text-red-700 hover:bg-danger-subtle rounded transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
                 ))}
               </div>
@@ -903,33 +928,56 @@ export function RecipeFormPage() {
       {/* ============================================================ */}
       {/*  ACTION BUTTONS                                               */}
       {/* ============================================================ */}
-      <div className="flex gap-2 mt-4">
-        <button
-          onClick={handleSave}
-          disabled={!name.trim() || ingredients.length === 0}
-          data-testid="save-recipe-btn"
-          className="px-6 py-3 bg-emerald-600 text-white rounded-md font-semibold text-[15px] hover:bg-emerald-700 transition-colors disabled:opacity-50"
-        >
-          {isEdit ? 'Update Recipe' : 'Create Recipe'}
-        </button>
-
-        <button
-          onClick={() => navigate('/chef/recipes')}
-          className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
-        >
-          Cancel
-        </button>
-
-        {isEdit && (
-          <button
-            onClick={() => setShowDeleteAlert(true)}
-            data-testid="delete-recipe-btn"
-            className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
+      {isViewMode ? (
+        /* View mode (existing recipe): only Delete is available — Edit lives
+            in the page header. Hide Save/Cancel since there is nothing to save. */
+        <div className="flex gap-2 mt-4">
+          <Link
+            to="/chef/recipes"
+            className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors no-underline"
           >
-            Delete
+            Back to recipes
+          </Link>
+          {isEdit && (
+            <button
+              onClick={() => setShowDeleteAlert(true)}
+              data-testid="delete-recipe-btn"
+              className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      ) : (
+        <div className="flex gap-2 mt-4">
+          <button
+            onClick={handleSave}
+            disabled={!name.trim() || ingredients.length === 0}
+            data-testid="save-recipe-btn"
+            className="px-6 py-3 bg-emerald-600 text-white rounded-md font-semibold text-[15px] hover:bg-emerald-700 transition-colors disabled:opacity-50"
+          >
+            {isEdit ? 'Save Changes' : 'Create Recipe'}
           </button>
-        )}
-      </div>
+
+          <button
+            onClick={cancelEdit}
+            data-testid="cancel-edit-btn"
+            className="px-4 py-2 bg-surface border border-border-strong text-text-secondary rounded-md text-sm hover:bg-surface-hover transition-colors"
+          >
+            Cancel
+          </button>
+
+          {isEdit && (
+            <button
+              onClick={() => setShowDeleteAlert(true)}
+              data-testid="delete-recipe-btn"
+              className="px-4 py-2 bg-red-600 text-white rounded-md font-semibold text-sm hover:bg-red-700 transition-colors"
+            >
+              Delete
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Delete confirmation */}
       {showDeleteAlert && (
