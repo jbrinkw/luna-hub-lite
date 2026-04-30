@@ -430,13 +430,13 @@ describe('shelf-ingest Edge Function', () => {
       }),
     });
 
-    // apply_shelf_event scopes its SELECT on (product_id, user_id); the
-    // row lookup finds no match, so it returns applied=false with the
-    // new distinct reason.
-    expect(res.status).toBe(200);
+    // apply_shelf_event (migration 20260429340000) now RAISEs SQLSTATE 23503
+    // for unknown product_id BEFORE writing a log row. The edge function
+    // forwards this as HTTP 500. Pi worker must dead-letter on non-2xx.
+    expect(res.status).toBeGreaterThanOrEqual(500);
     const body = await res.json();
-    expect(body.applied).toBe(false);
-    expect(body.reason).toMatch(/product not found/i);
+    // Error body must not look like a success-shaped response.
+    expect(body.ok).toBeFalsy();
 
     // Verify userB's stock is UNCHANGED.
     const { data: after } = await (adminClient as any)
@@ -1748,5 +1748,54 @@ describe('shelf-ingest Edge Function', () => {
     await (adminClient as any).schema('chefbyte').from('shelf_event_log').delete().eq('client_event_id', otherCeid);
     await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('lot_id', otherLot.lot_id);
     await (adminClient as any).schema('chefbyte').from('locations').delete().eq('location_id', otherLoc.location_id);
+  });
+
+  // ─── HTTP contract: phantom product_id → 4xx/5xx (Change F) ───────────
+
+  it('POST /event with phantom product_id returns 4xx/5xx with machine-readable error, NOT 200+applied=false', async () => {
+    // FINAL_PLAN.md Change F: the edge function must propagate an
+    // unknown product_id as a non-200 HTTP response with a machine-
+    // readable error code, not as 200 + {ok:true, applied:false, ...}.
+    //
+    // The DB RAISES with SQLSTATE 23503 (migration 20260429340000).
+    // The edge function's error branch fires → HTTP 5xx.
+    // OR the RPC writes the log row but returns applied=false with
+    // unexpected reason → edge function returns HTTP 422.
+    //
+    // NEGATIVE-TWIN PROOF:
+    //   Reverting 20260429340000_apply_shelf_event_strict.sql (removing
+    //   the pre-insert RAISE) causes the RPC to return applied=false
+    //   with reason='product not found'. Reverting the edge-fn
+    //   EXPECTED_NOT_APPLIED_REASONS check causes this to fall through
+    //   to the 200+applied=false branch. Both reversions make this
+    //   test fail because the response would be 200 instead of 4xx/5xx.
+    const phantomProductId = 'ffffffff-eeee-eeee-eeee-ffffffffffff';
+
+    const res = await fetch(`${BASE_URL}/event`, {
+      method: 'POST',
+      headers: authHeaders(importKey),
+      body: JSON.stringify({
+        scale_id: 'scale-01',
+        kind: 'live_shelf',
+        event_kind: 'consumed',
+        product_id: phantomProductId,
+        delta_g: -100,
+        occurred_at: new Date().toISOString(),
+        client_event_id: `contract-test-phantom-${crypto.randomUUID()}`,
+      }),
+    });
+
+    // Must be 4xx or 5xx — NOT 200.
+    expect(res.status).toBeGreaterThanOrEqual(400);
+    expect(res.status).toBeLessThan(600);
+
+    const body = await res.json();
+
+    // Must have a machine-readable error field, not a success shape.
+    // Success shape would be: {ok: true, applied: ..., reason: ..., resolved_lot_id: ...}
+    // Error shape must have: {error: '...', code?: '...'} (no 'ok: true').
+    expect(body).not.toHaveProperty('ok', true);
+    expect(body).toHaveProperty('error');
+    expect(typeof body.error).toBe('string');
   });
 });
