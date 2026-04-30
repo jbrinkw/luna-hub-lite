@@ -18,14 +18,16 @@ export function ModuleSwitcher() {
 
   return (
     <nav aria-label="Module switcher">
-      <div className="flex bg-slate-100 rounded-lg p-1 gap-1">
+      <div className="flex bg-surface-hover dark:bg-surface-sunken rounded-lg p-1 gap-1">
         {modules.map((m) => (
           <button
             key={m.path}
             type="button"
             className={[
               'px-4 py-2 rounded-md text-sm font-medium transition-colors cursor-pointer',
-              m.path === current ? 'bg-white shadow-sm text-slate-900' : 'text-slate-500 hover:text-slate-700',
+              m.path === current
+                ? 'bg-surface shadow-sm text-text dark:bg-surface-raised'
+                : 'text-text-secondary hover:text-text',
             ].join(' ')}
             onClick={() => {
               if (m.path !== current) navigate(m.path);
