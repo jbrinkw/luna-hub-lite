@@ -220,6 +220,12 @@ importers:
         specifier: ^4.0.18
         version: 4.0.18(@types/node@22.19.13)(jiti@2.6.1)(jsdom@27.4.0)(lightningcss@1.31.1)(yaml@2.8.2)
 
+  tools/eslint-plugin-anti-lazy:
+    dependencies:
+      eslint:
+        specifier: '>=9'
+        version: 9.39.3(jiti@2.6.1)
+
 packages:
 
   '@acemir/cssom@0.9.31':
