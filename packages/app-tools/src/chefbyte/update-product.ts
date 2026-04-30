@@ -18,6 +18,16 @@ export const updateProduct: ToolDefinition = {
       min_stock_amount: { type: 'number', description: 'Minimum stock threshold (containers)' },
       walmart_link: { type: 'string', description: 'Walmart product URL' },
       price: { type: 'number', description: 'Price per container' },
+      visual_unit_label: {
+        type: ['string', 'null'],
+        description:
+          'Display-only unit name (e.g. "egg", "slice", "bun"). Both this and visual_units_per_serving must be set together (or both null). Backend math always uses canonical unit + servings.',
+      },
+      visual_units_per_serving: {
+        type: ['number', 'null'],
+        description:
+          'How many of the visual unit equal one serving (e.g. 1 = 1 slice / serving, 0.5 = half a bagel / serving). Must be > 0 when set. Both-or-neither with visual_unit_label.',
+      },
     },
     required: ['product_id'],
   },
@@ -35,6 +45,8 @@ export const updateProduct: ToolDefinition = {
       'min_stock_amount',
       'walmart_link',
       'price',
+      'visual_unit_label',
+      'visual_units_per_serving',
     ];
 
     const updates: Record<string, any> = {};

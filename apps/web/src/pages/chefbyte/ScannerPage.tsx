@@ -604,6 +604,11 @@ export function ScannerPage() {
                 // null means "non-perishable / unknown" → scanner leaves
                 // expires_on unset for lots of this product.
                 const shelfLife = s?.default_shelf_life_days != null ? Number(s.default_shelf_life_days) || null : null;
+                // analyze-product also returns default_expiry_days (AI-estimated
+                // days-until-expiry from import date; range 1–730). Distinct from
+                // default_shelf_life_days. Surfaces in Settings → Products list.
+                const expiryDays =
+                  s?.default_expiry_days != null ? Number(s.default_expiry_days) || null : null;
                 // Wire new distinct-unit + recipe-unit fields from AI response.
                 // Defensive: only trust these when the suggestion object is present
                 // (the OFF-only fallback path doesn't produce them).
@@ -629,12 +634,13 @@ export function ScannerPage() {
                   fat_per_serving: fatVal,
                   servings_per_container: spc,
                   default_shelf_life_days: shelfLife,
+                  default_expiry_days: expiryDays,
                   is_distinct_unit_item: isDistinctUnitItem,
                   net_weight_g: netWeightG,
                   default_recipe_unit: defaultRecipeUnit,
                 };
                 const returning =
-                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container, default_shelf_life_days, is_distinct_unit_item, net_weight_g, default_recipe_unit';
+                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container, default_shelf_life_days, default_expiry_days, is_distinct_unit_item, net_weight_g, default_recipe_unit';
 
                 // Priority for upgrade target:
                 //   1. barcode-matched placeholder (existingPlaceholderId) — most
