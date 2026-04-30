@@ -12,6 +12,7 @@ import { CardSkeleton } from '@/components/ui/Skeleton';
 import { Settings, ChevronDown, ChevronRight } from 'lucide-react';
 import { queryKeys } from '@/shared/queryKeys';
 import { epley1RM } from '@/shared/epley';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
 export interface ExercisePR {
   exercise_id: string;
@@ -176,6 +177,21 @@ export function PrsPage() {
     queryFn: () => loadExercisesForPrs(user!.id),
     enabled: !!user,
   });
+
+  // ── Realtime invalidation ──
+  // PRs are computed entirely from completed_sets (with exercises
+  // joined for the name). New completed sets — from another tab,
+  // the Today page, or via MCP — must rebucket the PR list.
+  // exercises and user_settings are intentionally NOT in the
+  // realtime publication (rare changes, same-session edits) per
+  // migration 20260430010000_realtime_publication_completeness.sql.
+  useRealtimeInvalidation('coach-prs', [
+    {
+      schema: 'coachbyte',
+      table: 'completed_sets',
+      queryKeys: [queryKeys.prs(user!.id, String(dateRange))],
+    },
+  ]);
 
   // Load tracked exercise settings
   useQuery({

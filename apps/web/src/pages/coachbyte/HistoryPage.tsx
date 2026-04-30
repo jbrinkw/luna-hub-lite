@@ -11,6 +11,7 @@ import { ListSkeleton } from '@/components/ui/Skeleton';
 import { formatDateDisplay } from '@/shared/dates';
 import { formatWeightWithPlates } from '@/shared/plateCalc';
 import { queryKeys } from '@/shared/queryKeys';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
 export interface HistoryDay {
   plan_id: string;
@@ -215,6 +216,31 @@ export function HistoryPage() {
     queryFn: () => loadHistoryDetail(expandedPlan!, user!.id),
     enabled: !!user && !!expandedPlan,
   });
+
+  // ── Realtime invalidation ──
+  // The history list folds in planned + completed counts per day,
+  // so the page must refresh when the user finishes a workout in
+  // another tab or via MCP. coachbyte.daily_plans / exercises are
+  // intentionally NOT in the realtime publication (see migration
+  // 20260430010000_realtime_publication_completeness.sql), but
+  // planned_sets + completed_sets are — and any change there means
+  // the per-day counts need to be re-rolled-up.
+  useRealtimeInvalidation('coach-history', [
+    {
+      schema: 'coachbyte',
+      table: 'completed_sets',
+      queryKeys: [
+        queryKeys.history(user!.id),
+        queryKeys.historyCount(user!.id),
+        ...(expandedPlan ? [queryKeys.historyDetail(user!.id, expandedPlan)] : []),
+      ],
+    },
+    {
+      schema: 'coachbyte',
+      table: 'planned_sets',
+      queryKeys: [queryKeys.history(user!.id), queryKeys.historyCount(user!.id)],
+    },
+  ]);
 
   const loadMore = async () => {
     if (!user || !cursor) return;
