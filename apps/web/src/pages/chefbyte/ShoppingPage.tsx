@@ -145,6 +145,14 @@ export function ShoppingPage() {
 
   useRealtimeInvalidation('shopping-changes', [
     { schema: 'chefbyte', table: 'shopping_list', queryKeys: [queryKeys.shoppingList(user!.id)] },
+    // products is joined into every shopping_list row (walmart_link, price,
+    // name, is_placeholder). Without this subscription, adding a Walmart
+    // link from Settings or having a price refreshed via the Walmart tab
+    // does NOT propagate to the cart view — the user has to refresh.
+    // Filed as the root cause of the 2026-04-30 user complaint:
+    // "I added a Walmart link to the milk and went to shopping list to
+    // open the Walmart cart and I had to refresh."
+    { schema: 'chefbyte', table: 'products', queryKeys: [queryKeys.shoppingList(user!.id)] },
   ]);
 
   /* ---------------------------------------------------------------- */
