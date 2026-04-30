@@ -14,9 +14,6 @@
  */
 
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
-import { MemoryRouter } from 'react-router-dom';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
 // ---- mocks ---------------------------------------------------------------
 
@@ -39,10 +36,6 @@ vi.mock('@/shared/useRealtimeInvalidation', () => ({
 }));
 
 // -------------------------------------------------------------------------
-
-function makeQC() {
-  return new QueryClient({ defaultOptions: { queries: { retry: false } } });
-}
 
 // =========================================================================
 // 1. API key show-once: plaintext is only ever held in memory, not re-fetched
@@ -80,9 +73,7 @@ describe('spec: ModuleSwitcher filters by activations', () => {
       { id: 'coachbyte', requiresActivation: true },
       { id: 'chefbyte', requiresActivation: true },
     ];
-    const visible = modules.filter(
-      (m) => !m.requiresActivation || activations[m.id as keyof typeof activations],
-    );
+    const visible = modules.filter((m) => !m.requiresActivation || activations[m.id as keyof typeof activations]);
     expect(visible.map((m) => m.id)).toContain('hub');
     expect(visible.map((m) => m.id)).not.toContain('coachbyte');
     expect(visible.map((m) => m.id)).not.toContain('chefbyte');
@@ -95,9 +86,7 @@ describe('spec: ModuleSwitcher filters by activations', () => {
       { id: 'coachbyte', requiresActivation: true },
       { id: 'chefbyte', requiresActivation: true },
     ];
-    const visible = modules.filter(
-      (m) => !m.requiresActivation || activations[m.id as keyof typeof activations],
-    );
+    const visible = modules.filter((m) => !m.requiresActivation || activations[m.id as keyof typeof activations]);
     expect(visible.map((m) => m.id)).toContain('hub');
     expect(visible.map((m) => m.id)).toContain('coachbyte');
     expect(visible.map((m) => m.id)).not.toContain('chefbyte');
@@ -133,27 +122,27 @@ describe('spec: OfflineIndicator shown when offline', () => {
 describe('spec: session expiry detection', () => {
   it('null session after initial load triggers expiry (not SIGNED_OUT) path', () => {
     // The AuthProvider checks: if (initialLoadComplete && session === null && event !== 'SIGNED_OUT')
-    let initialLoadComplete = true;
-    let session: null | { user: { id: string } } = null;
-    let event = 'TOKEN_REFRESHED'; // not SIGNED_OUT
+    const initialLoadComplete = true;
+    const session: null | { user: { id: string } } = null;
+    const event = 'TOKEN_REFRESHED'; // not SIGNED_OUT
 
     const isExpired = initialLoadComplete && session === null && event !== 'SIGNED_OUT';
     expect(isExpired).toBe(true);
   });
 
   it('SIGNED_OUT event does NOT trigger expiry toast', () => {
-    let initialLoadComplete = true;
-    let session: null | { user: { id: string } } = null;
-    let event = 'SIGNED_OUT';
+    const initialLoadComplete = true;
+    const session: null | { user: { id: string } } = null;
+    const event = 'SIGNED_OUT';
 
     const isExpired = initialLoadComplete && session === null && event !== 'SIGNED_OUT';
     expect(isExpired).toBe(false);
   });
 
   it('null session before initial load does not trigger expiry toast', () => {
-    let initialLoadComplete = false;
-    let session: null | { user: { id: string } } = null;
-    let event = 'TOKEN_REFRESHED';
+    const initialLoadComplete = false;
+    const session: null | { user: { id: string } } = null;
+    const event = 'TOKEN_REFRESHED';
 
     const isExpired = initialLoadComplete && session === null && event !== 'SIGNED_OUT';
     expect(isExpired).toBe(false);

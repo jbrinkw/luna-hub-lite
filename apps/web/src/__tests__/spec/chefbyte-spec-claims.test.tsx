@@ -22,7 +22,7 @@
  *  10. isLotOnScale: false when in-flight, even if lot is paired
  */
 
-import { describe, it, expect, vi } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // Pure functions copy-tested from production source.
 // We import the IMPLEMENTATIONS rather than the production modules so we
@@ -90,11 +90,11 @@ describe('spec: inventory viewMode', () => {
 
 describe('spec: quantity displayed to 1 decimal, stored to 3', () => {
   it('toFixed(1) used in UI — 2.500 displays as "2.5"', () => {
-    expect(Number(2.500).toFixed(1)).toBe('2.5');
+    expect(Number(2.5).toFixed(1)).toBe('2.5');
   });
 
   it('toFixed(1) for zero stock: 0.000 → "0.0"', () => {
-    expect(Number(0.000).toFixed(1)).toBe('0.0');
+    expect(Number(0.0).toFixed(1)).toBe('0.0');
   });
 
   it('3-decimal DB value NOT shown verbatim: "2.500" fails 1-decimal check', () => {
@@ -156,7 +156,7 @@ describe('spec: shopping quantities rounded up to whole containers', () => {
 
   it('Math.floor (wrong) vs Math.ceil (spec) for 1.1 containers', () => {
     expect(Math.floor(1.1)).toBe(1); // would under-buy — spec forbids this
-    expect(Math.ceil(1.1)).toBe(2);  // spec-correct
+    expect(Math.ceil(1.1)).toBe(2); // spec-correct
   });
 });
 
@@ -208,8 +208,7 @@ describe('spec: barcode is nullable', () => {
 // =========================================================================
 
 describe('spec: lot merge key (product_id + location_id + expires_on)', () => {
-  const key = (pid: string, lid: string, exp: string | null) =>
-    `${pid}|${lid}|${exp ?? 'null'}`;
+  const key = (pid: string, lid: string, exp: string | null) => `${pid}|${lid}|${exp ?? 'null'}`;
 
   it('same product+location+expiry → same merge key (merges)', () => {
     const k1 = key('prod-1', 'loc-1', '2026-06-01');

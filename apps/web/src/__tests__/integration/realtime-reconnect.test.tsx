@@ -68,13 +68,18 @@ function waitForInvalidation(qc: QueryClient, key: unknown[], timeoutMs: number)
   return new Promise<void>((resolve, reject) => {
     const deadline = Date.now() + timeoutMs;
     function poll() {
-      if (qc.getQueryState(key)?.isInvalidated) { resolve(); return; }
+      if (qc.getQueryState(key)?.isInvalidated) {
+        resolve();
+        return;
+      }
       if (Date.now() > deadline) {
         const s = qc.getQueryState(key);
-        reject(new Error(
-          `Key ${JSON.stringify(key)} not invalidated within ${timeoutMs}ms. ` +
-          `state=${JSON.stringify({ isInvalidated: s?.isInvalidated, status: s?.status })}`,
-        ));
+        reject(
+          new Error(
+            `Key ${JSON.stringify(key)} not invalidated within ${timeoutMs}ms. ` +
+              `state=${JSON.stringify({ isInvalidated: s?.isInvalidated, status: s?.status })}`,
+          ),
+        );
         return;
       }
       setTimeout(poll, 50);
@@ -105,7 +110,6 @@ function waitForSubscribed(
     });
   });
 }
-
 
 // ── Suite ─────────────────────────────────────────────────────────────────────
 
@@ -177,10 +181,20 @@ describe('Realtime reconnect-after-drop', () => {
       } catch (err: any) {
         subscriberClient.removeChannel(warmChannel);
         lastWarmErr = err;
-        try { (subscriberClient as any).realtime?.disconnect?.(); } catch { /* ignore */ }
+        // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime disconnect can throw if already disconnected; explicit teardown, ignoring is correct
+        try {
+          (subscriberClient as any).realtime?.disconnect?.();
+        } catch {
+          /* ignore */
+        }
         if (attempt < backoffMs.length - 1) {
           await new Promise((r) => setTimeout(r, backoffMs[attempt]));
-          try { (subscriberClient as any).realtime?.connect?.(); } catch { /* ignore */ }
+          // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime connect can throw if already connecting; retry loop handles it
+          try {
+            (subscriberClient as any).realtime?.connect?.();
+          } catch {
+            /* ignore */
+          }
           await new Promise((r) => setTimeout(r, 500));
         }
       }
@@ -197,110 +211,118 @@ describe('Realtime reconnect-after-drop', () => {
 
   afterAll(async () => {
     subscriberClient.removeAllChannels();
-    try { (subscriberClient as any).realtime?.disconnect?.(); } catch { /* ignore */ }
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime disconnect can throw if already disconnected; explicit teardown, ignoring is correct
+    try {
+      (subscriberClient as any).realtime?.disconnect?.();
+    } catch {
+      /* ignore */
+    }
     if (productId) {
       await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', productId);
     }
     if (userId) await cleanupUser(userId);
   });
 
-  it(
-    'stateChangeCallbacks.close is an array — reconnect hook wiring is intact',
-    async () => {
-      /**
-       * Validates the prerequisite for the production reconnect-on-close handler
-       * in useRealtimeInvalidation.ts:
-       *
-       *   `supabase.realtime.stateChangeCallbacks.close`
-       *
-       * This private API must be an array so the hook can push an onSocketClose
-       * callback onto it. If supabase-js ever renames or removes the field, the
-       * handler silently fails and reconnect-on-drop stops working. This assertion
-       * catches that regression at integration tier (real supabase-js, no mocks).
-       *
-       * NOTE: this is complementary to the unit-tier canary in
-       * `realtime-private-api-canary.test.ts` which uses a stubbed client.
-       * Here we use a real authenticated supabase-js client so we also verify
-       * that the field is present AFTER connect(), not just at construction time.
-       */
-      const rt = (subscriberClient as any).realtime;
-      const closeCallbacks = rt?.stateChangeCallbacks?.close;
+  it('stateChangeCallbacks.close is an array — reconnect hook wiring is intact', async () => {
+    /**
+     * Validates the prerequisite for the production reconnect-on-close handler
+     * in useRealtimeInvalidation.ts:
+     *
+     *   `supabase.realtime.stateChangeCallbacks.close`
+     *
+     * This private API must be an array so the hook can push an onSocketClose
+     * callback onto it. If supabase-js ever renames or removes the field, the
+     * handler silently fails and reconnect-on-drop stops working. This assertion
+     * catches that regression at integration tier (real supabase-js, no mocks).
+     *
+     * NOTE: this is complementary to the unit-tier canary in
+     * `realtime-private-api-canary.test.ts` which uses a stubbed client.
+     * Here we use a real authenticated supabase-js client so we also verify
+     * that the field is present AFTER connect(), not just at construction time.
+     */
+    const rt = (subscriberClient as any).realtime;
+    const closeCallbacks = rt?.stateChangeCallbacks?.close;
 
-      expect(
-        Array.isArray(closeCallbacks),
-        'supabase.realtime.stateChangeCallbacks.close must be an array — ' +
-          'the production reconnect-on-close handler in useRealtimeInvalidation.ts ' +
-          'pushes to this array. If it changed, update the hook to use the new API.',
-      ).toBe(true);
+    expect(
+      Array.isArray(closeCallbacks),
+      'supabase.realtime.stateChangeCallbacks.close must be an array — ' +
+        'the production reconnect-on-close handler in useRealtimeInvalidation.ts ' +
+        'pushes to this array. If it changed, update the hook to use the new API.',
+    ).toBe(true);
 
-      // Verify we can push and remove a callback without side-effects.
-      const sentinel = () => {};
-      closeCallbacks.push(sentinel);
-      expect(closeCallbacks.includes(sentinel)).toBe(true);
-      const idx = closeCallbacks.indexOf(sentinel);
-      closeCallbacks.splice(idx, 1);
-      expect(closeCallbacks.includes(sentinel)).toBe(false);
-    },
-  );
+    // Verify we can push and remove a callback without side-effects.
+    const sentinel = () => {};
+    closeCallbacks.push(sentinel);
+    expect(closeCallbacks.includes(sentinel)).toBe(true);
+    const idx = closeCallbacks.indexOf(sentinel);
+    closeCallbacks.splice(idx, 1);
+    expect(closeCallbacks.includes(sentinel)).toBe(false);
+  });
 
-  it(
-    'delivers postgres_changes events on a fresh channel opened after reconnect',
-    async () => {
-      // This test verifies the simpler case: even if the re-join of the original
-      // channel fails, a NEW channel opened after reconnect works. This validates
-      // the `forceReconnect` path in useRealtimeInvalidation which always creates
-      // a fresh channel after an error.
-      const queryClient = makeQueryClient();
-      const queryKey = ['stockLots', userId, 'fresh-channel'];
-      queryClient.setQueryData(queryKey, []);
+  it('delivers postgres_changes events on a fresh channel opened after reconnect', async () => {
+    // This test verifies the simpler case: even if the re-join of the original
+    // channel fails, a NEW channel opened after reconnect works. This validates
+    // the `forceReconnect` path in useRealtimeInvalidation which always creates
+    // a fresh channel after an error.
+    const queryClient = makeQueryClient();
+    const queryKey = ['stockLots', userId, 'fresh-channel'];
+    queryClient.setQueryData(queryKey, []);
 
-      // Disconnect if still connected.
-      try { (subscriberClient as any).realtime?.disconnect?.(); } catch { /* ignore */ }
-      await new Promise((r) => setTimeout(r, 300));
+    // Disconnect if still connected.
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime disconnect can throw if already disconnected; explicit teardown, ignoring is correct
+    try {
+      (subscriberClient as any).realtime?.disconnect?.();
+    } catch {
+      /* ignore */
+    }
+    await new Promise((r) => setTimeout(r, 300));
 
-      // Reconnect.
-      try { (subscriberClient as any).realtime?.connect?.(); } catch { /* ignore */ }
-      await new Promise((r) => setTimeout(r, 1_000));
+    // Reconnect.
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime connect can throw if already connecting; retry loop handles it
+    try {
+      (subscriberClient as any).realtime?.connect?.();
+    } catch {
+      /* ignore */
+    }
+    await new Promise((r) => setTimeout(r, 1_000));
 
-      // Open a fresh channel after reconnect.
-      const freshChannel = subscriberClient.channel(`rt-fresh-${crypto.randomUUID()}`);
-      freshChannel.on(
-        'postgres_changes',
-        { event: 'INSERT', schema: 'chefbyte', table: 'stock_lots', filter: `user_id=eq.${userId}` },
-        () => {
-          queryClient.invalidateQueries({ queryKey, refetchType: 'all' });
-        },
-      );
+    // Open a fresh channel after reconnect.
+    const freshChannel = subscriberClient.channel(`rt-fresh-${crypto.randomUUID()}`);
+    freshChannel.on(
+      'postgres_changes',
+      { event: 'INSERT', schema: 'chefbyte', table: 'stock_lots', filter: `user_id=eq.${userId}` },
+      () => {
+        queryClient.invalidateQueries({ queryKey, refetchType: 'all' });
+      },
+    );
 
-      // Subscribe with retry (mirrors subscribeAndInvalidate in realtime-invalidation.test.tsx).
-      let subscribed = false;
-      for (let attempt = 0; attempt < 3 && !subscribed; attempt++) {
-        try {
-          await waitForSubscribed(freshChannel, 25_000);
-          subscribed = true;
-        } catch {
-          if (attempt < 2) await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)));
-        }
+    // Subscribe with retry (mirrors subscribeAndInvalidate in realtime-invalidation.test.tsx).
+    let subscribed = false;
+    for (let attempt = 0; attempt < 3 && !subscribed; attempt++) {
+      try {
+        await waitForSubscribed(freshChannel, 25_000);
+        subscribed = true;
+      } catch {
+        if (attempt < 2) await new Promise((r) => setTimeout(r, 1_000 * (attempt + 1)));
       }
-      if (!subscribed) {
-        subscriberClient.removeChannel(freshChannel);
-        throw new Error('fresh channel failed to subscribe after reconnect');
-      }
-
-      const { data: inserted, error: insertErr } = await (adminClient as any)
-        .schema('chefbyte')
-        .from('stock_lots')
-        .insert({ user_id: userId, product_id: productId, location_id: locationId, qty_containers: 2 })
-        .select('lot_id')
-        .single();
-      expect(insertErr).toBeNull();
-      insertedLotIds.push(inserted.lot_id);
-
-      await waitForInvalidation(queryClient, queryKey, INVALIDATION_TIMEOUT_MS);
-      expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true);
-
+    }
+    if (!subscribed) {
       subscriberClient.removeChannel(freshChannel);
-    },
-    60_000,
-  );
+      throw new Error('fresh channel failed to subscribe after reconnect');
+    }
+
+    const { data: inserted, error: insertErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('stock_lots')
+      .insert({ user_id: userId, product_id: productId, location_id: locationId, qty_containers: 2 })
+      .select('lot_id')
+      .single();
+    expect(insertErr).toBeNull();
+    insertedLotIds.push(inserted.lot_id);
+
+    await waitForInvalidation(queryClient, queryKey, INVALIDATION_TIMEOUT_MS);
+    expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBe(true);
+
+    subscriberClient.removeChannel(freshChannel);
+  }, 60_000);
 });

@@ -142,22 +142,16 @@ export default tseslint.config(
       '@luna/anti-lazy': antiLazyPlugin,
     },
     rules: {
-      // INITIAL ROLLOUT: set to 'warn' so the plugin ships without breaking
-      // verify:full on existing violations. Sweep agents will fix violations
-      // in batches; after the sweep, ratchet to 'error' in a follow-up commit.
-      // Current backlog (counted via `npx eslint ...` on 2026-04-30):
-      //   no-empty-catch-no-comment:       31
-      //   no-bare-tohavebeencalled:         24
-      //   no-bare-number-coerce:            28 (refined from 303 — allowlists numeric
-      //                                         DB column patterns; remaining ~28 are
-      //                                         genuine type coercions needing isFinite)
-      //   no-numeric-coalesce-default:       7 (new — ?? 0 in JSX/format display contexts)
-      //   spec-as-fixture:                   0 (new — no violations in current codebase)
-      '@luna/anti-lazy/no-empty-catch-no-comment': 'warn',
-      '@luna/anti-lazy/no-bare-tohavebeencalled': 'warn',
-      '@luna/anti-lazy/no-bare-number-coerce': 'warn',
-      '@luna/anti-lazy/no-numeric-coalesce-default': 'warn',
-      '@luna/anti-lazy/spec-as-fixture': 'warn',
+      // RATCHETED to 'error' on 2026-04-30 after R1 sweep brought violation
+      // count to 0. Any new violation now blocks the lint gate. Patterns that
+      // genuinely need to escape the rule must use:
+      //   // eslint-disable-next-line @luna/anti-lazy/<rule> -- reason: <specific>
+      // (the `-- reason:` is enforced by review, not by the rule itself).
+      '@luna/anti-lazy/no-empty-catch-no-comment': 'error',
+      '@luna/anti-lazy/no-bare-tohavebeencalled': 'error',
+      '@luna/anti-lazy/no-bare-number-coerce': 'error',
+      '@luna/anti-lazy/no-numeric-coalesce-default': 'error',
+      '@luna/anti-lazy/spec-as-fixture': 'error',
     },
   },
   // Agent R3: no-bare-id-string — global scope across all first-party TS/TSX.
@@ -184,7 +178,14 @@ export default tseslint.config(
       'branded-types': brandedTypesPlugin,
     },
     rules: {
-      'branded-types/no-bare-id-string': 'error',
+      // WARN-LEVEL after R3 globalization on 2026-04-30. R3 expanded the file
+      // glob from `*emit*`/`*outbox*`/etc. to all apps/web/src + supabase/functions
+      // and refactored 6 emit seams. ~50 internal IDs across the broader
+      // codebase still use bare `string` — many are not cross-process and the
+      // rule is over-firing on those. Keep at warn until a follow-up sweep
+      // either refactors or annotates each (eslint-disable + reason), then
+      // ratchet to error.
+      'branded-types/no-bare-id-string': 'warn',
     },
   },
 );

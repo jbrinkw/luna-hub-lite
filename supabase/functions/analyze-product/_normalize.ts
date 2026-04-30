@@ -161,6 +161,7 @@ export function validateSuggestion(raw: Record<string, unknown> | null): Suggest
   // or nullify — never surface a 422 for this field. Out-of-range values
   // are clamped to null with a warning so the caller can log + continue.
   if (coerced.default_expiry_days != null) {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: result `n` is checked with Number.isFinite on the next line; the rule walks parent expressions only and can't trace forward to the assigned variable's check
     const n = Math.round(Number(coerced.default_expiry_days));
     if (Number.isFinite(n) && n >= 1 && n <= 730) {
       coerced.default_expiry_days = n;
