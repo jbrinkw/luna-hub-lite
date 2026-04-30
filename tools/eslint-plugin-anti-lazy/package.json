@@ -6,7 +6,7 @@
   "main": "lib/index.js",
   "type": "commonjs",
   "scripts": {
-    "test": "node -e \"console.log('@luna/eslint-plugin-anti-lazy: no unit tests yet (rules verified by behavior in apps/web lint).')\""
+    "test": "node --test 'test/**/*.test.js'"
   },
   "peerDependencies": {
     "eslint": ">=9"

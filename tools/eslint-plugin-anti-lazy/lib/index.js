@@ -17,11 +17,15 @@
 const noEmptyCatchNoComment = require('./rules/no-empty-catch-no-comment');
 const noBareToHaveBeenCalled = require('./rules/no-bare-tohavebeencalled');
 const noBareNumberCoerce = require('./rules/no-bare-number-coerce');
+const noNumericCoalesceDefault = require('./rules/no-numeric-coalesce-default');
+const specAsFixture = require('./rules/spec-as-fixture');
 
 module.exports = {
   rules: {
     'no-empty-catch-no-comment': noEmptyCatchNoComment,
     'no-bare-tohavebeencalled': noBareToHaveBeenCalled,
     'no-bare-number-coerce': noBareNumberCoerce,
+    'no-numeric-coalesce-default': noNumericCoalesceDefault,
+    'spec-as-fixture': specAsFixture,
   },
 };
