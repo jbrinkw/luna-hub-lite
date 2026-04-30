@@ -18,9 +18,10 @@ function useParityReport() {
     queryKey: ['parity-report', user?.id],
     queryFn: async () => {
       if (!user?.id) return null;
-      const { data, error } = await supabase.storage
-        .from('parity-reports')
-        .download(`parity-reports/${user.id}/latest.json`);
+      // Object path is relative to the bucket root. The exporter writes to
+      // bucket `parity-reports` at key `{user_id}/latest.json`, so the
+      // download path must NOT re-prefix the bucket name.
+      const { data, error } = await supabase.storage.from('parity-reports').download(`${user.id}/latest.json`);
       if (error) return null;
       return JSON.parse(await data.text()) as ParityReport;
     },

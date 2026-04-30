@@ -144,17 +144,34 @@ run_parity_assert() {
   out=$(python3 scripts/harness/parity_assert.py self-test --quiet 2>&1)
   local ec=$?
   if [[ $ec -eq 1 ]]; then
-    # Expected: engine caught the mismatch — gate passes.
     echo "  parity_assert self-test: deltas detected as expected (engine OK)"
-    return 0
   elif [[ $ec -eq 0 ]]; then
     echo "  ERROR: parity_assert self-test reported NO deltas — the engine"
-    echo "  failed to detect the seeded Pi<->cloud unit mismatch. Either the"
-    echo "  self-test scenario was modified or the diff engine has regressed."
+    echo "  failed to detect the seeded Pi<->cloud unit mismatch."
     echo "  Output: $out"
     return 1
   else
-    echo "  ERROR: parity_assert.py exited with code $ec (import/usage error)."
+    echo "  ERROR: parity_assert.py self-test exited with code $ec."
+    echo "  Output: $out"
+    return 1
+  fi
+
+  # Frozen witness scenario: pinned to the actual prod UUIDs from the
+  # 2026-04-29 lot_id bridge bug (commit 41a7fbc). If a future agent
+  # breaks the diff engine, this scenario stops detecting the seeded
+  # mismatch and the gate fires. Same exit-code inversion as self-test.
+  out=$(python3 scripts/harness/parity_assert.py witness/lot-id-bridge --quiet 2>&1)
+  ec=$?
+  if [[ $ec -eq 1 ]]; then
+    echo "  parity_assert witness/lot-id-bridge: deltas detected (engine OK)"
+    return 0
+  elif [[ $ec -eq 0 ]]; then
+    echo "  ERROR: parity_assert witness/lot-id-bridge reported NO deltas — the"
+    echo "  engine failed to detect the historical 41a7fbc bridge bug."
+    echo "  Output: $out"
+    return 1
+  else
+    echo "  ERROR: parity_assert.py witness/lot-id-bridge exited with code $ec."
     echo "  Output: $out"
     return 1
   fi

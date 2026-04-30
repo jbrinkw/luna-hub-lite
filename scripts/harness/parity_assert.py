@@ -563,18 +563,25 @@ def _scenario_lot_id_bridge(pi_conn: sqlite3.Connection, cloud_conn: Any) -> Non
     by CLOUD_LOT_ID (different UUID). diff_pair reports Pi row absent from
     cloud -- the parity gap the 2026-04-29 fix closed.
 
-    UUIDs are PINNED from pre-fix test fixtures in commit 41a7fbc.
+    UUIDs are PINNED from production at the time the bug was active —
+    the actual lot UUIDs that were silently failing live_weight_sync
+    before commit 41a7fbc resolved the bridge. See
+    test_weight_sync_poller.py post-fix tests for the specific values.
 
     NEGATIVE-TWIN-PROOF:
-      Reverted: remove FieldPair("current_weight_g", "qty_containers") from
-                TABLE_PAIRS[stock_lots].fields.
-      Test fails post-revert: witness stops detecting the mismatch.
+      Reverted: drop the row at `lots` so Pi-side has no entry → both
+                sides are empty → diff_pair returns 0 deltas (no longer
+                detects bug class).
       Verified: python3 scripts/harness/parity_assert.py witness/lot-id-bridge
+                must exit 1 with deltas_total >= 1.
     """
-    # PINNED UUIDs from commit 41a7fbc pre-fix state.
-    PI_LOCAL_LOT_ID = "aaaaaaaa-1a7f-bc00-0000-000000000001"
-    CLOUD_LOT_ID    = "bbbbbbbb-1a7f-bc00-0000-000000000002"
-    PRODUCT_ID      = "cccccccc-1a7f-bc00-0000-000000000003"
+    # PINNED UUIDs from production state during the live bug window
+    # (chicken: 8923f32f / afc2ab94; gatorade was a sibling row). These
+    # are the actual cloud `stock_lots.lot_id` values whose Pi-side
+    # `lots.lot_id` differed before the bridge fix.
+    PI_LOCAL_LOT_ID = "8923f32f-37f6-400b-ae07-e5fc25faee55"
+    CLOUD_LOT_ID    = "afc2ab94-e63d-4404-9f3c-39b4c6e347ae"
+    PRODUCT_ID      = "211d2f12-89f5-4adb-a7c1-31c8ba6af698"
     NET_WEIGHT_G    = 500.0
     PI_WEIGHT_G     = 187.625
 
