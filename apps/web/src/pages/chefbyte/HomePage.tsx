@@ -11,7 +11,7 @@ import {
   ShoppingCart,
   ChevronDown,
   ChevronUp,
-  ExternalLink,
+  ChevronRight,
 } from 'lucide-react';
 
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
@@ -1251,14 +1251,43 @@ export function HomePage() {
       {/* ============================================================ */}
       {/*  MACRO SUMMARY — hero card, clickable to /chef/macros         */}
       {/* ============================================================ */}
+      {/*
+        User feedback: "it needs to be clearer that you can click on the
+        macros on the dash to take you to a macro page". The bare
+        ExternalLink icon in the top-right wasn't reading as
+        actionable. Replaced with an explicit "View details →" pill
+        styled like the rest of the dashboard tile chrome (group-hover
+        animates the chevron, focus-visible ring on the wrapping
+        anchor reveals it via the same `group` mechanism).
+
+        Implementation: the entire <Link> is the single focusable
+        element so the whole card is keyboard-activatable in one tab
+        stop and we don't end up with nested anchors (invalid HTML).
+        The explicit affordance inside is purely visual + announced
+        via aria-hidden="true" — its focus state is driven by the
+        parent's `group-focus-visible:` modifiers, so screen readers
+        only hear the link name once ("View Today macros, Apr 30 …")
+        instead of twice.
+      */}
       <div data-testid="macro-summary" className="mb-5">
-        <Link to="/chef/macros" className="no-underline text-inherit block">
-          <div className="relative bg-gradient-to-br from-surface-sunken to-success-subtle border border-border rounded-xl p-4 shadow-sm hover:shadow transition-shadow">
-            <ExternalLink
-              className="absolute top-3 right-3 h-4 w-4 text-text-tertiary"
+        <Link
+          to="/chef/macros"
+          aria-label="View today's macro details"
+          className="group no-underline text-inherit block focus:outline-none focus-visible:ring-2 focus-visible:ring-focus-ring rounded-xl"
+        >
+          <div className="relative bg-gradient-to-br from-surface-sunken to-success-subtle border border-border rounded-xl p-4 shadow-sm hover:shadow group-hover:border-border-strong transition-all">
+            {/* Explicit "View →" affordance — top-right, matches the
+                tile patterns elsewhere (card-low-stock / card-expired
+                etc. below). aria-hidden because the wrapping <Link>
+                already announces destination via aria-label. */}
+            <span
               data-testid="macro-summary-link-icon"
               aria-hidden="true"
-            />
+              className="absolute top-3 right-3 inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-surface/80 border border-border text-[11px] font-semibold text-text-secondary group-hover:text-text group-hover:bg-surface group-focus-visible:text-text transition-colors"
+            >
+              View
+              <ChevronRight className="w-3 h-3 transition-transform group-hover:translate-x-0.5" />
+            </span>
             <div className="mb-3">
               <span className="font-bold text-base text-text">Today</span>{' '}
               <span data-testid="day-window-label" className="text-sm text-text-secondary">
