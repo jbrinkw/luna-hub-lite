@@ -27,9 +27,14 @@
  * scenario that deliberately leaves the system in a violated state
  * (e.g. testing the production monitor itself) can opt out.
  */
-import { test as base, type TestInfo } from '@playwright/test';
+import { test as base, type Page, type TestInfo } from '@playwright/test';
 import { adminClient } from './env';
 import { assertSystemInvariants, type PiSimulatorState } from '../invariants';
+import { makeConsoleErrorGate } from './console-error-gate';
+
+// Re-export suppressConsoleErrors so scenarios can opt out of the gate for
+// known-expected errors without needing to import from two fixture files.
+export { suppressConsoleErrors } from './console-error-gate';
 
 interface ScenarioContext {
   startTime: Date;
@@ -83,7 +88,20 @@ export function clearScenarioContext(testId: string): void {
   if (currentTestId === testId) currentTestId = null;
 }
 
-export const test = base.extend<{ scenarioRegistry: void }>({
+export const test = base.extend<{ scenarioRegistry: void; consoleErrorGate: void }>({
+  // Auto-fixture: collects browser console.error calls and fails the test
+  // if any unfiltered errors were logged. Wires up before scenarioRegistry
+  // so the error list is available regardless of scenario pass/fail status.
+  consoleErrorGate: [
+    async ({ page }: { page: Page }, use: () => Promise<void>) => {
+      const gate = makeConsoleErrorGate(page);
+      gate.setup();
+      await use();
+      gate.teardown();
+    },
+    { auto: true },
+  ],
+
   // Auto-fixture: registers context on entry, runs invariants on pass.
   scenarioRegistry: [
     async ({}, use, testInfo: TestInfo) => {
