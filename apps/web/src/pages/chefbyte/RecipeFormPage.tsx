@@ -8,6 +8,7 @@ import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { computeRecipeMacros } from './RecipesPage';
 import { formatIngredientDisplay } from '@/shared/recipes/formatIngredientDisplay';
+import { GripVertical, Trash2, Eye, Pencil } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -75,6 +76,9 @@ export function RecipeFormPage() {
   const [ingNote, setIngNote] = useState('');
   const [ingVisualLabel, setIngVisualLabel] = useState('');
   const [ingVisualQty, setIngVisualQty] = useState<string>('');
+
+  /* ---- Display vs edit mode for ingredients ---- */
+  const [ingredientMode, setIngredientMode] = useState<'view' | 'edit'>('edit');
 
   /* ---- Delete confirmation ---- */
   const [showDeleteAlert, setShowDeleteAlert] = useState(false);
@@ -268,6 +272,16 @@ export function RecipeFormPage() {
 
   const updateIngredient = (index: number, field: keyof LocalIngredient, value: string | number) => {
     setIngredients((prev) => prev.map((ing, i) => (i === index ? { ...ing, [field]: value } : ing)));
+  };
+
+  const moveIngredient = (fromIdx: number, toIdx: number) => {
+    setIngredients((prev) => {
+      if (toIdx < 0 || toIdx >= prev.length) return prev;
+      const next = [...prev];
+      const [moved] = next.splice(fromIdx, 1);
+      next.splice(toIdx, 0, moved);
+      return next;
+    });
   };
 
   /* ---------------------------------------------------------------- */
@@ -545,7 +559,28 @@ export function RecipeFormPage() {
       {/*  INGREDIENTS SECTION                                          */}
       {/* ============================================================ */}
       <div data-testid="ingredients-section" className="bg-surface border border-border rounded-lg p-5 mb-4">
-        <h3 className="m-0 mb-4 text-lg font-bold text-text">Ingredients</h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="m-0 text-lg font-bold text-text">Ingredients</h3>
+          {ingredients.length > 0 && (
+            <button
+              type="button"
+              onClick={() => setIngredientMode((m) => (m === 'view' ? 'edit' : 'view'))}
+              data-testid="ingredient-mode-toggle"
+              className={[
+                'inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold border transition-colors',
+                ingredientMode === 'edit'
+                  ? 'bg-surface border-border-strong text-text-secondary hover:bg-surface-hover'
+                  : 'bg-emerald-50 border-emerald-300 text-emerald-700 hover:bg-emerald-100',
+              ].join(' ')}
+            >
+              {ingredientMode === 'edit' ? (
+                <><Eye className="h-3.5 w-3.5" /> View</>
+              ) : (
+                <><Pencil className="h-3.5 w-3.5" /> Edit</>
+              )}
+            </button>
+          )}
+        </div>
 
         {/* Add ingredient form — stacks vertically on mobile */}
         <div
@@ -712,44 +747,90 @@ export function RecipeFormPage() {
           </div>
         )}
 
-        {/* Ingredient cards */}
+        {/* Ingredient list */}
         {ingredients.length > 0 && (
-          <div className="space-y-2 mb-3" data-testid="ingredients-table">
-            {ingredients.map((ing, idx) => (
-              <div
-                key={`${ing.product_id}-${idx}`}
-                data-testid={`ingredient-row-${idx}`}
-                className="bg-surface border border-border rounded-lg p-3"
-              >
-                <div className="flex items-center justify-between mb-2">
-                  <span className="font-medium text-sm text-text">{ing.product_name}</span>
-                  <button
-                    onClick={() => removeIngredient(idx)}
-                    data-testid={`remove-ingredient-${idx}`}
-                    className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-xs px-2 py-1 hover:text-red-700"
+          <div className="mb-3" data-testid="ingredients-table">
+            {ingredientMode === 'view' ? (
+              /* ---- VIEW MODE: clean 1-row read-only list ---- */
+              <div className="divide-y divide-border-light border border-border rounded-lg overflow-hidden">
+                {ingredients.map((ing, idx) => (
+                  <div
+                    key={`${ing.product_id}-${idx}`}
+                    data-testid={`ingredient-row-${idx}`}
+                    className="flex items-center gap-3 px-3 py-2.5 bg-surface"
                   >
-                    Remove
-                  </button>
-                </div>
-                <div className="flex flex-wrap gap-2 items-end">
-                  <div className="w-20">
-                    <label className="block text-[11px] text-text-tertiary mb-0.5">Qty</label>
+                    <span className="flex-1 font-medium text-sm text-text">{ing.product_name}</span>
+                    <span className="text-sm text-text-secondary tabular-nums">
+                      {formatIngredientDisplay({
+                        quantity: ing.quantity,
+                        unit: ing.unit as 'container' | 'serving' | 'gram',
+                        visual_quantity: ing.visual_quantity,
+                        visual_unit_label: ing.visual_unit_label,
+                        productName: ing.product_name,
+                      })}
+                    </span>
+                    {ing.note && (
+                      <span className="text-xs text-text-tertiary italic truncate max-w-[100px]">{ing.note}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              /* ---- EDIT MODE: 1-row controls + drag handles + remove ---- */
+              <div className="space-y-1.5">
+                {ingredients.map((ing, idx) => (
+                  <div
+                    key={`${ing.product_id}-${idx}`}
+                    data-testid={`ingredient-row-${idx}`}
+                    className="flex items-center gap-2 bg-surface border border-border rounded-lg px-2 py-2"
+                  >
+                    {/* Drag handle (up/down arrows as lightweight reorder) */}
+                    <div className="flex flex-col gap-0.5 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => moveIngredient(idx, idx - 1)}
+                        disabled={idx === 0}
+                        aria-label="Move ingredient up"
+                        data-testid={`move-up-${idx}`}
+                        className="p-0.5 text-text-tertiary hover:text-text disabled:opacity-20 disabled:cursor-not-allowed"
+                      >
+                        ▲
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => moveIngredient(idx, idx + 1)}
+                        disabled={idx === ingredients.length - 1}
+                        aria-label="Move ingredient down"
+                        data-testid={`move-down-${idx}`}
+                        className="p-0.5 text-text-tertiary hover:text-text disabled:opacity-20 disabled:cursor-not-allowed"
+                      >
+                        ▼
+                      </button>
+                    </div>
+
+                    <GripVertical className="h-4 w-4 text-text-tertiary shrink-0" aria-hidden="true" />
+
+                    {/* Product name */}
+                    <span className="font-medium text-sm text-text min-w-[100px] flex-1 truncate">
+                      {ing.product_name}
+                    </span>
+
+                    {/* Qty */}
                     <input
                       type="number"
                       min="0"
                       value={ing.quantity}
                       onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
-                      className="w-full px-2 py-1.5 border border-border-strong rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                      className="w-16 px-2 py-1.5 border border-border-strong rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
                       data-testid={`edit-qty-${idx}`}
                     />
-                  </div>
-                  <div className="w-[110px]">
-                    <label className="block text-[11px] text-text-tertiary mb-0.5">Unit</label>
+
+                    {/* Unit */}
                     <select
                       value={ing.unit}
                       onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
                       data-testid={`edit-unit-${idx}`}
-                      className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                      className="w-[100px] px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
                     >
                       <option value="serving">Serving</option>
                       <option value="container">Container</option>
@@ -761,83 +842,30 @@ export function RecipeFormPage() {
                         g (gram)
                       </option>
                     </select>
-                    {ing.unit === 'gram' && !gramAvailable(ing.net_weight_g) && (
-                      <p
-                        className="mt-0.5 text-[10px] text-danger-text leading-tight"
-                        data-testid={`gram-unit-missing-weight-error-${idx}`}
-                      >
-                        Set net weight on product first
-                      </p>
-                    )}
-                  </div>
-                  <div className="flex-1 min-w-[100px]">
-                    <label className="block text-[11px] text-text-tertiary mb-0.5">Note</label>
+
+                    {/* Note */}
                     <input
                       value={ing.note}
-                      placeholder={'—'}
+                      placeholder="Note"
                       onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
-                      className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
+                      className="w-24 px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0 hidden sm:block"
                       data-testid={`edit-note-${idx}`}
                     />
+
+                    {/* Remove */}
+                    <button
+                      type="button"
+                      onClick={() => removeIngredient(idx)}
+                      data-testid={`remove-ingredient-${idx}`}
+                      aria-label={`Remove ${ing.product_name}`}
+                      className="shrink-0 p-1.5 text-danger-text hover:text-red-700 hover:bg-danger-subtle rounded transition-colors"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </button>
                   </div>
-                </div>
-                {/* Visual display override — per existing ingredient */}
-                <div className="mt-2 pt-2 border-t border-border-light">
-                  <p className="mb-1 text-[10px] text-text-tertiary font-semibold uppercase tracking-wide">
-                    Display override (optional)
-                  </p>
-                  <div className="flex flex-wrap gap-2 items-end">
-                    <div className="w-20">
-                      <label className="block text-[11px] text-text-tertiary mb-0.5">Display qty</label>
-                      <input
-                        type="number"
-                        min="0.001"
-                        step="any"
-                        value={ing.visual_quantity ?? ''}
-                        onChange={(e) => {
-                          const val = e.target.value === '' ? null : parseFloat(e.target.value);
-                          updateIngredient(idx, 'visual_quantity', val as any);
-                        }}
-                        placeholder="—"
-                        className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                        data-testid={`edit-visual-qty-${idx}`}
-                      />
-                    </div>
-                    <div className="flex-1 min-w-[100px]">
-                      <label className="block text-[11px] text-text-tertiary mb-0.5">Display label</label>
-                      <input
-                        type="text"
-                        value={ing.visual_unit_label ?? ''}
-                        onChange={(e) => updateIngredient(idx, 'visual_unit_label', e.target.value || (null as any))}
-                        placeholder="slice, scoop, tbsp…"
-                        className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                        data-testid={`edit-visual-label-${idx}`}
-                      />
-                    </div>
-                  </div>
-                  {/* Pair validation */}
-                  {(() => {
-                    const hasLabel = !!ing.visual_unit_label;
-                    const hasQty = ing.visual_quantity != null && ing.visual_quantity > 0;
-                    return hasLabel !== hasQty ? (
-                      <p className="mt-1 text-[10px] text-amber-600" data-testid={`visual-pair-error-${idx}`}>
-                        Set both or neither.
-                      </p>
-                    ) : null;
-                  })()}
-                  {/* Live preview */}
-                  <p className="mt-1 text-[10px] text-text-tertiary italic" data-testid={`visual-preview-${idx}`}>
-                    {formatIngredientDisplay({
-                      quantity: ing.quantity,
-                      unit: ing.unit as 'container' | 'serving' | 'gram',
-                      visual_quantity: ing.visual_quantity,
-                      visual_unit_label: ing.visual_unit_label,
-                      productName: ing.product_name,
-                    })}
-                  </p>
-                </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
 
