@@ -438,12 +438,18 @@ class CloudWorker(threading.Thread):
                     # avoid bumping attempts on every row.
                     break
                 else:
-                    # Finding #9: even on 2xx, inspect ``applied`` +
-                    # ``reason``. ``applied=false`` with a non-expected
-                    # reason (e.g. ``product not found`` because the
-                    # cloud catalog is out of sync with the Pi cache)
-                    # should surface as WARNING. The event still gets
-                    # marked sent — retrying won't fix the reason.
+                    # FINAL_PLAN.md Change A: HTTP contract says a 2xx
+                    # response with applied=false is ONLY valid when
+                    # reason is an allowlisted idempotent value
+                    # ('duplicate' / 'stale: manual edit is newer').
+                    # Any other applied=false with a 2xx response means
+                    # the edge layer translated an error into a success-
+                    # shaped body — dead-letter so it doesn't get silently
+                    # acked. The edge function now propagates unexpected
+                    # applied=false as HTTP 422 (Change A edge-fn patch),
+                    # so this branch is a belt-and-suspenders fallback for
+                    # edge-fn versions that still return 200 with the old
+                    # shape.
                     if isinstance(response, dict):
                         applied = response.get("applied")
                         reason = response.get("reason")
@@ -451,11 +457,18 @@ class CloudWorker(threading.Thread):
                             not isinstance(reason, str)
                             or reason not in EXPECTED_NOT_APPLIED_REASONS
                         ):
-                            log.warning(
-                                "cloud-worker: outbox %d ack'd with "
-                                "applied=false, reason=%r, response=%r",
+                            outbox.mark_dead_letter(
+                                conn, row.outbox_id,
+                                f"APPLIED_FALSE_UNEXPECTED: reason={reason!r}",
+                            )
+                            log.error(
+                                "cloud-worker: outbox %d DEAD-LETTERED — "
+                                "2xx response with applied=false and "
+                                "unexpected reason=%r (response=%r). "
+                                "Inspect via /admin/dead-letter.",
                                 row.outbox_id, reason, response,
                             )
+                            continue
                     outbox.mark_sent(conn, row.outbox_id)
                     # Image upload (mixed-content fix). Attempt after the
                     # outbox row is marked sent so a failed upload never

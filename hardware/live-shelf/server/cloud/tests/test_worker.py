@@ -23,12 +23,36 @@ from server.cloud import outbox  # noqa: E402
 from server.cloud.client import CloudError  # noqa: E402
 from server.cloud.worker import (  # noqa: E402
     CloudWorker,
+    EXPECTED_NOT_APPLIED_REASONS,
     MAX_POLL_INTERVAL_S,
     NON_RETRYABLE_EVENT_STATUS_CODES,
     OUTBOX_BACKLOG_WARN_THRESHOLD,
     RETRY_WARN_ATTEMPT_THRESHOLD,
 )
 from server.storage import init_db  # noqa: E402
+
+
+# ---------------------------------------------------------------------------
+# FINAL_PLAN.md Change A: EXPECTED_NOT_APPLIED_REASONS constant contract
+# ---------------------------------------------------------------------------
+
+
+def test_expected_not_applied_reasons_exact_frozenset():
+    """FINAL_PLAN.md Change A: the allowlist must be exactly
+    {'duplicate', 'stale: manual edit is newer'} — nothing more, nothing
+    less. Any expansion would widen the silent-ack window and allow new
+    error classes to slip through undetected.
+
+    NEGATIVE-TWIN PROOF: adding a third reason (e.g. 'product not found')
+    to EXPECTED_NOT_APPLIED_REASONS causes this assertion to fail."""
+    assert EXPECTED_NOT_APPLIED_REASONS == frozenset({
+        "duplicate",
+        "stale: manual edit is newer",
+    }), (
+        f"EXPECTED_NOT_APPLIED_REASONS must be exactly "
+        f"{{'duplicate', 'stale: manual edit is newer'}}, "
+        f"got {EXPECTED_NOT_APPLIED_REASONS!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -948,11 +972,13 @@ class TestAppliedFalseInspection:
         ]
         assert warn_records == []
 
-    def test_applied_false_product_not_found_logs_warning(
+    def test_applied_false_product_not_found_dead_letters_row(
         self, fake_client, conn, caplog,
     ):
-        """'product not found' means the Pi's cache is out of sync with
-        the cloud catalog — operator-actionable, so WARNING."""
+        """FINAL_PLAN.md Change A: 'product not found' (unexpected
+        applied=false) → dead-letter the row immediately. The row must
+        NOT be marked sent. Error logged at ERROR level so the operator
+        sees it in a nightly log review."""
         import logging
         outbox.enqueue_event(conn, {"n": 1})
         fake_client.post.return_value = {
@@ -963,19 +989,31 @@ class TestAppliedFalseInspection:
         w = _mk_worker(fake_client, conn)
         with caplog.at_level(logging.DEBUG, logger="server.cloud.worker"):
             w.tick()
-        warn_records = [
+
+        row = conn.execute(
+            "SELECT sent_at, failed_permanently, last_error FROM cloud_outbox"
+        ).fetchone()
+        # Row must be dead-lettered, NOT marked sent.
+        assert row["sent_at"] is None, "unexpected applied=false must NOT mark row sent"
+        assert row["failed_permanently"] == 1, "unexpected applied=false must dead-letter row"
+        assert (row["last_error"] or "").startswith("DEAD_LETTER:"), (
+            f"last_error must start with DEAD_LETTER:, got {row['last_error']!r}"
+        )
+
+        # ERROR-level log so it surfaces in nightly log review.
+        dl_records = [
             r for r in caplog.records
             if r.name == "server.cloud.worker"
-            and r.levelname == "WARNING"
-            and "applied=false" in r.message
-            and "product not found" in r.message
+            and r.levelname == "ERROR"
+            and "DEAD-LETTERED" in r.message
         ]
-        assert len(warn_records) == 1
+        assert len(dl_records) == 1
 
-    def test_applied_false_without_reason_logs_warning(
+    def test_applied_false_without_reason_dead_letters_row(
         self, fake_client, conn, caplog,
     ):
-        """No reason field at all — still unexpected, still WARN."""
+        """No reason field at all — unexpected, must dead-letter the row
+        and log at ERROR (not just WARNING). FINAL_PLAN.md Change A."""
         import logging
         outbox.enqueue_event(conn, {"n": 1})
         fake_client.post.return_value = {"applied": False}
@@ -983,20 +1021,29 @@ class TestAppliedFalseInspection:
         w = _mk_worker(fake_client, conn)
         with caplog.at_level(logging.DEBUG, logger="server.cloud.worker"):
             w.tick()
-        warn_records = [
+
+        row = conn.execute(
+            "SELECT sent_at, failed_permanently, last_error FROM cloud_outbox"
+        ).fetchone()
+        assert row["sent_at"] is None, "no-reason applied=false must NOT mark row sent"
+        assert row["failed_permanently"] == 1, "no-reason applied=false must dead-letter row"
+        assert (row["last_error"] or "").startswith("DEAD_LETTER:")
+
+        dl_records = [
             r for r in caplog.records
             if r.name == "server.cloud.worker"
-            and r.levelname == "WARNING"
-            and "applied=false" in r.message
+            and r.levelname == "ERROR"
+            and "DEAD-LETTERED" in r.message
         ]
-        assert len(warn_records) == 1
+        assert len(dl_records) == 1
 
-    def test_applied_false_still_marks_row_sent(
+    def test_applied_false_unexpected_dead_letters_not_marks_sent(
         self, fake_client, conn,
     ):
-        """The row is ack'd by the cloud — retrying wouldn't help. Mark
-        sent so the drainer moves on; the WARN log is how operators
-        learn something's off."""
+        """FINAL_PLAN.md Change A: an unexpected applied=false reason
+        (not in the allowlist) must dead-letter the row, NOT call
+        mark_sent. The row stays visible in /admin/dead-letter for
+        operator inspection."""
         outbox.enqueue_event(conn, {"n": 1})
         fake_client.post.return_value = {
             "applied": False,
@@ -1006,10 +1053,14 @@ class TestAppliedFalseInspection:
         w = _mk_worker(fake_client, conn)
         w.tick()
         row = conn.execute(
-            "SELECT sent_at, failed_permanently FROM cloud_outbox"
+            "SELECT sent_at, failed_permanently, last_error FROM cloud_outbox"
         ).fetchone()
-        assert row["sent_at"] is not None  # marked sent
-        assert row["failed_permanently"] == 0
+        # Must NOT be marked sent — dead-letter instead.
+        assert row["sent_at"] is None, "unexpected applied=false must NOT mark row sent"
+        assert row["failed_permanently"] == 1, "row must be dead-lettered"
+        assert (row["last_error"] or "").startswith("DEAD_LETTER:"), (
+            f"last_error must start with DEAD_LETTER:, got {row['last_error']!r}"
+        )
 
 
 # ---------------------------------------------------------------------------
