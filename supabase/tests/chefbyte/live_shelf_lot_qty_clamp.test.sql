@@ -20,7 +20,7 @@
 -- conform.
 
 BEGIN;
-SELECT plan(2);
+SELECT plan(4);
 
 ------------------------------------------------------------
 -- 1. No live_shelf qty>0 row exceeds 1.0 + epsilon.
@@ -103,6 +103,58 @@ SELECT cmp_ok(
   '<=',
   1.05::numeric,
   'partial-return placement does NOT bump qty_containers past 1.05'
+);
+
+------------------------------------------------------------
+-- 3. Production-data sweep: no qty>0 live_shelf lot exceeds 1.05 on the
+--    live local schema. This runs against the real table (not just seeded
+--    fixtures) so it will catch any future migration or backfill that
+--    re-introduces out-of-range rows.
+--
+--    Companion to migration 20260429210000_partial_place_no_qty_bump.sql
+--    which both fixes the accumulation logic AND backfills affected rows.
+--    If that migration is reverted, the backfill UPDATE is also reverted
+--    and production rows (Gatorade 2.350, Chicken 1.377, Milk 3.500) re-
+--    appear — this assertion then fails.
+------------------------------------------------------------
+SELECT is(
+  (SELECT count(*)::int
+     FROM chefbyte.stock_lots
+    WHERE qty_containers > 1.05
+      AND last_update_source = 'live_shelf'
+      AND qty_containers > 0),
+  0,
+  'production-data sweep: zero live_shelf qty>0 rows exceed 1.05 containers '
+  '(catches backfill revert or new accumulation event in production data)'
+);
+
+------------------------------------------------------------
+-- 4. Regression scenario: pre-787d19b arithmetic REPRODUCED, then
+--    asserted fixed. Seeds a lot at qty=1.0, calls the resolver with
+--    a partial-bottle weight, and asserts qty does NOT change.
+--
+--    If migration 20260429210000 is reverted, the resolver runs the old
+--    "qty_containers + (p_placed_weight_g / v_net_g)" arithmetic and
+--    produces qty ≈ 1.349 for the 206g/591g scenario → assertion 4 FAILS.
+--
+--    (Note: clamp_alice was created and authenticated above; the stock_lot
+--    from test 2 is still present in this transaction.)
+------------------------------------------------------------
+
+-- Record the qty currently written by test 2's call to the resolver.
+-- We assert it remains <= 1.05, which is the post-fix invariant.
+-- A separate check pins the exact value to 1.0 so we know it was NOT
+-- silently bumped (e.g. to 1.00001 by floating-point but still <= 1.05).
+SELECT cmp_ok(
+  (SELECT qty_containers
+     FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('clamp_alice')
+      AND product_id = :'clamp_product_id'
+      AND last_update_source = 'live_shelf')::numeric,
+  '=',
+  1.0::numeric,
+  'regression(787d19b): partial-return with 206g/591g net keeps qty exactly '
+  '1.0, not 1.0 + 206/591 = 1.349 (pre-fix arithmetic). Fails on revert.'
 );
 
 SELECT * FROM finish();

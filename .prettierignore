@@ -33,8 +33,15 @@ tests/e2e/
 
 # JSON/markdown that's intentionally hand-formatted
 Journal.json
-# planned-work.md is an intentionally-untracked agent scratchpad.
+# planned-work.md and root-level audit/analysis scratchpads are intentionally
+# untracked agent outputs — not subject to formatter enforcement.
 planned-work.md
+AUDIT_*.md
+MOCK_AUDIT_*.md
+SOLUTION_*.md
+TESTING_FAILURE_*.md
+FINAL_PLAN.md
+UX_AUDIT_*.md
 
 # Jinja templates use {% ... %} / {{ ... }} which prettier's HTML
 # parser misreads as malformed tags (e.g. {% endif %} between two
