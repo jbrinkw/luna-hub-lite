@@ -693,3 +693,182 @@ Deno.test('sanitize: empty string → null', () => {
 Deno.test('sanitize: empty candidate set → always null even if id looks valid', () => {
   assertEquals(sanitizePlaceholderMatch(PLACEHOLDER_A, new Set()), null);
 });
+
+// ─────────────────────────────────────────────────────────────────────────
+// default_expiry_days — prompt schema + normalize clamp tests
+// ─────────────────────────────────────────────────────────────────────────
+
+Deno.test('buildSystemPrompt: includes default_expiry_days in JSON schema and rules', () => {
+  const prompt = buildSystemPrompt(OFF_NUTELLA);
+  assertStringIncludes(prompt, '"default_expiry_days"');
+  assertStringIncludes(prompt, 'integer 1-730');
+  assertStringIncludes(prompt, 'default_expiry_days');
+});
+
+Deno.test('buildSystemPrompt: default_expiry_days rules include example products', () => {
+  const prompt = buildSystemPrompt(OFF_NUTELLA);
+  // Examples from the brief that should appear in the prompt
+  assertStringIncludes(prompt, 'Milk');
+  assertStringIncludes(prompt, 'Eggs');
+  assertStringIncludes(prompt, 'Canned beans');
+});
+
+Deno.test('validateSuggestion: default_expiry_days=7 passes through unchanged', () => {
+  const raw = {
+    name: 'Whole Milk',
+    calories_per_serving: 150,
+    protein_per_serving: 8,
+    carbs_per_serving: 12,
+    fat_per_serving: 8,
+    servings_per_container: 8,
+    default_expiry_days: 7,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, 7);
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days=730 (max) passes through', () => {
+  const raw = {
+    name: 'Canned Beans',
+    calories_per_serving: 110,
+    protein_per_serving: 7,
+    carbs_per_serving: 20,
+    fat_per_serving: 0,
+    default_expiry_days: 730,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, 730);
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days=1 (min) passes through', () => {
+  const raw = {
+    name: 'Fresh Bread',
+    calories_per_serving: 80,
+    protein_per_serving: 3,
+    carbs_per_serving: 15,
+    fat_per_serving: 1,
+    default_expiry_days: 1,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, 1);
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days=0 clamped to null (out of range)', () => {
+  const raw = {
+    name: 'Invalid Expiry',
+    calories_per_serving: 100,
+    protein_per_serving: 5,
+    carbs_per_serving: 10,
+    fat_per_serving: 3,
+    default_expiry_days: 0,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, null, 'default_expiry_days=0 should clamp to null');
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days=731 (> max) clamped to null', () => {
+  const raw = {
+    name: 'Too Long Expiry',
+    calories_per_serving: 100,
+    protein_per_serving: 5,
+    carbs_per_serving: 10,
+    fat_per_serving: 3,
+    default_expiry_days: 731,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, null, 'default_expiry_days=731 should clamp to null');
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days=-1 clamped to null', () => {
+  const raw = {
+    name: 'Negative Expiry',
+    calories_per_serving: 100,
+    protein_per_serving: 5,
+    carbs_per_serving: 10,
+    fat_per_serving: 3,
+    default_expiry_days: -1,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, null);
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days=1000 (way over) clamped to null', () => {
+  const raw = {
+    name: 'Way Over Expiry',
+    calories_per_serving: 100,
+    protein_per_serving: 5,
+    carbs_per_serving: 10,
+    fat_per_serving: 3,
+    default_expiry_days: 1000,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, null, 'default_expiry_days=1000 should clamp to null');
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days=null passes through as null', () => {
+  const raw = {
+    name: 'Non-Perishable',
+    calories_per_serving: 100,
+    protein_per_serving: 5,
+    carbs_per_serving: 10,
+    fat_per_serving: 3,
+    default_expiry_days: null,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, null);
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days missing → defaults to null', () => {
+  const raw = {
+    name: 'Legacy Product',
+    calories_per_serving: 100,
+    protein_per_serving: 5,
+    carbs_per_serving: 10,
+    fat_per_serving: 3,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, null);
+  }
+});
+
+Deno.test('validateSuggestion: default_expiry_days=21.7 rounds to 22', () => {
+  const raw = {
+    name: 'Eggs',
+    calories_per_serving: 70,
+    protein_per_serving: 6,
+    carbs_per_serving: 0,
+    fat_per_serving: 5,
+    default_expiry_days: 21.7,
+  };
+  const result = validateSuggestion(raw);
+  assertEquals(result.ok, true);
+  if (result.ok) {
+    assertEquals(result.suggestion.default_expiry_days, 22);
+  }
+});

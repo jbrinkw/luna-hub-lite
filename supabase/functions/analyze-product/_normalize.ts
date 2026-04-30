@@ -13,6 +13,8 @@ export interface Suggestion {
   fat_per_serving: number;
   description?: string;
   default_shelf_life_days: number | null;
+  /** AI-estimated days until expiry from import date. Null = non-perishable or uncertain. Range 1–730. */
+  default_expiry_days: number | null;
   /** True when sold as discrete countable pieces (eggs, buns, bars, packets). */
   is_distinct_unit_item: boolean;
   /** Default unit for recipe form. 'gram' requires net_weight_g > 0. */
@@ -154,6 +156,23 @@ export function validateSuggestion(raw: Record<string, unknown> | null): Suggest
     coerced.default_shelf_life_days = Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
   } else {
     coerced.default_shelf_life_days = null;
+  }
+
+  // default_expiry_days: integer in [1, 730] or null. Coerce, clamp,
+  // or nullify — never surface a 422 for this field. Out-of-range values
+  // are clamped to null with a warning so the caller can log + continue.
+  if (coerced.default_expiry_days != null) {
+    const n = Math.round(Number(coerced.default_expiry_days));
+    if (Number.isFinite(n) && n >= 1 && n <= 730) {
+      coerced.default_expiry_days = n;
+    } else {
+      console.warn(
+        `validateSuggestion: default_expiry_days ${coerced.default_expiry_days} out of range [1,730] — clamping to null`,
+      );
+      coerced.default_expiry_days = null;
+    }
+  } else {
+    coerced.default_expiry_days = null;
   }
 
   // is_distinct_unit_item: coerce to boolean, default false.
