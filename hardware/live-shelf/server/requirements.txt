@@ -25,3 +25,4 @@ paramiko>=3.4,<4
 
 # Tests
 pytest>=8.0
+hypothesis>=6
