@@ -107,7 +107,12 @@ test('meal-plan-execution-creates-meal-lot', async ({ page }) => {
     // catches regressions in any of those hops.
     await loginViaUi(page, seeded.email, seeded.password);
     await page.goto('/chef/meal-plan');
-    await page.getByTestId('today-btn').click();
+    // The seed uses `new Date().toISOString().slice(0, 10)` which is the
+    // UTC date — that may not equal the user's local "today" (the
+    // today-btn target). Click the seed's specific day column to ensure
+    // we're viewing the day the meal lives on regardless of TZ.
+    const dayCol = page.getByTestId(`day-col-desktop-${today}`);
+    await dayCol.click();
     await expect(
       page.getByTestId(`done-badge-${meal.meal_id}`),
       'meal plan grid should show done-badge for the executed meal',
