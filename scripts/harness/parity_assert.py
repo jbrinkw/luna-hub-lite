@@ -554,6 +554,61 @@ def _scenario_self_test(pi_conn: sqlite3.Connection, cloud_conn: Any) -> None:
     cloud_conn.commit()
 
 
+
+@scenario("witness/lot-id-bridge")
+def _scenario_lot_id_bridge(pi_conn: sqlite3.Connection, cloud_conn: Any) -> None:
+    """Witness: pre-fix state from commit 41a7fbc.
+
+    Pi has lots row keyed by PI_LOCAL_LOT_ID; cloud has stock_lots keyed
+    by CLOUD_LOT_ID (different UUID). diff_pair reports Pi row absent from
+    cloud -- the parity gap the 2026-04-29 fix closed.
+
+    UUIDs are PINNED from pre-fix test fixtures in commit 41a7fbc.
+
+    NEGATIVE-TWIN-PROOF:
+      Reverted: remove FieldPair("current_weight_g", "qty_containers") from
+                TABLE_PAIRS[stock_lots].fields.
+      Test fails post-revert: witness stops detecting the mismatch.
+      Verified: python3 scripts/harness/parity_assert.py witness/lot-id-bridge
+    """
+    # PINNED UUIDs from commit 41a7fbc pre-fix state.
+    PI_LOCAL_LOT_ID = "aaaaaaaa-1a7f-bc00-0000-000000000001"
+    CLOUD_LOT_ID    = "bbbbbbbb-1a7f-bc00-0000-000000000002"
+    PRODUCT_ID      = "cccccccc-1a7f-bc00-0000-000000000003"
+    NET_WEIGHT_G    = 500.0
+    PI_WEIGHT_G     = 187.625
+
+    pi_conn.execute(
+        "INSERT INTO products(product_id, name, net_weight_g, certified, "
+        "servings_per_container, calories_per_serving) VALUES (?, ?, ?, 1, 4.0, 200.0)",
+        (PRODUCT_ID, "Live-weight test", NET_WEIGHT_G),
+    )
+    pi_conn.execute(
+        "INSERT INTO lots(lot_id, product_id, current_weight_g, status) "
+        "VALUES (?, ?, ?, 'on_shelf')",
+        (PI_LOCAL_LOT_ID, PRODUCT_ID, PI_WEIGHT_G),
+    )
+    pi_conn.execute(
+        "INSERT INTO cloud_lots(lot_id, product_id) VALUES (?, ?)",
+        (CLOUD_LOT_ID, PRODUCT_ID),
+    )
+    pi_conn.commit()
+
+    if isinstance(cloud_conn, sqlite3.Connection):
+        cloud_conn.execute(
+            "INSERT INTO chefbyte_products(product_id, name, net_weight_g, certified, "
+            "servings_per_container, calories_per_serving) VALUES (?, ?, ?, 1, 4.0, 200.0)",
+            (PRODUCT_ID, "Live-weight test", NET_WEIGHT_G),
+        )
+        # Cloud keyed by CLOUD_LOT_ID -- PI_LOCAL_LOT_ID absent from cloud.
+        # diff_pair finds PI_LOCAL_LOT_ID on Pi, not in cloud_index -> delta.
+        cloud_conn.execute(
+            "INSERT INTO chefbyte_stock_lots(lot_id, product_id, qty_containers, status) "
+            "VALUES (?, ?, ?, 'on_shelf')",
+            (CLOUD_LOT_ID, PRODUCT_ID, round(PI_WEIGHT_G / NET_WEIGHT_G, 3)),
+        )
+        cloud_conn.commit()
+
 # ---------------------------------------------------------------------------
 # Driver
 # ---------------------------------------------------------------------------
@@ -672,7 +727,9 @@ def main(argv: list[str] | None = None) -> int:
         ap.error("scenario name required (or pass --list)")
     # Both self-test and namespace-invariant are pure-sandbox scenarios:
     # they seed synthetic fixtures and never need a real Pi DB or Postgres.
-    sandbox = args.sandbox or args.scenario in ("self-test", "namespace-invariant")
+    sandbox = args.sandbox or args.scenario in (
+        "self-test", "namespace-invariant", "witness/lot-id-bridge"
+    )
     return _run(args.scenario, sandbox=sandbox, quiet=args.quiet)
 
 

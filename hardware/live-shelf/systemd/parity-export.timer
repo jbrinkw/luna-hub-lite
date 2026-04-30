@@ -1,0 +1,14 @@
+[Unit]
+Description=Run parity export every hour (Pi SQLite vs cloud Supabase)
+
+[Timer]
+# 5min after boot (network settle time), then every hour.
+OnBootSec=5min
+OnUnitActiveSec=1h
+# 2-minute random jitter so multiple Pis don't all hit Supabase at once.
+AccuracySec=1s
+RandomizedDelaySec=120
+Unit=parity-export.service
+
+[Install]
+WantedBy=timers.target

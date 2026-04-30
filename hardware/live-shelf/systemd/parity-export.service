@@ -1,0 +1,23 @@
+[Unit]
+Description=Live Shelf parity export (Pi SQLite vs cloud Supabase diff)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=jeremy
+WorkingDirectory=/home/jeremy/live-shelf
+# Env file contains CLOUD_SUPABASE_URL, CLOUD_SERVICE_ROLE_KEY, SUPABASE_USER_ID.
+# Same .env as the main server.
+EnvironmentFile=/home/jeremy/live-shelf/server/.env
+ExecStart=/home/jeremy/live-shelf/.venv/bin/python3 \
+    /home/jeremy/live-shelf/hardware/live-shelf/scripts/parity_export.py
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=parity-export
+# Non-zero exit is logged but does not fail the timer -- operators see
+# the stale-report warning (>3h) in the Hub UI instead.
+SuccessExitStatus=0 1
+
+[Install]
+WantedBy=multi-user.target
