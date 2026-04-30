@@ -52,7 +52,7 @@ from typing import Any, Optional
 
 from .outbox import enqueue_event
 from .payload_contracts import validate_payload_contract
-from ..types_branded import CloudLotId
+from ..types_branded import CloudLotId, CloudProductId
 
 log = logging.getLogger(__name__)
 
@@ -498,7 +498,7 @@ class CloudEventEmitter:
         self,
         *,
         pattern: str,
-        product_id: Optional[str],
+        product_id: Optional[CloudProductId],
         scale_id: str,
         kind: str,
         delta_g: float,
@@ -585,7 +585,7 @@ class CloudEventEmitter:
         self,
         *,
         scale_id: str,
-        product_id: Optional[str],
+        product_id: Optional[CloudProductId],
         delta_g: float,
         noise_floor_g: float,
         refill_threshold_g: float,
@@ -650,7 +650,7 @@ class CloudEventEmitter:
         self,
         *,
         scale_id: str,
-        product_id: str,
+        product_id: CloudProductId,
         consumed_g: float,
         occurred_at: Optional[str] = None,
         pi_event_id: Optional[str] = None,
@@ -688,11 +688,11 @@ class CloudEventEmitter:
         self,
         *,
         scale_id: str,
-        product_id: str,
+        product_id: CloudProductId,
         kind: str = "live_shelf",
         occurred_at: Optional[str] = None,
         pi_event_id: Optional[str] = None,
-        lot_id: Optional[str] = None,
+        lot_id: Optional[CloudLotId] = None,
     ) -> Optional[str]:
         """Emit a cloud ``discarded`` event from the Pi /inventory remove button.
 
@@ -750,7 +750,7 @@ class CloudEventEmitter:
         self,
         *,
         scale_id: str,
-        product_id: str,
+        product_id: CloudProductId,
         kind: str = "live_shelf",
         occurred_at: Optional[str] = None,
         pi_event_id: Optional[str] = None,
@@ -797,7 +797,7 @@ class CloudEventEmitter:
         self,
         *,
         scale_id: str,
-        product_id: str,
+        product_id: CloudProductId,
         measured_weight_g: float,
         pi_event_id: str,
         occurred_at: Optional[str] = None,
@@ -841,7 +841,7 @@ class CloudEventEmitter:
         self,
         *,
         scale_id: str,
-        product_id: str,
+        product_id: CloudProductId,
         measured_weight_g: float,
         first_event_pi_event_id: str,
         occurred_at: Optional[str] = None,
@@ -1270,7 +1270,9 @@ def backfill_missing_outbox_events(
         try:
             emitter.emit_reconciler_resolution(
                 pattern=row["pattern"],
-                product_id=product_id,
+                # product_id was verified to exist in ``products`` above —
+                # safe to promote to CloudProductId at this intra-module seam.
+                product_id=CloudProductId(product_id),
                 scale_id=scale_id,
                 kind=shelf_kind,
                 delta_g=delta_g,

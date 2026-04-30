@@ -154,23 +154,26 @@ export default tseslint.config(
       '@luna/anti-lazy/spec-as-fixture': 'warn',
     },
   },
-  // Agent A2: no-bare-id-string — cross-process boundary files only.
-  // Scoped to emit handlers, outbox writers, and payload contract files where
-  // namespace-conflation bugs (Pi-local vs cloud UUID) are most dangerous.
-  // New block — do NOT merge into the anti-lazy block above (Agent A7 owns that).
+  // Agent R3: no-bare-id-string — global scope across all first-party TS/TSX.
+  // Expanded from A2's narrow emit/outbox/weight_sync glob to catch every
+  // cross-process boundary file, not just those with "emit" in the filename.
+  // Denylist: seed scripts + migration helpers that intentionally produce raw
+  // UUID strings as test fixtures. Test files excluded via ignores.
   {
     files: [
-      'apps/web/src/**/*emit*.{ts,tsx}',
-      'apps/web/src/**/*outbox*.{ts,tsx}',
-      'apps/web/src/**/*weight_sync*.{ts,tsx}',
-      'apps/web/src/**/*shelf-ingest*.{ts,tsx}',
-      'apps/web/src/**/*payload_contracts*.{ts,tsx}',
-      'supabase/functions/**/*emit*.ts',
-      'supabase/functions/**/*outbox*.ts',
-      'supabase/functions/*shelf-ingest*/**/*.ts',
-      'supabase/functions/**/*payload_contracts*.ts',
+      'apps/web/src/**/*.{ts,tsx}',
+      'apps/mcp-worker/src/**/*.ts',
+      'packages/*/src/**/*.{ts,tsx}',
+      'supabase/functions/**/*.ts',
     ],
-    ignores: ['**/__tests__/**', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    ignores: [
+      '**/__tests__/**',
+      '**/*.test.{ts,tsx}',
+      '**/*.spec.{ts,tsx}',
+      // Seed scripts produce raw UUID strings as DB fixtures — not boundaries.
+      'supabase/seeds/**',
+      'supabase/tests/**',
+    ],
     plugins: {
       'branded-types': brandedTypesPlugin,
     },

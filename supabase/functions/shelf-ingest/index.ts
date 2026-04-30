@@ -1,5 +1,43 @@
 import { createClient, type SupabaseClient } from 'jsr:@supabase/supabase-js@2';
 
+// ─── Branded ID types (cross-process boundary) ───────────────────────
+// Mirrors apps/web/src/shared/types/branded.ts. A UUID known to exist in
+// cloud chefbyte.stock_lots.lot_id — prevents passing a Pi-local lot UUID
+// where a cloud lot UUID is expected. Defined here because Deno edge
+// functions can't import from the apps/web module graph.
+
+/** A UUID known to exist in cloud `chefbyte.stock_lots.lot_id`. */
+type CloudLotId = string & { readonly __brand: 'CloudLotId' };
+
+const _UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Promote a raw string to CloudLotId after verifying it exists in
+ * chefbyte.stock_lots for the given user. Rejects format-valid UUIDs
+ * that are absent from the table (e.g. Pi-local lot UUIDs).
+ *
+ * Returns null when the raw value is null/empty (callers handle
+ * optional lot_id fields). Throws on DB errors so the caller can 500.
+ */
+async function parseCloudLotId(
+  raw: string | null,
+  supabase: SupabaseClient,
+  userId: string,
+): Promise<CloudLotId | null> {
+  if (!raw || raw.length === 0) return null;
+  if (!_UUID_RE.test(raw)) return null; // format guard — not a UUID, skip
+  const { data, error } = await supabase
+    .schema('chefbyte')
+    .from('stock_lots')
+    .select('lot_id')
+    .eq('lot_id', raw)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) return null; // UUID absent from cloud stock_lots
+  return raw as CloudLotId;
+}
+
 /**
  * shelf-ingest — cloud endpoint for the Live Shelf Raspberry Pi.
  *
@@ -712,6 +750,14 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     if (deltaG < 0) {
       return jsonResponse({ error: 'live_weight_sync delta_g must be non-negative (absolute observed weight)' }, 400);
     }
+    // Namespace check: piLotId must be a cloud stock_lots UUID for this
+    // user — not a Pi-local lot UUID. parseCloudLotId verifies it against
+    // the actual table. A format-valid-but-absent UUID returns null (the
+    // RPC would silently apply=false; we surface 404 instead).
+    const cloudLotId: CloudLotId | null = await parseCloudLotId(piLotId, supabase, device.user_id);
+    if (!cloudLotId) {
+      return jsonResponse({ error: 'pi_lot_id not found in cloud stock_lots (namespace mismatch or unknown lot)' }, 404);
+    }
     const { data: lwsData, error: lwsError } = await (supabase as any)
       .schema('chefbyte')
       .rpc('apply_live_weight_sync_admin', {
@@ -719,7 +765,7 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
         p_device_id: device.device_id,
         p_scale_id: scaleId,
         p_kind: kind,
-        p_pi_lot_id: piLotId,
+        p_pi_lot_id: cloudLotId,
         p_observed_weight_g: deltaG,
         p_observed_at: occurredAt,
         p_client_event_id: clientEventId,
@@ -791,12 +837,18 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
   let data: any;
   let error: any;
   if (isLotTargetedDiscard) {
+    // Namespace check: piLotId for a discarded event must be a cloud lot UUID.
+    // parse against stock_lots to reject Pi-local lot UUIDs at the boundary.
+    const discardLotId: CloudLotId | null = await parseCloudLotId(piLotId, supabase, device.user_id);
+    if (!discardLotId) {
+      return jsonResponse({ error: 'pi_lot_id not found in cloud stock_lots (namespace mismatch or unknown lot)' }, 404);
+    }
     ({ data, error } = await (supabase as any).schema('chefbyte').rpc('apply_discard_with_lot_id_admin', {
       p_user_id: device.user_id,
       p_device_id: device.device_id,
       p_scale_id: scaleId,
       p_kind: kind,
-      p_pi_lot_id: piLotId,
+      p_pi_lot_id: discardLotId,
       p_product_id: productId,
       p_occurred_at: occurredAt,
       p_client_event_id: clientEventId,
