@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter } from 'react-router-dom';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useAppContext } from '@/shared/AppProvider';
 import { ThemeProvider } from '@/shared/ThemeProvider';
 import { HubHomePage } from '@/pages/hub/HubHomePage';
@@ -34,13 +35,26 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
   }),
 }));
 
+// Mock supabase storage so SystemHealthCard doesn't need a QueryClientProvider
+// exception -- we wrap with one below, but also need storage to not throw.
+vi.mock('@/shared/supabase', () => ({
+  supabase: {
+    storage: {
+      from: () => ({ download: vi.fn().mockResolvedValue({ data: null, error: { message: 'not found' } }) }),
+    },
+  },
+}));
+
 function renderPage() {
+  const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return render(
-    <ThemeProvider>
-      <MemoryRouter initialEntries={['/hub']}>
-        <HubHomePage />
-      </MemoryRouter>
-    </ThemeProvider>,
+    <QueryClientProvider client={qc}>
+      <ThemeProvider>
+        <MemoryRouter initialEntries={['/hub']}>
+          <HubHomePage />
+        </MemoryRouter>
+      </ThemeProvider>
+    </QueryClientProvider>,
   );
 }
 
