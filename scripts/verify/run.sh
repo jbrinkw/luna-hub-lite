@@ -57,8 +57,8 @@ FULL_STEPS=(
   "mutation_pair_gate (PR-scoped)|run_mutation_pair_gate"
   "test:e2e (Phase 2, guarded)|run_e2e_guarded"
   "step:cloud-invariants|bash scripts/verify/cloud-invariants.sh"
-  "step:invariant-monitor|cd supabase/functions/invariant-monitor && deno test"
-  "step:state-machine|cd apps/web && npx vitest run src/__tests__/unit/state-machine/"
+  "step:invariant-monitor|(cd supabase/functions/invariant-monitor && deno test)"
+  "step:state-machine|(cd apps/web && npx vitest run src/__tests__/unit/state-machine/)"
   "step:splice-uniqueness|bash scripts/verify/migration-splice-uniqueness.sh"
   "step:schema-parity|bash scripts/verify/pi-cloud-schema-parity.sh"
 )
