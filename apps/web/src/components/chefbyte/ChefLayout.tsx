@@ -17,10 +17,10 @@ interface ChefLayoutProps {
 
 const TAB_VALUES = [
   '/chef',
+  '/chef/inventory',
+  '/chef/shopping',
   '/chef/meal-plan',
   '/chef/recipes',
-  '/chef/shopping',
-  '/chef/inventory',
   '/chef/events',
   '/chef/settings',
 ];
@@ -81,10 +81,10 @@ export function ChefLayout({ children }: ChefLayoutProps) {
   const tabItems: TabItem[] = useMemo(
     () => [
       { label: 'Dashboard', value: '/chef', href: '/chef' },
+      { label: 'Inventory', value: '/chef/inventory', href: '/chef/inventory' },
+      { label: 'Shopping', value: '/chef/shopping', href: '/chef/shopping' },
       { label: 'Meal Plan', value: '/chef/meal-plan', href: '/chef/meal-plan' },
       { label: 'Recipes', value: '/chef/recipes', href: '/chef/recipes' },
-      { label: 'Shopping', value: '/chef/shopping', href: '/chef/shopping' },
-      { label: 'Inventory', value: '/chef/inventory', href: '/chef/inventory' },
       {
         label: 'Events',
         value: '/chef/events',
