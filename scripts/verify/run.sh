@@ -56,7 +56,8 @@ FULL_STEPS=(
   "parity_assert (L2 self-test)|run_parity_assert"
   "mutation_pair_gate (PR-scoped)|run_mutation_pair_gate"
   "test:e2e (Phase 2, guarded)|run_e2e_guarded"
-  "step:cloud-invariants:bash scripts/verify/cloud-invariants.sh"
+  "step:cloud-invariants|bash scripts/verify/cloud-invariants.sh"
+  "step:invariant-monitor|cd supabase/functions/invariant-monitor && deno test"
 )
 
 # ---------------------------------------------------------------------------
