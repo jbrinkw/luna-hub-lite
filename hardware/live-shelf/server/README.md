@@ -136,6 +136,69 @@ cloud state — the cloud is a mirror, not a gate.
 - `cloud_outbox_pending` climbs but never drops → network or auth
   problem; check the worker thread's log lines for the last error.
 
+## Parity export (systemd timer)
+
+The `parity_export.py` script runs hourly on the Pi, diffs the local SQLite
+against the cloud Supabase, and writes `parity-reports/<user_id>/latest.json`
+to Supabase Storage. The Hub home page reads this report and shows a
+"System Health" card (green = in sync, yellow = stale >3h, red = drift > 0).
+
+### Install on the Pi (one-time)
+
+**1. Add env vars** to `hardware/live-shelf/server/.env`:
+
+```
+CLOUD_SUPABASE_URL=https://<project>.supabase.co
+CLOUD_SERVICE_ROLE_KEY=<service_role JWT from Supabase dashboard>
+SUPABASE_USER_ID=<your user UUID from Supabase Auth>
+```
+
+**2. Copy the script** to the Pi (included in `deploy.py` output):
+
+```bash
+python3 hardware/live-shelf/scripts/deploy.py
+```
+
+Or manually:
+
+```bash
+scp hardware/live-shelf/scripts/parity_export.py jeremy@192.168.0.181:/home/jeremy/live-shelf/hardware/live-shelf/scripts/
+scp scripts/harness/parity_core.py jeremy@192.168.0.181:/home/jeremy/live-shelf/hardware/live-shelf/scripts/
+```
+
+The script imports `parity_core` from the same directory as itself on the Pi
+(no repo structure required).
+
+**3. Install systemd units**:
+
+```bash
+# Copy units to Pi
+scp hardware/live-shelf/systemd/parity-export.service jeremy@192.168.0.181:/etc/systemd/system/
+scp hardware/live-shelf/systemd/parity-export.timer   jeremy@192.168.0.181:/etc/systemd/system/
+
+# On the Pi:
+ssh jeremy@192.168.0.181
+sudo systemctl daemon-reload
+sudo systemctl enable --now parity-export.timer
+
+# Verify timer is active:
+sudo systemctl status parity-export.timer
+
+# Run once immediately to check:
+sudo systemctl start parity-export.service
+sudo journalctl -u parity-export -n 50
+```
+
+**4. Create the Storage bucket** (one-time in Supabase dashboard):
+
+- Go to Storage → New bucket.
+- Name: `parity-reports`.
+- Public: No (the Hub web app downloads via the service_role key).
+
+**Timer schedule**: fires 5 minutes after boot, then every hour with a
+2-minute random jitter. The Hub UI shows "Stale report" if the last
+`generated_at` is more than 3 hours old.
+
 ## Architecture
 
 ```
