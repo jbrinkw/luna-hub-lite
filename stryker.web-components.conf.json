@@ -1,0 +1,66 @@
+{
+  "$schema": "./node_modules/@stryker-mutator/core/schema/stryker-schema.json",
+  "_": [
+    "Stryker config for apps/web React components and pages.",
+    "Uses coverageAnalysis:off (instead of perTest) because component tests",
+    "run under jsdom + React Testing Library — the per-test instrumentation",
+    "causes heap OOM for larger components (HubHomePage, SystemHealthCard etc).",
+    "",
+    "coverageAnalysis:off runs ALL tests for every mutant, which is slower",
+    "but stable. The mutation-pair gate scopes --mutate to a single file,",
+    "so the total mutant count remains low enough to complete.",
+    "",
+    "See stryker.web-shared.conf.json for the shared/* equivalent."
+  ],
+
+  "packageManager": "pnpm",
+  "testRunner": "vitest",
+  "plugins": ["@stryker-mutator/vitest-runner"],
+
+  "vitest": {
+    "configFile": "scripts/mutation/stryker-configs/vitest.web.config.ts",
+    "related": false
+  },
+
+  "coverageAnalysis": "off",
+  "timeoutMS": 60000,
+  "timeoutFactor": 2.0,
+  "concurrency": 1,
+
+  "mutate": [
+    "apps/web/src/components/**/*.ts",
+    "apps/web/src/components/**/*.tsx",
+    "apps/web/src/pages/**/*.ts",
+    "apps/web/src/pages/**/*.tsx",
+    "!apps/web/src/**/*.test.ts",
+    "!apps/web/src/**/*.test.tsx",
+    "!apps/web/src/__tests__/**"
+  ],
+
+  "ignorePatterns": [
+    "dist",
+    "coverage",
+    "legacy",
+    "hardware",
+    "supabase/migrations",
+    "packages/db-types/src/database.ts",
+    "**/*.tsbuildinfo",
+    ".verify",
+    ".turbo",
+    ".wrangler",
+    ".vercel",
+    ".stryker-tmp"
+  ],
+
+  "reporters": ["progress", "clear-text", "json"],
+  "jsonReporter": { "fileName": "reports/mutation/mutation-web-components.json" },
+
+  "thresholds": {
+    "high": 60,
+    "low": 40,
+    "break": 40
+  },
+
+  "tempDirName": ".stryker-tmp-web-components",
+  "cleanTempDir": true
+}

@@ -210,11 +210,14 @@ config_for_prod_file() {
   case "$f" in
     extensions/*) echo "stryker.conf.json" ;;
     apps/mcp-worker/src/*) echo "stryker.mcp-worker.conf.json" ;;
-    # All apps/web TypeScript sources — the web-shared Stryker config uses
-    # the full web vitest suite (scripts/mutation/stryker-configs/vitest.web.config.ts)
-    # and the --mutate flag passed by this gate narrows to exactly the prod
-    # file under test. This covers shared/, components/, pages/, and hooks/.
-    # Note: bash case does not support ** globs; use prefix match instead.
+    # shared/ primitives: perTest coverage — fast, small surface.
+    apps/web/src/shared/*) echo "stryker.web-shared.conf.json" ;;
+    # components/ and pages/: coverageAnalysis:off to avoid OOM on React
+    # components with many mutants. Runs full web vitest suite per mutant.
+    # bash case uses prefix glob — sub-directories are covered by /*
+    apps/web/src/components/*) echo "stryker.web-components.conf.json" ;;
+    apps/web/src/pages/*) echo "stryker.web-components.conf.json" ;;
+    # Other apps/web/* (hooks/, etc.) — shared config as fallback.
     apps/web/src/*) echo "stryker.web-shared.conf.json" ;;
     *) echo "" ;;
   esac
@@ -335,14 +338,18 @@ run_pair() {
   # relevant fields, and write a temporary config for this pair.
   local temp_cfg="$REPO_ROOT/.verify/mutation-pair-${idx}.stryker.conf.json"
   local temp_dir="$REPO_ROOT/.stryker-tmp-pair-${idx}"
-  node --input-type=module - <<NODE "$cfg" "$prod_f" "$pair_report_path" "$temp_cfg" "$temp_dir"
+  node --input-type=module - <<NODE "$cfg" "$prod_f" "$pair_report_path" "$temp_cfg" "$temp_dir" "$test_f"
 import fs from 'node:fs';
-const [cfgPath, prodFile, reportPath, outPath, tmpDir] = process.argv.slice(2);
+const [cfgPath, prodFile, reportPath, outPath, tmpDir, testFile] = process.argv.slice(2);
 let base = {};
 try { base = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch {}
 const merged = {
   ...base,
   mutate: [prodFile],
+  // Scope testFiles to the single test that covers this prod file.
+  // This avoids loading the entire 131+ test suite for a single-file pair check,
+  // which would OOM on large monorepos.
+  testFiles: [testFile],
   reporters: ['clear-text', 'json'],
   jsonReporter: { fileName: reportPath },
   tempDirName: tmpDir,
@@ -350,6 +357,8 @@ const merged = {
   // Suppress threshold break so Stryker exits 0 on low-score (we check killed count ourselves)
   thresholds: { high: 80, low: 0, break: 0 },
 };
+// Remove vitest.related if present — it can conflict with single-file testFiles scope
+if (merged.vitest) delete merged.vitest.related;
 fs.writeFileSync(outPath, JSON.stringify(merged, null, 2));
 NODE
 
