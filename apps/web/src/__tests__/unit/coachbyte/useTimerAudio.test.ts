@@ -86,8 +86,8 @@ describe('useTimerAudio — playTimerExpiredCue', () => {
     expect(mock.ctx.createOscillator).toHaveBeenCalledTimes(3);
     expect(mock.oscillators).toHaveLength(3);
     for (const osc of mock.oscillators) {
-      expect(osc.start).toHaveBeenCalled();
-      expect(osc.stop).toHaveBeenCalled();
+      expect(osc.start).toHaveBeenCalledTimes(1);
+      expect(osc.stop).toHaveBeenCalledTimes(1);
     }
   });
 
@@ -99,7 +99,7 @@ describe('useTimerAudio — playTimerExpiredCue', () => {
     const mock = setupAudioMock();
     mock.ctx.state = 'suspended';
     playTimerExpiredCue();
-    expect(mock.ctx.resume).toHaveBeenCalled();
+    expect(mock.ctx.resume).toHaveBeenCalledTimes(1);
   });
 });
 
@@ -170,7 +170,7 @@ describe('useTimerAudio — requestNotificationPermission', () => {
     ctor.requestPermission = vi.fn(() => Promise.resolve('granted'));
     (window as any).Notification = ctor;
     const result = await requestNotificationPermission();
-    expect(ctor.requestPermission).toHaveBeenCalled();
+    expect(ctor.requestPermission).toHaveBeenCalledTimes(1);
     expect(result).toBe('granted');
     delete (window as any).Notification;
   });
@@ -227,7 +227,7 @@ describe('useTimerAudio — useScreenWakeLock', () => {
     const { unmount } = renderHook(() => useScreenWakeLock(true));
     await Promise.resolve();
     unmount();
-    expect(release).toHaveBeenCalled();
+    expect(release).toHaveBeenCalledTimes(1);
   });
 
   it('does not request wakeLock when disabled', async () => {

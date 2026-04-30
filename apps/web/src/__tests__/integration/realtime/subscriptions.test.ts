@@ -208,9 +208,8 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
         // (otherwise supabase-js will reuse the dead one).
         try {
           (warmClient as any).realtime?.disconnect?.();
-        } catch {
-          /* ignore */
-        }
+          // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Supabase realtime disconnect throws on concurrent state transitions — best-effort
+        } catch {}
         if (attempt < backoffMs.length - 1) {
           await new Promise((r) => setTimeout(r, backoffMs[attempt]));
         }
@@ -226,9 +225,8 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       c.removeAllChannels();
       try {
         c.realtime.disconnect();
-      } catch {
-        /* ignore */
-      }
+        // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Supabase realtime disconnect throws when socket already closed in afterEach — best-effort
+      } catch {}
     }
     activeClients = [];
   });
@@ -660,9 +658,8 @@ describe('Realtime Subscriptions — postgres_changes CDC', () => {
       otherUser.client.removeAllChannels();
       try {
         (otherUser.client as any).realtime?.disconnect?.();
-      } catch {
-        /* ignore */
-      }
+        // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Supabase realtime disconnect throws when socket already closed in finally — best-effort
+      } catch {}
       await cleanupUser(otherUser.userId);
     }
   }, 35_000);

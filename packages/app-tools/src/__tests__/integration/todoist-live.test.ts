@@ -46,9 +46,8 @@ describe.skipIf(skip)('Todoist Live Integration Tests', () => {
           method: 'DELETE',
           headers: { Authorization: `Bearer ${TODOIST_API_KEY}` },
         });
-      } catch {
-        /* best-effort */
-      }
+        // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: DELETE cleanup request is best-effort; failure leaves orphan tasks but must not abort other cleanups
+      } catch {}
     }
   });
 

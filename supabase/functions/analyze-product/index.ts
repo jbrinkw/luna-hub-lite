@@ -127,9 +127,8 @@ async function checkQuota(supabase: any, userId: string): Promise<boolean> {
       if (parsed.date === today) {
         count = parsed.count ?? 0;
       }
-    } catch {
-      /* reset on parse error */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: malformed quota JSON in user_config resets the counter — safe to swallow and treat as fresh
+    } catch {}
   }
 
   if (count >= DAILY_QUOTA) return false;

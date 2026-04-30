@@ -231,9 +231,8 @@ export const realtimeHealth = {
     for (const r of reconnectors.values()) {
       try {
         r();
-      } catch {
-        /* swallow — individual reconnect failures are handled inside the hook */
-      }
+        // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: individual reconnect failures are caught and handled inside each hook — swallow to keep iterating
+      } catch {}
     }
   },
 

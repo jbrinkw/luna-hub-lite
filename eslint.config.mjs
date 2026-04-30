@@ -94,6 +94,12 @@ export default tseslint.config(
   prettier,
   {
     rules: {
+      // allowEmptyCatch: empty catch bodies are intentional here — the
+      // @luna/anti-lazy/no-empty-catch-no-comment rule enforces that every
+      // empty catch is preceded by an eslint-disable-next-line with a reason
+      // comment, satisfying the documentation requirement. Standard no-empty
+      // is therefore redundant for catch clauses.
+      'no-empty': ['warn', { allowEmptyCatch: true }],
       '@typescript-eslint/no-explicit-any': 'off',
       '@typescript-eslint/no-unused-vars': [
         'error',

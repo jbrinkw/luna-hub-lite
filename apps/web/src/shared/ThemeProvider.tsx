@@ -23,9 +23,8 @@ function getStoredPreference(): Theme {
   try {
     const stored = localStorage.getItem(STORAGE_KEY);
     if (stored === 'light' || stored === 'dark' || stored === 'system') return stored;
-  } catch {
-    // localStorage unavailable
-  }
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: localStorage unavailable in SSR or restricted contexts — fall back to system theme
+  } catch {}
   return 'system';
 }
 
@@ -61,9 +60,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setPreference(t);
     try {
       localStorage.setItem(STORAGE_KEY, t);
-    } catch {
-      // localStorage unavailable
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: localStorage unavailable in restricted contexts — preference is not persisted but theme still applies in-memory
+    } catch {}
   }, []);
 
   return <ThemeContext.Provider value={{ theme: resolved, preference, setTheme }}>{children}</ThemeContext.Provider>;

@@ -15,9 +15,8 @@ async function pollHealth(timeoutMs: number): Promise<void> {
     try {
       const res = await fetch(HEALTH_URL);
       if (res.ok) return;
-    } catch {
-      // Server not ready yet
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- Server not ready yet
+    } catch {}
     await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
   }
   throw new Error(`Wrangler dev did not become healthy within ${timeoutMs}ms`);
@@ -66,12 +65,11 @@ export async function setup(): Promise<() => Promise<void>> {
         // Kill the entire process group (detached mode uses negative PID)
         process.kill(-wranglerProcess.pid, 'SIGTERM');
       } catch {
-        // Process may already be dead
+        // reason: process.kill(-pid, ...) throws ESRCH when already dead — best-effort
         try {
           wranglerProcess.kill('SIGTERM');
-        } catch {
-          // Ignore
-        }
+          // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: ChildProcess.kill() throws when process is already gone — best-effort
+        } catch {}
       }
       wranglerProcess = null;
     }

@@ -515,6 +515,7 @@ export function LiveTrackImportPage() {
           const n = off?.nutriments ?? {};
           const num = (v: unknown): number | null => {
             if (v == null) return null;
+            // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
             const x = Number(v);
             return Number.isFinite(x) ? x : null;
           };
@@ -530,6 +531,7 @@ export function LiveTrackImportPage() {
           const q = num(off?.product_quantity);
           if (servingSize && q) {
             const m = String(servingSize).match(/\((\d+(?:\.\d+)?)\s*g\)/i);
+            // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: m[1] is captured by /\d+(?:\.\d+)?/ regex — always a valid numeric string
             const gPerServing = m ? Number(m[1]) : num(n['serving_size_value']);
             if (gPerServing && gPerServing > 0) {
               const spc = Math.round(q / gPerServing);
@@ -556,6 +558,7 @@ export function LiveTrackImportPage() {
               // regex as the offSpc derivation above.
               const servingSize = off?.serving_size ?? null;
               const m = servingSize ? String(servingSize).match(/\((\d+(?:\.\d+)?)\s*g\)/i) : null;
+              // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: m[1] is a regex digit-only capture group — always a valid numeric string; guarded by m truthy check and g > 0 below
               const g = m ? Number(m[1]) : null;
               return g && g > 0 ? g : null;
             })(),
@@ -677,9 +680,8 @@ export function LiveTrackImportPage() {
     dispatch({ type: 'ai_tare_cancelled' });
     try {
       await patchSession({ state: 'waiting_scale', ai_tare_product_form: null });
-    } catch {
-      /* best-effort */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: patchSession failure on cancel is non-fatal — server state expires on its own
+    } catch {}
   }, [state, session, patchSession]);
 
   /* ---------------------------------------------------------------- */
@@ -689,6 +691,7 @@ export function LiveTrackImportPage() {
   const [manualTareInput, setManualTareInput] = useState('');
   const applyManualTare = useCallback(() => {
     if (state.kind !== 'product_loaded') return;
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: manualTareInput is a text input value; Number.isFinite guard on the very next line rejects NaN/Infinity
     const tareG = Number(manualTareInput);
     if (!Number.isFinite(tareG) || tareG < 0) return;
     // Pass the last-seen scale reading so the save path can compute a
@@ -816,6 +819,7 @@ export function LiveTrackImportPage() {
         const shelfLifeDays = (product as any).default_shelf_life_days;
         let expiresOn: string | null = null;
         if (shelfLifeDays != null) {
+          // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
           const n = Number(shelfLifeDays);
           if (Number.isFinite(n) && n > 0) {
             const d = new Date();
@@ -990,6 +994,7 @@ export function LiveTrackImportPage() {
               const editedNet = parseFloat(state.nutrition.netWeightG);
               dispatch({
                 type: 'scale_reading',
+                // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: r is session.scale_reading_g, a DB NUMERIC column; null guarded above
                 scaleG: Number(r),
                 netG: Number.isFinite(editedNet) && editedNet > 0 ? editedNet : null,
               });
@@ -1238,6 +1243,7 @@ function ProductEditor({
             <>
               <div className="rounded bg-slate-50 p-3 text-sm text-slate-700" data-testid="livetrack-scale-reading">
                 <div>
+                  {/* eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: currentScaleReadingG is a DB NUMERIC column rendered inside a non-null guard block */}
                   Current reading: <span className="font-mono">{Number(currentScaleReadingG).toFixed(1)}g</span>
                 </div>
                 <div className="text-xs text-slate-500 mt-1">
@@ -1245,6 +1251,7 @@ function ProductEditor({
                 </div>
                 <div className="text-xs text-slate-500">
                   Auto tare ={' '}
+                  {/* eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: currentScaleReadingG is a DB NUMERIC column rendered inside a non-null guard block */}
                   <span className="font-mono">{Math.max(0, Number(currentScaleReadingG) - netG).toFixed(1)}g</span>{' '}
                   (reading − {netG}g net)
                 </div>

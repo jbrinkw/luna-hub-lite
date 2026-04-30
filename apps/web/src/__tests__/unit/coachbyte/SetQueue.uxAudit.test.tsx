@@ -184,7 +184,7 @@ describe('SetQueue — skip timer button', () => {
       />,
     );
     await userEvent.click(screen.getByTestId('skip-btn'));
-    expect(onSkip).toHaveBeenCalled();
+    expect(onSkip).toHaveBeenCalledTimes(1);
     expect(onReset).not.toHaveBeenCalled();
   });
 });

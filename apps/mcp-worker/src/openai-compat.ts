@@ -242,9 +242,8 @@ function convertMessages(
           let parsedInput: Record<string, unknown> = {};
           try {
             parsedInput = JSON.parse(tc.function.arguments);
-          } catch {
-            /* leave as empty */
-          }
+            // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: malformed JSON from model — fall back to empty object so tool dispatch doesn't crash
+          } catch {}
           content.push({
             type: 'tool_use',
             id: tc.id,

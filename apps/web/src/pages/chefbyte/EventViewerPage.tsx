@@ -1079,6 +1079,7 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
 
   const parseNum = (s: string): number | null => {
     if (s.trim() === '') return null;
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
     const n = Number(s);
     return Number.isFinite(n) ? n : null;
   };

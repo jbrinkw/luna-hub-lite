@@ -131,6 +131,7 @@ export function ShoppingPage() {
         .eq('user_id', user!.id)
         .maybeSingle();
       if (!row) return { used: 0, limit: 100 };
+      // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: quota.used is a Postgres integer column, always a valid numeric string from DB
       const used = (row as any).quota_date === walmartTodayUtc ? Number((row as any).used) : 0;
       return { used, limit: 100 };
     },
@@ -396,6 +397,7 @@ export function ShoppingPage() {
     // back to the local purchased[] length (since the cache may have
     // re-fetched between click and response).
     const lotsProcessed =
+      // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: lots_processed already type-checked as 'number' by the typeof guard on this same line; coerce is a no-op for display only
       typeof importResult?.lots_processed === 'number' ? Number(importResult.lots_processed) : importedCount;
     toast.show(`Imported ${lotsProcessed} item${lotsProcessed === 1 ? '' : 's'} to inventory.`, {
       variant: 'success',

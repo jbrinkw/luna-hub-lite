@@ -306,9 +306,8 @@ export function SplitPage() {
     // Some browsers need a payload to start the drag
     try {
       e.dataTransfer.setData('text/plain', String(index));
-    } catch {
-      /* ignore */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: dataTransfer.setData throws in some browsers when called outside dragstart — best-effort payload for browsers that require it
+    } catch {}
   };
   const onDragOver = (weekday: number) => (e: React.DragEvent) => {
     if (!dragRef.current || dragRef.current.weekday !== weekday) return;

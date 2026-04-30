@@ -143,7 +143,7 @@ describe('TodayPage — useRealtimeInvalidation query key contract (W-11)', () =
     renderToday();
 
     await waitFor(() => {
-      expect(realtimeInvalidationSpy).toHaveBeenCalled();
+      expect(realtimeInvalidationSpy).toHaveBeenCalledTimes(1);
     });
 
     const [channelName] = realtimeInvalidationSpy.mock.calls[0];
@@ -154,7 +154,7 @@ describe('TodayPage — useRealtimeInvalidation query key contract (W-11)', () =
     renderToday();
 
     await waitFor(() => {
-      expect(realtimeInvalidationSpy).toHaveBeenCalled();
+      expect(realtimeInvalidationSpy).toHaveBeenCalledTimes(1);
     });
 
     const [, subscriptions] = realtimeInvalidationSpy.mock.calls[0] as [string, any[]];
@@ -173,7 +173,7 @@ describe('TodayPage — useRealtimeInvalidation query key contract (W-11)', () =
     renderToday();
 
     await waitFor(() => {
-      expect(realtimeInvalidationSpy).toHaveBeenCalled();
+      expect(realtimeInvalidationSpy).toHaveBeenCalledTimes(1);
     });
 
     const [, subscriptions] = realtimeInvalidationSpy.mock.calls[0] as [string, any[]];
@@ -187,7 +187,7 @@ describe('TodayPage — useRealtimeInvalidation query key contract (W-11)', () =
     renderToday();
 
     await waitFor(() => {
-      expect(realtimeInvalidationSpy).toHaveBeenCalled();
+      expect(realtimeInvalidationSpy).toHaveBeenCalledTimes(1);
     });
 
     const [, subscriptions] = realtimeInvalidationSpy.mock.calls[0] as [string, any[]];

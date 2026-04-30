@@ -2196,7 +2196,7 @@ describe('HA SSRF protection', () => {
         }
         // Most importantly: fetch was actually called, proving the URL
         // cleared the SSRF guard.
-        expect(mockFetch).toHaveBeenCalled();
+        expect(mockFetch).toHaveBeenCalledTimes(1);
         const [calledUrl] = mockFetch.mock.calls[0];
         // URL origin should match the allowed input (URL class normalizes)
         expect(calledUrl.startsWith(new URL(url).origin)).toBe(true);

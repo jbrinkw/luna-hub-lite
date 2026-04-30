@@ -51,9 +51,8 @@ export function parseAIResponse(text: string): Record<string, unknown> | null {
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>;
     }
-  } catch {
-    /* fall through to recovery paths */
-  }
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: JSON.parse fails on malformed LLM output — fall through to markdown-fence recovery
+  } catch {}
 
   // Recovery 1: strip markdown fences and retry. Matches ```json ... ```
   // and plain ``` ... ``` blocks.
@@ -64,9 +63,8 @@ export function parseAIResponse(text: string): Record<string, unknown> | null {
       if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
       }
-    } catch {
-      /* fall through */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: markdown-fenced JSON is still malformed — fall through to brace-extraction recovery
+    } catch {}
   }
 
   // Recovery 2: extract the first balanced `{...}` substring. Handles
@@ -102,9 +100,8 @@ export function parseAIResponse(text: string): Record<string, unknown> | null {
             if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
               return parsed as Record<string, unknown>;
             }
-          } catch {
-            /* give up */
-          }
+            // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: extracted brace-balanced substring is still invalid JSON — give up and return null
+          } catch {}
           break;
         }
       }
@@ -142,6 +139,7 @@ export function validateSuggestion(raw: Record<string, unknown> | null): Suggest
   ] as const;
   const coerced: Record<string, unknown> = { ...raw };
   for (const k of numericFields) {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: LLM may return string numerics; || 0 provides safe fallback matching `Number(x) || 0` semantics documented in comment above
     if (coerced[k] != null) coerced[k] = Number(coerced[k]) || 0;
   }
 
@@ -152,6 +150,7 @@ export function validateSuggestion(raw: Record<string, unknown> | null): Suggest
   // default_shelf_life_days: integer in [1, 3650] or null. Coerce, clamp,
   // or nullify — never surface a 422 for this field.
   if (coerced.default_shelf_life_days != null) {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite in the same expression; LLM may return string or float
     const n = Math.round(Number(coerced.default_shelf_life_days));
     coerced.default_shelf_life_days = Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
   } else {

@@ -135,6 +135,7 @@ export async function loadHistoryDetail(
   return (data ?? []).map((cs: any) => ({
     exercise_name: cs.exercises?.name ?? 'Unknown',
     actual_reps: cs.actual_reps,
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: actual_load is a DB NUMERIC column from Supabase; always a valid numeric string
     actual_load: Number(cs.actual_load),
     completed_at: cs.completed_at,
   }));

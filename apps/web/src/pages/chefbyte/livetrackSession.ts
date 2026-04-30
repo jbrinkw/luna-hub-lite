@@ -256,6 +256,7 @@ export function computeQtyContainersFromScale(args: {
   netWeightG: number | null | undefined;
 }): number {
   const { scaleG, tareG, netWeightG } = args;
+  // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately used in Number.isFinite guard two lines below; netWeightG is typed number|null|undefined
   const netWeight = Number(netWeightG ?? 0);
   let qty = 1;
   if (scaleG != null && Number.isFinite(scaleG) && tareG != null && Number.isFinite(tareG) && netWeight > 0) {

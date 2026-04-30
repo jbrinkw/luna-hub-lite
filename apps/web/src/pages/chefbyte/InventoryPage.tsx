@@ -374,11 +374,8 @@ export function InventoryPage() {
     setLegendOpen(false);
     try {
       localStorage.setItem(legendStorageKey, '1');
-    } catch {
-      /* Safari private — ephemerally dismiss for the session, accept the
-         next-load reappearance. Fail-soft is correct here since a
-         dismissed legend is a comfort optimization, not a correctness one. */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Safari private mode throws on localStorage.setItem — ephemeral dismiss is fine for a comfort optimization
+    } catch {}
   };
 
   /* ---- Realtime pulse tracking.

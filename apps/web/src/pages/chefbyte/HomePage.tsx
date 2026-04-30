@@ -1043,6 +1043,7 @@ export function HomePage() {
     setEditValue('');
   };
   const commitEditLog = (log: FoodLogEntry) => {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
     const parsed = Number(editValue);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setMutationError('Quantity must be greater than 0');
@@ -1051,6 +1052,7 @@ export function HomePage() {
     editQtyMutation.mutate({ kind: 'log', log, newQty: parsed });
   };
   const commitEditTemp = (temp: TempItemEntry) => {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
     const parsed = Number(editValue);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setMutationError('Calories must be greater than 0');

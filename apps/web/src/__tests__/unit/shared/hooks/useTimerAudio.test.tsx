@@ -109,7 +109,7 @@ describe('useTimerAudio — unlockAudioContextNow', () => {
     const { ctx } = setupAudioMock();
     ctx.state = 'suspended';
     unlockAudioContextNow();
-    expect(ctx.resume).toHaveBeenCalled();
+    expect(ctx.resume).toHaveBeenCalledTimes(1);
   });
 
   it('no-ops when context is already running', () => {
@@ -140,8 +140,8 @@ describe('useTimerAudio — playPrCelebrationCue', () => {
     expect(ctx.createOscillator).toHaveBeenCalledTimes(4);
     expect(oscillators).toHaveLength(4);
     for (const osc of oscillators) {
-      expect(osc.start).toHaveBeenCalled();
-      expect(osc.stop).toHaveBeenCalled();
+      expect(osc.start).toHaveBeenCalledTimes(1);
+      expect(osc.stop).toHaveBeenCalledTimes(1);
     }
   });
 
@@ -153,7 +153,7 @@ describe('useTimerAudio — playPrCelebrationCue', () => {
     const { ctx } = setupAudioMock();
     ctx.state = 'suspended';
     playPrCelebrationCue();
-    expect(ctx.resume).toHaveBeenCalled();
+    expect(ctx.resume).toHaveBeenCalledTimes(1);
   });
 });
 

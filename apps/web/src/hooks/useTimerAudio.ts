@@ -199,9 +199,8 @@ export function vibrateTimerExpired(): void {
   if (typeof navigator.vibrate !== 'function') return;
   try {
     navigator.vibrate([200, 100, 200]);
-  } catch {
-    /* ignore */
-  }
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: navigator.vibrate throws in some environments despite the type check — best-effort haptic
+  } catch {}
 }
 
 /** Single 50ms haptic pulse — fired on Complete-Set tap so the user
@@ -213,9 +212,8 @@ export function vibrateSetCompleted(): void {
   if (typeof navigator.vibrate !== 'function') return;
   try {
     navigator.vibrate(50);
-  } catch {
-    /* ignore */
-  }
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: navigator.vibrate throws in some environments despite the type check — best-effort haptic
+  } catch {}
 }
 
 /** Distinct PR-celebration vibration: three quick pulses. Different
@@ -226,9 +224,8 @@ export function vibratePr(): void {
   if (typeof navigator.vibrate !== 'function') return;
   try {
     navigator.vibrate([80, 60, 80, 60, 80]);
-  } catch {
-    /* ignore */
-  }
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: navigator.vibrate throws in some environments despite the type check — best-effort haptic
+  } catch {}
 }
 
 // ---------------------------------------------------------------------------
@@ -254,9 +251,8 @@ export function notifyTimerExpired(title = 'Rest complete', body = "You're up �
   if (N.permission !== 'granted') return;
   try {
     new N(title, { body, tag: 'coachbyte-rest-timer', silent: false });
-  } catch {
-    /* ignore */
-  }
+    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Notification constructor can throw in sandboxed environments — best-effort desktop notification
+  } catch {}
 }
 
 // ---------------------------------------------------------------------------
@@ -316,9 +312,8 @@ export function useScreenWakeLock(enabled: boolean): { active: { current: boolea
         activeRef.current = false;
         sentinelRef.current = null;
       });
-    } catch {
-      /* permission denied / unsupported */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: wakeLock.request() throws if permission denied or API unavailable — best-effort screen lock
+    } catch {}
   }, []);
 
   useEffect(() => {

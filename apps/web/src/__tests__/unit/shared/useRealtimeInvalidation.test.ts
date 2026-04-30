@@ -233,7 +233,7 @@ describe('useRealtimeInvalidation — channel lifecycle', () => {
     );
 
     expect(mockSupabase.channel).toHaveBeenCalledWith(expect.stringContaining('my-channel'), expect.any(Object));
-    expect(mockChannel.subscribe).toHaveBeenCalled();
+    expect(mockChannel.subscribe).toHaveBeenCalledTimes(1);
   });
 
   it('removes the channel from supabase on unmount (no memory leak)', () => {
@@ -249,7 +249,7 @@ describe('useRealtimeInvalidation — channel lifecycle', () => {
 
     unmount();
 
-    expect(mockSupabase.removeChannel).toHaveBeenCalled();
+    expect(mockSupabase.removeChannel).toHaveBeenCalledTimes(1);
   });
 });
 

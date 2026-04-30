@@ -335,32 +335,34 @@ export function RecipesPage() {
   useEffect(() => {
     try {
       localStorage.setItem('chefbyte_recipes_cookable', canBeMadeOnly ? '1' : '0');
-    } catch {
-      /* Safari private — fail-soft. */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Safari private mode throws on localStorage.setItem — filter preference is ephemeral, fail-soft is correct
+    } catch {}
   }, [canBeMadeOnly]);
   useEffect(() => {
     try {
       localStorage.setItem('chefbyte_recipes_expiring', usesExpiringOnly ? '1' : '0');
-    } catch {
-      /* Safari private — fail-soft. */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Safari private mode throws on localStorage.setItem — filter preference is ephemeral, fail-soft is correct
+    } catch {}
   }, [usesExpiringOnly]);
 
   /* ---- Macro density thresholds (g per 100 cal, persisted) ---- */
   const [proteinThreshold, setProteinThreshold] = useState(() => {
     try {
       const saved = localStorage.getItem('chefbyte_protein_threshold');
+      // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: persisted by this same component as String(val) where val passed parseFloat+isNaN check; NaN falls back to default 8
       return saved ? Number(saved) : 8;
     } catch {
+      // reason: Safari private mode throws on localStorage.getItem — fall back to default
       return 8;
     }
   });
   const [carbsThreshold, setCarbsThreshold] = useState(() => {
     try {
       const saved = localStorage.getItem('chefbyte_carbs_threshold');
+      // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: persisted by this same component as String(val) where val passed parseFloat+isNaN check; NaN falls back to default 10
       return saved ? Number(saved) : 10;
     } catch {
+      // reason: Safari private mode throws on localStorage.getItem — fall back to default
       return 10;
     }
   });
@@ -686,9 +688,8 @@ export function RecipesPage() {
                               setProteinThreshold(val);
                               try {
                                 localStorage.setItem('chefbyte_protein_threshold', String(val));
-                              } catch {
-                                /* Safari private */
-                              }
+                                // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Safari private mode throws on localStorage.setItem — threshold reverts on reload, fail-soft is correct
+                              } catch {}
                             }
                             setEditingThreshold(null);
                           }
@@ -743,9 +744,8 @@ export function RecipesPage() {
                               setCarbsThreshold(val);
                               try {
                                 localStorage.setItem('chefbyte_carbs_threshold', String(val));
-                              } catch {
-                                /* Safari private */
-                              }
+                                // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Safari private mode throws on localStorage.setItem — threshold reverts on reload, fail-soft is correct
+                              } catch {}
                             }
                             setEditingThreshold(null);
                           }

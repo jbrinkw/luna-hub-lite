@@ -371,7 +371,7 @@ describe('useScannerDetection', () => {
         // The barcode callback never fired (the silent-drop bug).
         expect(onBarcodeScanned).not.toHaveBeenCalled();
         // But onScanDropped DID fire — once per intercepted keystroke.
-        expect(onScanDropped).toHaveBeenCalled();
+        expect(onScanDropped).toHaveBeenCalledTimes(1);
         const calls = onScanDropped.mock.calls;
         // Every call should carry the protected-target reason.
         for (const [reason, detail] of calls) {
@@ -503,7 +503,7 @@ describe('useScannerDetection', () => {
           nowSpy.mockReturnValue(1000);
           fireKey('5', { target: textarea });
         }).not.toThrow();
-        expect(onScanDropped).toHaveBeenCalled();
+        expect(onScanDropped).toHaveBeenCalledTimes(1);
         errSpy.mockRestore();
       } finally {
         document.body.removeChild(textarea);

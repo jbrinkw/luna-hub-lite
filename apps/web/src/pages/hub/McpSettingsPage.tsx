@@ -167,9 +167,8 @@ export function McpSettingsPage() {
       await navigator.clipboard.writeText(endpointUrl);
       setEndpointCopied(true);
       setTimeout(() => setEndpointCopied(false), 2000);
-    } catch {
-      // Clipboard API may not be available
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Clipboard API unavailable in non-HTTPS or restricted contexts — copy silently fails
+    } catch {}
   };
 
   // Claude.ai's "Add custom MCP" connector takes URL + Bearer token as
@@ -188,9 +187,8 @@ export function McpSettingsPage() {
       await navigator.clipboard.writeText(text);
       setFlag(true);
       setTimeout(() => setFlag(false), 2000);
-    } catch {
-      // Clipboard API may not be available
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Clipboard API unavailable in non-HTTPS or restricted contexts — copy silently fails
+    } catch {}
   };
 
   /**

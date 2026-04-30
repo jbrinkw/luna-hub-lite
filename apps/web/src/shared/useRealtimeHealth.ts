@@ -55,16 +55,14 @@ export function useRealtimeHealth() {
     //    per-channel reconnect is independently useful.
     try {
       supabase.realtime.disconnect();
-    } catch {
-      /* swallow — socket may already be in a transitional state */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Supabase realtime disconnect throws during state transitions (e.g. already disconnecting) — best-effort
+    } catch {}
     // Brief pause so the lib settles into 'disconnected' before connect.
     await new Promise<void>((resolve) => setTimeout(resolve, RECONNECT_SETTLE_MS));
     try {
       supabase.realtime.connect();
-    } catch {
-      /* swallow — connect() is safe to call when already connecting */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Supabase realtime connect() throws when already connecting/connected — best-effort
+    } catch {}
     // 2. Re-subscribe every tracked channel on the freshly-connected socket.
     realtimeHealth.reconnectAll();
   }, []);

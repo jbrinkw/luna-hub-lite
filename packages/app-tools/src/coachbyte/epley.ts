@@ -34,7 +34,9 @@ export async function computeEstimated1RMs(
   if (error) throw new Error(`epley: completed_sets fetch failed: ${error.message}`);
 
   for (const r of (data as any[]) ?? []) {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: actual_reps/actual_load are DB NUMERIC columns from Supabase; always valid numeric strings
     const reps = Number(r.actual_reps);
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: actual_load is a DB NUMERIC column from Supabase; always a valid numeric string
     const load = Number(r.actual_load);
     const e = epley1RM(load, reps);
     if (e <= 0) continue;

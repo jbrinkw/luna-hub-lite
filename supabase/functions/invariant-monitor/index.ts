@@ -509,6 +509,7 @@ const INVARIANTS: InvariantSpec[] = [
               name: r.name,
               calories_per_serving: cal,
               inferred_calories: inferred,
+              // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: driftPct.toFixed(4) always produces a valid numeric string; coerce back to number for JSON serialization
               drift_pct: Number(driftPct.toFixed(4)),
               carbs_per_serving: carbs,
               protein_per_serving: prot,

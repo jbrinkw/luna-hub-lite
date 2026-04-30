@@ -109,17 +109,15 @@ describe('InventoryPage — legend (R2 collapse-by-default)', () => {
   beforeEach(() => {
     try {
       localStorage.clear();
-    } catch {
-      /* ignore */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: localStorage unavailable in some test environments — best-effort
+    } catch {}
     vi.clearAllMocks();
   });
   afterEach(() => {
     try {
       localStorage.clear();
-    } catch {
-      /* ignore */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: localStorage unavailable in some test environments — best-effort
+    } catch {}
   });
 
   it('shows the toggle trigger but NOT the panel on first paint', async () => {

@@ -108,7 +108,7 @@ describe('useSettingsAlerts', () => {
     const { result } = renderHook(() => useSettingsAlerts());
 
     await waitFor(() => {
-      expect(mockChefbyte).toHaveBeenCalled();
+      expect(mockChefbyte).toHaveBeenCalledTimes(1);
     });
     expect(result.current).toBe(false);
   });

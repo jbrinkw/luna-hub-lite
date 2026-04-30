@@ -168,9 +168,8 @@ export function ScalesTab() {
       await navigator.clipboard.writeText(text);
       setCopiedKey(key);
       setTimeout(() => setCopiedKey(null), 2000);
-    } catch {
-      /* no-op */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Clipboard API unavailable in non-HTTPS or restricted contexts — copy silently fails
+    } catch {}
   };
 
   /* ---------------------------------------------------------------- */

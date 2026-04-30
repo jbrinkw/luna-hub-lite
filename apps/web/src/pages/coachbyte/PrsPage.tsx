@@ -74,6 +74,7 @@ export async function loadPrsData(
     const id = cs.exercise_id;
     const name = cs.exercises?.name ?? 'Unknown';
     const reps = cs.actual_reps;
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: actual_load is a DB NUMERIC column from Supabase; always a valid numeric string
     const load = Number(cs.actual_load);
 
     if (!exerciseMap.has(id)) {

@@ -340,7 +340,7 @@ export function SettingsPage() {
               <input
                 type="number"
                 min="0"
-                value={form.calories_per_serving ?? 0}
+                value={form.calories_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; zero is correct UI default for null macro
                 onChange={(e) => onChange('calories_per_serving', Number(e.target.value) || 0)}
                 data-testid={`${testIdPrefix}-calories`}
                 className={inputCls}
@@ -353,7 +353,7 @@ export function SettingsPage() {
               <input
                 type="number"
                 min="0"
-                value={form.carbs_per_serving ?? 0}
+                value={form.carbs_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; zero is correct UI default for null macro
                 onChange={(e) => onChange('carbs_per_serving', Number(e.target.value) || 0)}
                 data-testid={`${testIdPrefix}-carbs`}
                 className={inputCls}
@@ -366,7 +366,7 @@ export function SettingsPage() {
               <input
                 type="number"
                 min="0"
-                value={form.protein_per_serving ?? 0}
+                value={form.protein_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; zero is correct UI default for null macro
                 onChange={(e) => onChange('protein_per_serving', Number(e.target.value) || 0)}
                 data-testid={`${testIdPrefix}-protein`}
                 className={inputCls}
@@ -379,7 +379,7 @@ export function SettingsPage() {
               <input
                 type="number"
                 min="0"
-                value={form.fat_per_serving ?? 0}
+                value={form.fat_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; zero is correct UI default for null macro
                 onChange={(e) => onChange('fat_per_serving', Number(e.target.value) || 0)}
                 data-testid={`${testIdPrefix}-fat`}
                 className={inputCls}
@@ -400,7 +400,7 @@ export function SettingsPage() {
                 type="number"
                 min="0"
                 step="0.1"
-                value={form.min_stock_amount ?? 0}
+                value={form.min_stock_amount ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: 0 containers is the correct default minimum stock for a new product
                 onChange={(e) => onChange('min_stock_amount', Number(e.target.value) || 0)}
                 data-testid={`${testIdPrefix}-min-stock`}
                 className={inputCls}

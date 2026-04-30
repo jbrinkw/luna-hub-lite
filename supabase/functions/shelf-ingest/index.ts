@@ -1026,6 +1026,7 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
   if (typeof productId !== 'string' || productId.length === 0) {
     return jsonResponse({ error: 'product_id required' }, 400);
   }
+  // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line; tareRaw is an HTTP body field validated there
   const tare = typeof tareRaw === 'number' ? tareRaw : Number(tareRaw);
   if (!Number.isFinite(tare) || tare < 0) {
     return jsonResponse({ error: 'tare_weight_g must be a non-negative number' }, 400);

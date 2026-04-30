@@ -303,6 +303,7 @@ export function MealPlanPage() {
         .in('key', ['goal_calories', 'goal_protein', 'goal_carbs', 'goal_fat']);
       const map = new Map<string, number>();
       for (const r of (rows ?? []) as Array<{ key: string; value: string }>) {
+        // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: r.value is a user_config text column storing numeric goal values; Number.isFinite guard on the next line rejects NaN/Infinity
         const n = Number(r.value);
         if (Number.isFinite(n)) map.set(r.key, n);
       }
@@ -776,6 +777,7 @@ export function MealPlanPage() {
     setEditValue('');
   };
   const commitEditLog = (log: FoodLogEntry) => {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
     const parsed = Number(editValue);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setError('Quantity must be greater than 0');
@@ -784,6 +786,7 @@ export function MealPlanPage() {
     editQtyMutation.mutate({ kind: 'log', log, newQty: parsed });
   };
   const commitEditTemp = (temp: TempItemEntry) => {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
     const parsed = Number(editValue);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setError('Calories must be greater than 0');

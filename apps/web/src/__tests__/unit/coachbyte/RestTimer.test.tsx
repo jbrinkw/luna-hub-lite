@@ -70,7 +70,7 @@ describe('RestTimer', () => {
     const endTime = new Date(Date.now() + 60_000).toISOString();
     render(<RestTimer {...defaultProps} state="running" endTime={endTime} durationSeconds={60} onPause={onPause} />);
     await userEvent.click(screen.getByTestId('pause-btn'));
-    expect(onPause).toHaveBeenCalled();
+    expect(onPause).toHaveBeenCalledTimes(1);
   });
 
   it('shows Resume button when paused', () => {
@@ -90,7 +90,7 @@ describe('RestTimer', () => {
       <RestTimer {...defaultProps} state="paused" durationSeconds={60} elapsedBeforePause={20} onResume={onResume} />,
     );
     await userEvent.click(screen.getByTestId('resume-btn'));
-    expect(onResume).toHaveBeenCalled();
+    expect(onResume).toHaveBeenCalledTimes(1);
   });
 
   it('shows "Timer expired" when state is expired', () => {
@@ -122,7 +122,7 @@ describe('RestTimer', () => {
     const onReset = vi.fn();
     render(<RestTimer {...defaultProps} state="expired" durationSeconds={60} onReset={onReset} />);
     await userEvent.click(screen.getByTestId('reset-btn'));
-    expect(onReset).toHaveBeenCalled();
+    expect(onReset).toHaveBeenCalledTimes(1);
   });
 
   it('countdown tick decrements the display after 1 second', async () => {

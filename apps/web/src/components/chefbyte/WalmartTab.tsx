@@ -126,16 +126,15 @@ export function WalmartTab() {
         .eq('user_id', userId)
         .maybeSingle();
       if (quotaRow) {
+        // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: quota.used is a Postgres integer column, always a valid numeric string from DB
         const used = (quotaRow as any).quota_date === todayUtc ? Number((quotaRow as any).used) : 0;
         setQuotaUsed(used);
         setQuotaExceeded(used >= 100);
       } else {
         setQuotaUsed(0);
       }
-    } catch {
-      // Failure to hydrate is non-fatal; the chip stays at "—" and the
-      // first call's response will fill it.
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Failure to hydrate quota is non-fatal — chip stays at "—" until first API call fills it
+    } catch {}
 
     setLoading(false);
   }, [userId]);

@@ -438,6 +438,7 @@ export function MacroPage() {
   };
 
   const commitEditQty = (item: ConsumedItem) => {
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
     const parsed = Number(editValue);
     if (!Number.isFinite(parsed) || parsed <= 0) {
       setMutationError('Quantity must be greater than 0');

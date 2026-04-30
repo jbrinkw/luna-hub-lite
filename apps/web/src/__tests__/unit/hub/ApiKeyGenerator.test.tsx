@@ -22,7 +22,7 @@ describe('ApiKeyGenerator', () => {
     await waitFor(() => {
       expect(screen.getByTestId('key-plaintext')).toHaveTextContent('sk-plaintext-key');
     });
-    expect(onGenerate).toHaveBeenCalled();
+    expect(onGenerate).toHaveBeenCalledTimes(1);
   });
 
   it('key hidden after dismiss', async () => {
@@ -173,7 +173,7 @@ describe('ApiKeyGenerator', () => {
 
     await userEvent.click(screen.getByText('Generate'));
     await waitFor(() => {
-      expect(onGenerate).toHaveBeenCalled();
+      expect(onGenerate).toHaveBeenCalledTimes(1);
     });
     expect(screen.queryByTestId('key-plaintext')).not.toBeInTheDocument();
   });

@@ -136,6 +136,7 @@ export function isQueueItemNew(item: { status: 'success' | 'pending' | 'error'; 
  */
 export function computeExpiresOn(shelfLifeDays: number | null | undefined, purchaseDate: Date): string | null {
   if (shelfLifeDays == null) return null;
+  // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line
   const n = Number(shelfLifeDays);
   if (!Number.isFinite(n) || n <= 0) return null;
   const d = new Date(purchaseDate);
@@ -697,9 +698,8 @@ export function ScannerPage() {
                 }
               }
             }
-          } catch {
-            // Edge function call failed — fall through to placeholder
-          }
+            // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: analyze-product edge function call failed — fall through to placeholder product to avoid blocking scan queue
+          } catch {}
 
           if (hardAiError) {
             // Surface the actionable error in the queue — explicitly do NOT

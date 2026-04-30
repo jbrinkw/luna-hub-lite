@@ -58,7 +58,7 @@ describe('AdHocSetForm', () => {
     const onCancel = vi.fn();
     render(<AdHocSetForm exercises={exercises} onSubmit={vi.fn()} onCancel={onCancel} />);
     await userEvent.click(screen.getByTestId('adhoc-cancel'));
-    expect(onCancel).toHaveBeenCalled();
+    expect(onCancel).toHaveBeenCalledTimes(1);
   });
 
   it('renders empty options when exercises array is empty', () => {

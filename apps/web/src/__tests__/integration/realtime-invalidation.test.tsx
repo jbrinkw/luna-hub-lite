@@ -254,9 +254,8 @@ describe('Realtime invalidation harness — postgres_changes → QueryClient.inv
         lastWarmErr = err;
         try {
           (subscriberClient as any).realtime?.disconnect?.();
-        } catch {
-          /* ignore */
-        }
+          // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Supabase realtime disconnect throws on concurrent shutdown — best-effort
+        } catch {}
         if (attempt < backoffMs.length - 1) {
           await new Promise((r) => setTimeout(r, backoffMs[attempt]));
         }
@@ -278,9 +277,8 @@ describe('Realtime invalidation harness — postgres_changes → QueryClient.inv
     subscriberClient.removeAllChannels();
     try {
       (subscriberClient as any).realtime?.disconnect?.();
-    } catch {
-      /* ignore */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: Supabase realtime disconnect throws on concurrent shutdown in afterAll — best-effort
+    } catch {}
     if (productId) {
       await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', productId);
     }

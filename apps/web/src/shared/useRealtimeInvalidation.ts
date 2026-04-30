@@ -225,9 +225,8 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
       // same effect tick, and unsubscribe() ignores stale errors gracefully.
       try {
         rt.channel.unsubscribe();
-      } catch {
-        /* swallow — the channel may already be in a terminal state */
-      }
+        // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: channel.unsubscribe() throws when channel is already in a terminal state — best-effort cleanup
+      } catch {}
       if (rt.heartbeatTimer) clearInterval(rt.heartbeatTimer);
       if (rt.reconnectTimer) clearTimeout(rt.reconnectTimer);
       supabase.removeChannel(rt.channel);
@@ -259,10 +258,8 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
         if (cancelled) return;
         try {
           supabase.realtime.connect();
-        } catch {
-          /* connect() is safe to call when already connected; swallow
-           * any race errors thrown during shutdown */
-        }
+          // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: connect() throws when already connected or during shutdown races — safe to swallow per Supabase realtime-js docs
+        } catch {}
       }, 300);
     };
     // Private API access: `RealtimeClient.stateChangeCallbacks.close` is an

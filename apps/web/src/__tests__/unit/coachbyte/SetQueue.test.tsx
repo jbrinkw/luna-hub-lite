@@ -154,7 +154,7 @@ describe('SetQueue', () => {
     const onAdHoc = vi.fn();
     renderQueue(<SetQueue sets={makeSets()} onComplete={vi.fn()} onAdHoc={onAdHoc} />);
     await userEvent.click(screen.getByTestId('adhoc-btn'));
-    expect(onAdHoc).toHaveBeenCalled();
+    expect(onAdHoc).toHaveBeenCalledTimes(1);
   });
 
   it('syncs reps/load inputs when nextSet changes (useEffect)', async () => {
@@ -239,7 +239,7 @@ describe('SetQueue', () => {
         />,
       );
       await userEvent.click(screen.getByTestId('pause-btn'));
-      expect(onPause).toHaveBeenCalled();
+      expect(onPause).toHaveBeenCalledTimes(1);
     });
 
     it('shows Resume button when timer is paused', () => {
@@ -271,7 +271,7 @@ describe('SetQueue', () => {
         />,
       );
       await userEvent.click(screen.getByTestId('resume-btn'));
-      expect(onResume).toHaveBeenCalled();
+      expect(onResume).toHaveBeenCalledTimes(1);
     });
 
     it('shows Reset button in running, paused, and expired states', () => {

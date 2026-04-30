@@ -72,23 +72,20 @@ async function runStreamingLoop(
   const writeChunk = (delta: Record<string, unknown>, finish_reason: string | null = null) => {
     try {
       controller.enqueue(encodeDataLine(encoder, buildChunk(completionId, created, model, delta, finish_reason)));
-    } catch {
-      /* stream already closed */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: ReadableStream controller.enqueue throws if the stream is already closed/cancelled — suppress
+    } catch {}
   };
   const writeError = (message: string) => {
     try {
       controller.enqueue(encodeDataLine(encoder, buildErrorChunk(message)));
-    } catch {
-      /* stream already closed */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: ReadableStream controller.enqueue throws if the stream is already closed/cancelled — suppress
+    } catch {}
   };
   const writeDone = () => {
     try {
       controller.enqueue(encodeDone(encoder));
-    } catch {
-      /* stream already closed */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: ReadableStream controller.enqueue throws if the stream is already closed/cancelled — suppress
+    } catch {}
   };
 
   // Initial role chunk
@@ -110,9 +107,8 @@ async function runStreamingLoop(
   const keepaliveTimer: ReturnType<typeof setInterval> = setInterval(() => {
     try {
       controller.enqueue(encodeComment(encoder, 'keepalive'));
-    } catch {
-      /* stream already closed */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: ReadableStream controller.enqueue throws if the stream is already closed — suppress
+    } catch {}
   }, KEEPALIVE_INTERVAL_MS);
 
   const onText = (delta: string) => {
@@ -212,9 +208,8 @@ async function runStreamingLoop(
     clearInterval(keepaliveTimer);
     try {
       controller.close();
-    } catch {
-      /* already closed */
-    }
+      // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: ReadableStreamDefaultController.close() throws if already closed — suppress
+    } catch {}
   }
 }
 

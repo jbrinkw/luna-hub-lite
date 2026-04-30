@@ -131,7 +131,9 @@ export async function loadDailyPlanData(day: string, client?: SupabaseClient<any
     exercise_id: ps.exercise_id,
     exercise_name: ps.exercises?.name ?? 'Unknown',
     target_reps: ps.target_reps,
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: target_load is a DB NUMERIC column; truthy-guard above excludes null/0
     target_load: ps.target_load ? Number(ps.target_load) : null,
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: target_load_percentage is a DB NUMERIC column; truthy-guard above excludes null/0
     target_load_percentage: ps.target_load_percentage ? Number(ps.target_load_percentage) : null,
     rest_seconds: ps.rest_seconds,
     order: ps.order,
@@ -142,6 +144,7 @@ export async function loadDailyPlanData(day: string, client?: SupabaseClient<any
     completed_set_id: cs.completed_set_id,
     exercise_name: cs.exercises?.name ?? 'Unknown',
     actual_reps: cs.actual_reps,
+    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: actual_load is a DB NUMERIC column from Supabase; always a valid numeric string
     actual_load: Number(cs.actual_load),
     completed_at: cs.completed_at,
   }));
@@ -529,6 +532,7 @@ export function TodayPage() {
           // Exclude only THIS set — by id, not by value-equality.
           if (completedSetId && ps.completed_set_id === completedSetId) continue;
           const r = ps.actual_reps;
+          // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: actual_load is a DB NUMERIC column from Supabase; always a valid numeric string
           const l = Number(ps.actual_load);
           const e = epley1RM(l, r);
           if (e > prevBestWithout) prevBestWithout = e;
