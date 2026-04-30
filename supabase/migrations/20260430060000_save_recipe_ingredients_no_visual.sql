@@ -1,3 +1,4 @@
+-- no-test: save_recipe_ingredients_no_visual reverts an RPC signature back to the canonical pre-visual form (delete-old + insert-new); behavior is exercised at integration level via apps/web RecipeForm tests. Same exemption rationale as predecessor migration 20260429260000_save_recipe_ingredients_visual.sql which used the same annotation.
 -- save_recipe_ingredients_no_visual: revert
 -- private.save_recipe_ingredients (and its public wrapper
 -- chefbyte.save_recipe_ingredients) to the pre-visual signature.
