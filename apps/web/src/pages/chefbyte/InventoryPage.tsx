@@ -18,6 +18,7 @@ import { ConfirmModal } from '@/components/ui/ConfirmModal';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { ModalOverlay } from '@/components/shared/ModalOverlay';
 import { CloseInFlightModal, type CloseInFlightResolution } from '@/components/chefbyte/CloseInFlightModal';
+import { ProductActionModal } from '@/components/chefbyte/ProductActionModal';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { useAppContext } from '@/shared/AppProvider';
 import { chefbyte } from '@/shared/supabase';
@@ -1470,7 +1471,9 @@ export function InventoryPage() {
                   // a "(picked up)" label so the user immediately sees WHY the
                   // stock dropped to zero — the bottle is in their hand, not gone.
                   const isPickedUp = isZeroStock && inFlightSince !== null;
-                  const servingsTotal = totalStock * Number(product.servings_per_container);
+                  // servingsTotal moved into the ProductActionModal-driven
+                  // computation block at the bottom of the file — was only
+                  // used by the now-extracted "(servings)" detail label.
                   const isExpanded = expandedProductId === product.product_id;
                   const expiryLabel = nearestExpiry
                     ? new Date(nearestExpiry + 'T00:00:00').toLocaleDateString('en-US', {
@@ -1710,117 +1713,16 @@ export function InventoryPage() {
                         </button>
                       </div>
 
-                      {/* Expanded detail panel */}
-                      {isExpanded && (
-                        <div
-                          className="px-4 pb-4 pt-1 bg-surface-sunken/50 border-t border-border-light"
-                          data-testid={`inv-detail-${product.product_id}`}
-                        >
-                          {/* Detail info — matches the collapsed row's treatment:
-                            in-flight zero-stock shows "(picked up)" instead of
-                            a misleading "0.0 containers (0.0 servings)". */}
-                          <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm text-text-secondary mb-3">
-                            <span data-testid={`stock-servings-${product.product_id}`}>
-                              {isPickedUp
-                                ? '(picked up — awaiting reunite)'
-                                : (() => {
-                                    const visualSet =
-                                      product.visual_unit_label != null &&
-                                      product.visual_units_per_serving != null &&
-                                      Number(product.visual_units_per_serving) > 0;
-                                    // When the product has a visual unit, swap
-                                    // the redundant "(servings)" half of the
-                                    // pair for a "(N visual-units)" half. The
-                                    // canonical container count stays first so
-                                    // shopping/min-stock math reads identically.
-                                    const visualHalf = visualSet
-                                      ? formatQuantityWithVisual({
-                                          quantity: totalStock,
-                                          unit: 'container',
-                                          visualUnitLabel: product.visual_unit_label,
-                                          visualUnitsPerServing: Number(product.visual_units_per_serving),
-                                          servingsPerContainer: Number(product.servings_per_container) || 1,
-                                        })
-                                      : `${servingsTotal.toFixed(1)} servings`;
-                                    return `${totalStock.toFixed(1)} containers (${visualHalf})`;
-                                  })()}
-                            </span>
-                            <span data-testid={`min-stock-${product.product_id}`}>
-                              Min stock: {Number(product.min_stock_amount).toFixed(1)}
-                            </span>
-                            <span data-testid={`detail-expiry-${product.product_id}`}>Expires: {expiryLabel}</span>
-                            {product.barcode && (
-                              <span data-testid={`barcode-${product.product_id}`}>Barcode: {product.barcode}</span>
-                            )}
-                          </div>
-
-                          {/* Action buttons — clean grid layout */}
-                          <div className="grid grid-cols-2 gap-2 max-w-sm">
-                            <button
-                              className="flex items-center justify-center gap-1.5 bg-success text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-success-hover transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openAddStockModal(product.product_id, 1);
-                              }}
-                              data-testid={`add-ctn-${product.product_id}`}
-                            >
-                              Add Container
-                            </button>
-                            <button
-                              className="flex items-center justify-center gap-1.5 bg-danger text-white border-none px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-hover transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                consumeStockMutation.mutate({
-                                  productId: product.product_id,
-                                  qty: 1,
-                                  unit: 'container',
-                                  productName: product.name,
-                                });
-                              }}
-                              data-testid={`sub-ctn-${product.product_id}`}
-                            >
-                              Remove Container
-                            </button>
-                            <button
-                              className="flex items-center justify-center gap-1.5 bg-surface text-success-text border-2 border-success px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-success-subtle transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                openAddStockModal(product.product_id, 1 / Number(product.servings_per_container));
-                              }}
-                              data-testid={`add-srv-${product.product_id}`}
-                            >
-                              Add Serving
-                            </button>
-                            <button
-                              className="flex items-center justify-center gap-1.5 bg-surface text-danger-text border-2 border-danger px-3 py-2 rounded-lg cursor-pointer text-sm font-semibold hover:bg-danger-subtle transition-colors"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                consumeStockMutation.mutate({
-                                  productId: product.product_id,
-                                  qty: 1,
-                                  unit: 'serving',
-                                  productName: product.name,
-                                });
-                              }}
-                              data-testid={`sub-srv-${product.product_id}`}
-                            >
-                              Remove Serving
-                            </button>
-                          </div>
-
-                          {/* Consume All — separate, text-style */}
-                          <button
-                            className="mt-2 bg-transparent text-text-secondary border-none px-0 py-1 cursor-pointer text-sm underline hover:text-text transition-colors"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleConsumeAll(product.product_id);
-                            }}
-                            data-testid={`consume-all-${product.product_id}`}
-                          >
-                            Consume All
-                          </button>
-                        </div>
-                      )}
+                      {/* Expanded detail panel was here — replaced by the
+                          top-level <ProductActionModal>, which renders the
+                          same action buttons inside a popup instead of
+                          expanding the row in place. See user feedback:
+                          "edit product should be a popup not expand in
+                          place". The popup opens whenever
+                          ``expandedProductId === product.product_id`` so
+                          the row toggle (above) still drives the same
+                          state machine — only the render location moved.
+                          Same data-testids preserved on the buttons. */}
                     </div>
                   );
                 },
@@ -2178,6 +2080,58 @@ export function InventoryPage() {
         onClose={() => setCloseModalLot(null)}
         onResolve={handleResolveClose}
       />
+
+      {/* ========================================================== */}
+      {/*  PRODUCT ACTION MODAL                                        */}
+      {/* ========================================================== */}
+      {/* Replaces the prior "expand the row in place" affordance with a
+          modal popup. Drives off the same `expandedProductId` state the
+          row toggle already manipulates — clicking the row opens the
+          modal, clicking it again (or hitting Escape, or clicking the
+          backdrop) closes it. Action button data-testids match the prior
+          inline panel exactly so existing e2e + unit tests keep passing
+          without rework. */}
+      {(() => {
+        const active = expandedProductId ? grouped.find((g) => g.product.product_id === expandedProductId) : null;
+        if (!active) {
+          return (
+            <ProductActionModal
+              isOpen={false}
+              product={null}
+              totalStock={0}
+              servingsTotal={0}
+              expiryLabel="—"
+              isPickedUp={false}
+              onClose={() => setExpandedProductId(null)}
+              onOpenAddStock={openAddStockModal}
+              onConsume={(args) => consumeStockMutation.mutate(args)}
+              onConsumeAll={handleConsumeAll}
+            />
+          );
+        }
+        const isPickedUpActive = active.totalStock <= 0 && active.inFlightSince !== null;
+        const servingsTotalActive = active.totalStock * Number(active.product.servings_per_container);
+        const expiryLabelActive = active.nearestExpiry
+          ? new Date(active.nearestExpiry + 'T00:00:00').toLocaleDateString('en-US', {
+              month: 'short',
+              day: 'numeric',
+            })
+          : '—';
+        return (
+          <ProductActionModal
+            isOpen={true}
+            product={active.product}
+            totalStock={active.totalStock}
+            servingsTotal={servingsTotalActive}
+            expiryLabel={expiryLabelActive}
+            isPickedUp={isPickedUpActive}
+            onClose={() => setExpandedProductId(null)}
+            onOpenAddStock={openAddStockModal}
+            onConsume={(args) => consumeStockMutation.mutate(args)}
+            onConsumeAll={handleConsumeAll}
+          />
+        );
+      })()}
     </ChefLayout>
   );
 }
