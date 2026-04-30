@@ -210,7 +210,12 @@ config_for_prod_file() {
   case "$f" in
     extensions/*) echo "stryker.conf.json" ;;
     apps/mcp-worker/src/*) echo "stryker.mcp-worker.conf.json" ;;
-    apps/web/src/shared/*) echo "stryker.web-shared.conf.json" ;;
+    # All apps/web TypeScript sources — the web-shared Stryker config uses
+    # the full web vitest suite (scripts/mutation/stryker-configs/vitest.web.config.ts)
+    # and the --mutate flag passed by this gate narrows to exactly the prod
+    # file under test. This covers shared/, components/, pages/, and hooks/.
+    # Note: bash case does not support ** globs; use prefix match instead.
+    apps/web/src/*) echo "stryker.web-shared.conf.json" ;;
     *) echo "" ;;
   esac
 }
