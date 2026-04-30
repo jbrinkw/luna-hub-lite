@@ -329,16 +329,36 @@ run_pair() {
     return 0
   fi
 
-  # Run Stryker scoped to exactly prod_f
+  # Build a temp config that overrides mutate[] and jsonReporter.fileName.
+  # We can't pass --jsonReporter.fileName via CLI (not a valid Stryker CLI flag);
+  # it must be set in the config file. We read the base config, override the
+  # relevant fields, and write a temporary config for this pair.
+  local temp_cfg="$REPO_ROOT/.verify/mutation-pair-${idx}.stryker.conf.json"
+  local temp_dir="$REPO_ROOT/.stryker-tmp-pair-${idx}"
+  node --input-type=module - <<NODE "$cfg" "$prod_f" "$pair_report_path" "$temp_cfg" "$temp_dir"
+import fs from 'node:fs';
+const [cfgPath, prodFile, reportPath, outPath, tmpDir] = process.argv.slice(2);
+let base = {};
+try { base = JSON.parse(fs.readFileSync(cfgPath, 'utf8')); } catch {}
+const merged = {
+  ...base,
+  mutate: [prodFile],
+  reporters: ['clear-text', 'json'],
+  jsonReporter: { fileName: reportPath },
+  tempDirName: tmpDir,
+  cleanTempDir: true,
+  // Suppress threshold break so Stryker exits 0 on low-score (we check killed count ourselves)
+  thresholds: { high: 80, low: 0, break: 0 },
+};
+fs.writeFileSync(outPath, JSON.stringify(merged, null, 2));
+NODE
+
+  # Run Stryker scoped to exactly prod_f using the temp config
   local stryker_exit=0
   {
-    "$STRYKER_BIN" run "$cfg" \
-      --mutate "$prod_f" \
-      --reporters "json" \
-      --reporters "clear-text" \
-      --jsonReporter.fileName "$pair_report_path" \
-      2>&1
+    "$STRYKER_BIN" run "$temp_cfg" 2>&1
   } | tee -a "$LOG_FILE" ; stryker_exit=${PIPESTATUS[0]}
+  rm -f "$temp_cfg" 2>/dev/null || true
 
   # Timeout detection: stryker_exit != 0 AND no report written
   if [[ "$stryker_exit" -ne 0 && ! -f "$pair_report_path" ]]; then

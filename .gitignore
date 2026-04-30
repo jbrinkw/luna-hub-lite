@@ -46,3 +46,9 @@ Journal.json
 hardware/live-shelf/mutants/
 hardware/live-shelf/.mutmut-cache
 **/.testmondata
+
+# mutation_pair_gate self-test fixtures (created/deleted by the gate script; never committed)
+extensions/_self_test_gate_a/
+extensions/_self_test_gate_b/
+packages/app-tools/src/__tests__/_self_test_gate_a.test.ts
+packages/app-tools/src/__tests__/_self_test_gate_b.test.ts
