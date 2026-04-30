@@ -96,14 +96,22 @@ test('meal-plan-execution-creates-meal-lot', async ({ page }) => {
     expect(mealLot, 'meal lot exists').toBeTruthy();
     expect(Number(mealLot.qty_containers)).toBeGreaterThan(0);
 
-    // Web-side: ChefByte loads correctly after meal execution.
-    // NOTE: [MEAL] products are intentionally excluded from the Inventory page
-    // (useChefbyteProducts filters name ILIKE '[MEAL]%' to keep inventory clean).
-    // The DB assertions above already verified the [MEAL] lot was created.
-    // Here we just verify the app navigates and loads without crashing.
+    // Web-side: meal-plan UI reflects the mark_meal_done call.
+    // [MEAL] products are intentionally hidden from /chef/inventory (the
+    // useChefbyteProducts hook filters name ILIKE '[MEAL]%'), so the
+    // original assertion targeting `inv-product-<id>` will never match
+    // by design. Instead we verify the propagation point that actually
+    // matters: the meal-plan grid shows the done-badge for the meal
+    // whose mark_meal_done RPC just succeeded. This pins the
+    // RPC→Realtime→TanStack Query cache→UI render chain end-to-end and
+    // catches regressions in any of those hops.
     await loginViaUi(page, seeded.email, seeded.password);
-    await page.goto('/chef');
-    await expect(page.getByText('ChefByte')).toBeVisible({ timeout: 10_000 });
+    await page.goto('/chef/meal-plan');
+    await page.getByTestId('today-btn').click();
+    await expect(
+      page.getByTestId(`done-badge-${meal.meal_id}`),
+      'meal plan grid should show done-badge for the executed meal',
+    ).toBeVisible({ timeout: 10_000 });
   } finally {
     await seeded.cleanup();
   }
