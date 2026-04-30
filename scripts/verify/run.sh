@@ -54,6 +54,7 @@ FULL_STEPS=(
   "Pi unit tests (pytest)|run_pi_pytest"
   "harness (Pi <-> cloud loopback)|pnpm harness"
   "parity_assert (L2 self-test)|run_parity_assert"
+  "mutation_pair_gate (PR-scoped)|run_mutation_pair_gate"
   "test:e2e (Phase 2, guarded)|run_e2e_guarded"
 )
 
@@ -157,6 +158,13 @@ run_parity_assert() {
     echo "  Output: $out"
     return 1
   fi
+}
+
+run_mutation_pair_gate() {
+  # PR-scoped mutation gate: for each (new/modified test, modified prod file) pair,
+  # assert ≥1 mutant killed. Skip cleanly when no PR diff exists (empty diff vs
+  # origin/main). Timeout is a hard FAIL (exit 3) — not treated as a pass.
+  bash scripts/verify/mutation_pair_gate.sh
 }
 
 run_e2e_guarded() {
