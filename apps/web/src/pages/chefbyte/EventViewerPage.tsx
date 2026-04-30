@@ -358,6 +358,14 @@ export function EventViewerPage() {
   useRealtimeInvalidation('event-viewer', [
     { schema: 'chefbyte', table: 'event_overrides', queryKeys: [overridesKey] },
     { schema: 'chefbyte', table: 'shelf_event_log', queryKeys: [eventsKey] },
+    // products is read into productsById and rendered as the per-event
+    // name + macros. Without this, a Settings rename or AI-analyzer
+    // macro update doesn't reflect on the events list until refresh.
+    { schema: 'chefbyte', table: 'products', queryKeys: [productsKey] },
+    // live_shelf_devices supplies the LAN IP used to resolve
+    // before/after image URLs. Heartbeat-update or new device pair
+    // means a different IP — refresh is required without this sub.
+    { schema: 'chefbyte', table: 'live_shelf_devices', queryKeys: [devicesKey] },
   ]);
 
   /* ---- Merge ---- */

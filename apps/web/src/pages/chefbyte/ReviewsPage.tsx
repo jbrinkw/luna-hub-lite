@@ -177,7 +177,14 @@ export function ReviewsPage() {
 
   // Realtime push: any Pi-driven create or another-tab resolution
   // refetches the pending list immediately.
-  useRealtimeInvalidation('chef-reviews-rt', [{ schema: 'chefbyte', table: 'review_queue', queryKeys: [queryKey] }]);
+  useRealtimeInvalidation('chef-reviews-rt', [
+    { schema: 'chefbyte', table: 'review_queue', queryKeys: [queryKey] },
+    // live_shelf_devices is queried for the LAN-IP that resolves
+    // before/after image URLs. A heartbeat-update or new-device pair
+    // means a different LAN IP — without this, the page renders the
+    // stale IP (or no IP at all) until refresh.
+    { schema: 'chefbyte', table: 'live_shelf_devices', queryKeys: [devicesKey] },
+  ]);
 
   const resolveMutation = useMutation({
     mutationFn: async (args: {
