@@ -8,39 +8,39 @@
  *
  *   - Table accidentally dropped from the `supabase_realtime` publication
  *     (server responds `status: error`, channel transitions CHANNEL_ERROR).
+ *     The pgTAP `realtime_publication_completeness` gate catches this at CI
+ *     time now; this store still surfaces any runtime regression.
  *   - Auth token expired mid-session — WS closes with policy violation.
  *   - Network blip or OS resume — socket closed, reconnect logic failed.
  *   - Supabase server restart during a publication migration.
  *
- * Detection = two signals per channel:
+ * Detection = single signal per channel: the `status` argument from
+ * `channel.subscribe((status, err) => ...)`:
+ *   SUBSCRIBED | TIMED_OUT | CHANNEL_ERROR | CLOSED | CONNECTING.
  *
- *   1. **Status** from `channel.subscribe((status, err) => ...)`:
- *        SUBSCRIBED | TIMED_OUT | CHANNEL_ERROR | CLOSED
- *   2. **Broadcast echo heartbeat**: every 30s we emit a self-addressed
- *      broadcast on the same channel and listen for its echo (via
- *      `config.broadcast.self = true`). If three consecutive heartbeats fail
- *      to echo back, we flip to `degraded`. This validates the full WS path
- *      without hitting Postgres (no write cost; see ALTERNATIVE in the task
- *      brief — broadcast-self is strictly cheaper than a Postgres write).
+ * The earlier design also ran a 30s broadcast-self heartbeat as a "silent
+ * stall" probe but it could not actually detect the publication-gap failure
+ * mode it was designed for (broadcast and postgres_changes traverse different
+ * server paths) and was the source of a post-idle 401 storm in the browser
+ * console — the heartbeat kept firing on dead channels with stale JWTs.
+ * Removed in favor of state-machine-driven health; see the equivalent
+ * docblock in useRealtimeInvalidation.ts for the full justification.
  *
  * **Initial-connect grace window.** A freshly registered channel starts in
  * `CONNECTING` and typically reaches `SUBSCRIBED` within a few hundred ms.
  * To avoid a banner flash on every page load, a channel is NOT considered
  * degraded during the first `INITIAL_CONNECT_GRACE_MS` after registration
- * unless a terminal-error status arrives or 3 heartbeats are missed in that
- * window. After the grace window expires, if the channel still hasn't
- * reached `SUBSCRIBED`, it flips to `degraded` and the banner appears.
- * This trades a tiny (3s) detection delay on truly-broken realtime for
- * eliminating a 100% false-positive flash on every healthy page load.
+ * unless a terminal-error status arrives. After the grace window expires,
+ * if the channel still hasn't reached `SUBSCRIBED`, it flips to `degraded`
+ * and the banner appears.
  *
  * Once a channel has reached `SUBSCRIBED` at least once, the grace window
  * no longer applies — any subsequent terminal status flips it to degraded
  * immediately so mid-session disconnects surface promptly.
  *
  * A channel is `healthy` iff it's currently SUBSCRIBED (or within the
- * initial-connect grace window with no terminal error) AND the most recent
- * heartbeat echoed back. Any non-SUBSCRIBED terminal status (after grace),
- * or 3 consecutive missed heartbeats, flips it to `degraded`. The aggregate
+ * initial-connect grace window with no terminal error). Any non-SUBSCRIBED
+ * terminal status (after grace) flips it to `degraded`. The aggregate
  * `isAnyDegraded()` returns true if *any* registered channel is degraded —
  * that's what the UI banner watches.
  */
@@ -50,8 +50,6 @@ export type ChannelStatus = 'SUBSCRIBED' | 'TIMED_OUT' | 'CHANNEL_ERROR' | 'CLOS
 export interface ChannelHealth {
   key: string;
   status: ChannelStatus;
-  missedHeartbeats: number;
-  lastHeartbeatAt: number | null;
   /** Wall-clock ms when register() was called — used to enforce grace window. */
   registeredAt: number;
   /** Has this channel ever reached SUBSCRIBED? Once true, grace window no longer applies. */
@@ -90,11 +88,10 @@ function isTerminalError(status: ChannelStatus): boolean {
 }
 
 /**
- * Recompute `degraded` for a single channel from its current status,
- * heartbeat misses, and grace-window state.
+ * Recompute `degraded` for a single channel from its current status and
+ * grace-window state.
  *
  * Decision matrix:
- *   - Heartbeat fail (3+ misses) → degraded (always, even during grace)
  *   - Status SUBSCRIBED → healthy
  *   - Terminal error (CHANNEL_ERROR/TIMED_OUT/CLOSED) → degraded
  *   - Otherwise (CONNECTING, etc.):
@@ -104,10 +101,6 @@ function isTerminalError(status: ChannelStatus): boolean {
 function recompute(key: string, now: number = Date.now()) {
   const h = channels.get(key);
   if (!h) return;
-  if (h.missedHeartbeats >= 3) {
-    h.degraded = true;
-    return;
-  }
   if (h.status === 'SUBSCRIBED') {
     h.degraded = false;
     return;
@@ -139,8 +132,6 @@ export const realtimeHealth = {
       channels.set(key, {
         key,
         status: 'CONNECTING',
-        missedHeartbeats: 0,
-        lastHeartbeatAt: null,
         registeredAt: now,
         everSubscribed: false,
         degraded: false, // within grace window, treat as healthy ("connecting…")
@@ -175,30 +166,11 @@ export const realtimeHealth = {
     h.status = status;
     h.lastError = err;
     if (status === 'SUBSCRIBED') {
-      // Fresh subscribe — reset heartbeat miss counter so we don't stay
-      // degraded forever after a recovery, and pin everSubscribed so future
-      // disconnects do NOT get a fresh grace window.
-      h.missedHeartbeats = 0;
+      // Pin everSubscribed so future disconnects do NOT get a fresh grace
+      // window — mid-session disconnects must surface promptly.
       h.everSubscribed = true;
       clearGraceTimer(key);
     }
-    recompute(key);
-    emit();
-  },
-
-  markHeartbeatSent(key: string): void {
-    const h = channels.get(key);
-    if (!h) return;
-    h.missedHeartbeats += 1;
-    recompute(key);
-    emit();
-  },
-
-  markHeartbeatEcho(key: string): void {
-    const h = channels.get(key);
-    if (!h) return;
-    h.missedHeartbeats = 0;
-    h.lastHeartbeatAt = Date.now();
     recompute(key);
     emit();
   },

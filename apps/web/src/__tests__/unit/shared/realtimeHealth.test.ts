@@ -50,38 +50,9 @@ describe('realtimeHealth singleton', () => {
     expect(realtimeHealth.isAnyDegraded()).toBe(true);
   });
 
-  it('stays healthy through 2 missed heartbeats and flips on the 3rd', () => {
+  it('recovers when re-SUBSCRIBED after a terminal error', () => {
     realtimeHealth.register('a', () => {});
     realtimeHealth.setStatus('a', 'SUBSCRIBED');
-
-    realtimeHealth.markHeartbeatSent('a');
-    expect(realtimeHealth.isAnyDegraded()).toBe(false);
-
-    realtimeHealth.markHeartbeatSent('a');
-    expect(realtimeHealth.isAnyDegraded()).toBe(false);
-
-    realtimeHealth.markHeartbeatSent('a');
-    expect(realtimeHealth.isAnyDegraded()).toBe(true);
-  });
-
-  it('recovers when a heartbeat echo arrives', () => {
-    realtimeHealth.register('a', () => {});
-    realtimeHealth.setStatus('a', 'SUBSCRIBED');
-
-    realtimeHealth.markHeartbeatSent('a');
-    realtimeHealth.markHeartbeatSent('a');
-    realtimeHealth.markHeartbeatSent('a');
-    expect(realtimeHealth.isAnyDegraded()).toBe(true);
-
-    realtimeHealth.markHeartbeatEcho('a');
-    expect(realtimeHealth.isAnyDegraded()).toBe(false);
-  });
-
-  it('resets miss counter on re-SUBSCRIBED after an error', () => {
-    realtimeHealth.register('a', () => {});
-    realtimeHealth.setStatus('a', 'SUBSCRIBED');
-    realtimeHealth.markHeartbeatSent('a');
-    realtimeHealth.markHeartbeatSent('a');
 
     realtimeHealth.setStatus('a', 'CHANNEL_ERROR');
     expect(realtimeHealth.isAnyDegraded()).toBe(true);
@@ -226,13 +197,4 @@ describe('realtimeHealth — initial-connect grace window', () => {
     expect(realtimeHealth.isAnyDegraded()).toBe(true);
   });
 
-  it('three missed heartbeats during grace window override the grace and mark degraded', () => {
-    realtimeHealth.register('a', () => {});
-    expect(realtimeHealth.isAnyDegraded()).toBe(false);
-
-    realtimeHealth.markHeartbeatSent('a');
-    realtimeHealth.markHeartbeatSent('a');
-    realtimeHealth.markHeartbeatSent('a');
-    expect(realtimeHealth.isAnyDegraded()).toBe(true);
-  });
 });

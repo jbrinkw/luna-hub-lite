@@ -12,32 +12,12 @@ interface RealtimeSub {
 }
 
 /**
- * Heartbeat cadence. Every `HEARTBEAT_MS` the hook emits a broadcast-self
- * ping on each channel and expects the same channel to deliver it back.
- * Three consecutive misses flips the channel to `degraded` in the health
- * store. 30s is chosen to balance (a) how quickly a silent-death banner
- * surfaces (~90s worst-case) against (b) the number of WS frames we send
- * when idle. Broadcast is free — no Postgres write — so we can afford this.
- *
- * NOTE: this is in MILLIS; unit tests fake-time through it via
- * `vi.useFakeTimers()` and advance in increments of this constant.
- */
-export const HEARTBEAT_MS = 30_000;
-
-/**
  * Auto-reconnect policy on TIMED_OUT / CHANNEL_ERROR / CLOSED. Exponential
  * backoff: 1s, 3s, 9s. After 3 failed attempts we stop retrying and leave
  * the banner up; user clicks "Reconnect" (or a network-online event) to
  * force a resubscribe.
  */
 const RECONNECT_DELAYS_MS = [1_000, 3_000, 9_000];
-
-interface HeartbeatState {
-  // How many consecutive heartbeat pings went unanswered. Reset on every echo.
-  missed: number;
-  // Latest nonce we sent — used to ignore stale echoes from a prior cycle.
-  nonce: number;
-}
 
 /**
  * Subscribe to Supabase Realtime postgres_changes and invalidate specific
@@ -68,20 +48,24 @@ interface HeartbeatState {
  * a brief network blip stops receiving realtime events until manual
  * reload.
  *
- * **Silent-death detection.** Even with the socket-close hook above, a
- * broken publication or a dropped subscription can leave the socket
- * *open* while no postgres_changes events are ever delivered. We wire
- * three complementary signals into the `realtimeHealth` store:
- *
- *   1. Status from `channel.subscribe((status, err) => ...)`.
- *   2. Broadcast-echo heartbeat (every HEARTBEAT_MS) — validates the WS
- *      path without a Postgres write. `config.broadcast.self = true` is
- *      set so the channel delivers our own broadcast back to us.
- *   3. Exponential auto-reconnect on CHANNEL_ERROR / TIMED_OUT / CLOSED.
- *
- * Consumers don't need to opt in — just calling the hook as before wires
- * all of this up. `AppProvider` reads `realtimeHealth.isAnyDegraded()` and
- * shows a banner in `OfflineIndicator` when any tracked channel is down.
+ * **Health detection.** Channel health is driven entirely by the
+ * `channel.subscribe((status, err) => ...)` callback, which surfaces
+ * `SUBSCRIBED` / `CHANNEL_ERROR` / `TIMED_OUT` / `CLOSED` from supabase-js's
+ * Phoenix-channel state machine. Terminal errors trigger the
+ * exponential auto-reconnect ladder (1s/3s/9s, 3 attempts). The earlier
+ * design also ran a 30s broadcast-self heartbeat per channel as a
+ * "silent stall" probe, but it sent through `/realtime/v1/api/broadcast`
+ * (which requires a fresh JWT and counts toward broadcast quota) and
+ * could not actually detect the publication-gap failure mode it was
+ * designed for — broadcasts and postgres_changes go through different
+ * server paths, so a broken publication leaves the broadcast path
+ * working and the heartbeat happy. Once the pgTAP
+ * `realtime_publication_completeness` gate started enforcing publication
+ * membership at CI time, the heartbeat became net-negative: it could not
+ * detect the failure it claimed to and was the source of the post-idle
+ * 401 storm in the browser console (heartbeat keeps firing on a dead
+ * channel with a stale JWT). Removed in favor of state-machine-driven
+ * health.
  */
 export function useRealtimeInvalidation(channelName: string, subscriptions: RealtimeSub[]) {
   const queryClient = useQueryClient();
@@ -108,8 +92,6 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
       key: string;
       sub: RealtimeSub;
       channel: ReturnType<typeof supabase.channel>;
-      heartbeat: HeartbeatState;
-      heartbeatTimer?: ReturnType<typeof setInterval>;
       reconnectAttempt: number;
       reconnectTimer?: ReturnType<typeof setTimeout>;
     };
@@ -119,57 +101,37 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
     const buildChannel = (sub: RealtimeSub): ChannelRuntime => {
       const perTableName = `${channelName}:${sub.schema}.${sub.table}`;
 
-      // broadcast.self = true means our own broadcast is echoed back to us,
-      // which is what we want for the heartbeat probe.
-      const channel = supabase.channel(perTableName, {
-        config: { broadcast: { self: true } },
-      });
-
-      const heartbeat: HeartbeatState = { missed: 0, nonce: 0 };
+      const channel = supabase.channel(perTableName);
 
       const rt: ChannelRuntime = {
         key: perTableName,
         sub,
         channel,
-        heartbeat,
         reconnectAttempt: 0,
       };
 
-      channel
-        .on(
-          'postgres_changes',
-          {
-            event: '*',
-            schema: sub.schema,
-            table: sub.table,
-            filter: sub.filter ?? `user_id=eq.${user.id}`,
-          },
-          () => {
-            // Read the latest subscriptions from the ref in case the caller
-            // re-rendered with new keys after mount. Invalidate AND force a
-            // refetch: the default `refetchType: 'active'` silently skips
-            // queries whose observers aren't settled yet (e.g. during route
-            // transitions), which was hiding updates for pages that had
-            // just mounted when the event fired. `'all'` guarantees the
-            // refetch fires regardless of observer state.
-            const current = subsRef.current.find((s) => s.schema === sub.schema && s.table === sub.table) ?? sub;
-            for (const key of current.queryKeys) {
-              queryClient.invalidateQueries({ queryKey: [...key], refetchType: 'all' });
-            }
-            // A real postgres_changes event is also implicit proof that the
-            // channel is alive — reset the heartbeat counter.
-            realtimeHealth.markHeartbeatEcho(perTableName);
-          },
-        )
-        .on('broadcast', { event: 'rt-heartbeat' }, (payload: { payload?: { nonce?: number } }) => {
-          // Accept only echoes from the most recent heartbeat nonce — stale
-          // echoes (from a previous subscribe cycle) must not mask a newly
-          // broken channel.
-          if (payload?.payload?.nonce === heartbeat.nonce) {
-            heartbeat.missed = 0;
-            realtimeHealth.markHeartbeatEcho(perTableName);
+      channel.on(
+        'postgres_changes',
+        {
+          event: '*',
+          schema: sub.schema,
+          table: sub.table,
+          filter: sub.filter ?? `user_id=eq.${user.id}`,
+        },
+        () => {
+          // Read the latest subscriptions from the ref in case the caller
+          // re-rendered with new keys after mount. Invalidate AND force a
+          // refetch: the default `refetchType: 'active'` silently skips
+          // queries whose observers aren't settled yet (e.g. during route
+          // transitions), which was hiding updates for pages that had
+          // just mounted when the event fired. `'all'` guarantees the
+          // refetch fires regardless of observer state.
+          const current = subsRef.current.find((s) => s.schema === sub.schema && s.table === sub.table) ?? sub;
+          for (const key of current.queryKeys) {
+            queryClient.invalidateQueries({ queryKey: [...key], refetchType: 'all' });
           }
-        });
+        },
+      );
 
       realtimeHealth.register(perTableName, () => forceReconnect(rt));
 
@@ -184,24 +146,6 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
           scheduleReconnect(rt);
         }
       });
-
-      rt.heartbeatTimer = setInterval(() => {
-        if (cancelled) return;
-        heartbeat.nonce += 1;
-        heartbeat.missed += 1;
-        realtimeHealth.markHeartbeatSent(perTableName);
-        channel
-          .send({
-            type: 'broadcast',
-            event: 'rt-heartbeat',
-            payload: { nonce: heartbeat.nonce, at: Date.now() },
-          })
-          .catch(() => {
-            /* send() rejects when the channel is in an error state — the
-             * missed counter already ticked, so the health store picks it
-             * up. Nothing to do here. */
-          });
-      }, HEARTBEAT_MS);
 
       return rt;
     };
@@ -227,7 +171,6 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
         rt.channel.unsubscribe();
         // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: channel.unsubscribe() throws when channel is already in a terminal state — best-effort cleanup
       } catch {}
-      if (rt.heartbeatTimer) clearInterval(rt.heartbeatTimer);
       if (rt.reconnectTimer) clearTimeout(rt.reconnectTimer);
       supabase.removeChannel(rt.channel);
 
@@ -238,12 +181,10 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
 
     // One channel per subscription — see docblock above for why we don't
     // multiplex.
-    /* eslint-disable react-hooks/immutability -- runtimes Map is local to this effect */
     for (const sub of subsRef.current) {
       const rt = buildChannel(sub);
       runtimes.set(rt.key, rt);
     }
-    /* eslint-enable react-hooks/immutability */
 
     // Wire a socket-level close listener so a disconnect (explicit or
     // network-induced) kicks a reconnect. Each effect run installs its
@@ -297,7 +238,6 @@ export function useRealtimeInvalidation(channelName: string, subscriptions: Real
         if (idx >= 0) closeCallbacks.splice(idx, 1);
       }
       for (const runtime of runtimes.values()) {
-        if (runtime.heartbeatTimer) clearInterval(runtime.heartbeatTimer);
         if (runtime.reconnectTimer) clearTimeout(runtime.reconnectTimer);
         realtimeHealth.unregister(runtime.key);
         supabase.removeChannel(runtime.channel);

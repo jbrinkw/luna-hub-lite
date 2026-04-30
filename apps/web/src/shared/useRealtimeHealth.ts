@@ -14,8 +14,10 @@ export const RECONNECT_SETTLE_MS = 300;
 /**
  * React-facing subscription to the realtime health singleton. Returns
  * `{ degraded, reconnect }` where `degraded` flips to true as soon as ANY
- * tracked channel loses its SUBSCRIBED status or misses three consecutive
- * heartbeats, and `reconnect` force-resubscribes every tracked channel.
+ * tracked channel transitions to a terminal status (CHANNEL_ERROR /
+ * TIMED_OUT / CLOSED) or fails to reach SUBSCRIBED before its
+ * initial-connect grace window expires, and `reconnect` force-resubscribes
+ * every tracked channel.
  *
  * `reconnect` does TWO things, in order:
  *   1. **Hard-resets the underlying Realtime socket** via
@@ -29,8 +31,7 @@ export const RECONNECT_SETTLE_MS = 300;
  *      the lib to throw away its broken socket and build a fresh one.
  *   2. **Fans out per-channel reconnectors** via `realtimeHealth.reconnectAll()`.
  *      This rebuilds each `supabase.channel(...)` so the freshly-connected
- *      socket has a clean set of subscriptions and the heartbeat loop
- *      starts over from a known state.
+ *      socket has a clean set of subscriptions.
  *
  * Returns a Promise that resolves once both steps have been kicked off
  * (the actual SUBSCRIBED transition arrives asynchronously over the wire).

@@ -27,12 +27,10 @@ import React from 'react';
 
 const { mockChannel, mockSupabase, captureCallbacks } = vi.hoisted(() => {
   let postgresChangesCallback: (() => void) | null = null;
-  let broadcastCallback: ((payload: any) => void) | null = null;
 
   const mockChannel = {
     on: vi.fn((eventType: string, _filter: any, cb: any) => {
       if (eventType === 'postgres_changes') postgresChangesCallback = cb;
-      else if (eventType === 'broadcast') broadcastCallback = cb;
       return mockChannel;
     }),
     subscribe: vi.fn((cb?: any) => {
@@ -40,7 +38,6 @@ const { mockChannel, mockSupabase, captureCallbacks } = vi.hoisted(() => {
       return mockChannel;
     }),
     unsubscribe: vi.fn(),
-    send: vi.fn().mockResolvedValue(undefined),
   };
 
   const mockSupabase = {
@@ -66,12 +63,8 @@ const { mockChannel, mockSupabase, captureCallbacks } = vi.hoisted(() => {
       get postgres() {
         return postgresChangesCallback;
       },
-      get broadcast() {
-        return broadcastCallback;
-      },
       reset() {
         postgresChangesCallback = null;
-        broadcastCallback = null;
       },
     },
   };
@@ -91,11 +84,8 @@ vi.mock('@/shared/realtimeHealth', () => ({
     register: vi.fn(),
     unregister: vi.fn(),
     setStatus: vi.fn(),
-    markHeartbeatSent: vi.fn(),
-    markHeartbeatEcho: vi.fn(),
     isAnyDegraded: vi.fn(() => false),
   },
-  HEARTBEAT_MS: 30_000,
   INITIAL_CONNECT_GRACE_MS: 5_000,
 }));
 
@@ -125,14 +115,12 @@ beforeEach(() => {
   // Re-wire channel mock so .on() re-captures callbacks after clearAllMocks()
   mockChannel.on.mockImplementation((eventType: string, _filter: any, cb: any) => {
     if (eventType === 'postgres_changes') (captureCallbacks as any)._postgres = cb;
-    else if (eventType === 'broadcast') (captureCallbacks as any)._broadcast = cb;
     return mockChannel;
   });
   mockChannel.subscribe.mockImplementation((cb?: any) => {
     if (cb) cb('SUBSCRIBED', undefined);
     return mockChannel;
   });
-  mockChannel.send.mockResolvedValue(undefined);
   mockSupabase.channel.mockReturnValue(mockChannel);
   mockSupabase.realtime.stateChangeCallbacks.close = [];
 
@@ -232,7 +220,7 @@ describe('useRealtimeInvalidation — channel lifecycle', () => {
       { wrapper: wrapper(queryClient) },
     );
 
-    expect(mockSupabase.channel).toHaveBeenCalledWith(expect.stringContaining('my-channel'), expect.any(Object));
+    expect(mockSupabase.channel).toHaveBeenCalledWith(expect.stringContaining('my-channel'));
     expect(mockChannel.subscribe).toHaveBeenCalledTimes(1);
   });
 
