@@ -26,6 +26,7 @@ import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { useChefbyteProducts, type ChefbyteProduct } from '@/shared/useChefbyteProducts';
 import { todayStr } from '@/shared/dates';
 import { isValidLanIp } from '@/components/chefbyte/ScalesTab';
+import { formatQuantityWithVisual } from '@/shared/recipes/formatIngredientDisplay';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -60,12 +61,18 @@ interface StockLot {
   last_observed_at: string | null;
   locations: { name: string } | null;
   /**
-   * Joined from `chefbyte.products` — provides product name and
-   * servings_per_container without a separate map lookup. Includes
-   * [MEAL] sentinel products so the lot view can render a [MEAL] flag
-   * rather than showing "Unknown" for those lots.
+   * Joined from `chefbyte.products` — provides product name,
+   * servings_per_container, and visual-unit display fields without a
+   * separate map lookup. Includes [MEAL] sentinel products so the lot
+   * view can render a [MEAL] flag rather than showing "Unknown" for
+   * those lots.
    */
-  products: { name: string; servings_per_container: number } | null;
+  products: {
+    name: string;
+    servings_per_container: number;
+    visual_unit_label: string | null;
+    visual_units_per_serving: number | null;
+  } | null;
 }
 
 interface LiveShelfDeviceLite {
@@ -431,7 +438,7 @@ export function InventoryPage() {
       const { data, error } = await chefbyte()
         .from('stock_lots')
         .select(
-          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,last_observed_weight_g,last_observed_at,locations:location_id(name),products:product_id(name,servings_per_container)',
+          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,last_observed_weight_g,last_observed_at,locations:location_id(name),products:product_id(name,servings_per_container,visual_unit_label,visual_units_per_serving)',
         )
         .eq('user_id', user!.id);
       if (error) throw error;
@@ -748,16 +755,30 @@ export function InventoryPage() {
         const joinedProduct = lot.products;
         const mappedProduct = productMap.get(lot.product_id);
         const productName = joinedProduct?.name ?? mappedProduct?.name ?? 'Unknown';
-        const servingsPerContainer =
-          joinedProduct?.servings_per_container ?? mappedProduct?.servings_per_container ?? 1;
+        const servingsPerContainer: number = Number(
+          joinedProduct?.servings_per_container ?? mappedProduct?.servings_per_container ?? 1,
+        );
         const qtyServings = Number(lot.qty_containers) * servingsPerContainer;
         const isMealLot = productName.startsWith('[MEAL]');
+        // Visual unit: prefer the joined-row value (covers [MEAL] sentinel
+        // products that are filtered out of useChefbyteProducts) and fall
+        // back to the mappedProduct entry from the regular catalog.
+        const visualUnitLabel = joinedProduct?.visual_unit_label ?? mappedProduct?.visual_unit_label ?? null;
+        const visualUnitsPerServing =
+          joinedProduct?.visual_units_per_serving != null
+            ? Number(joinedProduct.visual_units_per_serving)
+            : mappedProduct?.visual_units_per_serving != null
+              ? Number(mappedProduct.visual_units_per_serving)
+              : null;
         return {
           ...lot,
           productName,
           productCertified: mappedProduct?.certified === true,
           qtyServings,
           isMealLot,
+          visualUnitLabel,
+          visualUnitsPerServing,
+          servingsPerContainer,
         };
       })
       .sort((a, b) => {
@@ -1351,7 +1372,19 @@ export function InventoryPage() {
                       <span className="line-through mr-2" data-testid={`expired-date-${lot.lot_id}`}>
                         Expires {lot.expires_on}
                       </span>
-                      <span>{Number(lot.qty_containers).toFixed(1)} ctn</span>
+                      <span>
+                        {formatQuantityWithVisual({
+                          quantity: Number(lot.qty_containers),
+                          unit: 'container',
+                          visualUnitLabel: lot.product?.visual_unit_label ?? null,
+                          visualUnitsPerServing:
+                            lot.product?.visual_units_per_serving != null
+                              ? Number(lot.product.visual_units_per_serving)
+                              : null,
+                          servingsPerContainer: Number(lot.product?.servings_per_container ?? 1),
+                          canonicalDecimals: 1,
+                        })}
+                      </span>
                     </div>
                   </div>
                   <div className="flex gap-1.5 shrink-0">
@@ -1598,7 +1631,17 @@ export function InventoryPage() {
                               <span aria-hidden="true">✋ </span>(picked up)
                             </span>
                           ) : (
-                            `${totalStock.toFixed(1)} ctn`
+                            formatQuantityWithVisual({
+                              quantity: totalStock,
+                              unit: 'container',
+                              visualUnitLabel: product.visual_unit_label ?? null,
+                              visualUnitsPerServing:
+                                product.visual_units_per_serving != null
+                                  ? Number(product.visual_units_per_serving)
+                                  : null,
+                              servingsPerContainer: Number(product.servings_per_container) || 1,
+                              canonicalDecimals: 1,
+                            })
                           )}
                         </span>
 
@@ -1659,7 +1702,27 @@ export function InventoryPage() {
                             <span data-testid={`stock-servings-${product.product_id}`}>
                               {isPickedUp
                                 ? '(picked up — awaiting reunite)'
-                                : `${totalStock.toFixed(1)} containers (${servingsTotal.toFixed(1)} servings)`}
+                                : (() => {
+                                    const visualSet =
+                                      product.visual_unit_label != null &&
+                                      product.visual_units_per_serving != null &&
+                                      Number(product.visual_units_per_serving) > 0;
+                                    // When the product has a visual unit, swap
+                                    // the redundant "(servings)" half of the
+                                    // pair for a "(N visual-units)" half. The
+                                    // canonical container count stays first so
+                                    // shopping/min-stock math reads identically.
+                                    const visualHalf = visualSet
+                                      ? formatQuantityWithVisual({
+                                          quantity: totalStock,
+                                          unit: 'container',
+                                          visualUnitLabel: product.visual_unit_label,
+                                          visualUnitsPerServing: Number(product.visual_units_per_serving),
+                                          servingsPerContainer: Number(product.servings_per_container) || 1,
+                                        })
+                                      : `${servingsTotal.toFixed(1)} servings`;
+                                    return `${totalStock.toFixed(1)} containers (${visualHalf})`;
+                                  })()}
                             </span>
                             <span data-testid={`min-stock-${product.product_id}`}>
                               Min stock: {Number(product.min_stock_amount).toFixed(1)}
@@ -1836,7 +1899,22 @@ export function InventoryPage() {
                             <span aria-hidden="true">✋ </span>(picked up)
                           </span>
                         ) : (
-                          `${Number(lot.qty_containers).toFixed(1)} ctn (${lot.qtyServings.toFixed(1)} svg)`
+                          (() => {
+                            const visualSet =
+                              lot.visualUnitLabel != null &&
+                              lot.visualUnitsPerServing != null &&
+                              lot.visualUnitsPerServing > 0;
+                            const visualHalf = visualSet
+                              ? formatQuantityWithVisual({
+                                  quantity: Number(lot.qty_containers),
+                                  unit: 'container',
+                                  visualUnitLabel: lot.visualUnitLabel,
+                                  visualUnitsPerServing: lot.visualUnitsPerServing,
+                                  servingsPerContainer: lot.servingsPerContainer,
+                                })
+                              : `${lot.qtyServings.toFixed(1)} svg`;
+                            return `${Number(lot.qty_containers).toFixed(1)} ctn (${visualHalf})`;
+                          })()
                         )}
                       </span>
                       {lot.last_observed_weight_g != null && (
@@ -1958,7 +2036,22 @@ export function InventoryPage() {
                               <span aria-hidden="true">✋ </span>(picked up)
                             </span>
                           ) : (
-                            `${Number(lot.qty_containers).toFixed(1)} ctn (${lot.qtyServings.toFixed(1)} svg)`
+                            (() => {
+                              const visualSet =
+                                lot.visualUnitLabel != null &&
+                                lot.visualUnitsPerServing != null &&
+                                lot.visualUnitsPerServing > 0;
+                              const visualHalf = visualSet
+                                ? formatQuantityWithVisual({
+                                    quantity: Number(lot.qty_containers),
+                                    unit: 'container',
+                                    visualUnitLabel: lot.visualUnitLabel,
+                                    visualUnitsPerServing: lot.visualUnitsPerServing,
+                                    servingsPerContainer: lot.servingsPerContainer,
+                                  })
+                                : `${lot.qtyServings.toFixed(1)} svg`;
+                              return `${Number(lot.qty_containers).toFixed(1)} ctn (${visualHalf})`;
+                            })()
                           )}
                         </td>
                         <td className="p-3">{lot.expires_on ?? '\u2014'}</td>

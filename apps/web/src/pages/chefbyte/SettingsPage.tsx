@@ -68,6 +68,8 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
   tare_weight_g: null,
   certified: null,
   default_expiry_days: null,
+  visual_unit_label: null,
+  visual_units_per_serving: null,
 });
 
 /* ================================================================== */
@@ -512,6 +514,74 @@ export function SettingsPage() {
               <p className="text-[11px] text-text-tertiary ml-6">1 piece = 1 serving (eggs, buns, slices, bars)</p>
             </div>
           </div>
+        </div>
+
+        {/* Visual unit (display-only) */}
+        <div>
+          <div className={sectionHeaderCls}>Visual Unit</div>
+          <p className="m-0 mb-2 text-[11px] text-text-tertiary">
+            Optional: display this product as e.g. &ldquo;2 eggs&rdquo; or &ldquo;1 slice&rdquo; instead of &ldquo;2
+            svg&rdquo;. Display-only — backend math always uses canonical units.
+          </p>
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr] gap-3">
+            <div>
+              <label className={labelCls}>Visual unit label</label>
+              <input
+                value={form.visual_unit_label ?? ''}
+                onChange={(e) => onChange('visual_unit_label', e.target.value === '' ? null : e.target.value)}
+                data-testid={`${testIdPrefix}-visual-unit-label`}
+                placeholder="e.g. egg, slice, scoop"
+                className={inputCls}
+              />
+              <p className="mt-1 text-[11px] text-text-tertiary">Singular noun. Pluralized automatically.</p>
+            </div>
+            <div>
+              <label className={labelCls}>
+                Visual units / serving <span className="text-text-tertiary font-normal">count</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="any"
+                value={form.visual_units_per_serving ?? ''}
+                onChange={(e) =>
+                  onChange('visual_units_per_serving', e.target.value === '' ? null : Number(e.target.value))
+                }
+                data-testid={`${testIdPrefix}-visual-units-per-serving`}
+                placeholder="e.g. 1 (egg) or 0.5 (half-bagel)"
+                className={inputCls}
+              />
+              <p className="mt-1 text-[11px] text-text-tertiary">Eggs: 1. Half-bagel-per-serving: 0.5.</p>
+            </div>
+          </div>
+          {/* Inline pair-validation: both must be set together, value > 0 */}
+          {(() => {
+            const labelSet = form.visual_unit_label != null && String(form.visual_unit_label).trim() !== '';
+            const countSet = form.visual_units_per_serving != null && Number(form.visual_units_per_serving) > 0;
+            const partial = labelSet !== countSet;
+            const zero = labelSet && countSet && Number(form.visual_units_per_serving) <= 0;
+            if (partial) {
+              return (
+                <p
+                  className="mt-1.5 text-[11px] text-amber-600 font-semibold"
+                  data-testid={`${testIdPrefix}-visual-pair-error`}
+                >
+                  Set both label and units, or clear both.
+                </p>
+              );
+            }
+            if (zero) {
+              return (
+                <p
+                  className="mt-1.5 text-[11px] text-red-600 font-semibold"
+                  data-testid={`${testIdPrefix}-visual-units-zero`}
+                >
+                  Visual units must be greater than zero.
+                </p>
+              );
+            }
+            return null;
+          })()}
         </div>
       </div>
     );

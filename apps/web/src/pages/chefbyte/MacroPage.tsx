@@ -15,6 +15,7 @@ import { computeRecipeMacros } from './RecipesPage';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { macroDelta } from '@/shared/macroValidation';
+import { formatQuantityWithVisual } from '@/shared/recipes/formatIngredientDisplay';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -41,6 +42,10 @@ export interface ConsumedItem {
   qty?: number | null;
   /** unit ('container'/'serving') — display + send to update RPC. */
   unit?: string | null;
+  /** Product display metadata for visual-unit rendering on Meal Plan rows. */
+  visualUnitLabel?: string | null;
+  visualUnitsPerServing?: number | null;
+  servingsPerContainer?: number | null;
 }
 
 export interface PlannedItem {
@@ -88,7 +93,9 @@ export async function loadMacroPageData(
     chef.rpc('get_daily_macros', { p_logical_date: logicalDate }),
     chef
       .from('food_logs')
-      .select('log_id, product_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+      .select(
+        'log_id, product_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name, servings_per_container, visual_unit_label, visual_units_per_serving)',
+      )
       .eq('user_id', userId)
       .eq('logical_date', logicalDate)
       .order('created_at'),
@@ -142,6 +149,11 @@ export async function loadMacroPageData(
       fat: Number(log.fat) || 0,
       qty: Number(log.qty_consumed) || 0,
       unit: log.unit ?? null,
+      visualUnitLabel: log.products?.visual_unit_label ?? null,
+      visualUnitsPerServing:
+        log.products?.visual_units_per_serving != null ? Number(log.products.visual_units_per_serving) : null,
+      servingsPerContainer:
+        log.products?.servings_per_container != null ? Number(log.products.servings_per_container) : null,
     });
   }
   for (const ti of (tempItemsRes.data ?? []) as any[]) {
@@ -737,8 +749,16 @@ export function MacroPage() {
                         <span className="text-sm font-medium text-text">{item.name}</span>
                         {item.source === 'Meal Plan' && item.qty != null && !isEditing && (
                           <span data-testid={`consumed-qty-${item.id}`} className="text-xs text-text-tertiary">
-                            ({item.qty} {item.unit}
-                            {Number(item.qty) !== 1 ? 's' : ''})
+                            (
+                            {formatQuantityWithVisual({
+                              quantity: Number(item.qty) || 0,
+                              unit: (item.unit ?? 'serving') as 'container' | 'serving' | 'gram',
+                              visualUnitLabel: item.visualUnitLabel ?? null,
+                              visualUnitsPerServing: item.visualUnitsPerServing ?? null,
+                              servingsPerContainer: Number(item.servingsPerContainer) || 1,
+                              canonicalDecimals: 1,
+                            })}
+                            )
                           </span>
                         )}
                       </div>

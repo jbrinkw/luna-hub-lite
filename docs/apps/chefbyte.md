@@ -53,6 +53,7 @@ AI-powered nutrition system: meal planning, inventory management, macro tracking
 - Minimum stock thresholds per product
 - Placeholder products (`is_placeholder = true`) for planning before purchase — shopping and ordering logic checks this explicitly
 - Product deletion cascades to recipe ingredients: `ON DELETE CASCADE` on the recipe_ingredients FK. Recipes that lose ingredients show as incomplete until re-linked.
+- **Visual unit (display-only):** Each product carries an optional `visual_unit_label` + `visual_units_per_serving` pair on `chefbyte.products` (added in migration `20260430040000_products_visual_unit.sql`). When set, every UI surface that renders a quantity for a human (recipe lines, inventory rows, meal-plan / macro consumed rows) renders the canonical amount as e.g. `2 eggs Cage-Free Eggs` or `0.5 bagels Big Bagel` instead of `2 svg ...`. Math is untouched — `consume_product`, `mark_meal_done`, food-log macros and stock decrement always read canonical `unit` + `quantity`. Both columns NULL = no visual unit; a CHECK constraint (`products_visual_pair_complete`) enforces both-or-neither plus `visual_units_per_serving > 0`. Configured in Settings → Products under **Visual Unit**. (Supersedes the per-ingredient pair previously on `recipe_ingredients`, dropped in migration `20260430050000_drop_recipe_visual_unit.sql`.)
 
 ### Recipe Search & Planning
 

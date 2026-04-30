@@ -24,6 +24,8 @@ interface ProductSearchResult {
   servings_per_container: number;
   net_weight_g: number | null;
   default_recipe_unit: 'gram' | 'serving' | 'container' | null;
+  visual_unit_label: string | null;
+  visual_units_per_serving: number | null;
 }
 
 interface LocalIngredient {
@@ -32,8 +34,6 @@ interface LocalIngredient {
   quantity: number;
   unit: string;
   note: string;
-  visual_unit_label: string | null;
-  visual_quantity: number | null;
   // Macro info for display
   calories_per_serving: number;
   carbs_per_serving: number;
@@ -41,6 +41,12 @@ interface LocalIngredient {
   fat_per_serving: number;
   servings_per_container: number;
   net_weight_g: number | null;
+  // Visual unit fields are display-only and live on the product. They
+  // are denormalized onto each ingredient row so the form-render preview
+  // does not need a second product lookup. Server-side they are pulled
+  // from chefbyte.products on every read of recipe_ingredients.
+  visual_unit_label: string | null;
+  visual_units_per_serving: number | null;
 }
 
 /* ================================================================== */
@@ -74,8 +80,6 @@ export function RecipeFormPage() {
   const [ingQuantity, setIngQuantity] = useState(1);
   const [ingUnit, setIngUnit] = useState<string>('serving');
   const [ingNote, setIngNote] = useState('');
-  const [ingVisualLabel, setIngVisualLabel] = useState('');
-  const [ingVisualQty, setIngVisualQty] = useState<string>('');
 
   /* ---- Display vs edit mode for ingredients ---- */
   const [ingredientMode, setIngredientMode] = useState<'view' | 'edit'>('edit');
@@ -97,7 +101,7 @@ export function RecipeFormPage() {
       const { data: recipe, error } = await chefbyte()
         .from('recipes')
         .select(
-          '*, recipe_ingredients(ingredient_id, product_id, quantity, unit, note, visual_unit_label, visual_quantity, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g))',
+          '*, recipe_ingredients(ingredient_id, product_id, quantity, unit, note, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g, visual_unit_label, visual_units_per_serving))',
         )
         .eq('recipe_id', id!)
         .eq('user_id', user!.id)
@@ -132,14 +136,15 @@ export function RecipeFormPage() {
       quantity: Number(ri.quantity),
       unit: ri.unit,
       note: ri.note ?? '',
-      visual_unit_label: ri.visual_unit_label ?? null,
-      visual_quantity: ri.visual_quantity != null ? Number(ri.visual_quantity) : null,
       calories_per_serving: Number(ri.products?.calories_per_serving ?? 0),
       carbs_per_serving: Number(ri.products?.carbs_per_serving ?? 0),
       protein_per_serving: Number(ri.products?.protein_per_serving ?? 0),
       fat_per_serving: Number(ri.products?.fat_per_serving ?? 0),
       servings_per_container: Number(ri.products?.servings_per_container ?? 1),
       net_weight_g: ri.products?.net_weight_g != null ? Number(ri.products.net_weight_g) : null,
+      visual_unit_label: ri.products?.visual_unit_label ?? null,
+      visual_units_per_serving:
+        ri.products?.visual_units_per_serving != null ? Number(ri.products.visual_units_per_serving) : null,
     }));
     setIngredients(ings);
     setFormPopulated(true);
@@ -177,7 +182,7 @@ export function RecipeFormPage() {
       const { data } = await chefbyte()
         .from('products')
         .select(
-          'product_id, name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g, default_recipe_unit',
+          'product_id, name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g, default_recipe_unit, visual_unit_label, visual_units_per_serving',
         )
         .eq('user_id', user.id)
         .ilike('name', `%${escapeIlike(text)}%`)
@@ -231,29 +236,21 @@ export function RecipeFormPage() {
   const addIngredient = () => {
     if (!selectedProduct || ingQuantity <= 0) return;
 
-    // Resolve visual pair: both must be set, or both cleared
-    const parsedVisualQty = ingVisualQty.trim() !== '' ? parseFloat(ingVisualQty) : null;
-    const parsedVisualLabel = ingVisualLabel.trim() !== '' ? ingVisualLabel.trim() : null;
-    const visualPairValid =
-      (parsedVisualQty == null && parsedVisualLabel == null) ||
-      (parsedVisualQty != null && !isNaN(parsedVisualQty) && parsedVisualQty > 0 && parsedVisualLabel != null);
-
-    if (!visualPairValid) return; // guard: UI already shows inline error
-
     const newIng: LocalIngredient = {
       product_id: selectedProduct.product_id,
       product_name: selectedProduct.name,
       quantity: ingQuantity,
       unit: ingUnit,
       note: ingNote,
-      visual_unit_label: parsedVisualLabel,
-      visual_quantity: parsedVisualQty,
       calories_per_serving: Number(selectedProduct.calories_per_serving),
       carbs_per_serving: Number(selectedProduct.carbs_per_serving),
       protein_per_serving: Number(selectedProduct.protein_per_serving),
       fat_per_serving: Number(selectedProduct.fat_per_serving),
       servings_per_container: Number(selectedProduct.servings_per_container),
       net_weight_g: selectedProduct.net_weight_g != null ? Number(selectedProduct.net_weight_g) : null,
+      visual_unit_label: selectedProduct.visual_unit_label ?? null,
+      visual_units_per_serving:
+        selectedProduct.visual_units_per_serving != null ? Number(selectedProduct.visual_units_per_serving) : null,
     };
 
     setIngredients((prev) => [...prev, newIng]);
@@ -262,8 +259,6 @@ export function RecipeFormPage() {
     setIngQuantity(1);
     setIngUnit('serving');
     setIngNote('');
-    setIngVisualLabel('');
-    setIngVisualQty('');
   };
 
   const removeIngredient = (index: number) => {
@@ -363,8 +358,6 @@ export function RecipeFormPage() {
               quantity: ing.quantity,
               unit: ing.unit,
               note: ing.note || null,
-              visual_unit_label: ing.visual_unit_label || null,
-              visual_quantity: ing.visual_quantity ?? null,
             })),
           });
           if (ingErr) throw ingErr;
@@ -395,8 +388,6 @@ export function RecipeFormPage() {
               quantity: ing.quantity,
               unit: ing.unit,
               note: ing.note || null,
-              visual_unit_label: ing.visual_unit_label || null,
-              visual_quantity: ing.visual_quantity ?? null,
             })),
           });
           if (ingErr) throw ingErr;
@@ -679,75 +670,37 @@ export function RecipeFormPage() {
           </button>
         </div>
 
-        {/* Visual unit override (new-ingredient, optional) */}
+        {/* Display preview (read-only) — surfaces what each ingredient will
+            render as. The visual unit lives on the product itself
+            (chefbyte.products.visual_unit_label + visual_units_per_serving)
+            so this preview reads from the selected product. To customise the
+            display, edit the product in Settings → Products. */}
         {selectedProduct && (
           <div
-            data-testid="visual-override-section"
+            data-testid="visual-preview-section"
             className="mb-4 p-3 bg-surface-sunken rounded-lg border border-border-light"
           >
-            <p className="m-0 mb-2 text-xs font-semibold text-text-secondary uppercase tracking-wide">
-              Display override (optional)
+            <p className="m-0 mb-1 text-xs font-semibold text-text-secondary uppercase tracking-wide">
+              Display preview
             </p>
-            <p className="m-0 mb-2 text-xs text-text-tertiary">
-              Optional — shows as &ldquo;1 slice&rdquo; instead of &ldquo;30g&rdquo;. Math always uses the canonical
-              amount.
+            <p className="m-0 text-xs text-text-secondary italic" data-testid="visual-preview">
+              {formatIngredientDisplay({
+                quantity: ingQuantity,
+                unit: ingUnit as 'container' | 'serving' | 'gram',
+                productName: selectedProduct.name,
+                visualUnitLabel: selectedProduct.visual_unit_label ?? null,
+                visualUnitsPerServing:
+                  selectedProduct.visual_units_per_serving != null
+                    ? Number(selectedProduct.visual_units_per_serving)
+                    : null,
+                servingsPerContainer: Number(selectedProduct.servings_per_container) || 1,
+              })}
             </p>
-            <div className="flex flex-wrap gap-2 items-end">
-              <div className="w-24">
-                <label className="block text-[11px] text-text-tertiary mb-0.5">Display qty</label>
-                <input
-                  type="number"
-                  min="0.001"
-                  step="any"
-                  value={ingVisualQty}
-                  onChange={(e) => setIngVisualQty(e.target.value)}
-                  data-testid="ing-visual-qty"
-                  placeholder="e.g. 1"
-                  className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                />
-              </div>
-              <div className="flex-1 min-w-[100px]">
-                <label className="block text-[11px] text-text-tertiary mb-0.5">Display label</label>
-                <input
-                  type="text"
-                  value={ingVisualLabel}
-                  onChange={(e) => setIngVisualLabel(e.target.value)}
-                  data-testid="ing-visual-label"
-                  placeholder="e.g. slice, scoop, tbsp"
-                  className="w-full px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring"
-                />
-              </div>
-            </div>
-            {/* Pair validation */}
-            {(() => {
-              const hasLabel = ingVisualLabel.trim() !== '';
-              const hasQty = ingVisualQty.trim() !== '' && parseFloat(ingVisualQty) > 0;
-              const partialSet = hasLabel !== hasQty;
-              return partialSet ? (
-                <p className="mt-1.5 text-xs text-amber-600" data-testid="visual-pair-error">
-                  Set both or neither — display qty and label must be paired.
-                </p>
-              ) : null;
-            })()}
-            {/* Live preview */}
-            {selectedProduct &&
-              (ingVisualLabel.trim() || ingVisualQty.trim()) &&
-              (() => {
-                const vQty = parseFloat(ingVisualQty) || null;
-                const vLabel = ingVisualLabel.trim() || null;
-                const preview = formatIngredientDisplay({
-                  quantity: ingQuantity,
-                  unit: ingUnit as 'container' | 'serving' | 'gram',
-                  visual_quantity: vQty,
-                  visual_unit_label: vLabel,
-                  productName: selectedProduct.name,
-                });
-                return (
-                  <p className="mt-1.5 text-xs text-text-secondary italic" data-testid="visual-preview">
-                    Preview: {preview}
-                  </p>
-                );
-              })()}
+            {selectedProduct.visual_unit_label == null && (
+              <p className="m-0 mt-1 text-[11px] text-text-tertiary">
+                To display this product as e.g. &ldquo;2 eggs&rdquo;, set its visual unit in Settings &rarr; Products.
+              </p>
+            )}
           </div>
         )}
 
@@ -768,9 +721,10 @@ export function RecipeFormPage() {
                       {formatIngredientDisplay({
                         quantity: ing.quantity,
                         unit: ing.unit as 'container' | 'serving' | 'gram',
-                        visual_quantity: ing.visual_quantity,
-                        visual_unit_label: ing.visual_unit_label,
                         productName: ing.product_name,
+                        visualUnitLabel: ing.visual_unit_label,
+                        visualUnitsPerServing: ing.visual_units_per_serving,
+                        servingsPerContainer: ing.servings_per_container,
                       })}
                     </span>
                     {ing.note && (
@@ -786,86 +740,105 @@ export function RecipeFormPage() {
                   <div
                     key={`${ing.product_id}-${idx}`}
                     data-testid={`ingredient-row-${idx}`}
-                    className="flex items-center gap-2 bg-surface border border-border rounded-lg px-2 py-2"
+                    className="bg-surface border border-border rounded-lg px-2 py-2"
                   >
-                    {/* Drag handle (up/down arrows as lightweight reorder) */}
-                    <div className="flex flex-col gap-0.5 shrink-0">
+                    <div className="flex items-center gap-2">
+                      {/* Drag handle (up/down arrows as lightweight reorder) */}
+                      <div className="flex flex-col gap-0.5 shrink-0">
+                        <button
+                          type="button"
+                          onClick={() => moveIngredient(idx, idx - 1)}
+                          disabled={idx === 0}
+                          aria-label="Move ingredient up"
+                          data-testid={`move-up-${idx}`}
+                          className="p-0.5 text-text-tertiary hover:text-text disabled:opacity-20 disabled:cursor-not-allowed"
+                        >
+                          ▲
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => moveIngredient(idx, idx + 1)}
+                          disabled={idx === ingredients.length - 1}
+                          aria-label="Move ingredient down"
+                          data-testid={`move-down-${idx}`}
+                          className="p-0.5 text-text-tertiary hover:text-text disabled:opacity-20 disabled:cursor-not-allowed"
+                        >
+                          ▼
+                        </button>
+                      </div>
+
+                      <GripVertical className="h-4 w-4 text-text-tertiary shrink-0" aria-hidden="true" />
+
+                      {/* Product name */}
+                      <span className="font-medium text-sm text-text min-w-[100px] flex-1 truncate">
+                        {ing.product_name}
+                      </span>
+
+                      {/* Qty */}
+                      <input
+                        type="number"
+                        min="0"
+                        value={ing.quantity}
+                        onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
+                        className="w-16 px-2 py-1.5 border border-border-strong rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
+                        data-testid={`edit-qty-${idx}`}
+                      />
+
+                      {/* Unit */}
+                      <select
+                        value={ing.unit}
+                        onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
+                        data-testid={`edit-unit-${idx}`}
+                        className="w-[100px] px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
+                      >
+                        <option value="serving">Serving</option>
+                        <option value="container">Container</option>
+                        <option
+                          value="gram"
+                          disabled={!gramAvailable(ing.net_weight_g)}
+                          title={!gramAvailable(ing.net_weight_g) ? 'Set net weight on the product first' : undefined}
+                        >
+                          g (gram)
+                        </option>
+                      </select>
+
+                      {/* Note */}
+                      <input
+                        value={ing.note}
+                        placeholder="Note"
+                        onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
+                        className="w-24 px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0 hidden sm:block"
+                        data-testid={`edit-note-${idx}`}
+                      />
+
+                      {/* Remove */}
                       <button
                         type="button"
-                        onClick={() => moveIngredient(idx, idx - 1)}
-                        disabled={idx === 0}
-                        aria-label="Move ingredient up"
-                        data-testid={`move-up-${idx}`}
-                        className="p-0.5 text-text-tertiary hover:text-text disabled:opacity-20 disabled:cursor-not-allowed"
+                        onClick={() => removeIngredient(idx)}
+                        data-testid={`remove-ingredient-${idx}`}
+                        aria-label={`Remove ${ing.product_name}`}
+                        className="shrink-0 p-1.5 text-danger-text hover:text-red-700 hover:bg-danger-subtle rounded transition-colors"
                       >
-                        ▲
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => moveIngredient(idx, idx + 1)}
-                        disabled={idx === ingredients.length - 1}
-                        aria-label="Move ingredient down"
-                        data-testid={`move-down-${idx}`}
-                        className="p-0.5 text-text-tertiary hover:text-text disabled:opacity-20 disabled:cursor-not-allowed"
-                      >
-                        ▼
+                        <Trash2 className="h-4 w-4" />
                       </button>
                     </div>
-
-                    <GripVertical className="h-4 w-4 text-text-tertiary shrink-0" aria-hidden="true" />
-
-                    {/* Product name */}
-                    <span className="font-medium text-sm text-text min-w-[100px] flex-1 truncate">
-                      {ing.product_name}
-                    </span>
-
-                    {/* Qty */}
-                    <input
-                      type="number"
-                      min="0"
-                      value={ing.quantity}
-                      onChange={(e) => updateIngredient(idx, 'quantity', Number(e.target.value) || 0)}
-                      className="w-16 px-2 py-1.5 border border-border-strong rounded text-sm text-right focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
-                      data-testid={`edit-qty-${idx}`}
-                    />
-
-                    {/* Unit */}
-                    <select
-                      value={ing.unit}
-                      onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
-                      data-testid={`edit-unit-${idx}`}
-                      className="w-[100px] px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
+                    {/* Read-only display preview — uses the product's visual
+                        unit (if set) so the user sees the rendered recipe
+                        line under each editable row. */}
+                    <p
+                      data-testid={`ingredient-preview-${idx}`}
+                      className="m-0 mt-1.5 ml-7 text-[11px] text-text-tertiary italic"
                     >
-                      <option value="serving">Serving</option>
-                      <option value="container">Container</option>
-                      <option
-                        value="gram"
-                        disabled={!gramAvailable(ing.net_weight_g)}
-                        title={!gramAvailable(ing.net_weight_g) ? 'Set net weight on the product first' : undefined}
-                      >
-                        g (gram)
-                      </option>
-                    </select>
-
-                    {/* Note */}
-                    <input
-                      value={ing.note}
-                      placeholder="Note"
-                      onChange={(e) => updateIngredient(idx, 'note', e.target.value)}
-                      className="w-24 px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0 hidden sm:block"
-                      data-testid={`edit-note-${idx}`}
-                    />
-
-                    {/* Remove */}
-                    <button
-                      type="button"
-                      onClick={() => removeIngredient(idx)}
-                      data-testid={`remove-ingredient-${idx}`}
-                      aria-label={`Remove ${ing.product_name}`}
-                      className="shrink-0 p-1.5 text-danger-text hover:text-red-700 hover:bg-danger-subtle rounded transition-colors"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </button>
+                      Display:{' '}
+                      {formatIngredientDisplay({
+                        quantity: Number(ing.quantity) || 0,
+                        unit: ing.unit as 'container' | 'serving' | 'gram',
+                        productName: ing.product_name,
+                        visualUnitLabel: ing.visual_unit_label,
+                        visualUnitsPerServing: ing.visual_units_per_serving,
+                        servingsPerContainer: ing.servings_per_container,
+                      })}
+                    </p>
                   </div>
                 ))}
               </div>

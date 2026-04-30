@@ -47,6 +47,11 @@ export interface ChefbyteProduct {
   default_recipe_unit: 'gram' | 'serving' | 'container' | null;
   tare_weight_g: number | null;
   certified: boolean | null;
+  // Display-only visual unit pair. Both NULL → fallback to canonical
+  // svg / ctn / g rendering. Both set → display layer renders e.g.
+  // "2 eggs Cage-Free Eggs". Backend math NEVER reads these columns.
+  visual_unit_label: string | null;
+  visual_units_per_serving: number | null;
 }
 
 export function useChefbyteProducts() {

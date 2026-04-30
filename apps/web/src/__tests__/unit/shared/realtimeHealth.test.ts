@@ -196,5 +196,4 @@ describe('realtimeHealth — initial-connect grace window', () => {
     realtimeHealth.setStatus('a', 'CHANNEL_ERROR', 'bad publication');
     expect(realtimeHealth.isAnyDegraded()).toBe(true);
   });
-
 });

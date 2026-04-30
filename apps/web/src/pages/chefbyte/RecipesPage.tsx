@@ -22,6 +22,8 @@ interface ProductInfo {
   fat_per_serving: number;
   servings_per_container: number;
   net_weight_g: number | null;
+  visual_unit_label: string | null;
+  visual_units_per_serving: number | null;
 }
 
 interface RecipeIngredient {
@@ -30,8 +32,6 @@ interface RecipeIngredient {
   quantity: number;
   unit: string;
   note: string | null;
-  visual_unit_label: string | null;
-  visual_quantity: number | null;
   products: ProductInfo | null;
 }
 
@@ -388,7 +388,7 @@ export function RecipesPage() {
         chefbyte()
           .from('recipes')
           .select(
-            '*, recipe_ingredients(ingredient_id, product_id, quantity, unit, note, visual_unit_label, visual_quantity, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g))',
+            '*, recipe_ingredients(ingredient_id, product_id, quantity, unit, note, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g, visual_unit_label, visual_units_per_serving))',
           )
           .eq('user_id', user!.id)
           .order('name'),
