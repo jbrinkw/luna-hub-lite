@@ -15,9 +15,16 @@ export const getProducts: ToolDefinition = {
       .schema('chefbyte')
       .from('products')
       .select(
-        'product_id, name, barcode, description, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, price, min_stock_amount',
+        'product_id, name, barcode, description, servings_per_container, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, price, min_stock_amount, visual_unit_label, visual_units_per_serving',
       )
       .eq('user_id', ctx.userId)
+      // Match the web UI's `useChefbyteProducts` hook: never return
+      // soft-deleted products or internal [MEAL]% sentinel rows. Without
+      // these filters, MCP and the Settings page disagreed (MCP returned
+      // tombstoned rows that the UI hides), which led to a surprising
+      // "16 vs 9 products" mismatch and confused recipe debugging.
+      .is('deleted_at', null)
+      .not('name', 'ilike', '[MEAL]%')
       .order('name', { ascending: true });
 
     if (args.search) {
