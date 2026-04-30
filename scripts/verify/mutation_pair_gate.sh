@@ -362,10 +362,14 @@ if (merged.vitest) delete merged.vitest.related;
 fs.writeFileSync(outPath, JSON.stringify(merged, null, 2));
 NODE
 
-  # Run Stryker scoped to exactly prod_f using the temp config
+  # Run Stryker scoped to exactly prod_f using the temp config.
+  # Bump Node heap to 8GB — components config uses coverageAnalysis:off
+  # which runs every test for every mutant; React Testing Library +
+  # jsdom + 76+ mutants exhausts the default 2GB heap.
   local stryker_exit=0
   {
-    "$STRYKER_BIN" run "$temp_cfg" 2>&1
+    NODE_OPTIONS="${NODE_OPTIONS:-} --max-old-space-size=8192" \
+      "$STRYKER_BIN" run "$temp_cfg" 2>&1
   } | tee -a "$LOG_FILE" ; stryker_exit=${PIPESTATUS[0]}
   rm -f "$temp_cfg" 2>/dev/null || true
 
