@@ -19,7 +19,13 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/__tests__/setup.ts'],
-    include: ['src/__tests__/unit/**/*.test.{ts,tsx}', 'src/__tests__/property/**/*.test.{ts,tsx}', 'src/__tests__/spec/**/*.test.{ts,tsx}'],
+    include: [
+      'src/__tests__/unit/**/*.test.{ts,tsx}',
+      'src/__tests__/property/**/*.test.{ts,tsx}',
+      'src/__tests__/spec/**/*.test.{ts,tsx}',
+      // RTL-based integration page tests (mocked Supabase, jsdom required)
+      'src/__tests__/integration/pages/**/*.test.tsx',
+    ],
     coverage: {
       provider: 'v8',
       reporter: ['text', 'html', 'json-summary'],

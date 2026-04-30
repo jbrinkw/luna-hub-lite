@@ -59,6 +59,13 @@ interface StockLot {
   last_observed_weight_g: number | null;
   last_observed_at: string | null;
   locations: { name: string } | null;
+  /**
+   * Joined from `chefbyte.products` — provides product name and
+   * servings_per_container without a separate map lookup. Includes
+   * [MEAL] sentinel products so the lot view can render a [MEAL] flag
+   * rather than showing "Unknown" for those lots.
+   */
+  products: { name: string; servings_per_container: number } | null;
 }
 
 interface LiveShelfDeviceLite {
@@ -427,7 +434,7 @@ export function InventoryPage() {
       const { data, error } = await chefbyte()
         .from('stock_lots')
         .select(
-          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,last_observed_weight_g,last_observed_at,locations:location_id(name)',
+          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,last_observed_weight_g,last_observed_at,locations:location_id(name),products:product_id(name,servings_per_container)',
         )
         .eq('user_id', user!.id);
       if (error) throw error;
@@ -736,11 +743,24 @@ export function InventoryPage() {
     return lots
       .filter((l) => Number(l.qty_containers) > 0 || l.in_flight_since !== null)
       .map((lot) => {
-        const product = productMap.get(lot.product_id);
+        // Use the joined product data from the query for name + servings.
+        // The join includes [MEAL] sentinel products that are excluded from
+        // useChefbyteProducts, so [MEAL] lots display their real name + flag
+        // rather than "Unknown". Fall back to the products[] map for the
+        // certified flag which is only fetched via useChefbyteProducts.
+        const joinedProduct = lot.products;
+        const mappedProduct = productMap.get(lot.product_id);
+        const productName = joinedProduct?.name ?? mappedProduct?.name ?? 'Unknown';
+        const servingsPerContainer =
+          joinedProduct?.servings_per_container ?? mappedProduct?.servings_per_container ?? 1;
+        const qtyServings = Number(lot.qty_containers) * servingsPerContainer;
+        const isMealLot = productName.startsWith('[MEAL]');
         return {
           ...lot,
-          productName: product?.name ?? 'Unknown',
-          productCertified: product?.certified === true,
+          productName,
+          productCertified: mappedProduct?.certified === true,
+          qtyServings,
+          isMealLot,
         };
       })
       .sort((a, b) => {
@@ -758,6 +778,13 @@ export function InventoryPage() {
         return a.productName.localeCompare(b.productName);
       });
   }, [lots, products]);
+
+  /* ---- Filtered lots (by search text) — mirrors filteredGrouped logic */
+  const filteredSortedLots = useMemo(() => {
+    if (!searchText.trim()) return sortedLots;
+    const lower = searchText.toLowerCase();
+    return sortedLots.filter((l) => l.productName.toLowerCase().includes(lower));
+  }, [sortedLots, searchText]);
 
   /* ---------------------------------------------------------------- */
   /*  Actions                                                          */
@@ -1727,13 +1754,13 @@ export function InventoryPage() {
       {/* ========================================================== */}
       {viewMode === 'lots' && (
         <div data-testid="lots-view">
-          {sortedLots.length === 0 && <p data-testid="no-lots">No stock lots.</p>}
+          {filteredSortedLots.length === 0 && <p data-testid="no-lots">No stock lots.</p>}
 
-          {sortedLots.length > 0 && (
+          {filteredSortedLots.length > 0 && (
             <>
               {/* Mobile card list */}
               <div className="sm:hidden flex flex-col gap-2 mt-3" data-testid="lots-table">
-                {sortedLots.map((lot) => (
+                {filteredSortedLots.map((lot) => (
                   <div
                     key={lot.lot_id}
                     data-testid={`lot-row-${lot.lot_id}`}
@@ -1741,6 +1768,15 @@ export function InventoryPage() {
                   >
                     <div className="flex items-center gap-2 mb-1 flex-wrap">
                       <span className="font-semibold text-sm text-text">{lot.productName}</span>
+                      {/* [MEAL] sentinel flag */}
+                      {lot.isMealLot && (
+                        <span
+                          data-testid={`lot-meal-badge-${lot.lot_id}`}
+                          className="inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-purple-100 text-purple-800 border border-purple-200"
+                        >
+                          [MEAL]
+                        </span>
+                      )}
                       {/* ✓ Certified — per-product. */}
                       {lot.productCertified && (
                         <span
@@ -1794,7 +1830,7 @@ export function InventoryPage() {
                       )}
                     </div>
                     <div className="flex flex-wrap gap-x-4 gap-y-0.5 text-xs text-text-secondary">
-                      <span>
+                      <span data-testid={`lot-qty-${lot.lot_id}`}>
                         {Number(lot.qty_containers) <= 0 && lot.in_flight_since !== null ? (
                           <span
                             className="text-amber-800 italic"
@@ -1803,7 +1839,7 @@ export function InventoryPage() {
                             <span aria-hidden="true">✋ </span>(picked up)
                           </span>
                         ) : (
-                          `${Number(lot.qty_containers).toFixed(1)} ctn`
+                          `${Number(lot.qty_containers).toFixed(1)} ctn (${lot.qtyServings.toFixed(1)} svg)`
                         )}
                       </span>
                       {lot.last_observed_weight_g != null && (
@@ -1813,6 +1849,13 @@ export function InventoryPage() {
                       )}
                       <span>{lot.locations?.name ?? '\u2014'}</span>
                       <span>Expires: {lot.expires_on ?? '\u2014'}</span>
+                      <span
+                        data-testid={`lot-id-short-${lot.lot_id}`}
+                        className="font-mono text-text-tertiary"
+                        title={lot.lot_id}
+                      >
+                        #{lot.lot_id.slice(0, 8)}
+                      </span>
                     </div>
                   </div>
                 ))}
@@ -1825,12 +1868,13 @@ export function InventoryPage() {
                     <tr className="bg-surface-sunken border-b-2 border-border">
                       <th className="p-3 text-left font-semibold">Product</th>
                       <th className="p-3 text-left font-semibold">Location</th>
-                      <th className="p-3 text-right font-semibold">Qty (ctn)</th>
+                      <th className="p-3 text-right font-semibold">Qty (ctn / svg)</th>
                       <th className="p-3 text-left font-semibold">Expires</th>
+                      <th className="p-3 text-left font-semibold text-text-tertiary font-mono">Lot ID</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sortedLots.map((lot) => (
+                    {filteredSortedLots.map((lot) => (
                       <tr
                         key={lot.lot_id}
                         data-testid={`lot-row-${lot.lot_id}`}
@@ -1839,6 +1883,15 @@ export function InventoryPage() {
                         <td className="p-3">
                           <span className="inline-flex items-center gap-2 flex-wrap">
                             {lot.productName}
+                            {/* [MEAL] sentinel flag */}
+                            {lot.isMealLot && (
+                              <span
+                                data-testid={`lot-meal-badge-${lot.lot_id}`}
+                                className="inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold bg-purple-100 text-purple-800 border border-purple-200"
+                              >
+                                [MEAL]
+                              </span>
+                            )}
                             {/* ✓ Certified */}
                             {lot.productCertified && (
                               <span
@@ -1899,7 +1952,7 @@ export function InventoryPage() {
                           </span>
                         </td>
                         <td className="p-3">{lot.locations?.name ?? '\u2014'}</td>
-                        <td className="text-right p-3">
+                        <td className="text-right p-3" data-testid={`lot-qty-${lot.lot_id}`}>
                           {Number(lot.qty_containers) <= 0 && lot.in_flight_since !== null ? (
                             <span
                               className="text-amber-800 italic"
@@ -1908,10 +1961,17 @@ export function InventoryPage() {
                               <span aria-hidden="true">✋ </span>(picked up)
                             </span>
                           ) : (
-                            Number(lot.qty_containers).toFixed(1)
+                            `${Number(lot.qty_containers).toFixed(1)} ctn (${lot.qtyServings.toFixed(1)} svg)`
                           )}
                         </td>
                         <td className="p-3">{lot.expires_on ?? '\u2014'}</td>
+                        <td
+                          className="p-3 font-mono text-xs text-text-tertiary"
+                          data-testid={`lot-id-short-${lot.lot_id}`}
+                          title={lot.lot_id}
+                        >
+                          #{lot.lot_id.slice(0, 8)}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
