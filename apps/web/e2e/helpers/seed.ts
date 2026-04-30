@@ -538,6 +538,49 @@ export async function seedWalmartLinks(
 }
 
 // ---------------------------------------------------------------------------
+// seedShelfEvent — insert a shelf_event_log row (for event viewer tests)
+// ---------------------------------------------------------------------------
+
+export async function seedShelfEvent(
+  client: SupabaseClient,
+  userId: string,
+  options?: {
+    productId?: string;
+    eventKind?: string;
+    deltaG?: number;
+    applied?: boolean;
+    reason?: string | null;
+    classifierStatus?: string | null;
+  },
+): Promise<string> {
+  const chef = (client as any).schema('chefbyte');
+  const now = new Date().toISOString();
+  const clientEventId = `e2e-evt-${Date.now()}`;
+
+  const { data, error } = await chef
+    .from('shelf_event_log')
+    .insert({
+      user_id: userId,
+      client_event_id: clientEventId,
+      applied: options?.applied ?? true,
+      reason: options?.reason ?? null,
+      classifier_status: options?.classifierStatus ?? null,
+      payload: {
+        product_id: options?.productId ?? null,
+        event_kind: options?.eventKind ?? 'consumed',
+        delta_g: options?.deltaG ?? -150,
+        occurred_at: now,
+      },
+      before_image_url: null,
+      after_image_url: null,
+    })
+    .select('event_id')
+    .single();
+  if (error) throw new Error(`Failed to seed shelf event: ${error.message}`);
+  return data.event_id;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 

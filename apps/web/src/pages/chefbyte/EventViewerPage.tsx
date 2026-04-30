@@ -298,10 +298,7 @@ export function EventViewerPage() {
       if (cutoff) q = q.gte('created_at', cutoff);
       const { data, error } = await q;
       if (error) throw error;
-      // Keep rows that have either a classifier payload OR an explicit
-      // classifier_status so the review/rejected queues never filter out
-      // rows with a NULL product_id (e.g. multi_match awaiting triage).
-      return (data ?? []).filter((r: EventRow) => !!r.payload?.product_id || !!r.classifier_status);
+      return (data ?? []) as EventRow[];
     },
     enabled: !!user,
     staleTime: 30_000,
