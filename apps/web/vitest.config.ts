@@ -18,11 +18,13 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'jsdom',
+    sequence: { shuffle: true },
     setupFiles: ['./src/__tests__/setup.ts'],
     include: [
       'src/__tests__/unit/**/*.test.{ts,tsx}',
       'src/__tests__/property/**/*.test.{ts,tsx}',
       'src/__tests__/spec/**/*.test.{ts,tsx}',
+      'src/__tests__/audit/**/*.test.{ts,tsx}',
       // RTL-based integration page tests (mocked Supabase, jsdom required)
       'src/__tests__/integration/pages/**/*.test.tsx',
     ],

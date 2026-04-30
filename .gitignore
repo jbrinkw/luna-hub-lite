@@ -28,6 +28,9 @@ reports/mutation/
 __pycache__/
 *.pyc
 
+# Supabase restart stamp (runtime, not repo state)
+scripts/verify/.last-supabase-restart
+
 # Temp files
 *.png
 .playwright-mcp/

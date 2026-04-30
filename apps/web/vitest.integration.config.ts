@@ -32,6 +32,7 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
+    sequence: { shuffle: true },
     setupFiles: ['./src/__tests__/setup.integration.ts'],
     include: ['src/__tests__/integration/**/*.test.{ts,tsx}', 'src/__tests__/flows/**/*.test.ts'],
     testTimeout: 15_000,

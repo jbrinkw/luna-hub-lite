@@ -28,6 +28,9 @@
 
 set -euo pipefail
 
+# Capture all original args before MODE parsing consumes $1.
+ORIGINAL_ARGS=("$@")
+
 MODE="${1:-fast}"
 if [[ "$MODE" != "fast" && "$MODE" != "full" ]]; then
   echo "usage: scripts/verify/run.sh fast|full" >&2
@@ -71,6 +74,68 @@ FULL_STEPS=(
 # functions keeps the step list above declarative.
 # ---------------------------------------------------------------------------
 
+# Timestamp file lives in TMPDIR (survives the session, not the reboot).
+SUPABASE_RESTART_STAMP="${TMPDIR:-/tmp}/.luna-supabase-last-restart"
+SUPABASE_RESTART_STALE_SECS=1800  # 30 minutes
+
+# restart_supabase_if_stale — idempotent Supabase restart guard.
+#
+# Restarts the local Supabase stack when either:
+#   (a) the stamp file is absent (never restarted this session), or
+#   (b) the stamp file is older than SUPABASE_RESTART_STALE_SECS (30 min), or
+#   (c) --force-supabase-restart was passed on the command line.
+#
+# Uses flock(1) so parallel invocations from two sibling steps don't race.
+# After a successful restart the stamp is updated to the current epoch.
+restart_supabase_if_stale() {
+  local force=0
+  for arg in "$@"; do
+    [[ "$arg" == "--force-supabase-restart" ]] && force=1
+  done
+  # Also honour the flag if it was passed to the top-level script.
+  for arg in "${ORIGINAL_ARGS[@]+"${ORIGINAL_ARGS[@]}"}"; do
+    [[ "$arg" == "--force-supabase-restart" ]] && force=1
+  done
+
+  local now
+  now=$(date +%s)
+
+  local needs_restart=0
+  if [[ $force -eq 1 ]]; then
+    needs_restart=1
+  elif [[ ! -f "$SUPABASE_RESTART_STAMP" ]]; then
+    needs_restart=1
+  else
+    local last_restart
+    last_restart=$(cat "$SUPABASE_RESTART_STAMP" 2>/dev/null || echo 0)
+    local age=$(( now - last_restart ))
+    if [[ $age -gt $SUPABASE_RESTART_STALE_SECS ]]; then
+      needs_restart=1
+    fi
+  fi
+
+  if [[ $needs_restart -eq 0 ]]; then
+    echo "  Supabase restart skipped (last restart < 30 min ago)."
+    return 0
+  fi
+
+  echo "  Restarting Supabase local stack to flush JWT clock-skew..."
+  (
+    flock -w 60 9 || { echo "  WARNING: could not acquire supabase restart lock — skipping."; exit 0; }
+    # Re-check stamp inside the lock in case a sibling already restarted.
+    local inner_now; inner_now=$(date +%s)
+    local inner_last; inner_last=$(cat "$SUPABASE_RESTART_STAMP" 2>/dev/null || echo 0)
+    local inner_age=$(( inner_now - inner_last ))
+    if [[ $force -eq 0 && $inner_age -le $SUPABASE_RESTART_STALE_SECS ]]; then
+      echo "  Supabase restart skipped (sibling already restarted)."
+      exit 0
+    fi
+    supabase stop && supabase start
+    date +%s > "$SUPABASE_RESTART_STAMP"
+    echo "  Supabase restart complete."
+  ) 9>/tmp/luna-supabase.lock
+}
+
 run_integration() {
   if ! supabase_running; then
     echo ""
@@ -79,6 +144,7 @@ run_integration() {
     echo "  Then re-run:    pnpm verify:full"
     return 1
   fi
+  restart_supabase_if_stale "$@"
   pnpm test:integration
 }
 
@@ -90,6 +156,7 @@ run_pgtap() {
     echo "  Then re-run:    pnpm verify:full"
     return 1
   fi
+  restart_supabase_if_stale "$@"
   pnpm test:db
 }
 
