@@ -267,12 +267,8 @@ export function BackupTab() {
               {BACKUP_TABLES.map((key) => (
                 <li key={`w-${key}`} className="flex justify-between">
                   <span>{TABLE_LABEL[key]}</span>
-                  <span className="font-mono">
-                    {
-                      restoreResult.wiped?.[key] ??
-                        0 /* eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: 0 is correct fallback — restore result counts default to 0 when table was untouched */
-                    }
-                  </span>
+                  {/* eslint-disable-next-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: 0 is correct fallback — restore result counts default to 0 when table was untouched */}
+                  <span className="font-mono">{restoreResult.wiped?.[key] ?? 0}</span>
                 </li>
               ))}
             </ul>
@@ -283,12 +279,8 @@ export function BackupTab() {
               {BACKUP_TABLES.map((key) => (
                 <li key={`r-${key}`} className="flex justify-between">
                   <span>{TABLE_LABEL[key]}</span>
-                  <span className="font-mono">
-                    {
-                      restoreResult.restored?.[key] ??
-                        0 /* eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: 0 is correct fallback — restore result counts default to 0 when table was untouched */
-                    }
-                  </span>
+                  {/* eslint-disable-next-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: 0 is correct fallback — restore result counts default to 0 when table was untouched */}
+                  <span className="font-mono">{restoreResult.restored?.[key] ?? 0}</span>
                 </li>
               ))}
             </ul>
