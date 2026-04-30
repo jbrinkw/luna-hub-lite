@@ -21,13 +21,16 @@ const TAB_VALUES = [
   '/chef/shopping',
   '/chef/meal-plan',
   '/chef/recipes',
-  '/chef/events',
   '/chef/settings',
 ];
 
 function getActiveTab(pathname: string): string {
   if (pathname === '/chef' || pathname === '/chef/home' || pathname.startsWith('/chef/macros')) {
     return '/chef';
+  }
+  // /chef/events lives inside Settings now — highlight Settings when on it.
+  if (pathname.startsWith('/chef/events')) {
+    return '/chef/settings';
   }
   const match = TAB_VALUES.find((v) => v !== '/chef' && pathname.startsWith(v));
   return match ?? '/chef';
@@ -78,6 +81,9 @@ export function ChefLayout({ children }: ChefLayoutProps) {
     { schema: 'chefbyte', table: 'event_overrides', queryKeys: [attentionKey] },
   ]);
 
+  // Events lives inside Settings → Events sub-tab now. Surface the
+  // attention-needs badge on Settings so users still see "N items need
+  // review" without a dedicated top-level tab.
   const tabItems: TabItem[] = useMemo(
     () => [
       { label: 'Dashboard', value: '/chef', href: '/chef' },
@@ -86,12 +92,11 @@ export function ChefLayout({ children }: ChefLayoutProps) {
       { label: 'Meal Plan', value: '/chef/meal-plan', href: '/chef/meal-plan' },
       { label: 'Recipes', value: '/chef/recipes', href: '/chef/recipes' },
       {
-        label: 'Events',
-        value: '/chef/events',
-        href: '/chef/events',
+        label: 'Settings',
+        value: '/chef/settings',
+        href: attentionCount > 0 ? '/chef/settings?tab=events' : '/chef/settings',
         badge: attentionCount > 0 ? String(attentionCount) : undefined,
       },
-      { label: 'Settings', value: '/chef/settings', href: '/chef/settings' },
     ],
     [attentionCount],
   );

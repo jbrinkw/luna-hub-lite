@@ -262,7 +262,13 @@ function deriveEventView(event: EventRow, override: OverrideRow | null, product:
 /*  EventViewerPage                                                    */
 /* ================================================================== */
 
-export function EventViewerPage() {
+/**
+ * `embedded` skips the ChefLayout wrapper so callers can mount the Events
+ * UI inside another page (e.g. SettingsPage's "Events" sub-tab). The
+ * standalone `/chef/events` route still defaults to embedded=false and
+ * renders the full layout.
+ */
+export function EventViewerPage({ embedded = false }: { embedded?: boolean } = {}) {
   const { user } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
@@ -521,9 +527,8 @@ export function EventViewerPage() {
 
   const attentionCount = useMemo(() => allRows.filter((r) => r.needsAction || r.needsReview).length, [allRows]);
 
-  return (
-    <ChefLayout title="Events">
-      <div className="space-y-4" data-testid="event-viewer-page">
+  const content = (
+    <div className="space-y-4" data-testid="event-viewer-page">
         <header className="flex items-center justify-between flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <h1 className="text-2xl font-bold text-text">Event Viewer</h1>
@@ -664,8 +669,10 @@ export function EventViewerPage() {
           </ul>
         )}
       </div>
-    </ChefLayout>
   );
+
+  if (embedded) return content;
+  return <ChefLayout title="Events">{content}</ChefLayout>;
 }
 
 /* ------------------------------------------------------------------ */

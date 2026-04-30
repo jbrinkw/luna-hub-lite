@@ -6,6 +6,7 @@ import { WalmartTab } from '@/components/chefbyte/WalmartTab';
 import { ScalesTab } from '@/components/chefbyte/ScalesTab';
 import { BackupTab } from '@/components/chefbyte/BackupTab';
 import { ClassifierTab } from '@/components/chefbyte/ClassifierTab';
+import { EventViewerPage } from '@/pages/chefbyte/EventViewerPage';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
@@ -24,7 +25,7 @@ type Product = ChefbyteProduct & { default_expiry_days?: number | null };
 // LiquidTrack retired 2026-04-21 — replaced by LiveTrack (live_scale kind
 // under Scales tab + LiveTrack Import wizard). See
 // supabase/migrations/20260421060000_retire_liquidtrack.sql for the DB drop.
-type Tab = 'products' | 'walmart' | 'scales' | 'locations' | 'classifier' | 'backup';
+type Tab = 'products' | 'walmart' | 'scales' | 'locations' | 'classifier' | 'backup' | 'events';
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'products', label: 'Products', icon: '\uD83D\uDCE6' },
@@ -32,6 +33,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'scales', label: 'Scales', icon: '\u2696\uFE0F' },
   { id: 'locations', label: 'Locations', icon: '\uD83D\uDCCD' },
   { id: 'classifier', label: 'Classifier', icon: '\uD83E\uDD16' },
+  { id: 'events', label: 'Events', icon: '\uD83D\uDCDC' },
   { id: 'backup', label: 'Backup', icon: '\uD83D\uDCBE' },
 ];
 
@@ -337,15 +339,20 @@ export function SettingsPage() {
             </div>
             <div>
               <label className={labelCls}>
-                Calories <span className="text-text-tertiary font-normal">kcal</span>
+                Calories <span className="text-text-tertiary font-normal">kcal · derived</span>
               </label>
+              {/* Derived from C·4 + P·4 + F·9 (Atwater 4-4-9). Read-only:
+                  user adjusts carbs/protein/fat and this updates live.
+                  The change handlers below also push the derived value
+                  back to form state so it persists on save. */}
               <input
                 type="number"
-                min="0"
-                value={form.calories_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; zero is correct UI default for null macro
-                onChange={(e) => onChange('calories_per_serving', Number(e.target.value) || 0)}
+                readOnly
+                value={form.calories_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; derived value resolves to 0 when all macros are 0
                 data-testid={`${testIdPrefix}-calories`}
-                className={inputCls}
+                className={`${inputCls} bg-surface-hover text-text-secondary cursor-not-allowed`}
+                aria-readonly="true"
+                title="Calculated from carbs × 4 + protein × 4 + fat × 9"
               />
             </div>
             <div>
@@ -356,7 +363,14 @@ export function SettingsPage() {
                 type="number"
                 min="0"
                 value={form.carbs_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; zero is correct UI default for null macro
-                onChange={(e) => onChange('carbs_per_serving', Number(e.target.value) || 0)}
+                onChange={(e) => {
+                  const c = Number(e.target.value) || 0;
+                  onChange('carbs_per_serving', c);
+                  onChange(
+                    'calories_per_serving',
+                    Math.round(c * 4 + (Number(form.protein_per_serving) || 0) * 4 + (Number(form.fat_per_serving) || 0) * 9),
+                  );
+                }}
                 data-testid={`${testIdPrefix}-carbs`}
                 className={inputCls}
               />
@@ -369,7 +383,14 @@ export function SettingsPage() {
                 type="number"
                 min="0"
                 value={form.protein_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; zero is correct UI default for null macro
-                onChange={(e) => onChange('protein_per_serving', Number(e.target.value) || 0)}
+                onChange={(e) => {
+                  const p = Number(e.target.value) || 0;
+                  onChange('protein_per_serving', p);
+                  onChange(
+                    'calories_per_serving',
+                    Math.round((Number(form.carbs_per_serving) || 0) * 4 + p * 4 + (Number(form.fat_per_serving) || 0) * 9),
+                  );
+                }}
                 data-testid={`${testIdPrefix}-protein`}
                 className={inputCls}
               />
@@ -382,7 +403,14 @@ export function SettingsPage() {
                 type="number"
                 min="0"
                 value={form.fat_per_serving ?? 0} // eslint-disable-line @luna/anti-lazy/no-numeric-coalesce-default -- reason: DB col NUMERIC NOT NULL DEFAULT 0; zero is correct UI default for null macro
-                onChange={(e) => onChange('fat_per_serving', Number(e.target.value) || 0)}
+                onChange={(e) => {
+                  const f = Number(e.target.value) || 0;
+                  onChange('fat_per_serving', f);
+                  onChange(
+                    'calories_per_serving',
+                    Math.round((Number(form.carbs_per_serving) || 0) * 4 + (Number(form.protein_per_serving) || 0) * 4 + f * 9),
+                  );
+                }}
                 data-testid={`${testIdPrefix}-fat`}
                 className={inputCls}
               />
@@ -978,6 +1006,8 @@ export function SettingsPage() {
         {/*  CLASSIFIER TAB                                              */}
         {/* ========================================================== */}
         {activeTab === 'classifier' && <ClassifierTab />}
+
+        {activeTab === 'events' && <EventViewerPage embedded />}
 
         {/* ========================================================== */}
         {/*  BACKUP TAB                                                  */}
