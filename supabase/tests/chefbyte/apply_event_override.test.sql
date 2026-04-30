@@ -491,14 +491,24 @@ SELECT is(
 -- ─────────────────────────────────────────────────────────────
 -- Test 14: retry_shelf_event — a previously-failed event re-applies
 --          cleanly after the underlying condition is fixed.
--- Seed a fresh event that fails (product with net_weight_g=NULL), then
--- fix the product and retry — the row should flip applied=true.
+--
+-- As of migration 20260429340000_apply_shelf_event_strict.sql,
+-- apply_shelf_event RAISES with SQLSTATE '22023' when net_weight_g is
+-- NULL — the RAISE fires BEFORE the shelf_event_log INSERT, so no log
+-- row is written. The old "apply → land applied=false → retry" loop is
+-- no longer the right test for this class of failure.
+--
+-- Updated scenario:
+--   * Seed the log row DIRECTLY with applied=false (simulating a post-
+--     insert failure like "no lot with stock to decrement") — the valid
+--     retry scenario where the log row exists. Fix the upstream state
+--     (add a lot), retry — row flips applied=true, double-retry raises.
 -- ─────────────────────────────────────────────────────────────
 
 SELECT tests.clear_authentication();
 SET ROLE service_role;
 
--- Seed a product with NULL net_weight_g so apply_shelf_event rejects.
+-- Seed a product (with valid net_weight_g = 100g) for the retry product.
 INSERT INTO chefbyte.products (
   product_id, user_id, name,
   net_weight_g, servings_per_container,
@@ -507,36 +517,32 @@ INSERT INTO chefbyte.products (
 ) VALUES (
   '80000000-0000-0000-0000-000000000003',
   :'_owner_uid'::uuid,
-  'Broken Weight Product',
-  NULL, 2, 100, 5, 10, 3
+  'Retry Test Product',
+  100, 2, 100, 5, 10, 3
 );
 
--- Apply once — should land applied=false (net_weight_g missing).
-SELECT chefbyte.apply_shelf_event_admin(
+-- Seed the log row directly with applied=false to simulate a post-insert
+-- failure (e.g. "no lot with stock to decrement"). This is the valid retry
+-- scenario — the row exists in the log, fix the upstream state, retry succeeds.
+INSERT INTO chefbyte.shelf_event_log (
+  user_id, device_id, client_event_id, payload, applied, reason
+) VALUES (
   :'_owner_uid'::uuid,
   '70000000-0000-0000-0000-0000000000a1'::uuid,
-  'scale-02', 'live_shelf', 'consumed',
-  '80000000-0000-0000-0000-000000000003'::uuid,
-  -50, '2026-04-15T15:00:00Z'::timestamptz, 'evt-retry-001', NULL
+  'evt-retry-001',
+  jsonb_build_object(
+    'scale_id', 'scale-02',
+    'kind', 'live_shelf',
+    'event_kind', 'consumed',
+    'product_id', '80000000-0000-0000-0000-000000000003',
+    'delta_g', -50,
+    'occurred_at', '2026-04-15T15:00:00Z'
+  ),
+  false,
+  'no lot with stock to decrement'
 );
 
-SET ROLE postgres;
-SELECT tests.authenticate_as('aeo_owner');
-
-SELECT is(
-  (SELECT applied FROM chefbyte.shelf_event_log
-    WHERE user_id = :'_owner_uid'::uuid AND client_event_id = 'evt-retry-001'),
-  FALSE,
-  'event lands applied=false when product has no net_weight_g'
-);
-
--- Fix the upstream issue (product now has a weight) and retry.
-UPDATE chefbyte.products
-   SET net_weight_g = 100
- WHERE product_id = '80000000-0000-0000-0000-000000000003'
-   AND user_id = :'_owner_uid'::uuid;
-
--- Needs a lot with stock to decrement.
+-- Add a lot with stock so the retry can decrement.
 INSERT INTO chefbyte.stock_lots (
   user_id, product_id, location_id,
   qty_containers, last_update_source, last_update_ts
@@ -545,6 +551,17 @@ INSERT INTO chefbyte.stock_lots (
   '80000000-0000-0000-0000-000000000003',
   :'fridge_id',
   5, 'live_shelf', '2026-04-15 15:05:00+00'
+);
+
+SET ROLE postgres;
+SELECT tests.authenticate_as('aeo_owner');
+
+-- The log row is present with applied=false (seeded directly above).
+SELECT is(
+  (SELECT applied FROM chefbyte.shelf_event_log
+    WHERE user_id = :'_owner_uid'::uuid AND client_event_id = 'evt-retry-001'),
+  FALSE,
+  'seeded log row has applied=false (simulating post-insert failure)'
 );
 
 SELECT lives_ok(
