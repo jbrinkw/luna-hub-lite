@@ -3,6 +3,7 @@ import { Dumbbell, ChefHat, LogOut, User, LayoutGrid, Wrench, Puzzle, KeyRound }
 import { useAppContext } from '@/shared/AppProvider';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { ThemeToggle } from '@/components/ui/ThemeToggle';
+import { SystemHealthCard } from '@/components/hub/SystemHealthCard';
 import type { LucideIcon } from 'lucide-react';
 
 interface AppDef {
@@ -155,6 +156,11 @@ export function HubHomePage() {
                 })}
               </div>
             )}
+
+            {/* System Health */}
+            <div className="mt-6">
+              <SystemHealthCard />
+            </div>
           </div>
         </div>
       </div>
