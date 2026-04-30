@@ -756,7 +756,10 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     // RPC would silently apply=false; we surface 404 instead).
     const cloudLotId: CloudLotId | null = await parseCloudLotId(piLotId, supabase, device.user_id);
     if (!cloudLotId) {
-      return jsonResponse({ error: 'pi_lot_id not found in cloud stock_lots (namespace mismatch or unknown lot)' }, 404);
+      return jsonResponse(
+        { error: 'pi_lot_id not found in cloud stock_lots (namespace mismatch or unknown lot)' },
+        404,
+      );
     }
     const { data: lwsData, error: lwsError } = await (supabase as any)
       .schema('chefbyte')
@@ -841,7 +844,10 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
     // parse against stock_lots to reject Pi-local lot UUIDs at the boundary.
     const discardLotId: CloudLotId | null = await parseCloudLotId(piLotId, supabase, device.user_id);
     if (!discardLotId) {
-      return jsonResponse({ error: 'pi_lot_id not found in cloud stock_lots (namespace mismatch or unknown lot)' }, 404);
+      return jsonResponse(
+        { error: 'pi_lot_id not found in cloud stock_lots (namespace mismatch or unknown lot)' },
+        404,
+      );
     }
     ({ data, error } = await (supabase as any).schema('chefbyte').rpc('apply_discard_with_lot_id_admin', {
       p_user_id: device.user_id,

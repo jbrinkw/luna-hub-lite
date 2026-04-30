@@ -60,7 +60,6 @@ export default tseslint.config(
       'supabase/tests/**/*.js',
       // Mutation-testing artifacts.
       'mutants/',
-      'hardware/live-shelf/mutants/',
       'hardware/live-shelf/.mutmut-cache/',
       // Local ESLint plugins are intentionally CommonJS .js; the ESLint
       // CLI loads them directly and tseslint's no-require-imports does

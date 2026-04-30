@@ -19,10 +19,7 @@
  * comment explaining WHY no invalidation is needed.
  */
 
-export type InvalidationKind =
-  | 'invalidated-by-mutation'
-  | 'invalidated-by-realtime'
-  | 'read-only';
+export type InvalidationKind = 'invalidated-by-mutation' | 'invalidated-by-realtime' | 'read-only';
 
 export interface RegistryEntry {
   key: keyof typeof import('./queryKeys').queryKeys;
@@ -156,6 +153,4 @@ export const invalidationRegistry: RegistryEntry[] = [
 ];
 
 /** Map from key name → registry entry for O(1) lookup in tests. */
-export const registryByKey: Map<string, RegistryEntry> = new Map(
-  invalidationRegistry.map((e) => [e.key as string, e]),
-);
+export const registryByKey: Map<string, RegistryEntry> = new Map(invalidationRegistry.map((e) => [e.key as string, e]));

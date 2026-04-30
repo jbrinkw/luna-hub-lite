@@ -92,7 +92,12 @@ describe('spec: resolvePercentLoad rounds to nearest 5 lbs', () => {
   });
 
   it('result is always a multiple of 5', () => {
-    const cases: Array<[number, number]> = [[70, 300], [80, 225], [90, 400], [75, 355]];
+    const cases: Array<[number, number]> = [
+      [70, 300],
+      [80, 225],
+      [90, 400],
+      [75, 355],
+    ];
     for (const [pct, e1rm] of cases) {
       expect(resolvePercentLoad(pct, e1rm) % 5).toBe(0);
     }
@@ -138,11 +143,7 @@ describe('spec: sequential set completion (lowest-order incomplete set)', () => 
 
 describe('spec: history keyset pagination', () => {
   it('cursor is the plan_date of the last result row', () => {
-    const page1 = [
-      { plan_date: '2026-04-30' },
-      { plan_date: '2026-04-28' },
-      { plan_date: '2026-04-25' },
-    ];
+    const page1 = [{ plan_date: '2026-04-30' }, { plan_date: '2026-04-28' }, { plan_date: '2026-04-25' }];
     const cursor = page1[page1.length - 1].plan_date;
     expect(cursor).toBe('2026-04-25');
   });

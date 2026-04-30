@@ -370,8 +370,8 @@ describe('useScannerDetection', () => {
 
         // The barcode callback never fired (the silent-drop bug).
         expect(onBarcodeScanned).not.toHaveBeenCalled();
-        // But onScanDropped DID fire — once per intercepted keystroke.
-        expect(onScanDropped).toHaveBeenCalledTimes(1);
+        // But onScanDropped DID fire — once per intercepted keystroke (6 digits + Enter = 7).
+        expect(onScanDropped).toHaveBeenCalledTimes(7);
         const calls = onScanDropped.mock.calls;
         // Every call should carry the protected-target reason.
         for (const [reason, detail] of calls) {

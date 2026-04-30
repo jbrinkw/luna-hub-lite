@@ -124,7 +124,7 @@ describe('spec: session expiry detection', () => {
     // The AuthProvider checks: if (initialLoadComplete && session === null && event !== 'SIGNED_OUT')
     const initialLoadComplete = true;
     const session: null | { user: { id: string } } = null;
-    const event = 'TOKEN_REFRESHED'; // not SIGNED_OUT
+    const event: string = 'TOKEN_REFRESHED'; // not SIGNED_OUT
 
     const isExpired = initialLoadComplete && session === null && event !== 'SIGNED_OUT';
     expect(isExpired).toBe(true);
@@ -142,7 +142,7 @@ describe('spec: session expiry detection', () => {
   it('null session before initial load does not trigger expiry toast', () => {
     const initialLoadComplete = false;
     const session: null | { user: { id: string } } = null;
-    const event = 'TOKEN_REFRESHED';
+    const event: string = 'TOKEN_REFRESHED';
 
     const isExpired = initialLoadComplete && session === null && event !== 'SIGNED_OUT';
     expect(isExpired).toBe(false);

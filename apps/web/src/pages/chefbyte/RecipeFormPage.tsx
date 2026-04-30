@@ -574,9 +574,13 @@ export function RecipeFormPage() {
               ].join(' ')}
             >
               {ingredientMode === 'edit' ? (
-                <><Eye className="h-3.5 w-3.5" /> View</>
+                <>
+                  <Eye className="h-3.5 w-3.5" /> View
+                </>
               ) : (
-                <><Pencil className="h-3.5 w-3.5" /> Edit</>
+                <>
+                  <Pencil className="h-3.5 w-3.5" /> Edit
+                </>
               )}
             </button>
           )}

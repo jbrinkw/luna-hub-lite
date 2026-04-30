@@ -181,19 +181,21 @@ describe('Realtime reconnect-after-drop', () => {
       } catch (err: any) {
         subscriberClient.removeChannel(warmChannel);
         lastWarmErr = err;
-        // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime disconnect can throw if already disconnected; explicit teardown, ignoring is correct
+
         try {
           (subscriberClient as any).realtime?.disconnect?.();
         } catch {
-          /* ignore */
+          // realtime disconnect/connect can throw on already-toggled state; ignored on purpose
+          void 0;
         }
         if (attempt < backoffMs.length - 1) {
           await new Promise((r) => setTimeout(r, backoffMs[attempt]));
-          // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime connect can throw if already connecting; retry loop handles it
+
           try {
             (subscriberClient as any).realtime?.connect?.();
           } catch {
-            /* ignore */
+            // realtime connect can throw on already-connecting; retry loop handles it
+            void 0;
           }
           await new Promise((r) => setTimeout(r, 500));
         }
@@ -211,11 +213,12 @@ describe('Realtime reconnect-after-drop', () => {
 
   afterAll(async () => {
     subscriberClient.removeAllChannels();
-    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime disconnect can throw if already disconnected; explicit teardown, ignoring is correct
+
     try {
       (subscriberClient as any).realtime?.disconnect?.();
     } catch {
-      /* ignore */
+      // realtime disconnect/connect can throw on already-toggled state; ignored on purpose
+      void 0;
     }
     if (productId) {
       await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', productId);
@@ -269,20 +272,22 @@ describe('Realtime reconnect-after-drop', () => {
     queryClient.setQueryData(queryKey, []);
 
     // Disconnect if still connected.
-    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime disconnect can throw if already disconnected; explicit teardown, ignoring is correct
+
     try {
       (subscriberClient as any).realtime?.disconnect?.();
     } catch {
-      /* ignore */
+      // realtime disconnect/connect can throw on already-toggled state; ignored on purpose
+      void 0;
     }
     await new Promise((r) => setTimeout(r, 300));
 
     // Reconnect.
-    // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: realtime connect can throw if already connecting; retry loop handles it
+
     try {
       (subscriberClient as any).realtime?.connect?.();
     } catch {
-      /* ignore */
+      // realtime disconnect/connect can throw on already-toggled state; ignored on purpose
+      void 0;
     }
     await new Promise((r) => setTimeout(r, 1_000));
 

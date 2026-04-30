@@ -8,6 +8,11 @@
 # author to schedule the follow-up. (It does NOT block — but the visibility
 # itself is the deterrent.)
 
+# Fail loudly on any error (e.g. lint-staged finds a violation). The original
+# version had no `set -e`, so a lint-staged failure was silently masked by
+# the trailing scanner block returning exit 0 — surfaced by Codex audit.
+set -e
+
 npx lint-staged
 
 # Scan HEAD for unresolved Verify-skipped footers.

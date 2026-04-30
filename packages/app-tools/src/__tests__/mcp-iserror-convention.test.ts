@@ -29,9 +29,25 @@ function makeErrorCtx(userId = 'user-test'): ToolContext {
   const chainFails = () => {
     const t: any = {};
     for (const m of [
-      'select', 'eq', 'is', 'order', 'limit', 'update', 'insert',
-      'not', 'ilike', 'gt', 'neq', 'in', 'lte', 'gte', 'delete', 'or',
-      'filter', 'range', 'returns',
+      'select',
+      'eq',
+      'is',
+      'order',
+      'limit',
+      'update',
+      'insert',
+      'not',
+      'ilike',
+      'gt',
+      'neq',
+      'in',
+      'lte',
+      'gte',
+      'delete',
+      'or',
+      'filter',
+      'range',
+      'returns',
     ]) {
       t[m] = vi.fn(() => t);
     }
@@ -122,18 +138,9 @@ const VALID_COACH_ARGS: Record<string, unknown> = {
 
 function assertIsError(result: any, toolName: string) {
   expect(result, `${toolName}: handler must return a result`).toBeDefined();
-  expect(
-    result.isError,
-    `${toolName}: error result must have isError=true (got isError=${result.isError})`,
-  ).toBe(true);
-  expect(
-    Array.isArray(result.content),
-    `${toolName}: result.content must be an array`,
-  ).toBe(true);
-  expect(
-    result.content.length,
-    `${toolName}: result.content must be non-empty`,
-  ).toBeGreaterThan(0);
+  expect(result.isError, `${toolName}: error result must have isError=true (got isError=${result.isError})`).toBe(true);
+  expect(Array.isArray(result.content), `${toolName}: result.content must be an array`).toBe(true);
+  expect(result.content.length, `${toolName}: result.content must be non-empty`).toBeGreaterThan(0);
   const text = result.content[0]?.text;
   expect(
     typeof text === 'string' && text.length > 0,
@@ -196,7 +203,10 @@ describe('spec: isError on invalid input (no DB call needed)', () => {
 
   it('CHEFBYTE_add_stock: non-positive qty_containers → isError', async () => {
     const tool = chefbyteTools['CHEFBYTE_add_stock']!;
-    const result = await tool.handler({ product_id: 'p', qty_containers: 0, location_id: 'loc-1' } as any, makeErrorCtx());
+    const result = await tool.handler(
+      { product_id: 'p', qty_containers: 0, location_id: 'loc-1' } as any,
+      makeErrorCtx(),
+    );
     assertIsError(result, 'CHEFBYTE_add_stock (zero qty)');
   });
 });

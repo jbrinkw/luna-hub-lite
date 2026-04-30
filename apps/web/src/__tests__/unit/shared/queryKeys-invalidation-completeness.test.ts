@@ -53,9 +53,7 @@ const SRC_ROOT = path.resolve(__dirname, '../../../');
 function grepExists(pattern: string, dir: string): boolean {
   try {
     const result = execSync(
-      `grep -rl --include="*.ts" --include="*.tsx" ` +
-        `--exclude-dir="__tests__" ` +
-        `-- '${pattern}' '${dir}'`,
+      `grep -rl --include="*.ts" --include="*.tsx" ` + `--exclude-dir="__tests__" ` + `-- '${pattern}' '${dir}'`,
       { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] },
     );
     return result.trim().length > 0;
@@ -128,8 +126,7 @@ describe('queryKeys invalidation completeness gate', () => {
 
     if (missingNote.length > 0) {
       throw new Error(
-        `Read-only registry entries missing justification notes:\n` +
-          missingNote.map((k) => `  - ${k}`).join('\n'),
+        `Read-only registry entries missing justification notes:\n` + missingNote.map((k) => `  - ${k}`).join('\n'),
       );
     }
 
@@ -152,7 +149,7 @@ describe('queryKeys invalidation completeness gate', () => {
   // Informational: log the breakdown so CI output is easy to read.
   it('logs invalidation coverage summary (always passes)', () => {
     const total = allKeys.length;
-    // eslint-disable-next-line no-console
+
     console.log(
       `\nInvalidation completeness:\n` +
         `  Total queryKeys : ${total}\n` +

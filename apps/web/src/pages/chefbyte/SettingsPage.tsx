@@ -415,9 +415,7 @@ export function SettingsPage() {
                 min="0"
                 step="1"
                 value={form.default_expiry_days ?? ''}
-                onChange={(e) =>
-                  onChange('default_expiry_days', e.target.value ? Number(e.target.value) : null)
-                }
+                onChange={(e) => onChange('default_expiry_days', e.target.value ? Number(e.target.value) : null)}
                 data-testid={`${testIdPrefix}-default-expiry-days`}
                 placeholder="e.g. 7"
                 className={inputCls}
@@ -645,11 +643,7 @@ export function SettingsPage() {
               className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-3"
             >
               {filteredProducts.map((p) => (
-                <div
-                  key={p.product_id}
-                  data-testid={`product-${p.product_id}`}
-                  className={productCardCls}
-                >
+                <div key={p.product_id} data-testid={`product-${p.product_id}`} className={productCardCls}>
                   {/* Display mode — always shown in the grid */}
                   <div className="flex flex-col flex-1">
                     <div className="flex items-start justify-between gap-2 mb-2">
@@ -686,9 +680,7 @@ export function SettingsPage() {
                       <span>P: {Number(p.protein_per_serving)}g</span>
                       <span>F: {Number(p.fat_per_serving)}g</span>
                       <span>Min Stock: {Number(p.min_stock_amount)}</span>
-                      {(p as any).default_expiry_days != null && (
-                        <span>Expiry: {(p as any).default_expiry_days}d</span>
-                      )}
+                      {(p as any).default_expiry_days != null && <span>Expiry: {(p as any).default_expiry_days}d</span>}
                       {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
                     </div>
                     <div className="flex gap-2 mt-3 pt-2 border-t border-border-light">
@@ -713,54 +705,55 @@ export function SettingsPage() {
             </div>
 
             {/* Edit Product Modal */}
-            {editingId !== null && (() => {
-              const editingProduct = products.find((p) => p.product_id === editingId);
-              return (
-                <div
-                  className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4"
-                  onClick={cancelEdit}
-                  data-testid="edit-product-modal-backdrop"
-                >
+            {editingId !== null &&
+              (() => {
+                const editingProduct = products.find((p) => p.product_id === editingId);
+                return (
                   <div
-                    className="bg-surface rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
-                    onClick={(e) => e.stopPropagation()}
-                    data-testid="edit-product-modal"
+                    className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4"
+                    onClick={cancelEdit}
+                    data-testid="edit-product-modal-backdrop"
                   >
-                    <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-border-light">
-                      <h3 className="m-0 text-lg font-bold">Edit: {editingProduct?.name}</h3>
-                      <span className="text-xs text-text-tertiary">{editingProduct?.barcode ?? 'no barcode'}</span>
-                    </div>
-                    <div className="px-5 py-4">
-                      {renderProductFields(
-                        editForm,
-                        (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
-                        'edit',
-                      )}
-                    </div>
-                    <div className="flex gap-2 px-5 pb-5 pt-2 border-t border-border-light">
-                      <button
-                        className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                        onClick={() => saveProductMutation.mutate()}
-                        data-testid="save-edit-product"
-                        disabled={
-                          editForm.default_recipe_unit === 'gram' &&
-                          !(editForm.net_weight_g && editForm.net_weight_g > 0)
-                        }
-                      >
-                        Save
-                      </button>
-                      <button
-                        className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
-                        onClick={cancelEdit}
-                        data-testid="cancel-edit-product"
-                      >
-                        Cancel
-                      </button>
+                    <div
+                      className="bg-surface rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+                      onClick={(e) => e.stopPropagation()}
+                      data-testid="edit-product-modal"
+                    >
+                      <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-border-light">
+                        <h3 className="m-0 text-lg font-bold">Edit: {editingProduct?.name}</h3>
+                        <span className="text-xs text-text-tertiary">{editingProduct?.barcode ?? 'no barcode'}</span>
+                      </div>
+                      <div className="px-5 py-4">
+                        {renderProductFields(
+                          editForm,
+                          (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
+                          'edit',
+                        )}
+                      </div>
+                      <div className="flex gap-2 px-5 pb-5 pt-2 border-t border-border-light">
+                        <button
+                          className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                          onClick={() => saveProductMutation.mutate()}
+                          data-testid="save-edit-product"
+                          disabled={
+                            editForm.default_recipe_unit === 'gram' &&
+                            !(editForm.net_weight_g && editForm.net_weight_g > 0)
+                          }
+                        >
+                          Save
+                        </button>
+                        <button
+                          className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
+                          onClick={cancelEdit}
+                          data-testid="cancel-edit-product"
+                        >
+                          Cancel
+                        </button>
+                      </div>
                     </div>
                   </div>
-                </div>
-              );
-            })()}
+                );
+              })()}
 
             {/* Delete confirmation dialog */}
             {deleteTarget !== null && (
