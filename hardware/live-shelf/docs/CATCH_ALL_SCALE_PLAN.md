@@ -261,6 +261,61 @@ delta. The empty-bottle short-circuit only fires when there's NO
 active session for the lot (the "I drank this away from the catch-
 all somehow and am acknowledging the empty container" path).
 
+### 6.5 REMOVE-event suppression — single-event placement model (2026-04-30)
+
+The user's mental model for the catch-all is "place item, weight
+settles, photo taken, record". The lift-off (`direction='remove'`)
+half of that interaction is **redundant** for catch-all because the
+item was being weighed — not stored on the scale. live_shelf needs
+ADD/REMOVE pairs (consumption tracking via in-flight); live_scale
+needs negative-delta REMOVE events (direct-consumption signal); but
+catch-all interactions are inherently one-shot measurements. We
+therefore drop catch-all REMOVE events at ingress.
+
+**Implementation** (`server/handlers/scale_events.py::handle_scale_event`):
+A short-circuit branch fires when `shelf_id == 'catch_all' AND
+direction == 'remove'`. The branch records a weight-trace marker
+(`kind='event_suppressed', reason='catch_all_remove_suppressed'`),
+logs an INFO line, and returns `{ok: true, suppressed:
+'catch_all_remove'}`. Nothing else fires:
+
+- No `scale_events` row insert.
+- No dedup LRU update.
+- No session pickup.
+- No frame capture.
+- No classifier dispatch.
+- No cloud emit.
+- No `lots` mutation (Pi-local OR cloud_lots).
+
+**Branch ordering** (load-bearing): the suppression runs AFTER the
+LiveTrack waiting-scale interception, the tare-arm interception, and
+the LiveTrack wizard suppression — those branches DO legitimately
+consume catch-all REMOVE events for their own purposes (a lift-off
+can carry a tare value or a wizard scale reading). The suppression
+runs BEFORE the dedup LRU, the `single_item` short-circuit, the
+weight-trace event marker for ADDs, and the session/classifier
+pipeline.
+
+**State-machine implication**: the FIRST/SECOND measurement state
+machine (§6.2) is unaffected by REMOVE suppression. After a
+placement (FIRST), the user lifts the item (REMOVE suppressed —
+in-flight markers stay set on `cloud_lots`) and re-places it (next
+ADD → SECOND, since `cloud_lots.in_flight_kind='catch_all'` is
+still set). A lift without re-placement leaves the in-flight markers
+set; the catch-all-specific TTL reaper (§5.2 / Layer 5) clears them
+after the configured TTL without changing qty or writing food_logs.
+
+**Cloud impact**: zero. The cloud's `apply_shelf_event` never
+accepted a "catch_all remove" event_kind in the first place
+(`VALID_EVENT_KINDS` in `supabase/functions/shelf-ingest/index.ts`
+lists only `catch_all_first_measurement`,
+`catch_all_second_measurement`, and `discarded` for catch-all).
+Pre-fix the Pi could route a catch-all REMOVE through the
+live_shelf-style apply path which would call `mark_lot_in_flight`
+on a Pi-local lot — wrong semantics for catch-all (no Pi-local lot
+exists for catch-all-only inventory) and visible only as orphan
+`session_resolutions` rows on Pi. The fix eliminates that orphan path.
+
 ## 7. Migrations + tests
 
 ### 7.1 Cloud migrations
@@ -286,6 +341,14 @@ all somehow and am acknowledging the empty container" path).
 - `server/handlers/tests/test_catch_all_dispatch.py` — 4 tests for
   the unblocker (frame persistence, inline classifier dispatch,
   live_shelf isolation, sweeper recovery). Mutation-verified.
+- `server/handlers/tests/test_catch_all_remove_suppression.py`
+  (2026-04-30) — 12 tests for the REMOVE-event suppression
+  (§6.5): response shape, no scale_events / classifier / cloud-emit
+  side effects, no lot mutations, weight-trace marker, ADD events
+  unaffected, live_shelf REMOVE unaffected, live_scale REMOVE
+  unaffected, noise events unaffected, place-lift-replace sequence
+  preserves first/second state machine, tare-arm interception still
+  wins over suppression.
 - All existing catch-all tests (`test_catch_all_*.py`) still pass.
 
 ## 8. Layers shipped vs deferred
@@ -301,6 +364,7 @@ all somehow and am acknowledging the empty container" path).
 | 7     | Empty container path (today's `abbd518`)                                       | **Verified** + extended to gate on "no active session"                    |
 | 8     | UI: distinguish catch-all in-flight from live_shelf in-flight on InventoryPage | Deferred (low priority)                                                   |
 | 9     | Harness scenarios                                                              | **Shipped** (2026-04-28 — first-event, full-session, TTL-clears-markers)  |
+| 10    | REMOVE-event suppression (single-event placement model, §6.5)                  | **Shipped** (2026-04-30 — ingress short-circuit, 12 Pi tests)             |
 
 ## 9. Live_shelf TTL macro write — already correct
 

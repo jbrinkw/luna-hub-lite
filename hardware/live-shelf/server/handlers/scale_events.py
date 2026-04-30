@@ -3600,6 +3600,62 @@ class ScaleHandler:
                 "delta_g": delta_g,
             }, 200
 
+        # Catch-all single-event measurement model (2026-04-30): the user's
+        # mental model is "place item, wait for settle, snap photo, record
+        # one event" — the lift-off (REMOVE) event is redundant for
+        # catch-all because the item was being weighed, not stored on the
+        # scale. We drop catch-all REMOVE events here, BEFORE the dedup +
+        # session + classifier + cloud-emit pipeline. The state machine
+        # implicitly resets for the next placement (next ADD event) by
+        # virtue of doing nothing. Weight-trace is preserved for diag
+        # observability; nothing else fires.
+        #
+        # live_shelf and live_scale REMOVE events are unaffected — those
+        # rigs DO need the lift-off signal (live_shelf for in_flight
+        # tracking, live_scale for negative-delta consumed events).
+        #
+        # Placement rationale: runs AFTER the wizard / tare-arm / waiting-
+        # scale / livetrack-import branches because those legitimately
+        # consume catch-all events of either direction (a lift-off can
+        # be a tare capture or a wizard reading). Runs BEFORE the
+        # single_item branch (different shelf), the weight-trace
+        # _append_weight_trace event marker, dedup, and the
+        # scale_events DB row insert — so a catch-all REMOVE leaves
+        # zero side effects beyond the suppression-trace marker and the
+        # lifecycle row.
+        if shelf_id == "catch_all" and direction == "remove":
+            # Weight-trace is keyed by ts and is the canonical place to
+            # see "this event arrived but did nothing" on diag dumps —
+            # the same convention used by the wizard suppression branch
+            # above. event_lifecycle is keyed by event_id and we
+            # deliberately don't insert a scale_events row, so there's
+            # no event_id to anchor a lifecycle row to.
+            _append_weight_trace({
+                "kind": "event_suppressed",
+                "device_id": device_id,
+                "esp_ts": ts,
+                "pi_ts": pi_received_ts,
+                "event_seq": event_seq,
+                "delta_g": delta_g,
+                "before_weight_g": before_weight_g,
+                "after_weight_g": after_weight_g,
+                "reason": "catch_all_remove_suppressed",
+            })
+            log.info(
+                "catch_all: suppressed remove event (single-event model) — "
+                "device_id=%s event_seq=%s delta_g=%.1fg before=%.1fg "
+                "after=%.1fg",
+                device_id, event_seq, delta_g, before_weight_g, after_weight_g,
+            )
+            return {
+                "ok": True,
+                "suppressed": "catch_all_remove",
+                "shelf_id": "catch_all",
+                "device_id": device_id,
+                "direction": direction,
+                "delta_g": delta_g,
+            }, 200
+
         # Single-item (live_scale) rig: direct-consumption hardware where
         # the scale is permanently paired to one product (see
         # chefbyte.scale_pairings). Skip the whole live_shelf / catch_all
