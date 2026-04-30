@@ -37,12 +37,12 @@
 
 BEGIN;
 
--- Opt-out registry (mirrored from opt_out_registry.sql; inlined because
--- `supabase test db` invokes psql from the repo root, making \ir resolve
--- relative to cwd rather than the test file's directory).
---
--- To update this list: also update opt_out_registry.sql (kept as
--- authoritative human-readable source) and paste the INSERT block here.
+-- Opt-out registry — inlined as the AUTHORITATIVE source. The previously
+-- separate `opt_out_registry.sql` was redundant (pg_prove picked it up as a
+-- standalone test file with no plan, causing parse-error failures) and was
+-- removed. To add an opt-out: add a row to the INSERT below with a non-empty
+-- reason, then add the table to a migration that explicitly does NOT include
+-- it in the supabase_realtime publication.
 CREATE TEMP TABLE IF NOT EXISTS _realtime_opt_out (
   schema_name  text NOT NULL,
   table_name   text NOT NULL,
@@ -84,19 +84,16 @@ INSERT INTO _realtime_opt_out (schema_name, table_name, reason) VALUES
   ('hub', 'agent_settings',
    'Agent-level prompt/config rows. Read on mount; no cross-tab live-update requirement.');
 
--- Count tables to set plan(N). Subquery materialised once.
-DO $$
-DECLARE
-  n int;
-BEGIN
-  SELECT count(*)
-    INTO n
+-- Count tables to set plan(N). pg_prove only parses `1..N` plan lines
+-- emitted as a top-level SELECT; calling `PERFORM plan(...)` from a DO
+-- block sends them as NOTICE which pg_prove ignores ("No plan found").
+SELECT plan((
+  SELECT count(*)::int
     FROM pg_class c
     JOIN pg_namespace ns ON ns.oid = c.relnamespace
    WHERE ns.nspname IN ('chefbyte', 'coachbyte', 'hub')
-     AND c.relkind = 'r';
-  PERFORM plan(n);
-END $$;
+     AND c.relkind = 'r'
+));
 
 -- Assert each table: in publication OR in opt-out with reason.
 SELECT

@@ -32,7 +32,12 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    sequence: { shuffle: true },
+    // Integration tests are deliberately story-ordered: tests within a file
+    // build on prior state (e.g., scanner test sequence updates a product, then
+    // a later test consumes it and asserts the updated macros). R10 introduced
+    // shuffle here, but that broke 31 such intentional sequences. Shuffle stays
+    // ON in vitest.config.ts (unit tests) where every test must be self-contained.
+    sequence: { shuffle: false },
     setupFiles: ['./src/__tests__/setup.integration.ts'],
     include: ['src/__tests__/integration/**/*.test.{ts,tsx}', 'src/__tests__/flows/**/*.test.ts'],
     testTimeout: 15_000,
