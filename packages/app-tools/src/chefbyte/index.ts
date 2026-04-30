@@ -15,6 +15,7 @@ import { markDone } from './mark-done';
 import { getRecipes } from './get-recipes';
 import { getCookable } from './get-cookable';
 import { createRecipe } from './create-recipe';
+import { updateRecipe } from './update-recipe';
 import { getMacros } from './get-macros';
 import { logTempItem } from './log-temp-item';
 import { setPrice } from './set-price';
@@ -45,6 +46,7 @@ export const chefbyteTools: Record<string, ToolDefinition> = {
   [getRecipes.name]: getRecipes,
   [getCookable.name]: getCookable,
   [createRecipe.name]: createRecipe,
+  [updateRecipe.name]: updateRecipe,
   [getMacros.name]: getMacros,
   [logTempItem.name]: logTempItem,
   [setPrice.name]: setPrice,
