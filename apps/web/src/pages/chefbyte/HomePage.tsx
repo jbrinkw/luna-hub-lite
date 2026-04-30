@@ -1315,7 +1315,7 @@ export function HomePage() {
           ].join(' ')}
         >
           <AlertTriangle className="w-3 h-3" />
-          {belowMinStock} below min stock
+          {belowMinStock} low on stock
         </Link>
         {/*
           "X expired" counter card. Red when count > 0 (nag-worthy),
