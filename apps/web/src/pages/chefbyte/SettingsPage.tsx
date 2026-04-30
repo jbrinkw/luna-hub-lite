@@ -19,7 +19,7 @@ import { useChefbyteProducts, type ChefbyteProduct } from '@/shared/useChefbyteP
 
 // Product type comes from the shared hook — re-export a local alias so
 // the rest of this file can keep using the short name.
-type Product = ChefbyteProduct;
+type Product = ChefbyteProduct & { default_expiry_days?: number | null };
 
 // LiquidTrack retired 2026-04-21 — replaced by LiveTrack (live_scale kind
 // under Scales tab + LiveTrack Import wizard). See
@@ -67,6 +67,7 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
   default_recipe_unit: null,
   tare_weight_g: null,
   certified: null,
+  default_expiry_days: null,
 });
 
 /* ================================================================== */
@@ -390,7 +391,7 @@ export function SettingsPage() {
         {/* Inventory & Shopping */}
         <div>
           <div className={sectionHeaderCls}>Inventory &amp; Shopping</div>
-          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_2fr] gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-[1fr_1fr_1fr_2fr] gap-3">
             <div>
               <label className={labelCls}>
                 Min stock <span className="text-text-tertiary font-normal">containers</span>
@@ -402,6 +403,23 @@ export function SettingsPage() {
                 value={form.min_stock_amount ?? 0}
                 onChange={(e) => onChange('min_stock_amount', Number(e.target.value) || 0)}
                 data-testid={`${testIdPrefix}-min-stock`}
+                className={inputCls}
+              />
+            </div>
+            <div>
+              <label className={labelCls}>
+                Default expiry <span className="text-text-tertiary font-normal">days</span>
+              </label>
+              <input
+                type="number"
+                min="0"
+                step="1"
+                value={form.default_expiry_days ?? ''}
+                onChange={(e) =>
+                  onChange('default_expiry_days', e.target.value ? Number(e.target.value) : null)
+                }
+                data-testid={`${testIdPrefix}-default-expiry-days`}
+                placeholder="e.g. 7"
                 className={inputCls}
               />
             </div>
@@ -626,108 +644,123 @@ export function SettingsPage() {
               data-testid="product-list"
               className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-3"
             >
-              {filteredProducts.map((p) => {
-                const isEditing = editingId === p.product_id;
-                return (
-                  <div
-                    key={p.product_id}
-                    data-testid={`product-${p.product_id}`}
-                    className={`${productCardCls}${isEditing ? ' col-span-full ring-2 ring-emerald-500/40 shadow-md' : ''}`}
-                  >
-                    {isEditing ? (
-                      /* Editing mode — escapes the card grid to use full row width */
-                      <div>
-                        <div className="flex items-baseline justify-between mb-4 pb-2 border-b border-border-light">
-                          <h4 className="m-0 text-base font-semibold">Editing: {p.name}</h4>
-                          <span className="text-xs text-text-tertiary">{p.barcode ?? 'no barcode'}</span>
-                        </div>
-                        {renderProductFields(
-                          editForm,
-                          (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
-                          'edit',
+              {filteredProducts.map((p) => (
+                <div
+                  key={p.product_id}
+                  data-testid={`product-${p.product_id}`}
+                  className={productCardCls}
+                >
+                  {/* Display mode — always shown in the grid */}
+                  <div className="flex flex-col flex-1">
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <h4 className="m-0 text-base font-semibold">{p.name}</h4>
+                      <div className="flex flex-wrap items-center gap-1 justify-end">
+                        {p.is_placeholder && (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200 whitespace-nowrap"
+                            title="Placeholder — macros are estimated. Will be promoted on barcode scan match."
+                            data-testid={`placeholder-badge-${p.product_id}`}
+                          >
+                            Placeholder
+                          </span>
                         )}
-                        <div className="flex gap-2 mt-5 pt-4 border-t border-border-light">
-                          <button
-                            className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
-                            onClick={() => saveProductMutation.mutate()}
-                            data-testid="save-edit-product"
-                            disabled={
-                              editForm.default_recipe_unit === 'gram' &&
-                              !(editForm.net_weight_g && editForm.net_weight_g > 0)
-                            }
+                        {p.tare_weight_g != null && (
+                          <span
+                            className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
+                            title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
+                            data-testid={`livetrack-enrolled-${p.product_id}`}
                           >
-                            Save
-                          </button>
-                          <button
-                            className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
-                            onClick={cancelEdit}
-                            data-testid="cancel-edit-product"
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      /* Display mode */
-                      <div className="flex flex-col flex-1">
-                        <div className="flex items-start justify-between gap-2 mb-2">
-                          <h4 className="m-0 text-base font-semibold">{p.name}</h4>
-                          <div className="flex flex-wrap items-center gap-1 justify-end">
-                            {p.is_placeholder && (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200 whitespace-nowrap"
-                                title="Placeholder — macros are estimated. Will be promoted on barcode scan match."
-                                data-testid={`placeholder-badge-${p.product_id}`}
-                              >
-                                Placeholder
-                              </span>
-                            )}
-                            {p.tare_weight_g != null && (
-                              <span
-                                className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
-                                title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
-                                data-testid={`livetrack-enrolled-${p.product_id}`}
-                              >
-                                <span aria-hidden="true">✓</span>
-                                LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        {p.barcode && (
-                          <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>
+                            <span aria-hidden="true">✓</span>
+                            LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
+                          </span>
                         )}
-                        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-text-secondary flex-1">
-                          <span>Srv/Ctn: {Number(p.servings_per_container)}</span>
-                          <span>Cal: {Number(p.calories_per_serving)}</span>
-                          <span>C: {Number(p.carbs_per_serving)}g</span>
-                          <span>P: {Number(p.protein_per_serving)}g</span>
-                          <span>F: {Number(p.fat_per_serving)}g</span>
-                          <span>Min Stock: {Number(p.min_stock_amount)}</span>
-                          {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
-                        </div>
-                        <div className="flex gap-2 mt-3 pt-2 border-t border-border-light">
-                          <button
-                            className="bg-emerald-600 text-white border-none px-3.5 py-1.5 rounded-md cursor-pointer font-semibold text-[13px] hover:bg-emerald-700"
-                            onClick={() => startEdit(p)}
-                            data-testid={`edit-product-${p.product_id}`}
-                          >
-                            Edit
-                          </button>
-                          <button
-                            onClick={() => setDeleteTarget(p.product_id)}
-                            data-testid={`delete-product-${p.product_id}`}
-                            className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:text-red-700"
-                          >
-                            Delete
-                          </button>
-                        </div>
                       </div>
+                    </div>
+                    {p.barcode && (
+                      <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>
                     )}
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-text-secondary flex-1">
+                      <span>Srv/Ctn: {Number(p.servings_per_container)}</span>
+                      <span>Cal: {Number(p.calories_per_serving)}</span>
+                      <span>C: {Number(p.carbs_per_serving)}g</span>
+                      <span>P: {Number(p.protein_per_serving)}g</span>
+                      <span>F: {Number(p.fat_per_serving)}g</span>
+                      <span>Min Stock: {Number(p.min_stock_amount)}</span>
+                      {(p as any).default_expiry_days != null && (
+                        <span>Expiry: {(p as any).default_expiry_days}d</span>
+                      )}
+                      {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
+                    </div>
+                    <div className="flex gap-2 mt-3 pt-2 border-t border-border-light">
+                      <button
+                        className="bg-emerald-600 text-white border-none px-3.5 py-1.5 rounded-md cursor-pointer font-semibold text-[13px] hover:bg-emerald-700"
+                        onClick={() => startEdit(p)}
+                        data-testid={`edit-product-${p.product_id}`}
+                      >
+                        Edit
+                      </button>
+                      <button
+                        onClick={() => setDeleteTarget(p.product_id)}
+                        data-testid={`delete-product-${p.product_id}`}
+                        className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:text-red-700"
+                      >
+                        Delete
+                      </button>
+                    </div>
                   </div>
-                );
-              })}
+                </div>
+              ))}
             </div>
+
+            {/* Edit Product Modal */}
+            {editingId !== null && (() => {
+              const editingProduct = products.find((p) => p.product_id === editingId);
+              return (
+                <div
+                  className="fixed inset-0 bg-black/50 flex items-center justify-center z-[1000] p-4"
+                  onClick={cancelEdit}
+                  data-testid="edit-product-modal-backdrop"
+                >
+                  <div
+                    className="bg-surface rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto"
+                    onClick={(e) => e.stopPropagation()}
+                    data-testid="edit-product-modal"
+                  >
+                    <div className="flex items-baseline justify-between px-5 pt-5 pb-3 border-b border-border-light">
+                      <h3 className="m-0 text-lg font-bold">Edit: {editingProduct?.name}</h3>
+                      <span className="text-xs text-text-tertiary">{editingProduct?.barcode ?? 'no barcode'}</span>
+                    </div>
+                    <div className="px-5 py-4">
+                      {renderProductFields(
+                        editForm,
+                        (field, value) => setEditForm((prev) => ({ ...prev, [field]: value })),
+                        'edit',
+                      )}
+                    </div>
+                    <div className="flex gap-2 px-5 pb-5 pt-2 border-t border-border-light">
+                      <button
+                        className="bg-emerald-600 text-white border-none px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed"
+                        onClick={() => saveProductMutation.mutate()}
+                        data-testid="save-edit-product"
+                        disabled={
+                          editForm.default_recipe_unit === 'gram' &&
+                          !(editForm.net_weight_g && editForm.net_weight_g > 0)
+                        }
+                      >
+                        Save
+                      </button>
+                      <button
+                        className="bg-surface text-text-secondary border border-border px-4 py-2 rounded-md cursor-pointer font-semibold text-sm hover:bg-surface-hover"
+                        onClick={cancelEdit}
+                        data-testid="cancel-edit-product"
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* Delete confirmation dialog */}
             {deleteTarget !== null && (
