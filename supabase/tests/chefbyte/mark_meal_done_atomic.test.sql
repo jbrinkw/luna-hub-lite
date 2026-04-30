@@ -1,11 +1,15 @@
--- Atomicity + stock-precheck tests for private.mark_meal_done.
+-- Atomicity + zero-shorts tests for private.mark_meal_done.
 --
--- Covers behavior introduced in 20260424070000_mark_meal_done_atomic.sql:
+-- Originally tested the pre-check RAISE on insufficient stock.
+-- Updated in 20260430020000_meal_execute_unification.sql: insufficient
+-- stock no longer raises — instead the function takes MIN(needed,
+-- available) per ingredient and completes the meal regardless.
+--
+-- Retained invariants:
 --   * FOR UPDATE lock on meal_plan_entry
---   * Pre-check ingredient stock before any mutation
---   * RAISE on insufficient stock → full rollback (zero partial state)
---   * Richer JSONB return payload (mode / deducted / food_log_ids)
---   * RAISE on already-completed (instead of returning success=false)
+--   * Zero-shorts: partial deduct + partials array in return
+--   * Richer JSONB return payload (mode / deducted / partials / food_log_ids)
+--   * RAISE on already-completed (unchanged)
 --   * Cross-user isolation (RAISE "not found")
 
 BEGIN;
@@ -78,64 +82,67 @@ INSERT INTO chefbyte.meal_plan_entries (
 );
 
 -- ─────────────────────────────────────────────────────────────
--- T1: Insufficient-stock raises (full rollback)
+-- T1: Partial stock — mark_meal_done completes (no RAISE)
 -- ─────────────────────────────────────────────────────────────
+-- Rice has 0.1 containers; recipe needs 1.0 → zero-shorts: deduct 0.1,
+-- complete the meal, return partials array.
 
-SELECT throws_like(
+SELECT lives_ok(
   $$ SELECT chefbyte.mark_meal_done('90000000-0000-0000-0000-000000000001'::uuid) $$,
-  'Insufficient stock for AtomicRice%',
-  'mark_meal_done raises "Insufficient stock" when an ingredient is short'
+  'mark_meal_done completes even when rice is short (zero-shorts)'
 );
 
 -- ─────────────────────────────────────────────────────────────
--- T2: Chicken stock untouched after the raise (no partial deduct)
+-- T2: Meal is marked completed despite short rice
 -- ─────────────────────────────────────────────────────────────
 
-SELECT is(
-  (SELECT qty_containers FROM chefbyte.stock_lots
-    WHERE user_id = tests.get_supabase_uid('atomic_tester')
-      AND product_id = '70000000-0000-0000-0000-000000000001'),
-  5.000::numeric,
-  'chicken stock untouched after insufficient-stock raise (rollback)'
-);
-
--- ─────────────────────────────────────────────────────────────
--- T3: Rice stock untouched after the raise
--- ─────────────────────────────────────────────────────────────
-
-SELECT is(
-  (SELECT qty_containers FROM chefbyte.stock_lots
-    WHERE user_id = tests.get_supabase_uid('atomic_tester')
-      AND product_id = '70000000-0000-0000-0000-000000000002'),
-  0.100::numeric,
-  'rice stock untouched after insufficient-stock raise (rollback)'
-);
-
--- ─────────────────────────────────────────────────────────────
--- T4: Meal stays uncompleted after the raise
--- ─────────────────────────────────────────────────────────────
-
-SELECT is(
+SELECT isnt(
   (SELECT completed_at FROM chefbyte.meal_plan_entries
     WHERE meal_id = '90000000-0000-0000-0000-000000000001'),
   NULL::timestamptz,
-  'meal stays uncompleted after insufficient-stock raise'
+  'meal is completed even when an ingredient was short'
 );
 
 -- ─────────────────────────────────────────────────────────────
--- T5: No food_logs created during the raised call
+-- T3: Chicken stock deducted (1 container taken from 5)
 -- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT COALESCE(SUM(qty_containers), 0::numeric) FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('atomic_tester')
+      AND product_id = '70000000-0000-0000-0000-000000000001'),
+  4.000::numeric,
+  'chicken stock deducted (1 of 5 containers taken)'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- T4: Rice stock drained to 0 (0.1 taken, no negative lots)
+-- ─────────────────────────────────────────────────────────────
+
+SELECT is(
+  (SELECT COALESCE(SUM(qty_containers), 0::numeric) FROM chefbyte.stock_lots
+    WHERE user_id = tests.get_supabase_uid('atomic_tester')
+      AND product_id = '70000000-0000-0000-0000-000000000002'),
+  0.000::numeric,
+  'rice stock drained to 0 — no negative lots'
+);
+
+-- ─────────────────────────────────────────────────────────────
+-- T5: 1 food_log written (chicken only — rice qty was 0.1, logged)
+-- ─────────────────────────────────────────────────────────────
+-- consume_product is called for each ingredient with actual amount.
+-- Chicken: 1 container. Rice: 0.1 container (what was available).
 
 SELECT is(
   (SELECT count(*)::integer FROM chefbyte.food_logs
     WHERE user_id = tests.get_supabase_uid('atomic_tester')
       AND meal_id = '90000000-0000-0000-0000-000000000001'),
-  0,
-  'no food_logs created during the raised mark_meal_done call'
+  2,
+  '2 food_logs written (chicken full + rice partial 0.1 container)'
 );
 
 -- ─────────────────────────────────────────────────────────────
--- Refill rice and run happy path, then verify rich return shape.
+-- Refill rice to run the rest of the happy-path tests.
 -- ─────────────────────────────────────────────────────────────
 
 INSERT INTO chefbyte.stock_lots (user_id, product_id, location_id, qty_containers, expires_on)
@@ -145,11 +152,21 @@ VALUES (
 );
 
 -- ─────────────────────────────────────────────────────────────
--- T6: Happy path — mode='recipe'
+-- T6: Happy path — mode='recipe' (fresh meal, full stock)
 -- ─────────────────────────────────────────────────────────────
+-- Meal 001 is already completed; insert a new meal for T6-T9.
+
+INSERT INTO chefbyte.meal_plan_entries (
+  meal_id, user_id, recipe_id, logical_date, servings, meal_prep
+) VALUES (
+  '90000000-0000-0000-0000-000000000003',
+  tests.get_supabase_uid('atomic_tester'),
+  '80000000-0000-0000-0000-000000000001',
+  '2026-04-12', 2, false
+);
 
 SELECT is(
-  (SELECT (chefbyte.mark_meal_done('90000000-0000-0000-0000-000000000001'::uuid))->>'mode'),
+  (SELECT (chefbyte.mark_meal_done('90000000-0000-0000-0000-000000000003'::uuid))->>'mode'),
   'recipe',
   'happy path return payload has mode=recipe'
 );
@@ -160,7 +177,7 @@ SELECT is(
 
 SELECT isnt(
   (SELECT completed_at FROM chefbyte.meal_plan_entries
-    WHERE meal_id = '90000000-0000-0000-0000-000000000001'),
+    WHERE meal_id = '90000000-0000-0000-0000-000000000003'),
   NULL::timestamptz,
   'meal.completed_at set after happy path'
 );
@@ -172,7 +189,7 @@ SELECT isnt(
 SELECT is(
   (SELECT count(*)::integer FROM chefbyte.food_logs
     WHERE user_id = tests.get_supabase_uid('atomic_tester')
-      AND meal_id = '90000000-0000-0000-0000-000000000001'),
+      AND meal_id = '90000000-0000-0000-0000-000000000003'),
   2,
   'happy path writes 2 food_logs tagged with the meal_id'
 );
@@ -182,7 +199,7 @@ SELECT is(
 -- ─────────────────────────────────────────────────────────────
 
 SELECT throws_ok(
-  $$ SELECT chefbyte.mark_meal_done('90000000-0000-0000-0000-000000000001'::uuid) $$,
+  $$ SELECT chefbyte.mark_meal_done('90000000-0000-0000-0000-000000000003'::uuid) $$,
   'Meal already completed',
   'second call on a completed meal raises (atomic — no silent success=false)'
 );

@@ -9,7 +9,7 @@ import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { toDateStr, todayStr } from '@/shared/dates';
 import { mealTypeFromHour } from '@/shared/mealTypeFromHour';
 import { computeRecipeMacros } from './RecipesPage';
-import { formatStockShortfallMessage } from '@/shared/stockShortfall';
+
 import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
@@ -480,8 +480,9 @@ export function MealPlanPage() {
 
   const markDoneMutation = useMutation({
     mutationFn: async (mealId: string) => {
-      const { error: rpcErr } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
+      const { data, error: rpcErr } = await (chefbyte() as any).rpc('mark_meal_done', { p_meal_id: mealId });
       if (rpcErr) throw new Error(rpcErr.message);
+      return data as { partials?: Array<{ product_id: string; needed: number; available: number }> } | null;
     },
     // Full optimistic update (R2 audit #4): flip completed_at AND seed a
     // synthetic food_logs row so the day's "Consumed" panel populates
@@ -520,11 +521,24 @@ export function MealPlanPage() {
       }
       return { previous };
     },
+    onSuccess: (data) => {
+      // Zero-shorts: if any ingredient was out of stock, show an info toast
+      // listing what was missing. The meal is still completed — this is
+      // informational only, not an error.
+      if (data?.partials && data.partials.length > 0) {
+        const names = data.partials
+          .map(
+            (p) => `product ${p.product_id.slice(0, 8)} (need ${p.needed.toFixed(2)}, had ${p.available.toFixed(2)})`,
+          )
+          .join('; ');
+        toast.show(`Meal done — some items were out of stock: ${names}`, { variant: 'info', durationMs: 8000 });
+      }
+    },
     onError: (err: Error, _mealId, context) => {
       if (context?.previous) {
         queryClient.setQueryData(queryKeys.mealPlan(userId!, startDate), context.previous);
       }
-      setError(formatStockShortfallMessage(err.message));
+      setError(err.message);
     },
     onSettled: () => invalidateMealPlan(),
   });
@@ -1160,20 +1174,22 @@ export function MealPlanPage() {
                             <div className="flex flex-row gap-2 mt-2.5 sm:flex-col sm:gap-1 sm:ml-3 sm:mt-0 shrink-0">
                               {!meal.completed_at ? (
                                 <>
-                                  <button
-                                    onClick={() => markDoneMutation.mutate(meal.meal_id)}
-                                    data-testid={`mark-done-${meal.meal_id}`}
-                                    className="px-3 py-1 bg-success text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-success-hover transition-colors"
-                                  >
-                                    Mark Done
-                                  </button>
-                                  {meal.meal_prep && (
+                                  {meal.meal_prep ? (
+                                    /* Prep meals: single "Execute" button — same RPC, no separate Mark Done */
                                     <button
                                       onClick={() => markDoneMutation.mutate(meal.meal_id)}
                                       data-testid={`exec-prep-${meal.meal_id}`}
                                       className="px-3 py-1 bg-violet-600 text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-violet-700 transition-colors"
                                     >
-                                      Execute Prep
+                                      Execute
+                                    </button>
+                                  ) : (
+                                    <button
+                                      onClick={() => markDoneMutation.mutate(meal.meal_id)}
+                                      data-testid={`mark-done-${meal.meal_id}`}
+                                      className="px-3 py-1 bg-success text-white rounded text-xs font-semibold whitespace-nowrap hover:bg-success-hover transition-colors"
+                                    >
+                                      Mark Done
                                     </button>
                                   )}
                                 </>
