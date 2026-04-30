@@ -62,6 +62,8 @@ FULL_STEPS=(
   "step:splice-uniqueness|bash scripts/verify/migration-splice-uniqueness.sh"
   "step:schema-parity|bash scripts/verify/pi-cloud-schema-parity.sh"
   "step:migration-test-coverage|bash scripts/verify/migration-test-coverage.sh"
+  "step:python-anti-lazy|run_python_anti_lazy"
+  "step:lint-coverage|bash scripts/verify/lint-coverage.sh"
 )
 
 # ---------------------------------------------------------------------------
@@ -181,6 +183,31 @@ run_parity_assert() {
     echo "  Output: $out"
     return 1
   fi
+}
+
+run_python_anti_lazy() {
+  # Ruff anti-lazy gate for the Pi server (BLE001, S110, S112, TRY300, E722).
+  # Also runs the AST-level int()/float() checker (ANTI_LAZY_001).
+  # Both are at warn-level initially (--exit-zero / || true) — violations are
+  # reported but do not block the build. After the sweep, remove || true.
+  if [[ ! -d hardware/live-shelf ]]; then
+    echo "  Skipping (hardware/live-shelf not present)."
+    return 0
+  fi
+  # Resolve the venv python (preferred) or fall back to system python3.
+  local py_bin
+  if [[ -x "$REPO_ROOT/hardware/live-shelf/.venv/bin/python" ]]; then
+    py_bin="$REPO_ROOT/hardware/live-shelf/.venv/bin/python"
+  elif command -v python3 >/dev/null 2>&1; then
+    py_bin="python3"
+  else
+    echo "  ERROR: python3 not on PATH; can't run python-anti-lazy gate."
+    return 1
+  fi
+  echo "  ruff anti-lazy check (warn-level)..."
+  (cd "$REPO_ROOT/hardware/live-shelf" && "$py_bin" -m ruff check . --exit-zero)
+  echo "  AST anti-lazy check — int()/float() coercions (warn-level)..."
+  (cd "$REPO_ROOT/hardware/live-shelf" && "$py_bin" scripts/anti_lazy_check.py || true)
 }
 
 run_mutation_pair_gate() {

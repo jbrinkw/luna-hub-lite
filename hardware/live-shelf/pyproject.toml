@@ -1,0 +1,48 @@
+[tool.ruff]
+# Anti-lazy lint gate for the live-shelf Pi server.
+# Mirrors the anti-lazy ESLint plugin rules (Agent R7 — Phase 2.2).
+# Rules are at 'warn' level initially (--exit-zero in CI), matching the
+# ESLint rollout strategy. After a sweep fixes violations, switch exit
+# behaviour by removing --exit-zero from the step in run.sh.
+
+target-version = "py313"
+line-length = 100
+
+# First-party directories scanned. The .venv, mutants, and __pycache__
+# directories are excluded via defaults + extend-exclude below.
+extend-exclude = [
+    ".venv",
+    "mutants",
+    ".mutmut-cache",
+    "__pycache__",
+    "*.pyc",
+]
+
+[tool.ruff.lint]
+# Anti-lazy ruleset — select rules that mirror the ESLint anti-lazy plugin:
+#
+#   BLE001  — blind except (mirrors no-empty-catch-no-comment)
+#   S110    — try-except-pass (mirrors no-empty-catch-no-comment, pass variant)
+#   S112    — try-except-continue (continuation of the silent-swallow pattern)
+#   TRY300  — consider-else (encourage explicit flow, mirrors anti-lazy philosophy)
+#   B007    — unused loop variable (cleanliness)
+#   E722    — bare except: (broadest silent-catch variant)
+#
+# int()/float() coercions without try/except are caught by the AST checker
+# (scripts/anti_lazy_check.py) since ruff has no stock rule for that pattern.
+select = [
+    "BLE001",  # blind-except: catches `except Exception` broadly
+    "S110",    # try-except-pass: silent swallow
+    "S112",    # try-except-continue: silent swallow in loops
+    "TRY300",  # try-consider-else: missing else clause
+    "B007",    # unused-loop-control-variable
+    "E722",    # bare-except: `except:` with no type
+]
+
+# Per-file ignores: tests legitimately swallow errors in some mock scaffolding.
+# The test ignore mirrors the ESLint `tests/**` exclusion approach — tests are
+# still linted, but BLE001/S110 are downgraded for test helper files only.
+[tool.ruff.lint.per-file-ignores]
+"server/tests/**" = ["BLE001", "S110", "S112"]
+"server/**/tests/**" = ["BLE001", "S110", "S112"]
+"scripts/tests/**" = ["BLE001", "S110", "S112"]
