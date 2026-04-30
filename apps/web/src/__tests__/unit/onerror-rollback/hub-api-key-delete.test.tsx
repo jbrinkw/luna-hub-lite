@@ -15,7 +15,11 @@ vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi
 
 const USER_ID = 'user-api-key-rollback';
 
-interface ApiKey { key_id: string; name: string; created_at: string }
+interface ApiKey {
+  key_id: string;
+  name: string;
+  created_at: string;
+}
 
 function buildHandlers(qc: QueryClient) {
   const key = queryKeys.apiKeys(USER_ID);

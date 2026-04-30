@@ -5,10 +5,7 @@ import path from 'path';
 // Resolve .env.test from the worktree root first; if not found (in isolated
 // worktrees the root path differs from the main repo root), fall back to the
 // canonical location at the monorepo root.
-const envCandidates = [
-  path.resolve(__dirname, '../../.env.test'),
-  '/home/jeremy/luna-hub-lite/.env.test',
-];
+const envCandidates = [path.resolve(__dirname, '../../.env.test'), '/home/jeremy/luna-hub-lite/.env.test'];
 for (const p of envCandidates) {
   try {
     process.loadEnvFile(p);

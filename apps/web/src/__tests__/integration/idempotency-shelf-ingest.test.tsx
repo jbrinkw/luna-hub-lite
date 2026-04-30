@@ -73,7 +73,7 @@ describe('shelf-ingest POST /event idempotency', () => {
   let importKey: string;
   let productId: string;
   let locationId: string;
-  let lotId: string;
+  let _lotId: string;
 
   beforeAll(async () => {
     const user = await createTestUser('si-idem');
@@ -127,7 +127,7 @@ describe('shelf-ingest POST /event idempotency', () => {
       .select('lot_id')
       .single();
     if (lotErr) throw new Error(`create lot: ${lotErr.message}`);
-    lotId = lot.lot_id;
+    _lotId = lot.lot_id;
 
     // Active device.
     importKey = 'shelf_idem_' + randomBytes(16).toString('hex');

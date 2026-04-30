@@ -125,11 +125,7 @@ describe('livetrack-session POST /create + /pi-update idempotency', () => {
 
   afterAll(async () => {
     // Cascade: live_shelf_devices DELETE cascades to livetrack_import_sessions.
-    await (adminClient as any)
-      .schema('chefbyte')
-      .from('live_shelf_devices')
-      .delete()
-      .eq('device_id', deviceId);
+    await (adminClient as any).schema('chefbyte').from('live_shelf_devices').delete().eq('device_id', deviceId);
     await cleanupUser(userId);
   });
 
@@ -171,10 +167,10 @@ describe('livetrack-session POST /create + /pi-update idempotency', () => {
     expect(live).toBe(1);
 
     // /active endpoint reflects the newest session only.
-    const activeRes = await fetch(
-      `${BASE_URL}/active?scale_id=${encodeURIComponent(SCALE_CREATE_RETRY)}`,
-      { method: 'GET', headers: piHeaders(importKey) },
-    );
+    const activeRes = await fetch(`${BASE_URL}/active?scale_id=${encodeURIComponent(SCALE_CREATE_RETRY)}`, {
+      method: 'GET',
+      headers: piHeaders(importKey),
+    });
     expect(activeRes.status).toBe(200);
     const activeBody = await activeRes.json();
     // The Pi /active endpoint returns either `{ session }` or `{ sessions }`.
@@ -274,10 +270,7 @@ describe('livetrack-session POST /create + /pi-update idempotency', () => {
     // the same value is a no-op at the Postgres level.
     expect(piJson2.session.state).toBe('scale_reading_received');
     expect(piJson2.session.session_id).toBe(piJson1.session.session_id);
-    expect(Number(piJson2.session.scale_reading_g)).toBeCloseTo(
-      Number(piJson1.session.scale_reading_g),
-      1,
-    );
+    expect(Number(piJson2.session.scale_reading_g)).toBeCloseTo(Number(piJson1.session.scale_reading_g), 1);
   });
 
   // ─── Case 4: /pi-update on expired session → 410 on both retries ────

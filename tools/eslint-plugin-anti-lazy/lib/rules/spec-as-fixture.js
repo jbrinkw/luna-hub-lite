@@ -78,8 +78,7 @@ module.exports = {
         // they're likely enum values.
         const allUpperCase = strings.every((s) => s === s.toUpperCase() && /[A-Z_]/.test(s));
         const firstPrefix = strings[0].slice(0, 3).toUpperCase();
-        const sharePrefix =
-          firstPrefix.length >= 3 && strings.every((s) => s.toUpperCase().startsWith(firstPrefix));
+        const sharePrefix = firstPrefix.length >= 3 && strings.every((s) => s.toUpperCase().startsWith(firstPrefix));
 
         if (!allUpperCase && !sharePrefix) return;
 

@@ -16,9 +16,23 @@ vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi
 const USER_ID = 'user-coach-rollback';
 const TODAY = '2026-04-30';
 
-interface PlannedSet { planned_set_id: string; exercise_name: string; exercise_id: string; completed: boolean }
-interface CompletedSet { completed_set_id: string; exercise_name: string; actual_reps: number; actual_load: number; completed_at: string }
-interface DailyPlanData { sets: PlannedSet[]; completedSets: CompletedSet[] }
+interface PlannedSet {
+  planned_set_id: string;
+  exercise_name: string;
+  exercise_id: string;
+  completed: boolean;
+}
+interface CompletedSet {
+  completed_set_id: string;
+  exercise_name: string;
+  actual_reps: number;
+  actual_load: number;
+  completed_at: string;
+}
+interface DailyPlanData {
+  sets: PlannedSet[];
+  completedSets: CompletedSet[];
+}
 
 function buildHandlers(qc: QueryClient) {
   const queryKey = queryKeys.dailyPlan(USER_ID, TODAY);

@@ -50,31 +50,81 @@ tester.run('spec-as-fixture', rule, {
     {
       code: `import { OrderStatus } from './types'; const cases = ['PENDING', 'ACTIVE', 'CANCELLED', 'COMPLETED'];`,
       filename: '/src/orders.test.ts',
-      errors: [{ messageId: 'specAsFixture', suggestions: [{ desc: 'Replace with Object.values(OrderStatus)', output: `import { OrderStatus } from './types'; const cases = Object.values(OrderStatus);` }] }],
+      errors: [
+        {
+          messageId: 'specAsFixture',
+          suggestions: [
+            {
+              desc: 'Replace with Object.values(OrderStatus)',
+              output: `import { OrderStatus } from './types'; const cases = Object.values(OrderStatus);`,
+            },
+          ],
+        },
+      ],
     },
     // Status suffix import + all-caps array
     {
       code: `import { JobStatus } from './jobs'; const statuses = ['RUNNING', 'FAILED', 'STOPPED', 'QUEUED'];`,
       filename: '/src/jobs.test.ts',
-      errors: [{ messageId: 'specAsFixture', suggestions: [{ desc: 'Replace with Object.values(JobStatus)', output: `import { JobStatus } from './jobs'; const statuses = Object.values(JobStatus);` }] }],
+      errors: [
+        {
+          messageId: 'specAsFixture',
+          suggestions: [
+            {
+              desc: 'Replace with Object.values(JobStatus)',
+              output: `import { JobStatus } from './jobs'; const statuses = Object.values(JobStatus);`,
+            },
+          ],
+        },
+      ],
     },
     // Mode suffix import + all-caps array
     {
       code: `import { DisplayMode } from './display'; const modes = ['DARK', 'LIGHT', 'SYSTEM', 'AUTO'];`,
       filename: '/src/display.spec.ts',
-      errors: [{ messageId: 'specAsFixture', suggestions: [{ desc: 'Replace with Object.values(DisplayMode)', output: `import { DisplayMode } from './display'; const modes = Object.values(DisplayMode);` }] }],
+      errors: [
+        {
+          messageId: 'specAsFixture',
+          suggestions: [
+            {
+              desc: 'Replace with Object.values(DisplayMode)',
+              output: `import { DisplayMode } from './display'; const modes = Object.values(DisplayMode);`,
+            },
+          ],
+        },
+      ],
     },
     // Kind suffix import + 5 elements
     {
       code: `import { EventKind } from './events'; const kinds = ['CLICK', 'HOVER', 'FOCUS', 'BLUR', 'SUBMIT'];`,
       filename: '/src/events.test.ts',
-      errors: [{ messageId: 'specAsFixture', suggestions: [{ desc: 'Replace with Object.values(EventKind)', output: `import { EventKind } from './events'; const kinds = Object.values(EventKind);` }] }],
+      errors: [
+        {
+          messageId: 'specAsFixture',
+          suggestions: [
+            {
+              desc: 'Replace with Object.values(EventKind)',
+              output: `import { EventKind } from './events'; const kinds = Object.values(EventKind);`,
+            },
+          ],
+        },
+      ],
     },
     // Category suffix
     {
       code: `import { FoodCategory } from './food'; const cats = ['DAIRY', 'MEAT', 'GRAIN', 'VEGGIE'];`,
       filename: '/src/food.test.ts',
-      errors: [{ messageId: 'specAsFixture', suggestions: [{ desc: 'Replace with Object.values(FoodCategory)', output: `import { FoodCategory } from './food'; const cats = Object.values(FoodCategory);` }] }],
+      errors: [
+        {
+          messageId: 'specAsFixture',
+          suggestions: [
+            {
+              desc: 'Replace with Object.values(FoodCategory)',
+              output: `import { FoodCategory } from './food'; const cats = Object.values(FoodCategory);`,
+            },
+          ],
+        },
+      ],
     },
   ],
 });

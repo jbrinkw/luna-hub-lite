@@ -44,8 +44,7 @@ vi.mock('@/shared/useRealtimeInvalidation', () => ({
 
 vi.mock('@/shared/queryKeys', () => ({
   queryKeys: {
-    livetrackSession: (userId: string, sessionId: string | null) =>
-      ['livetrack-session', userId, sessionId] as const,
+    livetrackSession: (userId: string, sessionId: string | null) => ['livetrack-session', userId, sessionId] as const,
     liveShelfDevice: (userId: string) => ['live-shelf-device', userId] as const,
   },
 }));
@@ -186,8 +185,8 @@ describe('useLiveTrackSession', () => {
   it('reconnect: refetch returns updated data after a reconnect', async () => {
     const updatedSession = { ...SESSION_STUB, state: 'waiting_scale' };
     mockLoadSession
-      .mockResolvedValueOnce(SESSION_STUB)       // initial load
-      .mockResolvedValueOnce(updatedSession);    // after reconnect
+      .mockResolvedValueOnce(SESSION_STUB) // initial load
+      .mockResolvedValueOnce(updatedSession); // after reconnect
 
     const { Wrapper } = makeWrapper();
     const { result } = renderHook(() => useLiveTrackSession('sess-1'), {

@@ -82,14 +82,14 @@ describe('ToolsPage toggleMutation — onError rollback', () => {
 
     const context = await onMutate({ toolName: 'COACHBYTE_get_today_plan', enabled: false });
     // Optimistic: flag flipped
-    expect((qc.getQueryData<ToolToggles>(TOOL_KEY)!).COACHBYTE_get_today_plan).toBe(false);
+    expect(qc.getQueryData<ToolToggles>(TOOL_KEY)!.COACHBYTE_get_today_plan).toBe(false);
 
     // Simulate error
     onError(new Error('upsert failed'), {}, context);
 
     // Rollback: original value restored
-    expect((qc.getQueryData<ToolToggles>(TOOL_KEY)!).COACHBYTE_get_today_plan).toBe(true);
-    expect((qc.getQueryData<ToolToggles>(TOOL_KEY)!).CHEFBYTE_get_inventory).toBe(false);
+    expect(qc.getQueryData<ToolToggles>(TOOL_KEY)!.COACHBYTE_get_today_plan).toBe(true);
+    expect(qc.getQueryData<ToolToggles>(TOOL_KEY)!.CHEFBYTE_get_inventory).toBe(false);
   });
 
   it('is a no-op when context.previous is undefined', () => {
@@ -99,7 +99,7 @@ describe('ToolsPage toggleMutation — onError rollback', () => {
     // Should not throw
     expect(() => onError(new Error('boom'), {}, undefined)).not.toThrow();
     // Data unchanged
-    expect((qc.getQueryData<ToolToggles>(TOOL_KEY)!).COACHBYTE_get_today_plan).toBe(false);
+    expect(qc.getQueryData<ToolToggles>(TOOL_KEY)!.COACHBYTE_get_today_plan).toBe(false);
   });
 
   it('optimistic write precedes rollback — sequence [false, true]', async () => {

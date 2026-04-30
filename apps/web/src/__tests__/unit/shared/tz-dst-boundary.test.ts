@@ -123,12 +123,22 @@ const MATRIX: [string, string, string, string][] = [
   // relative to the wall-clock date 2026-04-05).
   // SQL contract: (T15:30Z AT TIME ZONE 'Pacific/Auckland' - interval '4 hours')::date
   //             = (03:30am Apr-05 - 4h) = 23:30pm Apr-04 → date = 2026-04-04.
-  ['Pacific/Auckland', '2026-04-04T15:30:00Z', '2026-04-04', 'Auckland NZST (UTC+12): 15:30Z = 3:30am Apr-5 < 4am → logical date is Apr-4'],
+  [
+    'Pacific/Auckland',
+    '2026-04-04T15:30:00Z',
+    '2026-04-04',
+    'Auckland NZST (UTC+12): 15:30Z = 3:30am Apr-5 < 4am → logical date is Apr-4',
+  ],
 
   // Pacific/Honolulu UTC-10 (no DST)
   // 2026-12-31T13:30Z in Honolulu (UTC-10): 13:30-10 = 03:30am
   // 3:30am < 4am → previous day → 2026-12-30
-  ['Pacific/Honolulu', '2026-12-31T13:30:00Z', '2026-12-30', 'Honolulu UTC-10: 13:30Z = 3:30am → before 4am → previous day'],
+  [
+    'Pacific/Honolulu',
+    '2026-12-31T13:30:00Z',
+    '2026-12-30',
+    'Honolulu UTC-10: 13:30Z = 3:30am → before 4am → previous day',
+  ],
 ];
 
 // ─── Tests ───────────────────────────────────────────────────────────────────

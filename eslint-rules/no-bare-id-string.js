@@ -27,22 +27,10 @@
 'use strict';
 
 /** ID-like parameter/property names that must not be bare `string`. */
-const SENSITIVE_NAMES = new Set([
-  'lot_id',
-  'pi_lot_id',
-  'product_id',
-  'event_id',
-  'pi_event_id',
-]);
+const SENSITIVE_NAMES = new Set(['lot_id', 'pi_lot_id', 'product_id', 'event_id', 'pi_event_id']);
 
 /** Branded type names that satisfy the constraint. */
-const BRANDED_TYPES = new Set([
-  'CloudLotId',
-  'PiLocalLotId',
-  'CloudProductId',
-  'CloudEventId',
-  'PiLocalEventId',
-]);
+const BRANDED_TYPES = new Set(['CloudLotId', 'PiLocalLotId', 'CloudProductId', 'CloudEventId', 'PiLocalEventId']);
 
 /**
  * Return true if the TSTypeAnnotation node is the bare `string` primitive.
@@ -65,18 +53,14 @@ function isBrandedType(typeAnnotation) {
   if (!typeAnnotation) return false;
   const inner = typeAnnotation.typeAnnotation ?? typeAnnotation;
   if (inner.type === 'TSTypeReference') {
-    const name =
-      inner.typeName?.name ?? inner.typeName?.right?.name ?? null;
+    const name = inner.typeName?.name ?? inner.typeName?.right?.name ?? null;
     return BRANDED_TYPES.has(name);
   }
   // Allow TSUnionType whose members are all branded or null/undefined
   if (inner.type === 'TSUnionType') {
     return inner.types.every(
       (t) =>
-        (t.type === 'TSTypeReference' &&
-          BRANDED_TYPES.has(
-            t.typeName?.name ?? t.typeName?.right?.name ?? null,
-          )) ||
+        (t.type === 'TSTypeReference' && BRANDED_TYPES.has(t.typeName?.name ?? t.typeName?.right?.name ?? null)) ||
         t.type === 'TSNullKeyword' ||
         t.type === 'TSUndefinedKeyword',
     );
@@ -89,8 +73,7 @@ module.exports = {
   meta: {
     type: 'problem',
     docs: {
-      description:
-        'Require branded ID types instead of bare string in cross-process boundary files',
+      description: 'Require branded ID types instead of bare string in cross-process boundary files',
       category: 'Type safety',
       recommended: false,
     },
@@ -122,19 +105,13 @@ module.exports = {
 
     return {
       // Function parameter: function emit(pi_lot_id: string)
-      'FunctionDeclaration > :matches(Identifier, RestElement)[typeAnnotation]'(
-        node,
-      ) {
+      'FunctionDeclaration > :matches(Identifier, RestElement)[typeAnnotation]'(node) {
         checkNamedType(node.name, node.typeAnnotation, node);
       },
-      'FunctionExpression > :matches(Identifier, RestElement)[typeAnnotation]'(
-        node,
-      ) {
+      'FunctionExpression > :matches(Identifier, RestElement)[typeAnnotation]'(node) {
         checkNamedType(node.name, node.typeAnnotation, node);
       },
-      'ArrowFunctionExpression > :matches(Identifier, RestElement)[typeAnnotation]'(
-        node,
-      ) {
+      'ArrowFunctionExpression > :matches(Identifier, RestElement)[typeAnnotation]'(node) {
         checkNamedType(node.name, node.typeAnnotation, node);
       },
 

@@ -25,8 +25,7 @@ export type CloudEventId = string & { readonly __brand: 'CloudEventId' };
 /** A UUID known to exist in Pi `scale_events.event_id`. */
 export type PiLocalEventId = string & { readonly __brand: 'PiLocalEventId' };
 
-const UUID_RE =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export class InvalidIdError extends Error {
   constructor(
@@ -57,16 +56,9 @@ function assertUuidFormat(raw: string, namespace: string): void {
  * TypeScript code). Rejects valid-format UUIDs that belong to the wrong
  * namespace (e.g. a Pi-local lot_id).
  */
-export async function parseCloudLotId(
-  raw: string,
-  conn: SupabaseConn,
-): Promise<CloudLotId> {
+export async function parseCloudLotId(raw: string, conn: SupabaseConn): Promise<CloudLotId> {
   assertUuidFormat(raw, 'CloudLotId');
-  const { data } = await conn
-    .from('stock_lots')
-    .select('lot_id')
-    .eq('lot_id', raw)
-    .maybeSingle();
+  const { data } = await conn.from('stock_lots').select('lot_id').eq('lot_id', raw).maybeSingle();
   if (!data) throw new InvalidIdError(raw, 'CloudLotId', 'stock_lots');
   return raw as CloudLotId;
 }
@@ -75,16 +67,9 @@ export async function parseCloudLotId(
  * Parse a raw string as CloudProductId by verifying it exists in
  * `chefbyte.products`.
  */
-export async function parseCloudProductId(
-  raw: string,
-  conn: SupabaseConn,
-): Promise<CloudProductId> {
+export async function parseCloudProductId(raw: string, conn: SupabaseConn): Promise<CloudProductId> {
   assertUuidFormat(raw, 'CloudProductId');
-  const { data } = await conn
-    .from('products')
-    .select('product_id')
-    .eq('product_id', raw)
-    .maybeSingle();
+  const { data } = await conn.from('products').select('product_id').eq('product_id', raw).maybeSingle();
   if (!data) throw new InvalidIdError(raw, 'CloudProductId', 'products');
   return raw as CloudProductId;
 }
@@ -93,16 +78,9 @@ export async function parseCloudProductId(
  * Parse a raw string as CloudEventId by verifying it exists in
  * `chefbyte.shelf_event_log`.
  */
-export async function parseCloudEventId(
-  raw: string,
-  conn: SupabaseConn,
-): Promise<CloudEventId> {
+export async function parseCloudEventId(raw: string, conn: SupabaseConn): Promise<CloudEventId> {
   assertUuidFormat(raw, 'CloudEventId');
-  const { data } = await conn
-    .from('shelf_event_log')
-    .select('event_id')
-    .eq('event_id', raw)
-    .maybeSingle();
+  const { data } = await conn.from('shelf_event_log').select('event_id').eq('event_id', raw).maybeSingle();
   if (!data) throw new InvalidIdError(raw, 'CloudEventId', 'shelf_event_log');
   return raw as CloudEventId;
 }

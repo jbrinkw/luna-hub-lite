@@ -49,7 +49,9 @@ const { mockUseAuth, mockChefbyte, mockCounts } = vi.hoisted(() => {
   const mockChefbyte = vi.fn(() => builderFactory());
 
   // Reset callIdx before each test
-  const reset = () => { callIdx = 0; };
+  const reset = () => {
+    callIdx = 0;
+  };
 
   const mockUseAuth = vi.fn();
 

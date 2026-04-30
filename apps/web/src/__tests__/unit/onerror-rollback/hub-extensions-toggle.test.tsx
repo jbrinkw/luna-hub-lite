@@ -15,7 +15,10 @@ vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi
 
 const USER_ID = 'user-ext-rollback';
 
-interface ExtState { enabled: boolean; hasCredentials: boolean }
+interface ExtState {
+  enabled: boolean;
+  hasCredentials: boolean;
+}
 type ExtMap = Record<string, ExtState>;
 
 function buildHandlers(qc: QueryClient) {

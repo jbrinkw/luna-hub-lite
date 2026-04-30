@@ -16,8 +16,18 @@ vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi
 const USER_ID = 'user-macro-rollback';
 const DATE = '2026-04-30';
 
-interface ConsumedItem { id: string; source: string; calories: number; protein: number; carbs: number; fat: number }
-interface MacroPageData { consumed: ConsumedItem[]; totals: { calories: number } }
+interface ConsumedItem {
+  id: string;
+  source: string;
+  calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
+}
+interface MacroPageData {
+  consumed: ConsumedItem[];
+  totals: { calories: number };
+}
 
 function fullKey(userId: string, date: string) {
   return [...queryKeys.dailyMacros(userId, date), 'full'];
@@ -55,7 +65,9 @@ function buildEditQtyHandlers(qc: QueryClient) {
         qc.setQueryData<MacroPageData>(key, {
           ...previous,
           consumed: previous.consumed.map((c) =>
-            c.id === item.id ? { ...c, calories: newQty, protein: c.protein * scale, carbs: c.carbs * scale, fat: c.fat * scale } : c,
+            c.id === item.id
+              ? { ...c, calories: newQty, protein: c.protein * scale, carbs: c.carbs * scale, fat: c.fat * scale }
+              : c,
           ),
         });
       }

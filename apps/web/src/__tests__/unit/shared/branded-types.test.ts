@@ -58,12 +58,8 @@ describe('parseCloudLotId', () => {
     // PI_LOCAL_LOT_UUID is a valid UUID but does NOT exist in stock_lots —
     // this is the exact bug class we are guarding against.
     const conn = makeConn(null);
-    await expect(parseCloudLotId(PI_LOCAL_LOT_UUID, conn)).rejects.toThrow(
-      InvalidIdError,
-    );
-    await expect(parseCloudLotId(PI_LOCAL_LOT_UUID, conn)).rejects.toThrow(
-      'stock_lots',
-    );
+    await expect(parseCloudLotId(PI_LOCAL_LOT_UUID, conn)).rejects.toThrow(InvalidIdError);
+    await expect(parseCloudLotId(PI_LOCAL_LOT_UUID, conn)).rejects.toThrow('stock_lots');
   });
 
   it('rejects a UUID not present in stock_lots at all', async () => {
@@ -101,12 +97,8 @@ describe('parseCloudProductId', () => {
 
   it('rejects a valid-format UUID absent from products', async () => {
     const conn = makeConn(null);
-    await expect(parseCloudProductId(ABSENT_UUID, conn)).rejects.toThrow(
-      InvalidIdError,
-    );
-    await expect(parseCloudProductId(ABSENT_UUID, conn)).rejects.toThrow(
-      'products',
-    );
+    await expect(parseCloudProductId(ABSENT_UUID, conn)).rejects.toThrow(InvalidIdError);
+    await expect(parseCloudProductId(ABSENT_UUID, conn)).rejects.toThrow('products');
   });
 
   it('rejects an invalid format string without DB call', async () => {

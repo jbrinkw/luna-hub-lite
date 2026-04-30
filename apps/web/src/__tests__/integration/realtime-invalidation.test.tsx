@@ -400,7 +400,7 @@ describe('Realtime invalidation harness — postgres_changes → QueryClient.inv
       channelName: `rt-inv-delete-${crypto.randomUUID()}`,
       schema: 'chefbyte',
       table: 'stock_lots',
-      filter: '',  // empty string = no filter (see subscribeAndInvalidate)
+      filter: '', // empty string = no filter (see subscribeAndInvalidate)
       queryClient,
       queryKey,
     });

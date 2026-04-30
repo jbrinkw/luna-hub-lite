@@ -16,9 +16,18 @@ vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi
 const USER_ID = 'user-mealplan-rollback';
 const START_DATE = '2026-04-30';
 
-interface MealEntry { meal_id: string; completed_at: string | null; servings: number }
-interface FoodLogEntry { log_id: string }
-interface MealPlanData { meals: MealEntry[]; foodLogs: FoodLogEntry[] }
+interface MealEntry {
+  meal_id: string;
+  completed_at: string | null;
+  servings: number;
+}
+interface FoodLogEntry {
+  log_id: string;
+}
+interface MealPlanData {
+  meals: MealEntry[];
+  foodLogs: FoodLogEntry[];
+}
 
 function makeMarkDoneHandlers(qc: QueryClient) {
   const key = queryKeys.mealPlan(USER_ID, START_DATE);

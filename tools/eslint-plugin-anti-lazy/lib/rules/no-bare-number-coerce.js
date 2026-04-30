@@ -60,47 +60,118 @@ module.exports = {
     }
 
     // Known-numeric DB column PREFIX patterns (case-insensitive).
-    const NUMERIC_PREFIX = /^(value|qty|quantity|amount|count|n|num|integer|float|double|decimal|numeric|grams|kg|ml|l)_/i;
+    const NUMERIC_PREFIX =
+      /^(value|qty|quantity|amount|count|n|num|integer|float|double|decimal|numeric|grams|kg|ml|l)_/i;
 
     // Common Postgres numeric column suffixes
-    const NUMERIC_SUFFIX = /_g$|_kg$|_ml$|_l$|_kcal$|_pct$|_count$|_qty$|_amount$|_per_serving$|_per_container$|_time$|_duration$|_height$|_weight$/i;
+    const NUMERIC_SUFFIX =
+      /_g$|_kg$|_ml$|_l$|_kcal$|_pct$|_count$|_qty$|_amount$|_per_serving$|_per_container$|_time$|_duration$|_height$|_weight$/i;
 
     // Known-numeric EXACT variable / property names (common DB column names for numeric fields).
     const NUMERIC_EXACT = new Set([
       // Macros / nutrition
-      'calories', 'fat', 'protein', 'carbs', 'carbohydrates', 'fiber',
-      'sodium', 'sugar', 'saturated_fat', 'cholesterol',
-      'calories_per_serving', 'fat_per_serving', 'protein_per_serving',
-      'carbs_per_serving', 'net_weight_g', 'servings_per_container',
+      'calories',
+      'fat',
+      'protein',
+      'carbs',
+      'carbohydrates',
+      'fiber',
+      'sodium',
+      'sugar',
+      'saturated_fat',
+      'cholesterol',
+      'calories_per_serving',
+      'fat_per_serving',
+      'protein_per_serving',
+      'carbs_per_serving',
+      'net_weight_g',
+      'servings_per_container',
       // Physical / workout
-      'servings', 'weight', 'height', 'temp', 'temperature',
-      'reps', 'sets', 'distance', 'duration', 'bpm', 'rest_seconds',
-      'weight_kg', 'one_rm', 'epley_1rm',
+      'servings',
+      'weight',
+      'height',
+      'temp',
+      'temperature',
+      'reps',
+      'sets',
+      'distance',
+      'duration',
+      'bpm',
+      'rest_seconds',
+      'weight_kg',
+      'one_rm',
+      'epley_1rm',
       // Commerce / inventory
-      'price', 'cost', 'subtotal', 'tax', 'discount', 'quantity',
-      'qty', 'qty_consumed', 'qty_purchased', 'stock',
+      'price',
+      'cost',
+      'subtotal',
+      'tax',
+      'discount',
+      'quantity',
+      'qty',
+      'qty_consumed',
+      'qty_purchased',
+      'stock',
       // General numeric
-      'rate', 'total', 'total_time', 'active_time', 'base_servings',
-      'visual_quantity', 'consumed', 'goal', 'progress', 'pct',
+      'rate',
+      'total',
+      'total_time',
+      'active_time',
+      'base_servings',
+      'visual_quantity',
+      'consumed',
+      'goal',
+      'progress',
+      'pct',
       // Common short names (avoid 'value' — too broad, matches event.target.value)
-      'n', 'num', 'amount', 'count', 'score',
+      'n',
+      'num',
+      'amount',
+      'count',
+      'score',
     ]);
 
     // Known DB data-container variable names — member access on these is likely
     // from a numeric Postgres column (NUMERIC/INTEGER/FLOAT).
     const DB_CONTAINER = new Set([
-      'data', 'result', 'row', 'record', 'item', 'entry',
-      'payload', 'response', 'body', 'values', 'totals',
-      'macros', 'stats', 'summary', 'log', 'plan', 'exercise',
-      'product', 'lot', 'meal', 'recipe', 'ingredient',
-      'rpc', 'ti', 'ri', 'p', 'e', 's',  // common destructured DB result shorthands
+      'data',
+      'result',
+      'row',
+      'record',
+      'item',
+      'entry',
+      'payload',
+      'response',
+      'body',
+      'values',
+      'totals',
+      'macros',
+      'stats',
+      'summary',
+      'log',
+      'plan',
+      'exercise',
+      'product',
+      'lot',
+      'meal',
+      'recipe',
+      'ingredient',
+      'rpc',
+      'ti',
+      'ri',
+      'p',
+      'e',
+      's', // common destructured DB result shorthands
     ]);
 
     function getFinalPropertyName(node) {
       // Walk through MemberExpression / ChainExpression chain to get the final property name
       let cursor = node;
       while (cursor) {
-        if (cursor.type === 'ChainExpression') { cursor = cursor.expression; continue; }
+        if (cursor.type === 'ChainExpression') {
+          cursor = cursor.expression;
+          continue;
+        }
         if (cursor.type === 'MemberExpression') {
           const prop = cursor.property;
           if (prop && prop.type === 'Identifier') return prop.name;
@@ -115,8 +186,14 @@ module.exports = {
       // Walk to the root Identifier of a member chain (e.g. rpc.calories?.consumed → 'rpc')
       let cursor = node;
       while (cursor) {
-        if (cursor.type === 'ChainExpression') { cursor = cursor.expression; continue; }
-        if (cursor.type === 'MemberExpression') { cursor = cursor.object; continue; }
+        if (cursor.type === 'ChainExpression') {
+          cursor = cursor.expression;
+          continue;
+        }
+        if (cursor.type === 'MemberExpression') {
+          cursor = cursor.object;
+          continue;
+        }
         if (cursor.type === 'Identifier') return cursor.name;
         break;
       }

@@ -77,10 +77,8 @@ import {
  * to the given response map. If a name is not in the map, returns a success
  * response (no error, null data) so unregistered calls don't crash the test.
  */
-function makeClient(
-  responses: Record<string, { data?: unknown; error: { message: string } | null }>,
-) {
-  const rpc = vi.fn((name: string) =>
+function makeClient(responses: Record<string, { data?: unknown; error: { message: string } | null }>) {
+  const rpc = vi.fn((name: string, _params?: unknown) =>
     Promise.resolve(responses[name] ?? { data: null, error: null }),
   );
   const schema = vi.fn(() => ({ rpc }));
@@ -91,22 +89,26 @@ const OK = { data: null, error: null };
 
 // Guard rejection message patterns emitted by the DB RPCs.
 const GUARD = {
-  pause_not_running: (state: string) =>
-    ({ data: null, error: { message: `pause_timer: cannot pause timer in state ${state} (must be running)` } }),
-  resume_not_paused: (state: string) =>
-    ({ data: null, error: { message: `resume_timer: cannot resume timer in state ${state} (must be paused)` } }),
-  expire_not_running: (state: string) =>
-    ({ data: null, error: { message: `expire_timer: cannot expire timer in state ${state} (must be running)` } }),
-  expire_not_due: () =>
-    ({ data: null, error: { message: 'expire_timer: timer has not reached end_time yet' } }),
-  pause_no_timer: () =>
-    ({ data: null, error: { message: 'pause_timer: no active timer' } }),
-  resume_no_timer: () =>
-    ({ data: null, error: { message: 'resume_timer: no active timer' } }),
-  expire_no_timer: () =>
-    ({ data: null, error: { message: 'expire_timer: no active timer' } }),
-  start_bad_duration: () =>
-    ({ data: null, error: { message: 'start_timer: duration_seconds must be positive (got 0)' } }),
+  pause_not_running: (state: string) => ({
+    data: null,
+    error: { message: `pause_timer: cannot pause timer in state ${state} (must be running)` },
+  }),
+  resume_not_paused: (state: string) => ({
+    data: null,
+    error: { message: `resume_timer: cannot resume timer in state ${state} (must be paused)` },
+  }),
+  expire_not_running: (state: string) => ({
+    data: null,
+    error: { message: `expire_timer: cannot expire timer in state ${state} (must be running)` },
+  }),
+  expire_not_due: () => ({ data: null, error: { message: 'expire_timer: timer has not reached end_time yet' } }),
+  pause_no_timer: () => ({ data: null, error: { message: 'pause_timer: no active timer' } }),
+  resume_no_timer: () => ({ data: null, error: { message: 'resume_timer: no active timer' } }),
+  expire_no_timer: () => ({ data: null, error: { message: 'expire_timer: no active timer' } }),
+  start_bad_duration: () => ({
+    data: null,
+    error: { message: 'start_timer: duration_seconds must be positive (got 0)' },
+  }),
 };
 
 // ---------------------------------------------------------------------------
@@ -332,9 +334,12 @@ describe('event: extend (extendTimerRpc)', () => {
     };
     const result = await extendTimerRpc(timer, 30, m.client);
     expect(result.error).toBeNull();
-    expect(m.rpc).toHaveBeenCalledWith('start_timer', expect.objectContaining({
-      p_duration_seconds: expect.any(Number),
-    }));
+    expect(m.rpc).toHaveBeenCalledWith(
+      'start_timer',
+      expect.objectContaining({
+        p_duration_seconds: expect.any(Number),
+      }),
+    );
     // The new duration is remaining (~30s) + 30 = ~60s. Allow ±2s tolerance.
     const called = m.rpc.mock.calls[0][1] as { p_duration_seconds: number };
     expect(called.p_duration_seconds).toBeGreaterThanOrEqual(58);
@@ -383,62 +388,72 @@ describe('full state×event matrix (25 cells)', () => {
 
   const matrix: Cell[] = [
     // --- set ---
-    { state: 'idle',           event: 'set',          expectSuccess: true },
-    { state: 'running',        event: 'set',          expectSuccess: true },
-    { state: 'paused',         event: 'set',          expectSuccess: true },
-    { state: 'expired',        event: 'set',          expectSuccess: true },
-    { state: 'running_not_due',event: 'set',          expectSuccess: true },
+    { state: 'idle', event: 'set', expectSuccess: true },
+    { state: 'running', event: 'set', expectSuccess: true },
+    { state: 'paused', event: 'set', expectSuccess: true },
+    { state: 'expired', event: 'set', expectSuccess: true },
+    { state: 'running_not_due', event: 'set', expectSuccess: true },
 
     // --- pause ---
-    { state: 'idle',           event: 'pause',        expectSuccess: false, errorFragment: 'no active timer' },
-    { state: 'running',        event: 'pause',        expectSuccess: true },
-    { state: 'paused',         event: 'pause',        expectSuccess: false, errorFragment: 'cannot pause' },
-    { state: 'expired',        event: 'pause',        expectSuccess: false, errorFragment: 'cannot pause' },
-    { state: 'running_not_due',event: 'pause',        expectSuccess: true },
+    { state: 'idle', event: 'pause', expectSuccess: false, errorFragment: 'no active timer' },
+    { state: 'running', event: 'pause', expectSuccess: true },
+    { state: 'paused', event: 'pause', expectSuccess: false, errorFragment: 'cannot pause' },
+    { state: 'expired', event: 'pause', expectSuccess: false, errorFragment: 'cannot pause' },
+    { state: 'running_not_due', event: 'pause', expectSuccess: true },
 
     // --- resume ---
-    { state: 'idle',           event: 'resume',       expectSuccess: false, errorFragment: 'no active timer' },
-    { state: 'running',        event: 'resume',       expectSuccess: false, errorFragment: 'cannot resume' },
-    { state: 'paused',         event: 'resume',       expectSuccess: true },
-    { state: 'expired',        event: 'resume',       expectSuccess: false, errorFragment: 'cannot resume' },
-    { state: 'running_not_due',event: 'resume',       expectSuccess: false, errorFragment: 'cannot resume' },
+    { state: 'idle', event: 'resume', expectSuccess: false, errorFragment: 'no active timer' },
+    { state: 'running', event: 'resume', expectSuccess: false, errorFragment: 'cannot resume' },
+    { state: 'paused', event: 'resume', expectSuccess: true },
+    { state: 'expired', event: 'resume', expectSuccess: false, errorFragment: 'cannot resume' },
+    { state: 'running_not_due', event: 'resume', expectSuccess: false, errorFragment: 'cannot resume' },
 
     // --- reset ---
-    { state: 'idle',           event: 'reset',        expectSuccess: true },
-    { state: 'running',        event: 'reset',        expectSuccess: true },
-    { state: 'paused',         event: 'reset',        expectSuccess: true },
-    { state: 'expired',        event: 'reset',        expectSuccess: true },
-    { state: 'running_not_due',event: 'reset',        expectSuccess: true },
+    { state: 'idle', event: 'reset', expectSuccess: true },
+    { state: 'running', event: 'reset', expectSuccess: true },
+    { state: 'paused', event: 'reset', expectSuccess: true },
+    { state: 'expired', event: 'reset', expectSuccess: true },
+    { state: 'running_not_due', event: 'reset', expectSuccess: true },
 
     // --- tick_to_zero (expire) ---
     // idle: "no active timer" — surfaced (not a "cannot expire" message)
-    { state: 'idle',           event: 'tick_to_zero', expectSuccess: false, errorFragment: 'no active timer' },
+    { state: 'idle', event: 'tick_to_zero', expectSuccess: false, errorFragment: 'no active timer' },
     // running (due): happy path
-    { state: 'running',        event: 'tick_to_zero', expectSuccess: true },
+    { state: 'running', event: 'tick_to_zero', expectSuccess: true },
     // paused: "cannot expire" — swallowed by expireTimerRpc
-    { state: 'paused',         event: 'tick_to_zero', expectSuccess: true },
+    { state: 'paused', event: 'tick_to_zero', expectSuccess: true },
     // expired: "cannot expire" — swallowed
-    { state: 'expired',        event: 'tick_to_zero', expectSuccess: true },
+    { state: 'expired', event: 'tick_to_zero', expectSuccess: true },
     // running not due: "has not reached end_time" — surfaced
-    { state: 'running_not_due',event: 'tick_to_zero', expectSuccess: false, errorFragment: 'has not reached end_time' },
+    {
+      state: 'running_not_due',
+      event: 'tick_to_zero',
+      expectSuccess: false,
+      errorFragment: 'has not reached end_time',
+    },
   ];
 
   // RPC response per (state, event) cell.
-  function responseFor(state: State, event: Event): Record<string, { data?: unknown; error: { message: string } | null }> {
+  function responseFor(
+    state: State,
+    event: Event,
+  ): Record<string, { data?: unknown; error: { message: string } | null }> {
     switch (event) {
-      case 'set':         return { start_timer: OK };
-      case 'reset':       return { reset_timer: OK };
+      case 'set':
+        return { start_timer: OK };
+      case 'reset':
+        return { reset_timer: OK };
       case 'pause':
-        if (state === 'idle')    return { pause_timer: GUARD.pause_no_timer() };
+        if (state === 'idle') return { pause_timer: GUARD.pause_no_timer() };
         if (state === 'running' || state === 'running_not_due') return { pause_timer: OK };
         return { pause_timer: GUARD.pause_not_running(state) };
       case 'resume':
-        if (state === 'idle')    return { resume_timer: GUARD.resume_no_timer() };
-        if (state === 'paused')  return { resume_timer: OK };
+        if (state === 'idle') return { resume_timer: GUARD.resume_no_timer() };
+        if (state === 'paused') return { resume_timer: OK };
         return { resume_timer: GUARD.resume_not_paused(state === 'running_not_due' ? 'running' : state) };
       case 'tick_to_zero':
-        if (state === 'idle')            return { expire_timer: GUARD.expire_no_timer() };
-        if (state === 'running')         return { expire_timer: OK };
+        if (state === 'idle') return { expire_timer: GUARD.expire_no_timer() };
+        if (state === 'running') return { expire_timer: OK };
         if (state === 'running_not_due') return { expire_timer: GUARD.expire_not_due() };
         return { expire_timer: GUARD.expire_not_running(state) };
     }
@@ -446,11 +461,16 @@ describe('full state×event matrix (25 cells)', () => {
 
   async function fireEvent(event: Event, client: any): Promise<{ error: string | null }> {
     switch (event) {
-      case 'set':          return startTimerRpc(60, client);
-      case 'pause':        return pauseTimerRpc(client);
-      case 'resume':       return resumeTimerRpc(client);
-      case 'reset':        return resetTimerRpc(client);
-      case 'tick_to_zero': return expireTimerRpc(client);
+      case 'set':
+        return startTimerRpc(60, client);
+      case 'pause':
+        return pauseTimerRpc(client);
+      case 'resume':
+        return resumeTimerRpc(client);
+      case 'reset':
+        return resetTimerRpc(client);
+      case 'tick_to_zero':
+        return expireTimerRpc(client);
     }
   }
 

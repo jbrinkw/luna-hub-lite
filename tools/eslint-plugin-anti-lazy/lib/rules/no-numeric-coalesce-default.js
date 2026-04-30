@@ -50,10 +50,7 @@ module.exports = {
       // Pattern: (x ?? 0).toFixed(2) — parent is MemberExpression, grandparent is CallExpression
       if (parent.type === 'MemberExpression' && parent.object === node) {
         const prop = parent.property;
-        if (
-          prop &&
-          ['toFixed', 'toLocaleString', 'toFormat', 'format'].includes(prop.name)
-        ) {
+        if (prop && ['toFixed', 'toLocaleString', 'toFormat', 'format'].includes(prop.name)) {
           return true;
         }
       }

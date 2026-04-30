@@ -60,7 +60,9 @@ function setupAudioMock() {
       connect: vi.fn(() => ctx.destination),
     })),
   };
-  function Ctor(this: any) { return ctx; }
+  function Ctor(this: any) {
+    return ctx;
+  }
   (window as any).AudioContext = Ctor;
   return { ctx, oscillators };
 }

@@ -45,10 +45,7 @@ const SERVICE_ROLE_KEY = 'test-service-role-key-abc123';
 
 // ─── Test helper: build an authorized POST request ───────────────────────────
 
-function makeRequest(
-  body: Record<string, unknown> | null = null,
-  overrideKey?: string,
-): Request {
+function makeRequest(body: Record<string, unknown> | null = null, overrideKey?: string): Request {
   const key = overrideKey ?? SERVICE_ROLE_KEY;
   return new Request('http://localhost/invariant-monitor', {
     method: 'POST',
@@ -107,19 +104,22 @@ Deno.test('auth guard: missing Authorization header → rejected', () => {
   assertEquals(isServiceRoleAuthorized(req, SERVICE_ROLE_KEY), false);
 });
 
-Deno.test('auth guard: Bearer with extra whitespace between keyword and token → authorized (regex swallows \\s+)', () => {
-  const req = new Request('http://localhost/', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      // Double space: `Bearer  <key>` — the /^Bearer\s+(.+)$/ regex uses \s+
-      // so it swallows all whitespace, leaving match[1] = key exactly.
-      Authorization: `Bearer  ${SERVICE_ROLE_KEY}`,
-    },
-  });
-  // \s+ consumes both spaces; match[1] = SERVICE_ROLE_KEY → authorized.
-  assertEquals(isServiceRoleAuthorized(req, SERVICE_ROLE_KEY), true);
-});
+Deno.test(
+  'auth guard: Bearer with extra whitespace between keyword and token → authorized (regex swallows \\s+)',
+  () => {
+    const req = new Request('http://localhost/', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        // Double space: `Bearer  <key>` — the /^Bearer\s+(.+)$/ regex uses \s+
+        // so it swallows all whitespace, leaving match[1] = key exactly.
+        Authorization: `Bearer  ${SERVICE_ROLE_KEY}`,
+      },
+    });
+    // \s+ consumes both spaces; match[1] = SERVICE_ROLE_KEY → authorized.
+    assertEquals(isServiceRoleAuthorized(req, SERVICE_ROLE_KEY), true);
+  },
+);
 
 // ─── runMonitor stub tests ────────────────────────────────────────────────────
 //
@@ -131,7 +131,9 @@ interface StubSpec {
   name: string;
   severity: string;
   subject_type: string;
-  check: (sb: unknown) => Promise<Array<{ subject_id: string | null; user_id: string | null; details: Record<string, unknown> }>>;
+  check: (
+    sb: unknown,
+  ) => Promise<Array<{ subject_id: string | null; user_id: string | null; details: Record<string, unknown> }>>;
 }
 
 // Minimal runMonitor implementation (matches index.ts logic exactly)
@@ -175,8 +177,14 @@ Deno.test('runMonitor: no violations → all ok=true, violation_count=0', async 
 
   const results = await runMonitorStub(specs, {}, null);
   assertEquals(results.length, 2);
-  assertEquals(results.every((r) => r.ok), true);
-  assertEquals(results.every((r) => r.violation_count === 0), true);
+  assertEquals(
+    results.every((r) => r.ok),
+    true,
+  );
+  assertEquals(
+    results.every((r) => r.violation_count === 0),
+    true,
+  );
   // overall ok = all-ok
   const overallOk = results.every((r) => r.ok);
   assertEquals(overallOk, true);
@@ -259,7 +267,9 @@ Deno.test('runMonitor: check that throws → ok=false with error message', async
       name: 'qty_non_negative',
       severity: 'critical',
       subject_type: 'stock_lot',
-      check: async (_sb) => { throw new Error('DB connection refused'); },
+      check: async (_sb) => {
+        throw new Error('DB connection refused');
+      },
     },
   ];
 

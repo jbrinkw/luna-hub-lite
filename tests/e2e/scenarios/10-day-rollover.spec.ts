@@ -39,12 +39,19 @@ test('day-rollover-at-day-start-hour', async ({ page }) => {
     });
     await seedStockLot(seeded.userId, productId, 5);
 
-    // Compute "yesterday" as the user's logical_date for a 05:30 consume.
-    const yesterday = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    // Compute "yesterday" relative to the user's CURRENT logical_date.
+    // logical_date = (now - day_start_hour hours).date — replicates
+    // private.get_logical_date semantics in local time. At 00:53 local with
+    // day_start_hour=6, today's logical_date is already calendar-yesterday;
+    // so we subtract 1 from THAT, not from raw Date.now().
+    const DAY_START_HOUR = 6;
+    const adjustedNow = new Date(Date.now() - DAY_START_HOUR * 60 * 60 * 1000);
+    const yesterday = new Date(adjustedNow.getTime() - 24 * 60 * 60 * 1000);
     const yyyy = yesterday.getFullYear();
     const mm = String(yesterday.getMonth() + 1).padStart(2, '0');
     const dd = String(yesterday.getDate()).padStart(2, '0');
     const yesterdayStr = `${yyyy}-${mm}-${dd}`;
+    const admin = adminClient();
 
     // Consume one serving with explicit logical_date = yesterday.
     const userClient = seeded.client;
@@ -61,7 +68,6 @@ test('day-rollover-at-day-start-hour', async ({ page }) => {
     expect(rpcRes?.success).toBe(true);
 
     // DB-side: food_log stamped with yesterday's logical_date.
-    const admin = adminClient();
     const { data: logs, error: logErr } = await (admin as any)
       .schema('chefbyte')
       .from('food_logs')

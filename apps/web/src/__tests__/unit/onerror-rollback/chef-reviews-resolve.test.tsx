@@ -14,7 +14,11 @@ vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi
 
 const REVIEW_QUERY_KEY = ['reviews', 'u1', 'pending'] as const;
 
-interface ReviewRow { review_id: string; kind: string; status: string }
+interface ReviewRow {
+  review_id: string;
+  kind: string;
+  status: string;
+}
 
 function buildHandlers(qc: QueryClient, queryKey: readonly string[]) {
   return {
