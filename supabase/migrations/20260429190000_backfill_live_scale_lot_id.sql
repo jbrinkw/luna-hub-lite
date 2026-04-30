@@ -1,3 +1,4 @@
+-- no-test: one-time data-backfill UPDATE — invariants/live_scale_pairing_has_lot_id.test.sql pins the forward invariant
 -- ════════════════════════════════════════════════════════════════════════════
 -- Backfill chefbyte.scale_pairings.lot_id for live_scale rows
 -- ════════════════════════════════════════════════════════════════════════════

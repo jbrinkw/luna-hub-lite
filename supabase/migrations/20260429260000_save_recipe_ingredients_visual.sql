@@ -1,3 +1,4 @@
+-- no-test: save_recipe_ingredients visual-field extension — visual_unit_label/visual_quantity columns tested by chefbyte/recipe_visual_unit.test.sql; RPC call-path pgTAP gap tracked in TEST_GAP_ANALYSIS.md
 -- save_recipe_ingredients_visual: extend save_recipe_ingredients RPC to persist
 -- visual_unit_label and visual_quantity on recipe_ingredients rows.
 --

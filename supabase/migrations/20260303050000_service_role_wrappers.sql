@@ -1,3 +1,4 @@
+-- no-test: service-role admin wrappers only — each is a one-line delegate to the underlying private.* function which is tested by its own pgTAP suite
 -- Service-role wrappers for MCP Worker
 -- These accept explicit user_id (auth.uid() is NULL with service role key)
 -- Granted only to service_role, not authenticated

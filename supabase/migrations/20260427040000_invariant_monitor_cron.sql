@@ -1,3 +1,4 @@
+-- no-test: pg_cron registration + http-invoke helper only — the invariant-monitor edge function logic is tested by hub/invariant_predicates.test.sql and hub/invariant_violations.test.sql; the cron plumbing itself cannot be asserted in pgTAP without pg_cron installed
 -- Schedule the invariant-monitor edge function to run every 30 minutes.
 --
 -- Wires pg_cron + pg_net (both pre-installed on Supabase managed

@@ -1,3 +1,4 @@
+-- no-test: test-infrastructure helper RPC only — test_alter_publication is exercised by the E2E realtime-health.spec.ts suite, not by pgTAP
 -- Test-only RPC for the `realtime-health.spec.ts` end-to-end test. The spec
 -- needs to simulate a publication regression by DROPping a known table from
 -- `supabase_realtime` mid-test, asserting the new silent-death banner appears

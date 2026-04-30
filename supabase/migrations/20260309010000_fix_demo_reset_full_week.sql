@@ -1,3 +1,4 @@
+-- no-test: demo-account tooling only — reset_demo_dates patch, no user-facing behavioral contract to assert in pgTAP
 -- Fix demo reset: use user's logical date (not UTC CURRENT_DATE)
 -- and handle all 16 meal plan entries spread across the week.
 -- Replaces the no-arg overload (called by hub.reset_demo_dates wrapper).

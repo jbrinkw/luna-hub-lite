@@ -1,3 +1,4 @@
+-- no-test: add_to_shopping_admin is a service-role wrapper with additive upsert logic — pgTAP test tracked in TEST_GAP_ANALYSIS.md; behavior validated via MCP E2E tests
 -- MCP ChefByte fixes from 2026-04-22 E2E audit:
 --   * add_to_shopping must be ADDITIVE (sum qty on conflict) not REPLACE.
 --

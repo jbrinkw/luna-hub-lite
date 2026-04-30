@@ -61,6 +61,7 @@ FULL_STEPS=(
   "step:state-machine|(cd apps/web && npx vitest run src/__tests__/unit/state-machine/)"
   "step:splice-uniqueness|bash scripts/verify/migration-splice-uniqueness.sh"
   "step:schema-parity|bash scripts/verify/pi-cloud-schema-parity.sh"
+  "step:migration-test-coverage|bash scripts/verify/migration-test-coverage.sh"
 )
 
 # ---------------------------------------------------------------------------

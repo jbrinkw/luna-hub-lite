@@ -1,3 +1,4 @@
+-- no-test: voice-ack setting helpers — hub/agent_settings_rls.test.sql covers table; RPC behavioral tests tracked in TEST_GAP_ANALYSIS.md
 -- Voice ACK settings: let users opt-in to a short filler phrase emitted during
 -- long tool-execution gaps so Home Assistant Voice Preview TTS has something to
 -- speak instead of dead air.

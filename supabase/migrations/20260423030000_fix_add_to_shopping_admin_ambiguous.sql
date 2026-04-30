@@ -1,3 +1,4 @@
+-- no-test: ambiguous-column bugfix on add_to_shopping_admin — same test gap as 20260423020000; pgTAP test tracked in TEST_GAP_ANALYSIS.md
 -- Repair: the previous migration 20260423020000_mcp_chefbyte_fixes.sql defined
 -- chefbyte.add_to_shopping_admin with RETURNS TABLE columns named the same as
 -- the underlying shopping_list columns (`product_id`, `qty_containers`, etc).

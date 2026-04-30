@@ -1,3 +1,4 @@
+-- no-test: index-only migration — hub/api_keys.test.sql covers hub.api_keys table behavior
 -- Add partial unique index for fast API key authentication lookup (D4)
 CREATE UNIQUE INDEX IF NOT EXISTS idx_api_keys_hash_active
   ON hub.api_keys (api_key_hash)

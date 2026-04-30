@@ -1,3 +1,4 @@
+-- no-test: demo-account tooling only — shifts demo data dates, no user-facing behavioral contract to assert in pgTAP
 -- Demo account date reset function
 --
 -- Shifts all date-relative demo data to be relative to CURRENT_DATE.

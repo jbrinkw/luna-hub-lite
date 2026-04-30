@@ -1,3 +1,4 @@
+-- no-test: ALTER TABLE constraint/default additions and indexes only — affected tables covered by chefbyte/rls_core.test.sql and invariants/nonneg_check_constraints.test.sql
 -- Schema fixes: H8, H9, H10, M14
 -- H8:  NOT NULL + defaults on chefbyte.products macro columns
 -- H9:  NOT NULL + defaults on recipes.base_servings and meal_plan_entries.servings

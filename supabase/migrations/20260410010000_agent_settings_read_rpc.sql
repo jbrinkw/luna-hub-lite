@@ -1,3 +1,4 @@
+-- no-test: get_agent_settings RPC pgTAP gap — function exposes has_key+system_prompt; hub/agent_settings_rls.test.sql covers table access; full RPC test tracked in TEST_GAP_ANALYSIS.md
 -- Return agent settings without exposing the encrypted key blob
 CREATE OR REPLACE FUNCTION hub.get_agent_settings()
 RETURNS TABLE(has_key BOOLEAN, system_prompt TEXT)

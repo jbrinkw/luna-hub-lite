@@ -1,3 +1,4 @@
+-- no-test: agent settings encryption helpers — hub/agent_settings_rls.test.sql covers the agent_settings table RLS; encryption path is a patch on 20260409010000 with no independent behavioral contract
 -- Fix agent settings encryption functions to use missing_ok fallback
 -- and extensions.pgp_sym_encrypt/decrypt (schema-qualified).
 -- Matches the pattern from extension credentials (migration 20260304070000).

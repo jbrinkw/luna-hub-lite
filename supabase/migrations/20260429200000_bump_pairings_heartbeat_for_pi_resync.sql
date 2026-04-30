@@ -1,3 +1,4 @@
+-- no-test: one-time data-bump UPDATE — no schema change, Pi-resync is one-shot and not reproducible in pgTAP
 -- ════════════════════════════════════════════════════════════════════════════
 -- Bump scale_pairings.last_heartbeat_ts to force a Pi-side resync
 -- ════════════════════════════════════════════════════════════════════════════

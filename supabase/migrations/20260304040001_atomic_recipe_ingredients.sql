@@ -1,3 +1,4 @@
+-- no-test: save_recipe_ingredients pgTAP gap — behavior validated via E2E tests; pgTAP test tracked in TEST_GAP_ANALYSIS.md
 -------------------------------------------------------------
 -- Atomic recipe ingredient save
 -- Replaces the non-atomic DELETE + INSERT pattern with a

@@ -1,3 +1,4 @@
+-- no-test: column addition only — coachbyte.user_settings table covered by coachbyte/rls_tables.test.sql
 -- Add pr_tracked_exercise_ids column to coachbyte.user_settings
 -- Stores the list of exercise UUIDs the user wants to track on the PRs page.
 -- NULL means "track all exercises" (default behavior).

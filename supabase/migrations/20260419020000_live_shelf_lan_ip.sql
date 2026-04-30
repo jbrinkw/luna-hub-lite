@@ -1,3 +1,4 @@
+-- no-test: column addition only — live_shelf_devices table covered by chefbyte/live_shelf_devices_rls.test.sql
 -- Live Shelf LAN IP (device-local URL for "Review (N)" deep-link)
 --
 -- The Raspberry Pi running the live-shelf stack serves its review UI at
