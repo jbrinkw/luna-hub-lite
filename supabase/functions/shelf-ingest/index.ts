@@ -825,13 +825,15 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
 
   if (error) {
     // Always include client_event_id so operators can correlate a 500 with
-    // the Pi's retry queue.
+    // the Pi's retry queue. Forward the SQLSTATE code so callers can
+    // distinguish '23503' (unknown product) from '22023' (bad weight) from
+    // generic RPC failures.
     console.error('shelf-ingest: apply_shelf_event failed', {
       client_event_id: clientEventId,
       code: (error as any).code ?? null,
       message: (error as any).message ?? null,
     });
-    return jsonResponse({ error: 'apply_shelf_event failed' }, 500);
+    return jsonResponse({ error: 'apply_shelf_event failed', code: (error as any).code ?? 'RPC_ERROR' }, 500);
   }
 
   // RPC returns the composite row as an object (or an array with one row
@@ -840,6 +842,29 @@ async function handleEvent(supabase: SupabaseClient, device: Device, body: any):
   const applied = Boolean(row?.applied);
   const resolvedLotId = row?.resolved_lot_id ?? null;
   const reason = row?.reason ?? null;
+
+  // Change A: applied=false with an unexpected reason must NOT be forwarded
+  // as a 200 success-shaped response (which the Pi worker would silently ack).
+  // Known-safe reasons are 'duplicate' and 'stale: manual edit is newer' —
+  // those are valid idempotent no-ops. Everything else is a data-contract
+  // failure that must be surfaced as 4xx so the Pi dead-letters the row.
+  const EXPECTED_NOT_APPLIED_REASONS = new Set(['duplicate', 'stale: manual edit is newer']);
+
+  if (!applied && !EXPECTED_NOT_APPLIED_REASONS.has(reason ?? '')) {
+    console.error('shelf-ingest: apply_shelf_event returned applied=false with unexpected reason', {
+      client_event_id: clientEventId,
+      applied,
+      reason,
+    });
+    return jsonResponse(
+      {
+        error: 'apply_shelf_event rejected',
+        code: 'APPLIED_FALSE_UNEXPECTED',
+        reason,
+      },
+      422,
+    );
+  }
 
   // Note: as of migration 20260419060000 the plpgsql no longer collapses
   // every replay to reason='duplicate'. A successful replay echoes the
