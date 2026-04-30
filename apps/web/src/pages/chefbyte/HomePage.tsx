@@ -439,6 +439,17 @@ export function HomePage() {
     { schema: 'chefbyte', table: 'stock_lots', queryKeys: [homeQueryKey] },
     { schema: 'chefbyte', table: 'meal_plan_entries', queryKeys: [homeQueryKey] },
     { schema: 'chefbyte', table: 'shopping_list', queryKeys: [homeQueryKey] },
+    // The home dashboard joins products through shopping_list (price /
+    // walmart_link), meal_plan_entries (name + macros), and food_logs
+    // (name). It also runs three direct products SELECTs to compute
+    // missing-prices / placeholders / below-min-stock tiles. Without a
+    // products subscription, edits made in Settings, by the AI analyzer,
+    // or via MCP tools don't refresh any of those tiles.
+    { schema: 'chefbyte', table: 'products', queryKeys: [homeQueryKey] },
+    // Today's-meals card needs recipe + ingredient updates to recompute
+    // per-meal macros without a refresh.
+    { schema: 'chefbyte', table: 'recipes', queryKeys: [homeQueryKey] },
+    { schema: 'chefbyte', table: 'recipe_ingredients', queryKeys: [homeQueryKey] },
   ]);
 
   const invalidateHome = () => queryClient.invalidateQueries({ queryKey: homeQueryKey });

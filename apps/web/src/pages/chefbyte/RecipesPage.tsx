@@ -465,6 +465,12 @@ export function RecipesPage() {
     { schema: 'chefbyte', table: 'stock_lots', queryKeys: [queryKeys.recipes(user!.id)] },
     { schema: 'chefbyte', table: 'recipes', queryKeys: [queryKeys.recipes(user!.id)] },
     { schema: 'chefbyte', table: 'recipe_ingredients', queryKeys: [queryKeys.recipes(user!.id)] },
+    // products is deeply joined into recipe_ingredients
+    // (`products:product_id(name, calories_per_serving, ...)`). A macro
+    // change on a product (Settings edit, AI analyzer, MCP tool) changes
+    // the computed per-recipe macros, but without this subscription the
+    // recipe cards stay stale until refresh.
+    { schema: 'chefbyte', table: 'products', queryKeys: [queryKeys.recipes(user!.id)] },
   ]);
 
   /* ---------------------------------------------------------------- */

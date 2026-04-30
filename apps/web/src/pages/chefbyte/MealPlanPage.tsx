@@ -338,6 +338,27 @@ export function MealPlanPage() {
       table: 'temp_items',
       queryKeys: [queryKeys.mealPlan(userId!, startDate)],
     },
+    // The week query joins recipes, recipe_ingredients, and products
+    // (deeply nested) for every meal_plan_entries row to compute
+    // per-meal macros + display the meal name. Without these
+    // subscriptions, edits made in the Recipes tab — or product macro
+    // changes from the AI analyzer / Settings — don't propagate to a
+    // mounted MealPlan tab until refresh.
+    {
+      schema: 'chefbyte',
+      table: 'recipes',
+      queryKeys: [queryKeys.mealPlan(userId!, startDate)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'recipe_ingredients',
+      queryKeys: [queryKeys.mealPlan(userId!, startDate)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'products',
+      queryKeys: [queryKeys.mealPlan(userId!, startDate)],
+    },
   ]);
 
   /* ---------------------------------------------------------------- */

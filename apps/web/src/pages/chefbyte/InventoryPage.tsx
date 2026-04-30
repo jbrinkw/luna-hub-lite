@@ -528,8 +528,29 @@ export function InventoryPage() {
   /* ---------------------------------------------------------------- */
 
   useRealtimeInvalidation('inventory-changes', [
-    { schema: 'chefbyte', table: 'stock_lots', queryKeys: [queryKeys.stockLots(user!.id)] },
-    { schema: 'chefbyte', table: 'products', queryKeys: [queryKeys.products(user!.id)] },
+    {
+      schema: 'chefbyte',
+      table: 'stock_lots',
+      queryKeys: [queryKeys.stockLots(user!.id)],
+    },
+    // products is joined into the stock_lots query
+    // (`products:product_id(name, servings_per_container)`); the page
+    // also keys the products cache via queryKeys.products. Invalidate
+    // both so a product rename / servings-per-container edit from
+    // Settings (or AI analyzer) reflects on the lot rows immediately.
+    {
+      schema: 'chefbyte',
+      table: 'products',
+      queryKeys: [queryKeys.stockLots(user!.id), queryKeys.products(user!.id)],
+    },
+    // locations is joined into stock_lots (`locations:location_id(name)`).
+    // Without this, renaming a location in Settings won't update the
+    // location label on each lot row in Inventory.
+    {
+      schema: 'chefbyte',
+      table: 'locations',
+      queryKeys: [queryKeys.stockLots(user!.id), queryKeys.locations(user!.id)],
+    },
     {
       schema: 'chefbyte',
       table: 'live_shelf_devices',

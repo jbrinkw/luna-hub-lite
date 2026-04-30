@@ -281,6 +281,30 @@ export function MacroPage() {
       table: 'temp_items',
       queryKeys: [queryKeys.dailyMacros(userId!, currentDate)],
     },
+    // The Planned section selects from meal_plan_entries with a deep
+    // recipes/recipe_ingredients/products join. Without these
+    // subscriptions, marking a meal done in another tab (which clears
+    // it from Planned) or editing recipe macros doesn't propagate.
+    {
+      schema: 'chefbyte',
+      table: 'meal_plan_entries',
+      queryKeys: [queryKeys.dailyMacros(userId!, currentDate)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'recipes',
+      queryKeys: [queryKeys.dailyMacros(userId!, currentDate)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'recipe_ingredients',
+      queryKeys: [queryKeys.dailyMacros(userId!, currentDate)],
+    },
+    {
+      schema: 'chefbyte',
+      table: 'products',
+      queryKeys: [queryKeys.dailyMacros(userId!, currentDate)],
+    },
   ]);
 
   /* ---------------------------------------------------------------- */
