@@ -15,14 +15,7 @@ interface ChefLayoutProps {
   children: ReactNode;
 }
 
-const TAB_VALUES = [
-  '/chef',
-  '/chef/inventory',
-  '/chef/shopping',
-  '/chef/meal-plan',
-  '/chef/recipes',
-  '/chef/settings',
-];
+const TAB_VALUES = ['/chef', '/chef/inventory', '/chef/shopping', '/chef/meal-plan', '/chef/recipes', '/chef/settings'];
 
 function getActiveTab(pathname: string): string {
   if (pathname === '/chef' || pathname === '/chef/home' || pathname.startsWith('/chef/macros')) {

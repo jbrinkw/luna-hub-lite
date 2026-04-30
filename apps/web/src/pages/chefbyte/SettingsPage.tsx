@@ -368,7 +368,9 @@ export function SettingsPage() {
                   onChange('carbs_per_serving', c);
                   onChange(
                     'calories_per_serving',
-                    Math.round(c * 4 + (Number(form.protein_per_serving) || 0) * 4 + (Number(form.fat_per_serving) || 0) * 9),
+                    Math.round(
+                      c * 4 + (Number(form.protein_per_serving) || 0) * 4 + (Number(form.fat_per_serving) || 0) * 9,
+                    ),
                   );
                 }}
                 data-testid={`${testIdPrefix}-carbs`}
@@ -388,7 +390,9 @@ export function SettingsPage() {
                   onChange('protein_per_serving', p);
                   onChange(
                     'calories_per_serving',
-                    Math.round((Number(form.carbs_per_serving) || 0) * 4 + p * 4 + (Number(form.fat_per_serving) || 0) * 9),
+                    Math.round(
+                      (Number(form.carbs_per_serving) || 0) * 4 + p * 4 + (Number(form.fat_per_serving) || 0) * 9,
+                    ),
                   );
                 }}
                 data-testid={`${testIdPrefix}-protein`}
@@ -408,7 +412,9 @@ export function SettingsPage() {
                   onChange('fat_per_serving', f);
                   onChange(
                     'calories_per_serving',
-                    Math.round((Number(form.carbs_per_serving) || 0) * 4 + (Number(form.protein_per_serving) || 0) * 4 + f * 9),
+                    Math.round(
+                      (Number(form.carbs_per_serving) || 0) * 4 + (Number(form.protein_per_serving) || 0) * 4 + f * 9,
+                    ),
                   );
                 }}
                 data-testid={`${testIdPrefix}-fat`}

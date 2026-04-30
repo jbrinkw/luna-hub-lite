@@ -31,7 +31,7 @@ export const updateRecipe: ToolDefinition = {
       ingredients: {
         type: 'array',
         description:
-          'New ingredient list (optional). When provided, replaces the recipe\'s entire ingredient list atomically.',
+          "New ingredient list (optional). When provided, replaces the recipe's entire ingredient list atomically.",
         items: {
           type: 'object',
           properties: {

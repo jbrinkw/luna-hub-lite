@@ -529,146 +529,146 @@ export function EventViewerPage({ embedded = false }: { embedded?: boolean } = {
 
   const content = (
     <div className="space-y-4" data-testid="event-viewer-page">
-        <header className="flex items-center justify-between flex-wrap gap-3">
-          <div className="flex items-center gap-3">
-            <h1 className="text-2xl font-bold text-text">Event Viewer</h1>
-            {attentionCount > 0 && (
-              <span
-                className="text-xs font-semibold px-2 py-0.5 rounded-full bg-warning-subtle text-warning-text"
-                data-testid="attention-count"
-              >
-                {attentionCount} need attention
-              </span>
-            )}
-          </div>
-          <div className="flex items-center gap-2" role="tablist" aria-label="Range filter">
-            {(['today', 'week', 'all'] as RangeFilter[]).map((r) => (
-              <button
-                key={r}
-                data-testid={`range-${r}`}
-                onClick={() => setRange(r)}
-                className={[
-                  'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                  range === r
-                    ? 'bg-chef-accent text-white shadow-inner'
-                    : 'bg-surface text-text-secondary border border-border hover:bg-surface-hover',
-                ].join(' ')}
-                aria-pressed={range === r}
-              >
-                {r === 'today' ? 'Today' : r === 'week' ? 'This week' : 'All time'}
-              </button>
-            ))}
-          </div>
-        </header>
-
-        {/* Status filter */}
-        <div
-          className="flex items-center gap-2 flex-wrap"
-          role="tablist"
-          aria-label="Status filter"
-          data-testid="status-filter"
-        >
-          {STATUS_FILTERS.map((s) => (
+      <header className="flex items-center justify-between flex-wrap gap-3">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold text-text">Event Viewer</h1>
+          {attentionCount > 0 && (
+            <span
+              className="text-xs font-semibold px-2 py-0.5 rounded-full bg-warning-subtle text-warning-text"
+              data-testid="attention-count"
+            >
+              {attentionCount} need attention
+            </span>
+          )}
+        </div>
+        <div className="flex items-center gap-2" role="tablist" aria-label="Range filter">
+          {(['today', 'week', 'all'] as RangeFilter[]).map((r) => (
             <button
-              key={s.id}
-              data-testid={`status-${s.id}`}
-              onClick={() => setStatusFilter(s.id)}
+              key={r}
+              data-testid={`range-${r}`}
+              onClick={() => setRange(r)}
               className={[
                 'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
-                statusFilter === s.id
+                range === r
                   ? 'bg-chef-accent text-white shadow-inner'
                   : 'bg-surface text-text-secondary border border-border hover:bg-surface-hover',
               ].join(' ')}
-              aria-pressed={statusFilter === s.id}
+              aria-pressed={range === r}
             >
-              {s.label}
+              {r === 'today' ? 'Today' : r === 'week' ? 'This week' : 'All time'}
             </button>
           ))}
         </div>
+      </header>
 
-        {piOffline && (
-          <Alert variant="warning" data-testid="pi-offline-banner">
-            Pi offline — images unavailable. Classifier events still editable.
-          </Alert>
-        )}
-        {!lanIp && !piOffline && (
-          <Alert variant="info" data-testid="no-lan-ip-banner">
-            No Pi LAN IP on file — set one in Settings → Scales to see event images.
-          </Alert>
-        )}
-        {errorMsg && (
-          <Alert variant="error" data-testid="error-banner" onDismiss={() => setErrorMsg(null)}>
-            {errorMsg}
-          </Alert>
-        )}
-        {eventsErr && (
-          <Alert variant="error" data-testid="events-load-error">
-            Failed to load events: {(eventsErr as Error).message}
-          </Alert>
-        )}
-
-        {eventsLoading ? (
-          <ListSkeleton count={6} />
-        ) : rows.length === 0 ? (
-          <div className="text-center py-16 text-text-tertiary" data-testid="no-events">
-            No classifier events in this range yet.
-          </div>
-        ) : (
-          <ul className="space-y-3" data-testid="event-list">
-            {rows.map((row) => (
-              <EventCard
-                key={row.event.event_id}
-                row={row}
-                products={products}
-                lanIp={lanIp}
-                onImageError={() => setPiOffline(true)}
-                expanded={expandedEventId === row.event.event_id}
-                onToggleExpanded={() =>
-                  setExpandedEventId((id) => (id === row.event.event_id ? null : row.event.event_id))
-                }
-                onSave={(args) =>
-                  applyOverride.mutate({
-                    clientEventId: row.event.client_event_id,
-                    ...args,
-                  })
-                }
-                onToggleMacroLogging={() =>
-                  applyOverride.mutate({
-                    clientEventId: row.event.client_event_id,
-                    macroLoggingEnabled: !row.macroLoggingEnabled,
-                    isVoided: row.isVoided,
-                    eventKind: row.effectiveKind,
-                  })
-                }
-                onVoid={() =>
-                  applyOverride.mutate({
-                    clientEventId: row.event.client_event_id,
-                    isVoided: true,
-                    eventKind: row.effectiveKind,
-                  })
-                }
-                onUnvoid={() =>
-                  applyOverride.mutate({
-                    clientEventId: row.event.client_event_id,
-                    isVoided: false,
-                    macroLoggingEnabled: row.macroLoggingEnabled,
-                    eventKind: row.effectiveKind,
-                  })
-                }
-                onAcceptClassifier={(itemId) =>
-                  applyOverride.mutate({
-                    clientEventId: row.event.client_event_id,
-                    classifierOverrideItemId: itemId,
-                    eventKind: row.effectiveKind,
-                  })
-                }
-                onRetryAction={() => handleRetryAction(row)}
-                saving={applyOverride.isPending || retryEvent.isPending}
-              />
-            ))}
-          </ul>
-        )}
+      {/* Status filter */}
+      <div
+        className="flex items-center gap-2 flex-wrap"
+        role="tablist"
+        aria-label="Status filter"
+        data-testid="status-filter"
+      >
+        {STATUS_FILTERS.map((s) => (
+          <button
+            key={s.id}
+            data-testid={`status-${s.id}`}
+            onClick={() => setStatusFilter(s.id)}
+            className={[
+              'px-3 py-1.5 rounded-lg text-sm font-medium transition-colors',
+              statusFilter === s.id
+                ? 'bg-chef-accent text-white shadow-inner'
+                : 'bg-surface text-text-secondary border border-border hover:bg-surface-hover',
+            ].join(' ')}
+            aria-pressed={statusFilter === s.id}
+          >
+            {s.label}
+          </button>
+        ))}
       </div>
+
+      {piOffline && (
+        <Alert variant="warning" data-testid="pi-offline-banner">
+          Pi offline — images unavailable. Classifier events still editable.
+        </Alert>
+      )}
+      {!lanIp && !piOffline && (
+        <Alert variant="info" data-testid="no-lan-ip-banner">
+          No Pi LAN IP on file — set one in Settings → Scales to see event images.
+        </Alert>
+      )}
+      {errorMsg && (
+        <Alert variant="error" data-testid="error-banner" onDismiss={() => setErrorMsg(null)}>
+          {errorMsg}
+        </Alert>
+      )}
+      {eventsErr && (
+        <Alert variant="error" data-testid="events-load-error">
+          Failed to load events: {(eventsErr as Error).message}
+        </Alert>
+      )}
+
+      {eventsLoading ? (
+        <ListSkeleton count={6} />
+      ) : rows.length === 0 ? (
+        <div className="text-center py-16 text-text-tertiary" data-testid="no-events">
+          No classifier events in this range yet.
+        </div>
+      ) : (
+        <ul className="space-y-3" data-testid="event-list">
+          {rows.map((row) => (
+            <EventCard
+              key={row.event.event_id}
+              row={row}
+              products={products}
+              lanIp={lanIp}
+              onImageError={() => setPiOffline(true)}
+              expanded={expandedEventId === row.event.event_id}
+              onToggleExpanded={() =>
+                setExpandedEventId((id) => (id === row.event.event_id ? null : row.event.event_id))
+              }
+              onSave={(args) =>
+                applyOverride.mutate({
+                  clientEventId: row.event.client_event_id,
+                  ...args,
+                })
+              }
+              onToggleMacroLogging={() =>
+                applyOverride.mutate({
+                  clientEventId: row.event.client_event_id,
+                  macroLoggingEnabled: !row.macroLoggingEnabled,
+                  isVoided: row.isVoided,
+                  eventKind: row.effectiveKind,
+                })
+              }
+              onVoid={() =>
+                applyOverride.mutate({
+                  clientEventId: row.event.client_event_id,
+                  isVoided: true,
+                  eventKind: row.effectiveKind,
+                })
+              }
+              onUnvoid={() =>
+                applyOverride.mutate({
+                  clientEventId: row.event.client_event_id,
+                  isVoided: false,
+                  macroLoggingEnabled: row.macroLoggingEnabled,
+                  eventKind: row.effectiveKind,
+                })
+              }
+              onAcceptClassifier={(itemId) =>
+                applyOverride.mutate({
+                  clientEventId: row.event.client_event_id,
+                  classifierOverrideItemId: itemId,
+                  eventKind: row.effectiveKind,
+                })
+              }
+              onRetryAction={() => handleRetryAction(row)}
+              saving={applyOverride.isPending || retryEvent.isPending}
+            />
+          ))}
+        </ul>
+      )}
+    </div>
   );
 
   if (embedded) return content;
