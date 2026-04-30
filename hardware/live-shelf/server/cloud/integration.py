@@ -52,6 +52,7 @@ from typing import Any, Optional
 
 from .outbox import enqueue_event
 from .payload_contracts import validate_payload_contract
+from ..types_branded import CloudLotId
 
 log = logging.getLogger(__name__)
 
@@ -977,7 +978,7 @@ class CloudEventEmitter:
         *,
         scale_id: str,
         kind: str,
-        pi_lot_id: str,
+        pi_lot_id: CloudLotId,
         observed_weight_g: float,
         occurred_at: Optional[str] = None,
         pi_event_id: Optional[str] = None,

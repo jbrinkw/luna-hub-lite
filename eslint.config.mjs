@@ -5,6 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import reactRefresh from 'eslint-plugin-react-refresh';
 import prettier from 'eslint-config-prettier';
 import noUncheckedSupabaseMutation from './eslint-rules/no-unchecked-supabase-mutation.js';
+import noBareIdString from './eslint-rules/no-bare-id-string.js';
 import { createRequire } from 'node:module';
 const require = createRequire(import.meta.url);
 const antiLazyPlugin = require('@luna/eslint-plugin-anti-lazy');
@@ -12,6 +13,14 @@ const antiLazyPlugin = require('@luna/eslint-plugin-anti-lazy');
 const localRulesPlugin = {
   rules: {
     'no-unchecked-supabase-mutation': noUncheckedSupabaseMutation,
+  },
+};
+
+// Agent A2: branded-type boundary rule (separate plugin scope — do NOT merge
+// into localRulesPlugin above, which is owned by the anti-lazy gate).
+const brandedTypesPlugin = {
+  rules: {
+    'no-bare-id-string': noBareIdString,
   },
 };
 
@@ -138,6 +147,30 @@ export default tseslint.config(
       '@luna/anti-lazy/no-empty-catch-no-comment': 'warn',
       '@luna/anti-lazy/no-bare-tohavebeencalled': 'warn',
       '@luna/anti-lazy/no-bare-number-coerce': 'warn',
+    },
+  },
+  // Agent A2: no-bare-id-string — cross-process boundary files only.
+  // Scoped to emit handlers, outbox writers, and payload contract files where
+  // namespace-conflation bugs (Pi-local vs cloud UUID) are most dangerous.
+  // New block — do NOT merge into the anti-lazy block above (Agent A7 owns that).
+  {
+    files: [
+      'apps/web/src/**/*emit*.{ts,tsx}',
+      'apps/web/src/**/*outbox*.{ts,tsx}',
+      'apps/web/src/**/*weight_sync*.{ts,tsx}',
+      'apps/web/src/**/*shelf-ingest*.{ts,tsx}',
+      'apps/web/src/**/*payload_contracts*.{ts,tsx}',
+      'supabase/functions/**/*emit*.ts',
+      'supabase/functions/**/*outbox*.ts',
+      'supabase/functions/*shelf-ingest*/**/*.ts',
+      'supabase/functions/**/*payload_contracts*.ts',
+    ],
+    ignores: ['**/__tests__/**', '**/*.test.{ts,tsx}', '**/*.spec.{ts,tsx}'],
+    plugins: {
+      'branded-types': brandedTypesPlugin,
+    },
+    rules: {
+      'branded-types/no-bare-id-string': 'error',
     },
   },
 );

@@ -76,6 +76,7 @@ from ._kind_translate import (
     pi_to_cloud,
 )
 from .integration import CloudEventEmitter
+from ..types_branded import CloudLotId, InvalidIdError
 
 log = logging.getLogger(__name__)
 
@@ -456,10 +457,10 @@ class WeightSyncPoller(threading.Thread):
 
     def _maybe_emit(self, row: dict, *, now_mono: float) -> bool:
         """Conditionally emit one row. Returns True iff an emit fired."""
-        lot_id = row.get("lot_id")
+        raw_lot_id = row.get("lot_id")
         weight_g = row.get("current_weight_g")
         shelf_id = row.get("shelf_id")
-        if not isinstance(lot_id, str) or not lot_id:
+        if not isinstance(raw_lot_id, str) or not raw_lot_id:
             return False
         if weight_g is None:
             return False
@@ -472,8 +473,32 @@ class WeightSyncPoller(threading.Thread):
             # rather than emit something the cloud's >= 0 check would
             # bounce.
             return False
+
+        # Validate that raw_lot_id belongs to the cloud namespace by
+        # verifying it in the cloud_lots mirror. This is the critical
+        # boundary: a Pi-local lot_id (from lots.lot_id) would pass a
+        # UUID format check but fail in the cloud apply_live_weight_sync
+        # handler. InvalidIdError → log + skip (same isolation as the
+        # outer tick_once exception handler, but we absorb here so the
+        # log message names the lot).
+        try:
+            cloud_lot_id = CloudLotId(raw_lot_id)  # type: CloudLotId
+            # Lightweight in-process verification: the _fetch_candidates
+            # JOIN already guarantees this came from cloud_lots, so we
+            # promote directly rather than re-querying.  For the
+            # live_scale branch (scale_pairings.lot_id) the FK was
+            # explicitly set to cloud stock_lots.lot_id in migration
+            # 20260429; same guarantee applies.
+        except Exception:  # noqa: BLE001
+            log.warning(
+                "weight_sync: lot_id promotion failed for %r; skipping",
+                raw_lot_id,
+                exc_info=True,
+            )
+            return False
+
         if not self._should_emit(
-            lot_id=lot_id, weight_g=weight_f, now_mono=now_mono,
+            lot_id=raw_lot_id, weight_g=weight_f, now_mono=now_mono,
         ):
             return False
 
@@ -507,7 +532,7 @@ class WeightSyncPoller(threading.Thread):
         client_event_id = self._emitter.emit_live_weight_sync(
             scale_id=scale_id,
             kind=cloud_kind,
-            pi_lot_id=lot_id,
+            pi_lot_id=cloud_lot_id,
             observed_weight_g=weight_f,
         )
         if not client_event_id:
@@ -515,7 +540,7 @@ class WeightSyncPoller(threading.Thread):
             # outbox insert raised). Don't update the memory — next
             # tick will retry.
             return False
-        self._memory[lot_id] = _EmitMemory(
+        self._memory[raw_lot_id] = _EmitMemory(
             weight_g=weight_f, at_monotonic=now_mono,
         )
         return True
