@@ -190,3 +190,34 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
+
+/*
+ * Native <select>/<option> elements ship with browser-default chrome
+ * (white background, black text) that does NOT inherit our Tailwind
+ * theme tokens. Reported as "drop down menus not in dark mode" — the
+ * dropdown panel popped up white on black behind our other dark UI.
+ *
+ * Two-part fix:
+ *   1. Default every <select> to surface tokens so the *closed* control
+ *      always matches the page background + text colour.
+ *   2. Pin `color-scheme: dark` on the .dark scope so the browser-native
+ *      pop-out picker (option list, scrollbar, focus halo) renders dark.
+ *      `color-scheme: dark` is set on .dark globally already (line 122
+ *      above) but Chromium-based engines need it on the <select>
+ *      ancestor for the popup to honour it; setting it again here is
+ *      explicit + idempotent.
+ *
+ * Per-element classes can still override (e.g. transparent toggles in
+ * the navbar) — these rules only set defaults.
+ */
+select {
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}
+
+.dark select,
+.dark option {
+  color-scheme: dark;
+  background-color: var(--color-surface);
+  color: var(--color-text);
+}

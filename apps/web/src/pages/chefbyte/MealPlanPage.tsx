@@ -913,7 +913,7 @@ export function MealPlanPage() {
   );
 
   const inputCls =
-    'w-full px-3 py-2 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
+    'w-full px-3 py-2 border border-border-strong rounded-md text-sm bg-surface text-text focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
 
   /* ================================================================ */
   /*  RENDER                                                           */

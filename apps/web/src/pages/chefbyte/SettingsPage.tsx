@@ -40,7 +40,7 @@ const tabs: { id: Tab; label: string; icon: string }[] = [
 /* ------------------------------------------------------------------ */
 
 const inputCls =
-  'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm box-border focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
+  'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm box-border bg-surface text-text focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
 const labelCls = 'block mb-1 font-semibold text-[13px] text-text-secondary';
 const cardCls = 'border border-border rounded-lg p-3 mb-2 bg-surface';
 const productCardCls = 'border border-border rounded-lg p-4 bg-surface min-h-[180px] flex flex-col';
@@ -619,7 +619,7 @@ export function SettingsPage() {
           value={activeTab}
           onChange={(e) => setActiveTab(e.target.value as Tab)}
           data-testid="settings-tabs"
-          className="py-2.5 px-3 w-full rounded-lg border border-border text-sm"
+          className="py-2.5 px-3 w-full rounded-lg border border-border text-sm bg-surface text-text"
         >
           {tabs.map((tab) => (
             <option key={tab.id} value={tab.id}>

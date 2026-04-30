@@ -534,7 +534,7 @@ export function RecipeFormPage() {
   /* ================================================================ */
 
   const inputCls =
-    'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
+    'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm bg-surface text-text focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary';
   const labelCls = 'block mb-1 font-semibold text-sm text-text-secondary';
 
   if (loading) {
@@ -831,7 +831,7 @@ export function RecipeFormPage() {
                       onChange={(e) => updateIngredient(idx, 'unit', e.target.value)}
                       data-testid={`edit-unit-${idx}`}
                       aria-label={`Unit for ${ing.product_name}`}
-                      className="w-24 px-2 py-1.5 border border-border-strong rounded text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
+                      className="w-24 px-2 py-1.5 border border-border-strong rounded text-sm bg-surface text-text focus:outline-none focus:ring-2 focus:ring-focus-ring shrink-0"
                     >
                       <option value="serving">Serving</option>
                       <option value="container">Container</option>

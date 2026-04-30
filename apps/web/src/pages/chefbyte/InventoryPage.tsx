@@ -1149,7 +1149,7 @@ export function InventoryPage() {
   /* ================================================================ */
 
   const inputCls =
-    'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary box-border';
+    'w-full px-3 py-2.5 border border-border-strong rounded-md text-sm bg-surface text-text focus:outline-none focus:ring-2 focus:ring-focus-ring focus:border-primary box-border';
 
   if (loading) {
     return (
