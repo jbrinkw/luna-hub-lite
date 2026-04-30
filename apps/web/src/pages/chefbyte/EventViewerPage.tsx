@@ -267,7 +267,12 @@ export function EventViewerPage() {
   const queryClient = useQueryClient();
   const navigate = useNavigate();
 
-  const [range, setRange] = useState<RangeFilter>('week');
+  // Default to 'all' so the count rendered in the ChefLayout tab badge
+  // (which itself has no range filter) matches what users see when they
+  // click into the page. Previously defaulted to 'week', which silently
+  // hid every event older than 7 days even when the badge advertised
+  // hundreds — clicking the tab landed users on an empty page.
+  const [range, setRange] = useState<RangeFilter>('all');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [expandedEventId, setExpandedEventId] = useState<string | null>(null);
   const [piOffline, setPiOffline] = useState(false);
