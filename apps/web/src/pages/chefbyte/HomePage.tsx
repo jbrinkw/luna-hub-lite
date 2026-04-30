@@ -11,6 +11,7 @@ import {
   ShoppingCart,
   ChevronDown,
   ChevronUp,
+  ExternalLink,
 } from 'lucide-react';
 
 import { ChefLayout } from '@/components/chefbyte/ChefLayout';
@@ -1239,7 +1240,12 @@ export function HomePage() {
       {/* ============================================================ */}
       <div data-testid="macro-summary" className="mb-5">
         <Link to="/chef/macros" className="no-underline text-inherit block">
-          <div className="bg-gradient-to-br from-surface-sunken to-success-subtle border border-border rounded-xl p-4 shadow-sm hover:shadow transition-shadow">
+          <div className="relative bg-gradient-to-br from-surface-sunken to-success-subtle border border-border rounded-xl p-4 shadow-sm hover:shadow transition-shadow">
+            <ExternalLink
+              className="absolute top-3 right-3 h-4 w-4 text-text-tertiary"
+              data-testid="macro-summary-link-icon"
+              aria-hidden="true"
+            />
             <div className="mb-3">
               <span className="font-bold text-base text-text">Today</span>{' '}
               <span data-testid="day-window-label" className="text-sm text-text-secondary">
