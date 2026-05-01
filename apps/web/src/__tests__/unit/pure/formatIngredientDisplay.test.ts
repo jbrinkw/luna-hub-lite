@@ -197,4 +197,117 @@ describe('formatIngredientDisplay', () => {
       }),
     ).toBe('1 svg ');
   });
+
+  /* ---- display_by_weight (highest precedence) ---- */
+
+  it('by-weight + metric + serving unit: 1.33 svg of 454g/4-svg beef → "151g <name>"', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 1.33,
+        unit: 'serving',
+        productName: 'Ground Beef',
+        visualUnitLabel: null,
+        visualUnitsPerServing: null,
+        servingsPerContainer: 4,
+        displayByWeight: true,
+        netWeightG: 454,
+        unitSystem: 'metric',
+      }),
+    ).toBe('151g Ground Beef');
+  });
+
+  it('by-weight + imperial + serving unit: 1.33 svg of 454g/4-svg beef → "5.3oz <name>"', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 1.33,
+        unit: 'serving',
+        productName: 'Ground Beef',
+        visualUnitLabel: null,
+        visualUnitsPerServing: null,
+        servingsPerContainer: 4,
+        displayByWeight: true,
+        netWeightG: 454,
+        unitSystem: 'imperial',
+      }),
+    ).toBe('5.3oz Ground Beef');
+  });
+
+  it('by-weight + container unit: 0.5 ctn of 454g beef → "227g <name>"', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 0.5,
+        unit: 'container',
+        productName: 'Ground Beef',
+        visualUnitLabel: null,
+        visualUnitsPerServing: null,
+        servingsPerContainer: 4,
+        displayByWeight: true,
+        netWeightG: 454,
+        unitSystem: 'metric',
+      }),
+    ).toBe('227g Ground Beef');
+  });
+
+  it('by-weight + gram unit (already grams): qty=200 → "200g <name>"', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 200,
+        unit: 'gram',
+        productName: 'Flour',
+        visualUnitLabel: null,
+        visualUnitsPerServing: null,
+        servingsPerContainer: 50,
+        displayByWeight: true,
+        netWeightG: 2270,
+        unitSystem: 'metric',
+      }),
+    ).toBe('200g Flour');
+  });
+
+  it('by-weight precedes visual: visual_unit_label ignored when display_by_weight=true', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 2,
+        unit: 'serving',
+        productName: 'Beef',
+        visualUnitLabel: 'oz',
+        visualUnitsPerServing: 4,
+        servingsPerContainer: 4,
+        displayByWeight: true,
+        netWeightG: 454,
+        unitSystem: 'metric',
+      }),
+    ).toBe('227g Beef');
+  });
+
+  it('by-weight true but netWeightG missing → falls through to canonical', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 2,
+        unit: 'serving',
+        productName: 'Beef',
+        visualUnitLabel: null,
+        visualUnitsPerServing: null,
+        servingsPerContainer: 4,
+        displayByWeight: true,
+        netWeightG: null,
+        unitSystem: 'metric',
+      }),
+    ).toBe('2 svg Beef');
+  });
+
+  it('by-weight defaults to imperial when unitSystem omitted', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 1,
+        unit: 'serving',
+        productName: 'Beef',
+        visualUnitLabel: null,
+        visualUnitsPerServing: null,
+        servingsPerContainer: 4,
+        displayByWeight: true,
+        netWeightG: 454,
+      }),
+    ).toBe('4.0oz Beef');
+  });
 });

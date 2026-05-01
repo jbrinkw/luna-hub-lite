@@ -52,6 +52,10 @@ export interface ChefbyteProduct {
   // "2 eggs Cage-Free Eggs". Backend math NEVER reads these columns.
   visual_unit_label: string | null;
   visual_units_per_serving: number | null;
+  // Display-by-weight: when true and net_weight_g > 0, the UI renders
+  // quantities in grams or ounces (per hub.profiles.unit_system pref).
+  // Display-only; backend math reads canonical unit + quantity.
+  display_by_weight: boolean;
 }
 
 export function useChefbyteProducts() {

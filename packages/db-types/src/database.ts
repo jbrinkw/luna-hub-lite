@@ -373,6 +373,69 @@ export type Database = {
           },
         ]
       }
+      pi_lot_snapshots: {
+        Row: {
+          cloud_lot_id: string | null
+          created_at: string
+          current_weight_g: number | null
+          device_id: string
+          in_flight_kind: string | null
+          in_flight_since: string | null
+          last_update_source: string | null
+          observed_at: string
+          pi_lot_id: string
+          qty_containers: number | null
+          scale_id_paired_to: string | null
+          status: string | null
+          user_id: string
+        }
+        Insert: {
+          cloud_lot_id?: string | null
+          created_at?: string
+          current_weight_g?: number | null
+          device_id: string
+          in_flight_kind?: string | null
+          in_flight_since?: string | null
+          last_update_source?: string | null
+          observed_at?: string
+          pi_lot_id: string
+          qty_containers?: number | null
+          scale_id_paired_to?: string | null
+          status?: string | null
+          user_id: string
+        }
+        Update: {
+          cloud_lot_id?: string | null
+          created_at?: string
+          current_weight_g?: number | null
+          device_id?: string
+          in_flight_kind?: string | null
+          in_flight_since?: string | null
+          last_update_source?: string | null
+          observed_at?: string
+          pi_lot_id?: string
+          qty_containers?: number | null
+          scale_id_paired_to?: string | null
+          status?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "pi_lot_snapshots_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_device_history"
+            referencedColumns: ["device_id"]
+          },
+          {
+            foreignKeyName: "pi_lot_snapshots_device_id_fkey"
+            columns: ["device_id"]
+            isOneToOne: false
+            referencedRelation: "live_shelf_devices"
+            referencedColumns: ["device_id"]
+          },
+        ]
+      }
       products: {
         Row: {
           barcode: string | null
@@ -382,12 +445,16 @@ export type Database = {
           certified: boolean | null
           container_type: string | null
           created_at: string
+          default_expiry_days: number | null
+          default_recipe_unit: string | null
           default_shelf_life_days: number | null
           deleted_at: string | null
           density_g_per_ml: number | null
           description: string | null
+          display_by_weight: boolean
           fat_per_serving: number
           gross_weight_g: number | null
+          is_distinct_unit_item: boolean
           is_placeholder: boolean
           min_stock_amount: number
           name: string
@@ -402,6 +469,8 @@ export type Database = {
           updated_at: string
           user_id: string
           variant: string | null
+          visual_unit_label: string | null
+          visual_units_per_serving: number | null
           walmart_link: string | null
         }
         Insert: {
@@ -412,12 +481,16 @@ export type Database = {
           certified?: boolean | null
           container_type?: string | null
           created_at?: string
+          default_expiry_days?: number | null
+          default_recipe_unit?: string | null
           default_shelf_life_days?: number | null
           deleted_at?: string | null
           density_g_per_ml?: number | null
           description?: string | null
+          display_by_weight?: boolean
           fat_per_serving?: number
           gross_weight_g?: number | null
+          is_distinct_unit_item?: boolean
           is_placeholder?: boolean
           min_stock_amount?: number
           name: string
@@ -432,6 +505,8 @@ export type Database = {
           updated_at?: string
           user_id: string
           variant?: string | null
+          visual_unit_label?: string | null
+          visual_units_per_serving?: number | null
           walmart_link?: string | null
         }
         Update: {
@@ -442,12 +517,16 @@ export type Database = {
           certified?: boolean | null
           container_type?: string | null
           created_at?: string
+          default_expiry_days?: number | null
+          default_recipe_unit?: string | null
           default_shelf_life_days?: number | null
           deleted_at?: string | null
           density_g_per_ml?: number | null
           description?: string | null
+          display_by_weight?: boolean
           fat_per_serving?: number
           gross_weight_g?: number | null
+          is_distinct_unit_item?: boolean
           is_placeholder?: boolean
           min_stock_amount?: number
           name?: string
@@ -462,6 +541,8 @@ export type Database = {
           updated_at?: string
           user_id?: string
           variant?: string | null
+          visual_unit_label?: string | null
+          visual_units_per_serving?: number | null
           walmart_link?: string | null
         }
         Relationships: []
@@ -552,6 +633,8 @@ export type Database = {
       }
       review_queue: {
         Row: {
+          after_image_url: string | null
+          before_image_url: string | null
           created_at: string
           images: Json | null
           kind: string
@@ -566,6 +649,8 @@ export type Database = {
           user_response: Json | null
         }
         Insert: {
+          after_image_url?: string | null
+          before_image_url?: string | null
           created_at?: string
           images?: Json | null
           kind: string
@@ -580,6 +665,8 @@ export type Database = {
           user_response?: Json | null
         }
         Update: {
+          after_image_url?: string | null
+          before_image_url?: string | null
           created_at?: string
           images?: Json | null
           kind?: string
@@ -662,7 +749,9 @@ export type Database = {
       }
       shelf_event_log: {
         Row: {
+          after_image_url: string | null
           applied: boolean
+          before_image_url: string | null
           classification: Json | null
           classifier_status: string | null
           client_event_id: string
@@ -676,7 +765,9 @@ export type Database = {
           user_id: string
         }
         Insert: {
+          after_image_url?: string | null
           applied: boolean
+          before_image_url?: string | null
           classification?: Json | null
           classifier_status?: string | null
           client_event_id: string
@@ -690,7 +781,9 @@ export type Database = {
           user_id: string
         }
         Update: {
+          after_image_url?: string | null
           applied?: boolean
+          before_image_url?: string | null
           classification?: Json | null
           classifier_status?: string | null
           client_event_id?: string
@@ -1105,6 +1198,8 @@ export type Database = {
       resolve_review: {
         Args: { p_review_id: string; p_status: string; p_user_response?: Json }
         Returns: {
+          after_image_url: string | null
+          before_image_url: string | null
           created_at: string
           images: Json | null
           kind: string
@@ -1153,8 +1248,14 @@ export type Database = {
         Args: { p_scale: number; p_temp_id: string }
         Returns: Json
       }
+      upsert_pi_lot_snapshots_admin: {
+        Args: { p_device_id: string; p_lots: Json; p_user_id: string }
+        Returns: number
+      }
       upsert_review_queue_from_pi_admin: {
         Args: {
+          p_after_image_url?: string
+          p_before_image_url?: string
           p_created_at: string
           p_images: Json
           p_kind: string
@@ -1165,6 +1266,8 @@ export type Database = {
           p_user_id: string
         }
         Returns: {
+          after_image_url: string | null
+          before_image_url: string | null
           created_at: string
           images: Json | null
           kind: string
@@ -1830,6 +1933,7 @@ export type Database = {
           is_admin: boolean
           revoke_keys_on_logout: boolean
           timezone: string
+          unit_system: string
           user_id: string
         }
         Insert: {
@@ -1840,6 +1944,7 @@ export type Database = {
           is_admin?: boolean
           revoke_keys_on_logout?: boolean
           timezone?: string
+          unit_system?: string
           user_id: string
         }
         Update: {
@@ -1850,6 +1955,7 @@ export type Database = {
           is_admin?: boolean
           revoke_keys_on_logout?: boolean
           timezone?: string
+          unit_system?: string
           user_id?: string
         }
         Relationships: []
@@ -2262,6 +2368,8 @@ export type Database = {
       }
       upsert_review_queue_from_pi: {
         Args: {
+          p_after_image_url?: string
+          p_before_image_url?: string
           p_created_at: string
           p_images: Json
           p_kind: string

@@ -44,6 +44,7 @@ export function AccountPage() {
   const [displayName, setDisplayName] = useState('');
   const [timezone, setTimezone] = useState('America/New_York');
   const [dayStartHour, setDayStartHour] = useState(6);
+  const [unitSystem, setUnitSystem] = useState<'metric' | 'imperial'>('imperial');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const { showSaved, flash } = useSaveIndicator();
 
@@ -94,7 +95,7 @@ export function AccountPage() {
       const { data, error } = await supabase
         .schema('hub')
         .from('profiles')
-        .select('display_name, timezone, day_start_hour')
+        .select('display_name, timezone, day_start_hour, unit_system')
         .eq('user_id', user!.id)
         .single();
       if (error) throw error;
@@ -110,6 +111,11 @@ export function AccountPage() {
       setDisplayName(profile.display_name ?? '');
       setTimezone(profile.timezone);
       setDayStartHour(profile.day_start_hour);
+      // unit_system was added 2026-04-30; older rows materialized via the
+      // SELECT above will have it populated by the column DEFAULT 'imperial'
+      // — but coalesce defensively in case the row predates the migration.
+      const us = (profile as any).unit_system;
+      setUnitSystem(us === 'metric' ? 'metric' : 'imperial');
     }
   }, [profile]);
   /* eslint-enable react-hooks/set-state-in-effect */
@@ -120,7 +126,7 @@ export function AccountPage() {
       const { error } = await supabase
         .schema('hub')
         .from('profiles')
-        .update({ display_name: displayName, timezone, day_start_hour: dayStartHour })
+        .update({ display_name: displayName, timezone, day_start_hour: dayStartHour, unit_system: unitSystem })
         .eq('user_id', user!.id);
       if (error) throw error;
     },
@@ -308,6 +314,17 @@ export function AccountPage() {
                     {i === 0 ? '12:00 AM' : i < 12 ? `${i}:00 AM` : i === 12 ? '12:00 PM' : `${i - 12}:00 PM`}
                   </option>
                 ))}
+              </Select>
+
+              <Select
+                label="Unit System"
+                value={unitSystem}
+                onChange={(e) => setUnitSystem(e.target.value as 'metric' | 'imperial')}
+                hint="Affects display only — by-weight products render in grams (metric) or ounces (imperial). Backend storage is always SI."
+                data-testid="account-unit-system"
+              >
+                <option value="imperial">Imperial (ounces)</option>
+                <option value="metric">Metric (grams)</option>
               </Select>
 
               <Button onClick={handleSaveProfile} loading={saveProfileMutation.isPending}>

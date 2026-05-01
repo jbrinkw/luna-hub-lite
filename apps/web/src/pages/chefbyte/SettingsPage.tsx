@@ -72,6 +72,7 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
   default_expiry_days: null,
   visual_unit_label: null,
   visual_units_per_serving: null,
+  display_by_weight: false,
 });
 
 /* ================================================================== */
@@ -546,6 +547,30 @@ export function SettingsPage() {
                 <span className="text-sm font-semibold text-text">Distinct unit item</span>
               </label>
               <p className="text-[11px] text-text-tertiary ml-6">1 piece = 1 serving (eggs, buns, slices, bars)</p>
+              <label className="flex items-start gap-2 cursor-pointer mt-1.5">
+                <input
+                  type="checkbox"
+                  checked={!!form.display_by_weight}
+                  onChange={(e) => {
+                    onChange('display_by_weight', e.target.checked);
+                    // Display-by-weight and visual_unit_label encode different
+                    // intents; the helper resolves the conflict (weight wins),
+                    // but clearing the visual fields here keeps the form
+                    // truthful and prevents stale state on save.
+                    if (e.target.checked) {
+                      onChange('visual_unit_label', null);
+                      onChange('visual_units_per_serving', null);
+                    }
+                  }}
+                  data-testid={`${testIdPrefix}-display-by-weight`}
+                  className="mt-0.5 h-4 w-4 accent-emerald-600"
+                  disabled={!form.net_weight_g || form.net_weight_g <= 0}
+                />
+                <span className="text-sm font-semibold text-text">Display by weight</span>
+              </label>
+              <p className="text-[11px] text-text-tertiary ml-6">
+                Render quantities in grams or ounces (per Hub unit-system preference). Requires net weight.
+              </p>
             </div>
           </div>
         </div>

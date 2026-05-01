@@ -16,6 +16,7 @@ import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { macroDelta } from '@/shared/macroValidation';
 import { formatQuantityWithVisual } from '@/shared/recipes/formatIngredientDisplay';
+import { useUnitSystem } from '@/shared/useUnitSystem';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -46,6 +47,8 @@ export interface ConsumedItem {
   visualUnitLabel?: string | null;
   visualUnitsPerServing?: number | null;
   servingsPerContainer?: number | null;
+  displayByWeight?: boolean | null;
+  netWeightG?: number | null;
 }
 
 export interface PlannedItem {
@@ -94,7 +97,7 @@ export async function loadMacroPageData(
     chef
       .from('food_logs')
       .select(
-        'log_id, product_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name, servings_per_container, visual_unit_label, visual_units_per_serving)',
+        'log_id, product_id, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name, servings_per_container, visual_unit_label, visual_units_per_serving, display_by_weight, net_weight_g)',
       )
       .eq('user_id', userId)
       .eq('logical_date', logicalDate)
@@ -150,6 +153,8 @@ export async function loadMacroPageData(
       qty: Number(log.qty_consumed) || 0,
       unit: log.unit ?? null,
       visualUnitLabel: log.products?.visual_unit_label ?? null,
+      displayByWeight: !!log.products?.display_by_weight,
+      netWeightG: log.products?.net_weight_g != null ? Number(log.products.net_weight_g) : null,
       visualUnitsPerServing:
         log.products?.visual_units_per_serving != null ? Number(log.products.visual_units_per_serving) : null,
       servingsPerContainer:
@@ -217,6 +222,7 @@ export function MacroPage() {
   const { user } = useAuth();
   const { dayStartHour } = useAppContext();
   const queryClient = useQueryClient();
+  const unitSystem = useUnitSystem();
   // Initial date = current logical date (respects day_start_hour).
   // Without the shift, at 05:30 local time with day_start_hour=6 the page
   // would show an empty "today" while the consume flows (InventoryPage,
@@ -780,6 +786,9 @@ export function MacroPage() {
                               visualUnitLabel: item.visualUnitLabel ?? null,
                               visualUnitsPerServing: item.visualUnitsPerServing ?? null,
                               servingsPerContainer: Number(item.servingsPerContainer) || 1,
+                              displayByWeight: !!item.displayByWeight,
+                              netWeightG: item.netWeightG ?? null,
+                              unitSystem,
                               canonicalDecimals: 1,
                             })}
                             )

@@ -1,21 +1,30 @@
 /**
  * Format a product quantity for human-readable display.
  *
- * Used in two places that share identical display semantics:
- *   1. Recipe lines  ("2 eggs Cage-Free Eggs")
- *   2. Inventory / meal-plan / food-log quantity columns
+ * Three render modes, in precedence order:
  *
- * The visual pair lives on the PRODUCT now (visual_unit_label +
- * visual_units_per_serving). When set, this helper converts the
- * canonical (quantity + unit) into "<displayQty> <pluralized-label>
- * <productName>". When unset OR when the canonical unit is `gram`, the
- * helper falls back to the existing canonical rendering ("30g <name>",
- * "1 ctn <name>", "2 svg <name>").
+ *   1. **By-weight** — `displayByWeight && netWeightG > 0`. Converts the
+ *      canonical quantity to grams via net_weight_g, then renders as either
+ *      grams (`unitSystem='metric'`) or ounces (`unitSystem='imperial'`).
+ *      Format: "150g <name>" / "5.3oz <name>" — no plural-s, no space
+ *      before unit symbol.
+ *
+ *   2. **Visual unit** — `visualUnitLabel && visualUnitsPerServing > 0` AND
+ *      canonical unit is 'serving' or 'container'. Converts to servings,
+ *      multiplies by units-per-serving, pluralizes the label.
+ *      Format: "2 eggs <name>", "1 slice <name>".
+ *
+ *   3. **Canonical fallback** — render the raw unit. Format: "30g <name>",
+ *      "1 ctn <name>", "2 svg <name>".
  *
  * Backend math (consume_product, mark_meal_done, food_logs, macro calc)
- * NEVER reads visual fields — canonical unit + quantity remain the single
- * source of truth.
+ * NEVER reads any of these display fields — canonical unit + quantity
+ * remain the single source of truth.
  */
+export type UnitSystem = 'metric' | 'imperial';
+
+const GRAMS_PER_OUNCE = 28.3495231;
+
 export function formatIngredientDisplay(args: {
   quantity: number;
   unit: 'container' | 'serving' | 'gram';
@@ -23,12 +32,12 @@ export function formatIngredientDisplay(args: {
   visualUnitLabel: string | null;
   visualUnitsPerServing: number | null;
   servingsPerContainer: number;
+  displayByWeight?: boolean;
+  netWeightG?: number | null;
+  unitSystem?: UnitSystem;
 }): string {
   const { productName } = args;
   const name = productName ?? '';
-  // Recipe ingredient lines drop trailing zeros ("1 ctn Bacon", not
-  // "1.0 ctn Bacon") for tighter prose — pass canonicalDecimals undefined
-  // to skip toFixed and use the trim-zeros formatter instead.
   const qty = formatQuantityWithVisual(args);
   return `${qty} ${name}`;
 }
@@ -45,7 +54,8 @@ export function formatIngredientDisplay(args: {
  *     per CLAUDE.md ("Quantities displayed to 1 decimal in UI").
  *
  * The visual path always trims zeros and pluralizes so "1 egg" doesn't
- * render as "1.0 eggs".
+ * render as "1.0 eggs". The by-weight path also trims zeros — gram/oz
+ * never pluralize.
  */
 export function formatQuantityWithVisual(args: {
   quantity: number;
@@ -54,16 +64,41 @@ export function formatQuantityWithVisual(args: {
   visualUnitsPerServing: number | null;
   servingsPerContainer: number;
   canonicalDecimals?: number;
+  displayByWeight?: boolean;
+  netWeightG?: number | null;
+  unitSystem?: UnitSystem;
 }): string {
-  const { quantity, unit, visualUnitLabel, visualUnitsPerServing, servingsPerContainer, canonicalDecimals } = args;
+  const {
+    quantity,
+    unit,
+    visualUnitLabel,
+    visualUnitsPerServing,
+    servingsPerContainer,
+    canonicalDecimals,
+    displayByWeight,
+    netWeightG,
+    unitSystem = 'imperial',
+  } = args;
 
+  // Mode 1: by-weight rendering — highest precedence. Requires net_weight_g
+  // so we can convert canonical → grams. If the flag is set but
+  // net_weight_g is missing, fall through to the next mode rather than
+  // emitting a meaningless "0g" / "NaNg".
+  if (displayByWeight && netWeightG != null && netWeightG > 0) {
+    const grams = canonicalToGrams(quantity, unit, netWeightG, servingsPerContainer);
+    if (unitSystem === 'imperial') {
+      // Ounces typically show 1 decimal (per CLAUDE.md UI convention) —
+      // 5.3oz reads cleaner than 5oz or 5.29oz.
+      return `${(grams / GRAMS_PER_OUNCE).toFixed(1)}oz`;
+    }
+    // Grams as whole numbers — fractional grams aren't useful at the scale
+    // of recipe ingredients (the smallest recipe portion is ~1g).
+    return `${Math.round(grams)}g`;
+  }
+
+  // Mode 2: visual unit (eggs / slices / etc.).
   const visualSet =
     visualUnitLabel != null && visualUnitLabel !== '' && visualUnitsPerServing != null && visualUnitsPerServing > 0;
-
-  // Visual rendering only applies when the canonical unit is something
-  // we can convert to servings (container or serving). For gram, the
-  // user is already speaking grams — keep the canonical rendering so
-  // "30g" stays exact and stable.
   if (visualSet && (unit === 'container' || unit === 'serving')) {
     const servings = unit === 'container' ? quantity * Math.max(servingsPerContainer, 0.001) : quantity;
     const displayQty = servings * (visualUnitsPerServing as number);
@@ -71,7 +106,29 @@ export function formatQuantityWithVisual(args: {
     return `${formatNumber(displayQty)} ${label}`;
   }
 
+  // Mode 3: canonical fallback.
   return canonicalStr(quantity, unit, canonicalDecimals);
+}
+
+/**
+ * Convert a canonical (quantity + unit) into grams using a product's
+ * net_weight_g (per container) and servings_per_container.
+ *
+ * - container: quantity × net_weight_g
+ * - serving:   quantity × (net_weight_g / servings_per_container)
+ * - gram:      quantity (already grams)
+ */
+function canonicalToGrams(
+  quantity: number,
+  unit: 'container' | 'serving' | 'gram',
+  netWeightG: number,
+  servingsPerContainer: number,
+): number {
+  if (unit === 'gram') return quantity;
+  if (unit === 'container') return quantity * netWeightG;
+  // serving
+  const spc = servingsPerContainer > 0 ? servingsPerContainer : 1;
+  return quantity * (netWeightG / spc);
 }
 
 /** Format a number: drop trailing zeros, keep up to 3 decimal places. */
