@@ -131,21 +131,52 @@ function canonicalToGrams(
   return quantity * (netWeightG / spc);
 }
 
-/** Format a number: drop trailing zeros, keep up to 3 decimal places. */
+/** Format a number: drop trailing zeros, cap at 2 decimal places. */
 function formatNumber(n: number): string {
-  // Use toPrecision-style: show up to 3 significant decimals but trim zeros
-  const fixed = n.toFixed(3);
-  // Remove trailing zeros after decimal, and trailing dot
+  // toFixed(2) caps the displayed precision at 2 decimals (rounding half-up);
+  // the regex then trims any trailing zeros so "2.00" → "2", "0.50" → "0.5",
+  // but "1.33" stays "1.33".
+  const fixed = n.toFixed(2);
   return fixed.replace(/\.?0+$/, '');
 }
 
 /**
- * Simple pluralization: append "s" unless count === 1. Matches the rest
- * of the codebase ("1 serving" vs "2 servings"). No irregulars — the
- * label is user-supplied and we do not maintain a dictionary.
+ * Unit-symbol abbreviations that never pluralize. "2 oz" not "2 ozs",
+ * "3 tbsp" not "3 tbsps", "150 g" not "150 gs". Compared
+ * case-insensitively. Anything not in the set falls through to the
+ * naive "+s" rule (handles "egg" → "eggs", "slice" → "slices",
+ * "bun" → "buns", "tortilla" → "tortillas", etc.).
+ */
+const NON_PLURAL_UNIT_LABELS = new Set([
+  'oz',
+  'fl oz',
+  'lb',
+  'lbs',
+  'g',
+  'kg',
+  'mg',
+  'ml',
+  'l',
+  'tsp',
+  'tbsp',
+  'cm',
+  'mm',
+  'in',
+  'ft',
+  'pt',
+  'qt',
+  'gal',
+]);
+
+/**
+ * Append "s" unless count === 1, OR the label is a known unit-symbol
+ * abbreviation that doesn't take a plural ("oz", "tbsp", "g", etc.).
+ * Compares case-insensitively against NON_PLURAL_UNIT_LABELS.
  */
 function pluralize(label: string, count: number): string {
-  return count === 1 ? label : `${label}s`;
+  if (count === 1) return label;
+  if (NON_PLURAL_UNIT_LABELS.has(label.toLowerCase())) return label;
+  return `${label}s`;
 }
 
 /** Canonical unit abbreviation string, e.g. "30g", "1 ctn", "2 svg". */

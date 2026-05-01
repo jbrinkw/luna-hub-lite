@@ -296,6 +296,73 @@ describe('formatIngredientDisplay', () => {
     ).toBe('2 svg Beef');
   });
 
+  /* ---- Unit-abbreviation labels never pluralize ---- */
+
+  it('label="oz" + count > 1 → "2 oz" (no plural-s on abbreviation)', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 2,
+        unit: 'serving',
+        productName: 'Cheddar',
+        visualUnitLabel: 'oz',
+        visualUnitsPerServing: 1,
+        servingsPerContainer: 8,
+      }),
+    ).toBe('2 oz Cheddar');
+  });
+
+  it('label="tbsp" + count > 1 → "3 tbsp" (no plural-s)', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 3,
+        unit: 'serving',
+        productName: 'Mayo',
+        visualUnitLabel: 'tbsp',
+        visualUnitsPerServing: 1,
+        servingsPerContainer: 60,
+      }),
+    ).toBe('3 tbsp Mayo');
+  });
+
+  it('label="oz" + count = 0.5 → "0.5 oz" (no plural-s on fractional)', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 0.5,
+        unit: 'serving',
+        productName: 'Cheddar',
+        visualUnitLabel: 'oz',
+        visualUnitsPerServing: 1,
+        servingsPerContainer: 8,
+      }),
+    ).toBe('0.5 oz Cheddar');
+  });
+
+  it('label "OZ" (uppercase) is matched case-insensitively', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 2,
+        unit: 'serving',
+        productName: 'Cheddar',
+        visualUnitLabel: 'OZ',
+        visualUnitsPerServing: 1,
+        servingsPerContainer: 8,
+      }),
+    ).toBe('2 OZ Cheddar');
+  });
+
+  it('non-abbreviation labels still pluralize: "cup" + 2 → "cups"', () => {
+    expect(
+      formatIngredientDisplay({
+        quantity: 2,
+        unit: 'serving',
+        productName: 'Milk',
+        visualUnitLabel: 'cup',
+        visualUnitsPerServing: 1,
+        servingsPerContainer: 16,
+      }),
+    ).toBe('2 cups Milk');
+  });
+
   it('by-weight defaults to imperial when unitSystem omitted', () => {
     expect(
       formatIngredientDisplay({
