@@ -28,6 +28,7 @@ import { useChefbyteProducts, type ChefbyteProduct } from '@/shared/useChefbyteP
 import { todayStr } from '@/shared/dates';
 import { isValidLanIp } from '@/components/chefbyte/ScalesTab';
 import { formatQuantityWithVisual } from '@/shared/recipes/formatIngredientDisplay';
+import { useUnitSystem } from '@/shared/useUnitSystem';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -73,6 +74,8 @@ interface StockLot {
     servings_per_container: number;
     visual_unit_label: string | null;
     visual_units_per_serving: number | null;
+    display_by_weight: boolean;
+    net_weight_g: number | null;
   } | null;
 }
 
@@ -316,6 +319,7 @@ export function pickLatestAutomatedSource(
 
 export function InventoryPage() {
   const { user } = useAuth();
+  const unitSystem = useUnitSystem();
   const { dayStartHour } = useAppContext();
   const queryClient = useQueryClient();
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
@@ -439,7 +443,7 @@ export function InventoryPage() {
       const { data, error } = await chefbyte()
         .from('stock_lots')
         .select(
-          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,last_observed_weight_g,last_observed_at,locations:location_id(name),products:product_id(name,servings_per_container,visual_unit_label,visual_units_per_serving)',
+          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,last_observed_weight_g,last_observed_at,locations:location_id(name),products:product_id(name,servings_per_container,visual_unit_label,visual_units_per_serving,display_by_weight,net_weight_g)',
         )
         .eq('user_id', user!.id);
       if (error) throw error;
@@ -792,6 +796,15 @@ export function InventoryPage() {
             : mappedProduct?.visual_units_per_serving != null
               ? Number(mappedProduct.visual_units_per_serving)
               : null;
+        // Display-by-weight + net_weight_g: prefer joined-row (covers
+        // [MEAL] sentinel products), fall back to mappedProduct.
+        const displayByWeight = !!(joinedProduct?.display_by_weight ?? mappedProduct?.display_by_weight ?? false);
+        const netWeightG =
+          joinedProduct?.net_weight_g != null
+            ? Number(joinedProduct.net_weight_g)
+            : mappedProduct?.net_weight_g != null
+              ? Number(mappedProduct.net_weight_g)
+              : null;
         return {
           ...lot,
           productName,
@@ -801,6 +814,8 @@ export function InventoryPage() {
           visualUnitLabel,
           visualUnitsPerServing,
           servingsPerContainer,
+          displayByWeight,
+          netWeightG,
         };
       })
       .sort((a, b) => {
@@ -1404,6 +1419,9 @@ export function InventoryPage() {
                               ? Number(lot.product.visual_units_per_serving)
                               : null,
                           servingsPerContainer: Number(lot.product?.servings_per_container ?? 1),
+                          displayByWeight: !!lot.product?.display_by_weight,
+                          netWeightG: lot.product?.net_weight_g != null ? Number(lot.product.net_weight_g) : null,
+                          unitSystem,
                           canonicalDecimals: 1,
                         })}
                       </span>
@@ -1664,6 +1682,9 @@ export function InventoryPage() {
                                   ? Number(product.visual_units_per_serving)
                                   : null,
                               servingsPerContainer: Number(product.servings_per_container) || 1,
+                              displayByWeight: !!product.display_by_weight,
+                              netWeightG: product.net_weight_g != null ? Number(product.net_weight_g) : null,
+                              unitSystem,
                               canonicalDecimals: 1,
                             })
                           )}
@@ -1823,20 +1844,23 @@ export function InventoryPage() {
                           </span>
                         ) : (
                           (() => {
-                            const visualSet =
-                              lot.visualUnitLabel != null &&
-                              lot.visualUnitsPerServing != null &&
-                              lot.visualUnitsPerServing > 0;
-                            const visualHalf = visualSet
-                              ? formatQuantityWithVisual({
-                                  quantity: Number(lot.qty_containers),
-                                  unit: 'container',
-                                  visualUnitLabel: lot.visualUnitLabel,
-                                  visualUnitsPerServing: lot.visualUnitsPerServing,
-                                  servingsPerContainer: lot.servingsPerContainer,
-                                })
-                              : `${lot.qtyServings.toFixed(1)} svg`;
-                            return `${Number(lot.qty_containers).toFixed(1)} ctn (${visualHalf})`;
+                            // Single helper call handles all three modes —
+                            // by-weight wins, then visual, then canonical svg.
+                            // Pass quantity in servings so canonical fallback
+                            // renders "X svg" rather than "X ctn" (which
+                            // would duplicate the leading ctn count).
+                            const second = formatQuantityWithVisual({
+                              quantity: lot.qtyServings,
+                              unit: 'serving',
+                              visualUnitLabel: lot.visualUnitLabel,
+                              visualUnitsPerServing: lot.visualUnitsPerServing,
+                              servingsPerContainer: lot.servingsPerContainer,
+                              displayByWeight: !!lot.displayByWeight,
+                              netWeightG: lot.netWeightG ?? null,
+                              unitSystem,
+                              canonicalDecimals: 1,
+                            });
+                            return `${Number(lot.qty_containers).toFixed(1)} ctn (${second})`;
                           })()
                         )}
                       </span>
@@ -1960,20 +1984,18 @@ export function InventoryPage() {
                             </span>
                           ) : (
                             (() => {
-                              const visualSet =
-                                lot.visualUnitLabel != null &&
-                                lot.visualUnitsPerServing != null &&
-                                lot.visualUnitsPerServing > 0;
-                              const visualHalf = visualSet
-                                ? formatQuantityWithVisual({
-                                    quantity: Number(lot.qty_containers),
-                                    unit: 'container',
-                                    visualUnitLabel: lot.visualUnitLabel,
-                                    visualUnitsPerServing: lot.visualUnitsPerServing,
-                                    servingsPerContainer: lot.servingsPerContainer,
-                                  })
-                                : `${lot.qtyServings.toFixed(1)} svg`;
-                              return `${Number(lot.qty_containers).toFixed(1)} ctn (${visualHalf})`;
+                              const second = formatQuantityWithVisual({
+                                quantity: lot.qtyServings,
+                                unit: 'serving',
+                                visualUnitLabel: lot.visualUnitLabel,
+                                visualUnitsPerServing: lot.visualUnitsPerServing,
+                                servingsPerContainer: lot.servingsPerContainer,
+                                displayByWeight: !!lot.displayByWeight,
+                                netWeightG: lot.netWeightG ?? null,
+                                unitSystem,
+                                canonicalDecimals: 1,
+                              });
+                              return `${Number(lot.qty_containers).toFixed(1)} ctn (${second})`;
                             })()
                           )}
                         </td>

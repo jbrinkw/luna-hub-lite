@@ -8,6 +8,7 @@ import { chefbyte, escapeIlike } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { computeRecipeMacros } from './RecipesPage';
 import { formatIngredientDisplay } from '@/shared/recipes/formatIngredientDisplay';
+import { useUnitSystem } from '@/shared/useUnitSystem';
 import { Trash2, Pencil } from 'lucide-react';
 
 /* ------------------------------------------------------------------ */
@@ -26,6 +27,7 @@ interface ProductSearchResult {
   default_recipe_unit: 'gram' | 'serving' | 'container' | null;
   visual_unit_label: string | null;
   visual_units_per_serving: number | null;
+  display_by_weight: boolean;
 }
 
 interface LocalIngredient {
@@ -47,6 +49,7 @@ interface LocalIngredient {
   // from chefbyte.products on every read of recipe_ingredients.
   visual_unit_label: string | null;
   visual_units_per_serving: number | null;
+  display_by_weight: boolean;
 }
 
 /* ================================================================== */
@@ -57,6 +60,7 @@ export function RecipeFormPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { user } = useAuth();
+  const unitSystem = useUnitSystem();
   const queryClient = useQueryClient();
 
   const isEdit = !!id;
@@ -118,7 +122,7 @@ export function RecipeFormPage() {
       const { data: recipe, error } = await chefbyte()
         .from('recipes')
         .select(
-          '*, recipe_ingredients(ingredient_id, product_id, quantity, unit, note, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g, visual_unit_label, visual_units_per_serving))',
+          '*, recipe_ingredients(ingredient_id, product_id, quantity, unit, note, products:product_id(name, calories_per_serving, carbs_per_serving, protein_per_serving, fat_per_serving, servings_per_container, net_weight_g, visual_unit_label, visual_units_per_serving, display_by_weight))',
         )
         .eq('recipe_id', id!)
         .eq('user_id', user!.id)
@@ -166,6 +170,7 @@ export function RecipeFormPage() {
       fat_per_serving: Number(ri.products?.fat_per_serving ?? 0),
       servings_per_container: Number(ri.products?.servings_per_container ?? 1),
       net_weight_g: ri.products?.net_weight_g != null ? Number(ri.products.net_weight_g) : null,
+      display_by_weight: !!ri.products?.display_by_weight,
       visual_unit_label: ri.products?.visual_unit_label ?? null,
       visual_units_per_serving:
         ri.products?.visual_units_per_serving != null ? Number(ri.products.visual_units_per_serving) : null,
@@ -281,6 +286,7 @@ export function RecipeFormPage() {
       fat_per_serving: Number(selectedProduct.fat_per_serving),
       servings_per_container: Number(selectedProduct.servings_per_container),
       net_weight_g: selectedProduct.net_weight_g != null ? Number(selectedProduct.net_weight_g) : null,
+      display_by_weight: !!selectedProduct.display_by_weight,
       visual_unit_label: selectedProduct.visual_unit_label ?? null,
       visual_units_per_serving:
         selectedProduct.visual_units_per_serving != null ? Number(selectedProduct.visual_units_per_serving) : null,
@@ -796,6 +802,9 @@ export function RecipeFormPage() {
                         visualUnitLabel: ing.visual_unit_label,
                         visualUnitsPerServing: ing.visual_units_per_serving,
                         servingsPerContainer: ing.servings_per_container,
+                        displayByWeight: ing.display_by_weight,
+                        netWeightG: ing.net_weight_g,
+                        unitSystem,
                       })}
                     </span>
                     {ing.note && <span className="ml-2 text-xs text-text-tertiary italic">&bull; {ing.note}</span>}
