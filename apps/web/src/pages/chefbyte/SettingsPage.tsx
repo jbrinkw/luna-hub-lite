@@ -269,6 +269,15 @@ export function SettingsPage() {
     ? products.filter((p) => p.name.toLowerCase().includes(searchText.toLowerCase()))
     : products;
 
+  // Split into real (has barcode) vs placeholder (no barcode) so they
+  // render in two separate sections in the products grid below. Per the
+  // user's mental model, "placeholder" = a product entered without a
+  // barcode (manually-typed or scan-fallback). The is_placeholder flag
+  // is also set on these by the scanner, but barcode-null is the
+  // user-facing definition.
+  const realProducts = filteredProducts.filter((p) => p.barcode);
+  const placeholderProducts = filteredProducts.filter((p) => !p.barcode);
+
   const startEdit = (p: Product) => {
     setEditingId(p.product_id);
     setEditForm({ ...p });
@@ -278,6 +287,67 @@ export function SettingsPage() {
     setEditingId(null);
     setEditForm({});
   };
+
+  // Card JSX shared by both the real-products grid and the placeholders
+  // grid below. Closures capture startEdit / setDeleteTarget so callers
+  // don't need to thread them through.
+  const renderProductCard = (p: Product) => (
+    <div key={p.product_id} data-testid={`product-${p.product_id}`} className={productCardCls}>
+      <div className="flex flex-col flex-1">
+        <div className="flex items-start justify-between gap-2 mb-2">
+          <h4 className="m-0 text-base font-semibold">{p.name}</h4>
+          <div className="flex flex-wrap items-center gap-1 justify-end">
+            {p.is_placeholder && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200 whitespace-nowrap"
+                title="Placeholder — macros are estimated. Will be promoted on barcode scan match."
+                data-testid={`placeholder-badge-${p.product_id}`}
+              >
+                Placeholder
+              </span>
+            )}
+            {p.tare_weight_g != null && (
+              <span
+                className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
+                title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
+                data-testid={`livetrack-enrolled-${p.product_id}`}
+              >
+                <span aria-hidden="true">✓</span>
+                LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
+              </span>
+            )}
+          </div>
+        </div>
+        {p.barcode && <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>}
+        <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-text-secondary flex-1">
+          <span>Srv/Ctn: {Number(p.servings_per_container)}</span>
+          <span>Cal: {Number(p.calories_per_serving)}</span>
+          <span>C: {Number(p.carbs_per_serving)}g</span>
+          <span>P: {Number(p.protein_per_serving)}g</span>
+          <span>F: {Number(p.fat_per_serving)}g</span>
+          <span>Min Stock: {Number(p.min_stock_amount)}</span>
+          {(p as any).default_expiry_days != null && <span>Expiry: {(p as any).default_expiry_days}d</span>}
+          {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
+        </div>
+        <div className="flex gap-2 mt-3 pt-2 border-t border-border-light">
+          <button
+            className="bg-emerald-600 text-white border-none px-3.5 py-1.5 rounded-md cursor-pointer font-semibold text-[13px] hover:bg-emerald-700"
+            onClick={() => startEdit(p)}
+            data-testid={`edit-product-${p.product_id}`}
+          >
+            Edit
+          </button>
+          <button
+            onClick={() => setDeleteTarget(p.product_id)}
+            data-testid={`delete-product-${p.product_id}`}
+            className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:text-red-700"
+          >
+            Delete
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   /* ---------------------------------------------------------------- */
   /*  Render helpers                                                   */
@@ -761,77 +831,54 @@ export function SettingsPage() {
               )}
             </div>
 
-            {/* Product list */}
-            <div className="mb-3 pb-2 border-b border-border-light">
+            {/* Product list — real products first, then placeholders */}
+            <div className="mb-3 pb-2 border-b border-border-light flex items-baseline gap-3 flex-wrap">
               <span className="text-sm font-semibold text-text-secondary">
                 {filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}
               </span>
+              <span className="text-[11px] text-text-tertiary">
+                {realProducts.length} real · {placeholderProducts.length} placeholder
+              </span>
             </div>
-            <div
-              data-testid="product-list"
-              className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-3"
-            >
-              {filteredProducts.map((p) => (
-                <div key={p.product_id} data-testid={`product-${p.product_id}`} className={productCardCls}>
-                  {/* Display mode — always shown in the grid */}
-                  <div className="flex flex-col flex-1">
-                    <div className="flex items-start justify-between gap-2 mb-2">
-                      <h4 className="m-0 text-base font-semibold">{p.name}</h4>
-                      <div className="flex flex-wrap items-center gap-1 justify-end">
-                        {p.is_placeholder && (
-                          <span
-                            className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[11px] font-semibold text-amber-800 border border-amber-200 whitespace-nowrap"
-                            title="Placeholder — macros are estimated. Will be promoted on barcode scan match."
-                            data-testid={`placeholder-badge-${p.product_id}`}
-                          >
-                            Placeholder
-                          </span>
-                        )}
-                        {p.tare_weight_g != null && (
-                          <span
-                            className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-semibold text-emerald-800 border border-emerald-200 whitespace-nowrap"
-                            title={`LiveTrack enrolled (container tare ${Number(p.tare_weight_g).toFixed(1)} g)`}
-                            data-testid={`livetrack-enrolled-${p.product_id}`}
-                          >
-                            <span aria-hidden="true">✓</span>
-                            LiveTrack · {Number(p.tare_weight_g).toFixed(0)}g
-                          </span>
-                        )}
-                      </div>
-                    </div>
-                    {p.barcode && (
-                      <span className="text-xs text-text-secondary mb-1.5 break-all">Barcode: {p.barcode}</span>
-                    )}
-                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-x-3 gap-y-0.5 text-xs text-text-secondary flex-1">
-                      <span>Srv/Ctn: {Number(p.servings_per_container)}</span>
-                      <span>Cal: {Number(p.calories_per_serving)}</span>
-                      <span>C: {Number(p.carbs_per_serving)}g</span>
-                      <span>P: {Number(p.protein_per_serving)}g</span>
-                      <span>F: {Number(p.fat_per_serving)}g</span>
-                      <span>Min Stock: {Number(p.min_stock_amount)}</span>
-                      {(p as any).default_expiry_days != null && <span>Expiry: {(p as any).default_expiry_days}d</span>}
-                      {p.price != null && <span>Price: ${Number(p.price).toFixed(2)}</span>}
-                    </div>
-                    <div className="flex gap-2 mt-3 pt-2 border-t border-border-light">
-                      <button
-                        className="bg-emerald-600 text-white border-none px-3.5 py-1.5 rounded-md cursor-pointer font-semibold text-[13px] hover:bg-emerald-700"
-                        onClick={() => startEdit(p)}
-                        data-testid={`edit-product-${p.product_id}`}
-                      >
-                        Edit
-                      </button>
-                      <button
-                        onClick={() => setDeleteTarget(p.product_id)}
-                        data-testid={`delete-product-${p.product_id}`}
-                        className="bg-transparent border-none text-danger-text cursor-pointer font-semibold text-[13px] px-3.5 py-1.5 hover:text-red-700"
-                      >
-                        Delete
-                      </button>
-                    </div>
-                  </div>
+
+            {/* Real products section (have a barcode) */}
+            {realProducts.length > 0 && (
+              <>
+                <h3
+                  className="text-[11px] font-bold uppercase tracking-wider text-text-tertiary mb-2"
+                  data-testid="real-products-heading"
+                >
+                  Real products ({realProducts.length})
+                </h3>
+                <div
+                  data-testid="product-list"
+                  className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-3"
+                >
+                  {realProducts.map((p) => renderProductCard(p))}
                 </div>
-              ))}
-            </div>
+              </>
+            )}
+
+            {/* Placeholder products section (no barcode — manually entered or scan-fallback) */}
+            {placeholderProducts.length > 0 && (
+              <>
+                <h3
+                  className="text-[11px] font-bold uppercase tracking-wider text-text-tertiary mt-6 mb-2"
+                  data-testid="placeholder-products-heading"
+                >
+                  Placeholders ({placeholderProducts.length})
+                  <span className="ml-2 font-normal normal-case text-text-tertiary">
+                    — no barcode; will be promoted on scan match
+                  </span>
+                </h3>
+                <div
+                  data-testid="placeholder-product-list"
+                  className="grid grid-cols-[repeat(auto-fill,minmax(min(340px,100%),1fr))] gap-3"
+                >
+                  {placeholderProducts.map((p) => renderProductCard(p))}
+                </div>
+              </>
+            )}
 
             {/* Edit Product Modal */}
             {editingId !== null &&
