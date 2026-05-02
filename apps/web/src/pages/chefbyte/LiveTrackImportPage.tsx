@@ -538,6 +538,31 @@ export function LiveTrackImportPage() {
               if (Number.isFinite(spc) && spc >= 1 && spc <= 999) offSpc = spc;
             }
           }
+          // Classification + display fields from the AI suggestion. The
+          // edge function already validates these server-side via Zod
+          // (recipe_unit gram-requires-net_weight, visual pair both-or-
+          // neither, display_by_weight precedence) but we mirror the
+          // contract defensively in case `s` is undefined on OFF-miss.
+          const netWeightG = off?.product_quantity ?? null;
+          const isDistinctUnitItem: boolean = !!s?.is_distinct_unit_item;
+          const visualLabelRaw = (s as { visual_unit_label?: unknown })?.visual_unit_label;
+          const visualUnitsRaw = (s as { visual_units_per_serving?: unknown })?.visual_units_per_serving;
+          const visualLabel: string | null =
+            typeof visualLabelRaw === 'string' && visualLabelRaw.trim() !== '' ? visualLabelRaw.trim() : null;
+          const visualUnitsParsed = num(visualUnitsRaw);
+          const visualUnitsPerServing = visualUnitsParsed != null && visualUnitsParsed > 0 ? visualUnitsParsed : null;
+          const visualPairOk = visualLabel != null && visualUnitsPerServing != null;
+          const displayByWeight: boolean =
+            !!(s as { display_by_weight?: unknown })?.display_by_weight && !!(netWeightG && netWeightG > 0);
+          // recipe_unit decision: trust the AI's value but downgrade gram→
+          // serving if net_weight_g is missing (matches the Zod transform).
+          const rawRecipeUnit = (s as { default_recipe_unit?: unknown })?.default_recipe_unit;
+          const defaultRecipeUnit: 'gram' | 'serving' | 'container' =
+            rawRecipeUnit === 'gram' && !(netWeightG && netWeightG > 0)
+              ? 'serving'
+              : rawRecipeUnit === 'gram' || rawRecipeUnit === 'serving' || rawRecipeUnit === 'container'
+                ? rawRecipeUnit
+                : 'serving';
           // chefbyte.products declares macros as NUMERIC NOT NULL DEFAULT 0,
           // so we must NOT pass explicit nulls here — they override the
           // DEFAULT and fail the NOT NULL check. Use AI → OFF → 0 in order.
@@ -552,7 +577,8 @@ export function LiveTrackImportPage() {
             fat_per_serving: s?.fat_per_serving ?? offFat ?? 0,
             protein_per_serving: s?.protein_per_serving ?? offProt ?? 0,
             default_shelf_life_days: s?.default_shelf_life_days ?? null,
-            net_weight_g: off?.product_quantity ?? null,
+            default_expiry_days: (s as { default_expiry_days?: number | null })?.default_expiry_days ?? null,
+            net_weight_g: netWeightG,
             serving_weight_g: (() => {
               // Derive from OFF's serving_size parse when available — same
               // regex as the offSpc derivation above.
@@ -562,6 +588,13 @@ export function LiveTrackImportPage() {
               const g = m ? Number(m[1]) : null;
               return g && g > 0 ? g : null;
             })(),
+            is_distinct_unit_item: isDistinctUnitItem,
+            default_recipe_unit: defaultRecipeUnit,
+            // display_by_weight wins over visual pair — clear the pair when
+            // it's true so the row matches the helper's resolution logic.
+            visual_unit_label: displayByWeight || !visualPairOk ? null : visualLabel,
+            visual_units_per_serving: displayByWeight || !visualPairOk ? null : visualUnitsPerServing,
+            display_by_weight: displayByWeight,
             container_type: null,
             unit_type: null,
             // Running a product through the LiveTrack Import wizard is
