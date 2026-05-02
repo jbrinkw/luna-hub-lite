@@ -1,7 +1,10 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2';
 import Anthropic from 'npm:@anthropic-ai/sdk';
 import { buildSystemPrompt, buildUserPrompt, type PlaceholderCandidate } from './_prompt.ts';
-import { parseAIResponse, validateSuggestion } from './_normalize.ts';
+// parseAIResponse is no longer used at the call site (forced tool-use returns
+// structured input directly). Kept exported in _normalize.ts for tests +
+// defensive recovery if a future change ever falls back to text parsing.
+import { validateSuggestion } from './_normalize.ts';
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -233,27 +236,89 @@ async function normalizeWithAI(
   try {
     const anthropic = new Anthropic({ apiKey });
 
+    // Forced tool-use is Anthropic's canonical structured-output mechanism.
+    // Single round-trip: the model returns a tool_use block whose `input`
+    // IS the structured JSON. We never "execute" the tool — we just read
+    // the args. Sonnet without tool-use rambled prose preamble; this kills
+    // that failure mode at the wire level.
+    //
+    // calories_per_serving is INTENTIONALLY not in the tool schema — the
+    // server computes it from carbs×4 + protein×4 + fat×9 in
+    // SuggestionSchema. Removing it from the AI surface eliminates the
+    // "model picked the wrong calorie source" failure class entirely.
+    const NORMALIZE_TOOL = {
+      name: 'normalize_product',
+      description: 'Emit the normalized product. The only allowed action.',
+      input_schema: {
+        type: 'object' as const,
+        properties: {
+          name: { type: 'string' },
+          servings_per_container: { type: 'number' },
+          carbs_per_serving: { type: 'number' },
+          protein_per_serving: { type: 'number' },
+          fat_per_serving: { type: 'number' },
+          description: { type: 'string' },
+          default_shelf_life_days: { type: ['integer', 'null'] },
+          default_expiry_days: { type: ['integer', 'null'] },
+          is_distinct_unit_item: { type: 'boolean' },
+          default_recipe_unit: { type: 'string', enum: ['gram', 'serving', 'container'] },
+          net_weight_g: { type: ['number', 'null'] },
+          visual_unit_label: { type: ['string', 'null'] },
+          visual_units_per_serving: { type: ['number', 'null'] },
+          display_by_weight: { type: 'boolean' },
+          matched_placeholder_id: { type: ['string', 'null'] },
+        },
+        required: [
+          'name',
+          'servings_per_container',
+          'carbs_per_serving',
+          'protein_per_serving',
+          'fat_per_serving',
+          'is_distinct_unit_item',
+          'default_recipe_unit',
+          'display_by_weight',
+        ],
+      },
+    };
+
+    // Single-string system prompt. We previously experimented with a
+    // multi-block shape + cache_control: ephemeral, but Sonnet 4.6's
+    // empirical cache-write floor is ~2.5-3k tokens of cacheable prefix
+    // (well above our ~1.1k STATIC_RULES + tool schema), so caching never
+    // fired. See _prompt.ts header for the long-form note.
     const systemPrompt = buildSystemPrompt(offProduct, placeholderCandidates);
     const userPrompt = buildUserPrompt(offProduct);
 
     // Anthropic Node SDK signature: messages.create(body, options).
     // ``timeout`` belongs in the second arg (RequestOptions) — passing
     // it inside the body is silently ignored by the SDK, falling back
-    // to the default 10-min timeout. Audit-bonus fix.
+    // to the default 10-min timeout.
     const message = await anthropic.messages.create(
       {
-        model: 'claude-haiku-4-5-20251001',
-        max_tokens: 512,
+        // Sonnet 4.6 over Haiku: Haiku flubs discrete-item classification
+        // (sliced bread → distinct=false) and shelf-life estimation on
+        // ~50% of cases tested, even with the same upgraded prompt. Sonnet
+        // costs ~3× per call but stays well under the 100/user/day quota
+        // envelope.
+        model: 'claude-sonnet-4-6',
+        max_tokens: 768,
+        // temp=0: classification is a deterministic problem; sampling
+        // adds run-to-run variance with no upside (saw a cheddar visual
+        // pair flip-flop between identical inputs in earlier runs).
+        temperature: 0,
         system: systemPrompt,
+        tools: [NORMALIZE_TOOL],
+        tool_choice: { type: 'tool', name: NORMALIZE_TOOL.name },
         messages: [{ role: 'user', content: userPrompt }],
       },
       { timeout: 25_000 },
     );
 
-    const text = message.content[0]?.type === 'text' ? message.content[0].text : '';
-    const parsed = parseAIResponse(text);
+    // Single tool_use block whose `input` is the structured suggestion.
+    const toolUse = (message.content as Array<{ type: string; input?: unknown }>).find((b) => b.type === 'tool_use');
+    const parsed = toolUse?.input as Record<string, unknown> | undefined;
     if (!parsed) {
-      console.error('Failed to parse AI response:', text);
+      console.error('Sonnet did not call normalize_product tool:', JSON.stringify(message.content));
       return null;
     }
     return parsed;

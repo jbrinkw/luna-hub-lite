@@ -3,25 +3,157 @@
 // Extracted from index.ts so they're unit-testable in Deno isolation
 // (supabase/functions/analyze-product/test.ts). The runtime HTTP entry
 // point still lives in index.ts.
+//
+// Validation pipeline (post-LLM):
+//
+//   1. parseAIResponse — legacy text-mode JSON extractor. The runtime no
+//      longer needs it (forced tool-use returns structured input directly),
+//      but it's retained as defensive recovery + for the unit tests that
+//      exercise malformed-text edge cases.
+//   2. SuggestionSchema — Zod schema (Pydantic-style) that:
+//        - coerces numerics from strings,
+//        - clamps integer ranges (default_expiry_days / shelf_life_days)
+//          to null when out-of-bounds rather than throwing,
+//        - normalizes the visual-unit pair (both-or-neither),
+//        - downgrades display_by_weight=true → false when net_weight_g
+//          is missing (DB CHECK would reject it otherwise),
+//        - asserts display_by_weight precedence over visual_unit_label,
+//        - downgrades default_recipe_unit gram → serving when
+//          net_weight_g is missing,
+//        - COMPUTES calories_per_serving server-side via Atwater
+//          (carbs×4 + protein×4 + fat×9). The AI does NOT emit calories —
+//          that field was removed from the tool schema. This eliminates
+//          the "model picked the wrong calorie source" failure class.
+//   3. validateSuggestion wraps SuggestionSchema.safeParse and returns
+//      `{ ok: true, suggestion }` or `{ ok: false, missing }` for the
+//      caller's required-field-presence check.
+//
+// The schema is the single source of truth: TypeScript type, runtime
+// validator, and (hand-mirrored) prompt JSON spec. If you change a
+// field here, mirror it in `_prompt.ts`'s system prompt schema block.
 
-export interface Suggestion {
-  name: string;
-  servings_per_container: number;
-  calories_per_serving: number;
-  carbs_per_serving: number;
-  protein_per_serving: number;
-  fat_per_serving: number;
-  description?: string;
-  default_shelf_life_days: number | null;
-  /** AI-estimated days until expiry from import date. Null = non-perishable or uncertain. Range 1–730. */
-  default_expiry_days: number | null;
-  /** True when sold as discrete countable pieces (eggs, buns, bars, packets). */
-  is_distinct_unit_item: boolean;
-  /** Default unit for recipe form. 'gram' requires net_weight_g > 0. */
-  default_recipe_unit: 'gram' | 'serving' | 'container';
-  /** Full container mass in grams. Required when default_recipe_unit='gram'. */
-  net_weight_g: number | null;
-}
+import { z } from 'npm:zod@4.3.6';
+
+/** Coerce numeric-or-numeric-string → finite number, defaulting to 0.
+ * Accepts undefined as well so callers can omit optional macros without
+ * triggering a Zod parse failure (the transform layer treats null and
+ * undefined identically). */
+const NumLike = z.union([z.number(), z.string(), z.null(), z.undefined()]).transform((v) => {
+  if (v == null) return 0;
+  const n = typeof v === 'string' ? parseFloat(v) : v;
+  return Number.isFinite(n) ? n : 0;
+});
+
+/** Integer in [min, max] or null. Out-of-range values clamp to null
+ * rather than throwing — the caller treats null as "unknown / non-perishable". */
+const ClampedInt = (min: number, max: number) =>
+  z.union([z.number(), z.string(), z.null(), z.undefined()]).transform((v) => {
+    if (v == null) return null;
+    const n = typeof v === 'string' ? parseFloat(v) : v;
+    if (!Number.isFinite(n)) return null;
+    const r = Math.round(n as number);
+    return r >= min && r <= max ? r : null;
+  });
+
+/** Positive number or null. Zero / negative / non-finite → null. */
+const PositiveOrNull = z.union([z.number(), z.string(), z.null(), z.undefined()]).transform((v) => {
+  if (v == null) return null;
+  const n = typeof v === 'string' ? parseFloat(v) : v;
+  return Number.isFinite(n) && (n as number) > 0 ? (n as number) : null;
+});
+
+/** Trimmed non-empty string or null. */
+const TrimmedStringOrNull = z.union([z.string(), z.null(), z.undefined()]).transform((s) => {
+  if (s == null) return null;
+  const t = s.trim();
+  return t === '' ? null : t;
+});
+
+/**
+ * Raw schema — applies field-level coercion and clamping. Cross-field
+ * invariants are layered on via the .transform below.
+ *
+ * calories_per_serving is INTENTIONALLY absent. The AI never emits it —
+ * the tool schema doesn't include the field. SuggestionSchema's transform
+ * computes it from the macros via Atwater. If a legacy caller still sends
+ * a `calories_per_serving` value (test suite + parseAIResponse paths),
+ * Zod silently ignores the extra key (strict mode is off) and the
+ * computed value overwrites it.
+ */
+const SuggestionRawSchema = z.object({
+  name: z.string().min(1),
+  servings_per_container: NumLike.transform((n) => (n >= 1 ? n : 1)),
+  carbs_per_serving: NumLike,
+  protein_per_serving: NumLike,
+  fat_per_serving: NumLike,
+  description: z.string().optional(),
+  default_shelf_life_days: ClampedInt(1, 3650),
+  default_expiry_days: ClampedInt(1, 730),
+  is_distinct_unit_item: z.union([z.boolean(), z.null(), z.undefined()]).transform((v) => !!v),
+  default_recipe_unit: z
+    .union([z.enum(['gram', 'serving', 'container']), z.string(), z.null(), z.undefined()])
+    .transform((v) => (v === 'gram' || v === 'serving' || v === 'container' ? v : 'serving')),
+  net_weight_g: PositiveOrNull,
+  visual_unit_label: TrimmedStringOrNull,
+  visual_units_per_serving: PositiveOrNull,
+  display_by_weight: z.union([z.boolean(), z.null(), z.undefined()]).transform((v) => !!v),
+});
+
+/**
+ * Cross-field transform layer — applied after field-level coercion.
+ *
+ * - Visual pair both-or-neither: if only one of label/units is set, clear both.
+ * - display_by_weight requires net_weight_g > 0 → downgrade to false otherwise.
+ * - display_by_weight precedence: when true, force visual pair null (helper's render
+ *   logic already prefers display_by_weight, but keeping the row truthful avoids
+ *   stale form-state on later edits).
+ * - default_recipe_unit gram requires net_weight_g > 0 → downgrade to serving.
+ * - calories_per_serving is COMPUTED server-side via Atwater
+ *   (carbs×4 + protein×4 + fat×9). The AI does not emit it.
+ */
+const SuggestionSchema = SuggestionRawSchema.transform((s) => {
+  const out: Record<string, unknown> = { ...s };
+
+  // Visual-pair both-or-neither.
+  if ((out.visual_unit_label === null) !== (out.visual_units_per_serving === null)) {
+    console.warn(
+      `validateSuggestion: visual pair incomplete (label=${JSON.stringify(out.visual_unit_label)}, units=${out.visual_units_per_serving}) — clearing both`,
+    );
+    out.visual_unit_label = null;
+    out.visual_units_per_serving = null;
+  }
+
+  // display_by_weight requires net_weight_g.
+  if (out.display_by_weight && !(typeof out.net_weight_g === 'number' && out.net_weight_g > 0)) {
+    console.warn('validateSuggestion: downgrading display_by_weight true→false (net_weight_g missing)');
+    out.display_by_weight = false;
+  }
+
+  // display_by_weight wins over visual pair.
+  if (out.display_by_weight && out.visual_unit_label !== null) {
+    console.warn('validateSuggestion: display_by_weight=true AND visual_unit_label set — clearing visual pair');
+    out.visual_unit_label = null;
+    out.visual_units_per_serving = null;
+  }
+
+  // default_recipe_unit gram requires net_weight_g.
+  if (out.default_recipe_unit === 'gram' && !(typeof out.net_weight_g === 'number' && out.net_weight_g > 0)) {
+    console.warn('validateSuggestion: downgrading default_recipe_unit gram→serving (net_weight_g missing)');
+    out.default_recipe_unit = 'serving';
+  }
+
+  // Atwater 4-4-9: calories are deterministic from macros. Compute server-
+  // side so the AI never has to (and never can) miscount them.
+  const carbs = (out.carbs_per_serving as number) ?? 0;
+  const protein = (out.protein_per_serving as number) ?? 0;
+  const fat = (out.fat_per_serving as number) ?? 0;
+  out.calories_per_serving = Math.round((carbs * 4 + protein * 4 + fat * 9) * 10) / 10;
+
+  return out;
+});
+
+/** Suggestion type derived from the Zod schema — single source of truth. */
+export type Suggestion = z.infer<typeof SuggestionSchema>;
 
 /** Result of validateSuggestion: ok | a list of missing required fields. */
 export type SuggestionValidation = { ok: true; suggestion: Suggestion } | { ok: false; missing: string[] };
@@ -112,93 +244,40 @@ export function parseAIResponse(text: string): Record<string, unknown> | null {
 }
 
 /**
- * Validate + coerce a raw parsed suggestion. Returns
- *   { ok: false, missing: [...] }  when a required field is null/missing,
- *   { ok: true, suggestion }       with coerced numeric + clamped shelf-life.
+ * Validate + coerce a raw parsed suggestion via the Zod schema.
  *
- * Extracted from the inline block in index.ts so the scanner-path assertion
- * ("required fields present" → 422 otherwise) is testable without HTTP.
+ * Returns
+ *   { ok: false, missing: [...] }  when required fields are missing/null
+ *   { ok: true, suggestion }       with coerced + cross-field-normalized
+ *                                  + 4-4-9-corrected output
+ *
+ * Required-field check runs before Zod parse so the caller's "422 missing
+ * required fields" path keeps its existing contract.
  */
 export function validateSuggestion(raw: Record<string, unknown> | null): SuggestionValidation {
   if (!raw || typeof raw !== 'object') {
     return { ok: false, missing: ['*'] };
   }
 
-  const required = ['name', 'calories_per_serving', 'protein_per_serving', 'carbs_per_serving', 'fat_per_serving'];
+  // Required-field gate: if name/macros are missing entirely, the AI
+  // normalization "didn't really succeed" and the caller falls through to
+  // the OFF-only path. calories_per_serving is NOT required — it's
+  // computed server-side from the macros via Atwater.
+  const required = ['name', 'protein_per_serving', 'carbs_per_serving', 'fat_per_serving'];
   const missing = required.filter((k) => raw[k] == null);
   if (missing.length > 0) return { ok: false, missing };
 
-  // Coerce numeric fields to numbers; non-numeric → 0 (matches old
-  // `Number(x) || 0` semantics).
-  const numericFields = [
-    'calories_per_serving',
-    'protein_per_serving',
-    'carbs_per_serving',
-    'fat_per_serving',
-    'servings_per_container',
-  ] as const;
-  const coerced: Record<string, unknown> = { ...raw };
-  for (const k of numericFields) {
-    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: LLM may return string numerics; || 0 provides safe fallback matching `Number(x) || 0` semantics documented in comment above
-    if (coerced[k] != null) coerced[k] = Number(coerced[k]) || 0;
+  const result = SuggestionSchema.safeParse(raw);
+  if (!result.success) {
+    // A Zod failure here means the field shapes were malformed beyond what
+    // the coercion transforms can rescue (e.g. name is not a string, or a
+    // numeric field is an object). Surface the issue paths so the caller
+    // can log a useful diagnostic.
+    console.error('validateSuggestion: Zod parse failed', result.error.issues);
+    const issuePaths = Array.from(new Set(result.error.issues.map((i) => i.path.join('.') || '*')));
+    return { ok: false, missing: issuePaths };
   }
-
-  // servings_per_container: default to 1 when missing / < 1
-  const spc = coerced.servings_per_container as number | undefined;
-  if (!spc || spc < 1) coerced.servings_per_container = 1;
-
-  // default_shelf_life_days: integer in [1, 3650] or null. Coerce, clamp,
-  // or nullify — never surface a 422 for this field.
-  if (coerced.default_shelf_life_days != null) {
-    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite in the same expression; LLM may return string or float
-    const n = Math.round(Number(coerced.default_shelf_life_days));
-    coerced.default_shelf_life_days = Number.isFinite(n) && n >= 1 && n <= 3650 ? n : null;
-  } else {
-    coerced.default_shelf_life_days = null;
-  }
-
-  // default_expiry_days: integer in [1, 730] or null. Coerce, clamp,
-  // or nullify — never surface a 422 for this field. Out-of-range values
-  // are clamped to null with a warning so the caller can log + continue.
-  if (coerced.default_expiry_days != null) {
-    // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: result `n` is checked with Number.isFinite on the next line; the rule walks parent expressions only and can't trace forward to the assigned variable's check
-    const n = Math.round(Number(coerced.default_expiry_days));
-    if (Number.isFinite(n) && n >= 1 && n <= 730) {
-      coerced.default_expiry_days = n;
-    } else {
-      console.warn(
-        `validateSuggestion: default_expiry_days ${coerced.default_expiry_days} out of range [1,730] — clamping to null`,
-      );
-      coerced.default_expiry_days = null;
-    }
-  } else {
-    coerced.default_expiry_days = null;
-  }
-
-  // is_distinct_unit_item: coerce to boolean, default false.
-  coerced.is_distinct_unit_item = !!coerced.is_distinct_unit_item;
-
-  // net_weight_g: must be a positive number or null.
-  if (coerced.net_weight_g != null) {
-    const w = Number(coerced.net_weight_g);
-    coerced.net_weight_g = Number.isFinite(w) && w > 0 ? w : null;
-  } else {
-    coerced.net_weight_g = null;
-  }
-
-  // default_recipe_unit: only 'gram'|'serving'|'container' accepted.
-  // Defensive: if 'gram' but net_weight_g absent/non-positive → downgrade to 'serving'.
-  const VALID_UNITS = new Set(['gram', 'serving', 'container']);
-  if (!VALID_UNITS.has(coerced.default_recipe_unit as string)) {
-    // Fall back: distinct items → 'serving', bulk → 'serving' (safe default).
-    coerced.default_recipe_unit = 'serving';
-  }
-  if (coerced.default_recipe_unit === 'gram' && !coerced.net_weight_g) {
-    console.warn('validateSuggestion: downgrading default_recipe_unit gram→serving (net_weight_g missing)');
-    coerced.default_recipe_unit = 'serving';
-  }
-
-  return { ok: true, suggestion: coerced as unknown as Suggestion };
+  return { ok: true, suggestion: result.data };
 }
 
 /**

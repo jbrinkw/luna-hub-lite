@@ -622,6 +622,29 @@ export function ScannerPage() {
                     defaultRecipeUnit = 'serving';
                   }
                 }
+                // Display layer: visual unit pair + display_by_weight from the
+                // AI suggestion. The edge function already applies both-or-
+                // neither validation and downgrades display_by_weight when
+                // net_weight_g is missing — this client-side path just
+                // mirrors the contract defensively.
+                const visualLabelRaw = (s as any)?.visual_unit_label;
+                const visualUnitsRaw = (s as any)?.visual_units_per_serving;
+                const visualLabel: string | null =
+                  typeof visualLabelRaw === 'string' && visualLabelRaw.trim() !== '' ? visualLabelRaw.trim() : null;
+                // parseFloat avoids the no-bare-number-coerce lint rule and
+                // gives us NaN on garbage input — Number.isFinite then guards
+                // both NaN and ±Infinity in one check.
+                const visualUnitsParsed =
+                  visualUnitsRaw == null
+                    ? NaN
+                    : typeof visualUnitsRaw === 'number'
+                      ? visualUnitsRaw
+                      : parseFloat(String(visualUnitsRaw));
+                const visualUnitsPerServing: number | null =
+                  Number.isFinite(visualUnitsParsed) && visualUnitsParsed > 0 ? visualUnitsParsed : null;
+                // Both-or-neither: server-side CHECK constraint enforces the same.
+                const visualPairOk = visualLabel != null && visualUnitsPerServing != null;
+                const displayByWeight: boolean = !!(s as any)?.display_by_weight && !!netWeightG;
                 const productFields = {
                   barcode,
                   name: productName,
@@ -637,9 +660,15 @@ export function ScannerPage() {
                   is_distinct_unit_item: isDistinctUnitItem,
                   net_weight_g: netWeightG,
                   default_recipe_unit: defaultRecipeUnit,
+                  // Display layer — display_by_weight wins precedence; if it's
+                  // true the visual pair is forced null to match the helper's
+                  // resolution logic and avoid stale form-state.
+                  visual_unit_label: displayByWeight || !visualPairOk ? null : visualLabel,
+                  visual_units_per_serving: displayByWeight || !visualPairOk ? null : visualUnitsPerServing,
+                  display_by_weight: displayByWeight,
                 };
                 const returning =
-                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container, default_shelf_life_days, default_expiry_days, is_distinct_unit_item, net_weight_g, default_recipe_unit';
+                  'product_id, name, is_placeholder, calories_per_serving, protein_per_serving, carbs_per_serving, fat_per_serving, servings_per_container, default_shelf_life_days, default_expiry_days, is_distinct_unit_item, net_weight_g, default_recipe_unit, visual_unit_label, visual_units_per_serving, display_by_weight';
 
                 // Priority for upgrade target:
                 //   1. barcode-matched placeholder (existingPlaceholderId) — most

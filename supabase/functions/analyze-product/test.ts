@@ -89,17 +89,20 @@ Deno.test('slimNutriments handles null / undefined nutriments', () => {
   assertEquals(slimNutriments({}), {});
 });
 
-Deno.test('buildSystemPrompt includes proposed name and 4-4-9 rule', () => {
+Deno.test('buildSystemPrompt includes proposed name and core contract', () => {
   const prompt = buildSystemPrompt(OFF_NUTELLA);
   assertStringIncludes(prompt, 'Ferrero Nutella');
-  assertStringIncludes(prompt, '4-4-9 validation');
-  assertStringIncludes(prompt, 'carbs×4 + protein×4 + fat×9');
-  // Contract fields the AI must return
-  assertStringIncludes(prompt, 'calories_per_serving');
+  // 4-4-9 / Atwater calorie computation must be referenced as the
+  // server-side rule (the AI no longer emits calories).
+  assertStringIncludes(prompt, '4-4-9');
+  // Contract fields the AI must emit
   assertStringIncludes(prompt, 'servings_per_container');
   assertStringIncludes(prompt, 'default_shelf_life_days');
-  // Shelf-life range must be tamped to [1, 3650]
-  assertStringIncludes(prompt, 'integer 1-3650');
+  // Shelf-life range
+  assertStringIncludes(prompt, '1-3650');
+  // Calories field is INTENTIONALLY absent from the AI's responsibility:
+  // the prompt explicitly tells the model NOT to emit it.
+  assertStringIncludes(prompt, 'Do NOT emit `calories_per_serving`');
 });
 
 Deno.test('buildUserPrompt ships OFF product fields + slim nutriments only', () => {
@@ -240,10 +243,12 @@ Deno.test('calorieDrift: non-finite calories returns null', () => {
 // validateSuggestion tests — coercion, clamping, missing-field guards
 // ─────────────────────────────────────────────────────────────────────────
 
-Deno.test('validateSuggestion: accepts a complete suggestion', () => {
+Deno.test('validateSuggestion: accepts a complete suggestion + computes calories from macros', () => {
+  // calories_per_serving in the input is silently ignored (extra key
+  // stripped by Zod) — calories are recomputed server-side.
   const raw = {
     name: 'Chicken Breast',
-    calories_per_serving: 165,
+    calories_per_serving: 999, // bogus value; will be recomputed
     protein_per_serving: 31,
     carbs_per_serving: 0,
     fat_per_serving: 3.6,
@@ -254,21 +259,19 @@ Deno.test('validateSuggestion: accepts a complete suggestion', () => {
   assertEquals(result.ok, true);
   if (result.ok) {
     assertEquals(result.suggestion.name, 'Chicken Breast');
-    assertEquals(result.suggestion.calories_per_serving, 165);
+    // 4-4-9 → 0×4 + 31×4 + 3.6×9 = 124 + 32.4 = 156.4
+    assertEquals(result.suggestion.calories_per_serving, 156.4);
     assertEquals(result.suggestion.default_shelf_life_days, 7);
   }
 });
 
 Deno.test('validateSuggestion: reports every missing required field', () => {
+  // calories_per_serving is NOT a required field — it's computed
+  // server-side from the macros, so its absence does not fail validation.
   const result = validateSuggestion({ name: 'Incomplete' });
   assertEquals(result.ok, false);
   if (!result.ok) {
-    assertEquals(result.missing.sort(), [
-      'calories_per_serving',
-      'carbs_per_serving',
-      'fat_per_serving',
-      'protein_per_serving',
-    ]);
+    assertEquals(result.missing.sort(), ['carbs_per_serving', 'fat_per_serving', 'protein_per_serving']);
   }
 });
 
@@ -281,15 +284,15 @@ Deno.test('validateSuggestion: null raw → not-ok with * missing marker', () =>
 Deno.test('validateSuggestion: coerces string numerics to numbers', () => {
   const result = validateSuggestion({
     name: 'Stringy',
-    calories_per_serving: '200' as unknown as number,
     protein_per_serving: '15' as unknown as number,
     carbs_per_serving: '30' as unknown as number,
     fat_per_serving: '5' as unknown as number,
   });
   assertEquals(result.ok, true);
   if (result.ok) {
+    // 4-4-9 → 30×4 + 15×4 + 5×9 = 120 + 60 + 45 = 225
     assertEquals(typeof result.suggestion.calories_per_serving, 'number');
-    assertEquals(result.suggestion.calories_per_serving, 200);
+    assertEquals(result.suggestion.calories_per_serving, 225);
     // servings_per_container defaults to 1 when missing
     assertEquals(result.suggestion.servings_per_container, 1);
   }
@@ -453,15 +456,16 @@ Deno.test('buildSystemPrompt: with candidates — includes EXISTING PLACEHOLDER 
   // Matching guidance present
   assertStringIncludes(prompt, 'matched_placeholder_id');
   assertStringIncludes(prompt, 'Match strictly');
-  // Normal fields still present
-  assertStringIncludes(prompt, '4-4-9 validation');
-  assertStringIncludes(prompt, 'calories_per_serving');
+  // Core rule body still present
+  assertStringIncludes(prompt, '4-4-9');
+  assertStringIncludes(prompt, 'calories_per_serving'); // appears in the "Do NOT emit" instruction
 });
 
-Deno.test('buildSystemPrompt: with candidates — matched_placeholder_id in JSON schema', () => {
+Deno.test('buildSystemPrompt: with candidates — matched_placeholder_id mentioned', () => {
   const prompt = buildSystemPrompt(OFF_NUTELLA, PLACEHOLDER_CANDIDATES);
-  // The JSON schema block must include the new field
-  assertStringIncludes(prompt, '"matched_placeholder_id"');
+  // The placeholder section explicitly references matched_placeholder_id
+  // as the field the AI should set when a match is found.
+  assertStringIncludes(prompt, 'matched_placeholder_id');
 });
 
 Deno.test(
@@ -474,8 +478,8 @@ Deno.test(
     assert(!prompt.includes(PLACEHOLDER_A), 'should NOT include candidate A UUID when list is empty');
     // The "always null" note is present
     assertStringIncludes(prompt, 'matched_placeholder_id: always null');
-    // Normal rules still present
-    assertStringIncludes(prompt, '4-4-9 validation');
+    // Core rule body still present
+    assertStringIncludes(prompt, '4-4-9');
   },
 );
 
@@ -499,11 +503,14 @@ Deno.test('buildSystemPrompt: includes distinct-unit classification rules', () =
   assertStringIncludes(prompt, 'serving');
 });
 
-Deno.test('buildSystemPrompt: JSON schema includes new fields', () => {
+Deno.test('buildSystemPrompt: rules cover the classification + display fields', () => {
+  // The earlier JSON-schema-style block was dropped; the tool-use schema
+  // is the contract. The rule body still has to mention each field by
+  // name so the model knows how to reason about it.
   const prompt = buildSystemPrompt(OFF_NUTELLA);
-  assertStringIncludes(prompt, '"is_distinct_unit_item"');
-  assertStringIncludes(prompt, '"default_recipe_unit"');
-  assertStringIncludes(prompt, '"net_weight_g"');
+  assertStringIncludes(prompt, 'is_distinct_unit_item');
+  assertStringIncludes(prompt, 'default_recipe_unit');
+  assertStringIncludes(prompt, 'net_weight_g');
 });
 
 Deno.test('validateSuggestion: is_distinct_unit_item=true passes through unchanged', () => {
@@ -698,19 +705,24 @@ Deno.test('sanitize: empty candidate set → always null even if id looks valid'
 // default_expiry_days — prompt schema + normalize clamp tests
 // ─────────────────────────────────────────────────────────────────────────
 
-Deno.test('buildSystemPrompt: includes default_expiry_days in JSON schema and rules', () => {
+Deno.test('buildSystemPrompt: includes default_expiry_days field + range', () => {
   const prompt = buildSystemPrompt(OFF_NUTELLA);
-  assertStringIncludes(prompt, '"default_expiry_days"');
-  assertStringIncludes(prompt, 'integer 1-730');
   assertStringIncludes(prompt, 'default_expiry_days');
+  // Range still bounded to 1-730 (DB constraint)
+  assertStringIncludes(prompt, 'Range 1-730');
 });
 
-Deno.test('buildSystemPrompt: default_expiry_days rules include example products', () => {
+Deno.test('buildSystemPrompt: shelf-life/expiry anchors cover the common categories', () => {
   const prompt = buildSystemPrompt(OFF_NUTELLA);
-  // Examples from the brief that should appear in the prompt
-  assertStringIncludes(prompt, 'Milk');
+  // Coarse category anchors the prompt uses to ground estimates. We don't
+  // assert specific numbers (those can be tuned over time without breaking
+  // the contract) — just that the model is given a category vocabulary
+  // covering the major food groups.
+  assertStringIncludes(prompt, 'Frozen meat');
   assertStringIncludes(prompt, 'Eggs');
-  assertStringIncludes(prompt, 'Canned beans');
+  assertStringIncludes(prompt, 'Bread');
+  assertStringIncludes(prompt, 'Yogurt');
+  assertStringIncludes(prompt, 'Hard cheese');
 });
 
 Deno.test('validateSuggestion: default_expiry_days=7 passes through unchanged', () => {
