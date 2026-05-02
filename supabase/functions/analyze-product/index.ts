@@ -399,13 +399,18 @@ Deno.serve(async (req) => {
       return jsonResponse({ error: 'Barcode must be alphanumeric' }, 400);
     }
 
-    // Check if product already exists for this user
+    // Check if product already exists for this user. deleted_at filter
+    // is defensive — current product deletes are hard, but legacy
+    // soft-deleted rows may still exist and would otherwise short-circuit
+    // a rescan to the tombstone (the row's macros would be reused and
+    // the AI re-import would never run).
     const { data: existing } = await supabase
       .schema('chefbyte')
       .from('products')
       .select('*')
       .eq('user_id', user.id)
       .eq('barcode', barcodeStr)
+      .is('deleted_at', null)
       .single();
 
     if (existing) {

@@ -1,0 +1,21 @@
+-- Drop product tombstones.
+--
+-- Earlier iterations soft-deleted products (set deleted_at = now()) so the
+-- Pi's product-sync poller could see the tombstone in its updated_since
+-- delta. The downside: the dead row stayed in the unique-on
+-- (user_id, barcode) index, which made rescans of the same barcode
+-- short-circuit on the dead row instead of re-running the AI normalize
+-- pipeline. The row's cached macros got reused, and no live row ever got
+-- created — the user's products page stayed empty even though scans
+-- "succeeded".
+--
+-- We're switching to hard delete going forward (SettingsPage and the
+-- CHEFBYTE_delete_product MCP tool both call .delete() now). This
+-- migration cleans up any legacy tombstones so the unique-on-barcode
+-- index isn't blocked for future scans of the same barcode.
+--
+-- food_logs.product_id has ON DELETE SET NULL (per
+-- 20260424020000_food_logs_fk_set_null.sql) so historical macro rows
+-- survive with their cached values; everything else cascades out.
+
+DELETE FROM chefbyte.products WHERE deleted_at IS NOT NULL;

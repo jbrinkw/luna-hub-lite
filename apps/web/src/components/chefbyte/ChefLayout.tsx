@@ -87,7 +87,11 @@ export function ChefLayout({ children }: ChefLayoutProps) {
       {
         label: 'Settings',
         value: '/chef/settings',
-        href: attentionCount > 0 ? '/chef/settings?tab=events' : '/chef/settings',
+        // Always land on the products tab. Earlier we routed to ?tab=events
+        // when there was an attention badge, but the user prefers settings
+        // to default to products regardless — the events tab is still
+        // reachable via the in-page tab strip.
+        href: '/chef/settings',
         badge: attentionCount > 0 ? String(attentionCount) : undefined,
       },
     ],

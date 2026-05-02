@@ -14,6 +14,7 @@ import { DEFAULT_MACRO_GOALS } from '@/shared/constants';
 import { queryKeys } from '@/shared/queryKeys';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { useToast } from '@/components/shared/Toast';
+import { aggregateLogsByProduct } from '@/shared/aggregateLogs';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -56,12 +57,16 @@ interface MealEntry {
 interface FoodLogEntry {
   log_id: string;
   logical_date: string;
+  product_id: string | null;
   qty_consumed: number;
   unit: string;
   calories: number;
   protein: number;
   carbs: number;
   fat: number;
+  /** ISO-8601 timestamp — drives the 15-min same-product aggregation in
+   *  the per-day Consumed section. See `aggregateLogsByProduct`. */
+  created_at: string;
   products: { name: string } | null;
 }
 
@@ -257,7 +262,9 @@ export function MealPlanPage() {
           .order('created_at'),
         chefbyte()
           .from('food_logs')
-          .select('log_id, logical_date, qty_consumed, unit, calories, protein, carbs, fat, products:product_id(name)')
+          .select(
+            'log_id, logical_date, product_id, qty_consumed, unit, calories, protein, carbs, fat, created_at, products:product_id(name)',
+          )
           .eq('user_id', userId!)
           .gte('logical_date', startDate)
           .lte('logical_date', endDate)
@@ -439,6 +446,11 @@ export function MealPlanPage() {
     return (foodLogs ?? []).filter((l) => l.logical_date === selectedDay);
   }, [selectedDay, foodLogs]);
 
+  /** selectedDayLogs grouped by (product_id, 15-min window) so consecutive
+   *  same-product entries collapse into one summed row. See
+   *  aggregateLogsByProduct + its unit tests. */
+  const selectedDayLogGroups = useMemo(() => aggregateLogsByProduct(selectedDayLogs), [selectedDayLogs]);
+
   const selectedDayTemps = useMemo(() => {
     if (!selectedDay) return [];
     return (tempItems ?? []).filter((t) => t.logical_date === selectedDay);
@@ -526,12 +538,14 @@ export function MealPlanPage() {
             ? {
                 log_id: `optimistic-${mealId}`,
                 logical_date: meal.logical_date,
+                product_id: null,
                 qty_consumed: meal.servings,
                 unit: 'serving',
                 calories: macros.calories,
                 protein: macros.protein,
                 carbs: macros.carbs,
                 fat: macros.fat,
+                created_at: nowIso,
                 products: { name: meal.recipes?.name ?? meal.products?.name ?? 'Meal' },
               }
             : null;
@@ -690,6 +704,18 @@ export function MealPlanPage() {
   const deleteFoodLogMutation = useMutation({
     mutationFn: async (logId: string) => {
       const { error: err } = await chefbyte().from('food_logs').delete().eq('log_id', logId);
+      if (err) throw new Error(err.message);
+    },
+    onSettled: () => invalidateMealPlan(),
+  });
+
+  /** Delete every log in an aggregated 15-min same-product group in one
+   *  round-trip. Used by the merged-row Delete button on the per-day
+   *  Consumed section. */
+  const deleteFoodLogsBatchMutation = useMutation({
+    mutationFn: async (logIds: string[]) => {
+      if (logIds.length === 0) return;
+      const { error: err } = await chefbyte().from('food_logs').delete().in('log_id', logIds);
       if (err) throw new Error(err.message);
     },
     onSettled: () => invalidateMealPlan(),
@@ -1325,7 +1351,41 @@ export function MealPlanPage() {
                     <h4 className="m-0 text-sm font-bold text-success-text uppercase tracking-wide">Consumed</h4>
                   </div>
                   <div className="flex flex-col gap-1.5 p-3">
-                    {selectedDayLogs.map((log) => {
+                    {selectedDayLogGroups.map((group) => {
+                      const log = group.anchor;
+                      const isMerged = group.logs.length > 1;
+                      if (isMerged) {
+                        const productName = log.products?.name ?? 'Unknown';
+                        return (
+                          <div
+                            key={`group-${log.log_id}`}
+                            data-testid={`consumed-log-group-${log.log_id}`}
+                            className="py-2 px-3 border border-border border-l-4 border-l-success rounded-md bg-surface"
+                          >
+                            <div className="flex justify-between items-start gap-2">
+                              <span className="font-semibold text-sm min-w-0">
+                                {productName}
+                                <span className="font-normal text-text-secondary text-xs ml-2">
+                                  {group.totalQty} {log.unit}
+                                  {group.totalQty !== 1 ? 's' : ''}
+                                  <span className="text-text-tertiary ml-1.5">(×{group.logs.length})</span>
+                                </span>
+                              </span>
+                              <DeleteBtn
+                                id={`log-group-${log.log_id}`}
+                                onConfirm={async () => {
+                                  deleteFoodLogsBatchMutation.mutate(group.logs.map((l) => l.log_id));
+                                }}
+                                testId={`delete-log-group-${log.log_id}`}
+                              />
+                            </div>
+                            <div className="text-xs text-text-secondary mt-1">
+                              {Math.round(group.totalCalories)} cal | {Math.round(group.totalProtein)}g P |{' '}
+                              {Math.round(group.totalCarbs)}g C | {Math.round(group.totalFat)}g F
+                            </div>
+                          </div>
+                        );
+                      }
                       const delId = `log-${log.log_id}`;
                       const editKey = `log-${log.log_id}`;
                       const isEditing = editingId === editKey;

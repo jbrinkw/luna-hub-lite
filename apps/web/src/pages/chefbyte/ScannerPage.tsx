@@ -452,6 +452,9 @@ export function ScannerPage() {
         // Look up product by barcode. Use maybeSingle() because "0 rows" is
         // the normal first-scan case — single() would raise PGRST116 and
         // throw us into the catch, blocking the analyze-product fallback.
+        // deleted_at filter is defensive — current settings deletes are
+        // hard, but legacy soft-deleted rows may still exist in the DB
+        // and would otherwise short-circuit the scan to a tombstone.
         const { data: product, error: lookupErr } = await chefbyte()
           .from('products')
           .select(
@@ -459,6 +462,7 @@ export function ScannerPage() {
           )
           .eq('user_id', user.id)
           .eq('barcode', barcode)
+          .is('deleted_at', null)
           .maybeSingle();
         if (lookupErr) throw new Error(lookupErr.message);
 

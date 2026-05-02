@@ -27,6 +27,7 @@ import { CardSkeleton, MacroBarSkeleton, ListSkeleton } from '@/components/Skele
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 import { formatStockShortfallMessage as formatStockShortfallMessageShared } from '@/shared/stockShortfall';
 import { useToast } from '@/components/shared/Toast';
+import { aggregateLogsByProduct } from '@/shared/aggregateLogs';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -39,6 +40,7 @@ interface MacroTotals {
 
 interface FoodLogEntry {
   log_id: string;
+  product_id: string | null;
   qty_consumed: number;
   unit: string;
   calories: number;
@@ -46,6 +48,9 @@ interface FoodLogEntry {
   carbs: number;
   fat: number;
   meal_id: string | null;
+  /** Used to group consecutive same-product entries within a 15-min window
+   *  in the Consumed Today section. See `aggregateLogsByProduct`. */
+  created_at: string;
   products: { name: string } | null;
   meal_plan_entries: {
     recipes: { name: string } | null;
@@ -313,11 +318,13 @@ export function HomePage() {
           .eq('user_id', userId!)
           .eq('logical_date', today)
           .eq('meal_prep', false),
-        // 8. Food logs
+        // 8. Food logs. created_at + product_id added so the Consumed
+        // Today section can group consecutive same-product entries within
+        // a 15-min window via aggregateLogsByProduct.
         chefbyte()
           .from('food_logs')
           .select(
-            'log_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
+            'log_id, product_id, qty_consumed, unit, calories, protein, carbs, fat, meal_id, created_at, products:product_id(name), meal_plan_entries:meal_id(recipes:recipe_id(name), products:product_id(name))',
           )
           .eq('user_id', userId!)
           .eq('logical_date', today),
@@ -698,6 +705,7 @@ export function HomePage() {
           meal && macrosPatch
             ? {
                 log_id: `optimistic-${mealId}`,
+                product_id: null,
                 qty_consumed: meal.servings,
                 unit: 'serving',
                 calories: macrosPatch.calories,
@@ -705,6 +713,7 @@ export function HomePage() {
                 carbs: macrosPatch.carbs,
                 fat: macrosPatch.fat,
                 meal_id: mealId,
+                created_at: nowIso,
                 products: null,
                 meal_plan_entries: {
                   recipes: meal.recipes ? { name: meal.recipes.name } : null,
@@ -857,6 +866,19 @@ export function HomePage() {
     onSettled: () => invalidateHome(),
   });
 
+  /** Delete every log in an aggregated standalone-log group in one round-
+   *  trip. Used when the Consumed Today section's group has > 1 entry
+   *  (the Delete button on that row nukes all logs in the 15-min window). */
+  const deleteFoodLogsBatchMutation = useMutation({
+    mutationFn: async (logIds: string[]) => {
+      if (logIds.length === 0) return;
+      const { error } = await chefbyte().from('food_logs').delete().in('log_id', logIds);
+      if (error) throw new Error(error.message);
+    },
+    onError: (err: Error) => setMutationError(err.message),
+    onSettled: () => invalidateHome(),
+  });
+
   const deleteMealLogsMutation = useMutation({
     mutationFn: async (mealId: string) => {
       const { error } = await chefbyte().from('food_logs').delete().eq('meal_id', mealId);
@@ -917,6 +939,11 @@ export function HomePage() {
     }
     return { mealGroups: Array.from(groups.values()), standaloneLogs: standalone };
   })();
+
+  /* Standalone logs grouped by (product_id, 15-min window) so rapid-fire
+   * scans of the same product render as one summed row instead of N
+   * identical rows. See aggregateLogsByProduct + its unit tests. */
+  const standaloneGroups = aggregateLogsByProduct(standaloneLogs);
 
   const deleteTempItemMutation = useMutation({
     mutationFn: async (tempId: string) => {
@@ -1701,8 +1728,48 @@ export function HomePage() {
                 </div>
               );
             })}
-            {/* Standalone food logs (not part of a meal) */}
-            {standaloneLogs.map((log) => {
+            {/* Standalone food logs (not part of a meal). Consecutive same-
+                product entries within 15 min collapse into one summed row
+                via aggregateLogsByProduct — without that, four glasses of
+                milk in twenty minutes would render as four identical
+                lines. Groups with >1 entry hide the inline edit (per-log
+                qty edit on a summed row is ambiguous) and the Delete
+                button nukes every log in the group. */}
+            {standaloneGroups.map((group) => {
+              const log = group.anchor;
+              const isMerged = group.logs.length > 1;
+              if (isMerged) {
+                const productName = log.products?.name ?? 'Unknown';
+                return (
+                  <div
+                    key={`group-${log.log_id}`}
+                    data-testid={`consumed-log-group-${log.log_id}`}
+                    className="py-2 px-3 border border-border border-l-4 border-l-success rounded-md bg-success-subtle"
+                  >
+                    <div className="flex justify-between items-start gap-2">
+                      <span className="font-semibold text-sm text-text min-w-0">
+                        {productName}
+                        <span className="font-normal text-text-secondary text-xs ml-2">
+                          {group.totalQty} {log.unit}
+                          {group.totalQty !== 1 ? 's' : ''}
+                          <span className="text-text-tertiary ml-1.5">(×{group.logs.length})</span>
+                        </span>
+                      </span>
+                      <DeleteBtn
+                        id={`log-group-${log.log_id}`}
+                        onConfirm={async () => {
+                          deleteFoodLogsBatchMutation.mutate(group.logs.map((l) => l.log_id));
+                        }}
+                        testId={`delete-log-group-${log.log_id}`}
+                      />
+                    </div>
+                    <div className="text-xs text-text-secondary mt-1">
+                      {Math.round(group.totalCalories)} cal | {Math.round(group.totalProtein)}g P |{' '}
+                      {Math.round(group.totalCarbs)}g C | {Math.round(group.totalFat)}g F
+                    </div>
+                  </div>
+                );
+              }
               const isEditing = editingId === `log-${log.log_id}`;
               const isOptimistic = String(log.log_id).startsWith('optimistic-');
               return (

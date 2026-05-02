@@ -184,17 +184,16 @@ export function SettingsPage() {
 
   const deleteProductMutation = useMutation({
     mutationFn: async (productId: string) => {
-      // Soft-delete: set deleted_at so the Pi's product-sync poller sees
-      // the tombstone in its next updated_since delta. The
-      // products_set_updated_at trigger bumps updated_at automatically.
-      // Historical rows (stock_lots / food_logs / meal_plan_entries /
-      // recipe_ingredients) stay intact so charts + recipes don't
-      // retroactively lose data.
-      const { error: deleteErr } = await chefbyte()
-        .from('products')
-        .update({ deleted_at: new Date().toISOString() })
-        .eq('product_id', productId)
-        .is('deleted_at', null);
+      // Hard delete. Earlier iterations soft-deleted (set deleted_at) so
+      // historical food_logs / stock_lots stayed intact, but that left
+      // tombstone rows that poisoned rescans (the unique-on-barcode index
+      // matched the dead row and the scanner short-circuited on it). User
+      // intent on deletion is "make it gone" — so we hard-delete and let
+      // ON DELETE policies on referencing rows decide. Stock_lots cascade
+      // out, food_logs.product_id is set to NULL (history rows survive
+      // with their cached macros), meal_plan_entries / recipe_ingredients
+      // similarly clean up via FK rules.
+      const { error: deleteErr } = await chefbyte().from('products').delete().eq('product_id', productId);
       if (deleteErr) throw deleteErr;
     },
     onMutate: async (productId) => {
@@ -831,24 +830,21 @@ export function SettingsPage() {
               )}
             </div>
 
-            {/* Product list — real products first, then placeholders */}
+            {/* Product list — complete (have a barcode) first, then placeholders */}
             <div className="mb-3 pb-2 border-b border-border-light flex items-baseline gap-3 flex-wrap">
               <span className="text-sm font-semibold text-text-secondary">
                 {filteredProducts.length} product{filteredProducts.length !== 1 ? 's' : ''}
               </span>
-              <span className="text-[11px] text-text-tertiary">
-                {realProducts.length} real · {placeholderProducts.length} placeholder
-              </span>
             </div>
 
-            {/* Real products section (have a barcode) */}
+            {/* Complete products section (have a barcode) */}
             {realProducts.length > 0 && (
               <>
                 <h3
                   className="text-[11px] font-bold uppercase tracking-wider text-text-tertiary mb-2"
                   data-testid="real-products-heading"
                 >
-                  Real products ({realProducts.length})
+                  Complete products ({realProducts.length})
                 </h3>
                 <div
                   data-testid="product-list"

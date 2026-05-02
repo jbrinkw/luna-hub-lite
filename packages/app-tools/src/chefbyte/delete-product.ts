@@ -4,11 +4,9 @@ import { toolSuccess, toolError } from '../shared';
 export const deleteProduct: ToolDefinition = {
   name: 'CHEFBYTE_delete_product',
   description:
-    'Soft-delete a product by product_id (sets deleted_at timestamp). The product ' +
-    'is hidden from inventory / product-list queries and propagates to the Live ' +
-    "Shelf Pi (its local classifier won't propose the deleted product anymore). " +
-    'Existing stock_lots, food_logs, meal_plan_entries, and recipe_ingredients ' +
-    'rows are preserved — historical records stay intact. RLS enforces ownership.',
+    'Delete a product by product_id. stock_lots / shopping_list / meal_plan_entries / ' +
+    'recipe_ingredients referencing the product cascade out; food_logs preserve their ' +
+    'cached macro values with product_id set to NULL. RLS enforces ownership.',
   inputSchema: {
     type: 'object',
     properties: {
@@ -22,19 +20,18 @@ export const deleteProduct: ToolDefinition = {
       return toolError('product_id is required');
     }
 
-    // Soft-delete: set deleted_at = now(). The products_set_updated_at
-    // trigger bumps updated_at so the Pi's 30s product-sync poller sees
-    // the tombstone in its next updated_since delta and hard-deletes the
-    // local row. We still filter on `deleted_at IS NULL` in the eq clause
-    // so double-deleting a product returns "not found" rather than
-    // silently succeeding — prevents accidental state bounce in retries.
+    // Hard delete. Earlier iterations soft-deleted (set deleted_at) so
+    // historical food_logs / stock_lots could keep their reference, but
+    // the tombstone left the row in the unique-on-(user_id, barcode)
+    // index — which made rescans of the same barcode short-circuit on
+    // the dead row. food_logs has ON DELETE SET NULL so history rows
+    // survive without breaking; everything else cascades.
     const { data, error } = await ctx.supabase
       .schema('chefbyte')
       .from('products')
-      .update({ deleted_at: new Date().toISOString() })
+      .delete()
       .eq('product_id', product_id)
       .eq('user_id', ctx.userId)
-      .is('deleted_at', null)
       .select('product_id, name, barcode');
 
     if (error) return toolError(`Failed to delete product: ${error.message}`);
