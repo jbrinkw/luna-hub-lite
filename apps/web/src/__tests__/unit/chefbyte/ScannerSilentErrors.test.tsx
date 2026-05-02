@@ -104,6 +104,7 @@ vi.mock('@/shared/supabase', () => {
         return builder;
       });
       builder.is = vi.fn(() => builder);
+      builder.not = vi.fn(() => builder);
       builder.order = vi.fn(() => builder);
       builder.limit = vi.fn(() => Promise.resolve({ data: [{ location_id: 'loc-1' }], error: null }));
 

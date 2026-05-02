@@ -724,12 +724,38 @@ export function ScannerPage() {
                     }, 5000);
                   }
                 } else {
-                  const { data: created } = await chefbyte()
+                  // Revive-on-tombstone: even though Settings + the MCP tool
+                  // hard-delete now, a user's DB may still hold legacy
+                  // tombstones from older soft-deletes. The unique-on
+                  // (user_id, barcode) index applies regardless of
+                  // deleted_at, so a plain INSERT here would hit a duplicate-
+                  // key violation that the outer catch swallows silently —
+                  // surfacing as a red queue row + no stock_lot. Detect that
+                  // case explicitly and UPDATE the tombstoned row to revive
+                  // it (clear deleted_at, apply new fields) instead.
+                  const { data: tombstoned } = await chefbyte()
                     .from('products')
-                    .insert({ user_id: user.id, ...productFields })
-                    .select(returning)
-                    .single();
-                  resultRow = created;
+                    .select('product_id')
+                    .eq('user_id', user.id)
+                    .eq('barcode', barcode)
+                    .not('deleted_at', 'is', null)
+                    .maybeSingle();
+                  if (tombstoned) {
+                    const { data: revived } = await chefbyte()
+                      .from('products')
+                      .update({ ...productFields, deleted_at: null })
+                      .eq('product_id', (tombstoned as { product_id: string }).product_id)
+                      .select(returning)
+                      .single();
+                    resultRow = revived;
+                  } else {
+                    const { data: created } = await chefbyte()
+                      .from('products')
+                      .insert({ user_id: user.id, ...productFields })
+                      .select(returning)
+                      .single();
+                    resultRow = created;
+                  }
                 }
                 if (resultRow) {
                   analyzedProduct = resultRow;

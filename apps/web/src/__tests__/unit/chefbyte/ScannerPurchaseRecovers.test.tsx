@@ -108,6 +108,7 @@ vi.mock('@/shared/supabase', () => {
         if (col === 'expires_on' && val === null) state.expiresOnIsNull = true;
         return builder;
       });
+      builder.not = vi.fn(() => builder);
       builder.order = vi.fn(() => builder);
       builder.limit = vi.fn(() => Promise.resolve({ data: [{ location_id: 'loc-1' }], error: null }));
 

@@ -605,18 +605,44 @@ export function LiveTrackImportPage() {
             // product in its certified catalog.
             certified: 1,
           };
-          const { data: created, error: insErr } = await chefbyte()
+          const productReturning =
+            'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g, certified, default_shelf_life_days';
+          // Revive-on-tombstone: legacy soft-deleted rows still occupy the
+          // unique-on (user_id, barcode) index. A plain INSERT would 23505
+          // and bail us out of the wizard with a confusing error. Detect
+          // and revive instead — same shape as ScannerPage.
+          const { data: tombstoned } = await chefbyte()
             .from('products')
-            .insert({ user_id: user.id, ...productFields })
-            .select(
-              'product_id, name, barcode, servings_per_container, calories_per_serving, carbs_per_serving, fat_per_serving, protein_per_serving, net_weight_g, tare_weight_g, container_type, unit_type, serving_weight_g, certified, default_shelf_life_days',
-            )
-            .single();
+            .select('product_id')
+            .eq('user_id', user.id)
+            .eq('barcode', barcode)
+            .not('deleted_at', 'is', null)
+            .maybeSingle();
+          let created: ProductRow | null = null;
+          let insErr: { message: string } | null = null;
+          if (tombstoned) {
+            const { data: revived, error: updErr } = await chefbyte()
+              .from('products')
+              .update({ ...productFields, deleted_at: null })
+              .eq('product_id', (tombstoned as { product_id: string }).product_id)
+              .select(productReturning)
+              .single();
+            created = (revived as ProductRow | null) ?? null;
+            insErr = updErr ?? null;
+          } else {
+            const { data: inserted, error: e } = await chefbyte()
+              .from('products')
+              .insert({ user_id: user.id, ...productFields })
+              .select(productReturning)
+              .single();
+            created = (inserted as ProductRow | null) ?? null;
+            insErr = e ?? null;
+          }
           if (insErr || !created) {
             dispatch({ type: 'error', message: insErr?.message ?? 'insert failed' });
             return;
           }
-          product = created as ProductRow;
+          product = created;
         }
 
         // 3. Patch the session with barcode + product_id + state=waiting_scale.

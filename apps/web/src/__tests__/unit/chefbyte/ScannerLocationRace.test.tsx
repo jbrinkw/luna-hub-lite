@@ -126,6 +126,7 @@ vi.mock('@/shared/supabase', () => {
         if (col === 'expires_on' && val === null) state.expiresOnIsNull = true;
         return builder;
       });
+      builder.not = vi.fn(() => builder);
       builder.order = vi.fn(() => builder);
       // The locations queryFn ends in `.limit(1)` (no .single() / .maybeSingle()).
       // For the `locations` table we resolve through the deferred so the test
