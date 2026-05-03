@@ -33,6 +33,29 @@ AI-powered nutrition system: meal planning, inventory management, macro tracking
 - Nutrition editor: auto-scaling (edit calories → macros scale proportionally, edit macro → calories recalculate via 4-4-9 rule)
 - Red-highlight for new/unacknowledged scans
 
+### USB Scanner (Pi → cloud forwarder)
+
+Plug a USB barcode scanner into the live-shelf Pi. Each scan forwards
+the barcode to the cloud edge function which processes it under your
+currently-active scanner mode (purchase / consume / shopping).
+
+**Mode resolution** (`chefbyte.scanner_state` table):
+
+- If you've toggled "Lock scanner to single mode" in Settings → Scanner,
+  that mode is used for every Pi USB scan.
+- Otherwise the Pi uses the mode the web Scanner page last broadcast
+  (default: purchase).
+
+**Persistent transactions**: every scan (web + Pi USB) is logged in
+`chefbyte.scan_transactions`. Visit Settings → Scanner Transactions to
+view, filter, or void past scans. Voiding reverses the side-effect
+(deletes the stock_lot, food_log, or shopping_list row created by the
+scan).
+
+**Pi setup**: set `BARCODE_SCANNER_ENABLED=true` and
+`BARCODE_SCANNER_DEVICE=/dev/input/eventX` in the Pi env. The scanner
+listens via evdev; ENTER terminates each barcode.
+
 ### Inventory Management
 
 - Product catalog with search and filtering. Search input uses `ilike` with special character escaping for safe pattern matching.

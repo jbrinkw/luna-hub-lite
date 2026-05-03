@@ -100,6 +100,38 @@ Default locations (Fridge, Pantry, Freezer) are seeded per user on ChefByte acti
 | `tare_weight_g`    | `NUMERIC(10,3) NULL` | Empty-container weight in grams. Set-once: written via the catch-all tare capture flow (manual arm, AI auto-import, or empty-container heuristic). Drives the LiveTrack tag color (red when NULL). |
 | `measured_full_at` | `TIMESTAMPTZ NULL`   | Set-once stamp confirming the product's mass equals `tare + net_weight_g` within 5%. Drives the "fully calibrated" state of the LiveTrack inventory tag. NULL = not yet confirmed.                 |
 
+### `chefbyte.scanner_state`
+
+One row per user. Tracks active scanner mode + optional permanent lock.
+
+| Column             | Type        | Notes                                                                                      |
+| ------------------ | ----------- | ------------------------------------------------------------------------------------------ |
+| `user_id`          | UUID PK     | FK auth.users CASCADE                                                                      |
+| `last_active_mode` | TEXT        | Default 'purchase'; check'd to 4-value enum                                                |
+| `locked_mode`      | TEXT NULL   | When set, overrides last_active_mode for both Pi USB scans and web Scanner mode-resolution |
+| `updated_at`       | TIMESTAMPTZ | Auto-update on write                                                                       |
+
+### `chefbyte.scan_transactions`
+
+Persistent audit log of every scan (web + Pi USB).
+
+| Column                                                            | Type           | Notes                                               |
+| ----------------------------------------------------------------- | -------------- | --------------------------------------------------- |
+| `transaction_id`                                                  | UUID PK        | gen_random_uuid()                                   |
+| `user_id`                                                         | UUID           | FK auth.users CASCADE                               |
+| `barcode`                                                         | TEXT           | NOT NULL                                            |
+| `product_id`                                                      | UUID NULL      | FK products SET NULL (audit retains row)            |
+| `mode`                                                            | TEXT           | 4-value scan mode                                   |
+| `qty` / `unit`                                                    | NUMERIC / TEXT | Optional (NULL for non-applied)                     |
+| `nutrition_snapshot`                                              | JSONB          | Optional snapshot                                   |
+| `status`                                                          | TEXT           | 'pending' / 'applied' / 'voided' / 'errored'        |
+| `error_msg`                                                       | TEXT NULL      | Set when status='errored'                           |
+| `logical_date`                                                    | DATE           | User's day-boundary-aware date                      |
+| `source`                                                          | TEXT           | 'web' or 'pi_usb'                                   |
+| `pi_event_id`                                                     | TEXT NULL      | Idempotency key for Pi scans (unique partial index) |
+| `applied_lot_id` / `applied_food_log_id` / `applied_cart_item_id` | UUID NULL      | FK SET NULL — void reverses these                   |
+| `created_at` / `applied_at`                                       | TIMESTAMPTZ    | applied_at NULL until status='applied'              |
+
 ### Non-negative CHECK constraints (migration 20260304040004)
 
 - `chefbyte.products`: `calories_per_serving >= 0`, `protein_per_serving >= 0`, `carbs_per_serving >= 0`, `fat_per_serving >= 0`
