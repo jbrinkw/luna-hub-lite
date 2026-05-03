@@ -93,6 +93,13 @@ Default locations (Fridge, Pantry, Freezer) are seeded per user on ChefByte acti
 
 - `instructions` TEXT — free-text recipe instructions/preparation steps
 
+### `chefbyte.products` — LiveTrack calibration columns
+
+| Column             | Type                 | Description                                                                                                                                                                                        |
+| ------------------ | -------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `tare_weight_g`    | `NUMERIC(10,3) NULL` | Empty-container weight in grams. Set-once: written via the catch-all tare capture flow (manual arm, AI auto-import, or empty-container heuristic). Drives the LiveTrack tag color (red when NULL). |
+| `measured_full_at` | `TIMESTAMPTZ NULL`   | Set-once stamp confirming the product's mass equals `tare + net_weight_g` within 5%. Drives the "fully calibrated" state of the LiveTrack inventory tag. NULL = not yet confirmed.                 |
+
 ### Non-negative CHECK constraints (migration 20260304040004)
 
 - `chefbyte.products`: `calories_per_serving >= 0`, `protein_per_serving >= 0`, `carbs_per_serving >= 0`, `fat_per_serving >= 0`

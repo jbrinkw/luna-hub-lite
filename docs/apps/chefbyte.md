@@ -133,6 +133,40 @@ replaced by the LiveTrack system:
   the browser (JWT on `/create`) and the Pi (x-api-key on `/pi-update`).
 - Managed in ChefByte Settings → Scales tab.
 
+#### LiveTrack auto-import (catch-all)
+
+When you place a product on the catch-all scale that you already own
+(scanned, manually added, or imported any way), the catch-all triggers
+the AI classifier to:
+
+1. Pick the product from your full inventory (any qty>0 lot).
+2. If the product has no tare yet, estimate the empty container weight
+   from the visual + product metadata (container type, net_weight_g).
+3. Auto-apply the estimate. No review queue.
+
+The product's LiveTrack tag in `/chef/inventory` reflects calibration:
+
+| Color            | Condition                            | Meaning                                                       |
+| ---------------- | ------------------------------------ | ------------------------------------------------------------- |
+| Red              | `tare_weight_g IS NULL`              | Delta tracking only — relative weight changes work, no fill % |
+| Blue             | tare set, `measured_full_at IS NULL` | Fill % computed from AI estimate, not yet confirmed full      |
+| Normal (emerald) | tare set, `measured_full_at` set     | Fully calibrated                                              |
+
+Two paths stamp `measured_full_at`:
+
+- Programmatic: any catch-all placement reading within 5% of
+  `tare_weight_g + net_weight_g`.
+- Manual: "Item is full" checkbox on a catch-all event in `/chef/events`.
+
+Tare and `measured_full_at` are set-once. Once written, they're never
+overwritten programmatically. Manual edit through the products UI is
+always allowed.
+
+Auto-tare-on-empty: when an empty container is placed on the catch-all
+and `tare_weight_g IS NULL`, the empty-container heuristic captures
+`tare = scale_reading` IF the reading is under 30% of `net_weight_g`.
+Conservative threshold avoids false positives on partial fills.
+
 ### Backup & Restore
 
 User-initiated manual snapshot / rollback of the caller's ChefByte data. Surfaced as a dedicated Settings → Backup tab.

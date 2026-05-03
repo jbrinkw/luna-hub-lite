@@ -228,3 +228,53 @@ Add `hardware/live-shelf/server/tests/test_tare_capture.py` (following `test_cat
 - UI polish (icon, colors, animations) beyond the state-to-label table in §5.3.
 - Auto-retry or debounce logic on implausible readings — the arm row keeps `last_error`, user reads it and re-places the container or cancels.
 - Reset-to-null for a product's existing tare (owner asked about _capture_, not edit/clear).
+
+## 2026-05-02: Auto-import extension
+
+The original tare-capture flow (operator clicks "Tare" → next placement
+captures) is preserved. A second path — "auto-import" — runs in
+parallel:
+
+- **Trigger:** any non-noise catch-all placement that does NOT have an
+  active tare arm.
+- **Pool:** `chefbyte.products ∩ stock_lots(qty>0)` (Pi sees this as
+  `cloud_lots qty>0` with the `in_flight_kind='catch_all'` rows
+  excluded — Tier 1 owns those).
+- **AI:** picks the product. When the picked candidate has
+  `needs_tare_estimate=True` in the prompt, the model also produces
+  `estimated_tare_g`. Same Anthropic `claude-sonnet-4-6` model as the
+  rest of the catch-all classifier.
+- **Apply:**
+  - Writes tare via `_push_product_state_to_cloud(tare_g=...)` IFF
+    `products.tare_weight_g IS NULL` AND `est_tare > 0` AND
+    `est_tare < scale_reading - 1.0`.
+  - Stamps `measured_full_at` via
+    `_push_product_state_to_cloud(measured_full_at=...)` IFF
+    `|scale_reading - (tare + net_weight_g)| ≤ 0.05 * net_weight_g`
+    AND `measured_full_at IS NULL`.
+
+Two extensions to existing paths:
+
+1. `_maybe_emit_empty_container_discard` (`scale_events.py:2046-2249`):
+   when tare is null AND placement reads under 30% of `net_weight_g`,
+   capture `tare = scale_reading` + push to cloud + continue with the
+   existing local-delete + `discarded` emit.
+
+2. The cloud `/shelf-ingest/product-tare` endpoint accepts an optional
+   `measured_full_at` field and applies set-once on its side
+   (SELECT-then-conditional-UPDATE; preserves existing values; safe
+   to retry).
+
+Set-once is enforced at three layers:
+
+- Pi guard (`current_tare is None`, `measured_full_at is None`)
+- Cloud guard (`/shelf-ingest/product-tare` SELECT-then-conditional-UPDATE)
+- UI guard (checkbox `disabled` when stamped; `.is('measured_full_at', null)` filter on the UPDATE)
+
+Decision #45 is unaffected: this path does NOT mint new
+`chefbyte.products` rows from a place event. The product must already
+exist in the catalog (scanned, manually added, etc.). The new feature
+only writes calibration metadata onto existing products.
+
+Lifecycle reason codes added: `TARE_AUTO_IMPORT`, `MEASURED_FULL_AUTO`,
+`TARE_AUTO_FROM_EMPTY`.
