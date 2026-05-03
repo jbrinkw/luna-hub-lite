@@ -15,6 +15,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import math
 import re
 from typing import Any, Optional
 
@@ -293,6 +294,24 @@ def parse_response(
     secondary = _coerce_secondary(data.get("secondary_candidates"))
     multi_match = _coerce_secondary(data.get("multi_match"))
 
+    # Catch-all auto-import: optional estimated_tare_g. Validated:
+    # must be > 0 and finite. Out-of-range / non-numeric → silently
+    # dropped (None). The apply path is the source of truth for whether
+    # to write — it cross-checks against measured weight to reject
+    # impossible values (tare > scale_reading). We deliberately do NOT
+    # raise MalformedClassifierOutput here: the rest of the
+    # classification (item_id, action, confidence) is still useful even
+    # when the model fumbled the optional tare field.
+    estimated_tare_g: float | None = None
+    raw_tare = data.get("estimated_tare_g")
+    if raw_tare is not None:
+        try:
+            tare_val = float(raw_tare)
+            if tare_val > 0.0 and math.isfinite(tare_val):
+                estimated_tare_g = tare_val
+        except (TypeError, ValueError):
+            pass
+
     return ClassificationResult(
         item_id=item_id,
         action=action,
@@ -302,6 +321,7 @@ def parse_response(
         multi_match=tuple(multi_match),
         candidate_pool_used=tuple(candidate_pool_used),
         meta=meta or {},
+        estimated_tare_g=estimated_tare_g,
     )
 
 
@@ -626,5 +646,6 @@ def _normalise_unknown(result: ClassificationResult) -> ClassificationResult:
             multi_match=result.multi_match,
             candidate_pool_used=result.candidate_pool_used,
             meta=result.meta,
+            estimated_tare_g=result.estimated_tare_g,
         )
     return result

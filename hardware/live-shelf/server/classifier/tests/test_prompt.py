@@ -477,3 +477,23 @@ def test_catch_all_instruction_requests_tare_when_needs_tare_set():
     assert "estimated_tare_g" in text_with
     assert "empty container" in text_with.lower()
     assert "estimated_tare_g" not in text_without
+
+
+def test_catch_all_system_prompt_acknowledges_estimated_tare_g():
+    """The system prompt's schema MUST acknowledge the optional
+    estimated_tare_g field so the model's strict-JSON instruction
+    doesn't conflict with the conditional tare-estimation block.
+
+    Task 6 added a conditional instruction that asks the model to
+    return ``estimated_tare_g`` for some candidates, but the original
+    catch-all system prompt declared a strict 4-field schema with
+    "Do not include any text outside the JSON object." That contradiction
+    risks the model dropping the tare field to comply with the strict
+    schema. This test pins the schema-block fix so future edits don't
+    regress it.
+    """
+    from server.classifier.prompt import CATCH_ALL_SYSTEM_PROMPT
+    assert "estimated_tare_g" in CATCH_ALL_SYSTEM_PROMPT, (
+        "System prompt must mention estimated_tare_g so model knows "
+        "the field is permitted (Task 6 + Task 7 dependency)."
+    )

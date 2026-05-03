@@ -196,10 +196,13 @@ Valid actions:
 
 Respond with STRICT JSON matching this schema:
 {
-  "item_id": string,          // candidate_id or "UNKNOWN"
-  "action": string,           // "added", "removed", or "unknown"
-  "confidence": number,       // 0.0 to 1.0
-  "reasoning": string         // one or two sentences naming what you see
+  "item_id": string,             // candidate_id or "UNKNOWN"
+  "action": string,              // "added", "removed", or "unknown"
+  "confidence": number,          // 0.0 to 1.0
+  "reasoning": string,           // one or two sentences naming what you see
+  "estimated_tare_g": number     // optional; include ONLY when the
+                                 // instruction explicitly asks for a
+                                 // tare estimate for the picked candidate
 }
 
 Do not include any text outside the JSON object. multi_match and

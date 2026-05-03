@@ -253,6 +253,83 @@ class TestParseResponse:
         with pytest.raises(MalformedClassifierOutput):
             parse_response('["L1"]', candidate_pool_used=[])
 
+    def test_parses_estimated_tare_g_when_present(self):
+        """When the model returns estimated_tare_g, it lands on the
+        ClassificationResult. Missing field → None (not an error). An
+        out-of-range value (e.g. negative, NaN, non-numeric) is silently
+        dropped and the rest of the result is preserved — the apply path
+        treats missing tare as 'no estimate provided'.
+        """
+        raw_with_tare = json.dumps(
+            {
+                "item_id": "lot-1",
+                "action": "added",
+                "confidence": 0.9,
+                "reasoning": "matches container",
+                "estimated_tare_g": 28.5,
+            }
+        )
+        raw_without_tare = json.dumps(
+            {
+                "item_id": "lot-2",
+                "action": "added",
+                "confidence": 0.95,
+                "reasoning": "exact match",
+            }
+        )
+        raw_invalid_tare = json.dumps(
+            {
+                "item_id": "lot-3",
+                "action": "added",
+                "confidence": 0.9,
+                "reasoning": "ok",
+                "estimated_tare_g": -5,  # invalid: must be > 0
+            }
+        )
+        raw_string_tare = json.dumps(
+            {
+                "item_id": "lot-4",
+                "action": "added",
+                "confidence": 0.9,
+                "reasoning": "ok",
+                "estimated_tare_g": "twenty-eight",  # invalid: not numeric
+            }
+        )
+        raw_zero_tare = json.dumps(
+            {
+                "item_id": "lot-5",
+                "action": "added",
+                "confidence": 0.9,
+                "reasoning": "ok",
+                "estimated_tare_g": 0.0,  # invalid: must be > 0
+            }
+        )
+
+        r_with = parse_response(raw_with_tare, candidate_pool_used=[])
+        r_without = parse_response(raw_without_tare, candidate_pool_used=[])
+        r_invalid = parse_response(raw_invalid_tare, candidate_pool_used=[])
+        r_string = parse_response(raw_string_tare, candidate_pool_used=[])
+        r_zero = parse_response(raw_zero_tare, candidate_pool_used=[])
+
+        assert r_with.estimated_tare_g == pytest.approx(28.5)
+        # Other fields preserved on the same result.
+        assert r_with.item_id == "lot-1"
+        assert r_with.action == "added"
+
+        # Missing field → None, not an error.
+        assert r_without.estimated_tare_g is None
+        assert r_without.item_id == "lot-2"
+
+        # Out-of-range / non-numeric → silently None; rest of the
+        # classification is preserved (we don't reject the whole
+        # response just because tare is malformed).
+        assert r_invalid.estimated_tare_g is None
+        assert r_invalid.item_id == "lot-3"
+        assert r_string.estimated_tare_g is None
+        assert r_string.item_id == "lot-4"
+        assert r_zero.estimated_tare_g is None
+        assert r_zero.item_id == "lot-5"
+
 
 # --- End-to-end classify_event -------------------------------------------
 

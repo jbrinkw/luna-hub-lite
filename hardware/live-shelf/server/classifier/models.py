@@ -401,6 +401,13 @@ class ClassificationResult:
     # Free-form metadata (model id, cache stats, raw JSON, …). Not part of
     # the §4.5 spec but helpful for debugging.
     meta: dict[str, Any] = field(default_factory=dict)
+    # Catch-all auto-import (2026-05-02). When the picked candidate had
+    # ``needs_tare_estimate=True`` in the prompt, the model returns its
+    # best-guess empty-container mass here. The apply path writes this
+    # to ``products.tare_weight_g`` IFF currently null (set-once).
+    # ``None`` when the candidate didn't need an estimate or the model
+    # returned an out-of-range value (negative, NaN, non-numeric, etc.).
+    estimated_tare_g: float | None = None
 
     @classmethod
     def unknown(
