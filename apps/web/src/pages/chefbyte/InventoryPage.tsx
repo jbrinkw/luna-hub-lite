@@ -1342,7 +1342,8 @@ export function InventoryPage() {
                   </li>
                   <li>
                     <CheckCircle2 className="inline w-3 h-3 text-emerald-700 align-middle" aria-hidden="true" />{' '}
-                    <strong>Certified</strong> — calibrated for live shelf tracking.
+                    <strong>LiveTrack</strong> — green: fully calibrated; blue: tare estimated, place a full container
+                    to lock; red: no tare yet (place on the catch-all to capture).
                   </li>
                   <li>
                     <Scale className="inline w-3 h-3 text-sky-700 align-middle" aria-hidden="true" />{' '}

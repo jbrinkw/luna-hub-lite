@@ -20,24 +20,24 @@ export function livetrackTagState(inputs: LivetrackTagInputs): LivetrackTagState
     return {
       color: 'red',
       label: 'LiveTrack',
-      tooltip: 'No tare — tracking relative changes only. Place this on the catch-all to capture tare automatically.',
+      tooltip:
+        'No tare measured yet — only relative weight changes are tracked. Place this product on the catch-all scale to capture tare automatically.',
     };
   }
   if (!fullSet) {
-    const missing: string[] = ['measured-full confirmation'];
-    if (inputs.net_weight_g === null || inputs.net_weight_g === undefined) {
-      missing.unshift('net weight not set (required for measured-full detection)');
-    }
+    const netMissing = inputs.net_weight_g === null || inputs.net_weight_g === undefined;
     return {
       color: 'blue',
       label: 'LiveTrack',
-      tooltip: `Tare is an AI estimate. Missing: ${missing.join('; ')}. Confirm a full placement to lock it.`,
+      tooltip: netMissing
+        ? "Tare is estimated, not measured. Set the product's net weight (in product details), then place a fresh container on the catch-all to confirm calibration."
+        : 'Tare is estimated, not measured. Place a fresh container on the catch-all scale to confirm and lock the calibration.',
     };
   }
   return {
     color: 'normal',
     label: 'LiveTrack',
-    tooltip: 'Fully calibrated — tare measured and full mass confirmed.',
+    tooltip: 'Fully calibrated. Tare is measured and full mass confirmed.',
   };
 }
 
