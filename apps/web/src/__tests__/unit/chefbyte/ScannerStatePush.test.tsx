@@ -27,6 +27,35 @@
 import { describe, it, expect, vi } from 'vitest';
 import { pushScannerMode } from '@/shared/scannerStateApi';
 
+// The default-invoke regression test below mocks the supabase module so
+// `supabase.functions.invoke` is a method (not an arrow) and reads
+// `this.region` synchronously. If pushScannerMode captures the bare
+// method reference without preserving `this`, the read fails with
+// "Cannot read properties of undefined (reading 'region')" — exactly
+// the runtime error the user reported.
+const supabaseMockState = {
+  functionsThis: undefined as unknown,
+  invokeCalls: [] as Array<{ name: string; opts: unknown }>,
+};
+
+vi.mock('@/shared/supabase', () => {
+  function invokeImpl(this: { region?: string }, name: string, opts: unknown) {
+    // Capture `this` at call time so the test can assert it was preserved.
+    supabaseMockState.functionsThis = this;
+    if (this === undefined || this.region === undefined) {
+      // Mirror the SDK's actual failure mode when `this` is lost.
+      throw new TypeError("Cannot read properties of undefined (reading 'region')");
+    }
+    supabaseMockState.invokeCalls.push({ name, opts });
+    return Promise.resolve({ data: null, error: null });
+  }
+  const functions = { invoke: invokeImpl, region: 'us-east-1' };
+  return {
+    supabase: { functions },
+    chefbyte: () => ({}),
+  };
+});
+
 describe('pushScannerMode', () => {
   it('POSTs to /shelf-ingest/scanner-state with last_active_mode', async () => {
     const invokeMock = vi.fn().mockResolvedValue({ data: null, error: null });
@@ -55,5 +84,20 @@ describe('pushScannerMode', () => {
       'shelf-ingest/scanner-state',
       expect.objectContaining({ body: { locked_mode: null } }),
     );
+  });
+
+  it('preserves `this` binding on supabase.functions when caller omits invoke', async () => {
+    // Regression for the production-only crash: capturing
+    // `supabase.functions.invoke` as a bare reference loses its
+    // `this` binding, and the SDK reads `this.region` on call → throws
+    // "Cannot read properties of undefined (reading 'region')".
+    // The mock above throws that exact error if `this` is undefined.
+    supabaseMockState.functionsThis = undefined;
+    supabaseMockState.invokeCalls = [];
+    await pushScannerMode({ last_active_mode: 'purchase' });
+    expect(supabaseMockState.functionsThis).toBeDefined();
+    expect((supabaseMockState.functionsThis as { region?: string }).region).toBe('us-east-1');
+    expect(supabaseMockState.invokeCalls).toHaveLength(1);
+    expect(supabaseMockState.invokeCalls[0].name).toBe('shelf-ingest/scanner-state');
   });
 });

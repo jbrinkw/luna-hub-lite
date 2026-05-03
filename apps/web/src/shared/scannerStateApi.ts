@@ -43,10 +43,16 @@ type InvokeFn = typeof supabase.functions.invoke;
  * `shelf-ingest/scanner-state` edge function. Throws on edge-function
  * error so callers can surface failures (current callers do
  * fire-and-forget with a console.warn — see ScannerPage).
+ *
+ * The default `invoke` wraps `supabase.functions.invoke` in an arrow
+ * so the `this` binding to `supabase.functions` is preserved. Capturing
+ * the bare method reference loses `this` and the supabase-js SDK throws
+ * `Cannot read properties of undefined (reading 'region')` on call.
+ * Tests can pass their own `invoke` to bypass the SDK entirely.
  */
 export async function pushScannerMode(
   patch: ScannerStatePatch,
-  invoke: InvokeFn = supabase.functions.invoke,
+  invoke: InvokeFn = (name, opts) => supabase.functions.invoke(name, opts),
 ): Promise<void> {
   const { error } = await invoke('shelf-ingest/scanner-state', { body: patch });
   if (error) throw error;
