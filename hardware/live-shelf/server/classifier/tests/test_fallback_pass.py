@@ -376,3 +376,155 @@ class TestMutationDocumentation:
         assert result.item_id == "prod_gatorade", (
             "fallback branch missing — pass-1 UNKNOWN was kept"
         )
+
+
+# --- 9. Field preservation: estimated_tare_g must thread through ----------
+# Regression guard for the Task 7 reviewer's catch: the two
+# reconstruction sites (pass-2 wins + _stamp_meta) used to enumerate
+# fields manually and silently dropped any field added later. Task 8
+# starts consuming ``ClassificationResult.estimated_tare_g`` to seed
+# the per-product tare on first sighting, so any drop in the fallback
+# path is silent data loss for fallback-enabled users.
+#
+# These tests pin the contract: fields on the source result MUST
+# survive the reconstruction. We use ``estimated_tare_g`` because it's
+# the field the reviewer flagged, but the assertion shape is generic
+# enough to also fail for any future field that's silently stripped.
+
+
+def _success_response_with_tare(
+    *, item_id: str, confidence: float, tare: float, action: str = "added"
+) -> str:
+    """Same shape as ``_success_response`` plus ``estimated_tare_g``."""
+    import json
+
+    return json.dumps(
+        {
+            "item_id": item_id,
+            "action": action,
+            "confidence": confidence,
+            "reasoning": "stub-with-tare",
+            "estimated_tare_g": tare,
+        }
+    )
+
+
+class TestFieldPreservationThroughReconstruction:
+    def test_pass2_wins_preserves_estimated_tare_g(self, frame_paths) -> None:
+        """When fallback pass-2 supersedes pass-1, the new
+        ClassificationResult must carry the estimated_tare_g from pass-2.
+
+        Bug: per-field manual reconstruction at the pass-2-wins site
+        silently dropped this field for every fallback-enabled user.
+        Caught by Task 7 reviewer; Task 8 will consume this field to
+        seed per-product tare on first sighting, so a silent drop is
+        silent data loss in production.
+        """
+        before, after = frame_paths
+        # Pass-1 UNKNOWN, pass-2 wins with high confidence + tare.
+        client = _FakeClient(
+            [
+                _success_response(item_id="UNKNOWN", confidence=0.1, action="unknown"),
+                _success_response_with_tare(
+                    item_id="prod_gatorade", confidence=0.95, tare=28.5,
+                ),
+            ]
+        )
+        source = _StubSource(fallback_pool=[_gatorade()])
+        ctx = ClassifierContext(source=source, anthropic_client=client)
+
+        result = classify_event_with_fallback(
+            _add_event(before, after), ctx, fallback_enabled=True,
+        )
+
+        # Sanity: pass-2 actually won.
+        assert result.item_id == "prod_gatorade"
+        assert result.meta["fallback_pass_used"] is True
+        # The bug: estimated_tare_g would be None here pre-fix because
+        # the manual ClassificationResult(...) reconstruction omitted it.
+        assert result.estimated_tare_g == pytest.approx(28.5), (
+            "pass-2-wins reconstruction stripped estimated_tare_g — "
+            "use dataclasses.replace so new fields thread through "
+            "automatically."
+        )
+
+    def test_stamp_meta_preserves_estimated_tare_g_on_pass1_high_confidence(
+        self, frame_paths,
+    ) -> None:
+        """_stamp_meta must not strip estimated_tare_g when stamping
+        audit fields onto a result.
+
+        Pass-1 high-confidence path: pass-1 returns a tare estimate,
+        no pass-2 runs, but ``_stamp_meta`` still rebuilds the result
+        to add ``fallback_pass_attempted=False``. The rebuild must
+        preserve every field on the source result.
+        """
+        before, after = frame_paths
+        client = _FakeClient(
+            [
+                _success_response_with_tare(
+                    item_id="prod_existing", confidence=0.95, tare=42.0,
+                ),
+            ]
+        )
+        source = _StubSource(fallback_pool=[_gatorade()])
+        ctx = ClassifierContext(source=source, anthropic_client=client)
+
+        result = classify_event_with_fallback(
+            _add_event(before, after), ctx, fallback_enabled=True,
+        )
+
+        # Sanity: pass-2 did NOT run (pass-1 was confident).
+        assert result.meta["fallback_pass_attempted"] is False
+        # The bug: _stamp_meta's manual reconstruction stripped this
+        # field, so apply-path code reading result.estimated_tare_g
+        # silently saw None for fallback-enabled users.
+        assert result.estimated_tare_g == pytest.approx(42.0), (
+            "_stamp_meta stripped estimated_tare_g — use "
+            "dataclasses.replace so new fields thread through "
+            "automatically."
+        )
+
+    def test_stamp_meta_preserves_estimated_tare_g_on_pass2_rejected(
+        self, frame_paths,
+    ) -> None:
+        """_stamp_meta also runs when pass-2 is attempted-but-rejected
+        (low-confidence or empty pool). The pass-1 result's tare must
+        still survive that reconstruction.
+
+        This exercises a different ``_stamp_meta`` callsite than the
+        high-confidence test — pass-1 has tare AND fallback_pass_used
+        gets stamped to False, so it covers the
+        ``fallback_pass_attempted=True, fallback_pass_used=False``
+        branch.
+        """
+        before, after = frame_paths
+        # Pass-1 returns low confidence with a tare estimate.
+        # Pass-2 returns gatorade but with low confidence — gets rejected.
+        # Result: pass-1 wins, but flows through _stamp_meta with
+        # extra audit fields.
+        client = _FakeClient(
+            [
+                _success_response_with_tare(
+                    item_id="prod_pass1", confidence=0.3, tare=15.0,
+                ),
+                _success_response(item_id="prod_gatorade", confidence=0.5),
+            ]
+        )
+        source = _StubSource(fallback_pool=[_gatorade()])
+        ctx = ClassifierContext(source=source, anthropic_client=client)
+
+        result = classify_event_with_fallback(
+            _add_event(before, after), ctx, fallback_enabled=True,
+        )
+
+        # Sanity: pass-2 ran but lost.
+        assert result.item_id == "prod_pass1"
+        assert result.meta["fallback_pass_attempted"] is True
+        assert result.meta["fallback_pass_used"] is False
+        # Pass-1's tare must survive _stamp_meta reconstruction.
+        assert result.estimated_tare_g == pytest.approx(15.0), (
+            "_stamp_meta (pass-2-rejected branch) stripped "
+            "estimated_tare_g — use dataclasses.replace so new fields "
+            "thread through automatically."
+        )

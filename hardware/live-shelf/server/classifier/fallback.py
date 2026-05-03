@@ -38,6 +38,7 @@ Design constraints:
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from typing import Any, Optional
 
@@ -352,16 +353,12 @@ def classify_event_with_fallback(
         "fallback_pass2_item_id": pass2.item_id,
         "fallback_pass2_confidence": pass2_conf,
     }
-    return ClassificationResult(
-        item_id=pass2.item_id,
-        action=pass2.action,
-        confidence=pass2.confidence,
-        reasoning=pass2.reasoning,
-        secondary_candidates=pass2.secondary_candidates,
-        multi_match=pass2.multi_match,
-        candidate_pool_used=pass2.candidate_pool_used,
-        meta=merged_meta,
-    )
+    # Use dataclasses.replace so any field added to ClassificationResult
+    # later (e.g. estimated_tare_g — Task 7+8) threads through
+    # automatically. Manual per-field reconstruction was the bug — it
+    # silently dropped any new field whenever this site rebuilt the
+    # result.
+    return dataclasses.replace(pass2, meta=merged_meta)
 
 
 def _stamp_meta(
@@ -374,18 +371,16 @@ def _stamp_meta(
     instance. Used by the early-out branches to ensure every result
     coming out of this orchestrator carries the audit fields the
     caller's logging path expects.
+
+    Uses :func:`dataclasses.replace` rather than per-field enumeration
+    so any field added to ``ClassificationResult`` later (e.g.
+    ``estimated_tare_g`` — Task 7+8 catch-all auto-import) threads
+    through automatically. The previous manual-reconstruction
+    implementation silently stripped new fields, which was caught by
+    the Task 7 reviewer as a regression risk.
     """
     merged = {**(result.meta or {}), **fields}
-    return ClassificationResult(
-        item_id=result.item_id,
-        action=result.action,
-        confidence=result.confidence,
-        reasoning=result.reasoning,
-        secondary_candidates=result.secondary_candidates,
-        multi_match=result.multi_match,
-        candidate_pool_used=result.candidate_pool_used,
-        meta=merged,
-    )
+    return dataclasses.replace(result, meta=merged)
 
 
 __all__ = [
