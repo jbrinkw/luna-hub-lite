@@ -750,6 +750,119 @@ export type Database = {
           },
         ]
       }
+      scan_transactions: {
+        Row: {
+          applied_at: string | null
+          applied_cart_item_id: string | null
+          applied_food_log_id: string | null
+          applied_lot_id: string | null
+          barcode: string
+          created_at: string
+          error_msg: string | null
+          logical_date: string
+          mode: string
+          nutrition_snapshot: Json | null
+          pi_event_id: string | null
+          product_id: string | null
+          qty: number | null
+          source: string
+          status: string
+          transaction_id: string
+          unit: string | null
+          user_id: string
+        }
+        Insert: {
+          applied_at?: string | null
+          applied_cart_item_id?: string | null
+          applied_food_log_id?: string | null
+          applied_lot_id?: string | null
+          barcode: string
+          created_at?: string
+          error_msg?: string | null
+          logical_date: string
+          mode: string
+          nutrition_snapshot?: Json | null
+          pi_event_id?: string | null
+          product_id?: string | null
+          qty?: number | null
+          source: string
+          status: string
+          transaction_id?: string
+          unit?: string | null
+          user_id: string
+        }
+        Update: {
+          applied_at?: string | null
+          applied_cart_item_id?: string | null
+          applied_food_log_id?: string | null
+          applied_lot_id?: string | null
+          barcode?: string
+          created_at?: string
+          error_msg?: string | null
+          logical_date?: string
+          mode?: string
+          nutrition_snapshot?: Json | null
+          pi_event_id?: string | null
+          product_id?: string | null
+          qty?: number | null
+          source?: string
+          status?: string
+          transaction_id?: string
+          unit?: string | null
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "scan_transactions_applied_cart_item_id_fkey"
+            columns: ["applied_cart_item_id"]
+            isOneToOne: false
+            referencedRelation: "shopping_list"
+            referencedColumns: ["cart_item_id"]
+          },
+          {
+            foreignKeyName: "scan_transactions_applied_food_log_id_fkey"
+            columns: ["applied_food_log_id"]
+            isOneToOne: false
+            referencedRelation: "food_logs"
+            referencedColumns: ["log_id"]
+          },
+          {
+            foreignKeyName: "scan_transactions_applied_lot_id_fkey"
+            columns: ["applied_lot_id"]
+            isOneToOne: false
+            referencedRelation: "stock_lots"
+            referencedColumns: ["lot_id"]
+          },
+          {
+            foreignKeyName: "scan_transactions_product_id_fkey"
+            columns: ["product_id"]
+            isOneToOne: false
+            referencedRelation: "products"
+            referencedColumns: ["product_id"]
+          },
+        ]
+      }
+      scanner_state: {
+        Row: {
+          last_active_mode: string
+          locked_mode: string | null
+          updated_at: string
+          user_id: string
+        }
+        Insert: {
+          last_active_mode?: string
+          locked_mode?: string | null
+          updated_at?: string
+          user_id: string
+        }
+        Update: {
+          last_active_mode?: string
+          locked_mode?: string | null
+          updated_at?: string
+          user_id?: string
+        }
+        Relationships: []
+      }
       shelf_event_log: {
         Row: {
           after_image_url: string | null
