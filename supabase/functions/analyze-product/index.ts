@@ -475,7 +475,7 @@ Deno.serve(async (req) => {
     // soft-deleted rows may still exist and would otherwise short-circuit
     // a rescan to the tombstone (the row's macros would be reused and
     // the AI re-import would never run).
-    const { data: existing } = await supabase
+    const { data: existing } = await (supabase as any)
       .schema('chefbyte')
       .from('products')
       .select('*')
@@ -637,7 +637,7 @@ Deno.serve(async (req) => {
       // index on (user_id, barcode) WHERE deleted_at IS NULL — a race
       // between two concurrent Pi scans would still be safe (the second
       // INSERT would 23505 and we re-query).
-      const { data: inserted, error: insErr } = await supabase
+      const { data: inserted, error: insErr } = await (supabase as any)
         .schema('chefbyte')
         .from('products')
         .insert(productPayload)
@@ -647,7 +647,7 @@ Deno.serve(async (req) => {
         // Most likely cause: unique-constraint clash from a concurrent
         // insert. Re-query so the caller still gets a product_id.
         console.warn('analyze-product: auto-insert failed, re-querying', insErr.message);
-        const { data: requeried } = await supabase
+        const { data: requeried } = await (supabase as any)
           .schema('chefbyte')
           .from('products')
           .select('product_id')
