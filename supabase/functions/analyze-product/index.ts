@@ -359,6 +359,21 @@ async function normalizeWithAI(
   }
 }
 
+/**
+ * Constant-time(-ish) string compare for the service-role bearer check.
+ * Length first (cheap), then byte equality. Token leaks via timing aren't a
+ * realistic threat at the edge runtime layer, but the comparison costs nothing
+ * and matches the pattern used in invariant-monitor.
+ */
+function timingSafeEqual(a: string, b: string): boolean {
+  if (a.length === 0 || a.length !== b.length) return false;
+  let mismatch = 0;
+  for (let i = 0; i < a.length; i += 1) {
+    mismatch |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  }
+  return mismatch === 0;
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders });
@@ -368,28 +383,71 @@ Deno.serve(async (req) => {
   }
 
   try {
-    // JWT auth
-    const authHeader = req.headers.get('Authorization');
-    if (!authHeader?.startsWith('Bearer ')) {
+    const authHeader = req.headers.get('Authorization') ?? '';
+    if (!authHeader.startsWith('Bearer ')) {
       return jsonResponse({ error: 'Missing authorization header' }, 401);
     }
 
-    const supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
-      global: { headers: { Authorization: authHeader } },
-    });
-
-    const {
-      data: { user },
-      error: authError,
-    } = await supabase.auth.getUser();
-    if (authError || !user) {
-      return jsonResponse({ error: 'Invalid token' }, 401);
+    // Parse body BEFORE resolving auth — service-role callers must supply
+    // user_id in the body since there's no auth.uid() available, so we need
+    // the body parsed before deciding which auth path applies.
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
+      return jsonResponse({ error: 'Invalid JSON body' }, 400);
     }
-
-    // Parse body
-    const { barcode, placeholder_candidates } = await req.json();
+    const { barcode, placeholder_candidates } = body ?? {};
     if (!barcode) {
       return jsonResponse({ error: 'Barcode is required' }, 400);
+    }
+
+    // ─── Dual-auth resolution ───────────────────────────────────────
+    // Browser/web flow: JWT in Authorization header, user resolved via
+    //   supabase.auth.getUser() (UNCHANGED behavior).
+    // Server→server flow: SERVICE_ROLE_KEY as the bearer + explicit
+    //   body.user_id. Pattern matches the existing apply_shelf_event_admin /
+    //   consume_product_admin precedent — service-role caller declares which
+    //   user this write is for, since auth.uid() is unavailable.
+    //
+    // Used by shelf-ingest's /barcode-scan handler when it forwards an
+    // unknown Pi USB barcode. shelf-ingest authenticates the device via
+    // x-api-key, so it knows the user_id; it then invokes analyze-product
+    // with its service-role client, passing user_id in the body.
+    const bearerToken = authHeader.slice('Bearer '.length).trim();
+    const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '';
+    const isServiceRoleCall = serviceRoleKey.length > 0 && timingSafeEqual(bearerToken, serviceRoleKey);
+
+    let userId: string;
+    let supabase: ReturnType<typeof createClient>;
+
+    if (isServiceRoleCall) {
+      // Service-role caller MUST supply user_id in the body — no auth.uid()
+      // is available, so the trust is "shelf-ingest already authenticated
+      // the Pi via x-api-key and knows whose barcode this is".
+      const bodyUserId = body?.user_id;
+      if (typeof bodyUserId !== 'string' || bodyUserId.length === 0) {
+        return jsonResponse({ error: 'service-role caller must supply user_id in body' }, 400);
+      }
+      userId = bodyUserId;
+      // Service-role-scoped client. RLS bypassed; the userId-scoped filters
+      // we apply below (e.g., .eq('user_id', userId)) are now the only
+      // tenant boundary. Every DB write uses userId explicitly.
+      supabase = createClient(Deno.env.get('SUPABASE_URL')!, serviceRoleKey);
+    } else {
+      // Browser caller. Anon-keyed client with the user's JWT relayed,
+      // matching the original behavior (RLS still applies).
+      supabase = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const {
+        data: { user },
+        error: authError,
+      } = await supabase.auth.getUser();
+      if (authError || !user) {
+        return jsonResponse({ error: 'Invalid token' }, 401);
+      }
+      userId = user.id;
     }
 
     // Validate and sanitize placeholder_candidates. Accept only well-formed
@@ -421,7 +479,7 @@ Deno.serve(async (req) => {
       .schema('chefbyte')
       .from('products')
       .select('*')
-      .eq('user_id', user.id)
+      .eq('user_id', userId)
       .eq('barcode', barcodeStr)
       .is('deleted_at', null)
       .single();
@@ -472,7 +530,7 @@ Deno.serve(async (req) => {
 
     // Check daily quota (100/user/day). OFF call succeeded, so any
     // subsequent work genuinely reflects a quota-consumed analysis.
-    const withinQuota = await checkQuota(supabase, user.id);
+    const withinQuota = await checkQuota(supabase, userId);
     if (!withinQuota) {
       return jsonResponse({ error: 'Limit reached — enter product manually' }, 429);
     }
@@ -544,12 +602,79 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ─── Service-role: auto-create the product ───────────────────────
+    // The browser flow returns the suggestion + OFF blob and lets the
+    // ScannerPage UI confirm creation. The service-role flow has no UI —
+    // shelf-ingest's /barcode-scan handler forwards an unknown Pi USB
+    // barcode and expects a product row to exist on success so the
+    // downstream execute_scan_action call can mint a stock_lot. Auto-create
+    // here, scoped to the resolved userId. Failure is non-fatal (the response
+    // still carries the suggestion) but is reported via `auto_created=false`
+    // so the caller can fall back to its errored-transaction path.
+    let autoCreatedProductId: string | null = null;
+    let autoCreateError: string | null = null;
+    if (isServiceRoleCall && suggestion) {
+      const productPayload: Record<string, unknown> = {
+        user_id: userId,
+        barcode: barcodeStr,
+        name: (suggestion as any).name,
+        servings_per_container: (suggestion as any).servings_per_container ?? 1,
+        calories_per_serving: (suggestion as any).calories_per_serving ?? 0,
+        carbs_per_serving: (suggestion as any).carbs_per_serving ?? 0,
+        protein_per_serving: (suggestion as any).protein_per_serving ?? 0,
+        fat_per_serving: (suggestion as any).fat_per_serving ?? 0,
+        default_shelf_life_days: (suggestion as any).default_shelf_life_days ?? null,
+        default_expiry_days: (suggestion as any).default_expiry_days ?? null,
+        is_distinct_unit_item: (suggestion as any).is_distinct_unit_item ?? false,
+        default_recipe_unit: (suggestion as any).default_recipe_unit ?? 'serving',
+        net_weight_g: (suggestion as any).net_weight_g ?? null,
+        visual_unit_label: (suggestion as any).visual_unit_label ?? null,
+        visual_units_per_serving: (suggestion as any).visual_units_per_serving ?? null,
+        display_by_weight: (suggestion as any).display_by_weight ?? false,
+        description: (suggestion as any).description ?? null,
+      };
+      // Service-role path bypasses RLS, but products has a unique partial
+      // index on (user_id, barcode) WHERE deleted_at IS NULL — a race
+      // between two concurrent Pi scans would still be safe (the second
+      // INSERT would 23505 and we re-query).
+      const { data: inserted, error: insErr } = await supabase
+        .schema('chefbyte')
+        .from('products')
+        .insert(productPayload)
+        .select('product_id')
+        .single();
+      if (insErr) {
+        // Most likely cause: unique-constraint clash from a concurrent
+        // insert. Re-query so the caller still gets a product_id.
+        console.warn('analyze-product: auto-insert failed, re-querying', insErr.message);
+        const { data: requeried } = await supabase
+          .schema('chefbyte')
+          .from('products')
+          .select('product_id')
+          .eq('user_id', userId)
+          .eq('barcode', barcodeStr)
+          .is('deleted_at', null)
+          .maybeSingle();
+        autoCreatedProductId = requeried?.product_id ?? null;
+        if (!autoCreatedProductId) {
+          autoCreateError = insErr.message;
+        }
+      } else {
+        autoCreatedProductId = inserted?.product_id ?? null;
+      }
+    }
+
     return jsonResponse({
       source: 'ai',
       suggestion,
       matched_placeholder_id: matchedPlaceholderId,
       ai_degraded: aiDegradedReason !== null,
       ai_reason: aiDegradedReason,
+      // Service-role auto-create result (null on browser path or on
+      // service-role failure). Browser flow ignores these fields.
+      product_id: autoCreatedProductId,
+      auto_created: autoCreatedProductId !== null,
+      auto_create_error: autoCreateError,
       off: {
         product_name: offProduct.product_name,
         brands: offProduct.brands,

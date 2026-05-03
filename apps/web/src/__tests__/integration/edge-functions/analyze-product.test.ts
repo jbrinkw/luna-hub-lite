@@ -9,7 +9,7 @@
  * via supabase.auth.getUser(). Error responses use {error: "..."} format.
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { adminClient, SUPABASE_URL } from '../../setup.integration';
+import { adminClient, SUPABASE_URL, getFunctionRuntimeServiceRoleKey } from '../../setup.integration';
 import { createTestUser, cleanupUser } from '../../test-helpers';
 
 const EDGE_URL = `${SUPABASE_URL}/functions/v1/analyze-product`;
@@ -752,4 +752,159 @@ describe('Analyze-Product Edge Function — failure paths', () => {
     expect(afterRows![0].is_placeholder).toBe(false);
     expect(afterRows![0].name).toBe('Resurrected Product');
   }, 15_000);
+});
+
+/**
+ * ─── Dual-auth (I-Cloud-4) ──────────────────────────────────────────
+ *
+ * analyze-product accepts two auth shapes:
+ *   1. JWT (browser) — Authorization: Bearer <user-jwt>, user resolved via
+ *      supabase.auth.getUser(). Original behavior, MUST remain unchanged.
+ *   2. Service-role + body.user_id — Authorization: Bearer <SERVICE_ROLE_KEY>
+ *      + explicit body.user_id. Used by shelf-ingest's /barcode-scan handler
+ *      when it forwards an unknown Pi USB barcode (no JWT available because
+ *      the Pi authenticates the device via x-api-key, not user JWT).
+ *
+ * On the service-role path the function ALSO auto-creates a chefbyte.products
+ * row scoped to body.user_id so shelf-ingest's downstream execute_scan_action
+ * call has a product to mint a stock_lot against. The browser path remains
+ * read-only and lets the ScannerPage UI handle creation.
+ *
+ * The canned OFF mode (`x-test-off-mode: canned`) is used to keep these
+ * deterministic without a live OFF call — the auth resolution branch is the
+ * thing under test, not OFF / Anthropic.
+ */
+describe('Analyze-Product Edge Function — dual-auth (I-Cloud-4)', () => {
+  let userId: string;
+  // The function's runtime SUPABASE_SERVICE_ROLE_KEY differs from .env.test
+  // in local supabase CLI ≤ 2.75 (HS256 demo key vs. ES256 in .env.test).
+  // Byte-compare detection inside the function uses the runtime key, so the
+  // test must too.
+  const FUNCTION_SERVICE_ROLE_KEY = getFunctionRuntimeServiceRoleKey();
+
+  beforeAll(async () => {
+    const user = await createTestUser('ap-dual');
+    userId = user.userId;
+    const { error: actErr } = await (user.client as any).schema('hub').rpc('activate_app', { p_app_name: 'chefbyte' });
+    if (actErr) throw new Error(`activate_app failed: ${actErr.message}`);
+  });
+
+  afterAll(async () => {
+    await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('user_id', userId);
+    await (adminClient as any).schema('chefbyte').from('products').delete().eq('user_id', userId);
+    await (adminClient as any).schema('chefbyte').from('user_config').delete().eq('user_id', userId);
+    await cleanupUser(userId);
+  });
+
+  it('rejects service-role bearer without body.user_id with 400', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${FUNCTION_SERVICE_ROLE_KEY}`,
+        'x-test-off-mode': 'canned',
+      },
+      body: JSON.stringify({ barcode: 'DUALAUTHNOUSERID' }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/user_id/i);
+  });
+
+  it('rejects service-role bearer with non-string user_id with 400', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${FUNCTION_SERVICE_ROLE_KEY}`,
+        'x-test-off-mode': 'canned',
+      },
+      body: JSON.stringify({ barcode: 'DUALAUTHBADUSERID', user_id: 123 }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/user_id/i);
+  });
+
+  it('service-role + body.user_id auto-creates a product scoped to that user', async () => {
+    // Reset quota so this test exercises the full auto-create path.
+    await (adminClient as any)
+      .schema('chefbyte')
+      .from('user_config')
+      .delete()
+      .eq('user_id', userId)
+      .eq('key', 'analyze_quota');
+
+    const barcode = 'DUALAUTHCANNED01';
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${FUNCTION_SERVICE_ROLE_KEY}`,
+        // Force Anthropic timeout simulates the soft-degraded path. We
+        // assert auto-create works ONLY when a suggestion is produced;
+        // separately, we exercise the suggestion path below.
+        'x-test-off-mode': 'canned',
+      },
+      body: JSON.stringify({ barcode, user_id: userId }),
+    });
+
+    // Whether the live ANTHROPIC_API_KEY is configured or not, the OFF data
+    // is canned and a 200 must be returned. If suggestion is non-null the
+    // service-role path auto-creates the product.
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.source).toBe('ai');
+    expect(body.off).toBeDefined();
+
+    if (body.suggestion) {
+      // auto_created field is the dual-auth contract surface.
+      expect(body.auto_created).toBe(true);
+      expect(typeof body.product_id).toBe('string');
+      // Verify the product row landed in the DB scoped to the supplied user_id.
+      const { data: row } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .select('product_id, user_id, barcode, name')
+        .eq('barcode', barcode)
+        .single();
+      expect(row).not.toBeNull();
+      expect(row.product_id).toBe(body.product_id);
+      expect(row.user_id).toBe(userId);
+      expect(row.barcode).toBe(barcode);
+      expect(typeof row.name).toBe('string');
+      expect(row.name.length).toBeGreaterThan(0);
+    } else {
+      // ANTHROPIC_API_KEY missing or AI returned null. auto_created should
+      // be false in that case (no suggestion → nothing to insert).
+      expect(body.auto_created).toBe(false);
+      expect(body.product_id).toBeNull();
+    }
+  }, 30_000);
+
+  it('rejects an unrelated bearer token with 401 (not service-role, not a valid JWT)', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: 'Bearer not-a-jwt-and-not-the-service-role-key',
+        'x-test-off-mode': 'canned',
+      },
+      body: JSON.stringify({ barcode: 'DUALAUTHBADBEARER', user_id: userId }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toMatch(/invalid token/i);
+  });
+
+  it('regression: JWT path still rejects missing-Authorization request with 401', async () => {
+    const res = await fetch(EDGE_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ barcode: 'DUALAUTHJWTREGRESSION' }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toMatch(/missing authorization/i);
+  });
 });

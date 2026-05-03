@@ -1283,30 +1283,42 @@ async function handleBarcodeScan(req: Request, supabase: SupabaseClient): Promis
     .maybeSingle();
   let productId: string | null = productQ.data?.product_id ?? null;
 
-  // Unknown barcode → invoke analyze-product. analyze-product requires
-  // a user JWT (verify_jwt=true), so the service-role-scoped invoke
-  // call may fail in environments without a forwarded JWT (test +
-  // Pi-only paths). On any error we fall through to the errored-
-  // transaction log so the Pi sees a stable response shape.
+  // Unknown barcode → invoke analyze-product. analyze-product accepts a
+  // service-role bearer + explicit user_id (the dual-auth precedent matches
+  // apply_shelf_event_admin / consume_product_admin) and, on the service-
+  // role path, auto-creates the product so the downstream execute_scan_action
+  // call can mint a stock_lot. The supabase client here is service-role-
+  // scoped, so the invoke call sends Authorization: Bearer <SERVICE_ROLE_KEY>
+  // automatically; we just have to declare the user_id in the body.
+  // On any failure we fall through to the errored-transaction log so the Pi
+  // sees a stable response shape.
   if (!productId) {
     let analyzeError: string | null = null;
     try {
       const analyzeRes = await supabase.functions.invoke('analyze-product', {
-        body: { barcode },
+        body: { barcode, user_id: userId },
       });
       if (analyzeRes.error) {
         const msg = (analyzeRes.error as { message?: string }).message ?? 'unknown error';
         analyzeError = `analyze-product: ${msg}`;
       } else {
-        const re = await supabase
-          .schema('chefbyte')
-          .from('products')
-          .select('product_id')
-          .eq('user_id', userId)
-          .eq('barcode', barcode)
-          .is('deleted_at', null)
-          .maybeSingle();
-        productId = re.data?.product_id ?? null;
+        // Prefer the product_id returned by analyze-product's service-role
+        // auto-create; fall back to a re-query if the response is missing
+        // the field (e.g., older fn deployment that doesn't return it).
+        const fnProductId = (analyzeRes.data as { product_id?: string | null } | null)?.product_id ?? null;
+        if (fnProductId) {
+          productId = fnProductId;
+        } else {
+          const re = await supabase
+            .schema('chefbyte')
+            .from('products')
+            .select('product_id')
+            .eq('user_id', userId)
+            .eq('barcode', barcode)
+            .is('deleted_at', null)
+            .maybeSingle();
+          productId = re.data?.product_id ?? null;
+        }
       }
     } catch (e) {
       analyzeError = `analyze-product: ${(e as Error).message ?? String(e)}`;
