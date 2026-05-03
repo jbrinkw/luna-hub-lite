@@ -461,6 +461,46 @@ class CloudClient:
             {"product_id": product_id, "tare_weight_g": float(tare_g)},
         )
 
+    def post_barcode_scan(
+        self,
+        *,
+        barcode: str,
+        pi_event_id: str,
+        mode: Optional[str] = None,
+        qty: Optional[float] = None,
+        unit: Optional[str] = None,
+    ) -> dict[str, Any]:
+        """POST ``/barcode-scan`` with the user's USB-scanner barcode.
+
+        Forwards a barcode decoded by the Pi's HID listener (Task 7) to
+        the cloud's ``shelf-ingest`` edge function which routes it through
+        the same idempotent transaction pipeline used by the in-app
+        scanner. ``pi_event_id`` is a Pi-generated UUID used as the
+        idempotency key — re-posting the same id returns the original
+        ``transaction_id`` rather than producing a duplicate row.
+
+        ``mode``, ``qty`` and ``unit`` are optional consume-mode fields
+        (e.g. ``mode='consume_macros', qty=1.5, unit='serving'``); they
+        are omitted from the payload entirely when unset so the edge
+        function's defaults apply.
+
+        Returns the cloud response as a dict (typically
+        ``{transaction_id, status, ...}``). Raises :class:`CloudError`
+        on any non-2xx — callers (HID worker loop) are expected to log
+        and either retry or drop the event per their policy.
+        """
+        body: dict[str, Any] = {
+            "barcode": barcode,
+            "pi_event_id": pi_event_id,
+        }
+        if mode is not None:
+            body["mode"] = mode
+        if qty is not None:
+            body["qty"] = qty
+        if unit is not None:
+            body["unit"] = unit
+        return self.post("/barcode-scan", body)
+
     def push_product_state(
         self,
         *,
