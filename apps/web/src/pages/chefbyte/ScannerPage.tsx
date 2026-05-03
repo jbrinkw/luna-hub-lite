@@ -530,6 +530,14 @@ export function ScannerPage() {
 
           let analyzedProduct: any = null;
           let hardAiError: { message: string; reason: string } | null = null;
+          // Captures any inner-try failure (write error from
+          // INSERT/UPDATE/revive, or a thrown exception) so we can surface
+          // it as a red queue-row message instead of swallowing silently.
+          // Without this, e.g. a unique-constraint collision or RLS failure
+          // would leave the queue row stuck at "pending" amber with no
+          // actionable signal — and the user sees an empty inventory with
+          // no idea why.
+          let inlineErr: string | null = null;
           try {
             // Fetch the user's placeholder products so the AI can match by
             // name/description in the same call — zero extra HTTP requests.
@@ -683,17 +691,19 @@ export function ScannerPage() {
                 const upgradeTargetId = existingPlaceholderId ?? aiMatchedPlaceholderId ?? null;
 
                 let resultRow: any = null;
+                let writeErr: { message: string } | null = null;
                 if (upgradeTargetId) {
                   // Upgrade the placeholder row instead of creating a duplicate —
                   // preserves all FK references (stock lots, food logs, recipe
                   // ingredients, meal plan entries) referencing the placeholder id.
-                  const { data: updated } = await chefbyte()
+                  const { data: updated, error: updErr } = await chefbyte()
                     .from('products')
                     .update(productFields)
                     .eq('product_id', upgradeTargetId)
                     .select(returning)
                     .single();
                   resultRow = updated;
+                  writeErr = updErr ?? null;
 
                   // Surface the AI name-match promotion to the user so they
                   // know the placeholder was promoted rather than a new row
@@ -741,29 +751,37 @@ export function ScannerPage() {
                     .not('deleted_at', 'is', null)
                     .maybeSingle();
                   if (tombstoned) {
-                    const { data: revived } = await chefbyte()
+                    const { data: revived, error: revErr } = await chefbyte()
                       .from('products')
                       .update({ ...productFields, deleted_at: null })
                       .eq('product_id', (tombstoned as { product_id: string }).product_id)
                       .select(returning)
                       .single();
                     resultRow = revived;
+                    writeErr = revErr ?? null;
                   } else {
-                    const { data: created } = await chefbyte()
+                    const { data: created, error: insErr } = await chefbyte()
                       .from('products')
                       .insert({ user_id: user.id, ...productFields })
                       .select(returning)
                       .single();
                     resultRow = created;
+                    writeErr = insErr ?? null;
                   }
                 }
                 if (resultRow) {
                   analyzedProduct = resultRow;
+                } else if (writeErr) {
+                  inlineErr = `Product write failed: ${writeErr.message}`;
                 }
               }
             }
-            // eslint-disable-next-line @luna/anti-lazy/no-empty-catch-no-comment -- reason: analyze-product edge function call failed — fall through to placeholder product to avoid blocking scan queue
-          } catch {}
+          } catch (err: any) {
+            // Capture any thrown exception inside the analyze-product +
+            // product-write block so it surfaces as a red queue row instead
+            // of disappearing silently.
+            inlineErr = err?.message ? `Scan pipeline error: ${err.message}` : 'Scan pipeline error';
+          }
 
           if (hardAiError) {
             // Surface the actionable error in the queue — explicitly do NOT
@@ -779,6 +797,16 @@ export function ScannerPage() {
                       errorMsg: hardAiError!.message,
                     }
                   : item,
+              ),
+            );
+          } else if (inlineErr && !analyzedProduct) {
+            // Inner-block write or thrown exception failed and we don't have
+            // a product row to act on. Surface the captured message — without
+            // this the row used to stay at "pending" amber and the user had
+            // no signal that the side effects didn't happen.
+            setQueue((prev) =>
+              prev.map((item) =>
+                item.id === tempId ? { ...item, status: 'error', name: inlineErr!, errorMsg: inlineErr! } : item,
               ),
             );
           } else if (analyzedProduct) {
@@ -1605,6 +1633,20 @@ export function ScannerPage() {
                       : 'Consumed'}{' '}
                   {item.quantity} {item.unit === 'container' ? `container${item.quantity === 1 ? '' : 's'}` : item.unit}
                 </div>
+                {/* errorMsg surfaces the actual reason a row went red.
+                    Without this the queue row would say "Added to stock
+                    1 container" even when executeAction returned an error
+                    like "No location configured" — the row coloring
+                    changed but the user had no signal that the side
+                    effect (stock_lot insert) didn't actually happen. */}
+                {item.status === 'error' && item.errorMsg && (
+                  <div
+                    data-testid={`item-error-${item.id}`}
+                    className="text-[0.8em] text-danger-text mt-0.5 break-words"
+                  >
+                    {item.errorMsg}
+                  </div>
+                )}
               </div>
             ))}
           </div>
