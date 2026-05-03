@@ -268,14 +268,27 @@ async function normalizeWithAI(
           display_by_weight: { type: 'boolean' },
           matched_placeholder_id: { type: ['string', 'null'] },
         },
+        // Every field the SERVER consumes (DB write, downstream UI logic) is
+        // required here. Nullable fields stay nullable (e.g. shelf-stable
+        // products legitimately have no expiry) but the AI must always emit
+        // the KEY — null vs missing is the difference between "the model
+        // thought about it and decided null is correct" vs "the model
+        // forgot the field entirely". Forces deliberate output every call.
+        // description and matched_placeholder_id are the only true optionals
+        // (purely cosmetic / context-conditional respectively).
         required: [
           'name',
           'servings_per_container',
           'carbs_per_serving',
           'protein_per_serving',
           'fat_per_serving',
+          'default_shelf_life_days',
+          'default_expiry_days',
           'is_distinct_unit_item',
           'default_recipe_unit',
+          'net_weight_g',
+          'visual_unit_label',
+          'visual_units_per_serving',
           'display_by_weight',
         ],
       },

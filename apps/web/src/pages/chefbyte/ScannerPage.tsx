@@ -951,11 +951,28 @@ export function ScannerPage() {
 
     switch (actionMode) {
       case 'purchase': {
-        const locId = defaultLocationId;
+        let locId = defaultLocationId ?? null;
         if (!locId) {
-          // No locations — can't add stock. Surface this as an error so the
-          // queue row turns red rather than silently appearing successful.
-          return { undoInfo: undefined, error: 'No location configured. Add one in Settings.' };
+          // No locations configured yet — auto-create a "Pantry" so the
+          // first-time scan doesn't dead-end. Earlier we returned a red
+          // "No location configured" error which left the user staring at
+          // the catalog with no stock_lot and no clear next step. The
+          // location row carries ON DELETE CASCADE from auth.users so a
+          // user delete cleans it up. queryKeys.locations gets invalidated
+          // so the cached null becomes the new id immediately.
+          const { data: created, error: createErr } = await chefbyte()
+            .from('locations')
+            .insert({ user_id: user.id, name: 'Pantry' })
+            .select('location_id')
+            .single();
+          if (createErr || !created) {
+            return {
+              undoInfo: undefined,
+              error: `Failed to create default Pantry location: ${createErr?.message ?? 'unknown'}`,
+            };
+          }
+          locId = (created as { location_id: string }).location_id;
+          queryClient.invalidateQueries({ queryKey: queryKeys.locations(user.id) });
         }
 
         // Auto-populate expires_on from product.default_shelf_life_days
