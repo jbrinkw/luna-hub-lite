@@ -24,26 +24,18 @@ import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 describe('shelf-ingest corsHeaders constant', () => {
-  const source = readFileSync(
-    resolve(__dirname, '../../../../../../supabase/functions/shelf-ingest/index.ts'),
-    'utf8',
-  );
+  const source = readFileSync(resolve(__dirname, '../../../../../../supabase/functions/shelf-ingest/index.ts'), 'utf8');
 
   // Match the literal string assigned to Access-Control-Allow-Headers.
   // The constant is declared once near the top of the file. A regex
   // beats parsing-via-AST here because the file has Deno-specific
   // imports that break ts-node and vite's ESM loader.
-  const allowHeadersMatch = source.match(
-    /['"]Access-Control-Allow-Headers['"]\s*:\s*['"`]([^'"`]+?)['"`]/m,
-  );
+  const allowHeadersMatch = source.match(/['"]Access-Control-Allow-Headers['"]\s*:\s*['"`]([^'"`]+?)['"`]/m);
   // Fallback for the multi-line string literal style we use:
   //   'Access-Control-Allow-Headers':
   //     'authorization, ...',
   const allowHeadersMultilineMatch =
-    allowHeadersMatch ??
-    source.match(
-      /['"]Access-Control-Allow-Headers['"]\s*:\s*\n?\s*['"`]([^'"`]+?)['"`]/m,
-    );
+    allowHeadersMatch ?? source.match(/['"]Access-Control-Allow-Headers['"]\s*:\s*\n?\s*['"`]([^'"`]+?)['"`]/m);
 
   it('declares an Access-Control-Allow-Headers value', () => {
     expect(allowHeadersMultilineMatch).not.toBeNull();
