@@ -1946,7 +1946,93 @@ async function handleHeartbeat(supabase: SupabaseClient, device: Device, body: a
   return jsonResponse({ ok: true });
 }
 
+/**
+ * POST /scan-transaction/:transaction_id/void — reverse an applied scan.
+ *
+ * Browser-JWT route (no x-api-key path). The Settings → Scanner
+ * Transactions tab calls this when the user taps "Void" on an audit
+ * row. Per-mode reversal is delegated to private.void_scan_transaction
+ * (purchase deletes the stock_lot, consume_macros deletes the food_log,
+ * shopping deletes the cart row, consume_no_macros only flips status).
+ *
+ * Auth + ownership:
+ *   1. Resolve user from `Authorization: Bearer <jwt>`.
+ *   2. SELECT chefbyte.scan_transactions WHERE transaction_id = :id
+ *      AND user_id = auth.uid(). Missing → 404 (don't leak existence
+ *      across users).
+ *   3. RPC chefbyte.void_scan_transaction (PostgREST wrapper, since
+ *      private isn't on the API surface). Wrapper does NOT enforce
+ *      ownership — that's why step 2 is mandatory.
+ *
+ * Idempotency: private.void_scan_transaction is idempotent on
+ * already-voided rows (no-op return). Calling void twice → 200 both
+ * times; UI debounce isn't required.
+ *
+ * Response: { ok: true, transaction_id: <uuid> }.
+ */
+async function handleVoidScanTransaction(
+  req: Request,
+  supabase: SupabaseClient,
+  transactionId: string,
+): Promise<Response> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return jsonResponse({ error: 'unauthorized' }, 401);
+  }
+  const userClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const {
+    data: { user },
+    error: authError,
+  } = await userClient.auth.getUser();
+  if (authError || !user) {
+    return jsonResponse({ error: 'unauthorized' }, 401);
+  }
+
+  // Ownership gate: the wrapper RPC is service-role-impersonated and
+  // does not check user_id. We MUST verify the caller owns the row
+  // before invoking, or any authenticated user could void any row.
+  // 404 (not 403) on cross-user attempts so existence isn't leaked.
+  const { data: own, error: ownErr } = await supabase
+    .schema('chefbyte')
+    .from('scan_transactions')
+    .select('transaction_id')
+    .eq('user_id', user.id)
+    .eq('transaction_id', transactionId)
+    .maybeSingle();
+  if (ownErr) {
+    console.error('shelf-ingest: void ownership check failed', ownErr);
+    return jsonResponse({ error: ownErr.message }, 500);
+  }
+  if (!own) {
+    return jsonResponse({ error: 'not found' }, 404);
+  }
+
+  const { error: rpcErr } = await supabase
+    .schema('chefbyte')
+    .rpc('void_scan_transaction', { p_transaction_id: transactionId });
+  if (rpcErr) {
+    console.error('shelf-ingest: void_scan_transaction rpc failed', rpcErr);
+    return jsonResponse({ error: rpcErr.message }, 500);
+  }
+  return jsonResponse({ ok: true, transaction_id: transactionId });
+}
+
 // ─── Entrypoint ──────────────────────────────────────────────────────
+
+// Path-param route matcher for /scan-transaction/<uuid>/void. UUID
+// regex matches RFC 4122 form (36 chars, hex + dashes); the dispatcher
+// uses this BEFORE the leaf-based switch because the URL has trailing
+// segments after the transaction id and `leaf` only sees `void`.
+//
+// Supabase routes the function at /functions/v1/shelf-ingest/<subpath>,
+// so cleanedPath is the FULL pathname (e.g.
+// `/functions/v1/shelf-ingest/scan-transaction/<uuid>/void`). The regex
+// matches the trailing tail; an unanchored `\/scan-transaction` allows
+// the prefix to vary across hosting environments while still pinning
+// the UUID + `/void` suffix.
+const VOID_SCAN_TX_RE = /\/scan-transaction\/([0-9a-f-]{36})\/void$/i;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
@@ -1969,6 +2055,18 @@ Deno.serve(async (req) => {
     // inside the handler, mirroring livetrack-session/create).
     if (req.method === 'POST' && leaf === 'scanner-state') {
       return await handleScannerState(req, supabase);
+    }
+
+    // Path-param route: /scan-transaction/<uuid>/void. Browser-JWT only.
+    // Matched against cleanedPath because the leaf switch sees only the
+    // last segment (`void`), which would also match unrelated URLs.
+    // Must be evaluated BEFORE the x-api-key gate; the handler 401s on
+    // missing JWT.
+    if (req.method === 'POST') {
+      const voidMatch = cleanedPath.match(VOID_SCAN_TX_RE);
+      if (voidMatch) {
+        return await handleVoidScanTransaction(req, supabase, voidMatch[1]);
+      }
     }
 
     // Dual-auth route — accepts BOTH x-api-key (Pi) AND JWT (web). Must

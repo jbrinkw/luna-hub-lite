@@ -2393,4 +2393,223 @@ describe('shelf-ingest Edge Function', () => {
     const body = await res.json();
     expect(body.error).toBe('unauthorized');
   });
+
+  // ─── /scan-transaction/:id/void: browser-JWT undo ──────────────────
+  //
+  // Task 6: the Settings → Scanner Transactions tab calls this when
+  // the user taps "Void" on an audit row. Behaviour mirrors
+  // private.void_scan_transaction:
+  //   * purchase           → deletes applied_lot_id stock_lot
+  //   * consume_macros     → deletes applied_food_log_id food_log
+  //   * shopping           → deletes applied_cart_item_id cart row
+  //   * consume_no_macros  → no side-effect rollback (only flips status)
+  // Then flips status='voided' on the audit row.
+  // Idempotent on already-voided rows.
+
+  it('POST /scan-transaction/:id/void reverses applied_lot_id (purchase)', async () => {
+    const ctx = await provisionScannerUser('si-void-purchase');
+    try {
+      const barcode = 'VOID-PURCH-' + randomBytes(4).toString('hex').toUpperCase();
+      const { data: prod } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .insert({
+          user_id: ctx.userId,
+          name: 'Void Test Product',
+          barcode,
+          servings_per_container: 2,
+          calories_per_serving: 200,
+          net_weight_g: 500,
+        })
+        .select('product_id')
+        .single();
+
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: ctx.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+
+      // Apply a scan → mints a stock_lot + scan_transactions row.
+      const scanRes = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, pi_event_id: 'evt-' + crypto.randomUUID() }),
+      });
+      expect(scanRes.status).toBe(200);
+      const scanBody = await scanRes.json();
+      expect(scanBody.status).toBe('applied');
+      const transactionId: string = scanBody.transaction_id;
+      const lotId: string = scanBody.applied_lot_id;
+      expect(lotId).toBeTruthy();
+
+      // Sanity: the lot exists.
+      const { data: lotsBefore } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id')
+        .eq('user_id', ctx.userId)
+        .eq('product_id', prod.product_id);
+      expect(lotsBefore).toHaveLength(1);
+      expect(lotsBefore[0].lot_id).toBe(lotId);
+
+      // Void it.
+      const voidRes = await fetch(`${BASE_URL}/scan-transaction/${transactionId}/void`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${ctx.accessToken}`,
+        },
+      });
+      expect(voidRes.status).toBe(200);
+      const voidBody = await voidRes.json();
+      expect(voidBody.ok).toBe(true);
+      expect(voidBody.transaction_id).toBe(transactionId);
+
+      // The stock_lot was deleted.
+      const { data: lotsAfter } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id')
+        .eq('user_id', ctx.userId)
+        .eq('product_id', prod.product_id);
+      expect(lotsAfter).toHaveLength(0);
+
+      // The audit row flipped to voided.
+      const { data: tx } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('status, applied_lot_id')
+        .eq('transaction_id', transactionId)
+        .single();
+      expect(tx.status).toBe('voided');
+      // applied_lot_id reflects the FK ON DELETE SET NULL behaviour now
+      // that the lot row is gone.
+      expect(tx.applied_lot_id).toBeNull();
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /scan-transaction/:id/void returns 404 for cross-user attempt', async () => {
+    const userA = await provisionScannerUser('si-void-userA');
+    const userB = await provisionScannerUser('si-void-userB');
+    try {
+      // userA creates a transaction.
+      const barcode = 'VOID-XU-' + randomBytes(4).toString('hex').toUpperCase();
+      await (adminClient as any).schema('chefbyte').from('products').insert({
+        user_id: userA.userId,
+        name: 'Cross-User Product',
+        barcode,
+        servings_per_container: 1,
+        net_weight_g: 100,
+      });
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: userA.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+      const scanRes = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': userA.importKey },
+        body: JSON.stringify({ barcode, pi_event_id: 'evt-' + crypto.randomUUID() }),
+      });
+      expect(scanRes.status).toBe(200);
+      const scanBody = await scanRes.json();
+      const transactionId: string = scanBody.transaction_id;
+
+      // userB attempts to void userA's row → 404 (not 403; existence
+      // must not leak across users).
+      const voidRes = await fetch(`${BASE_URL}/scan-transaction/${transactionId}/void`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${userB.accessToken}`,
+        },
+      });
+      expect(voidRes.status).toBe(404);
+      const voidBody = await voidRes.json();
+      expect(voidBody.error).toBe('not found');
+
+      // userA's row remains 'applied' — the void was rejected.
+      const { data: tx } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('status, applied_lot_id')
+        .eq('transaction_id', transactionId)
+        .single();
+      expect(tx.status).toBe('applied');
+      expect(tx.applied_lot_id).toBeTruthy();
+    } finally {
+      await userB.cleanup();
+      await userA.cleanup();
+    }
+  });
+
+  it('POST /scan-transaction/:id/void is idempotent on already-voided rows', async () => {
+    const ctx = await provisionScannerUser('si-void-idem');
+    try {
+      const barcode = 'VOID-IDEM-' + randomBytes(4).toString('hex').toUpperCase();
+      await (adminClient as any).schema('chefbyte').from('products').insert({
+        user_id: ctx.userId,
+        name: 'Idem Void Product',
+        barcode,
+        servings_per_container: 1,
+        net_weight_g: 100,
+      });
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: ctx.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+
+      const scanRes = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, pi_event_id: 'evt-' + crypto.randomUUID() }),
+      });
+      expect(scanRes.status).toBe(200);
+      const scanBody = await scanRes.json();
+      const transactionId: string = scanBody.transaction_id;
+
+      const voidUrl = `${BASE_URL}/scan-transaction/${transactionId}/void`;
+      const voidHeaders = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${ctx.accessToken}`,
+      };
+
+      // First call: applied → voided.
+      const r1 = await fetch(voidUrl, { method: 'POST', headers: voidHeaders });
+      expect(r1.status).toBe(200);
+      const b1 = await r1.json();
+      expect(b1.ok).toBe(true);
+
+      // Second call: voided → voided (idempotent no-op in
+      // private.void_scan_transaction). Same 200 status.
+      const r2 = await fetch(voidUrl, { method: 'POST', headers: voidHeaders });
+      expect(r2.status).toBe(200);
+      const b2 = await r2.json();
+      expect(b2.ok).toBe(true);
+      expect(b2.transaction_id).toBe(transactionId);
+
+      // Still exactly one row, still status='voided'.
+      const { data: tx } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('status')
+        .eq('transaction_id', transactionId)
+        .single();
+      expect(tx.status).toBe('voided');
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /scan-transaction/:id/void rejects unauthenticated requests', async () => {
+    const fakeId = crypto.randomUUID();
+    const res = await fetch(`${BASE_URL}/scan-transaction/${fakeId}/void`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe('unauthorized');
+  });
 });
