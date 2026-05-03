@@ -171,7 +171,7 @@ CREATE TABLE chefbyte.scan_transactions (
   source TEXT NOT NULL CHECK (source IN ('web', 'pi_usb')),
   pi_event_id TEXT NULL,
   applied_lot_id UUID NULL REFERENCES chefbyte.stock_lots(lot_id) ON DELETE SET NULL,
-  applied_food_log_id UUID NULL REFERENCES chefbyte.food_logs(food_log_id) ON DELETE SET NULL,
+  applied_food_log_id UUID NULL REFERENCES chefbyte.food_logs(log_id) ON DELETE SET NULL,
   applied_cart_item_id UUID NULL REFERENCES chefbyte.shopping_list(cart_item_id) ON DELETE SET NULL,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   applied_at TIMESTAMPTZ NULL
@@ -398,7 +398,7 @@ BEGIN
         v_logical_date
       FROM chefbyte.products p
       WHERE p.product_id = p_product_id AND p.user_id = p_user_id
-      RETURNING food_log_id INTO v_food_log_id;
+      RETURNING log_id INTO v_food_log_id;
     END IF;
 
     RETURN jsonb_build_object(
@@ -556,7 +556,7 @@ BEGIN
     DELETE FROM chefbyte.stock_lots WHERE lot_id = v_lot_id;
   END IF;
   IF v_food_log_id IS NOT NULL THEN
-    DELETE FROM chefbyte.food_logs WHERE food_log_id = v_food_log_id;
+    DELETE FROM chefbyte.food_logs WHERE log_id = v_food_log_id;
   END IF;
   IF v_cart_item_id IS NOT NULL THEN
     DELETE FROM chefbyte.shopping_list WHERE cart_item_id = v_cart_item_id;
