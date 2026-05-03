@@ -96,6 +96,7 @@ export const invalidationRegistry: RegistryEntry[] = [
 
   // ── ChefByte ─────────────────────────────────────────────────────────────
   { key: 'products', kind: 'invalidated-by-mutation' },
+  { key: 'productMeasuredStates', kind: 'invalidated-by-mutation' },
   { key: 'stockLots', kind: 'invalidated-by-realtime' },
   { key: 'locations', kind: 'invalidated-by-realtime' },
   {

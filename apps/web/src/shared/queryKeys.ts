@@ -21,6 +21,7 @@ export const queryKeys = {
 
   // ChefByte
   products: (userId: string) => ['products', userId] as const,
+  productMeasuredStates: (userId: string) => ['product-measured-states', userId] as const,
   stockLots: (userId: string) => ['stock-lots', userId] as const,
   locations: (userId: string) => ['locations', userId] as const,
   defaultLocationId: (userId: string) => ['default-location-id', userId] as const,

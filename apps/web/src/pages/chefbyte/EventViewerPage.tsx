@@ -46,6 +46,7 @@ import { Alert } from '@/components/ui/Alert';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte, supabase } from '@/shared/supabase';
 import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { queryKeys } from '@/shared/queryKeys';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -361,6 +362,31 @@ export function EventViewerPage({ embedded = false }: { embedded?: boolean } = {
     staleTime: 60_000,
   });
 
+  // Per-product measured-state lookup driving the "Item is full" checkbox
+  // in the editor panel. Separate from the products list above because:
+  //   1. The full products query selects only macro/weight columns; this
+  //      query also surfaces measured_full_at + tare_weight_g.
+  //   2. The set-once stamp mutation invalidates this key so the checkbox
+  //      flips checked + disabled immediately after a successful write.
+  const productStatesKey = queryKeys.productMeasuredStates(user!.id);
+  const { data: productStates = {} } = useQuery({
+    queryKey: productStatesKey,
+    queryFn: async () => {
+      const { data, error } = await chefbyte()
+        .from('products')
+        .select('product_id, tare_weight_g, measured_full_at')
+        .eq('user_id', user!.id);
+      if (error) throw error;
+      return Object.fromEntries(
+        (
+          (data ?? []) as Array<{ product_id: string; tare_weight_g: number | null; measured_full_at: string | null }>
+        ).map((p) => [p.product_id, p]),
+      );
+    },
+    enabled: !!user,
+    staleTime: 30_000,
+  });
+
   useRealtimeInvalidation('event-viewer', [
     { schema: 'chefbyte', table: 'event_overrides', queryKeys: [overridesKey] },
     { schema: 'chefbyte', table: 'shelf_event_log', queryKeys: [eventsKey] },
@@ -483,6 +509,33 @@ export function EventViewerPage({ embedded = false }: { embedded?: boolean } = {
     },
     onError: (e: any) => {
       setErrorMsg(e?.message ?? 'Retry failed');
+    },
+  });
+
+  // Manual fallback for the catch-all auto-import: when the AI estimate of
+  // net_weight_g is off, the user can mark a fresh container as "full"
+  // here and the cloud locks measured_full_at on the product. Set-once is
+  // enforced at THREE layers — Pi guard, edge-function guard, AND the
+  // `.is('measured_full_at', null)` filter below — so re-runs are no-ops.
+  const stampMeasuredFullMutation = useMutation({
+    mutationFn: async (vars: { product_id: string; measured_full_at: string }) => {
+      const { error } = await chefbyte()
+        .from('products')
+        .update({ measured_full_at: vars.measured_full_at })
+        .eq('product_id', vars.product_id)
+        .eq('user_id', user!.id)
+        .is('measured_full_at', null);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: productStatesKey });
+      // Inventory tag color (Task 11) reads from the products query — refresh
+      // it so the blue "needs measurement" tag flips to green immediately.
+      queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
+      queryClient.invalidateQueries({ queryKey: productsKey });
+    },
+    onError: (e: any) => {
+      setErrorMsg(e?.message ?? 'Failed to stamp item-is-full');
     },
   });
 
@@ -664,6 +717,20 @@ export function EventViewerPage({ embedded = false }: { embedded?: boolean } = {
               }
               onRetryAction={() => handleRetryAction(row)}
               saving={applyOverride.isPending || retryEvent.isPending}
+              productMeasuredFullAt={
+                row.event.payload?.product_id
+                  ? (productStates[row.event.payload.product_id]?.measured_full_at ?? null)
+                  : null
+              }
+              stampingMeasuredFull={stampMeasuredFullMutation.isPending}
+              onStampMeasuredFull={() => {
+                const pid = row.event.payload?.product_id;
+                if (!pid) return;
+                stampMeasuredFullMutation.mutate({
+                  product_id: pid,
+                  measured_full_at: new Date().toISOString(),
+                });
+              }}
             />
           ))}
         </ul>
@@ -703,6 +770,12 @@ interface EventCardProps {
   onAcceptClassifier: (itemId: string) => void;
   onRetryAction: () => void;
   saving: boolean;
+  /** Current measured_full_at for this event's product (null = not yet stamped). */
+  productMeasuredFullAt: string | null;
+  /** Set-once handler that stamps measured_full_at on the event's product. */
+  onStampMeasuredFull: () => void;
+  /** True while the stamp mutation is inflight (disables the checkbox). */
+  stampingMeasuredFull: boolean;
 }
 
 function EventCard(props: EventCardProps) {
@@ -720,6 +793,9 @@ function EventCard(props: EventCardProps) {
     onAcceptClassifier,
     onRetryAction,
     saving,
+    productMeasuredFullAt,
+    onStampMeasuredFull,
+    stampingMeasuredFull,
   } = props;
   const {
     event,
@@ -954,7 +1030,14 @@ function EventCard(props: EventCardProps) {
           {needsReview && (
             <ReviewPanel row={row} products={products} onAcceptClassifier={onAcceptClassifier} saving={saving} />
           )}
-          <EditorPanel row={row} onSave={onSave} saving={saving} />
+          <EditorPanel
+            row={row}
+            onSave={onSave}
+            saving={saving}
+            productMeasuredFullAt={productMeasuredFullAt}
+            onStampMeasuredFull={onStampMeasuredFull}
+            stampingMeasuredFull={stampingMeasuredFull}
+          />
         </Fragment>
       )}
     </li>
@@ -1070,9 +1153,22 @@ interface EditorPanelProps {
     eventKind?: EventKind | null;
   }) => void;
   saving: boolean;
+  /** Current measured_full_at for this event's product (null = not yet stamped). */
+  productMeasuredFullAt: string | null;
+  /** Set-once handler that stamps measured_full_at on the event's product. */
+  onStampMeasuredFull: () => void;
+  /** True while the stamp mutation is inflight (disables the checkbox). */
+  stampingMeasuredFull: boolean;
 }
 
-function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
+function EditorPanel({
+  row,
+  onSave,
+  saving,
+  productMeasuredFullAt,
+  onStampMeasuredFull,
+  stampingMeasuredFull,
+}: EditorPanelProps) {
   const [stockQty, setStockQty] = useState<string>(row.effectiveStockDeltaContainers.toFixed(3).replace(/\.?0+$/, ''));
   const [servings, setServings] = useState<string>(
     row.effectiveServings === 0 ? '0' : row.effectiveServings.toFixed(2).replace(/\.?0+$/, ''),
@@ -1273,6 +1369,42 @@ function EditorPanel({ row, onSave, saving }: EditorPanelProps) {
           </div>
         </details>
       )}
+
+      {/*
+        Manual fallback for the catch-all auto-import (Tasks 8-10):
+        if the AI-estimated net_weight_g is off, the auto-stamp may
+        never trigger. The user can mark the container as full here
+        and the cloud locks measured_full_at. Set-once: once stamped,
+        the checkbox stays checked and disabled.
+      */}
+      {row.event.payload?.product_id ? (
+        <div className="flex items-center gap-2 pt-2 border-t border-border">
+          <input
+            type="checkbox"
+            id={`event-item-full-${row.event.event_id}`}
+            data-testid="event-item-full-checkbox"
+            checked={!!productMeasuredFullAt}
+            disabled={!!productMeasuredFullAt || stampingMeasuredFull}
+            onChange={(e) => {
+              if (!e.target.checked) return;
+              if (productMeasuredFullAt) return;
+              onStampMeasuredFull();
+            }}
+            className="h-4 w-4 rounded border-border accent-chef-accent disabled:opacity-60"
+          />
+          <label
+            htmlFor={`event-item-full-${row.event.event_id}`}
+            className="text-xs text-text-secondary"
+            title={
+              productMeasuredFullAt
+                ? `Stamped at ${productMeasuredFullAt}`
+                : 'Mark this container as full — locks the LiveTrack tag to fully calibrated. One-way.'
+            }
+          >
+            Item is full {productMeasuredFullAt ? <span className="text-text-tertiary">(stamped)</span> : null}
+          </label>
+        </div>
+      ) : null}
 
       <div className="flex justify-end">
         <button
