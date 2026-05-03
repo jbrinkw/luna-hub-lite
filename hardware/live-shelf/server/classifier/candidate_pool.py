@@ -139,6 +139,13 @@ def _rank_candidates(candidates: list[Candidate], observed_abs_delta: float) -> 
             rank_score=score,
             product_id=c.product_id,
             lot_id=c.lot_id,
+            # Catch-all auto-import (2026-05-02, Task 5): preserve the
+            # tare-state fields across the rank rebuild so the
+            # eventual ``to_prompt_dict`` projection still emits
+            # ``needs_tare_estimate`` for the picked candidate. Frozen
+            # dataclass means we have to enumerate every field.
+            needs_tare_estimate=c.needs_tare_estimate,
+            net_weight_g=c.net_weight_g,
         )
 
         tier = _tier_rank(c.why_candidate)
@@ -545,15 +552,17 @@ def pool_for_catch_all(
     observed_abs = abs(delta_g)
     limit = top_n if top_n is not None else ctx.pool_top_n
 
-    # Tier 1 — lots currently in-flight on the catch-all.
+    # Tier 1 — lots currently in-flight on the catch-all. Held as
+    # ``LotCandidate`` so the rebuild loop below can read the
+    # ``tare_weight_g`` / ``net_weight_g`` fields directly from the
+    # source row without round-tripping through ``_from_lot``.
     get_in_flight = getattr(source, "get_catch_all_in_flight_lots", None)
-    in_flight_lots: list[Candidate] = []
+    in_flight_lots: list[LotCandidate] = []
     if callable(get_in_flight):
         try:
-            rows = list(get_in_flight())
+            in_flight_lots = list(get_in_flight())
         except Exception:  # noqa: BLE001 — never crash the pool builder
-            rows = []
-        in_flight_lots = [_from_lot(lot, "in_flight") for lot in rows]
+            in_flight_lots = []
 
     # Tier 2 — every qty>0 cloud_lots row for the user (catch-all
     # auto-import, 2026-05-02). Widened from the prior
@@ -562,50 +571,63 @@ def pool_for_catch_all(
     # writes tare from the AI estimate when the picked product has
     # none. FEFO-ordered (oldest created_at first) at the source query.
     get_inventory = getattr(source, "get_catch_all_user_inventory_lots", None)
-    inventory_lots: list[Candidate] = []
+    inventory_lots: list[LotCandidate] = []
     if callable(get_inventory):
         try:
-            rows = list(get_inventory())
+            inventory_lots = list(get_inventory())
         except Exception:  # noqa: BLE001
-            rows = []
-        inventory_lots = [_from_lot(lot, "inventory_only") for lot in rows]
-
-    # Lot-level: candidate_id is the lot_id (override _from_lot's
-    # product_id default). The apply path will look up the picked
-    # candidate by lot_id to find the in-flight markers.
-    def _lot_keyed(c: Candidate, source_lot_id: str) -> Candidate:
-        return Candidate(
-            candidate_id=source_lot_id,
-            name=c.name,
-            brand=c.brand,
-            expected_weight_g=c.expected_weight_g,
-            container_type=c.container_type,
-            why_candidate=c.why_candidate,
-            reference_image_paths=c.reference_image_paths,
-            rank_score=c.rank_score,
-            product_id=c.product_id,
-            lot_id=source_lot_id,
-        )
+            inventory_lots = []
 
     rebuilt: list[Candidate] = []
     seen_lot_ids: set[str] = set()
     # **2026-04-28 (Codex finding MEDIUM-5):** Tier 1 (in-flight) and
     # Tier 2 (inventory-only) are now strictly disjoint at the source
-    # query (Tier 2 excludes ``in_flight_kind IS NOT NULL``), but we
+    # query (Tier 2 excludes ``in_flight_kind = 'catch_all'``), but we
     # also dedupe by lot_id here as a belt-and-braces guard. If a
     # future repo refactor re-introduces overlap, the first
     # occurrence wins (Tier 1 in-flight always precedes Tier 2 in the
     # iteration order below) and the duplicate is silently dropped
     # before ranking + truncation, so a single lot can never crowd out
     # real options or appear twice in the prompt.
-    for c in in_flight_lots + inventory_lots:
-        if c.lot_id is None:
+    #
+    # Catch-all auto-import (2026-05-02, Task 5): the Tier 2
+    # ``LotCandidate`` carries ``tare_weight_g`` + ``net_weight_g``
+    # (populated by ``get_catch_all_user_inventory_lots``). Tier 1
+    # in-flight ``LotCandidate``s don't populate them — defaults to
+    # ``None`` — so they never get the auto-import flag (correct:
+    # in-flight items are mid-measurement, not mid-import). The flag
+    # is set iff source carried a non-None ``net_weight_g`` AND
+    # ``tare_weight_g`` is None. The ``getattr`` defensive lookup
+    # keeps legacy stubs / pre-Task-5 source paths working when they
+    # haven't been re-generated against the widened ``LotCandidate``.
+    for tier_tag, src_c in (
+        [("in_flight", lot) for lot in in_flight_lots]
+        + [("inventory_only", lot) for lot in inventory_lots]
+    ):
+        if src_c.lot_id is None:
             continue
-        lot_id_str = str(c.lot_id)
+        lot_id_str = str(src_c.lot_id)
         if lot_id_str in seen_lot_ids:
             continue
         seen_lot_ids.add(lot_id_str)
-        rebuilt.append(_lot_keyed(c, c.lot_id))
+        src_tare = getattr(src_c, "tare_weight_g", None)
+        src_net = getattr(src_c, "net_weight_g", None)
+        needs_tare = src_tare is None and src_net is not None
+        rebuilt.append(
+            Candidate(
+                candidate_id=lot_id_str,
+                name=src_c.name,
+                brand=src_c.brand,
+                expected_weight_g=src_c.expected_weight_g,
+                container_type=src_c.container_type,
+                why_candidate=tier_tag,  # type: ignore[arg-type]
+                reference_image_paths=src_c.reference_image_paths,
+                product_id=src_c.product_id,
+                lot_id=lot_id_str,
+                needs_tare_estimate=needs_tare,
+                net_weight_g=src_net,
+            )
+        )
 
     # No product-collapse: catch-all pool is lot-keyed (each lot has its
     # own state machine). Rank within the (in_flight, inventory_only)

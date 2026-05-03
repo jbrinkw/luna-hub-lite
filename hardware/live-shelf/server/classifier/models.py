@@ -81,6 +81,14 @@ class LotCandidate:
     container_type: str | None
     status: Literal["on_shelf", "in_flight", "out"]
     reference_image_paths: Sequence[str] = field(default_factory=tuple)
+    # Catch-all auto-import (2026-05-02): the new Tier 2 source
+    # ``get_catch_all_user_inventory_lots`` populates these so the
+    # pool builder can derive ``Candidate.needs_tare_estimate``
+    # without a second SQL round-trip. ``None`` for legacy callers
+    # (``get_catch_all_inventory_lots``, live-shelf branches) — those
+    # paths don't drive auto-import tare estimation.
+    tare_weight_g: float | None = None
+    net_weight_g: float | None = None
 
 
 @dataclass(frozen=True)
@@ -129,6 +137,15 @@ class Candidate:
     # apply-path lot picker. The picker is authoritative when a lot's
     # state has shifted since pool assembly.
     lot_id: str | None = None
+    # Catch-all auto-import (2026-05-02): the apply path needs to know
+    # whether the picked candidate's product has a tare captured yet,
+    # so it can ask the AI for an estimate when missing. The flag is
+    # surfaced into ``to_prompt_dict`` ONLY when True — set-once means
+    # already-captured products don't waste prompt tokens on the flag.
+    # Paired with ``net_weight_g`` so the AI has the full container's
+    # net mass to compare against the visual.
+    needs_tare_estimate: bool = False
+    net_weight_g: float | None = None
 
     def to_prompt_dict(self) -> dict[str, Any]:
         """Project into the JSON payload the classifier sees.
@@ -145,9 +162,15 @@ class Candidate:
         contract — failing it means the classifier is being shown
         per-lot state again, which the user has explicitly forbidden
         (decisions.md #42).
+
+        Catch-all auto-import (2026-05-02): when ``needs_tare_estimate``
+        is True, the dict carries ``needs_tare_estimate=True`` and
+        ``net_weight_g`` so the model is told to provide an
+        ``estimated_tare_g`` in its response. When False (default for
+        already-captured products), neither key is emitted.
         """
 
-        return {
+        out: dict[str, Any] = {
             "candidate_id": self.candidate_id,
             "name": self.name,
             "brand": self.brand,
@@ -156,6 +179,10 @@ class Candidate:
             "why_candidate": self.why_candidate,
             "reference_image_count": len(self.reference_image_paths),
         }
+        if self.needs_tare_estimate:
+            out["needs_tare_estimate"] = True
+            out["net_weight_g"] = self.net_weight_g
+        return out
 
 
 # --- Event + context ------------------------------------------------------

@@ -373,14 +373,15 @@ class RepoCandidateSource:
             )
             out: list[LotCandidate] = []
             for row in rows:
-                # ``_tare`` (products.tare_weight_g) is unpacked here
-                # to keep the tuple shape stable for Task 5, which will
-                # consult it to flip ``needs_tare_estimate`` on the AI
-                # prompt. Not used in this adapter — Tier-2 candidates
-                # carry tare via downstream pool builders.
+                # ``p_tare`` (products.tare_weight_g) is unpacked here
+                # so the LotCandidate carries it through to the pool
+                # builder, which uses it (paired with p_net) to flip
+                # ``Candidate.needs_tare_estimate`` for AI tare
+                # estimation when the product has no captured tare yet
+                # (Task 5, catch-all auto-import).
                 (
                     lot_id, product_id, _qty, _ifsince, _pkid, _created,
-                    p_name, p_brand, p_net, p_gross, p_container, _tare,
+                    p_name, p_brand, p_net, p_gross, p_container, p_tare,
                 ) = row
                 if not product_id or not p_name:
                     # Orphan: cloud_lots has a product_id but no products
@@ -404,6 +405,11 @@ class RepoCandidateSource:
                         reference_image_paths=self._absolute_refs(
                             str(product_id)
                         ),
+                        # Catch-all auto-import (Task 5): thread
+                        # tare/net so the pool builder can flag
+                        # candidates with no tare captured.
+                        tare_weight_g=p_tare,
+                        net_weight_g=p_net,
                     )
                 )
             return out

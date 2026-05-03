@@ -86,7 +86,15 @@ class _CatchAllStubSource:
         return []
 
 
-def _lot(lot_id, weight_g, *, name=None, status="on_shelf"):
+def _lot(
+    lot_id,
+    weight_g,
+    *,
+    name=None,
+    status="on_shelf",
+    tare_weight_g=None,
+    net_weight_g=None,
+):
     return LotCandidate(
         lot_id=lot_id,
         product_id=f"p-{lot_id}",
@@ -95,6 +103,8 @@ def _lot(lot_id, weight_g, *, name=None, status="on_shelf"):
         expected_weight_g=weight_g,
         container_type="tub",
         status=status,
+        tare_weight_g=tare_weight_g,
+        net_weight_g=net_weight_g,
     )
 
 
@@ -399,3 +409,75 @@ def test_pool_for_catch_all_uses_user_inventory_method():
     )
     # Sentinel last invariant preserved.
     assert pool[-1].candidate_id == UNKNOWN_CANDIDATE_ID
+
+
+# ----------------------------------------------------------------------
+# Task 5 (catch-all auto-import, 2026-05-02): tare-state threading
+# from LotCandidate (source) -> Candidate (prompt-level).
+# ----------------------------------------------------------------------
+
+
+def test_pool_for_catch_all_threads_tare_state_to_candidate():
+    """LotCandidate.tare_weight_g + net_weight_g land as
+    Candidate.needs_tare_estimate + net_weight_g for Tier 2 picks.
+    Lot with tare=None + net=500 -> needs_tare_estimate=True;
+    lot with tare=25 + net=500 -> False.
+
+    Mutation guard: dropping the ``getattr(src_c, "tare_weight_g", None)``
+    /  ``getattr(src_c, "net_weight_g", None)`` reads in
+    ``pool_for_catch_all`` makes both ``needs_tare_estimate`` and
+    ``net_weight_g`` come back ``False`` / ``None`` regardless of
+    source state — failing the membership assertions for
+    ``lot-null``.
+    """
+    needs = _lot(
+        "lot-null",
+        500.0,
+        name="Pasta Box",
+        tare_weight_g=None,
+        net_weight_g=500.0,
+    )
+    captured = _lot(
+        "lot-set",
+        700.0,
+        name="Olive Oil",
+        tare_weight_g=25.0,
+        net_weight_g=500.0,
+    )
+    ctx = ClassifierContext(
+        source=_CatchAllStubSource(
+            inventory=[needs, captured],
+        ),
+    )
+    pool = pool_for_catch_all(delta_g=500.0, ctx=ctx)
+    by_id = {c.candidate_id: c for c in pool}
+
+    # Lot with no captured tare: pool builder flags it for AI
+    # estimation and surfaces the net mass to anchor the prompt.
+    assert by_id["lot-null"].needs_tare_estimate is True
+    assert by_id["lot-null"].net_weight_g == 500.0
+
+    # Lot with captured tare: set-once -> pool builder doesn't ask
+    # for an estimate; net is still propagated for diagnostics but
+    # ``needs_tare_estimate`` is False so ``to_prompt_dict`` won't
+    # surface it (verified by ``test_models``).
+    assert by_id["lot-set"].needs_tare_estimate is False
+
+
+def test_pool_for_catch_all_in_flight_lots_never_flagged_for_tare():
+    """Tier 1 in-flight lots are mid-measurement, not mid-import.
+    Their ``LotCandidate`` defaults ``tare_weight_g=None`` and
+    ``net_weight_g=None`` (the cloud-side adapter doesn't populate
+    them for the in-flight tier), so ``needs_tare_estimate`` MUST
+    stay False for any in-flight pick.
+    """
+    in_flight = _lot("lot-mid", 350.0, name="Mid-measure", status="in_flight")
+    ctx = ClassifierContext(
+        source=_CatchAllStubSource(in_flight=[in_flight]),
+    )
+    pool = pool_for_catch_all(delta_g=350.0, ctx=ctx)
+    pick = next(c for c in pool if c.candidate_id == "lot-mid")
+    assert pick.needs_tare_estimate is False
+    # net_weight_g defaults to None for in-flight lots — the cloud
+    # adapter doesn't populate it for Tier 1.
+    assert pick.net_weight_g is None
