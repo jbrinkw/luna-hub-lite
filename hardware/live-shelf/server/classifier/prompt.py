@@ -227,6 +227,40 @@ CATCH_ALL_INSTRUCTION_TEXT = (
 )
 
 
+# Appended to ``CATCH_ALL_INSTRUCTION_TEXT`` only when at least one
+# candidate carries ``needs_tare_estimate: true`` in its prompt JSON.
+# The auto-import flow uses the model's ``estimated_tare_g`` to seed
+# ``chefbyte.products.tare_weight_g`` for products that lack a captured
+# tare, so they can participate in deterministic catch-all matching on
+# subsequent placements. Already-captured products skip this block to
+# save prompt tokens on the common case.
+CATCH_ALL_TARE_ESTIMATION_BLOCK = """\
+Some candidates have ``needs_tare_estimate: true`` and a known
+``net_weight_g``. For the candidate you pick (if it carries that flag),
+ALSO produce ``estimated_tare_g`` in your JSON: your best guess for
+the EMPTY CONTAINER MASS in grams, ignoring any contents.
+
+Inputs to use:
+- The ``container_type`` field (cardboard_box, glass_bottle,
+  plastic_tub, metal_can, plastic_bag, ...) — use category typical
+  empty masses as a coarse anchor.
+- The visual: shape and apparent material in the after image.
+- ``net_weight_g``: the manufacturer's labeled net contents. The total
+  scale reading should reasonably equal ``estimated_tare_g + (some fill
+  fraction x net_weight_g)``. A scale reading near ``net_weight_g``
+  alone implies a fresh / nearly-full container. A reading well below
+  ``net_weight_g`` implies partial fill — your tare estimate is still
+  the EMPTY mass, regardless of fill.
+
+Constraints:
+- ``estimated_tare_g`` must be > 0.
+- ``estimated_tare_g`` must be < the measured scale reading minus 1g
+  (you cannot have an empty container heavier than what's on the scale).
+- If you cannot estimate, omit the field entirely (do not return 0 or null).
+- Format: number, no units suffix in the JSON value.
+"""
+
+
 INSTRUCTION_TEXT = (
     "Compare the before and after frames side by side. For an ADD event, "
     "identify the item that APPEARS in the after frame but is NOT in the "
@@ -701,8 +735,27 @@ def build_catch_all_messages_payload(
             {"type": "text", "text": "[above: scale image at stability]"}
         )
 
-    # 4. Final instruction.
-    user_content.append({"type": "text", "text": CATCH_ALL_INSTRUCTION_TEXT})
+    # 4. Final instruction. When at least one candidate needs a tare
+    # estimate, append the auto-import tare-estimation block so the
+    # model knows to produce ``estimated_tare_g`` in its JSON response.
+    # ``getattr`` defends against ProductCandidate or other Candidate-
+    # shaped objects without the field (legacy paths).
+    needs_tare = any(
+        getattr(c, "needs_tare_estimate", False) for c in candidates
+    )
+    if needs_tare:
+        user_content.append({
+            "type": "text",
+            "text": (
+                CATCH_ALL_INSTRUCTION_TEXT
+                + "\n\n"
+                + CATCH_ALL_TARE_ESTIMATION_BLOCK
+            ),
+        })
+    else:
+        user_content.append(
+            {"type": "text", "text": CATCH_ALL_INSTRUCTION_TEXT}
+        )
 
     return {
         "system": system,

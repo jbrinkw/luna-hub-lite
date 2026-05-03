@@ -12,6 +12,7 @@ from server.classifier.models import Candidate, ScaleEvent, UNKNOWN_CANDIDATE_ID
 from server.classifier.prompt import (
     INSTRUCTION_TEXT,
     SYSTEM_PROMPT,
+    build_catch_all_messages_payload,
     build_messages_payload,
     build_system_prompt,
 )
@@ -436,3 +437,43 @@ class TestPromptPurity:
         assert '"status":' not in prompt_text
         assert '"in_flight_since":' not in prompt_text
         assert '"pickup_weight_g":' not in prompt_text
+
+
+# --- Catch-all tare-estimation instruction (Task 6) ------------------------
+
+
+def test_catch_all_instruction_requests_tare_when_needs_tare_set():
+    """When any candidate has needs_tare_estimate=True, the instruction
+    text MUST tell the model to also produce estimated_tare_g for that
+    candidate. When no candidate needs it, the tare instruction stays
+    silent (saves prompt tokens on the common case)."""
+    candidates_with_need = [
+        Candidate(candidate_id="lot-1", name="Pasta Box", brand=None,
+                  expected_weight_g=500.0, container_type="cardboard_box",
+                  why_candidate="inventory_only",
+                  needs_tare_estimate=True, net_weight_g=500.0,
+                  product_id="p-1", lot_id="lot-1"),
+    ]
+    candidates_no_need = [
+        Candidate(candidate_id="lot-2", name="Olive Oil", brand=None,
+                  expected_weight_g=750.0, container_type="glass_bottle",
+                  why_candidate="inventory_only",
+                  needs_tare_estimate=False, net_weight_g=750.0,
+                  product_id="p-2", lot_id="lot-2"),
+    ]
+    event = ScaleEvent(event_id="e1", session_id=None, ts="2026-05-02T00:00:00Z",
+                      delta_g=505.0, before_weight_g=0.0, after_weight_g=505.0,
+                      direction="add", before_frame_path=None,
+                      after_frame_path=None)
+    p_with = build_catch_all_messages_payload(event, candidates_with_need)
+    p_without = build_catch_all_messages_payload(event, candidates_no_need)
+    text_with = " ".join(
+        b["text"] for b in p_with["messages"][0]["content"] if b.get("type") == "text"
+    )
+    text_without = " ".join(
+        b["text"] for b in p_without["messages"][0]["content"] if b.get("type") == "text"
+    )
+    # Tare-instruction block appears only when needed.
+    assert "estimated_tare_g" in text_with
+    assert "empty container" in text_with.lower()
+    assert "estimated_tare_g" not in text_without
