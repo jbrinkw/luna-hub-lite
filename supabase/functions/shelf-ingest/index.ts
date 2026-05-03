@@ -1017,34 +1017,100 @@ async function handleIntake(supabase: SupabaseClient, device: Device, body: any)
 }
 
 /**
- * Apply a Pi-captured tare-weight to a single products row.
+ * Apply Pi-captured tare-weight and/or measured_full_at to a products row.
  *
- * Called by the Pi after the catch-all scale tare-capture interceptor
- * fires (see CATCH_ALL_TARE_CAPTURE_PLAN.md §4.2 cloud resolution).
- * Narrow by design: only bumps tare_weight_g, nothing else. The
- * product row must already exist + belong to the authenticated
+ * Called by the Pi after:
+ *   1. The catch-all scale tare-capture interceptor fires
+ *      (CATCH_ALL_TARE_CAPTURE_PLAN.md §4.2 cloud resolution) — pushes
+ *      `tare_weight_g`.
+ *   2. The catch-all auto-import dispatch (Task 9 of catch-all-livetrack
+ *      auto-import plan) — pushes `measured_full_at` when scale ≈
+ *      tare + net_weight_g, optionally alongside tare on first capture.
+ *
+ * Set-once enforcement: each field is only written when its column is
+ * currently NULL on the row. Defense-in-depth — the Pi already guards
+ * before dispatch, but transient retries (Pi → cloud) could otherwise
+ * overwrite a user-corrected value. RLS via .eq('user_id', userId).
+ *
+ * The product row must already exist + belong to the authenticated
  * device's user. Missing / cross-user rows return 404 so the Pi's
  * fire-and-forget caller logs once and moves on.
  */
 async function handleProductTare(supabase: SupabaseClient, device: Device, body: any): Promise<Response> {
   const productId: string | undefined = body?.product_id;
-  const tareRaw = body?.tare_weight_g;
   if (typeof productId !== 'string' || productId.length === 0) {
     return jsonResponse({ error: 'product_id required' }, 400);
   }
-  // eslint-disable-next-line @luna/anti-lazy/no-bare-number-coerce -- reason: immediately guarded by Number.isFinite on the next line; tareRaw is an HTTP body field validated there
-  const tare = typeof tareRaw === 'number' ? tareRaw : Number(tareRaw);
-  if (!Number.isFinite(tare) || tare < 0) {
-    return jsonResponse({ error: 'tare_weight_g must be a non-negative number' }, 400);
+
+  // Normalise inputs — both fields are optional but at least one must
+  // be supplied or this call is a no-op (surface as 400 to make Pi-side
+  // bugs loud).
+  const updates: { tare_weight_g?: number; measured_full_at?: string } = {};
+
+  if (body?.tare_weight_g !== undefined && body?.tare_weight_g !== null) {
+    const tare = typeof body.tare_weight_g === 'number' ? body.tare_weight_g : Number(body.tare_weight_g);
+    if (!Number.isFinite(tare) || tare < 0) {
+      return jsonResponse({ error: 'tare_weight_g must be a non-negative number' }, 400);
+    }
+    updates.tare_weight_g = tare;
   }
+
+  if (body?.measured_full_at !== undefined && body?.measured_full_at !== null) {
+    if (typeof body.measured_full_at !== 'string' || Number.isNaN(Date.parse(body.measured_full_at))) {
+      return jsonResponse({ error: 'measured_full_at must be an ISO 8601 timestamp' }, 400);
+    }
+    updates.measured_full_at = body.measured_full_at;
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return jsonResponse({ error: 'tare_weight_g or measured_full_at is required' }, 400);
+  }
+
   const userId = device.user_id;
+
+  // Set-once: read current values; only write fields whose column is
+  // NULL. Preserves the user's "no overwrite after set" rule even if
+  // the Pi re-pushes (idempotent retries are common in fire-and-forget
+  // callers).
+  const { data: existing, error: existingErr } = await supabase
+    .schema('chefbyte')
+    .from('products')
+    .select('tare_weight_g, measured_full_at')
+    .eq('product_id', productId)
+    .eq('user_id', userId)
+    .maybeSingle();
+  if (existingErr) throw existingErr;
+  if (!existing) {
+    return jsonResponse({ error: 'product not found' }, 404);
+  }
+
+  const filtered: typeof updates = {};
+  if (updates.tare_weight_g !== undefined && existing.tare_weight_g === null) {
+    filtered.tare_weight_g = updates.tare_weight_g;
+  }
+  if (updates.measured_full_at !== undefined && existing.measured_full_at === null) {
+    filtered.measured_full_at = updates.measured_full_at;
+  }
+
+  // All requested fields already set — no-op success so Pi retries
+  // don't surface as errors. Echo back the existing row state.
+  if (Object.keys(filtered).length === 0) {
+    return jsonResponse({
+      ok: true,
+      product_id: productId,
+      tare_weight_g: existing.tare_weight_g,
+      measured_full_at: existing.measured_full_at,
+      skipped: 'all requested fields already set (set-once)',
+    });
+  }
+
   const { data: updated, error: updErr } = await supabase
     .schema('chefbyte')
     .from('products')
-    .update({ tare_weight_g: tare })
+    .update(filtered)
     .eq('product_id', productId)
     .eq('user_id', userId)
-    .select('product_id, tare_weight_g')
+    .select('product_id, tare_weight_g, measured_full_at')
     .maybeSingle();
   if (updErr) throw updErr;
   if (!updated) {
@@ -1054,6 +1120,7 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
     ok: true,
     product_id: updated.product_id,
     tare_weight_g: updated.tare_weight_g,
+    measured_full_at: updated.measured_full_at,
   });
 }
 

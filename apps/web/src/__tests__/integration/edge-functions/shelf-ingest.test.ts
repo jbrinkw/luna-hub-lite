@@ -1798,4 +1798,115 @@ describe('shelf-ingest Edge Function', () => {
     expect(body).toHaveProperty('error');
     expect(typeof body.error).toBe('string');
   });
+
+  // ─── /product-tare: measured_full_at write + set-once enforcement ────
+  //
+  // Task 2 of the catch-all-livetrack auto-import plan: the Pi's
+  // auto-import dispatch needs to programmatically push measured_full_at
+  // when the catch-all scale settles at tare + net_weight_g. Cloud must
+  // accept the optional field on /product-tare AND enforce set-once so
+  // a Pi retry can't overwrite a previously-stamped value.
+
+  it('POST /product-tare also accepts measured_full_at and stamps it once', async () => {
+    // Fresh product with both fields NULL so the write actually lands.
+    const { data: prod, error: prodErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Tare-And-Full Product',
+        barcode: `SI-TARE-FULL-${Date.now()}`,
+        net_weight_g: 500,
+        servings_per_container: 5,
+      })
+      .select('product_id')
+      .single();
+    if (prodErr) throw new Error(`create tare product: ${prodErr.message}`);
+    const tareProductId = prod.product_id;
+
+    // First write: both tare_weight_g + measured_full_at land.
+    const firstStamp = '2026-05-02T18:00:00.000Z';
+    const res = await fetch(`${BASE_URL}/product-tare`, {
+      method: 'POST',
+      headers: authHeaders(importKey),
+      body: JSON.stringify({
+        product_id: tareProductId,
+        tare_weight_g: 25,
+        measured_full_at: firstStamp,
+      }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.ok).toBe(true);
+    expect(body.product_id).toBe(tareProductId);
+    expect(Number(body.tare_weight_g)).toBe(25);
+    // The handler echoes back the stored value (whatever Postgres
+    // serialised) — assert via DB readback below for canonical shape.
+
+    const { data: row1 } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .select('tare_weight_g, measured_full_at')
+      .eq('product_id', tareProductId)
+      .single();
+    expect(Number(row1.tare_weight_g)).toBe(25);
+    expect(new Date(row1.measured_full_at).toISOString()).toBe(firstStamp);
+
+    // Second write: a DIFFERENT measured_full_at MUST NOT overwrite —
+    // this is the set-once defense-in-depth guard. The Pi already
+    // pre-checks but cloud must not trust retried payloads.
+    const secondStamp = '2026-05-02T19:30:00.000Z';
+    const res2 = await fetch(`${BASE_URL}/product-tare`, {
+      method: 'POST',
+      headers: authHeaders(importKey),
+      body: JSON.stringify({
+        product_id: tareProductId,
+        measured_full_at: secondStamp,
+      }),
+    });
+    expect(res2.status).toBe(200);
+    const body2 = await res2.json();
+    expect(body2.ok).toBe(true);
+
+    const { data: row2 } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .select('tare_weight_g, measured_full_at')
+      .eq('product_id', tareProductId)
+      .single();
+    expect(Number(row2.tare_weight_g)).toBe(25);
+    // Set-once: the FIRST stamp is preserved.
+    expect(new Date(row2.measured_full_at).toISOString()).toBe(firstStamp);
+
+    // Cleanup
+    await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', tareProductId);
+  });
+
+  it('POST /product-tare with neither field returns 400', async () => {
+    // Defensive contract check: at least one of tare_weight_g /
+    // measured_full_at must be present, otherwise the call is a no-op
+    // and we surface that as a 400 to make Pi-side bugs loud.
+    const res = await fetch(`${BASE_URL}/product-tare`, {
+      method: 'POST',
+      headers: authHeaders(importKey),
+      body: JSON.stringify({ product_id: productId }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/required/i);
+  });
+
+  it('POST /product-tare with malformed measured_full_at returns 400', async () => {
+    const res = await fetch(`${BASE_URL}/product-tare`, {
+      method: 'POST',
+      headers: authHeaders(importKey),
+      body: JSON.stringify({
+        product_id: productId,
+        measured_full_at: 'not-an-iso-timestamp',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/iso/i);
+  });
 });
