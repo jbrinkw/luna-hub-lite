@@ -38,4 +38,5 @@ export const queryKeys = {
   scalePairings: (userId: string) => ['scale-pairings', userId] as const,
   userConfig: (userId: string, key: string) => ['user-config', userId, key] as const,
   chefSettings: (userId: string) => ['chef-settings', userId] as const,
+  scannerState: (userId?: string) => ['chefbyte', 'scannerState', userId] as const,
 };

@@ -10,6 +10,7 @@ import { todayStr } from '@/shared/dates';
 import { queryKeys } from '@/shared/queryKeys';
 import { useScannerDetection, type ScannerDropReason, type ScannerDropDetail } from '@/hooks/useScannerDetection';
 import { handleKeypadStep } from './keypadLogic';
+import { fetchScannerState, pushScannerMode } from '@/shared/scannerStateApi';
 
 /**
  * Snapshot of the most-recent dropped scan, surfaced as a transient toast.
@@ -201,6 +202,23 @@ export function ScannerPage() {
   const barcodeRef = useRef<HTMLInputElement>(null);
   const [searchParams] = useSearchParams();
 
+  // Cloud-side scanner_state hydration (USB Scanner Task 11). The Pi USB
+  // scanner forwarder + the web Scanner page must agree on the active
+  // mode, so the row at chefbyte.scanner_state is the cross-device
+  // source of truth. On mount we read it once via TanStack Query;
+  // initialMode below blends locked_mode > last_active_mode > URL param.
+  // The query is fire-and-forget on first paint — render proceeds with a
+  // local default ('purchase') and re-renders when the row resolves; the
+  // scanner UI auto-corrects the highlighted mode the moment the data
+  // arrives. staleTime keeps us from re-fetching on every page mount
+  // within a 60s window (the row only changes on user action).
+  const { data: scannerState } = useQuery({
+    queryKey: queryKeys.scannerState(user?.id),
+    queryFn: fetchScannerState,
+    enabled: !!user,
+    staleTime: 60_000,
+  });
+
   // Deep-link support from EventViewerPage "Add stock" retry action:
   //   /chef/scanner?mode=purchase&product=<uuid>
   // The ?mode= param honors one of the four valid scan modes on mount.
@@ -209,14 +227,30 @@ export function ScannerPage() {
   // operators can confirm the deep-link wired up correctly, and future
   // work can upgrade it into an auto-queue entry without breaking the
   // URL contract.
+  //
+  // Mode resolution priority (matches the Pi-side decision in shelf-ingest
+  // /barcode-scan handleBarcodeScan):
+  //   1. scanner_state.locked_mode  — admin/cross-device lock; can't be
+  //      overridden locally even via deep-link.
+  //   2. scanner_state.last_active_mode — the most-recent local pick on
+  //      any device.
+  //   3. ?mode=<...> URL param — explicit deep-link intent from another
+  //      page (e.g. EventViewerPage "Add stock" retry).
+  //   4. 'purchase' — system default.
   const initialModeParam = searchParams.get('mode') as ScanMode | null;
-  const initialMode: ScanMode =
-    initialModeParam === 'purchase' ||
-    initialModeParam === 'consume_macros' ||
-    initialModeParam === 'consume_no_macros' ||
-    initialModeParam === 'shopping'
-      ? initialModeParam
-      : 'purchase';
+  const initialMode: ScanMode = (() => {
+    if (scannerState?.locked_mode) return scannerState.locked_mode;
+    if (scannerState?.last_active_mode) return scannerState.last_active_mode;
+    if (
+      initialModeParam === 'purchase' ||
+      initialModeParam === 'consume_macros' ||
+      initialModeParam === 'consume_no_macros' ||
+      initialModeParam === 'shopping'
+    ) {
+      return initialModeParam;
+    }
+    return 'purchase';
+  })();
 
   // Cache default location to avoid re-fetching on every scan
   const { data: defaultLocationId } = useQuery({
@@ -239,6 +273,59 @@ export function ScannerPage() {
   const [queue, setQueue] = useState<QueueItem[]>([]);
   const [filter, setFilter] = useState<'all' | 'new'>('all');
   const [activeItemId, setActiveItemId] = useState<string | null>(null);
+
+  // Hydrate `mode` from cloud scanner_state once the query resolves. The
+  // initial render uses `useState(initialMode)` which sees `scannerState
+  // === undefined` (still fetching) and falls back to URL param /
+  // 'purchase'; this effect re-syncs as soon as the cloud row arrives so
+  // the highlighted mode reflects the cross-device source of truth. We
+  // bypass the local `handleSetMode` push wrapper deliberately — this
+  // setMode is "I just learned the cloud's value", not "user picked",
+  // so re-pushing would be a write echo.
+  //
+  // Scoped to a ref so we only hydrate ONCE per mount: a background
+  // refetch of scannerState (e.g. window-focus refetch) shouldn't yank
+  // the mode out from under the user mid-scan.
+  const hydratedFromCloudRef = useRef(false);
+  useEffect(() => {
+    if (hydratedFromCloudRef.current) return;
+    if (!scannerState) return; // still loading
+    const cloudMode: ScanMode | null = scannerState.locked_mode ?? scannerState.last_active_mode ?? null;
+    if (cloudMode) setMode(cloudMode);
+    hydratedFromCloudRef.current = true;
+  }, [scannerState]);
+
+  // Debounced mode-change push to chefbyte.scanner_state. The 500ms
+  // window absorbs keypad-mashing during testing without spamming the
+  // edge function — only the LAST mode pick within a 500ms burst
+  // actually hits the network. Held in a ref + cleared on unmount
+  // below so a navigation away mid-debounce doesn't fire a state update
+  // on a torn-down component.
+  //
+  // Failures are logged + swallowed: the local UI mode change is the
+  // load-bearing user feedback; the cloud sync is "best effort" cross-
+  // device coordination. A network blip shouldn't surface a red banner
+  // for a successful local mode click.
+  const debouncedPushModeRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const handleSetMode = useCallback((newMode: ScanMode) => {
+    setMode(newMode);
+    if (debouncedPushModeRef.current) clearTimeout(debouncedPushModeRef.current);
+    debouncedPushModeRef.current = setTimeout(() => {
+      pushScannerMode({ last_active_mode: newMode }).catch((err) => {
+        console.warn('scanner-state push failed (non-fatal):', err);
+      });
+    }, 500);
+  }, []);
+
+  // Cancel any pending debounced push when the component unmounts —
+  // otherwise a navigation away during the 500ms window would fire a
+  // POST after the page has been disposed (no harm functionally but the
+  // console.warn on a tear-down failure is noise).
+  useEffect(() => {
+    return () => {
+      if (debouncedPushModeRef.current) clearTimeout(debouncedPushModeRef.current);
+    };
+  }, []);
 
   /* ---- Keypad screen ---- */
   const [screenValue, setScreenValue] = useState('1');
@@ -1709,13 +1796,18 @@ export function ScannerPage() {
             ).map((m) => (
               <button
                 key={m.key}
-                className={`p-2.5 border-2 rounded-lg cursor-pointer w-full flex items-center justify-center text-center leading-tight transition-all ${
+                disabled={!!scannerState?.locked_mode}
+                className={`p-2.5 border-2 rounded-lg cursor-pointer w-full flex items-center justify-center text-center leading-tight transition-all disabled:cursor-not-allowed disabled:opacity-60 ${
                   mode === m.key
                     ? 'bg-text text-text-inverse border-text font-extrabold text-base ring-2 ring-text/30 ring-offset-1'
                     : 'bg-surface text-text border-border-strong font-semibold text-[15px]'
                 }`}
                 onClick={() => {
-                  setMode(m.key);
+                  // Use the wrapper that fires the debounced cloud push
+                  // — every user-driven mode change must broadcast to
+                  // chefbyte.scanner_state so other devices (Pi USB
+                  // forwarder, second browser tab) stay in sync.
+                  handleSetMode(m.key);
                   // Nutrition editor only renders in 'purchase' mode; fall
                   // back to the main screen so the keypad still targets
                   // something meaningful when the user switches away.
