@@ -89,6 +89,16 @@ class ReasonCode:
     LOT_REPLACED_IN_FLIGHT = "lot_replaced_in_flight"
     LOT_EXPIRED_IN_FLIGHT = "lot_expired_in_flight"
 
+    # -- catch-all tare capture (CATCH_ALL_TARE_CAPTURE_PLAN.md) ----------
+    # Uppercase values intentional — these reason codes have shipped this
+    # casing in the DB and operator audits grep for the literals. Adding
+    # constants here so call sites stop sprouting magic strings (per
+    # class docstring) without breaking historical rows.
+    TARE_CAPTURE = "TARE_CAPTURE"
+    TARE_AUTO_IMPORT = "TARE_AUTO_IMPORT"
+    TARE_AUTO_FROM_EMPTY = "TARE_AUTO_FROM_EMPTY"
+    MEASURED_FULL_AUTO = "MEASURED_FULL_AUTO"
+
     # -- usage_log (USAGE_LOG_PLAN.md) ------------------------------------
     # Emitted whenever a usage_log row is written (or the write is
     # attempted and fails). Lets timelines correlate consumption with

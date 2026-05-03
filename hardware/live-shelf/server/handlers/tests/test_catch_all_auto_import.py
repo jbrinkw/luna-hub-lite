@@ -39,6 +39,7 @@ from server.handlers.scale_events import ScaleHandler  # noqa: E402
 from server.shelves import DEFAULT_REGISTRY  # noqa: E402
 from server.storage import init_db  # noqa: E402
 from server.storage import repo as storage_repo  # noqa: E402
+from server.storage.lifecycle import ReasonCode  # noqa: E402
 from server.storage.models import LotIn, ProductIn  # noqa: E402
 
 
@@ -222,7 +223,7 @@ def test_catch_all_auto_import_writes_tare_when_null(tmp_path):
     rows = conn.execute(
         "SELECT actor, reason_code, payload_json "
         "FROM event_lifecycle WHERE reason_code = ?",
-        ("TARE_AUTO_IMPORT",),
+        (ReasonCode.TARE_AUTO_IMPORT,),
     ).fetchall()
     assert len(rows) == 1, (
         "auto-import must emit a single TARE_AUTO_IMPORT lifecycle row"
@@ -280,7 +281,7 @@ def test_catch_all_auto_import_skips_tare_write_when_already_set(tmp_path):
     )
     rows = conn.execute(
         "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
-        ("TARE_AUTO_IMPORT",),
+        (ReasonCode.TARE_AUTO_IMPORT,),
     ).fetchall()
     assert rows == [], (
         "set-once: no TARE_AUTO_IMPORT lifecycle row when tare already set"
@@ -404,7 +405,7 @@ def test_catch_all_stamps_measured_full_when_reading_near_full(tmp_path):
     rows = conn.execute(
         "SELECT actor, reason_code, payload_json "
         "FROM event_lifecycle WHERE reason_code = ?",
-        ("MEASURED_FULL_AUTO",),
+        (ReasonCode.MEASURED_FULL_AUTO,),
     ).fetchall()
     assert len(rows) == 1
     assert rows[0][0] == "catch_all_auto_import"
@@ -448,7 +449,7 @@ def test_catch_all_does_not_stamp_when_reading_partial(tmp_path):
     ), "partial-fill reading must NOT stamp measured_full_at"
     rows = conn.execute(
         "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
-        ("MEASURED_FULL_AUTO",),
+        (ReasonCode.MEASURED_FULL_AUTO,),
     ).fetchall()
     assert rows == []
 
@@ -534,7 +535,7 @@ def test_empty_heuristic_writes_tare_when_null_and_reading_low(tmp_path):
     rows = conn.execute(
         "SELECT actor, reason_code, payload_json "
         "FROM event_lifecycle WHERE reason_code = ?",
-        ("TARE_AUTO_FROM_EMPTY",),
+        (ReasonCode.TARE_AUTO_FROM_EMPTY,),
     ).fetchall()
     assert len(rows) == 1, (
         "auto-tare-on-empty must emit a single TARE_AUTO_FROM_EMPTY "
@@ -588,7 +589,7 @@ def test_empty_heuristic_skips_tare_write_when_tare_already_set(tmp_path):
     )
     rows = conn.execute(
         "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
-        ("TARE_AUTO_FROM_EMPTY",),
+        (ReasonCode.TARE_AUTO_FROM_EMPTY,),
     ).fetchall()
     assert rows == [], (
         "set-once: no TARE_AUTO_FROM_EMPTY row when tare already set"

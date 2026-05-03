@@ -2204,7 +2204,7 @@ class ScaleHandler:
             self._lc_event(
                 event_id,
                 actor="catch_all_auto_import",
-                reason_code="TARE_AUTO_FROM_EMPTY",
+                reason_code=ReasonCode.TARE_AUTO_FROM_EMPTY,
                 payload={
                     "product_id": product_id,
                     "tare_g": new_tare,
@@ -2437,7 +2437,7 @@ class ScaleHandler:
                     self._lc_event(
                         event_id,
                         actor="catch_all_auto_import",
-                        reason_code="TARE_AUTO_IMPORT",
+                        reason_code=ReasonCode.TARE_AUTO_IMPORT,
                         payload={
                             "product_id": str(product_id),
                             "tare_g": est_tare,
@@ -2529,7 +2529,7 @@ class ScaleHandler:
                     self._lc_event(
                         event_id,
                         actor="catch_all_auto_import",
-                        reason_code="MEASURED_FULL_AUTO",
+                        reason_code=ReasonCode.MEASURED_FULL_AUTO,
                         payload={
                             "product_id": str(product_id),
                             "scale_reading_g": measured_g,
@@ -3780,7 +3780,7 @@ class ScaleHandler:
                 self._lc_event(
                     None,
                     actor="tare_capture",
-                    reason_code="TARE_CAPTURE",
+                    reason_code=ReasonCode.TARE_CAPTURE,
                     payload={
                         "product_id": tare_product_id,
                         "device_id": device_id,
