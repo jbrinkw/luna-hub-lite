@@ -2037,9 +2037,18 @@ async function handleVoidScanTransaction(
 // ─── Entrypoint ──────────────────────────────────────────────────────
 
 // Path-param route matcher for /scan-transaction/<uuid>/void. UUID
-// regex matches RFC 4122 form (36 chars, hex + dashes); the dispatcher
-// uses this BEFORE the leaf-based switch because the URL has trailing
-// segments after the transaction id and `leaf` only sees `void`.
+// regex matches RFC 4122 form (36 chars, hex + dashes in the canonical
+// 8-4-4-4-12 layout); the dispatcher uses this BEFORE the leaf-based
+// switch because the URL has trailing segments after the transaction id
+// and `leaf` only sees `void`.
+//
+// Strict UUID layout (mirrors UUID_REGEX above): a degenerate string
+// like 36 dashes matched the pre-fix loose `[0-9a-f-]{36}` and would
+// fall into handleVoidScanTransaction with a non-UUID transactionId,
+// crashing on the PostgREST `eq('transaction_id', ...)` cast. With the
+// strict layout, malformed paths fall through to the generic 404 (or
+// 401 if x-api-key is missing) without ever running the ownership
+// query.
 //
 // Supabase routes the function at /functions/v1/shelf-ingest/<subpath>,
 // so cleanedPath is the FULL pathname (e.g.
@@ -2047,7 +2056,7 @@ async function handleVoidScanTransaction(
 // matches the trailing tail; an unanchored `\/scan-transaction` allows
 // the prefix to vary across hosting environments while still pinning
 // the UUID + `/void` suffix.
-const VOID_SCAN_TX_RE = /\/scan-transaction\/([0-9a-f-]{36})\/void$/i;
+const VOID_SCAN_TX_RE = /\/scan-transaction\/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\/void$/i;
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {

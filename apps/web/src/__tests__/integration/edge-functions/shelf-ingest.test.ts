@@ -2714,4 +2714,30 @@ describe('shelf-ingest Edge Function', () => {
     const body = await res.json();
     expect(body.error).toBe('unauthorized');
   });
+
+  // Audit I-Cloud-6: pre-fix regex `[0-9a-f-]{36}` matched degenerate
+  // strings like 36 dashes, routing them into handleVoidScanTransaction
+  // where the non-UUID transaction_id would crash the PostgREST
+  // ownership SELECT. With the strict 8-4-4-4-12 regex, malformed paths
+  // fall through the dispatcher entirely. With a valid x-api-key, the
+  // dispatcher exits at the catch-all 404. With a JWT (no x-api-key),
+  // it would 401 — we exercise the 404 branch here because that's the
+  // path that previously surfaced 500.
+  it('POST /scan-transaction/<invalid-shape>/void falls through to 404', async () => {
+    const ctx = await provisionScannerUser('si-void-bad-uuid');
+    try {
+      // 36 dashes — matched pre-fix loose regex but fails strict
+      // 8-4-4-4-12 hex layout.
+      const badId = '------------------------------------';
+      const res = await fetch(`${BASE_URL}/scan-transaction/${badId}/void`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+      });
+      expect(res.status).toBe(404);
+      const body = await res.json();
+      expect(body.error).toBe('not found');
+    } finally {
+      await ctx.cleanup();
+    }
+  });
 });
