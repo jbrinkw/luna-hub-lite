@@ -1,3 +1,8 @@
+-- no-test: REVOKE-only DDL — the negative behavioral contract
+-- (authenticated/anon callers hit 42501 insufficient_privilege when
+-- RPC'ing the wrappers directly) is pinned by
+-- supabase/tests/chefbyte/scanner_wrappers_security.test.sql.
+--
 -- Critical security fix (audit 2026-05-03): the chefbyte-schema wrappers
 -- around the new private scanner functions were granted EXECUTE to
 -- authenticated, but they accept caller-controlled user_id / transaction_id
