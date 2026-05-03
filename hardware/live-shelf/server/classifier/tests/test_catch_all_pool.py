@@ -9,7 +9,9 @@ fundamentally different from the live_shelf pool:
     happens later in the apply path based on the picked lot's
     ``in_flight_kind``).
   * Sources from cloud_lots only (Tier 1 = catch_all in-flight,
-    Tier 2 = certified-not-on-any-shelf, Tier 3 = UNKNOWN sentinel).
+    Tier 2 = qty>0 user-inventory, Tier 3 = UNKNOWN sentinel).
+    Tier 2 was widened on 2026-05-02 from certified-not-on-any-shelf
+    to all qty>0 inventory (see candidate_pool.py:556-561).
   * No top-up / recently-out / catalog branches.
 """
 
@@ -111,7 +113,7 @@ def test_pool_includes_in_flight_tier():
 
 
 def test_pool_includes_inventory_tier():
-    """Tier 2 — certified-not-on-any-shelf lots appear in the pool."""
+    """Tier 2 — qty>0 user-inventory lots appear in the pool (post 2026-05-02 widening)."""
     ctx = ClassifierContext(
         source=_CatchAllStubSource(
             inventory=[_lot("INV-1", 500.0)],

@@ -344,12 +344,13 @@ def _build_pool(event: ScaleEvent, ctx: ClassifierContext) -> list[Candidate]:
 
     **2026-04-27 catch-all delta-capture (CATCH_ALL_SCALE_PLAN.md):** an
     ADD event on the catch-all shelf uses a dedicated single-pool
-    composition (in-flight catch-all lots + certified-not-on-any-shelf
-    lots + UNKNOWN). REMOVE on the catch-all uses the default REMOVE
-    pool — catch-all REMOVEs are rare (user picks the bottle off the
-    measuring station) and are handled by the same on-shelf rank logic.
-    Live_shelf events use the existing pool_for_add / pool_for_remove
-    paths.
+    composition (in-flight catch-all lots + qty>0 user-inventory lots
+    + UNKNOWN). Tier 2 was widened on 2026-05-02 from certified-only
+    to all qty>0 inventory; see ``pool_for_catch_all`` for the
+    rationale. REMOVE on the catch-all uses the default REMOVE pool —
+    catch-all REMOVEs are rare (user picks the bottle off the measuring
+    station) and are handled by the same on-shelf rank logic. Live_shelf
+    events use the existing pool_for_add / pool_for_remove paths.
     """
     shelf_id = getattr(ctx, "shelf_id", None)
 

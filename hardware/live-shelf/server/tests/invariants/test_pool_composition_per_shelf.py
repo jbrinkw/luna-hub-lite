@@ -314,8 +314,9 @@ class TestCatchAllPoolComposition:
             "(decisions.md #56 Tier 1)."
         )
         assert "inventory_only" in whys, (
-            "catch_all pool MUST include certified-not-on-any-shelf lots "
-            "(decisions.md #56 Tier 2)."
+            "catch_all pool MUST include qty>0 user-inventory lots "
+            "(decisions.md #56 Tier 2; widened 2026-05-02 from "
+            "certified-only to all qty>0 inventory)."
         )
 
         # Live-shelf branches MUST NOT bleed in — a hand of catch-all

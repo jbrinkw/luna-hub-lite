@@ -515,11 +515,13 @@ def pool_for_catch_all(
        catch-all (``cloud_lots.in_flight_kind='catch_all'``). Multiple
        can coexist. Picking one of these triggers the SECOND event in
        the apply path.
-    2. ``catch_all_inventory`` lots — every certified-not-on-any-shelf
-       lot, ordered FEFO by ``cloud_lots.created_at ASC``. Picking one
-       of these triggers the FIRST event in the apply path. "Not on any
-       shelf" = no Pi-local ``lots`` row AND not pinned via
-       ``scale_pairings``.
+    2. ``inventory_only`` lots — every qty>0 user-inventory lot
+       (catch-all auto-import, 2026-05-02). Includes uncertified
+       products; ordered FEFO by ``cloud_lots.created_at ASC``.
+       Picking one of these triggers the FIRST event in the apply
+       path; if the picked product has no tare yet, the apply path
+       writes one from the AI's ``estimated_tare_g`` (set-once).
+       Sourced via ``CandidateSource.get_catch_all_user_inventory_lots``.
     3. UNKNOWN sentinel.
 
     Live-shelf branches (``recently_out``, ``top_up_target``,
