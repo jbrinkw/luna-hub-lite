@@ -1,19 +1,28 @@
 /**
- * In-flight barcode dedup tests for the rapid-same-barcode-scan bug
- * (2026-04-29). Reported by the user: scanning the same NEW barcode
- * three times in quick succession (before analyze-product resolves)
- * spawned three duplicate `Unknown (<barcode>)` products in the queue
- * + three "Added to fridge 1 container" mints — even though the user's
- * physical action was a single barcode + an unintentional repeat trigger.
+ * In-flight barcode coordination tests.
+ *
+ * Original bug (2026-04-29): rapid-firing the same NEW barcode spawned
+ * parallel analyze-product calls + duplicate INSERTs. The first fix was
+ * a silent-drop dedup — but that lost legitimate "I scanned 3 of these
+ * to add 3 lots" intent.
+ *
+ * Current design: a Map<barcode, Promise> queues duplicate scans. Scan 2
+ * awaits scan 1's pipeline, then re-enters via the ref. By the time
+ * scan 2 retries, scan 1 has committed its product row, so scan 2 takes
+ * the existing-product path and adds its OWN stock_lot. The user's
+ * stated rule was "3 ramen scans = 3 inventory increments, only 1 LLM
+ * call."
  *
  * Lock-in invariants:
- *   1. Same barcode scanned twice while the first analyze-product is
- *      still pending → only ONE queue row + ONE products INSERT.
- *   2. After the in-flight pipeline resolves, scanning the same barcode
- *      again is allowed (it's now a refill, not a dupe).
- *   3. The dropped-scan toast surfaces the "Scanning..." state so the
- *      user gets feedback instead of silent rejection.
- *   4. A pipeline failure releases the in-flight lock so a retry works.
+ *   1. Same barcode scanned twice while #1's analyze-product is still
+ *      pending → only ONE analyze-product call until #1 settles.
+ *   2. The "Queued..." toast surfaces the wait state so the user gets
+ *      feedback instead of silent rejection.
+ *   3. After #1 completes, #2's awaiting handler wakes and produces its
+ *      own queue row + its own stock_lot.
+ *   4. After the in-flight pipeline resolves, fresh scans of the same
+ *      barcode start their own pipelines (no zombie lock).
+ *   5. A pipeline failure releases the slot so a retry works.
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -199,45 +208,58 @@ beforeEach(() => {
 /*  Tests                                                              */
 /* ------------------------------------------------------------------ */
 
-describe('ScannerPage — in-flight barcode dedup', () => {
-  it('drops a 2nd scan of the same barcode while the 1st pipeline is in flight', async () => {
+describe('ScannerPage — in-flight barcode coordination', () => {
+  it('queues a 2nd same-barcode scan and runs it after the 1st pipeline completes', async () => {
     const user = userEvent.setup();
     renderScanner();
 
-    // Scan #1 — pipeline starts, analyze-product is pending.
+    // Scan #1 — pipeline starts, analyze-product hangs at the AI step.
     await scanBarcode(user, '013562000043');
-
-    // Wait for analyze-product to be invoked (pipeline reached the AI step).
     await waitFor(() => {
-      expect(mockState.analyzeInvocationCount).toBeGreaterThan(0);
+      expect(mockState.analyzeInvocationCount).toBe(1);
     });
-
-    const inflightInvocations = mockState.analyzeInvocationCount;
 
     // Scan #2 — same barcode, while #1 is still pending.
     await scanBarcode(user, '013562000043');
 
-    // The dedup must surface as a "Scanning..." toast.
+    // The "Queued..." toast surfaces the wait state.
     await waitFor(() => {
       expect(screen.queryByTestId('dropped-scan-toast')).not.toBeNull();
     });
-    expect(screen.getByTestId('dropped-scan-toast').textContent).toContain('Scanning');
+    expect(screen.getByTestId('dropped-scan-toast').textContent).toContain('Queued');
 
-    // Critical: analyze-product must NOT have been called a second time.
-    expect(mockState.analyzeInvocationCount).toBe(inflightInvocations);
+    // Load-bearing invariant: analyze-product MUST NOT have been called a
+    // second time while #1 is in-flight. Scan 2 is parked on the await.
+    expect(mockState.analyzeInvocationCount).toBe(1);
 
-    // Now release the in-flight analyze-product. Only one pipeline ever ran
-    // → only ONE products INSERT and ONE stock_lots INSERT.
+    // Release #1's analyze-product. Pipeline 1 completes → 1st INSERTs.
     mockState.analyzePending!.resolve(undefined);
-
     await waitFor(() => {
       expect(mockState.productsInsertCount).toBe(1);
     });
-    expect(mockState.stockLotsInsertCount).toBe(1);
 
-    // And the queue should show exactly one row, not two.
+    // After #1 resolves, #2's awaiting handler wakes and re-enters the
+    // scan flow. The mock's products lookup always returns null (it can't
+    // simulate "row now exists"), so #2's retry runs its own analyze-
+    // product call. In production the lookup would match the live row
+    // and short-circuit to executeAction directly — invariant being
+    // tested here is "scan 2 produces its own pipeline AFTER #1 resolves",
+    // not the specific lookup behavior the mock can't replicate.
+    await waitFor(() => {
+      expect(mockState.analyzeInvocationCount).toBe(2);
+    });
+
+    // Release #2's analyze-product. Pipeline 2 completes → 2nd INSERTs.
+    mockState.analyzePending!.resolve(undefined);
+    await waitFor(() => {
+      expect(mockState.productsInsertCount).toBe(2);
+    });
+    expect(mockState.stockLotsInsertCount).toBe(2);
+
+    // Two queue rows — one per scan. The user's rule: "3 ramen scans =
+    // 3 inventory increments." Generalizes for N >= 1.
     const queueRows = screen.getAllByTestId(/^queue-item-/);
-    expect(queueRows.length).toBe(1);
+    expect(queueRows.length).toBe(2);
   });
 
   it('allows re-scanning the same barcode AFTER the in-flight pipeline finishes', async () => {

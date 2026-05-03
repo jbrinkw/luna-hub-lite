@@ -312,22 +312,26 @@ export function ScannerPage() {
   const barcodeSubmitRef = useRef<(barcode: string) => void>(() => {});
 
   /**
-   * In-flight barcode dedup. While a scan for barcode X is mid-pipeline
-   * (products lookup → analyze-product → DB write), subsequent scans of
-   * the SAME barcode are silently dropped with a transient toast. Without
-   * this guard, a user rapid-firing the same barcode against a brand-new
-   * product spawns parallel analyze-product calls and parallel placeholder
-   * INSERTs because the products lookup races resolve before the first
-   * pipeline has had a chance to commit its row — yielding 2-3 duplicate
-   * `Unknown (<barcode>)` products + duplicate `stock_lots` for one
-   * physical scan event.
+   * In-flight barcode coordination — Map<barcode, Promise<void>> so the
+   * SECOND (and Nth) scan of the same barcode can AWAIT the first
+   * pipeline's completion and then re-enter the scan flow. By the time
+   * the first scan finishes, the product row exists, so the duplicate's
+   * lookup matches and the existing-product path runs executeAction —
+   * each duplicate scan adds its own stock_lot.
    *
-   * Cleared in a `finally` block at the bottom of `handleBarcodeSubmit`
-   * so a thrown error doesn't leave the barcode permanently locked. Held
+   * This replaces an earlier Set<string> + silent-drop design that lost
+   * scans 2..N when the user rapid-fired the same barcode. Without the
+   * coordination at all, parallel pipelines for the same barcode race
+   * against each other: parallel analyze-product calls, parallel
+   * placeholder INSERTs, duplicate `Unknown (<barcode>)` products, and
+   * duplicate `stock_lots` from one physical "I scanned 3 ramen" event.
+   *
+   * The Promise resolves in the `finally` of handleBarcodeSubmit (success
+   * OR error) so a thrown pipeline doesn't leave duplicates hanging. Held
    * in a ref (not state) so the synchronous scan handler reads the latest
    * value without waiting for a re-render.
    */
-  const inFlightBarcodesRef = useRef<Set<string>>(new Set());
+  const inFlightBarcodesRef = useRef<Map<string, Promise<void>>>(new Map());
 
   /* ---- Scanner drop observability ----
    *
@@ -381,19 +385,21 @@ export function ScannerPage() {
     async (barcode: string) => {
       if (!barcode.trim() || !user) return;
 
-      // In-flight dedup: if this exact barcode is already mid-pipeline
-      // (products lookup or analyze-product or DB write), drop the new
-      // scan instead of starting a parallel pipeline. The "Scanning..."
-      // toast surfaces the drop so the user knows the second trigger
-      // wasn't lost — it's intentionally suppressed because the first
-      // one is still running.
+      // In-flight coordination: if a scan for this exact barcode is
+      // already mid-pipeline, AWAIT its completion and then re-enter
+      // ourselves. By the time the original finishes, the product row
+      // exists, so the duplicate's lookup matches the existing-product
+      // path and executeAction adds another stock_lot. This is what
+      // "scanned 3 ramen at once and only 1 registered" used to fail —
+      // scans 2 + 3 silently dropped.
       const trimmedBarcode = barcode.trim();
-      if (inFlightBarcodesRef.current.has(trimmedBarcode)) {
+      const existingPromise = inFlightBarcodesRef.current.get(trimmedBarcode);
+      if (existingPromise) {
         setDroppedScan({
           reason: 'protected-target',
           detail: {},
           timestamp: Date.now(),
-          message: `Scanning ${trimmedBarcode}...`,
+          message: `Queued ${trimmedBarcode} — waiting for previous scan...`,
         });
         if (droppedClearTimerRef.current) clearTimeout(droppedClearTimerRef.current);
         droppedClearTimerRef.current = setTimeout(() => {
@@ -404,9 +410,20 @@ export function ScannerPage() {
           barcodeRef.current.value = '';
           barcodeRef.current.focus();
         }
-        return;
+        // Wait for the in-flight pipeline (success OR error). Re-enter via
+        // the ref so a closure that's been re-created on a later render is
+        // the one we invoke (matches the pattern used by hardware-scanner
+        // detection). Sequential await + recursive call also serializes
+        // when 3+ scans pile up: the third scan sees the SECOND scan's
+        // Promise after the first resolves.
+        await existingPromise;
+        return barcodeSubmitRef.current(barcode);
       }
-      inFlightBarcodesRef.current.add(trimmedBarcode);
+      let resolveInFlight: () => void = () => {};
+      const inFlightPromise = new Promise<void>((resolve) => {
+        resolveInFlight = resolve;
+      });
+      inFlightBarcodesRef.current.set(trimmedBarcode, inFlightPromise);
 
       const qty = parseFloat(screenValue) || 1;
       const tempId = Date.now().toString();
@@ -908,12 +925,14 @@ export function ScannerPage() {
           ),
         );
       } finally {
-        // Always release the in-flight lock — even when the pipeline threw
+        // Always release the in-flight slot — even when the pipeline threw
         // — so a transient failure doesn't permanently block re-scanning
-        // the same barcode. The user's stated rule was "don't double-
-        // process while in flight", not "lock forever on the first
-        // attempt". A retry after a real error must be allowed.
+        // the same barcode. Resolve the awaitable Promise so any duplicate
+        // scans currently parked on `await existingPromise` wake up and
+        // retry; they'll find the now-existing product (or hit the same
+        // error) and surface in the queue accordingly.
         inFlightBarcodesRef.current.delete(trimmedBarcode);
+        resolveInFlight();
       }
     },
     [user, mode, screenValue, unit, nutrition, defaultLocationId],
