@@ -619,24 +619,78 @@ class ScaleHandler:
         """
         return self._is_wizard_active_for(None, None)
 
+    def _push_product_state_to_cloud(
+        self,
+        product_id: str,
+        *,
+        tare_g: Optional[float] = None,
+        measured_full_at: Optional[str] = None,
+    ) -> None:
+        """Push tare and/or measured_full_at to cloud /shelf-ingest/product-tare.
+
+        Per the CATCH_ALL_TARE_CAPTURE_PLAN cloud resolution: local
+        writes are authoritative and synchronous; cloud push is
+        best-effort and must never raise / block the HTTP response. Any
+        exception is swallowed + logged at WARNING. When ``cloud_client``
+        is None (or the client lacks ``push_product_state``), the call
+        is a silent no-op — useful for the legacy / tests / cloud-
+        disabled paths.
+
+        Both fields are optional but at least one must be provided. The
+        cloud route enforces set-once semantics: existing non-NULL
+        fields are NOT overwritten, so retries on transient errors are
+        safe. Used by:
+          * catch-all auto-import (Task 8) — ``tare_g`` only;
+          * in-flight pickup full-cup capture (Task 9, pending);
+          * calibration completion (Task 10, pending).
+        """
+        if tare_g is None and measured_full_at is None:
+            return
+        client = self._cloud_client
+        if client is None:
+            return
+        push = getattr(client, "push_product_state", None)
+        if not callable(push):
+            log.warning(
+                "cloud_client has no push_product_state — skipping push for %s",
+                product_id,
+            )
+            return
+        try:
+            kwargs: dict[str, Any] = {"product_id": product_id}
+            if tare_g is not None:
+                kwargs["tare_g"] = float(tare_g)
+            if measured_full_at is not None:
+                kwargs["measured_full_at"] = measured_full_at
+            push(**kwargs)
+        except Exception:  # noqa: BLE001 — must never raise
+            log.warning(
+                "cloud: push_product_state failed for product_id=%s (non-fatal)",
+                product_id,
+                exc_info=True,
+            )
+
     def _push_tare_to_cloud(self, product_id: str, tare_g: float) -> None:
         """Fire-and-forget cloud push of a captured tare value.
 
-        Per the CATCH_ALL_TARE_CAPTURE_PLAN cloud resolution: local write
-        is authoritative and synchronous; cloud push is best-effort and
-        must never raise / block the HTTP response. Any exception is
-        swallowed + logged at WARNING. When ``cloud_client`` is None (or
-        the client lacks ``post_product_tare``), the call is a silent
-        no-op — useful for the legacy / tests / cloud-disabled paths.
+        Backwards-compat wrapper around :meth:`_push_product_state_to_cloud`
+        kept for the ARM-driven tare-capture path (CATCH_ALL_TARE_CAPTURE_PLAN
+        §4.2/§4.3). Tries the new ``push_product_state`` route first; if
+        the cloud client only exposes the legacy ``post_product_tare``
+        method (older Pi releases / test stubs that pre-date Task 8),
+        falls back to it so we don't drop the push silently.
         """
         client = self._cloud_client
         if client is None:
             return
-        push = getattr(client, "post_product_tare", None)
-        if not callable(push):
+        if callable(getattr(client, "push_product_state", None)):
+            self._push_product_state_to_cloud(product_id, tare_g=float(tare_g))
+            return
+        legacy = getattr(client, "post_product_tare", None)
+        if not callable(legacy):
             return
         try:
-            push(product_id=product_id, tare_g=float(tare_g))
+            legacy(product_id=product_id, tare_g=float(tare_g))
         except Exception:  # noqa: BLE001 — must never raise
             log.warning(
                 "cloud: post_product_tare failed for product_id=%s (non-fatal)",
@@ -2264,6 +2318,65 @@ class ScaleHandler:
                 "for event %s; falling through", measured_g, event_id,
             )
             return False
+
+        # Catch-all auto-import (CATCH_ALL_TARE_CAPTURE_PLAN.md Task 8,
+        # 2026-05-02). When the picked product has no tare yet AND the
+        # classifier returned an estimate, push it to cloud so the next
+        # consumption event has a real container mass to work with.
+        # Set-once is enforced at three layers:
+        #   (a) Pi guard — current_tare IS NULL check below;
+        #   (b) cloud guard — /shelf-ingest/product-tare SELECT-then-
+        #       conditional-UPDATE (Task 2);
+        #   (c) UI guard — Tasks 11/12 (pending).
+        # The implausible-tare check (estimate >= scale_reading - 1g)
+        # mirrors the prompt instruction in classifier/prompt.py:259.
+        # Best-effort: any exception is swallowed so the dispatch path
+        # never blocks on the cloud push.
+        try:
+            est_tare_raw = (
+                classification.get("estimated_tare_g")
+                if isinstance(classification, dict)
+                else getattr(classification, "estimated_tare_g", None)
+            )
+            if est_tare_raw is not None:
+                product = storage_repo.get_product(self._conn, str(product_id))
+                current_tare = (
+                    getattr(product, "tare_weight_g", None)
+                    if product is not None else None
+                )
+                try:
+                    est_tare = float(est_tare_raw)
+                except (TypeError, ValueError):
+                    est_tare = None
+                if (
+                    current_tare is None
+                    and est_tare is not None
+                    and est_tare > 0.0
+                    and est_tare < measured_g - 1.0
+                ):
+                    self._lc_event(
+                        event_id,
+                        actor="catch_all_auto_import",
+                        reason_code="TARE_AUTO_IMPORT",
+                        payload={
+                            "product_id": str(product_id),
+                            "tare_g": est_tare,
+                            "scale_reading_g": measured_g,
+                            "model_reasoning": (
+                                classification.get("reasoning")
+                                if isinstance(classification, dict)
+                                else getattr(classification, "reasoning", None)
+                            ),
+                        },
+                    )
+                    self._push_product_state_to_cloud(
+                        str(product_id), tare_g=est_tare,
+                    )
+        except Exception:  # pragma: no cover — never block dispatch on tare push
+            log.exception(
+                "catch_all_auto_import: tare push failed (non-fatal) for "
+                "event %s lot %s", event_id, cloud_lot_id,
+            )
 
         # Branch 2: SECOND measurement — picked lot already in-flight
         # on catch-all from a prior FIRST event.

@@ -450,8 +450,48 @@ class CloudClient:
         shelf-ingest edge function. If the edge function doesn't yet
         expose that route, the call returns a 404 which propagates as
         :class:`CloudError` and is logged + swallowed by the handler.
+
+        Backwards-compat with the original ARM-driven tare-capture
+        callers; new callers (catch-all auto-import, future
+        ``measured_full_at`` pushes) should prefer
+        :meth:`push_product_state`.
         """
         return self.post(
             "/product-tare",
             {"product_id": product_id, "tare_weight_g": float(tare_g)},
         )
+
+    def push_product_state(
+        self,
+        *,
+        product_id: str,
+        tare_g: Optional[float] = None,
+        measured_full_at: Optional[str] = None,
+    ) -> dict:
+        """Push tare and/or measured_full_at to ``/shelf-ingest/product-tare``.
+
+        Both fields are optional but at least one must be provided. The
+        cloud route enforces set-once semantics on its side (see Task 2's
+        ``/shelf-ingest/product-tare`` SELECT-then-conditional-UPDATE):
+        existing non-NULL fields are not overwritten, so retries on
+        transient errors are safe.
+
+        Used by:
+          * Catch-all auto-import (Task 8) — sends ``tare_g`` only.
+          * In-flight pickup full-cup capture (Task 9 — pending) — sends
+            ``measured_full_at`` only.
+          * Calibration completion (Task 10 — pending) — may send both.
+
+        Raises :class:`CloudError` on any non-2xx — callers swallow it
+        per fire-and-forget semantics. The local row is authoritative;
+        the push is best-effort propagation.
+        """
+        if tare_g is None and measured_full_at is None:
+            # Nothing to send — caller bug, but don't make a useless round trip.
+            return {}
+        body: dict[str, Any] = {"product_id": product_id}
+        if tare_g is not None:
+            body["tare_weight_g"] = float(tare_g)
+        if measured_full_at is not None:
+            body["measured_full_at"] = measured_full_at
+        return self.post("/product-tare", body)
