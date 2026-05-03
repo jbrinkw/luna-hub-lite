@@ -68,6 +68,7 @@ const blankProduct = (): Omit<Product, 'product_id' | 'user_id'> => ({
   is_distinct_unit_item: false,
   default_recipe_unit: null,
   tare_weight_g: null,
+  measured_full_at: null,
   certified: null,
   default_expiry_days: null,
   visual_unit_label: null,

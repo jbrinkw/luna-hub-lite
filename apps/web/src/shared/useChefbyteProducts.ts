@@ -46,6 +46,11 @@ export interface ChefbyteProduct {
   is_distinct_unit_item: boolean;
   default_recipe_unit: 'gram' | 'serving' | 'container' | null;
   tare_weight_g: number | null;
+  // Wall-clock UTC timestamp the live-shelf classifier first observed this
+  // product as "measured-full" (reading >= net_weight_g - tolerance). NULL
+  // until that lock occurs — drives the 3-state LiveTrack tag (red / blue
+  // / normal) on the InventoryPage.
+  measured_full_at: string | null;
   certified: boolean | null;
   // Display-only visual unit pair. Both NULL → fallback to canonical
   // svg / ctn / g rendering. Both set → display layer renders e.g.

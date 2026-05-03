@@ -29,6 +29,7 @@ import { todayStr } from '@/shared/dates';
 import { isValidLanIp } from '@/components/chefbyte/ScalesTab';
 import { formatQuantityWithVisual } from '@/shared/recipes/formatIngredientDisplay';
 import { useUnitSystem } from '@/shared/useUnitSystem';
+import { livetrackTagState, livetrackTagClassNames } from './livetrackTagState';
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -809,6 +810,13 @@ export function InventoryPage() {
           ...lot,
           productName,
           productCertified: mappedProduct?.certified === true,
+          // Certified-product tare-state inputs for the 3-state LiveTrack
+          // tag (red / blue / normal). Pulled from the catalog product, not
+          // the joined stock_lots row, because tare/measured_full live on
+          // chefbyte.products.
+          productTareWeightG: mappedProduct?.tare_weight_g ?? null,
+          productMeasuredFullAt: mappedProduct?.measured_full_at ?? null,
+          productNetWeightG: mappedProduct?.net_weight_g ?? null,
           qtyServings,
           isMealLot,
           visualUnitLabel,
@@ -1564,17 +1572,25 @@ export function InventoryPage() {
                             ready for shelf events. Independent of On Scale +
                             In Flight; a certified product can sit on a shelf
                             (unpaired) just fine. */}
-                          {product.certified === true && (
-                            <span
-                              data-testid={`certified-badge-${product.product_id}`}
-                              title="Certified — calibrated and ready for live shelf tracking"
-                              className="inline-flex items-center gap-1 shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200"
-                              aria-label="Certified"
-                            >
-                              <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
-                              Certified
-                            </span>
-                          )}
+                          {product.certified === true &&
+                            (() => {
+                              const tag = livetrackTagState({
+                                tare_weight_g: product.tare_weight_g,
+                                measured_full_at: product.measured_full_at,
+                                net_weight_g: product.net_weight_g,
+                              });
+                              return (
+                                <span
+                                  data-testid={`livetrack-tag-${product.product_id}`}
+                                  title={tag.tooltip}
+                                  className={`inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${livetrackTagClassNames(tag.color)}`}
+                                  aria-label={`LiveTrack — ${tag.color === 'normal' ? 'calibrated' : tag.color === 'blue' ? 'tare estimated' : 'no tare'}`}
+                                >
+                                  <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
+                                  {tag.label}
+                                </span>
+                              );
+                            })()}
                           {/* On Scale — per-product roll-up of any qty>0 lot
                             that is paired AND not in-flight. Independent of
                             In Flight: a lot in flight pulls "on scale" off
@@ -1781,18 +1797,26 @@ export function InventoryPage() {
                           [MEAL]
                         </span>
                       )}
-                      {/* ✓ Certified — per-product. */}
-                      {lot.productCertified && (
-                        <span
-                          data-testid={`lot-certified-badge-${lot.lot_id}`}
-                          title="Certified — calibrated and ready for live shelf tracking"
-                          className="inline-flex items-center gap-1 shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200"
-                          aria-label="Certified"
-                        >
-                          <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
-                          Certified
-                        </span>
-                      )}
+                      {/* ✓ LiveTrack — per-product, 3-state by tare/measured_full_at. */}
+                      {lot.productCertified &&
+                        (() => {
+                          const tag = livetrackTagState({
+                            tare_weight_g: lot.productTareWeightG,
+                            measured_full_at: lot.productMeasuredFullAt,
+                            net_weight_g: lot.productNetWeightG,
+                          });
+                          return (
+                            <span
+                              data-testid={`lot-livetrack-tag-${lot.lot_id}`}
+                              title={tag.tooltip}
+                              className={`inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${livetrackTagClassNames(tag.color)}`}
+                              aria-label={`LiveTrack — ${tag.color === 'normal' ? 'calibrated' : tag.color === 'blue' ? 'tare estimated' : 'no tare'}`}
+                            >
+                              <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
+                              {tag.label}
+                            </span>
+                          );
+                        })()}
                       {/* ⚖ On Scale — per-lot, paired AND not in-flight. */}
                       {isLotOnScale(lot, pairedLotIds) && (
                         <span
@@ -1914,18 +1938,26 @@ export function InventoryPage() {
                                 [MEAL]
                               </span>
                             )}
-                            {/* ✓ Certified */}
-                            {lot.productCertified && (
-                              <span
-                                data-testid={`lot-certified-badge-${lot.lot_id}`}
-                                title="Certified — calibrated and ready for live shelf tracking"
-                                className="inline-flex items-center gap-1 shrink-0 rounded-full bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-800 border border-emerald-200"
-                                aria-label="Certified"
-                              >
-                                <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
-                                Certified
-                              </span>
-                            )}
+                            {/* ✓ LiveTrack — per-product, 3-state by tare/measured_full_at. */}
+                            {lot.productCertified &&
+                              (() => {
+                                const tag = livetrackTagState({
+                                  tare_weight_g: lot.productTareWeightG,
+                                  measured_full_at: lot.productMeasuredFullAt,
+                                  net_weight_g: lot.productNetWeightG,
+                                });
+                                return (
+                                  <span
+                                    data-testid={`lot-livetrack-tag-${lot.lot_id}`}
+                                    title={tag.tooltip}
+                                    className={`inline-flex items-center gap-1 shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${livetrackTagClassNames(tag.color)}`}
+                                    aria-label={`LiveTrack — ${tag.color === 'normal' ? 'calibrated' : tag.color === 'blue' ? 'tare estimated' : 'no tare'}`}
+                                  >
+                                    <CheckCircle2 className="w-2.5 h-2.5" aria-hidden="true" />
+                                    {tag.label}
+                                  </span>
+                                );
+                              })()}
                             {/* ⚖ On Scale (per-lot) */}
                             {isLotOnScale(lot, pairedLotIds) && (
                               <span

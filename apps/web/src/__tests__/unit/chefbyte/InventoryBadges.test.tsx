@@ -303,7 +303,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
       renderPage();
       await screen.findByTestId('inv-product-prod-cert-on-scale');
 
-      expect(screen.getByTestId('certified-badge-prod-cert-on-scale')).toBeInTheDocument();
+      expect(screen.getByTestId('livetrack-tag-prod-cert-on-scale')).toBeInTheDocument();
       expect(screen.getByTestId('on-scale-badge-prod-cert-on-scale')).toBeInTheDocument();
       // The product row should NOT carry an inflight-badge in its subtree.
       const row = screen.getByTestId('inv-product-prod-cert-on-scale');
@@ -319,7 +319,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
       await screen.findByTestId('inv-product-prod-cert-in-flight');
 
       const row = screen.getByTestId('inv-product-prod-cert-in-flight');
-      expect(within(row).getByTestId('certified-badge-prod-cert-in-flight')).toBeInTheDocument();
+      expect(within(row).getByTestId('livetrack-tag-prod-cert-in-flight')).toBeInTheDocument();
       expect(within(row).getByTestId('inflight-badge')).toBeInTheDocument();
       expect(within(row).queryByTestId('on-scale-badge-prod-cert-in-flight')).toBeNull();
     });
@@ -330,7 +330,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
 
       const row = screen.getByTestId('inv-product-prod-paired-uncert');
       expect(within(row).getByTestId('on-scale-badge-prod-paired-uncert')).toBeInTheDocument();
-      expect(within(row).queryByTestId('certified-badge-prod-paired-uncert')).toBeNull();
+      expect(within(row).queryByTestId('livetrack-tag-prod-paired-uncert')).toBeNull();
       expect(within(row).queryByTestId('inflight-badge')).toBeNull();
     });
 
@@ -339,7 +339,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
       await screen.findByTestId('inv-product-prod-uncert-bare');
 
       const row = screen.getByTestId('inv-product-prod-uncert-bare');
-      expect(within(row).queryByTestId('certified-badge-prod-uncert-bare')).toBeNull();
+      expect(within(row).queryByTestId('livetrack-tag-prod-uncert-bare')).toBeNull();
       expect(within(row).queryByTestId('on-scale-badge-prod-uncert-bare')).toBeNull();
       expect(within(row).queryByTestId('inflight-badge')).toBeNull();
     });
@@ -355,7 +355,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
       const rows = await screen.findAllByTestId('lot-row-lot-cert-on-scale');
       // jsdom renders both mobile + desktop layouts; assert the badges
       // are present in at least one of them.
-      const certBadges = screen.getAllByTestId('lot-certified-badge-lot-cert-on-scale');
+      const certBadges = screen.getAllByTestId('lot-livetrack-tag-lot-cert-on-scale');
       const onScaleBadges = screen.getAllByTestId('lot-on-scale-badge-lot-cert-on-scale');
       expect(certBadges.length).toBeGreaterThan(0);
       expect(onScaleBadges.length).toBeGreaterThan(0);
@@ -373,7 +373,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
       await user.click(within(screen.getByTestId('inventory-view-toggle')).getByRole('button', { name: /lots/i }));
 
       await screen.findAllByTestId('lot-row-lot-cert-in-flight');
-      expect(screen.getAllByTestId('lot-certified-badge-lot-cert-in-flight').length).toBeGreaterThan(0);
+      expect(screen.getAllByTestId('lot-livetrack-tag-lot-cert-in-flight').length).toBeGreaterThan(0);
       expect(screen.getAllByTestId('lot-inflight-badge-lot-cert-in-flight').length).toBeGreaterThan(0);
       expect(screen.queryAllByTestId('lot-on-scale-badge-lot-cert-in-flight').length).toBe(0);
     });
@@ -386,7 +386,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
 
       await screen.findAllByTestId('lot-row-lot-paired-uncert');
       expect(screen.getAllByTestId('lot-on-scale-badge-lot-paired-uncert').length).toBeGreaterThan(0);
-      expect(screen.queryAllByTestId('lot-certified-badge-lot-paired-uncert').length).toBe(0);
+      expect(screen.queryAllByTestId('lot-livetrack-tag-lot-paired-uncert').length).toBe(0);
       expect(screen.queryAllByTestId('lot-inflight-badge-lot-paired-uncert').length).toBe(0);
     });
 
@@ -398,7 +398,7 @@ describe('InventoryPage — three-badge model (Certified / On Scale / In Flight)
 
       await screen.findAllByTestId('lot-row-lot-uncert-bare');
       expect(screen.queryAllByTestId('lot-on-scale-badge-lot-uncert-bare').length).toBe(0);
-      expect(screen.queryAllByTestId('lot-certified-badge-lot-uncert-bare').length).toBe(0);
+      expect(screen.queryAllByTestId('lot-livetrack-tag-lot-uncert-bare').length).toBe(0);
       expect(screen.queryAllByTestId('lot-inflight-badge-lot-uncert-bare').length).toBe(0);
     });
   });
