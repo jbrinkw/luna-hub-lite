@@ -537,15 +537,20 @@ Deno.serve(async (req) => {
 
     // Normalize with Claude Haiku 4.5. Failures are classified into two
     // buckets:
-    //   * HARD  (missing_key, bad_key, billing) — admin intervention
-    //     required, short-circuit with 503 so the UI surfaces it clearly.
-    //   * SOFT  (rate_limit, timeout, transient) — the raw OFF data is
-    //     still useful, so we fall through and return 200 with
-    //     ``suggestion: null`` + ``ai_degraded`` flag. The scanner's
-    //     existing OFF fallback path (ScannerPage.tsx:272–279) produces
-    //     a product with macro values from OFF nutriments, which beats a
-    //     silent "Unknown (barcode)" placeholder.
-    const HARD_FAILURES = new Set(['missing_key', 'bad_key', 'billing']);
+    //   * HARD  (bad_key, billing) — admin intervention required and the
+    //     existing key/credit will keep failing on retry, so short-circuit
+    //     with 503 so the UI surfaces it clearly.
+    //   * SOFT  (missing_key, rate_limit, timeout, transient) — the raw
+    //     OFF data is still useful, so we fall through and return 200
+    //     with ``suggestion: null`` + ``ai_degraded`` flag (the
+    //     ``ai_reason`` field still carries the underlying cause so
+    //     ScannerPage.tsx can promote ``missing_key`` to a hard banner
+    //     for browser users). Service-role callers (Pi USB) get the
+    //     OFF fallback so the scanner can still log a useful audit row
+    //     instead of an opaque 503. Mirrors the dual-auth I-Cloud-4
+    //     intent — see analyze-product.test.ts ":service-role +
+    //     body.user_id auto-creates a product scoped to that user".
+    const HARD_FAILURES = new Set(['bad_key', 'billing']);
     let suggestion: any = null;
     let aiDegradedReason: string | null = null;
     try {
