@@ -958,6 +958,58 @@ def start_disk_retention_sweeper(
     return t
 
 
+def _start_barcode_scanner_thread(
+    cloud_client: Optional[Any],
+) -> Optional[threading.Thread]:
+    """Start the USB barcode scanner forwarder thread (off by default).
+
+    Gated by env var ``BARCODE_SCANNER_ENABLED``. The thread reads scans
+    from ``/dev/input/<device>`` via evdev and forwards each to
+    ``POST /shelf-ingest/barcode-scan`` via the supplied ``CloudClient``.
+
+    No-ops (returns ``None``) when:
+      * ``BARCODE_SCANNER_ENABLED`` is unset / falsy — keeps existing Pi
+        deployments unaffected by this code path.
+      * ``cloud_client`` is ``None`` — the scanner can't post anywhere
+        without it; we log a warning and skip rather than crashing the
+        loop on first scan.
+
+    The ``evdev`` import lives inside the inner ``_run`` so a Pi that
+    doesn't enable the scanner doesn't pull the dependency. Returns the
+    thread (for tests / observability) or ``None`` when not started.
+    """
+    if os.environ.get('BARCODE_SCANNER_ENABLED', '').lower() not in (
+        '1', 'true', 'yes',
+    ):
+        return None
+    if cloud_client is None:
+        log.warning(
+            'BARCODE_SCANNER_ENABLED=true but cloud_client is None; '
+            'scanner thread NOT started (set CLOUD_URL + CLOUD_IMPORT_KEY)',
+        )
+        return None
+    device_path = os.environ.get('BARCODE_SCANNER_DEVICE', '/dev/input/event0')
+
+    def _run() -> None:
+        # Lazy imports so a Pi that doesn't run the scanner doesn't pull
+        # the evdev dependency.
+        from .barcode.hid_listener import open_device_and_stream_barcodes
+        from .barcode.scanner_loop import ScannerLoop
+        loop = ScannerLoop(
+            cloud_client=cloud_client,
+            barcode_source=lambda: open_device_and_stream_barcodes(device_path),
+        )
+        try:
+            loop.run_forever()
+        except Exception:
+            log.exception('barcode scanner loop crashed')
+
+    t = threading.Thread(target=_run, name='barcode-scanner', daemon=True)
+    t.start()
+    log.info('barcode-scanner thread started for device=%s', device_path)
+    return t
+
+
 def create_app(
     *,
     config: Optional[AppConfig] = None,
@@ -2529,6 +2581,14 @@ def create_app(
             )
         # The other branch (enabled but missing url/key) already logged
         # a WARNING up at emitter-construction time.
+
+    # --- USB barcode scanner (USB Scanner Task 10) ----------------------
+    # Off by default; gated by BARCODE_SCANNER_ENABLED. When enabled the
+    # thread reads /dev/input/<device> via evdev and forwards each scan
+    # to POST /shelf-ingest/barcode-scan via the shared cloud_client.
+    barcode_scanner_thread = _start_barcode_scanner_thread(cloud_client)
+    if barcode_scanner_thread is not None:
+        background_threads.append(barcode_scanner_thread)
 
     return AppBundle(
         app=app,
