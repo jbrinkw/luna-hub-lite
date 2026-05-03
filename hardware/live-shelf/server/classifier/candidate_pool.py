@@ -553,11 +553,13 @@ def pool_for_catch_all(
             rows = []
         in_flight_lots = [_from_lot(lot, "in_flight") for lot in rows]
 
-    # Tier 2 — certified-not-on-any-shelf lots, FEFO by created_at.
-    # Use ``inventory_only`` as the why_candidate so existing rank/dedupe
-    # tiers still apply (catch-all only — these never appear in the
-    # live_shelf pool builder).
-    get_inventory = getattr(source, "get_catch_all_inventory_lots", None)
+    # Tier 2 — every qty>0 cloud_lots row for the user (catch-all
+    # auto-import, 2026-05-02). Widened from the prior
+    # certified-not-on-any-shelf scope; uncertified products with
+    # inventory are now first-class candidates and the apply path
+    # writes tare from the AI estimate when the picked product has
+    # none. FEFO-ordered (oldest created_at first) at the source query.
+    get_inventory = getattr(source, "get_catch_all_user_inventory_lots", None)
     inventory_lots: list[Candidate] = []
     if callable(get_inventory):
         try:

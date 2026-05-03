@@ -344,6 +344,13 @@ class _CatchAllStubSource:
         return list(self._in_flight)
 
     def get_catch_all_inventory_lots(self):
+        # Legacy certified-only Tier 2 method (no longer wired into
+        # pool_for_catch_all after Task 4). Kept for protocol shape.
+        return []
+
+    def get_catch_all_user_inventory_lots(self):
+        # Task 4 Tier 2 source. Stub returns empty here — these tests
+        # exercise in-flight routing, not Tier-2 contribution.
         return []
 
 

@@ -144,20 +144,35 @@ class _Source:
             )
         ]
 
+    def _ca_inventory_row(self) -> LotCandidate:
+        return LotCandidate(
+            lot_id="lot_ca_inventory",
+            product_id="prod_ca_inventory",
+            name="Catch-All Inventory",
+            brand=None,
+            expected_weight_g=110.0,
+            container_type="bottle",
+            status="on_shelf",
+            reference_image_paths=(),
+        )
+
     def get_catch_all_inventory_lots(self) -> Sequence[LotCandidate]:
+        # Legacy certified-only Tier 2 source. ``pool_for_catch_all``
+        # no longer wires this method (Task 4, 2026-05-02), but the
+        # adapter keeps it for the certified-only flow elsewhere; we
+        # keep it on the stub so any introspection of the protocol
+        # shape still finds it.
         self.calls.append("catch_all_inventory")
-        return [
-            LotCandidate(
-                lot_id="lot_ca_inventory",
-                product_id="prod_ca_inventory",
-                name="Catch-All Inventory",
-                brand=None,
-                expected_weight_g=110.0,
-                container_type="bottle",
-                status="on_shelf",
-                reference_image_paths=(),
-            )
-        ]
+        return [self._ca_inventory_row()]
+
+    def get_catch_all_user_inventory_lots(self) -> Sequence[LotCandidate]:
+        # Task 4 source: widened pool covering every qty>0 cloud_lots
+        # row regardless of certification. ``pool_for_catch_all``
+        # consults THIS method now; the invariant test asserts the
+        # ``inventory_only`` tier appears, so the stub returns the
+        # same canonical lot the legacy method emitted.
+        self.calls.append("catch_all_user_inventory")
+        return [self._ca_inventory_row()]
 
 
 def _ctx(shelf_id: str | None) -> tuple[ClassifierContext, _Source]:

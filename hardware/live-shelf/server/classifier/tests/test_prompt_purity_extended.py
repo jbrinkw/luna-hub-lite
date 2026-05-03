@@ -176,6 +176,16 @@ class _AllReasonsSource:
         return [self._lot("ca_in_flight", "in_flight")]
 
     def get_catch_all_inventory_lots(self):
+        # Legacy certified-only Tier 2 method. ``pool_for_catch_all``
+        # no longer wires this after Task 4; we keep the stub method
+        # on the source so any cross-reason audit still finds it.
+        return [self._lot("ca_inventory", "on_shelf")]
+
+    def get_catch_all_user_inventory_lots(self):
+        # Task 4 Tier 2 source: widened pool covering every qty>0
+        # cloud_lots row. Mirrors the legacy method here so the
+        # ca_inventory lot remains in the prompt-purity audit pool
+        # for catch-all events after the source swap.
         return [self._lot("ca_inventory", "on_shelf")]
 
 

@@ -52,6 +52,15 @@ class _CatchAllStubSource:
         return self._in_flight
 
     def get_catch_all_inventory_lots(self):
+        # Legacy method kept for protocol stability. ``pool_for_catch_all``
+        # consults ``get_catch_all_user_inventory_lots`` after Task 4.
+        return self._inventory
+
+    def get_catch_all_user_inventory_lots(self):
+        # Task 4 (2026-05-02) Tier 2 source: widened pool covering
+        # every qty>0 cloud_lots row. Mirrors the legacy method here
+        # so the edge-weight property still drives the inventory-tier
+        # branch in the pool builder after the swap.
         return self._inventory
 
     def get_on_shelf_lots(self, shelf_id=None):

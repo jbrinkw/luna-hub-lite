@@ -36,6 +36,16 @@ class _CatchAllStubSource:
     Implements only the catch-all-specific methods + the legacy
     no-op stubs needed for compatibility with helpers that may
     introspect them.
+
+    **2026-05-02 (Task 4):** ``pool_for_catch_all`` now sources Tier
+    2 from ``get_catch_all_user_inventory_lots`` (widened pool
+    covering every qty>0 cloud_lots row, certified or not). The
+    legacy ``get_catch_all_inventory_lots`` method is still exposed
+    here so tests that introspect the protocol shape pre-Task 4
+    keep working — the adapter on the Pi keeps the legacy method
+    too. Both methods return the same ``inventory`` list so
+    membership assertions in this file stay agnostic to which
+    method fires.
     """
 
     def __init__(self, *, in_flight=(), inventory=()):
@@ -47,6 +57,15 @@ class _CatchAllStubSource:
         return self._in_flight
 
     def get_catch_all_inventory_lots(self):
+        # Legacy certified-only method. Kept for protocol stability
+        # (adapter on the Pi exposes it too) but no longer wired
+        # into ``pool_for_catch_all`` after Task 4.
+        return self._inventory
+
+    def get_catch_all_user_inventory_lots(self):
+        # Task 4 source: widened pool covering every qty>0 cloud_lots
+        # row regardless of certification. Mirrors the legacy method
+        # in this stub so existing membership assertions still hit.
         return self._inventory
 
     # --- Legacy no-ops (none of these should fire from the catch-all
@@ -193,8 +212,15 @@ def test_pool_falls_back_gracefully_on_source_error():
         def get_catch_all_in_flight_lots(self):
             raise RuntimeError("DB went away")
 
-        def get_catch_all_inventory_lots(self):
+        def get_catch_all_user_inventory_lots(self):
+            # Task 4: builder sources Tier 2 from the user-inventory
+            # method, so the throwing branch lives here now. Legacy
+            # method also raises for completeness — guards against
+            # future refactors that briefly fall back to it.
             raise RuntimeError("DB still gone")
+
+        def get_catch_all_inventory_lots(self):
+            raise RuntimeError("DB still gone (legacy)")
 
     ctx = ClassifierContext(source=_ThrowingStub())
     pool = pool_for_catch_all(100.0, ctx)
@@ -286,3 +312,88 @@ def test_pool_dedupe_prefers_in_flight_tier():
         "in-flight tier must win the dedupe so the SECOND-measurement "
         "branch fires when the lot is mid-session"
     )
+
+
+# ----------------------------------------------------------------------
+# Task 4 (catch-all auto-import, 2026-05-02): pool builder must source
+# Tier 2 from the WIDENED user-inventory method, not the certified-only
+# legacy method.
+# ----------------------------------------------------------------------
+
+
+class _UserInventoryOnlyStubSource:
+    """Catch-all source that exposes ONLY the new ``user_inventory``
+    method (no legacy ``get_catch_all_inventory_lots``).
+
+    Locks in the invariant: ``pool_for_catch_all`` MUST consult
+    ``get_catch_all_user_inventory_lots`` for Tier 2. If the builder
+    still calls the legacy method, this stub's lots are never queried
+    and the assertion below fails.
+    """
+
+    def __init__(self, *, in_flight=(), user_inventory=()):
+        self._in_flight = in_flight
+        self._user_inventory = user_inventory
+
+    def get_catch_all_in_flight_lots(self):
+        return self._in_flight
+
+    def get_catch_all_user_inventory_lots(self):
+        return self._user_inventory
+
+    # Live-shelf surface — must never be queried by pool_for_catch_all.
+    def get_on_shelf_lots(self, shelf_id=None):
+        return []
+
+    def get_recently_out_lots(self, window_seconds, shelf_id=None):
+        return []
+
+    def get_in_flight_lots(self, max_age_seconds=None, shelf_id=None):
+        return []
+
+    def get_certified_not_on_shelf(self):
+        return []
+
+
+def test_pool_for_catch_all_uses_user_inventory_method():
+    """Tier 2 must call ``get_catch_all_user_inventory_lots`` (the
+    widened pool from Task 3), NOT the legacy
+    ``get_catch_all_inventory_lots`` (certified-only).
+
+    Lock-in invariant: uncertified products with qty>0 appear in the
+    pool. The certified-only filter from the legacy adapter method
+    used to drop them; the new method exposes them and the builder
+    must wire that source.
+
+    Mutation guard: reverting the source method name in
+    ``pool_for_catch_all`` to ``get_catch_all_inventory_lots`` makes
+    this stub's user_inventory invisible to the builder (the legacy
+    method is intentionally absent here), the inventory tier yields
+    [], and both ``lot-uncert`` / ``lot-cert`` are missing from the
+    pool — failing the membership assertions.
+    """
+    uncertified = _lot("lot-uncert", 500.0, name="Uncertified Pasta")
+    certified = _lot("lot-cert", 700.0, name="Certified Olive Oil")
+    ctx = ClassifierContext(
+        source=_UserInventoryOnlyStubSource(
+            in_flight=[],
+            user_inventory=[uncertified, certified],
+        ),
+        shelf_id="catch_all",
+    )
+    pool = pool_for_catch_all(delta_g=505.0, ctx=ctx)
+    pool_ids = [c.candidate_id for c in pool]
+    # Both lots present (uncertified + certified are equal-class —
+    # the widened pool no longer filters on certification).
+    assert "lot-uncert" in pool_ids, (
+        "uncertified-product lot missing from catch-all pool. The "
+        "widened user-inventory source MUST surface qty>0 lots "
+        "regardless of certification status."
+    )
+    assert "lot-cert" in pool_ids, (
+        "certified-product lot missing from catch-all pool — the "
+        "widened user-inventory source covers ALL qty>0 lots, "
+        "certified included."
+    )
+    # Sentinel last invariant preserved.
+    assert pool[-1].candidate_id == UNKNOWN_CANDIDATE_ID
