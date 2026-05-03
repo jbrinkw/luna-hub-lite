@@ -26,11 +26,12 @@ import sqlite3
 import sys
 import threading
 import time
+from collections import deque
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Optional
 
-from flask import Flask, Response
+from flask import Flask, Response, jsonify
 
 from . import adapters
 from .camera import mjpeg
@@ -958,13 +959,46 @@ def start_disk_retention_sweeper(
     return t
 
 
+# I-Pi-2 scanner-thread hardening
+# --------------------------------
+# Module-level health dict the ``/health/barcode`` route reads. Mutated
+# only by the scanner thread (state transitions, restart bookkeeping) and
+# by ``ScannerLoop.on_scan`` (last_scan_ts). Single-writer + a Flask
+# request reader → no lock needed for these scalar reads/writes.
+#
+# state transitions:
+#   ``disabled``           → BARCODE_SCANNER_ENABLED unset/falsy
+#   ``starting``           → enabled, before the inner loop has resolved a device
+#   ``running``            → ScannerLoop is iterating
+#   ``device_lost``        → caught ScannerDeviceLost, sleeping before retry
+#   ``crashed``            → unexpected exception, sleeping before retry
+#   ``failed_terminally``  → restart cap exceeded, thread exited
+#   ``idle``               → source iterator exhausted (test path; never in prod)
+scanner_health: dict[str, Any] = {
+    'enabled': False,
+    'state': 'disabled',
+    'last_scan_ts': None,
+    'last_restart_ts': None,
+    'restart_window': deque(),
+}
+
+# Restart cap: more than this many restarts within ``_RESTART_WINDOW_S``
+# means something is permanently wrong (bad device, missing perms after a
+# udev change). Stop trying so the operator notices via the log alarm
+# rather than spamming retries forever.
+_RESTART_WINDOW_S = 300  # 5 min
+_MAX_RESTARTS_IN_WINDOW = 10
+
+
 def _start_barcode_scanner_thread(
     cloud_client: Optional[Any],
+    *,
+    shutdown_event: Optional[threading.Event] = None,
 ) -> Optional[threading.Thread]:
     """Start the USB barcode scanner forwarder thread (off by default).
 
     Gated by env var ``BARCODE_SCANNER_ENABLED``. The thread reads scans
-    from ``/dev/input/<device>`` via evdev and forwards each to
+    from a USB HID barcode scanner via evdev and forwards each to
     ``POST /shelf-ingest/barcode-scan`` via the supplied ``CloudClient``.
 
     No-ops (returns ``None``) when:
@@ -974,6 +1008,31 @@ def _start_barcode_scanner_thread(
         without it; we log a warning and skip rather than crashing the
         loop on first scan.
 
+    Hardening (I-Pi-2)
+    ------------------
+    The inner ``_run`` is a bounded restart loop. Pre-fix the thread was
+    one-shot — any USB unplug, permission flap, or kernel hiccup killed
+    it permanently. Now:
+
+    * ``ScannerDeviceLost`` (raised by ``open_device_and_stream_barcodes``
+      and by ``discover_barcode_device``) → warn + sleep + retry. This
+      is the dominant case (USB cable jiggle, scanner reboot).
+    * Any other ``Exception`` → log.exception (full traceback) + sleep +
+      retry. A code bug shouldn't take the thread down forever, but it
+      should leave a stack trace on every iteration so we notice.
+    * Cap: more than ``_MAX_RESTARTS_IN_WINDOW`` restarts in
+      ``_RESTART_WINDOW_S`` flips state to ``failed_terminally`` and
+      exits the thread. Operators see the cap message in the log + see
+      ``state="failed_terminally"`` on ``/health/barcode``.
+    * Backoff: 2s, 4s, 8s, ... capped at 60s. Resets on each successful
+      ``run_forever`` entry so a flaky scanner that recovers settles back
+      to fast retries on the next trip.
+    * Discovery: if ``BARCODE_SCANNER_DEVICE`` is set, that path wins
+      (back-compat). Otherwise the loop calls
+      ``discover_barcode_device(BARCODE_SCANNER_VENDOR_ID,
+      BARCODE_SCANNER_NAME_PATTERN)`` so the Pi survives USB-port
+      renumbering across reboots.
+
     The ``evdev`` import lives inside the inner ``_run`` so a Pi that
     doesn't enable the scanner doesn't pull the dependency. Returns the
     thread (for tests / observability) or ``None`` when not started.
@@ -981,32 +1040,125 @@ def _start_barcode_scanner_thread(
     if os.environ.get('BARCODE_SCANNER_ENABLED', '').lower() not in (
         '1', 'true', 'yes',
     ):
+        scanner_health['enabled'] = False
+        scanner_health['state'] = 'disabled'
         return None
     if cloud_client is None:
         log.warning(
             'BARCODE_SCANNER_ENABLED=true but cloud_client is None; '
             'scanner thread NOT started (set CLOUD_URL + CLOUD_IMPORT_KEY)',
         )
+        scanner_health['enabled'] = False
+        scanner_health['state'] = 'disabled'
         return None
-    device_path = os.environ.get('BARCODE_SCANNER_DEVICE', '/dev/input/event0')
+
+    scanner_health['enabled'] = True
+    scanner_health['state'] = 'starting'
+    scanner_health['last_scan_ts'] = None
+    scanner_health['last_restart_ts'] = None
+    scanner_health['restart_window'] = deque()
+
+    device_path_env = os.environ.get('BARCODE_SCANNER_DEVICE')
+    vendor_id_env = os.environ.get('BARCODE_SCANNER_VENDOR_ID')
+    name_pattern_env = os.environ.get('BARCODE_SCANNER_NAME_PATTERN')
 
     def _run() -> None:
         # Lazy imports so a Pi that doesn't run the scanner doesn't pull
-        # the evdev dependency.
-        from .barcode.hid_listener import open_device_and_stream_barcodes
-        from .barcode.scanner_loop import ScannerLoop
-        loop = ScannerLoop(
-            cloud_client=cloud_client,
-            barcode_source=lambda: open_device_and_stream_barcodes(device_path),
+        # the evdev dependency at module load.
+        from .barcode.hid_listener import (
+            ScannerDeviceLost,
+            discover_barcode_device,
+            open_device_and_stream_barcodes,
         )
-        try:
-            loop.run_forever()
-        except Exception:
-            log.exception('barcode scanner loop crashed')
+        from .barcode.scanner_loop import ScannerLoop
+
+        backoff = 2.0
+        max_backoff = 60.0
+
+        def _resolve_device() -> str:
+            # Explicit path wins (back-compat with existing Pi deployments).
+            if device_path_env:
+                return device_path_env
+            return discover_barcode_device(
+                vendor_id_hex=vendor_id_env,
+                name_substring=name_pattern_env,
+            )  # raises ScannerDeviceLost if no match
+
+        def _should_continue() -> bool:
+            return shutdown_event is None or not shutdown_event.is_set()
+
+        def _on_scan(_barcode: str) -> None:
+            # Updated by ScannerLoop after each forwarded scan. Single
+            # writer, multiple readers (the Flask /health/barcode route).
+            scanner_health['last_scan_ts'] = time.time()
+
+        while _should_continue():
+            try:
+                resolved_path = _resolve_device()
+                log.info('barcode-scanner: starting on %s', resolved_path)
+                scanner_health['state'] = 'running'
+                # Reset backoff on successful resolve — a flaky scanner
+                # that recovers shouldn't stay in slow-retry territory.
+                backoff = 2.0
+                loop = ScannerLoop(
+                    cloud_client=cloud_client,
+                    barcode_source=lambda p=resolved_path: (
+                        open_device_and_stream_barcodes(p)
+                    ),
+                    on_scan=_on_scan,
+                )
+                loop.run_forever()
+                # Source exhausted — only happens in tests where the fake
+                # iterator is finite. In prod, ``read_loop`` blocks
+                # forever or raises.
+                scanner_health['state'] = 'idle'
+                return
+            except ScannerDeviceLost as exc:
+                log.warning(
+                    'barcode: device lost (%s); retry in %.1fs',
+                    exc, backoff,
+                )
+                scanner_health['state'] = 'device_lost'
+            except Exception:
+                log.exception(
+                    'barcode: unexpected loop crash; retry in %.1fs',
+                    backoff,
+                )
+                scanner_health['state'] = 'crashed'
+
+            now = time.time()
+            scanner_health['last_restart_ts'] = now
+            window: deque = scanner_health['restart_window']
+            window.append(now)
+            # Evict restarts older than the rolling window.
+            while window and window[0] < now - _RESTART_WINDOW_S:
+                window.popleft()
+            if len(window) > _MAX_RESTARTS_IN_WINDOW:
+                log.error(
+                    'barcode: %d restarts in %ds; giving up. Restart Pi '
+                    'service to retry.',
+                    len(window), _RESTART_WINDOW_S,
+                )
+                scanner_health['state'] = 'failed_terminally'
+                return
+
+            # Sleep with cancellation support so AppBundle.shutdown can
+            # wake us promptly. Falls back to plain time.sleep when no
+            # event was provided (back-compat for direct callers).
+            if shutdown_event is not None:
+                if shutdown_event.wait(timeout=backoff):
+                    return
+            else:
+                time.sleep(backoff)
+            backoff = min(backoff * 2, max_backoff)
 
     t = threading.Thread(target=_run, name='barcode-scanner', daemon=True)
     t.start()
-    log.info('barcode-scanner thread started for device=%s', device_path)
+    log.info(
+        'barcode-scanner thread started '
+        '(device=%s, vendor=%s, name=%s)',
+        device_path_env, vendor_id_env, name_pattern_env,
+    )
     return t
 
 
@@ -2130,6 +2282,37 @@ def create_app(
             "cloud_outbox_permanent_failures": cloud_outbox_permanent_failures,
         }, (200 if ok else 503)
 
+    # --- Barcode scanner health (I-Pi-2) -------------------------------
+    # Surfaces the ``scanner_health`` module-level dict so operators can
+    # detect a permanently-failed scanner thread without grepping logs.
+    # Reports state, last_scan_age_s (None when no scan ever recorded),
+    # last_restart_age_s, and a rolling restart count over the last
+    # 5 minutes. When ``BARCODE_SCANNER_ENABLED`` is unset / falsy this
+    # collapses to ``{"state": "disabled"}``.
+    @app.get("/health/barcode")
+    def health_barcode():
+        if not scanner_health.get('enabled'):
+            return jsonify({'state': 'disabled'})
+        now = time.time()
+        last_scan = scanner_health.get('last_scan_ts')
+        last_restart = scanner_health.get('last_restart_ts')
+        # Snapshot the deque to avoid len() racing the writer thread.
+        # ``list(deque)`` is atomic in CPython.
+        window_snapshot = list(scanner_health.get('restart_window') or [])
+        recent_restarts = sum(
+            1 for t in window_snapshot if t > now - _RESTART_WINDOW_S
+        )
+        return jsonify({
+            'state': scanner_health.get('state'),
+            'last_scan_age_s': (
+                now - last_scan if last_scan is not None else None
+            ),
+            'last_restart_age_s': (
+                now - last_restart if last_restart is not None else None
+            ),
+            'restart_count_5min': recent_restarts,
+        })
+
     # --- Launch camera thread(s) ----------------------------------------
     if start_camera:
         camera.start()
@@ -2582,11 +2765,19 @@ def create_app(
         # The other branch (enabled but missing url/key) already logged
         # a WARNING up at emitter-construction time.
 
-    # --- USB barcode scanner (USB Scanner Task 10) ----------------------
+    # --- USB barcode scanner (USB Scanner Task 10 + I-Pi-2 hardening) ----
     # Off by default; gated by BARCODE_SCANNER_ENABLED. When enabled the
-    # thread reads /dev/input/<device> via evdev and forwards each scan
-    # to POST /shelf-ingest/barcode-scan via the shared cloud_client.
-    barcode_scanner_thread = _start_barcode_scanner_thread(cloud_client)
+    # thread reads from a USB HID barcode scanner via evdev and forwards
+    # each scan to POST /shelf-ingest/barcode-scan via the shared
+    # cloud_client. The thread is now an auto-restart wrapper — see
+    # ``_start_barcode_scanner_thread`` for the full backoff/cap policy.
+    # ``shutdown_event`` is wired in so AppBundle.shutdown can cancel
+    # the retry sleep promptly (otherwise we'd wait up to 60s on the
+    # joint).
+    barcode_scanner_thread = _start_barcode_scanner_thread(
+        cloud_client,
+        shutdown_event=background_shutdown_event,
+    )
     if barcode_scanner_thread is not None:
         background_threads.append(barcode_scanner_thread)
 
