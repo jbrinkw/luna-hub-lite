@@ -68,7 +68,14 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
   }),
 }));
 
+// Stub the realtime hook so the tab mounts cleanly under jsdom (the real
+// hook reaches into `supabase.realtime.stateChangeCallbacks` which the
+// test mock doesn't provide).
+vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi.fn() }));
+
 import { ScannerTransactionsTab } from '@/pages/chefbyte/ScannerTransactionsTab';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { queryKeys } from '@/shared/queryKeys';
 
 describe('ScannerTransactionsTab', () => {
   it('lists transactions and allows void', async () => {
@@ -95,6 +102,71 @@ describe('ScannerTransactionsTab', () => {
         'shelf-ingest/scan-transaction/tx-1/void',
         expect.objectContaining({ method: 'POST' }),
       );
+    });
+  });
+
+  it('subscribes to realtime postgres_changes for chefbyte.scan_transactions', () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <ScannerTransactionsTab />
+      </QueryClientProvider>,
+    );
+
+    expect(useRealtimeInvalidation).toHaveBeenCalledWith(
+      'scan-transactions-tab',
+      expect.arrayContaining([
+        expect.objectContaining({
+          schema: 'chefbyte',
+          table: 'scan_transactions',
+          queryKeys: [queryKeys.scanTransactions('u-1')],
+        }),
+      ]),
+    );
+    const calls = (useRealtimeInvalidation as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const tabCall = calls.find((c) => c[0] === 'scan-transactions-tab');
+    const subs = tabCall![1] as Array<{ schema: string; table: string; queryKeys: readonly (readonly unknown[])[] }>;
+    // Exactly one sub registered (no extras silently added).
+    expect(subs).toHaveLength(1);
+  });
+
+  it('void mutation invalidates downstream caches (stockLots, shoppingList, dailyMacros, foodLogs, products)', async () => {
+    const user = userEvent.setup();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    const invalidateSpy = vi.spyOn(qc, 'invalidateQueries');
+
+    render(
+      <QueryClientProvider client={qc}>
+        <ScannerTransactionsTab />
+      </QueryClientProvider>,
+    );
+
+    await waitFor(() => {
+      expect(screen.getByText('111')).toBeInTheDocument();
+    });
+
+    invalidateSpy.mockClear();
+    await user.click(screen.getByTestId('void-tx-1'));
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith(
+        'shelf-ingest/scan-transaction/tx-1/void',
+        expect.objectContaining({ method: 'POST' }),
+      );
+    });
+
+    // Wait for onSuccess to fire (mutation resolves async).
+    await waitFor(() => {
+      const calls = invalidateSpy.mock.calls.map((c) => (c[0] as { queryKey?: readonly unknown[] }).queryKey);
+      // Primary: scanTransactions list refresh.
+      expect(calls).toContainEqual(queryKeys.scanTransactions('u-1'));
+      // Defensive downstream:
+      expect(calls).toContainEqual(queryKeys.products('u-1'));
+      expect(calls).toContainEqual(queryKeys.stockLots('u-1'));
+      expect(calls).toContainEqual(queryKeys.shoppingList('u-1'));
+      // dailyMacros + foodLogs invalidated by tuple prefix (date-keyed).
+      expect(calls).toContainEqual(['daily-macros', 'u-1']);
+      expect(calls).toContainEqual(['food-logs', 'u-1']);
     });
   });
 });

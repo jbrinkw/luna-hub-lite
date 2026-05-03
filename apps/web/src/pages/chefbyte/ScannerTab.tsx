@@ -3,6 +3,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { fetchScannerState, pushScannerMode, type ScanMode } from '@/shared/scannerStateApi';
 import { queryKeys } from '@/shared/queryKeys';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
 const MODE_LABELS: Record<ScanMode, string> = {
   purchase: 'Purchase (add to stock)',
@@ -44,6 +45,19 @@ export function ScannerTab() {
       queryClient.invalidateQueries({ queryKey: queryKeys.scannerState(user?.id) });
     },
   });
+
+  // Realtime: cross-device lock changes — when another tab/device flips the
+  // lock or the Pi forwarder updates last_active_mode, this tab's display
+  // should reflect it without a manual reload. Migration
+  // `20260503100000_scanner_state_and_transactions.sql` adds
+  // chefbyte.scanner_state to the supabase_realtime publication.
+  useRealtimeInvalidation('scanner-tab', [
+    {
+      schema: 'chefbyte',
+      table: 'scanner_state',
+      queryKeys: [queryKeys.scannerState(user?.id)],
+    },
+  ]);
 
   return (
     <div className="space-y-3 p-4">

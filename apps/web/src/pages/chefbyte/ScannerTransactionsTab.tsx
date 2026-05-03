@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { supabase, chefbyte } from '@/shared/supabase';
 import { queryKeys } from '@/shared/queryKeys';
 import { useAuth } from '@/shared/auth/AuthProvider';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
 
 interface ScanTxRow {
   transaction_id: string;
@@ -37,6 +38,18 @@ export function ScannerTransactionsTab() {
     enabled: !!user,
   });
 
+  // Realtime: when the Pi USB scanner (or any other tab) writes a new row to
+  // chefbyte.scan_transactions, refresh this tab without a manual reload.
+  // Migration `20260503100000_scanner_state_and_transactions.sql` already
+  // adds the table to the supabase_realtime publication.
+  useRealtimeInvalidation('scan-transactions-tab', [
+    {
+      schema: 'chefbyte',
+      table: 'scan_transactions',
+      queryKeys: [queryKeys.scanTransactions(user?.id)],
+    },
+  ]);
+
   const voidMutation = useMutation({
     mutationFn: async (transactionId: string) => {
       const { error } = await supabase.functions.invoke(`shelf-ingest/scan-transaction/${transactionId}/void`, {
@@ -45,7 +58,27 @@ export function ScannerTransactionsTab() {
       if (error) throw error;
     },
     onSuccess: () => {
+      // Always: refresh the transactions list (status flips to 'voided').
       queryClient.invalidateQueries({ queryKey: queryKeys.scanTransactions(user?.id) });
+      // Defensive downstream invalidation: void reverses one of three
+      // side-effect paths and we don't know which from the UI side, so
+      // invalidate every key that could have been touched.
+      //   purchase        → stock_lots (Realtime usually catches it; this
+      //                     covers the case where the realtime channel for
+      //                     stock_lots is unhealthy or the page mounted
+      //                     after the event fired).
+      //   consume_macros  → food_log row deleted → dailyMacros + foodLogs
+      //                     for whatever date the consume hit.
+      //   shopping        → cart_item row deleted → shoppingList.
+      // products is included because Settings → Products may have been
+      // affected (e.g. last lot of a placeholder product re-added).
+      queryClient.invalidateQueries({ queryKey: queryKeys.products(user!.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.stockLots(user!.id) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.shoppingList(user!.id) });
+      // dailyMacros/foodLogs are date-keyed; the void may correspond to any
+      // logical_date so we invalidate by tuple prefix (matches every date).
+      queryClient.invalidateQueries({ queryKey: ['daily-macros', user?.id] });
+      queryClient.invalidateQueries({ queryKey: ['food-logs', user?.id] });
     },
   });
 

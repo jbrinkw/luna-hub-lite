@@ -25,7 +25,14 @@ vi.mock('@/shared/auth/AuthProvider', () => ({
   }),
 }));
 
+// Stub the realtime hook so the tab mounts cleanly under jsdom — the real
+// hook touches supabase.realtime internals that the test mock doesn't
+// expose.
+vi.mock('@/shared/useRealtimeInvalidation', () => ({ useRealtimeInvalidation: vi.fn() }));
+
 import { ScannerTab } from '@/pages/chefbyte/ScannerTab';
+import { useRealtimeInvalidation } from '@/shared/useRealtimeInvalidation';
+import { queryKeys } from '@/shared/queryKeys';
 
 describe('ScannerTab', () => {
   it('toggling lock + selecting mode + saving POSTs locked_mode', async () => {
@@ -65,5 +72,30 @@ describe('ScannerTab', () => {
       const call = invokeMock.mock.calls.find((c) => (c[1] as any)?.body?.locked_mode === null);
       expect(call).toBeDefined();
     });
+  });
+
+  it('subscribes to realtime postgres_changes for chefbyte.scanner_state so cross-device lock changes sync', () => {
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <ScannerTab />
+      </QueryClientProvider>,
+    );
+
+    expect(useRealtimeInvalidation).toHaveBeenCalledWith(
+      'scanner-tab',
+      expect.arrayContaining([
+        expect.objectContaining({
+          schema: 'chefbyte',
+          table: 'scanner_state',
+          queryKeys: [queryKeys.scannerState('u-1')],
+        }),
+      ]),
+    );
+    const calls = (useRealtimeInvalidation as unknown as { mock: { calls: unknown[][] } }).mock.calls;
+    const tabCall = calls.find((c) => c[0] === 'scanner-tab');
+    const subs = tabCall![1] as Array<{ schema: string; table: string; queryKeys: readonly (readonly unknown[])[] }>;
+    // Exactly one sub registered (no extras silently added).
+    expect(subs).toHaveLength(1);
   });
 });
