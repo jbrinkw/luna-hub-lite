@@ -76,8 +76,7 @@ const corsHeaders = {
   // Without `authorization` here, the browser preflight rejects with
   // "Request header field authorization is not allowed by
   // Access-Control-Allow-Headers" before the actual request fires.
-  'Access-Control-Allow-Headers':
-    'authorization, x-client-info, apikey, content-type, x-api-key',
+  'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type, x-api-key',
 };
 
 // ─── Validation constants ────────────────────────────────────────────
@@ -1307,8 +1306,32 @@ async function handleBarcodeScan(req: Request, supabase: SupabaseClient): Promis
         body: { barcode, user_id: userId },
       });
       if (analyzeRes.error) {
-        const msg = (analyzeRes.error as { message?: string }).message ?? 'unknown error';
-        analyzeError = `analyze-product: ${msg}`;
+        // supabase-js wraps non-2xx responses in FunctionsHttpError whose
+        // ``.message`` is the opaque constant
+        // ``"Edge Function returned a non-2xx status code"``. The actual
+        // JSON body sits on ``error.context`` (a Response object). Read
+        // it so the audit row's ``error_msg`` surfaces the real reason
+        // (OFF 404, missing AI key, quota exhausted, billing exhausted,
+        // invalid input, etc) instead of the SDK's wrapper string —
+        // otherwise every distinct upstream failure collapses to the
+        // same opaque diagnostic and the Settings → Scanner Transactions
+        // audit log loses its triage value.
+        let underlying: string | null = null;
+        const ctx = (analyzeRes.error as { context?: Response }).context;
+        if (ctx && typeof ctx.json === 'function') {
+          try {
+            const body = await ctx.json();
+            if (body && typeof body === 'object' && typeof (body as { error?: unknown }).error === 'string') {
+              underlying = (body as { error: string }).error;
+            }
+          } catch {
+            // Body wasn't JSON or already-consumed — keep ``underlying``
+            // null so the ``??`` below falls through to ``error.message``.
+            underlying = null;
+          }
+        }
+        const fallback = (analyzeRes.error as { message?: string }).message ?? 'unknown error';
+        analyzeError = `analyze-product: ${underlying ?? fallback}`;
       } else {
         // Prefer the product_id returned by analyze-product's service-role
         // auto-create; fall back to a re-query if the response is missing

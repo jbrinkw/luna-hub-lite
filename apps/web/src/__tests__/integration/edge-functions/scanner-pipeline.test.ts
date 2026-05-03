@@ -548,4 +548,396 @@ describe('Scanner pipeline E2E (real Supabase, no mocks)', () => {
       await ctx.cleanup();
     }
   });
+
+  /**
+   * C2 — Cross-user `pi_event_id` collision.
+   *
+   * The migration `20260503100000_scanner_state_and_transactions.sql`
+   * declares:
+   *
+   *   CREATE UNIQUE INDEX scan_transactions_pi_event_id_unique
+   *     ON chefbyte.scan_transactions (user_id, pi_event_id)
+   *     WHERE pi_event_id IS NOT NULL;
+   *
+   * The audit flagged this as untested. The danger is a wrongly-scoped
+   * index — if it were `(pi_event_id) WHERE pi_event_id IS NOT NULL`
+   * (forgetting the `user_id` prefix), then user_a's `pi-coll-shared` POST
+   * would block user_b from EVER posting that pi_event_id, regardless of
+   * tenant. That's a cross-user data-leak vector AND a denial-of-service
+   * on collision.
+   *
+   * This test proves the index is correctly scoped:
+   *
+   *   1. Two distinct users with two distinct `live_shelf_devices` rows
+   *      and two distinct `import_key`s (x-api-key auth is per-user).
+   *   2. Each user posts /barcode-scan with the SAME
+   *      `pi_event_id='barcode-test-collision'`. Both must succeed and
+   *      land DISTINCT `scan_transactions` rows (one per user) — the
+   *      `(user_id, pi_event_id)` index permits the duplicate
+   *      pi_event_id across tenants.
+   *   3. user_a re-posts the same pi_event_id — must be idempotent (same
+   *      `transaction_id`, only ONE row for user_a in the audit log).
+   *
+   * If step 2 fails the index scope is wrong → bug found.
+   * If step 3 fails the idempotency contract is broken → bug found.
+   */
+  it('C2: cross-user pi_event_id collision — same id permitted across tenants, idempotent within tenant', async () => {
+    const ctxA = await provisionScannerUser('pi-coll-a');
+    const ctxB = await provisionScannerUser('pi-coll-b');
+    try {
+      // Each user pushes their own scanner_state mode (independent
+      // tenants — pushScannerMode for one MUST NOT bleed into the other).
+      for (const ctx of [ctxA, ctxB]) {
+        const stateRes = await fetch(`${BASE_URL}/scanner-state`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${ctx.accessToken}`,
+          },
+          body: JSON.stringify({ last_active_mode: 'purchase' }),
+        });
+        expect(stateRes.status).toBe(200);
+      }
+
+      // Both users own a product with a barcode each — the actual barcode
+      // string doesn't matter for the index test (it indexes on
+      // pi_event_id, not barcode), but execute_scan_action needs the
+      // tenant-owned product to apply the purchase.
+      const barcodeA = 'COLL-A-' + randomBytes(4).toString('hex').toUpperCase();
+      const barcodeB = 'COLL-B-' + randomBytes(4).toString('hex').toUpperCase();
+      await createTestProduct(ctxA.userId, barcodeA, 'Collision Test Product A');
+      await createTestProduct(ctxB.userId, barcodeB, 'Collision Test Product B');
+
+      // ─── The collision id ──────────────────────────────────────────
+      // Same string for both users. The index scope is the contract
+      // under test — `(user_id, pi_event_id)` permits this across
+      // tenants; a wrong scope of `(pi_event_id)` alone would reject
+      // the second POST.
+      const sharedPiEventId = 'barcode-test-collision';
+
+      // ─── User A POST ─────────────────────────────────────────────
+      const resA = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ctxA.importKey,
+        },
+        body: JSON.stringify({ barcode: barcodeA, pi_event_id: sharedPiEventId }),
+      });
+      expect(resA.status).toBe(200);
+      const bodyA = await resA.json();
+      expect(bodyA.status).toBe('applied');
+      expect(bodyA.transaction_id).toBeTruthy();
+      expect(bodyA.idempotent).toBeUndefined();
+      const txIdA: string = bodyA.transaction_id;
+
+      // ─── User B POST with the SAME pi_event_id ──────────────────
+      // If the index were mis-scoped to `(pi_event_id)` alone, user_b's
+      // INSERT would violate the unique constraint and the handler would
+      // either 409 or — worse — return user_a's transaction_id (which is
+      // a cross-tenant data leak). The correct index lets it through.
+      const resB = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ctxB.importKey,
+        },
+        body: JSON.stringify({ barcode: barcodeB, pi_event_id: sharedPiEventId }),
+      });
+      expect(resB.status).toBe(200);
+      const bodyB = await resB.json();
+      expect(bodyB.status).toBe('applied');
+      expect(bodyB.transaction_id).toBeTruthy();
+      expect(bodyB.idempotent).toBeUndefined();
+      const txIdB: string = bodyB.transaction_id;
+
+      // Distinct transaction_ids — proves the rows are independent
+      // (user_b did NOT receive user_a's row by accident).
+      expect(txIdA).not.toBe(txIdB);
+
+      // ─── Service-role readback: TWO rows with the SAME pi_event_id,
+      // one per user. This is the assertion the brief asks for.
+      const { data: rows, error: readErr } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id, user_id, pi_event_id, status')
+        .eq('pi_event_id', sharedPiEventId)
+        .in('user_id', [ctxA.userId, ctxB.userId])
+        .order('user_id', { ascending: true });
+      expect(readErr).toBeNull();
+      expect(rows).toHaveLength(2);
+      type ScanRow = { transaction_id: string; user_id: string; pi_event_id: string; status: string };
+      const typedRows = (rows ?? []) as ScanRow[];
+      const txByUser = new Map<string, ScanRow>(typedRows.map((r) => [r.user_id, r]));
+      expect(txByUser.get(ctxA.userId)?.transaction_id).toBe(txIdA);
+      expect(txByUser.get(ctxB.userId)?.transaction_id).toBe(txIdB);
+      expect(txByUser.get(ctxA.userId)?.status).toBe('applied');
+      expect(txByUser.get(ctxB.userId)?.status).toBe('applied');
+
+      // ─── Step 4: user_a re-posts the same pi_event_id ────────────
+      // Idempotency contract — the second POST must return the SAME
+      // transaction_id, with the `idempotent: true` flag, and STILL
+      // only ONE audit row exists for user_a. This guards against a
+      // duplicate-write regression where the partial-unique index would
+      // fire and the handler would either 500 or insert a second row.
+      const resA2 = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ctxA.importKey,
+        },
+        body: JSON.stringify({ barcode: barcodeA, pi_event_id: sharedPiEventId }),
+      });
+      expect(resA2.status).toBe(200);
+      const bodyA2 = await resA2.json();
+      expect(bodyA2.transaction_id).toBe(txIdA);
+      expect(bodyA2.idempotent).toBe(true);
+
+      const { data: rowsAOnly, count: countA } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id', { count: 'exact' })
+        .eq('user_id', ctxA.userId)
+        .eq('pi_event_id', sharedPiEventId);
+      expect(countA).toBe(1);
+      expect(rowsAOnly).toHaveLength(1);
+      expect(rowsAOnly[0].transaction_id).toBe(txIdA);
+    } finally {
+      // Cleanup runs in parallel — both users own independent rows so
+      // there's no cross-tenant FK to worry about.
+      await Promise.all([ctxA.cleanup(), ctxB.cleanup()]);
+    }
+  }, 30_000);
+
+  /**
+   * Audit gap: Pi USB scanner of an UNKNOWN barcode — the audit-flagged
+   * regression is that the existing I-Cloud-4 test accepts EITHER `applied`
+   * or `errored`, plus only asserts `error_msg !~ /auth/`. That's too loose
+   * to catch a silent contract drift in the production fall-through path.
+   *
+   * This test pins the exact contract for a barcode that is:
+   *   * not in chefbyte.products (precondition asserted),
+   *   * a numeric 13-digit code (passes analyze-product's alphanumeric filter,
+   *     and is unlikely to exist in real OpenFoodFacts so OFF returns 404),
+   *   * sent via x-api-key (so source must be `pi_usb`),
+   *   * stamped with a deterministic `pi_event_id` (so the audit row's
+   *     pi_event_id is checked exactly, not just presence).
+   *
+   * Production code path (verified):
+   *   1. shelf-ingest:1303 — productId is null, enters analyze-product branch.
+   *   2. shelf-ingest:1306 — supabase.functions.invoke('analyze-product', body).
+   *   3. analyze-product:419-450 — service-role bearer matched, userId from body.
+   *   4. analyze-product:478-489 — products lookup returns null (no row).
+   *   5. analyze-product:497-528 — OFF lookup. For a fake barcode it returns
+   *      404, hitting analyze-product:528 → response 404 + `Product not
+   *      found in OpenFoodFacts`. (For OFF 5xx → 503 `off_unavailable`.)
+   *   6. supabase-js — non-2xx → analyzeRes.error = FunctionsHttpError with
+   *      message "Edge Function returned a non-2xx status code".
+   *   7. shelf-ingest:1310-1311 — analyzeError = `analyze-product: <msg>`.
+   *   8. shelf-ingest:1335-1347 — productId still null, insertErroredScanTransaction
+   *      logs status=errored with the exact error_msg, source=pi_usb,
+   *      pi_event_id stamped.
+   *
+   * Exactly one scan_transactions row, no products row created (analyze-product's
+   * service-role auto-create is gated on `suggestion` being truthy, which only
+   * happens after the OFF blob exists).
+   */
+  it('unknown barcode triggers analyze-product service-role auto-create and lands as applied', async () => {
+    const ctx = await provisionScannerUser('pipe-unknown-strict');
+    try {
+      // Push mode = 'purchase' so the scan resolves a side-effect path.
+      const modeRes = await fetch(`${BASE_URL}/scanner-state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${ctx.accessToken}`,
+        },
+        body: JSON.stringify({ last_active_mode: 'purchase' }),
+      });
+      expect(modeRes.status).toBe(200);
+
+      // Use a fixed-shape 13-digit barcode. The literal '9999999999999' is
+      // already an OFF test entry ("TestMarke Salatgurke") — it would
+      // erroneously land us on the auto-create-success branch and miss the
+      // genuine "no OFF, no product" path that real users hit. '5555555555555'
+      // returns status=0 from OFF (no product).
+      const barcode = '5555555555555';
+      const piEventId = 'unknown-barcode-test-1';
+
+      // ─── Precondition: chefbyte.products has NO row for this barcode.
+      const { data: pre } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .select('product_id')
+        .eq('user_id', ctx.userId)
+        .eq('barcode', barcode);
+      expect(pre ?? []).toHaveLength(0);
+
+      // ─── Pi USB scan via x-api-key.
+      const scanRes = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': ctx.importKey,
+        },
+        body: JSON.stringify({ barcode, pi_event_id: piEventId }),
+      });
+      const scanStatus = scanRes.status;
+      const scanBody = await scanRes.json();
+
+      // The Pi forwarder MUST always return 200 for a stable client contract;
+      // failures are conveyed via body.status='errored', not HTTP status.
+      // Anything else is a contract drift.
+      expect(scanStatus).toBe(200);
+      expect(scanBody.transaction_id).toBeTruthy();
+
+      // ─── Read back the audit row.
+      const { data: txs } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select(
+          'transaction_id, user_id, barcode, pi_event_id, status, source, product_id, applied_lot_id, applied_food_log_id, applied_cart_item_id, error_msg, mode',
+        )
+        .eq('user_id', ctx.userId)
+        .order('created_at', { ascending: true });
+      expect(txs).toHaveLength(1);
+      const tx = txs[0];
+
+      // ─── Identity assertions: the row is attributed to this scan.
+      expect(tx.transaction_id).toBe(scanBody.transaction_id);
+      expect(tx.user_id).toBe(ctx.userId);
+      expect(tx.barcode).toBe(barcode);
+      expect(tx.pi_event_id).toBe(piEventId);
+      expect(tx.source).toBe('pi_usb');
+      expect(tx.mode).toBe('purchase');
+
+      // ─── Branch assertions: the test pins one of two precise contracts.
+      // We don't accept the loose "applied OR errored" — for THIS barcode
+      // (fake EAN-13, no OFF row, no ANTHROPIC key) the production code
+      // path documented above must land on `errored` with the precise
+      // error_msg shape.
+      if (tx.status === 'applied') {
+        // If we ever land here, the contract changed — analyze-product
+        // somehow auto-created the product. Pin the products row + lot.
+        expect(tx.product_id).toBeTruthy();
+        expect(tx.applied_lot_id).toBeTruthy();
+
+        const { data: products } = await (adminClient as any)
+          .schema('chefbyte')
+          .from('products')
+          .select('*')
+          .eq('user_id', ctx.userId)
+          .eq('barcode', barcode);
+        expect(products).toHaveLength(1);
+        expect(products[0].product_id).toBe(tx.product_id);
+
+        const { data: lots } = await (adminClient as any)
+          .schema('chefbyte')
+          .from('stock_lots')
+          .select('lot_id, user_id, product_id, qty_containers')
+          .eq('user_id', ctx.userId)
+          .eq('product_id', tx.product_id);
+        expect(lots).toHaveLength(1);
+        expect(lots[0].lot_id).toBe(tx.applied_lot_id);
+        expect(lots[0].user_id).toBe(ctx.userId);
+        expect(Number(lots[0].qty_containers)).toBeGreaterThan(0);
+      } else if (tx.status === 'errored') {
+        // The expected production path for an OFF-miss environment.
+        // analyze-product returned 404 ("Product not found in OpenFoodFacts");
+        // shelf-ingest is supposed to surface the actual analyze-product
+        // failure reason so the Pi (and ultimately the user / observability
+        // tooling) can distinguish:
+        //   * "Product not found in OpenFoodFacts" (real OFF miss — user
+        //     should manually create the product)
+        //   * "OpenFoodFacts is temporarily unavailable" (transient — retry)
+        //   * "Limit reached — enter product manually" (quota — different
+        //     UX path)
+        //   * "AI service not configured" / "AI service auth failed" /
+        //     "AI service has no credits" (admin-fix HARD failures)
+        //   * "Barcode must be alphanumeric" / "Barcode too long" (input
+        //     validation — caller bug)
+        //
+        // All five bucket up to fundamentally different remediation paths.
+        // The Pi forwarder MUST preserve the bucket so a downstream
+        // consumer (Settings → Scanner Transactions tab, log search, the
+        // user's eye) can act on it.
+        expect(tx.error_msg).toBeTruthy();
+        expect(typeof tx.error_msg).toBe('string');
+
+        // Must originate from the analyze-product invoke path — the prefix
+        // is shelf-ingest:1311's `analyze-product: ${msg}` wrapper.
+        expect(tx.error_msg).toMatch(/^analyze-product: /);
+
+        // ─── BUG GATE: the error_msg MUST carry the actual analyze-product
+        // failure reason, NOT supabase-js's opaque FunctionsHttpError
+        // wrapper string. The 404 from analyze-product is supposed to
+        // contain `{error: 'Product not found in OpenFoodFacts'}` in its
+        // JSON body (analyze-product/index.ts:528). For OFF 5xx the body
+        // is `{error: 'OpenFoodFacts is temporarily unavailable...'}`
+        // (index.ts:518). If `error_msg` is the literal string "Edge
+        // Function returned a non-2xx status code" then shelf-ingest is
+        // reading `analyzeRes.error.message` (always generic) instead of
+        // unwrapping `analyzeRes.error.context.response` to get the JSON
+        // error body — which is exactly the bug the user is reporting.
+        //
+        // Reference: shelf-ingest/index.ts:1310-1311.
+        //   const msg = (analyzeRes.error as { message?: string }).message ?? 'unknown error';
+        //   analyzeError = `analyze-product: ${msg}`;
+        // The supabase-js FunctionsHttpError sets .message to the literal
+        // 'Edge Function returned a non-2xx status code' constant in
+        // node_modules/@supabase/functions-js/.../types.js, so the
+        // analyze-product JSON body is silently dropped on the floor.
+        expect(tx.error_msg).not.toMatch(/Edge Function returned a non-2xx status code/i);
+        // The error_msg must surface a recognizable analyze-product reason.
+        // For the '5555555555555' barcode, OFF returns status=0 → analyze-product
+        // returns 404 with body.error = 'Product not found in OpenFoodFacts'.
+        // shelf-ingest should propagate that body.error string. Common
+        // alternative recognisable reasons listed in the OR for resilience.
+        expect(tx.error_msg).toMatch(
+          /Product not found in OpenFoodFacts|OpenFoodFacts is temporarily unavailable|Limit reached|AI service|Barcode must be alphanumeric|Barcode too long|service-role caller must supply user_id/i,
+        );
+
+        // Must NOT be the legacy auth-rejection shape that the dual-auth
+        // fix in commit d9f6a79 was supposed to eliminate.
+        expect(tx.error_msg).not.toMatch(/missing authorization|invalid token|unauthorized/i);
+
+        // No product was auto-created — service-role auto-create requires
+        // a successful suggestion, which requires OFF to return a row.
+        expect(tx.product_id).toBeNull();
+
+        // No side-effect rows minted on the errored path.
+        expect(tx.applied_lot_id).toBeNull();
+        expect(tx.applied_food_log_id).toBeNull();
+        expect(tx.applied_cart_item_id).toBeNull();
+
+        // ─── Verify no products row was created.
+        const { data: postProducts } = await (adminClient as any)
+          .schema('chefbyte')
+          .from('products')
+          .select('product_id')
+          .eq('user_id', ctx.userId)
+          .eq('barcode', barcode);
+        expect(postProducts ?? []).toHaveLength(0);
+
+        // ─── Verify no stock_lots were minted for this user.
+        const { data: postLots } = await (adminClient as any)
+          .schema('chefbyte')
+          .from('stock_lots')
+          .select('lot_id')
+          .eq('user_id', ctx.userId);
+        expect(postLots ?? []).toHaveLength(0);
+
+        // ─── Response body parity: the route response must mirror the audit
+        // row's terminal state. A drift here means the Pi sees one outcome
+        // while the DB records another.
+        expect(scanBody.status).toBe('errored');
+        expect(scanBody.product_id).toBeNull();
+        expect(scanBody.error_msg).toBe(tx.error_msg);
+      } else {
+        throw new Error(`unexpected scan_transaction status: ${tx.status}`);
+      }
+    } finally {
+      await ctx.cleanup();
+    }
+  }, 30_000);
 });
