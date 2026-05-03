@@ -266,8 +266,15 @@ def test_catch_all_auto_import_skips_tare_write_when_already_set(tmp_path):
     )
     assert handled is True
 
-    # Set-once at the Pi: no push at all when tare is already set.
-    assert cloud.product_state_calls == [], (
+    # Set-once at the Pi: no TARE-carrying push when tare is already
+    # set. The Task 9 block (measured_full stamp) may still fire on the
+    # same dispatch since the placement happens to look full — that's a
+    # separate concern; this test is exclusively scoped to the Task 8
+    # tare path.
+    tare_pushes = [
+        c for c in cloud.product_state_calls if c.get("tare_g") is not None
+    ]
+    assert tare_pushes == [], (
         "set-once: must not re-push tare when products.tare_weight_g "
         "is already non-NULL"
     )
@@ -339,3 +346,108 @@ def test_catch_all_auto_import_skips_when_no_estimate(tmp_path):
     )
     assert handled is True
     assert cloud.product_state_calls == []
+
+
+# ---------------------------------------------------------------------------
+# Layer 5 (Task 9): measured_full_at stamp — fires when scale reading ≈
+# tare + net (within 5% of net) and the cloud product has no
+# measured_full_at yet. Set-once at the cloud layer; the Pi only ever
+# reads its local product row to gate the push.
+# ---------------------------------------------------------------------------
+
+
+def test_catch_all_stamps_measured_full_when_reading_near_full(tmp_path):
+    """Catch-all picks a fresh, full container: scale reading ≈ tare + net.
+    Dispatch path issues a second ``push_product_state`` call carrying
+    ``measured_full_at`` and emits a ``MEASURED_FULL_AUTO`` lifecycle row.
+
+    Tolerance: 5% of net_weight_g. With tare=25g and net=500g the
+    expected full reading is 525g; tolerance is 25g. A 521g reading
+    (4g below expected) is well inside the window.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    # Tare already set — Task 8's tare-write block is a no-op so the
+    # only push that fires comes from the Task 9 measured_full block.
+    _seed_product(conn, product_id="prod-fresh", tare=25.0, net=500.0)
+    _seed_cloud_lot(conn, lot_id="LOT-FRESH", product_id="prod-fresh")
+
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-FRESH",
+            "reasoning": "fresh full bottle, recently picked up",
+        },
+        delta_g=521.0,  # |521 - 525| = 4g ≤ 25g tolerance
+        event_ts="2026-05-02T18:00:00.000Z",
+        event_id="evt-auto-5",
+        session_id="sess-auto-5",
+    )
+    assert handled is True
+
+    # Exactly one push, carrying measured_full_at (and no tare_g — Task 8
+    # block was skipped because tare was already calibrated).
+    full_calls = [
+        c for c in cloud.product_state_calls
+        if c.get("measured_full_at") is not None
+    ]
+    assert len(full_calls) == 1, (
+        "expected exactly one push_product_state carrying measured_full_at"
+    )
+    assert full_calls[0]["product_id"] == "prod-fresh"
+    assert full_calls[0]["tare_g"] is None, (
+        "Task 9 stamp must not refine tare; tare is already set-once"
+    )
+    # ISO-8601 timestamp string, not a datetime — cloud route expects
+    # JSON-friendly strings.
+    assert isinstance(full_calls[0]["measured_full_at"], str)
+
+    rows = conn.execute(
+        "SELECT actor, reason_code, payload_json "
+        "FROM event_lifecycle WHERE reason_code = ?",
+        ("MEASURED_FULL_AUTO",),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "catch_all_auto_import"
+    import json as _json
+    payload = _json.loads(rows[0][2])
+    assert payload["product_id"] == "prod-fresh"
+    assert payload["scale_reading_g"] == pytest.approx(521.0)
+    assert payload["expected_full_g"] == pytest.approx(525.0)
+    assert payload["tolerance_g"] == pytest.approx(25.0)
+
+
+def test_catch_all_does_not_stamp_when_reading_partial(tmp_path):
+    """A reading mid-bottle (between tare and tare+net) MUST NOT stamp.
+
+    With tare=25g and net=500g, expected full reading is 525g and
+    tolerance is 25g. A 275g reading is 250g below expected — well
+    outside the window — so no measured_full_at push is allowed. This
+    is the core defense against false-positive calibration on partial
+    placements.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    _seed_product(conn, product_id="prod-mid", tare=25.0, net=500.0)
+    _seed_cloud_lot(conn, lot_id="LOT-MID", product_id="prod-mid")
+
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-MID",
+            "reasoning": "half-full bottle returned to shelf",
+        },
+        delta_g=275.0,  # |275 - 525| = 250g  ≫ 25g tolerance
+        event_ts="2026-05-02T18:00:00.000Z",
+        event_id="evt-auto-6",
+        session_id="sess-auto-6",
+    )
+    assert handled is True
+
+    assert not any(
+        c.get("measured_full_at") is not None
+        for c in cloud.product_state_calls
+    ), "partial-fill reading must NOT stamp measured_full_at"
+    rows = conn.execute(
+        "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
+        ("MEASURED_FULL_AUTO",),
+    ).fetchall()
+    assert rows == []

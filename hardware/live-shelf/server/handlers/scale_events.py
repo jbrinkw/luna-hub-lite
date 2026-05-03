@@ -2378,6 +2378,98 @@ class ScaleHandler:
                 "event %s lot %s", event_id, cloud_lot_id,
             )
 
+        # Catch-all auto-import — measured_full_at stamp
+        # (CATCH_ALL_TARE_CAPTURE_PLAN.md Task 9, 2026-05-02). When the
+        # scale reading is within 5% of the expected full mass
+        # (tare + net), the placed container is full enough to use as
+        # the calibration anchor for the full-bottle weight. Push
+        # ``measured_full_at = now`` so the cloud transitions the
+        # product from "labeled-only" to "measured" — only a fresh,
+        # full container can supply this anchor; partial fills are
+        # rejected by the 5% gate.
+        #
+        # Set-once is enforced at three layers, mirroring the tare
+        # block above:
+        #   (a) Pi guard — local Product row's measured_full_at IS NULL
+        #       check (the Pi schema may not mirror this column; in
+        #       that case getattr returns None and we let cloud enforce);
+        #   (b) cloud guard — /shelf-ingest/product-tare conditional
+        #       UPDATE skips the write when the column is already set
+        #       (Task 9 cloud half landed in commit 9d0f7e1);
+        #   (c) UI guard — Tasks 11/12 (pending).
+        #
+        # The local product is re-fetched here because the tare write
+        # above may have updated it; if the cloud push is in-flight the
+        # local read can still be stale, in which case we fall back to
+        # the AI estimate that the Task 8 block validated. Both fields
+        # being on the SAME push call is also a valid path — but
+        # splitting them keeps the lifecycle audit simpler and avoids
+        # a partial-success ambiguity if cloud rejects one but accepts
+        # the other.
+        try:
+            product = storage_repo.get_product(self._conn, str(product_id))
+            current_tare = (
+                getattr(product, "tare_weight_g", None)
+                if product is not None else None
+            )
+            # Fallback when local read hasn't seen the tare write yet —
+            # use the validated AI estimate (already gated by the
+            # implausibility check above).
+            if current_tare is None:
+                cls_tare_raw = (
+                    classification.get("estimated_tare_g")
+                    if isinstance(classification, dict)
+                    else getattr(classification, "estimated_tare_g", None)
+                )
+                if cls_tare_raw is not None:
+                    try:
+                        cls_tare = float(cls_tare_raw)
+                    except (TypeError, ValueError):
+                        cls_tare = None
+                    if cls_tare is not None and cls_tare > 0.0:
+                        current_tare = cls_tare
+            net_w = (
+                getattr(product, "net_weight_g", None)
+                if product is not None else None
+            )
+            already_stamped = (
+                getattr(product, "measured_full_at", None) is not None
+                if product is not None else False
+            )
+            if (
+                current_tare is not None
+                and net_w is not None
+                and not already_stamped
+                and float(net_w) > 0.0
+            ):
+                expected_full = float(current_tare) + float(net_w)
+                tolerance = 0.05 * float(net_w)
+                if abs(measured_g - expected_full) <= tolerance:
+                    stamp = datetime.now(timezone.utc).isoformat()
+                    self._lc_event(
+                        event_id,
+                        actor="catch_all_auto_import",
+                        reason_code="MEASURED_FULL_AUTO",
+                        payload={
+                            "product_id": str(product_id),
+                            "scale_reading_g": measured_g,
+                            "expected_full_g": expected_full,
+                            "tolerance_g": tolerance,
+                            "tare_g_used": float(current_tare),
+                            "net_weight_g": float(net_w),
+                            "stamp": stamp,
+                        },
+                    )
+                    self._push_product_state_to_cloud(
+                        str(product_id), measured_full_at=stamp,
+                    )
+        except Exception:  # pragma: no cover — never block dispatch
+            log.exception(
+                "catch_all_auto_import: measured_full stamp failed "
+                "(non-fatal) for event %s lot %s",
+                event_id, cloud_lot_id,
+            )
+
         # Branch 2: SECOND measurement — picked lot already in-flight
         # on catch-all from a prior FIRST event.
         if in_flight_kind == "catch_all":
