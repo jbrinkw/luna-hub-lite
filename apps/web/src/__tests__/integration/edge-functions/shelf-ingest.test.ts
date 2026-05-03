@@ -2740,4 +2740,76 @@ describe('shelf-ingest Edge Function', () => {
       await ctx.cleanup();
     }
   });
+
+  // CORS preflight regression — the browser preflights any request
+  // carrying a non-simple header. supabase-js sends `Authorization`
+  // (JWT bearer), `apikey`, and `x-client-info` by default for
+  // browser-JWT routes like /scanner-state, all three of which trigger
+  // preflight.
+  //
+  // IMPORTANT: locally, the Supabase Edge Functions gateway intercepts
+  // OPTIONS preflights and echoes back whatever was in
+  // `Access-Control-Request-Headers`. The function's own OPTIONS handler
+  // doesn't run. So this integration test only verifies the round-trip
+  // works for a browser-shaped request — it does NOT verify the
+  // function's source-code constant. A separate unit test on the
+  // `corsHeaders` constant value (`shelf-ingest-cors.test.ts`) pins the
+  // production-deployed function's allow-list. The combination covers
+  // both "gateway behaves" (here) and "function returns the right
+  // headers if hit directly" (constant test).
+  describe('CORS preflight', () => {
+    const browserPreflightHeaders = (origin: string) => ({
+      Origin: origin,
+      'Access-Control-Request-Method': 'POST',
+      // Mirror what supabase-js sends from a browser context.
+      'Access-Control-Request-Headers': 'authorization,apikey,content-type,x-client-info',
+    });
+
+    it('OPTIONS /scanner-state allows the supabase-js header set', async () => {
+      const res = await fetch(`${BASE_URL}/scanner-state`, {
+        method: 'OPTIONS',
+        headers: browserPreflightHeaders('https://lunahub.dev'),
+      });
+      expect(res.status).toBe(200);
+      const allowHeaders = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase();
+      // Headers we asked the browser to allow MUST come back in the
+      // allow-list — otherwise supabase-js's POST is blocked.
+      expect(allowHeaders).toContain('authorization');
+      expect(allowHeaders).toContain('apikey');
+      expect(allowHeaders).toContain('content-type');
+      expect(allowHeaders).toContain('x-client-info');
+    });
+
+    it('OPTIONS /barcode-scan allows both auth schemes', async () => {
+      // /barcode-scan accepts EITHER x-api-key (Pi) or Authorization
+      // bearer (web). Send both via the preflight; both must come back.
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://lunahub.dev',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'authorization,x-api-key,content-type',
+        },
+      });
+      expect(res.status).toBe(200);
+      const allowHeaders = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase();
+      expect(allowHeaders).toContain('authorization');
+      expect(allowHeaders).toContain('x-api-key');
+    });
+
+    it('OPTIONS /scan-transaction/<id>/void allows authorization', async () => {
+      const fakeId = 'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee';
+      const res = await fetch(`${BASE_URL}/scan-transaction/${fakeId}/void`, {
+        method: 'OPTIONS',
+        headers: {
+          Origin: 'https://lunahub.dev',
+          'Access-Control-Request-Method': 'POST',
+          'Access-Control-Request-Headers': 'authorization,content-type',
+        },
+      });
+      expect(res.status).toBe(200);
+      const allowHeaders = (res.headers.get('access-control-allow-headers') ?? '').toLowerCase();
+      expect(allowHeaders).toContain('authorization');
+    });
+  });
 });

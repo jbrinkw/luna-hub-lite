@@ -69,7 +69,15 @@ async function parseCloudLotId(
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Access-Control-Allow-Headers': 'Content-Type, x-api-key',
+  // Browser routes (`/scanner-state`, `/scan-transaction/:id/void`) send
+  // `Authorization: Bearer <jwt>` + the supabase-js client always sends
+  // `apikey` and `x-client-info`, both of which trigger CORS preflights
+  // and must be in the allow-list. Pi routes still use `x-api-key`.
+  // Without `authorization` here, the browser preflight rejects with
+  // "Request header field authorization is not allowed by
+  // Access-Control-Allow-Headers" before the actual request fires.
+  'Access-Control-Allow-Headers':
+    'authorization, x-client-info, apikey, content-type, x-api-key',
 };
 
 // ─── Validation constants ────────────────────────────────────────────
