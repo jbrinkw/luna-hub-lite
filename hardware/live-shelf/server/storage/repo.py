@@ -1410,6 +1410,58 @@ def list_certified_not_on_shelf_lots_by_oldest_created(
     return [tuple(r) for r in rows]
 
 
+def list_user_inventory_lots_qty_gt_zero(
+    conn: sqlite3.Connection,
+) -> list[tuple[Any, ...]]:
+    """Return every cloud_lots row with qty>0 NOT in_flight on catch_all.
+
+    Joined with products for name/brand/weight metadata. Ordered FEFO
+    (created_at ASC) so the apply path can prefer the oldest lot when
+    multiple lots exist for the same product.
+
+    Excludes ``in_flight_kind = 'catch_all'`` rows — those are owned by
+    Tier 1 (:func:`list_cloud_in_flight_catch_all_lots`) and must not
+    appear in Tier 2 to avoid double-ranking the same lot in the
+    catch-all candidate pool.
+
+    Includes lots regardless of ``products.certified`` flag — the
+    catch-all auto-import widens the pool from "only certified" to
+    "any product in inventory". Set-once tare write later in the apply
+    path means uncertified products are first-class candidates for AI
+    tare estimation on first measurement.
+
+    Soft-deleted rows (cloud_lots.deleted_at, products.deleted_at) are
+    excluded. live_shelf in-flight rows pass through (different state
+    machine; the apply path routes correctly via lot_id).
+
+    Returns a tuple shape that extends
+    :func:`list_certified_not_on_shelf_lots_by_oldest_created` with one
+    extra trailing column — ``products.tare_weight_g`` — so the apply
+    path (Task 5) can decide whether the AI prompt should request a
+    tare estimate (``needs_tare_estimate = tare IS NULL``). The adapter
+    unpack stays parallel; the new column is appended at the end.
+    """
+    rows = conn.execute(
+        """
+        SELECT cl.lot_id, cl.product_id, cl.qty_containers,
+               cl.in_flight_since, cl.pickup_event_id, cl.created_at,
+               p.name AS p_name, p.brand AS p_brand,
+               p.net_weight_g AS p_net_weight_g,
+               p.gross_weight_g AS p_gross_weight_g,
+               p.container_type AS p_container_type,
+               p.tare_weight_g AS p_tare_weight_g
+          FROM cloud_lots cl
+          JOIN products p ON p.product_id = cl.product_id
+         WHERE cl.qty_containers > 0
+           AND cl.deleted_at IS NULL
+           AND p.deleted_at IS NULL
+           AND (cl.in_flight_kind IS NULL OR cl.in_flight_kind <> 'catch_all')
+         ORDER BY (cl.created_at IS NULL), cl.created_at ASC
+        """
+    ).fetchall()
+    return [tuple(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # sessions
 # ---------------------------------------------------------------------------

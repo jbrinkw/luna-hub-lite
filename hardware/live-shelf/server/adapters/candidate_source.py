@@ -348,6 +348,66 @@ class RepoCandidateSource:
                 )
             return out
 
+    def get_catch_all_user_inventory_lots(self) -> Sequence[LotCandidate]:
+        """Tier 2 of the catch-all auto-import — every qty>0 lot for the user.
+
+        Widens the legacy :meth:`get_catch_all_inventory_lots` from
+        "certified-not-on-any-shelf" to "every cloud_lots row with
+        qty>0", regardless of certification status or shelf presence
+        (except already-in-flight on catch-all, which is excluded to
+        avoid double-counting against Tier 1).
+
+        Used when the user places a product they own — whether it was
+        barcode-scanned without a livetrack capture, manually added,
+        or fully calibrated — on the catch-all scale. The classifier
+        picks from this widened pool; the apply path writes tare from
+        the AI estimate IFF the picked product currently has none.
+
+        The legacy ``get_catch_all_inventory_lots`` STAYS — it's still
+        used by the certified-only flow. This method is the new entry
+        point for the auto-import pool builder (Task 4).
+        """
+        with self._db_lock:
+            rows = storage_repo.list_user_inventory_lots_qty_gt_zero(
+                self._conn
+            )
+            out: list[LotCandidate] = []
+            for row in rows:
+                # ``_tare`` (products.tare_weight_g) is unpacked here
+                # to keep the tuple shape stable for Task 5, which will
+                # consult it to flip ``needs_tare_estimate`` on the AI
+                # prompt. Not used in this adapter — Tier-2 candidates
+                # carry tare via downstream pool builders.
+                (
+                    lot_id, product_id, _qty, _ifsince, _pkid, _created,
+                    p_name, p_brand, p_net, p_gross, p_container, _tare,
+                ) = row
+                if not product_id or not p_name:
+                    # Orphan: cloud_lots has a product_id but no products
+                    # row is mirrored locally. Skip — without product
+                    # metadata we can't build a usable candidate.
+                    continue
+                out.append(
+                    LotCandidate(
+                        lot_id=str(lot_id),
+                        product_id=str(product_id),
+                        name=str(p_name),
+                        brand=p_brand,
+                        expected_weight_g=p_gross or p_net,
+                        container_type=p_container,
+                        # No "off-shelf inventory" status in the
+                        # LotCandidate enum — borrow ``out`` (closest
+                        # match: lot is logically off any shelf). Tier
+                        # ranking is driven by why_candidate set in
+                        # candidate_pool, not status.
+                        status="out",
+                        reference_image_paths=self._absolute_refs(
+                            str(product_id)
+                        ),
+                    )
+                )
+            return out
+
     def get_certified_livetrack_tracked(self) -> Sequence[ProductCandidate]:
         """Fallback pool — all certified LiveTrack-tracked products.
 
