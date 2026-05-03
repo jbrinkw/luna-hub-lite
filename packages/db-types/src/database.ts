@@ -456,6 +456,7 @@ export type Database = {
           gross_weight_g: number | null
           is_distinct_unit_item: boolean
           is_placeholder: boolean
+          measured_full_at: string | null
           min_stock_amount: number
           name: string
           net_weight_g: number | null
@@ -492,6 +493,7 @@ export type Database = {
           gross_weight_g?: number | null
           is_distinct_unit_item?: boolean
           is_placeholder?: boolean
+          measured_full_at?: string | null
           min_stock_amount?: number
           name: string
           net_weight_g?: number | null
@@ -528,6 +530,7 @@ export type Database = {
           gross_weight_g?: number | null
           is_distinct_unit_item?: boolean
           is_placeholder?: boolean
+          measured_full_at?: string | null
           min_stock_amount?: number
           name?: string
           net_weight_g?: number | null
