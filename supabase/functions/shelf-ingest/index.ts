@@ -1206,6 +1206,21 @@ async function handleBarcodeScan(req: Request, supabase: SupabaseClient): Promis
     return jsonResponse({ error: 'barcode required' }, 400);
   }
 
+  // Validate qty at the edge before the RPC call so the DB never sees
+  // a negative/zero/NaN/Infinity quantity (the RPC would either insert
+  // a corrupt row or surface a CHECK constraint error). The 10000
+  // ceiling is a sanity hard-stop — no realistic single-scan use case
+  // exceeds it, and unbounded values would let a misbehaving client
+  // mint arbitrarily large stock_lots.
+  if (body.qty !== undefined && body.qty !== null) {
+    if (typeof body.qty !== 'number' || !Number.isFinite(body.qty) || body.qty <= 0) {
+      return jsonResponse({ error: 'qty must be a positive finite number' }, 400);
+    }
+    if (body.qty > 10000) {
+      return jsonResponse({ error: 'qty exceeds hard ceiling (10000)' }, 400);
+    }
+  }
+
   const piEventId: string | null =
     typeof body.pi_event_id === 'string' && body.pi_event_id.length > 0 ? body.pi_event_id : null;
 

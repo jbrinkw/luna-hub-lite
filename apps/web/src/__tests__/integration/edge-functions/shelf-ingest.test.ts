@@ -2394,6 +2394,108 @@ describe('shelf-ingest Edge Function', () => {
     expect(body.error).toBe('unauthorized');
   });
 
+  // ─── /barcode-scan: edge-side qty validation (audit I-Cloud-3) ─────
+  //
+  // The RPC accepts NUMERIC(10,3) which would silently absorb negative,
+  // zero, or absurdly large values. Validating at the edge BEFORE the
+  // RPC fires prevents a misbehaving client (or an upstream Pi bug)
+  // from minting corrupt stock_lots / food_logs / cart rows. Each
+  // case must return 400 with no DB mutation.
+  it('POST /barcode-scan rejects negative qty with 400', async () => {
+    const ctx = await provisionScannerUser('si-bs-qty-neg');
+    try {
+      const barcode = 'BS-QTYNEG-' + randomBytes(4).toString('hex').toUpperCase();
+      // Seed product so we can verify NO transaction row was inserted on rejection.
+      await (adminClient as any).schema('chefbyte').from('products').insert({
+        user_id: ctx.userId,
+        name: 'Neg Qty Product',
+        barcode,
+        servings_per_container: 1,
+        net_weight_g: 100,
+      });
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, qty: -1 }),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('qty');
+
+      // No scan_transactions row created — early reject is pre-RPC.
+      const { count } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id', { count: 'exact', head: true })
+        .eq('user_id', ctx.userId);
+      expect(count).toBe(0);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /barcode-scan rejects zero qty with 400', async () => {
+    const ctx = await provisionScannerUser('si-bs-qty-zero');
+    try {
+      const barcode = 'BS-QTYZERO-' + randomBytes(4).toString('hex').toUpperCase();
+      await (adminClient as any).schema('chefbyte').from('products').insert({
+        user_id: ctx.userId,
+        name: 'Zero Qty Product',
+        barcode,
+        servings_per_container: 1,
+        net_weight_g: 100,
+      });
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, qty: 0 }),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('qty');
+
+      const { count } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id', { count: 'exact', head: true })
+        .eq('user_id', ctx.userId);
+      expect(count).toBe(0);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /barcode-scan rejects qty above hard ceiling with 400', async () => {
+    const ctx = await provisionScannerUser('si-bs-qty-huge');
+    try {
+      const barcode = 'BS-QTYHUGE-' + randomBytes(4).toString('hex').toUpperCase();
+      await (adminClient as any).schema('chefbyte').from('products').insert({
+        user_id: ctx.userId,
+        name: 'Huge Qty Product',
+        barcode,
+        servings_per_container: 1,
+        net_weight_g: 100,
+      });
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, qty: 99999 }),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toContain('qty');
+
+      const { count } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id', { count: 'exact', head: true })
+        .eq('user_id', ctx.userId);
+      expect(count).toBe(0);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
   // ─── /scan-transaction/:id/void: browser-JWT undo ──────────────────
   //
   // Task 6: the Settings → Scanner Transactions tab calls this when
