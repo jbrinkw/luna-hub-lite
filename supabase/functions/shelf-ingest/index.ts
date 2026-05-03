@@ -115,6 +115,11 @@ const VALID_EVENT_KINDS = [
   'live_weight_sync',
 ] as const;
 
+// Allowed values for chefbyte.scanner_state.last_active_mode and
+// .locked_mode. Must stay in lockstep with the CHECK constraints in
+// migration 20260503100000_scanner_state_and_transactions.sql.
+const VALID_SCAN_MODES = new Set<string>(['purchase', 'consume_macros', 'consume_no_macros', 'shopping']);
+
 function jsonResponse(body: Record<string, unknown>, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
@@ -1017,6 +1022,104 @@ async function handleIntake(supabase: SupabaseClient, device: Device, body: any)
 }
 
 /**
+ * POST /scanner-state — UPSERT chefbyte.scanner_state with PATCH semantics.
+ *
+ * Browser-JWT route (NOT x-api-key — the Pi USB scanner forwarder only
+ * READS scanner_state via direct Realtime subscription on its own
+ * JWT-impersonated session; only the web ScannerPage WRITES). The
+ * dispatcher must skip the global x-api-key auth gate for this leaf and
+ * call this handler directly, mirroring livetrack-session/create.
+ *
+ * Body shape (any subset; absent fields are NOT touched, hence PATCH):
+ *   {
+ *     "last_active_mode": "purchase" | "consume_macros" | "consume_no_macros" | "shopping",
+ *     "locked_mode":      ... | null,   // null clears the lock
+ *   }
+ *
+ * Validation:
+ *   - At least one of (last_active_mode, locked_mode) must be present;
+ *     an empty body is a 400 to make client-side bugs loud.
+ *   - last_active_mode is required to be a valid mode string when present
+ *     (the column is NOT NULL with a 'purchase' default).
+ *   - locked_mode accepts a valid mode OR null (clears the lock).
+ *
+ * Auth: extracts the `Authorization: Bearer <jwt>` header, calls
+ * supabase.auth.getUser() with a JWT-scoped client to verify the token,
+ * then writes via service-role (bypassing RLS) scoped on user_id =
+ * resolved auth.uid(). Defense-in-depth: the row's PRIMARY KEY is
+ * user_id and `onConflict: 'user_id'` ensures cross-user upserts can't
+ * race in.
+ */
+async function handleScannerState(req: Request, supabase: SupabaseClient): Promise<Response> {
+  const authHeader = req.headers.get('Authorization');
+  if (!authHeader?.startsWith('Bearer ')) {
+    return jsonResponse({ error: 'Missing authorization header' }, 401);
+  }
+  const userClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+    global: { headers: { Authorization: authHeader } },
+  });
+  const {
+    data: { user },
+    error: authError,
+  } = await userClient.auth.getUser();
+  if (authError || !user) {
+    return jsonResponse({ error: 'Invalid token' }, 401);
+  }
+
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return jsonResponse({ error: 'invalid body' }, 400);
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return jsonResponse({ error: 'invalid body' }, 400);
+  }
+
+  const updates: { last_active_mode?: string; locked_mode?: string | null } = {};
+
+  if (body.last_active_mode !== undefined) {
+    if (typeof body.last_active_mode !== 'string' || !VALID_SCAN_MODES.has(body.last_active_mode)) {
+      return jsonResponse({ error: 'invalid last_active_mode' }, 400);
+    }
+    updates.last_active_mode = body.last_active_mode;
+  }
+  if (body.locked_mode !== undefined) {
+    if (body.locked_mode === null) {
+      updates.locked_mode = null;
+    } else if (typeof body.locked_mode !== 'string' || !VALID_SCAN_MODES.has(body.locked_mode)) {
+      return jsonResponse({ error: 'invalid locked_mode' }, 400);
+    } else {
+      updates.locked_mode = body.locked_mode;
+    }
+  }
+
+  if (Object.keys(updates).length === 0) {
+    return jsonResponse({ error: 'no fields to update' }, 400);
+  }
+
+  // UPSERT with PATCH semantics: when the row does not yet exist, last_active_mode
+  // falls back to the column's 'purchase' default if absent from the payload.
+  const upsertPayload: Record<string, unknown> = {
+    user_id: user.id,
+    ...updates,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await supabase
+    .schema('chefbyte')
+    .from('scanner_state')
+    .upsert(upsertPayload, { onConflict: 'user_id' })
+    .select('user_id, last_active_mode, locked_mode')
+    .single();
+  if (error || !data) {
+    console.error('shelf-ingest: scanner_state upsert failed', error);
+    return jsonResponse({ error: error?.message ?? 'upsert failed' }, 500);
+  }
+  return jsonResponse({ ok: true, ...data });
+}
+
+/**
  * Apply Pi-captured tare-weight and/or measured_full_at to a products row.
  *
  * Called by the Pi after:
@@ -1523,6 +1626,13 @@ Deno.serve(async (req) => {
     const cleanedPath = url.pathname.replace(/\/+$/, '');
     const segments = cleanedPath.split('/').filter(Boolean);
     const leaf = segments[segments.length - 1] ?? '';
+
+    // Browser-JWT routes — must be dispatched BEFORE the global x-api-key
+    // auth gate below (they authenticate via Authorization: Bearer <jwt>
+    // inside the handler, mirroring livetrack-session/create).
+    if (req.method === 'POST' && leaf === 'scanner-state') {
+      return await handleScannerState(req, supabase);
+    }
 
     const authRes = await authenticate(supabase, req.headers.get('x-api-key'));
     if (!authRes.ok) {

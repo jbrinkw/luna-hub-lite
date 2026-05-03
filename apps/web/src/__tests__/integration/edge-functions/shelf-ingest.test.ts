@@ -1909,4 +1909,114 @@ describe('shelf-ingest Edge Function', () => {
     const body = await res.json();
     expect(body.error).toMatch(/iso/i);
   });
+
+  // ─── /scanner-state: browser-JWT mode persistence ──────────────────
+  //
+  // Task 4 of the Pi USB scanner forwarder plan: the web ScannerPage
+  // pushes mode-state changes (last_active_mode + locked_mode) into the
+  // cloud so the Pi USB forwarder can resolve which mode to apply for
+  // each scan even when the browser tab is closed. PATCH-style upsert:
+  // partial bodies must not stomp the un-supplied field.
+
+  it('POST /scanner-state UPSERTs scanner_state with PATCH semantics', async () => {
+    // Fresh user — scanner_state has no row yet, so the first call
+    // exercises INSERT and subsequent calls exercise UPDATE via
+    // ON CONFLICT (user_id).
+    const tempUser = await createTestUser('si-scanner-state');
+    try {
+      const {
+        data: { session },
+      } = await tempUser.client.auth.getSession();
+      const accessToken = session!.access_token;
+      const jwtHeaders = {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${accessToken}`,
+      };
+
+      const fetchScannerState = async () => {
+        const { data } = await (adminClient as any)
+          .schema('chefbyte')
+          .from('scanner_state')
+          .select('user_id, last_active_mode, locked_mode')
+          .eq('user_id', tempUser.userId)
+          .maybeSingle();
+        return data;
+      };
+
+      // Step 1: set last_active_mode (locked_mode untouched → NULL on a
+      // fresh INSERT; PATCH semantics on a subsequent UPDATE).
+      const r1 = await fetch(`${BASE_URL}/scanner-state`, {
+        method: 'POST',
+        headers: jwtHeaders,
+        body: JSON.stringify({ last_active_mode: 'consume_macros' }),
+      });
+      expect(r1.status).toBe(200);
+      const body1 = await r1.json();
+      expect(body1.ok).toBe(true);
+      expect(body1.last_active_mode).toBe('consume_macros');
+      expect(body1.locked_mode).toBeNull();
+      let row = await fetchScannerState();
+      expect(row).not.toBeNull();
+      expect(row.user_id).toBe(tempUser.userId);
+      expect(row.last_active_mode).toBe('consume_macros');
+      expect(row.locked_mode).toBeNull();
+
+      // Step 2: set locked_mode WITHOUT supplying last_active_mode. The
+      // existing 'consume_macros' value MUST survive (PATCH, not PUT).
+      const r2 = await fetch(`${BASE_URL}/scanner-state`, {
+        method: 'POST',
+        headers: jwtHeaders,
+        body: JSON.stringify({ locked_mode: 'shopping' }),
+      });
+      expect(r2.status).toBe(200);
+      const body2 = await r2.json();
+      expect(body2.last_active_mode).toBe('consume_macros');
+      expect(body2.locked_mode).toBe('shopping');
+      row = await fetchScannerState();
+      expect(row.last_active_mode).toBe('consume_macros');
+      expect(row.locked_mode).toBe('shopping');
+
+      // Step 3: clear the lock by sending null. last_active_mode still
+      // preserved.
+      const r3 = await fetch(`${BASE_URL}/scanner-state`, {
+        method: 'POST',
+        headers: jwtHeaders,
+        body: JSON.stringify({ locked_mode: null }),
+      });
+      expect(r3.status).toBe(200);
+      const body3 = await r3.json();
+      expect(body3.last_active_mode).toBe('consume_macros');
+      expect(body3.locked_mode).toBeNull();
+      row = await fetchScannerState();
+      expect(row.last_active_mode).toBe('consume_macros');
+      expect(row.locked_mode).toBeNull();
+    } finally {
+      // FK cascade from auth.users handles scanner_state cleanup.
+      await cleanupUser(tempUser.userId);
+    }
+  });
+
+  it('POST /scanner-state rejects invalid mode', async () => {
+    const tempUser = await createTestUser('si-scanner-state-bad');
+    try {
+      const {
+        data: { session },
+      } = await tempUser.client.auth.getSession();
+      const accessToken = session!.access_token;
+
+      const res = await fetch(`${BASE_URL}/scanner-state`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({ last_active_mode: 'bogus' }),
+      });
+      expect(res.status).toBe(400);
+      const body = await res.json();
+      expect(body.error).toMatch(/last_active_mode/i);
+    } finally {
+      await cleanupUser(tempUser.userId);
+    }
+  });
 });
