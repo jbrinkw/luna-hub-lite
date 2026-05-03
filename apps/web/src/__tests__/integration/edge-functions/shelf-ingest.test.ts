@@ -2019,4 +2019,378 @@ describe('shelf-ingest Edge Function', () => {
       await cleanupUser(tempUser.userId);
     }
   });
+
+  // ─── /barcode-scan: Pi/web entrypoint ─────────────────────────────
+  //
+  // Task 5 of the Pi USB scanner forwarder plan: every USB scan from
+  // the Pi (or every web-driven scan) lands here. Auth is dual-mode:
+  // x-api-key (Pi, source='pi_usb') OR JWT (web, source='web'). Mode
+  // resolves locked_mode > body.mode > last_active_mode > 'purchase'.
+  // pi_event_id (when present) makes a duplicate POST a no-op.
+
+  /** Helper: provision one fresh user + Pi device for a barcode-scan
+   *  test. Each test owns its own user so concurrent runs don't poison
+   *  each other's scanner_state / scan_transactions rows. */
+  async function provisionScannerUser(suffix: string): Promise<{
+    userId: string;
+    accessToken: string;
+    deviceId: string;
+    importKey: string;
+    locationId: string;
+    cleanup: () => Promise<void>;
+  }> {
+    const user = await createTestUser(suffix);
+    const { error: actErr } = await (user.client as any).schema('hub').rpc('activate_app', { p_app_name: 'chefbyte' });
+    if (actErr) throw new Error(`activate_app failed: ${actErr.message}`);
+
+    // activate_app seeds Fridge/Pantry/Freezer; pick the oldest (matches
+    // execute_scan_action's ORDER BY created_at ASC LIMIT 1).
+    const { data: locs } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('locations')
+      .select('location_id')
+      .eq('user_id', user.userId)
+      .order('created_at', { ascending: true })
+      .limit(1);
+    const oldestLoc = locs?.[0]?.location_id ?? null;
+
+    const apiKey = 'shelf_' + randomBytes(16).toString('hex');
+    const { data: dev, error: devErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('live_shelf_devices')
+      .insert({
+        user_id: user.userId,
+        device_name: `Scanner Test Pi ${suffix}`,
+        import_key_hash: createHash('sha256').update(apiKey).digest('hex'),
+        is_active: true,
+      })
+      .select('device_id')
+      .single();
+    if (devErr) throw new Error(`create device: ${devErr.message}`);
+
+    const {
+      data: { session },
+    } = await user.client.auth.getSession();
+    const accessToken = session!.access_token;
+
+    return {
+      userId: user.userId,
+      accessToken,
+      deviceId: dev.device_id,
+      importKey: apiKey,
+      locationId: oldestLoc,
+      cleanup: async () => {
+        // FK-safe: scan_transactions → products/stock_lots/food_logs/shopping_list,
+        // device → device_id. Cascade from auth.users handles scanner_state +
+        // scan_transactions (user_id ON DELETE CASCADE) but we wipe explicitly
+        // for clarity + speed.
+        await (adminClient as any).schema('chefbyte').from('scan_transactions').delete().eq('user_id', user.userId);
+        await (adminClient as any).schema('chefbyte').from('food_logs').delete().eq('user_id', user.userId);
+        await (adminClient as any).schema('chefbyte').from('shopping_list').delete().eq('user_id', user.userId);
+        await (adminClient as any).schema('chefbyte').from('stock_lots').delete().eq('user_id', user.userId);
+        await (adminClient as any).schema('chefbyte').from('products').delete().eq('user_id', user.userId);
+        await (adminClient as any)
+          .schema('chefbyte')
+          .from('live_shelf_devices')
+          .delete()
+          .eq('device_id', dev.device_id);
+        await cleanupUser(user.userId);
+      },
+    };
+  }
+
+  it('POST /barcode-scan(purchase) creates a stock_lot + scan_transactions row', async () => {
+    const ctx = await provisionScannerUser('si-bs-purchase');
+    try {
+      // Seed: a product the Pi will scan + scanner_state.last_active_mode='purchase'.
+      const barcode = 'BS-PURCHASE-' + randomBytes(4).toString('hex').toUpperCase();
+      const { data: prod } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .insert({
+          user_id: ctx.userId,
+          name: 'Scanner Pasta',
+          barcode,
+          servings_per_container: 2,
+          calories_per_serving: 200,
+          net_weight_g: 500,
+        })
+        .select('product_id')
+        .single();
+      const productId = prod.product_id;
+
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: ctx.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+
+      const piEventId = 'evt-' + crypto.randomUUID();
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, pi_event_id: piEventId }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.transaction_id).toBeTruthy();
+      expect(body.status).toBe('applied');
+      expect(body.mode).toBe('purchase');
+      expect(body.product_id).toBe(productId);
+      expect(body.applied_lot_id).toBeTruthy();
+
+      // Verify the scan_transactions row matches the response.
+      const { data: tx } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id, barcode, mode, product_id, status, source, pi_event_id, applied_lot_id, applied_at')
+        .eq('transaction_id', body.transaction_id)
+        .single();
+      expect(tx.barcode).toBe(barcode);
+      expect(tx.mode).toBe('purchase');
+      expect(tx.product_id).toBe(productId);
+      expect(tx.status).toBe('applied');
+      expect(tx.source).toBe('pi_usb');
+      expect(tx.pi_event_id).toBe(piEventId);
+      expect(tx.applied_lot_id).toBe(body.applied_lot_id);
+      expect(tx.applied_at).toBeTruthy();
+
+      // Verify the stock_lot was actually minted.
+      const { data: lots } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id, qty_containers, product_id, location_id')
+        .eq('user_id', ctx.userId)
+        .eq('product_id', productId);
+      expect(lots).toHaveLength(1);
+      expect(lots[0].lot_id).toBe(body.applied_lot_id);
+      expect(Number(lots[0].qty_containers)).toBe(1);
+      expect(lots[0].location_id).toBe(ctx.locationId);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /barcode-scan with same pi_event_id is idempotent', async () => {
+    const ctx = await provisionScannerUser('si-bs-idem');
+    try {
+      const barcode = 'BS-IDEM-' + randomBytes(4).toString('hex').toUpperCase();
+      await (adminClient as any).schema('chefbyte').from('products').insert({
+        user_id: ctx.userId,
+        name: 'Idem Product',
+        barcode,
+        servings_per_container: 1,
+        net_weight_g: 100,
+      });
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: ctx.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+
+      const piEventId = 'evt-' + crypto.randomUUID();
+      const headers = { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey };
+      const r1 = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ barcode, pi_event_id: piEventId }),
+      });
+      const b1 = await r1.json();
+      const r2 = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ barcode, pi_event_id: piEventId }),
+      });
+      const b2 = await r2.json();
+      expect(r1.status).toBe(200);
+      expect(r2.status).toBe(200);
+      expect(b1.transaction_id).toBe(b2.transaction_id);
+      // Second response is the idempotent replay — the route signals it.
+      expect(b2.idempotent).toBe(true);
+
+      // Verify only ONE scan_transactions row exists.
+      const { data: rows, count } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('transaction_id', { count: 'exact' })
+        .eq('user_id', ctx.userId)
+        .eq('pi_event_id', piEventId);
+      expect(count).toBe(1);
+      expect(rows).toHaveLength(1);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /barcode-scan respects locked_mode override', async () => {
+    const ctx = await provisionScannerUser('si-bs-locked');
+    try {
+      const barcode = 'BS-LOCKED-' + randomBytes(4).toString('hex').toUpperCase();
+      const { data: prod } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .insert({
+          user_id: ctx.userId,
+          name: 'Locked Product',
+          barcode,
+          servings_per_container: 1,
+          net_weight_g: 100,
+        })
+        .select('product_id')
+        .single();
+
+      // locked_mode='shopping' MUST override body.mode='purchase' — this
+      // is the trust boundary: a malicious or stale client cannot bypass
+      // the user's explicit lock.
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert(
+          { user_id: ctx.userId, last_active_mode: 'purchase', locked_mode: 'shopping' },
+          { onConflict: 'user_id' },
+        );
+
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({
+          barcode,
+          mode: 'purchase', // client tries to override — locked wins
+          pi_event_id: 'evt-' + crypto.randomUUID(),
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('applied');
+      expect(body.mode).toBe('shopping');
+      expect(body.applied_cart_item_id).toBeTruthy();
+
+      const { data: tx } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('mode, applied_cart_item_id, applied_lot_id')
+        .eq('transaction_id', body.transaction_id)
+        .single();
+      expect(tx.mode).toBe('shopping');
+      expect(tx.applied_cart_item_id).toBe(body.applied_cart_item_id);
+      expect(tx.applied_lot_id).toBeNull();
+
+      // No stock_lot should have been minted (purchase path NOT taken).
+      const { data: lots } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id')
+        .eq('user_id', ctx.userId)
+        .eq('product_id', prod.product_id);
+      expect(lots).toHaveLength(0);
+
+      // Shopping list should have one row.
+      const { data: cart } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('shopping_list')
+        .select('cart_item_id, qty_containers')
+        .eq('user_id', ctx.userId)
+        .eq('product_id', prod.product_id);
+      expect(cart).toHaveLength(1);
+      expect(cart[0].cart_item_id).toBe(body.applied_cart_item_id);
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /barcode-scan logs errored transaction when product unknown + analyze fails', async () => {
+    const ctx = await provisionScannerUser('si-bs-errored');
+    try {
+      const barcode = 'BS-UNKNOWN-' + randomBytes(4).toString('hex').toUpperCase();
+      // Set last_active_mode so a mode is resolvable even on the error
+      // path (the errored row still needs a non-null mode column).
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: ctx.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({
+          barcode,
+          pi_event_id: 'evt-' + crypto.randomUUID(),
+        }),
+      });
+      // We always 200 on errored scans — the audit row is the contract,
+      // not the HTTP status (Pi is fire-and-forget; non-200 would
+      // trigger client retries that would just create more errored rows).
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('errored');
+      expect(body.error_msg).toBeTruthy();
+      expect(body.transaction_id).toBeTruthy();
+
+      const { data: tx } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('barcode, status, error_msg, product_id, applied_lot_id, source')
+        .eq('transaction_id', body.transaction_id)
+        .single();
+      expect(tx.barcode).toBe(barcode);
+      expect(tx.status).toBe('errored');
+      expect(tx.error_msg).toBeTruthy();
+      expect(tx.product_id).toBeNull();
+      expect(tx.applied_lot_id).toBeNull();
+      expect(tx.source).toBe('pi_usb');
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /barcode-scan accepts JWT (web) auth and stamps source=web', async () => {
+    const ctx = await provisionScannerUser('si-bs-web');
+    try {
+      const barcode = 'BS-WEB-' + randomBytes(4).toString('hex').toUpperCase();
+      await (adminClient as any).schema('chefbyte').from('products').insert({
+        user_id: ctx.userId,
+        name: 'Web Scanner Product',
+        barcode,
+        servings_per_container: 1,
+        net_weight_g: 100,
+      });
+      await (adminClient as any)
+        .schema('chefbyte')
+        .from('scanner_state')
+        .upsert({ user_id: ctx.userId, last_active_mode: 'purchase' }, { onConflict: 'user_id' });
+
+      const res = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${ctx.accessToken}`,
+        },
+        body: JSON.stringify({ barcode }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.status).toBe('applied');
+
+      const { data: tx } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('scan_transactions')
+        .select('source, pi_event_id')
+        .eq('transaction_id', body.transaction_id)
+        .single();
+      expect(tx.source).toBe('web');
+      // No pi_event_id on web scans (web doesn't supply it).
+      expect(tx.pi_event_id).toBeNull();
+    } finally {
+      await ctx.cleanup();
+    }
+  });
+
+  it('POST /barcode-scan rejects requests with neither x-api-key nor JWT', async () => {
+    const res = await fetch(`${BASE_URL}/barcode-scan`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ barcode: 'NO-AUTH-ATTEMPT' }),
+    });
+    expect(res.status).toBe(401);
+    const body = await res.json();
+    expect(body.error).toBe('unauthorized');
+  });
 });

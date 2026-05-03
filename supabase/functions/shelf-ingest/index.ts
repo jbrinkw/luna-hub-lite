@@ -1120,6 +1120,343 @@ async function handleScannerState(req: Request, supabase: SupabaseClient): Promi
 }
 
 /**
+ * POST /barcode-scan — apply one USB-scanner / web-scanner barcode.
+ *
+ * Dual-auth route: accepts BOTH x-api-key (Pi) AND JWT (web). The
+ * x-api-key header is tried first; if absent or invalid we fall back
+ * to the Authorization: Bearer JWT path. ``source`` on the resulting
+ * scan_transactions row is ``pi_usb`` when x-api-key auth succeeded,
+ * else ``web``.
+ *
+ * Body shape:
+ *   {
+ *     "barcode":             string                     // required
+ *     "pi_event_id":         string?                    // optional dedup key (Pi)
+ *     "mode":                string?                    // valid mode override
+ *     "qty":                 number?                    // defaults to 1
+ *     "unit":                "container" | "serving"?   // mode-specific default
+ *     "nutrition_snapshot":  object?                    // future-proofing
+ *   }
+ *
+ * Mode resolution priority:
+ *   1. ``scanner_state.locked_mode`` if set — ALWAYS wins (cloud-side
+ *      trust boundary; even an explicit body.mode can't override a
+ *      lock).
+ *   2. ``body.mode`` when present + valid.
+ *   3. ``scanner_state.last_active_mode`` if set.
+ *   4. Default ``'purchase'``.
+ *
+ * Idempotency: the partial unique index
+ *   chefbyte.scan_transactions_pi_event_id_unique
+ *   ON (user_id, pi_event_id) WHERE pi_event_id IS NOT NULL
+ * de-duplicates by ``(user_id, pi_event_id)`` — a duplicate POST returns
+ * the prior transaction unchanged.
+ *
+ * On unknown barcode, the handler invokes the ``analyze-product`` edge
+ * function and re-queries products. If the lookup still fails (or
+ * analyze-product is unreachable in the test environment), an
+ * ``errored`` transaction is logged and returned with status=200 so
+ * the Pi's fire-and-forget caller doesn't retry.
+ */
+async function handleBarcodeScan(req: Request, supabase: SupabaseClient): Promise<Response> {
+  // ─── Auth: try x-api-key (Pi) first, then JWT (web) ─────────────
+  let userId: string | null = null;
+  let deviceId: string | null = null;
+  const apiKey = req.headers.get('x-api-key');
+  if (apiKey) {
+    const authRes = await authenticate(supabase, apiKey);
+    if (authRes.ok) {
+      userId = authRes.device.user_id;
+      deviceId = authRes.device.device_id;
+    }
+  }
+  if (!userId) {
+    const authHeader = req.headers.get('Authorization');
+    if (authHeader?.startsWith('Bearer ')) {
+      const userClient = createClient(Deno.env.get('SUPABASE_URL')!, Deno.env.get('SUPABASE_ANON_KEY')!, {
+        global: { headers: { Authorization: authHeader } },
+      });
+      const {
+        data: { user },
+        error: authError,
+      } = await userClient.auth.getUser();
+      if (!authError && user) {
+        userId = user.id;
+      }
+    }
+  }
+  if (!userId) {
+    return jsonResponse({ error: 'unauthorized' }, 401);
+  }
+  const source: 'pi_usb' | 'web' = deviceId ? 'pi_usb' : 'web';
+
+  // ─── Body parsing ───────────────────────────────────────────────
+  let body: any;
+  try {
+    body = await req.json();
+  } catch {
+    return jsonResponse({ error: 'invalid body' }, 400);
+  }
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    return jsonResponse({ error: 'invalid body' }, 400);
+  }
+
+  const barcode = typeof body.barcode === 'string' ? body.barcode.trim() : '';
+  if (!barcode) {
+    return jsonResponse({ error: 'barcode required' }, 400);
+  }
+
+  const piEventId: string | null =
+    typeof body.pi_event_id === 'string' && body.pi_event_id.length > 0 ? body.pi_event_id : null;
+
+  // ─── Idempotency check ──────────────────────────────────────────
+  // The unique index on (user_id, pi_event_id) WHERE pi_event_id IS NOT
+  // NULL guarantees a successful prior insert is observable here.
+  if (piEventId) {
+    const existing = await supabase
+      .schema('chefbyte')
+      .from('scan_transactions')
+      .select(
+        'transaction_id, status, mode, product_id, applied_lot_id, applied_food_log_id, applied_cart_item_id, error_msg',
+      )
+      .eq('user_id', userId)
+      .eq('pi_event_id', piEventId)
+      .maybeSingle();
+    if (existing.data) {
+      return jsonResponse({
+        transaction_id: existing.data.transaction_id,
+        status: existing.data.status,
+        mode: existing.data.mode,
+        product_id: existing.data.product_id,
+        applied_lot_id: existing.data.applied_lot_id,
+        applied_food_log_id: existing.data.applied_food_log_id,
+        applied_cart_item_id: existing.data.applied_cart_item_id,
+        error_msg: existing.data.error_msg,
+        idempotent: true,
+      });
+    }
+  }
+
+  // ─── Mode resolution ────────────────────────────────────────────
+  // Locked mode ALWAYS wins (cloud-side trust boundary — a misbehaving
+  // client can't bypass a user-applied lock by sending body.mode).
+  const stateQ = await supabase
+    .schema('chefbyte')
+    .from('scanner_state')
+    .select('last_active_mode, locked_mode')
+    .eq('user_id', userId)
+    .maybeSingle();
+  let mode: string;
+  if (stateQ.data?.locked_mode) {
+    mode = stateQ.data.locked_mode;
+  } else if (typeof body.mode === 'string' && VALID_SCAN_MODES.has(body.mode)) {
+    mode = body.mode;
+  } else if (stateQ.data?.last_active_mode) {
+    mode = stateQ.data.last_active_mode;
+  } else {
+    mode = 'purchase';
+  }
+
+  // ─── Product lookup ─────────────────────────────────────────────
+  const productQ = await supabase
+    .schema('chefbyte')
+    .from('products')
+    .select('product_id')
+    .eq('user_id', userId)
+    .eq('barcode', barcode)
+    .is('deleted_at', null)
+    .maybeSingle();
+  let productId: string | null = productQ.data?.product_id ?? null;
+
+  // Unknown barcode → invoke analyze-product. analyze-product requires
+  // a user JWT (verify_jwt=true), so the service-role-scoped invoke
+  // call may fail in environments without a forwarded JWT (test +
+  // Pi-only paths). On any error we fall through to the errored-
+  // transaction log so the Pi sees a stable response shape.
+  if (!productId) {
+    let analyzeError: string | null = null;
+    try {
+      const analyzeRes = await supabase.functions.invoke('analyze-product', {
+        body: { barcode },
+      });
+      if (analyzeRes.error) {
+        const msg = (analyzeRes.error as { message?: string }).message ?? 'unknown error';
+        analyzeError = `analyze-product: ${msg}`;
+      } else {
+        const re = await supabase
+          .schema('chefbyte')
+          .from('products')
+          .select('product_id')
+          .eq('user_id', userId)
+          .eq('barcode', barcode)
+          .is('deleted_at', null)
+          .maybeSingle();
+        productId = re.data?.product_id ?? null;
+      }
+    } catch (e) {
+      analyzeError = `analyze-product: ${(e as Error).message ?? String(e)}`;
+    }
+
+    if (!productId) {
+      const errored = await insertErroredScanTransaction(supabase, {
+        userId,
+        barcode,
+        mode,
+        source,
+        piEventId,
+        productId: null,
+        qty: typeof body.qty === 'number' ? body.qty : null,
+        unit: typeof body.unit === 'string' ? body.unit : null,
+        errorMsg: analyzeError ?? 'product not found and analyze-product silent',
+      });
+      return jsonResponse(errored);
+    }
+  }
+
+  // ─── Execute action via private.execute_scan_action ─────────────
+  const defaultUnit = mode === 'consume_macros' || mode === 'consume_no_macros' ? 'serving' : 'container';
+  const qty = typeof body.qty === 'number' ? body.qty : 1;
+  const unit = typeof body.unit === 'string' ? body.unit : defaultUnit;
+  const nutritionSnapshot =
+    body.nutrition_snapshot && typeof body.nutrition_snapshot === 'object' ? body.nutrition_snapshot : null;
+
+  // private.execute_scan_action via the chefbyte-schema PostgREST wrapper
+  // (migration 20260503100150). PostgREST only exposes the schemas listed
+  // in supabase/config.toml (public, graphql_public, hub, coachbyte,
+  // chefbyte) — the wrapper is a thin SECURITY DEFINER pass-through that
+  // delegates to private.execute_scan_action.
+  const actionQ = await (supabase as any).schema('chefbyte').rpc('execute_scan_action', {
+    p_user_id: userId,
+    p_product_id: productId,
+    p_mode: mode,
+    p_qty: qty,
+    p_unit: unit,
+    p_nutrition_snapshot: nutritionSnapshot,
+  });
+
+  if (actionQ.error) {
+    const errored = await insertErroredScanTransaction(supabase, {
+      userId,
+      barcode,
+      mode,
+      source,
+      piEventId,
+      productId,
+      qty,
+      unit,
+      errorMsg: actionQ.error.message ?? 'execute_scan_action failed',
+    });
+    return jsonResponse(errored);
+  }
+
+  const result = (actionQ.data ?? {}) as {
+    applied_lot_id?: string | null;
+    applied_food_log_id?: string | null;
+    applied_cart_item_id?: string | null;
+  };
+
+  // ─── Insert applied transaction ─────────────────────────────────
+  const nowIso = new Date().toISOString();
+  const logicalDate = nowIso.slice(0, 10);
+  const tx = await supabase
+    .schema('chefbyte')
+    .from('scan_transactions')
+    .insert({
+      user_id: userId,
+      barcode,
+      product_id: productId,
+      mode,
+      qty,
+      unit,
+      nutrition_snapshot: nutritionSnapshot,
+      status: 'applied',
+      logical_date: logicalDate,
+      source,
+      pi_event_id: piEventId,
+      applied_lot_id: result.applied_lot_id ?? null,
+      applied_food_log_id: result.applied_food_log_id ?? null,
+      applied_cart_item_id: result.applied_cart_item_id ?? null,
+      applied_at: nowIso,
+    })
+    .select('transaction_id')
+    .single();
+
+  if (tx.error || !tx.data) {
+    console.error('shelf-ingest: scan_transactions insert failed', tx.error);
+    return jsonResponse({ error: tx.error?.message ?? 'transaction insert failed' }, 500);
+  }
+
+  return jsonResponse({
+    transaction_id: tx.data.transaction_id,
+    status: 'applied',
+    product_id: productId,
+    mode,
+    applied_lot_id: result.applied_lot_id ?? null,
+    applied_food_log_id: result.applied_food_log_id ?? null,
+    applied_cart_item_id: result.applied_cart_item_id ?? null,
+  });
+}
+
+/**
+ * Helper: insert a scan_transactions row with status='errored' and
+ * return the response shape callers expect. Used by both the unknown-
+ * product path and the execute_scan_action failure path.
+ */
+async function insertErroredScanTransaction(
+  supabase: SupabaseClient,
+  params: {
+    userId: string;
+    barcode: string;
+    mode: string;
+    source: 'pi_usb' | 'web';
+    piEventId: string | null;
+    productId: string | null;
+    qty: number | null;
+    unit: string | null;
+    errorMsg: string;
+  },
+): Promise<Record<string, unknown>> {
+  const { data, error } = await supabase
+    .schema('chefbyte')
+    .from('scan_transactions')
+    .insert({
+      user_id: params.userId,
+      barcode: params.barcode,
+      product_id: params.productId,
+      mode: params.mode,
+      qty: params.qty,
+      unit: params.unit,
+      status: 'errored',
+      error_msg: params.errorMsg,
+      logical_date: new Date().toISOString().slice(0, 10),
+      source: params.source,
+      pi_event_id: params.piEventId,
+    })
+    .select('transaction_id')
+    .single();
+  if (error || !data) {
+    console.error('shelf-ingest: errored scan_transactions insert failed', error);
+    // Best-effort: still return a response so the Pi doesn't retry on
+    // cascade failure. transaction_id null signals upstream insert
+    // failure to the client.
+    return {
+      transaction_id: null,
+      status: 'errored',
+      error_msg: params.errorMsg,
+      mode: params.mode,
+      product_id: params.productId,
+    };
+  }
+  return {
+    transaction_id: data.transaction_id,
+    status: 'errored',
+    error_msg: params.errorMsg,
+    mode: params.mode,
+    product_id: params.productId,
+  };
+}
+
+/**
  * Apply Pi-captured tare-weight and/or measured_full_at to a products row.
  *
  * Called by the Pi after:
@@ -1632,6 +1969,15 @@ Deno.serve(async (req) => {
     // inside the handler, mirroring livetrack-session/create).
     if (req.method === 'POST' && leaf === 'scanner-state') {
       return await handleScannerState(req, supabase);
+    }
+
+    // Dual-auth route — accepts BOTH x-api-key (Pi) AND JWT (web). Must
+    // be dispatched before the global x-api-key gate so a JWT-only web
+    // call isn't 401'd on the missing api key. The handler resolves
+    // auth itself (x-api-key tried first → JWT fallback) and 401s if
+    // neither succeeds.
+    if (req.method === 'POST' && leaf === 'barcode-scan') {
+      return await handleBarcodeScan(req, supabase);
     }
 
     const authRes = await authenticate(supabase, req.headers.get('x-api-key'));
