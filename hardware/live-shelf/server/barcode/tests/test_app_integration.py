@@ -354,114 +354,195 @@ def test_scanner_thread_shutdown_event_breaks_retry_loop(monkeypatch):
 # /health/barcode endpoint tests (Layer 3)
 # ---------------------------------------------------------------------------
 #
-# These tests need a Flask app to exercise the route. We piggyback off
-# the integration test's ``bundle`` fixture (which calls ``create_app``)
-# rather than spinning up a parallel test client harness.
+# Tests exercise the PRODUCTION route registered by ``create_app``
+# (server/app.py:2292). The earlier rev of these tests built a parallel
+# Flask app with an inline copy of the route handler — a tautology that
+# verified the test's own re-implementation, not production. Replaced
+# with full ``create_app`` invocations whose ``test_client`` hits the
+# real handler. The pattern mirrors ``server/tests/test_app_startup.py``
+# which uses an in-memory sqlite + ``_FakeCamera`` to instantiate the
+# bundle without touching real hardware / disk.
 
 
-def test_health_barcode_returns_disabled_when_off(monkeypatch):
-    """Layer 3: with ``BARCODE_SCANNER_ENABLED`` unset, the route
-    collapses to ``{'state': 'disabled'}`` regardless of any stale
-    state in the module-level dict."""
-    from server import app as app_module
-    # The module-level dict can carry state from a previous test that
-    # toggled the env var. Reset to the disabled-baseline.
-    app_module.scanner_health['enabled'] = False
-    app_module.scanner_health['state'] = 'disabled'
+class _FakeCamera:
+    """Minimal camera stand-in for ``create_app``. Same shape as the one
+    in ``server/tests/test_app_startup.py`` — kept local here to avoid a
+    cross-package import that would drag conftest baggage."""
 
-    # Build a tiny Flask app that registers JUST the health_barcode
-    # handler — full ``create_app`` is overkill and would require the
-    # full conftest fixture chain.
-    from flask import Flask, jsonify
-    test_app = Flask(__name__)
+    import threading as _threading
 
-    @test_app.get('/health/barcode')
-    def _route():
-        # Inline copy of the production route's logic so this test
-        # isn't dependent on create_app's many fixtures. We import the
-        # module-level dict so the assertion still goes through the
-        # real source of truth.
-        if not app_module.scanner_health.get('enabled'):
-            return jsonify({'state': 'disabled'})
-        return jsonify(app_module.scanner_health)  # pragma: no cover
+    def __init__(self) -> None:
+        self.shutdown_event = self._threading.Event()
+        self._subs: list = []
+        self.last_frame_ts = None
+        self.frames_captured = 0
+        self.grab_failures = 0
 
-    client = test_app.test_client()
-    r = client.get('/health/barcode')
-    assert r.status_code == 200
-    assert r.get_json() == {'state': 'disabled'}
+        class _Cfg:
+            brightness_threshold = 15.0
+            brightness_hysteresis = 2.0
+            capture_fps = 10
+
+        self.config = _Cfg()
+
+    def on_brightness_transition(self, cb):
+        self._subs.append(cb)
+
+    def start(self):
+        pass
+
+    def join(self, timeout=None):
+        pass
+
+    def is_alive(self):
+        return True
+
+    def current_frame(self):
+        import numpy as np
+        return np.zeros((10, 10, 3), dtype=np.uint8)
+
+    def current_frame_jpeg(self, quality: int = 85):
+        return b"\xff\xd8\xff\xd9"
+
+    def snapshot_ring(self):
+        return []
+
+    def current_brightness(self):
+        return 0.0
+
+    def door_open(self):
+        return False
 
 
-def test_health_barcode_returns_running_state(monkeypatch):
-    """Layer 3: when the scanner is running, the route reports state,
-    last_scan_age_s, last_restart_age_s, and a 5-min restart count."""
-    import time as time_mod
+def _make_bundle(tmp_path):
+    """Build a real ``AppBundle`` via ``create_app`` against an in-memory
+    sqlite. Camera + classifier are stubbed; cloud worker is left
+    disabled (the default when ``cloud_url`` is empty)."""
+    from pathlib import Path
+    from server.app import create_app
+    from server.config import AppConfig
+    from server.storage import init_db
 
-    from server import app as app_module
-
-    # Stage scanner_health as if a scan happened 5 seconds ago.
-    now = time_mod.time()
-    app_module.scanner_health['enabled'] = True
-    app_module.scanner_health['state'] = 'running'
-    app_module.scanner_health['last_scan_ts'] = now - 5.0
-    app_module.scanner_health['last_restart_ts'] = now - 60.0
-    app_module.scanner_health['restart_window'] = deque(
-        [now - 200, now - 60],
+    cfg = AppConfig()
+    p = Path(tmp_path)
+    cfg.data_root = p
+    cfg.refs_root = p / "refs"
+    cfg.events_root = p / "events"
+    cfg.db_path = p / "shelf.sqlite3"
+    cfg.anthropic_api_key = "test-key"
+    conn = init_db(str(cfg.db_path))
+    return create_app(
+        config=cfg,
+        camera=_FakeCamera(),  # type: ignore[arg-type]
+        conn=conn,
+        classifier_client=None,
+        apply_v4l2=False,
+        start_camera=False,
     )
 
-    # Run the production route logic directly via a tiny Flask app
-    # (same trick as the disabled test).
-    from flask import Flask, jsonify
-    test_app = Flask(__name__)
 
-    @test_app.get('/health/barcode')
-    def _route():
-        if not app_module.scanner_health.get('enabled'):
-            return jsonify({'state': 'disabled'})
-        now_inner = time_mod.time()
-        last_scan = app_module.scanner_health.get('last_scan_ts')
-        last_restart = app_module.scanner_health.get('last_restart_ts')
-        window_snapshot = list(
-            app_module.scanner_health.get('restart_window') or []
+def test_health_barcode_returns_disabled_when_off(tmp_path, monkeypatch):
+    """With ``BARCODE_SCANNER_ENABLED`` unset, the production
+    ``/health/barcode`` route collapses to ``{'state': 'disabled'}``
+    regardless of any stale state on the module-level dict.
+
+    Mutation guard: removing ``if not scanner_health.get('enabled'):
+    return jsonify({'state': 'disabled'})`` from the production handler
+    would change the JSON shape (it would expose the four-key snapshot
+    instead) and this test would fail.
+    """
+    monkeypatch.delenv('BARCODE_SCANNER_ENABLED', raising=False)
+    from server import app as app_module
+
+    # ``create_app`` calls ``_start_barcode_scanner_thread`` which
+    # resets ``scanner_health`` based on the env var. Build the bundle
+    # FIRST, then stage the dict in the post-startup state we want to
+    # assert against. Otherwise the reset wipes whatever we staged.
+    bundle = _make_bundle(tmp_path)
+    try:
+        # Staging stale running-shape state on a disabled dict — the
+        # production handler must IGNORE these fields and return only
+        # {'state': 'disabled'} based on the enabled flag.
+        app_module.scanner_health['enabled'] = False
+        app_module.scanner_health['state'] = 'running'  # stale field
+        app_module.scanner_health['last_scan_ts'] = 12345.6  # stale field
+        app_module.scanner_health['last_restart_ts'] = 12340.0  # stale field
+        app_module.scanner_health['restart_window'] = deque(
+            [12340.0, 12342.0]
         )
-        recent = sum(
-            1 for t in window_snapshot
-            if t > now_inner - app_module._RESTART_WINDOW_S
+
+        client = bundle.app.test_client()
+        r = client.get('/health/barcode')
+        assert r.status_code == 200
+        # Production handler MUST return only {'state': 'disabled'} when
+        # the dict's enabled flag is falsy. Stale fields above must NOT
+        # appear in the response.
+        assert r.get_json() == {'state': 'disabled'}
+    finally:
+        bundle.shutdown()
+
+
+def test_health_barcode_returns_running_state(tmp_path, monkeypatch):
+    """When the scanner is running, the production route reports state,
+    last_scan_age_s, last_restart_age_s, and a 5-min restart count.
+
+    Mutation guards:
+      * Renaming any of the four keys (state, last_scan_age_s,
+        last_restart_age_s, restart_count_5min) breaks the assertion.
+      * Returning ``last_scan`` (raw timestamp) instead of ``now -
+        last_scan`` (age) breaks the approx assertion.
+      * Counting all restart_window entries instead of those inside the
+        5-min window changes the count and breaks the assertion.
+    """
+    import time as time_mod
+    monkeypatch.delenv('BARCODE_SCANNER_ENABLED', raising=False)
+    from server import app as app_module
+
+    # Build the bundle FIRST so create_app's call to
+    # ``_start_barcode_scanner_thread`` (which resets scanner_health
+    # based on BARCODE_SCANNER_ENABLED) can't wipe our staged state.
+    bundle = _make_bundle(tmp_path)
+    try:
+        now = time_mod.time()
+        # Mix one in-window restart (60s ago) with one out-of-window
+        # restart (400s ago, beyond the 300s window). Production must
+        # report restart_count_5min == 1, not 2.
+        app_module.scanner_health['enabled'] = True
+        app_module.scanner_health['state'] = 'running'
+        app_module.scanner_health['last_scan_ts'] = now - 5.0
+        app_module.scanner_health['last_restart_ts'] = now - 60.0
+        app_module.scanner_health['restart_window'] = deque(
+            [now - 400.0, now - 60.0],
         )
-        return jsonify({
-            'state': app_module.scanner_health.get('state'),
-            'last_scan_age_s': (
-                now_inner - last_scan if last_scan is not None else None
-            ),
-            'last_restart_age_s': (
-                now_inner - last_restart
-                if last_restart is not None else None
-            ),
-            'restart_count_5min': recent,
-        })
 
-    client = test_app.test_client()
-    body = client.get('/health/barcode').get_json()
-    assert body['state'] == 'running'
-    # Allow a small delta for scheduler jitter.
-    assert body['last_scan_age_s'] == pytest.approx(5.0, abs=1.0)
-    assert body['last_restart_age_s'] == pytest.approx(60.0, abs=1.0)
-    # Both restart timestamps are within the 5-min window.
-    assert body['restart_count_5min'] == 2
+        client = bundle.app.test_client()
+        r = client.get('/health/barcode')
+        assert r.status_code == 200
+        body = r.get_json()
+        assert set(body.keys()) == {
+            'state', 'last_scan_age_s', 'last_restart_age_s',
+            'restart_count_5min',
+        }, f"unexpected keys in /health/barcode payload: {body!r}"
+        assert body['state'] == 'running'
+        # Small wall-clock delta is unavoidable between staging the dict
+        # above and the route reading time.time(). Allow 1s slack.
+        assert body['last_scan_age_s'] == pytest.approx(5.0, abs=1.0)
+        assert body['last_restart_age_s'] == pytest.approx(60.0, abs=1.0)
+        # 400s-ago restart is OUTSIDE the 300s window; only the 60s-ago
+        # restart counts.
+        assert body['restart_count_5min'] == 1
+    finally:
+        bundle.shutdown()
 
 
-def test_health_barcode_route_registered_in_create_app():
-    """Smoke test that the production route is actually wired up.
-    Without this we could ship a full implementation that's silently
-    unreachable. We don't need a full bundle — a tiny ``test_client``
-    against the route after running through ``create_app`` is enough."""
-    # Use the same lightweight check the rest of test_app_integration.py
-    # uses: the route should be listed in ``app.url_map``. Build via
-    # the test_integration ``bundle`` fixture would require the full
-    # conftest chain; instead we walk to the route registration via
-    # the source.
-    import server.app as app_module
-    src = open(app_module.__file__).read()
-    assert "@app.get(\"/health/barcode\")" in src
-    # The route handler is defined inline; verify the function name
-    # appears too.
-    assert 'def health_barcode' in src
+def test_health_barcode_route_registered_in_create_app(tmp_path):
+    """Structural smoke check that the route is wired into the real
+    ``app.url_map`` after ``create_app`` runs. Catches accidental
+    indentation slips that move the ``@app.get`` decorator outside the
+    factory's scope."""
+    bundle = _make_bundle(tmp_path)
+    try:
+        rules = {r.rule for r in bundle.app.url_map.iter_rules()}
+        assert '/health/barcode' in rules
+    finally:
+        bundle.shutdown()

@@ -626,3 +626,206 @@ def test_empty_heuristic_falls_through_when_null_tare_and_reading_above_30pct(
     )
     # Lot still present.
     assert storage_repo.get_lot(conn, lot.lot_id) is not None
+
+
+# ---------------------------------------------------------------------------
+# Layer 7 (audit M-Pi-1): measured_full_at Pi-side set-once guard
+#
+# scale_events.py:2515-2522 reads ``getattr(product, "measured_full_at",
+# None)`` and short-circuits the second push when the local Product
+# mirror reports a non-NULL value (set-once at the Pi). The catch is:
+# the Pi's SQLite schema (``server/storage/schema.sql:5-35``) and the
+# ``Product`` dataclass (``server/storage/models.py:147-163``) do NOT
+# carry a ``measured_full_at`` column. ``_row_to_product`` never fills
+# that field, so ``getattr(..., None)`` ALWAYS returns None and the
+# guard is dead code on the production Pi.
+#
+# These tests capture both halves of that finding so a future migration
+# that adds the column (and back-fills the dataclass) immediately
+# starts exercising the real guard:
+#
+#   1. ``test_measured_full_pi_guard_is_dead_code_on_current_schema``
+#      — bug-hypothesis test. Drives a scenario where the cloud has
+#      already stamped the product as full; demonstrates the Pi
+#      re-pushes anyway because its local mirror lacks the column.
+#      Cloud-side set-once is the sole defense today.
+#
+#   2. ``test_measured_full_pi_guard_short_circuits_when_attribute_present``
+#      — forward-compatibility test. Monkey-patches a ``measured_full_at``
+#      attribute onto the Product instance returned by ``get_product`` to
+#      simulate a future schema with that column. The guard at
+#      scale_events.py:2519 ``not already_stamped`` then fires and the
+#      Pi short-circuits — proves the guard logic itself is correct,
+#      it's only the SQLite mirror that's missing.
+# ---------------------------------------------------------------------------
+
+
+def test_measured_full_pi_guard_is_dead_code_on_current_schema(
+    tmp_path, monkeypatch,
+):
+    """Bug-hypothesis test (audit M-Pi-1).
+
+    Today's Pi schema does NOT include ``products.measured_full_at`` and
+    the ``Product`` dataclass has no such field. The catch-all dispatch
+    path at ``scale_events.py:2515`` calls ``getattr(product,
+    "measured_full_at", None)`` — which returns ``None`` regardless of
+    whether the cloud has already stamped the column.
+
+    Concretely: when the catch-all path encounters a fresh-full
+    placement on a product whose CLOUD row has already been stamped
+    measured_full_at (e.g. from a prior Pi reboot, or from another
+    device on the same account), the Pi has no way to know. It pushes
+    again. The cloud-side conditional UPDATE at /shelf-ingest/product-tare
+    silently no-ops the duplicate write — no functional bug — but the
+    redundant network round-trip + lifecycle row are dead-cycles the
+    "Pi guard" comment claims to prevent.
+
+    What this test asserts:
+      * The Pi DOES push ``measured_full_at`` even though a hypothetical
+        ``getattr(product, "measured_full_at")`` "should" guard it,
+        because the dataclass doesn't carry that field.
+      * A ``MEASURED_FULL_AUTO`` lifecycle row is recorded — confirming
+        the supposedly-guarded code path executed.
+
+    A future fix that adds the column to ``schema.sql`` + reads it in
+    ``_row_to_product`` will need to KEEP the schema migration in lockstep
+    with the dataclass. This test will start failing the moment that
+    happens, signalling the migration to update.
+    """
+    # Pi-mirror reality: even if we manually annotate the dataclass with
+    # measured_full_at = ANY value, the field doesn't exist as a column
+    # so ``_row_to_product`` never populates it. We exercise the real
+    # repo round-trip here (no monkeypatching) — the guard's getattr
+    # falls through to its ``None`` default.
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    _seed_product(conn, product_id="prod-already-full", tare=25.0, net=500.0)
+    _seed_cloud_lot(
+        conn, lot_id="LOT-ALREADY-FULL", product_id="prod-already-full",
+    )
+
+    # Confirm the column-of-interest does NOT exist on the local
+    # ``products`` table. If a future migration adds it, this assertion
+    # flips — and the guard becomes reachable, so the rest of this test
+    # SHOULD also flip (the test that follows asserts that future
+    # behavior).
+    cols = {
+        row[1] for row in conn.execute("PRAGMA table_info(products)")
+    }
+    assert "measured_full_at" not in cols, (
+        "Pi schema unexpectedly grew measured_full_at — update this "
+        "test to assert the now-active set-once guard, see "
+        "test_measured_full_pi_guard_short_circuits_when_attribute_present"
+    )
+
+    # Trigger the catch-all path with a fresh-full placement: scale
+    # reads near tare + net so the Task 9 measured_full block fires.
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-ALREADY-FULL",
+            "reasoning": "fresh full bottle, cloud already stamped",
+        },
+        delta_g=521.0,  # within 5% of expected_full=525g
+        event_ts="2026-05-02T18:00:00.000Z",
+        event_id="evt-dead-code",
+        session_id="sess-dead-code",
+    )
+    assert handled is True
+
+    # The push DID happen because the Pi guard had no local data to
+    # short-circuit on. This is the dead-code finding.
+    full_calls = [
+        c for c in cloud.product_state_calls
+        if c.get("measured_full_at") is not None
+    ]
+    assert len(full_calls) == 1, (
+        "Pi guard cannot fire on the current schema (no measured_full_at "
+        "column) — the dispatch path always reaches the push. If this "
+        "assertion fails because the guard now short-circuits, ensure "
+        "the schema + Product dataclass both grew the column together."
+    )
+    rows = conn.execute(
+        "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
+        (ReasonCode.MEASURED_FULL_AUTO,),
+    ).fetchall()
+    assert len(rows) == 1, (
+        "lifecycle row also lands every time — confirming the guarded "
+        "block executes unconditionally on the current Pi schema"
+    )
+
+
+def test_measured_full_pi_guard_short_circuits_when_attribute_present(
+    tmp_path, monkeypatch,
+):
+    """Forward-compat / guard-logic test.
+
+    This isolates the GUARD LOGIC at scale_events.py:2515-2522 from the
+    schema-shape concern in the test above. We monkey-patch
+    ``storage_repo.get_product`` to return a Product whose
+    ``measured_full_at`` attribute is non-None (mimicking a future
+    schema that mirrors the cloud column). The guard MUST then
+    short-circuit: no measured_full_at push, no MEASURED_FULL_AUTO
+    lifecycle row.
+
+    If a future refactor accidentally drops the
+    ``and not already_stamped`` clause from line 2519, this test will
+    fail — even before the schema migration lands.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    _seed_product(conn, product_id="prod-stamped", tare=25.0, net=500.0)
+    _seed_cloud_lot(conn, lot_id="LOT-STAMPED", product_id="prod-stamped")
+
+    # Wrap the real get_product so we keep all the standard behavior
+    # (column reads, _row_to_product) and then dynamically attach the
+    # missing field so the dispatch path's getattr observes a non-None
+    # value. We import the symbol the production code imports — i.e.
+    # the one the dispatcher actually calls — so monkeypatching the
+    # right binding is unambiguous.
+    from server.handlers import scale_events as scale_events_mod
+
+    real_get_product = scale_events_mod.storage_repo.get_product
+
+    def _get_product_with_stamp(conn_arg, product_id):
+        product = real_get_product(conn_arg, product_id)
+        if product is not None and str(product_id) == "prod-stamped":
+            # Inject the field that a future migration would back-fill
+            # from the cloud-mirrored column. The dataclass is not
+            # frozen, so attribute injection works.
+            product.measured_full_at = "2026-05-01T18:00:00.000Z"
+        return product
+
+    monkeypatch.setattr(
+        scale_events_mod.storage_repo,
+        "get_product",
+        _get_product_with_stamp,
+    )
+
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-STAMPED",
+            "reasoning": "fresh full bottle, but already stamped",
+        },
+        delta_g=521.0,  # within 5% of expected_full=525g
+        event_ts="2026-05-02T18:00:00.000Z",
+        event_id="evt-guard-fires",
+        session_id="sess-guard-fires",
+    )
+    assert handled is True
+
+    # Guard fires: no measured_full_at push, no lifecycle row.
+    full_calls = [
+        c for c in cloud.product_state_calls
+        if c.get("measured_full_at") is not None
+    ]
+    assert full_calls == [], (
+        "Pi-side set-once: when product.measured_full_at is non-None "
+        "the dispatch path MUST short-circuit before push_product_state"
+    )
+    rows = conn.execute(
+        "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
+        (ReasonCode.MEASURED_FULL_AUTO,),
+    ).fetchall()
+    assert rows == [], (
+        "no MEASURED_FULL_AUTO lifecycle row when the Pi guard fires"
+    )
