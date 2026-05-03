@@ -465,6 +465,77 @@ export function ScannerPage() {
   }, []);
 
   /* ---------------------------------------------------------------- */
+  /*  Persistent audit log (chefbyte.scan_transactions)                */
+  /* ---------------------------------------------------------------- */
+
+  /**
+   * USB Scanner Task 12 — fire-and-forget INSERT into
+   * `chefbyte.scan_transactions` after every scan completes (success
+   * OR error). This is the persistent audit log that the Settings →
+   * Scanner Transactions tab subscribes to via Realtime.
+   *
+   * Critical: never blocks the UI. A failed audit-log INSERT only emits
+   * a console.warn — the user-visible scan flow is the load-bearing
+   * code, the audit log is observability sugar. This mirrors the
+   * scanner-state push pattern.
+   *
+   * The `applied_*` IDs connect a transaction back to its downstream
+   * effect (lot, food_log, cart_item) so the void-mutation can reverse
+   * them. They're optional — any may be null when the side-effect didn't
+   * happen (e.g. errored scan, or a mode where that effect isn't created).
+   */
+  const logTransaction = useCallback(
+    (args: {
+      barcode: string;
+      productId: string | null;
+      mode: ScanMode;
+      qty: number | null;
+      unit: 'serving' | 'container' | null;
+      status: 'applied' | 'errored';
+      errorMsg: string | null;
+      appliedLotId?: string | null;
+      appliedFoodLogId?: string | null;
+      appliedCartItemId?: string | null;
+    }) => {
+      if (!user) return;
+      const today = new Date().toISOString().slice(0, 10);
+      // Fire-and-forget INSERT inside an async IIFE so any rejection (or
+      // `.then` called on a non-thenable from a test mock builder) is
+      // confined to a try/catch and never surfaces as an unhandled
+      // rejection. The audit log is observability sugar — a failure here
+      // must NEVER break the user-visible scan flow.
+      void (async () => {
+        try {
+          const res = await chefbyte()
+            .from('scan_transactions')
+            .insert({
+              user_id: user.id,
+              barcode: args.barcode,
+              product_id: args.productId,
+              mode: args.mode,
+              qty: args.qty,
+              unit: args.unit,
+              status: args.status,
+              error_msg: args.errorMsg,
+              logical_date: today,
+              source: 'web',
+              applied_lot_id: args.appliedLotId ?? null,
+              applied_food_log_id: args.appliedFoodLogId ?? null,
+              applied_cart_item_id: args.appliedCartItemId ?? null,
+              applied_at: args.status === 'applied' ? new Date().toISOString() : null,
+            });
+          if ((res as { error?: unknown })?.error) {
+            console.warn('scan_transactions log failed:', (res as { error?: unknown }).error);
+          }
+        } catch (err) {
+          console.warn('scan_transactions log failed (threw):', err);
+        }
+      })();
+    },
+    [user],
+  );
+
+  /* ---------------------------------------------------------------- */
   /*  Barcode submit                                                   */
   /* ---------------------------------------------------------------- */
 
@@ -627,6 +698,26 @@ export function ScannerPage() {
                 : item,
             ),
           );
+
+          // Persistent audit log (Task 12). The applied_*_id fields
+          // connect this transaction to its downstream effect so void
+          // can reverse it. undoInfo carries the IDs created by
+          // executeAction — extract per mode.
+          logTransaction({
+            barcode,
+            productId: product.product_id,
+            mode,
+            qty,
+            unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
+            status: result.error ? 'errored' : 'applied',
+            errorMsg: result.error ?? null,
+            appliedLotId:
+              mode === 'purchase' && result.undoInfo?.type === 'purchase' ? (result.undoInfo.recordId ?? null) : null,
+            appliedFoodLogId:
+              mode === 'consume_macros' && result.undoInfo?.type === 'consume' ? (result.undoInfo.logId ?? null) : null,
+            appliedCartItemId:
+              mode === 'shopping' && result.undoInfo?.type === 'shopping' ? (result.undoInfo.recordId ?? null) : null,
+          });
         } else {
           // No product OR stale-placeholder row — call analyze-product and
           // either INSERT a new row or UPDATE the placeholder in place.
@@ -903,6 +994,15 @@ export function ScannerPage() {
                   : item,
               ),
             );
+            logTransaction({
+              barcode,
+              productId: null,
+              mode,
+              qty,
+              unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
+              status: 'errored',
+              errorMsg: hardAiError.message,
+            });
           } else if (inlineErr && !analyzedProduct) {
             // Inner-block write or thrown exception failed and we don't have
             // a product row to act on. Surface the captured message — without
@@ -913,6 +1013,15 @@ export function ScannerPage() {
                 item.id === tempId ? { ...item, status: 'error', name: inlineErr!, errorMsg: inlineErr! } : item,
               ),
             );
+            logTransaction({
+              barcode,
+              productId: null,
+              mode,
+              qty,
+              unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
+              status: 'errored',
+              errorMsg: inlineErr,
+            });
           } else if (analyzedProduct) {
             // AI-analyzed product created/updated successfully.
             // Merge with user edits: analyze-product takes 5–25s and during
@@ -967,6 +1076,25 @@ export function ScannerPage() {
                   : item,
               ),
             );
+
+            // Persistent audit log (Task 12) — AI-imported product path.
+            logTransaction({
+              barcode,
+              productId: analyzedProduct.product_id,
+              mode,
+              qty,
+              unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
+              status: result.error ? 'errored' : 'applied',
+              errorMsg: result.error ?? null,
+              appliedLotId:
+                mode === 'purchase' && result.undoInfo?.type === 'purchase' ? (result.undoInfo.recordId ?? null) : null,
+              appliedFoodLogId:
+                mode === 'consume_macros' && result.undoInfo?.type === 'consume'
+                  ? (result.undoInfo.logId ?? null)
+                  : null,
+              appliedCartItemId:
+                mode === 'shopping' && result.undoInfo?.type === 'shopping' ? (result.undoInfo.recordId ?? null) : null,
+            });
           } else if (existingPlaceholderId) {
             // We already have a placeholder from a prior failed scan; don't
             // create another. Just surface the existing placeholder.
@@ -983,6 +1111,19 @@ export function ScannerPage() {
                   : item,
               ),
             );
+            // Persistent audit log (Task 12). The placeholder fallback
+            // didn't run executeAction so no downstream IDs exist —
+            // record the placeholder match as `applied` (the queue row
+            // shows success) but no lot/log/cart attachment.
+            logTransaction({
+              barcode,
+              productId: existingPlaceholderId,
+              mode,
+              qty,
+              unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
+              status: 'applied',
+              errorMsg: null,
+            });
           } else {
             // analyze-product failed and no placeholder exists. Scanners always
             // have a barcode so minting a placeholder here is wrong — surfacing
@@ -1001,6 +1142,15 @@ export function ScannerPage() {
                   : item,
               ),
             );
+            logTransaction({
+              barcode,
+              productId: null,
+              mode,
+              qty,
+              unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
+              status: 'errored',
+              errorMsg: errMsg,
+            });
           }
         }
       } catch (err: any) {
@@ -1011,6 +1161,16 @@ export function ScannerPage() {
               : item,
           ),
         );
+        // Persistent audit log (Task 12) — outer pipeline exception.
+        logTransaction({
+          barcode,
+          productId: null,
+          mode,
+          qty,
+          unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
+          status: 'errored',
+          errorMsg: err?.message ?? 'Unknown',
+        });
       } finally {
         // Always release the in-flight slot — even when the pipeline threw
         // — so a transient failure doesn't permanently block re-scanning
@@ -1022,7 +1182,7 @@ export function ScannerPage() {
         resolveInFlight();
       }
     },
-    [user, mode, screenValue, unit, nutrition, defaultLocationId],
+    [user, mode, screenValue, unit, nutrition, defaultLocationId, logTransaction],
   );
 
   // Keep ref in sync so hardware scanner detection can call the latest version
