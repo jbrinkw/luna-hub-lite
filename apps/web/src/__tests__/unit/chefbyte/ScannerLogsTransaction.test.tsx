@@ -11,10 +11,19 @@
  * IDs (applied_lot_id / applied_food_log_id / applied_cart_item_id) so
  * the void-mutation can reverse the side-effects later.
  *
- * Failure mode the test pins down: a successful purchase scan must
- * produce an `applied`-status scan_transactions row with the right
- * barcode + source + user_id + mode. If the logging is missing or the
- * patch shape regresses, the test fails.
+ * Failure modes pinned down here:
+ *
+ *  1. A successful purchase scan must produce an `applied`-status
+ *     scan_transactions row with the right barcode + source + user_id +
+ *     mode.
+ *
+ *  2. (Audit 2026-05-03 regression guard) When the purchase scan
+ *     MERGES into an existing lot (same product + location +
+ *     expires_on), `applied_lot_id` MUST be null. private.void_scan_transaction
+ *     unconditionally DELETEs the referenced lot — recording a merge's
+ *     lot_id would destroy inventory contributed by other scans /
+ *     manual entry / Pi USB. Only fresh-lot scans (wasNewLot=true) get
+ *     the lot id recorded.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, waitFor } from '@testing-library/react';
@@ -26,9 +35,16 @@ import { MemoryRouter } from 'react-router-dom';
 /*  Mock state                                                         */
 /* ------------------------------------------------------------------ */
 
-const { scanTransactionsInsertMock, invokeMock } = vi.hoisted(() => ({
+const { scanTransactionsInsertMock, invokeMock, existingLotState } = vi.hoisted(() => ({
   scanTransactionsInsertMock: vi.fn(() => Promise.resolve({ data: null, error: null })),
   invokeMock: vi.fn(() => Promise.resolve({ data: null, error: { message: 'not under test' } })),
+  // Mutable holder so individual tests can flip the stock_lots
+  // maybeSingle() result between "no existing lot" (insert path) and
+  // "existing lot" (merge path). The merge-path test asserts that
+  // applied_lot_id stays null in the audit log so void doesn't
+  // destroy a multi-scan pile via private.void_scan_transaction's
+  // unconditional DELETE.
+  existingLotState: { current: null as { lot_id: string; qty_containers: number } | null },
 }));
 
 const productKnown = {
@@ -93,13 +109,25 @@ vi.mock('@/shared/supabase', () => {
           });
         }
         if (table === 'stock_lots') {
-          return Promise.resolve({ data: null, error: null });
+          // Read from the shared holder so each test can opt into
+          // either the insert (null) or merge (non-null) branch.
+          return Promise.resolve({ data: existingLotState.current, error: null });
         }
         return Promise.resolve({ data: null, error: null });
       });
       builder.single = vi.fn(() => {
         if (table === 'stock_lots' && state.op === 'insert') {
           return Promise.resolve({ data: { lot_id: 'lot-new-1' }, error: null });
+        }
+        if (table === 'stock_lots' && state.op === 'update') {
+          // The merge branch updates qty_containers and returns the
+          // pre-existing lot's id. Mirror that shape so executeAction
+          // populates undoInfo.recordId correctly even though the test
+          // asserts the audit log ignores it.
+          return Promise.resolve({
+            data: { lot_id: existingLotState.current?.lot_id ?? 'lot-existing-1' },
+            error: null,
+          });
         }
         return Promise.resolve({ data: null, error: null });
       });
@@ -142,6 +170,9 @@ beforeEach(() => {
   scanTransactionsInsertMock.mockClear();
   invokeMock.mockReset();
   invokeMock.mockResolvedValue({ data: null, error: { message: 'not under test' } });
+  // Default to "no existing lot" — tests opt into the merge branch
+  // explicitly by setting `existingLotState.current` to a row.
+  existingLotState.current = null;
 });
 
 describe('ScannerPage logs scan_transactions', () => {
@@ -174,7 +205,52 @@ describe('ScannerPage logs scan_transactions', () => {
     expect(patch.barcode).toBe(productKnown.barcode);
     expect(patch.source).toBe('web');
     expect(patch.user_id).toBe('u-1');
-    expect(['applied', 'errored']).toContain(patch.status as string);
+    // Tightened from `expect(['applied','errored']).toContain(...)` —
+    // a happy-path purchase scan with all writes mocked to succeed
+    // MUST land at status='applied'. The looser assertion would have
+    // silently passed even if the scan had errored under the hood.
+    expect(patch.status).toBe('applied');
     expect(patch.mode).toBe('purchase');
+    // Insert path (no existing lot) → fresh lot was minted by the
+    // mocked stock_lots.insert → applied_lot_id MUST carry the new
+    // lot id so void can clean up.
+    expect(patch.applied_lot_id).toBe('lot-new-1');
+  });
+
+  it('leaves applied_lot_id null when the purchase MERGES into an existing lot', async () => {
+    // Audit 2026-05-03: when (product, location, expires_on) match an
+    // existing stock_lot, executeAction UPDATEs (merges) instead of
+    // INSERTing. private.void_scan_transaction unconditionally
+    // DELETEs the lot referenced by applied_lot_id, so recording the
+    // merged lot's id would destroy inventory contributed by other
+    // scans / manual entry / Pi USB. The fix: only record
+    // applied_lot_id when a fresh lot was minted (wasNewLot=true).
+    // Merges leave it null, making void a status-flip-only.
+    existingLotState.current = { lot_id: 'lot-existing-1', qty_containers: 2 };
+
+    const user = userEvent.setup();
+    const qc = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(
+      <QueryClientProvider client={qc}>
+        <MemoryRouter>
+          <ScannerPage />
+        </MemoryRouter>
+      </QueryClientProvider>,
+    );
+    const input = await screen.findByTestId('barcode-input');
+    await user.clear(input);
+    await user.type(input, productKnown.barcode);
+    await user.keyboard('{Enter}');
+
+    await waitFor(() => {
+      expect(scanTransactionsInsertMock).toHaveBeenCalledTimes(1);
+    });
+
+    const lastCall = scanTransactionsInsertMock.mock.calls.at(-1) as unknown[] | undefined;
+    const patch = (lastCall?.[0] ?? {}) as Record<string, unknown>;
+    expect(patch.status).toBe('applied');
+    expect(patch.mode).toBe('purchase');
+    // The audit row exists — no destructive DELETE target attached.
+    expect(patch.applied_lot_id).toBeNull();
   });
 });

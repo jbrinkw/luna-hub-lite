@@ -703,6 +703,20 @@ export function ScannerPage() {
           // connect this transaction to its downstream effect so void
           // can reverse it. undoInfo carries the IDs created by
           // executeAction — extract per mode.
+          //
+          // When the web purchase MERGES into an existing lot (rather
+          // than minting a fresh one), applied_lot_id stays null.
+          // private.void_scan_transaction unconditionally DELETEs the
+          // referenced lot, which would destroy inventory added by
+          // other scans / manual entry / Pi USB into the same merged
+          // lot. The void path then becomes a status-flip-only —
+          // macros are voided correctly, but stock changes from a
+          // merge are intentionally not reversible because the local
+          // merge collapses the per-scan history. Asymmetric with the
+          // Pi USB path (which always INSERTs new lots and gets clean
+          // void semantics), but acceptable for v1.
+          const wasNewLotKnown =
+            mode === 'purchase' && result.undoInfo?.type === 'purchase' && result.undoInfo.wasNewLot === true;
           logTransaction({
             barcode,
             productId: product.product_id,
@@ -711,8 +725,7 @@ export function ScannerPage() {
             unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
             status: result.error ? 'errored' : 'applied',
             errorMsg: result.error ?? null,
-            appliedLotId:
-              mode === 'purchase' && result.undoInfo?.type === 'purchase' ? (result.undoInfo.recordId ?? null) : null,
+            appliedLotId: wasNewLotKnown ? (result.undoInfo?.recordId ?? null) : null,
             appliedFoodLogId:
               mode === 'consume_macros' && result.undoInfo?.type === 'consume' ? (result.undoInfo.logId ?? null) : null,
             appliedCartItemId:
@@ -1078,6 +1091,13 @@ export function ScannerPage() {
             );
 
             // Persistent audit log (Task 12) — AI-imported product path.
+            // See the "wasNewLot" comment block on the known-product
+            // path above for the rationale: applied_lot_id is only
+            // recorded when the scan minted a fresh lot. Merges leave
+            // it null so void becomes a status-flip-only and doesn't
+            // destroy inventory contributed by other scans/manual/Pi.
+            const wasNewLotAi =
+              mode === 'purchase' && result.undoInfo?.type === 'purchase' && result.undoInfo.wasNewLot === true;
             logTransaction({
               barcode,
               productId: analyzedProduct.product_id,
@@ -1086,8 +1106,7 @@ export function ScannerPage() {
               unit: mode === 'purchase' || mode === 'shopping' ? 'container' : unit,
               status: result.error ? 'errored' : 'applied',
               errorMsg: result.error ?? null,
-              appliedLotId:
-                mode === 'purchase' && result.undoInfo?.type === 'purchase' ? (result.undoInfo.recordId ?? null) : null,
+              appliedLotId: wasNewLotAi ? (result.undoInfo?.recordId ?? null) : null,
               appliedFoodLogId:
                 mode === 'consume_macros' && result.undoInfo?.type === 'consume'
                   ? (result.undoInfo.logId ?? null)
