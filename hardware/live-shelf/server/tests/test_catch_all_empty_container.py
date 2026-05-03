@@ -357,11 +357,28 @@ class TestEmptyContainerWindow:
 
 
 class TestMissingTareOrNet:
-    """The branch is unreachable by design when tare/net are missing
-    (uncertified products aren't in the candidate pool), but the helper
-    still defensively skips so a stale snapshot can't crash the apply."""
+    """Defensive guards around missing product geometry.
 
-    def test_missing_tare_falls_through(self, tmp_path):
+    * ``net_weight_g IS NULL`` always falls through — there's no
+      reference for either the tare-set ≈tare path or the null-tare
+      <30% path.
+    * ``tare_weight_g IS NULL`` is now a valid input to the
+      catch-all-livetrack auto-import branch (2026-05-02): when a
+      placement reads under 30% of net, treat as an empty container and
+      capture tare from the reading. So this class only asserts the
+      "not low enough" half — when the reading is above 30% of net we
+      MUST NOT fire (defends against false-positive empty-detection on
+      partial placements like a half-full bottle returned to the
+      catch-all)."""
+
+    def test_missing_tare_with_partial_reading_falls_through(self, tmp_path):
+        """Null tare + placed weight > 30% of net → DON'T fire.
+
+        With ``net_weight_g=575g`` the empty-threshold is 172.5g. A 300g
+        placement (≈52% of net — a partially full container) is above
+        the threshold, so the null-tare auto-import branch must NOT
+        treat this as empty. The lot stays put; no discarded emit fires.
+        """
         conn = init_db(":memory:")
         handler = _make_handler(conn, tmp_path)
         _, lot = _seed_product_and_lot(
@@ -369,21 +386,23 @@ class TestMissingTareOrNet:
             pickup_weight_g=600.0,
         )
         session_id = _open_session(conn)
-        event_id = _record_add(conn, session_id, delta_g=25.0)
+        # 300g > 172.5g (30% of 575g) — partial fill, NOT empty.
+        event_id = _record_add(conn, session_id, delta_g=300.0)
 
         handler._apply_lot_update_from_classification(
             direction="add",
             classification=_classification(lot.lot_id),
             event_ts="2026-04-27T12:05:05.000Z",
-            delta_g=25.0,
+            delta_g=300.0,
             session_id=session_id,
             event_id=event_id,
             shelf_id="catch_all",
         )
 
         assert storage_repo.get_lot(conn, lot.lot_id) is not None, (
-            "missing tare must NOT trigger discarded — branch defensively "
-            "falls through to normal flow"
+            "null tare + partial-fill reading must NOT trigger discarded — "
+            "the 30% threshold protects against false-positive empty-"
+            "detection on half-full placements"
         )
         assert "discarded" not in _outbox_kinds(conn)
 

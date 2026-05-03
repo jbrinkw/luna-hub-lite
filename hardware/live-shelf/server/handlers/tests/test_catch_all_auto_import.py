@@ -39,7 +39,7 @@ from server.handlers.scale_events import ScaleHandler  # noqa: E402
 from server.shelves import DEFAULT_REGISTRY  # noqa: E402
 from server.storage import init_db  # noqa: E402
 from server.storage import repo as storage_repo  # noqa: E402
-from server.storage.models import ProductIn  # noqa: E402
+from server.storage.models import LotIn, ProductIn  # noqa: E402
 
 
 class _NullCandidateSource:
@@ -451,3 +451,177 @@ def test_catch_all_does_not_stamp_when_reading_partial(tmp_path):
         ("MEASURED_FULL_AUTO",),
     ).fetchall()
     assert rows == []
+
+
+# ---------------------------------------------------------------------------
+# Layer 6 (Task 10): empty-container heuristic captures tare when null +
+# placed weight reads under 30% of net_weight_g. Set-once: when tare is
+# already non-NULL the legacy ≈tare path runs unchanged with NO tare push.
+# ---------------------------------------------------------------------------
+
+
+def _seed_local_lot(
+    conn,
+    *,
+    product_id: str,
+    shelf_id: str = "catch_all",
+    status: str = "in_flight",
+    placed_g: float = 600.0,
+):
+    """Seed a local ``lots`` row so the heuristic can be invoked directly.
+
+    The empty-container heuristic reads ``lot.lot_id`` and ``lot.product_id``;
+    nothing else on the lot matters for the null-tare branch under test.
+    """
+    return storage_repo.create_lot(
+        conn,
+        LotIn(
+            product_id=product_id,
+            status=status,
+            current_weight_g=placed_g,
+            initial_weight_g=placed_g,
+            pickup_weight_g=placed_g,
+            in_flight_since=(
+                "2026-05-02T18:00:00.000Z" if status == "in_flight" else None
+            ),
+            shelf_id=shelf_id,
+        ),
+    )
+
+
+def test_empty_heuristic_writes_tare_when_null_and_reading_low(tmp_path):
+    """When tare IS NULL and a placement reads under 30% of net_weight_g,
+    treat as empty container: capture tare = scale_reading + delete lot
+    + push tare to cloud (set-once at /shelf-ingest/product-tare).
+
+    With net=500g, the 30% threshold is 150g. A 30g reading is far below
+    that — clearly an empty container. Tare is captured from the reading
+    itself (the placement IS the tare measurement) and pushed to cloud
+    BEFORE the local lot delete so the products row keeps the tare
+    even after the lot is gone.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    _seed_product(conn, product_id="prod-emptynull", tare=None, net=500.0)
+    lot = _seed_local_lot(conn, product_id="prod-emptynull")
+
+    fired = handler._maybe_emit_empty_container_discard(
+        lot=lot,
+        delta_g=30.0,  # 30g << 150g (30% of net=500g)
+        event_ts="2026-05-02T18:00:00.000Z",
+        event_id="evt-empty-null",
+        session_id="sess-empty-null",
+        confidence=0.95,
+    )
+
+    assert fired is True, (
+        "null-tare branch must fire when reading is under 30% of net"
+    )
+    # Tare push fired with the captured value.
+    tare_pushes = [
+        c for c in cloud.product_state_calls if c.get("tare_g") is not None
+    ]
+    assert len(tare_pushes) == 1, (
+        "expected exactly one push_product_state call carrying tare_g"
+    )
+    assert tare_pushes[0]["product_id"] == "prod-emptynull"
+    assert tare_pushes[0]["tare_g"] == pytest.approx(30.0)
+    # measured_full_at must NOT be on this push (this branch is empty,
+    # not full).
+    assert tare_pushes[0]["measured_full_at"] is None
+
+    # Lifecycle row exists.
+    rows = conn.execute(
+        "SELECT actor, reason_code, payload_json "
+        "FROM event_lifecycle WHERE reason_code = ?",
+        ("TARE_AUTO_FROM_EMPTY",),
+    ).fetchall()
+    assert len(rows) == 1, (
+        "auto-tare-on-empty must emit a single TARE_AUTO_FROM_EMPTY "
+        "lifecycle row"
+    )
+    assert rows[0][0] == "catch_all_auto_import"
+    import json as _json
+    payload = _json.loads(rows[0][2])
+    assert payload["product_id"] == "prod-emptynull"
+    assert payload["tare_g"] == pytest.approx(30.0)
+    assert payload["net_weight_g"] == pytest.approx(500.0)
+    assert payload["placed_weight_g"] == pytest.approx(30.0)
+    assert payload["threshold_g"] == pytest.approx(150.0)
+
+    # Lot was deleted (matches existing empty-container semantics).
+    assert storage_repo.get_lot(conn, lot.lot_id) is None, (
+        "empty-container hit must DELETE the local lot row"
+    )
+
+
+def test_empty_heuristic_skips_tare_write_when_tare_already_set(tmp_path):
+    """Set-once: tare is already calibrated → existing ≈tare path runs
+    unchanged. The heuristic deletes the lot (empty observed) but MUST
+    NOT refresh the existing tare even though we have a fresh reading.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    _seed_product(conn, product_id="prod-emptyset", tare=25.0, net=500.0)
+    lot = _seed_local_lot(conn, product_id="prod-emptyset")
+
+    # 27g sits inside the 5% window of (25 + 500) = 26.25g around tare=25g.
+    fired = handler._maybe_emit_empty_container_discard(
+        lot=lot,
+        delta_g=27.0,
+        event_ts="2026-05-02T18:00:00.000Z",
+        event_id="evt-empty-set",
+        session_id="sess-empty-set",
+        confidence=0.95,
+    )
+
+    assert fired is True, (
+        "≈tare reading on a calibrated product must still discard the lot"
+    )
+    # No tare push: existing tare is preserved (set-once at the Pi).
+    tare_pushes = [
+        c for c in cloud.product_state_calls if c.get("tare_g") is not None
+    ]
+    assert tare_pushes == [], (
+        "set-once: must not push tare when products.tare_weight_g is "
+        "already non-NULL"
+    )
+    rows = conn.execute(
+        "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
+        ("TARE_AUTO_FROM_EMPTY",),
+    ).fetchall()
+    assert rows == [], (
+        "set-once: no TARE_AUTO_FROM_EMPTY row when tare already set"
+    )
+
+
+def test_empty_heuristic_falls_through_when_null_tare_and_reading_above_30pct(
+    tmp_path,
+):
+    """Null tare + reading above 30% of net → DON'T fire. Half-full
+    bottles read at ~50% of net so the 30% threshold protects against
+    false-positive empty-detection on partial placements.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    _seed_product(conn, product_id="prod-emptypartial", tare=None, net=500.0)
+    lot = _seed_local_lot(conn, product_id="prod-emptypartial")
+
+    # 200g > 150g (30% of 500g) — a partially full container, NOT empty.
+    fired = handler._maybe_emit_empty_container_discard(
+        lot=lot,
+        delta_g=200.0,
+        event_ts="2026-05-02T18:00:00.000Z",
+        event_id="evt-empty-partial",
+        session_id="sess-empty-partial",
+        confidence=0.95,
+    )
+
+    assert fired is False, (
+        "null-tare branch must NOT fire when reading exceeds 30% of net"
+    )
+    assert cloud.product_state_calls == [], (
+        "no cloud push when the heuristic falls through"
+    )
+    # Lot still present.
+    assert storage_repo.get_lot(conn, lot.lot_id) is not None

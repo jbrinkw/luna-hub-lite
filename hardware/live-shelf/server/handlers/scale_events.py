@@ -2055,13 +2055,14 @@ class ScaleHandler:
     ) -> bool:
         """Detect empty-container catch-all placements and emit ``discarded``.
 
-        2026-04-27 feature. Catch-all only. The user picks up a bottle
-        from the live shelf, drinks all of it (consumption is already
-        logged via the live_scale weight changes during the session),
-        then places the empty bottle on the catch-all scale to "log
-        out" the container from inventory. We detect this by comparing
-        the placed weight to the product's tare:
+        2026-04-27 feature, extended 2026-05-02 for catch-all-livetrack
+        auto-import. Catch-all only. The user picks up a bottle from
+        the live shelf, drinks all of it (consumption is already logged
+        via the live_scale weight changes during the session), then
+        places the empty bottle on the catch-all scale to "log out"
+        the container from inventory. We detect this via two branches:
 
+        Branch A — tare is calibrated (legacy 2026-04-27):
             tolerance = 0.05 * (tare_weight_g + net_weight_g)
             empty if abs(placed_weight_g - tare_weight_g) <= tolerance
 
@@ -2070,7 +2071,20 @@ class ScaleHandler:
         (25g tare + 575g net), the window is ±30g around 25g —
         anything in [tare-30g, tare+30g] reads as "empty".
 
-        On hit:
+        Branch B — tare is NULL, capture from reading (2026-05-02
+        catch-all-livetrack auto-import):
+            empty if placed_weight_g <= 0.30 * net_weight_g
+
+        Half-full bottles read at ~50% of net so the 30% threshold has
+        comfortable margin against partial-fill false positives. When
+        this branch fires we ALSO push ``tare_g = placed_weight_g`` to
+        cloud /shelf-ingest/product-tare (set-once enforced server-side)
+        and log a ``TARE_AUTO_FROM_EMPTY`` lifecycle row. Combined with
+        the candidate-pool inventory scoping (only certified / known
+        products reach this branch), a real empty container is the only
+        realistic cause of a sub-30%-of-net reading.
+
+        On hit (either branch):
           * Local lot is deleted (matches manual_discard semantics).
           * Cloud emit fires ``discarded`` for the lot's product_id +
             scale-02 / catch_all kind. Cloud handler (migration
@@ -2080,11 +2094,12 @@ class ScaleHandler:
             of the apply path (no duplicate consumed/added/new_arrival
             emit).
 
-        Defensive: when ``tare_weight_g`` or ``net_weight_g`` is missing
-        on the product row, return ``False`` and fall through to the
-        normal flow. The branch is unreachable by design for uncertified
-        / not-in-inventory products (they're not in the candidate pool),
-        but keep the guard so a stale snapshot can't crash the apply.
+        Defensive: when ``net_weight_g`` is missing on the product row,
+        return ``False`` and fall through to the normal flow — neither
+        branch has a reference for "what does empty look like". The
+        catch-all is unreachable by design for uncertified / not-in-
+        inventory products (they're not in the candidate pool), but
+        keep the guard so a stale snapshot can't crash the apply.
         """
         if delta_g is None:
             return False
@@ -2103,31 +2118,73 @@ class ScaleHandler:
             return False
         tare = getattr(product, "tare_weight_g", None)
         net = getattr(product, "net_weight_g", None)
-        if tare is None or net is None:
+        if net is None:
+            # No net_weight reference: can't validate either branch.
             return False
         try:
-            tare_f = float(tare)
             net_f = float(net)
         except (TypeError, ValueError):
             return False
-        if tare_f <= 0.0 or net_f <= 0.0:
+        if net_f <= 0.0:
             return False
+
         placed_weight_g = abs(float(delta_g))
-        tolerance = 0.05 * (tare_f + net_f)
-        if abs(placed_weight_g - tare_f) > tolerance:
-            return False
+
+        # Two ways into the empty-container discard:
+        #   (A) tare is set + placement is within 5% of (tare+net) of the
+        #       tare alone (legacy 2026-04-27 path).
+        #   (B) tare is NULL + placement reads under 30% of net_weight_g
+        #       (catch-all auto-import 2026-05-02). The AI auto-import
+        #       (Task 8) may have failed/skipped to set tare; if a
+        #       placement reads "low", assume an empty container and
+        #       CAPTURE tare = placed_weight_g. The 30% threshold is
+        #       conservative — half-full bottles read at ~50% of net,
+        #       so 30% has comfortable margin against partial-fill
+        #       false positives. Combined with the candidate-pool
+        #       inventory scoping (only certified/known products reach
+        #       this branch), a real empty container is the only realistic
+        #       cause of a sub-30%-of-net reading.
+        if tare is None:
+            empty_threshold_g = 0.30 * net_f
+            if placed_weight_g > empty_threshold_g:
+                return False
+            new_tare: Optional[float] = placed_weight_g
+            tare_f: Optional[float] = None
+            tolerance: Optional[float] = None
+        else:
+            try:
+                tare_f = float(tare)
+            except (TypeError, ValueError):
+                return False
+            if tare_f <= 0.0:
+                return False
+            tolerance = 0.05 * (tare_f + net_f)
+            if abs(placed_weight_g - tare_f) > tolerance:
+                return False
+            new_tare = None  # Existing path: don't refresh tare (set-once).
+            empty_threshold_g = None
 
         # Empty-container hit. Mirror the manual_discard sequence:
         # local DELETE first (so the Pi's view is the leading edge),
         # then enqueue the cloud event. The cloud's discarded handler
         # is idempotent on already-zeroed-and-cleared lots.
-        log.info(
-            "empty-container discard: lot %s product %s (tare=%.1fg "
-            "net=%.1fg, placed=%.1fg, tolerance=±%.1fg) — emitting "
-            "discarded for catch-all event %s",
-            lot.lot_id, product_id, tare_f, net_f,
-            placed_weight_g, tolerance, event_id,
-        )
+        if new_tare is not None:
+            log.info(
+                "empty-container discard (null-tare capture): lot %s "
+                "product %s (net=%.1fg, placed=%.1fg, threshold=%.1fg) "
+                "— capturing tare=%.1fg + emitting discarded for catch-all "
+                "event %s",
+                lot.lot_id, product_id, net_f,
+                placed_weight_g, empty_threshold_g, new_tare, event_id,
+            )
+        else:
+            log.info(
+                "empty-container discard: lot %s product %s (tare=%.1fg "
+                "net=%.1fg, placed=%.1fg, tolerance=±%.1fg) — emitting "
+                "discarded for catch-all event %s",
+                lot.lot_id, product_id, tare_f, net_f,
+                placed_weight_g, tolerance, event_id,
+            )
         try:
             storage_repo.delete_lot(self._conn, lot.lot_id)
         except Exception:  # pragma: no cover - defensive
@@ -2137,6 +2194,28 @@ class ScaleHandler:
             )
             # Don't return False — we'd then double-emit on retry.
             # Fall through to the cloud emit anyway (best-effort).
+        # Auto-tare-on-empty (2026-05-02): when tare was null and we
+        # captured it from this reading, push to cloud BEFORE the
+        # discard-emit so the products row carries tare even after the
+        # lot is removed. /shelf-ingest/product-tare enforces set-once
+        # so a concurrent push from the in-flight pickup capture path
+        # can't overwrite this value.
+        if new_tare is not None:
+            self._lc_event(
+                event_id,
+                actor="catch_all_auto_import",
+                reason_code="TARE_AUTO_FROM_EMPTY",
+                payload={
+                    "product_id": product_id,
+                    "tare_g": new_tare,
+                    "net_weight_g": net_f,
+                    "placed_weight_g": placed_weight_g,
+                    "threshold_g": empty_threshold_g,
+                },
+            )
+            self._push_product_state_to_cloud(
+                product_id, tare_g=new_tare,
+            )
         # Lifecycle log so /event/<id> shows the empty-container path.
         self._lc_event(
             event_id,
@@ -2146,10 +2225,11 @@ class ScaleHandler:
                 "branch": "empty_container_discard",
                 "lot_id": lot.lot_id,
                 "product_id": product_id,
-                "tare_weight_g": tare_f,
+                "tare_weight_g": tare_f if tare_f is not None else new_tare,
                 "net_weight_g": net_f,
                 "placed_weight_g": placed_weight_g,
                 "tolerance_g": tolerance,
+                "auto_tare_captured": new_tare is not None,
             },
         )
         try:
