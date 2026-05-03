@@ -39,4 +39,5 @@ export const queryKeys = {
   userConfig: (userId: string, key: string) => ['user-config', userId, key] as const,
   chefSettings: (userId: string) => ['chef-settings', userId] as const,
   scannerState: (userId?: string) => ['chefbyte', 'scannerState', userId] as const,
+  scanTransactions: (userId?: string) => ['chefbyte', 'scanTransactions', userId] as const,
 };

@@ -8,6 +8,7 @@ import { BackupTab } from '@/components/chefbyte/BackupTab';
 import { ClassifierTab } from '@/components/chefbyte/ClassifierTab';
 import { EventViewerPage } from '@/pages/chefbyte/EventViewerPage';
 import { ScannerTab } from './ScannerTab';
+import { ScannerTransactionsTab } from './ScannerTransactionsTab';
 import { ListSkeleton } from '@/components/ui/Skeleton';
 import { useAuth } from '@/shared/auth/AuthProvider';
 import { chefbyte } from '@/shared/supabase';
@@ -26,13 +27,23 @@ type Product = ChefbyteProduct & { default_expiry_days?: number | null };
 // LiquidTrack retired 2026-04-21 — replaced by LiveTrack (live_scale kind
 // under Scales tab + LiveTrack Import wizard). See
 // supabase/migrations/20260421060000_retire_liquidtrack.sql for the DB drop.
-type Tab = 'products' | 'walmart' | 'scales' | 'scanner' | 'locations' | 'classifier' | 'backup' | 'events';
+type Tab =
+  | 'products'
+  | 'walmart'
+  | 'scales'
+  | 'scanner'
+  | 'scanner-transactions'
+  | 'locations'
+  | 'classifier'
+  | 'backup'
+  | 'events';
 
 const tabs: { id: Tab; label: string; icon: string }[] = [
   { id: 'products', label: 'Products', icon: '\uD83D\uDCE6' },
   { id: 'walmart', label: 'Walmart', icon: '\uD83C\uDFEA' },
   { id: 'scales', label: 'Scales', icon: '\u2696\uFE0F' },
   { id: 'scanner', label: 'Scanner', icon: '\uD83D\uDCF7' },
+  { id: 'scanner-transactions', label: 'Scanner Txns', icon: '\uD83D\uDCCB' },
   { id: 'locations', label: 'Locations', icon: '\uD83D\uDCCD' },
   { id: 'classifier', label: 'Classifier', icon: '\uD83E\uDD16' },
   { id: 'events', label: 'Events', icon: '\uD83D\uDCDC' },
@@ -989,6 +1000,11 @@ export function SettingsPage() {
         {/*  SCANNER TAB (lock-to-mode toggle)                           */}
         {/* ========================================================== */}
         {activeTab === 'scanner' && <ScannerTab />}
+
+        {/* ========================================================== */}
+        {/*  SCANNER TRANSACTIONS TAB (audit log + void)                 */}
+        {/* ========================================================== */}
+        {activeTab === 'scanner-transactions' && <ScannerTransactionsTab />}
 
         {/* ========================================================== */}
         {/*  LOCATIONS TAB                                               */}

@@ -152,6 +152,7 @@ export const invalidationRegistry: RegistryEntry[] = [
       'for low-frequency config values.',
   },
   { key: 'scannerState', kind: 'invalidated-by-mutation' },
+  { key: 'scanTransactions', kind: 'invalidated-by-mutation' },
 ];
 
 /** Map from key name → registry entry for O(1) lookup in tests. */
