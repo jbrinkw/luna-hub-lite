@@ -15,10 +15,29 @@ on every flavor of "the device went away" — startup ENOENT, mid-loop
 ``OSError`` from a USB unplug, kernel-permission flap. The outer restart
 wrapper in :mod:`server.app` distinguishes that from a generic crash so
 device-loss can downgrade to a warn-level retry instead of an error.
+
+BT-scanner stale-fd watchdog (2026-05-03 follow-up)
+---------------------------------------------------
+Bluetooth HID scanners commonly idle-disconnect after ~30-60s. When the
+scanner reconnects the kernel re-binds the uhid device, often reusing
+the same /dev/input/eventN path but pointing it at a NEW Sysfs node.
+``device.read_loop()`` parked on the old fd does NOT raise — the fd
+silently goes stale and every keystroke from the new binding is lost
+until something else triggers a restart. The user observed this live:
+listener "running" for 8 hours, last_scan_age_s=29939, four kernel
+re-binds in between, every scan dropped.
+
+The fix uses ``select.poll()`` with a short timeout so we (a) detect
+``POLLHUP`` / ``POLLERR`` immediately when the kernel removes the fd
+and (b) re-stat the eventN path on every poll-timeout to catch the
+silent re-bind case where the old fd still seems healthy but the path
+now resolves to a different inode/sysfs entry. Either signal raises
+:class:`ScannerDeviceLost` so the outer restart wrapper rediscovers.
 """
 from __future__ import annotations
 import logging
 import os
+import select
 from typing import Any, Iterable, Iterator, Optional
 
 logger = logging.getLogger(__name__)
@@ -47,6 +66,13 @@ IGNORED_KEYS = {'KEY_LEFTSHIFT', 'KEY_RIGHTSHIFT',
                 'KEY_LEFTCTRL', 'KEY_RIGHTCTRL',
                 'KEY_LEFTALT', 'KEY_RIGHTALT',
                 'KEY_CAPSLOCK', 'KEY_NUMLOCK'}
+
+# poll timeout in ms — short enough that a silent BT re-bind is detected
+# within ~2s (the user feels at most one or two missed scans before the
+# wrapper restarts), long enough that healthy idle scanners don't burn
+# CPU in tight loops. Kept as a module-level constant so tests can
+# monkeypatch it down to ~50ms for fast feedback.
+_POLL_TIMEOUT_MS = 2000
 
 
 def accumulate_keys_to_barcode(keys: Iterable[str]) -> str:
@@ -103,31 +129,79 @@ def open_device_and_stream_barcodes(device_path: str) -> Iterator[str]:
             f'failed to open {device_path}: {type(exc).__name__}: {exc}'
         ) from exc
     logger.info('barcode: opened %s (%s)', device_path, device.name)
+
+    # Snapshot the device path's inode at open time. When the BT scanner
+    # idle-disconnects and reconnects, the kernel typically re-binds the
+    # same eventN path to a new uhid Sysfs node. devtmpfs regenerates the
+    # device file with a new inode in the process, so an inode mismatch
+    # against the still-valid fd is the most reliable "this fd is stale"
+    # signal short of a udev MONITOR socket. The check fires only on
+    # poll-timeout (no events for ``_POLL_TIMEOUT_MS``), so it's a no-op
+    # in the common case where the scanner is actively typing.
+    try:
+        original_inode = os.stat(device_path).st_ino
+    except OSError:
+        original_inode = None
+
+    poller = select.poll()
+    poller.register(device.fd, select.POLLIN | select.POLLHUP | select.POLLERR)
+
     buffer: list[str] = []
     try:
-        for event in device.read_loop():
-            if event.type != evdev.ecodes.EV_KEY:
+        while True:
+            ready = poller.poll(_POLL_TIMEOUT_MS)
+            if not ready:
+                # No keystrokes for the timeout window — verify the device
+                # path still resolves to the same inode. A silent kernel
+                # re-bind during a BT sleep/wake cycle gets caught here.
+                if not os.path.exists(device_path):
+                    raise ScannerDeviceLost(
+                        f'device path vanished during read: {device_path}'
+                    )
+                if original_inode is not None:
+                    try:
+                        current_inode = os.stat(device_path).st_ino
+                    except OSError as exc:
+                        raise ScannerDeviceLost(
+                            f'stat failed during read on {device_path}: '
+                            f'{type(exc).__name__}: {exc}'
+                        ) from exc
+                    if current_inode != original_inode:
+                        raise ScannerDeviceLost(
+                            f'silent re-bind detected on {device_path}: '
+                            f'inode {original_inode} -> {current_inode} '
+                            '(BT scanner sleep/wake or USB hot-plug)'
+                        )
                 continue
-            key_event = evdev.categorize(event)
-            if key_event.keystate != key_event.key_down:
-                continue
-            keycode = key_event.keycode
-            if isinstance(keycode, list):
-                keycode = keycode[0]
-            if keycode in ENTER_KEYS:
-                barcode = ''.join(buffer)
-                buffer = []
-                if barcode:
-                    yield barcode
-            elif keycode in IGNORED_KEYS:
-                continue
-            else:
-                char = KEY_MAP.get(keycode)
-                if char:
-                    buffer.append(char)
+            for fd, flags in ready:
+                if flags & (select.POLLHUP | select.POLLERR | select.POLLNVAL):
+                    raise ScannerDeviceLost(
+                        f'poll detected HUP/ERR/NVAL on {device_path} '
+                        f'(flags={flags})'
+                    )
+            for event in device.read():
+                if event.type != evdev.ecodes.EV_KEY:
+                    continue
+                key_event = evdev.categorize(event)
+                if key_event.keystate != key_event.key_down:
+                    continue
+                keycode = key_event.keycode
+                if isinstance(keycode, list):
+                    keycode = keycode[0]
+                if keycode in ENTER_KEYS:
+                    barcode = ''.join(buffer)
+                    buffer = []
+                    if barcode:
+                        yield barcode
+                elif keycode in IGNORED_KEYS:
+                    continue
+                else:
+                    char = KEY_MAP.get(keycode)
+                    if char:
+                        buffer.append(char)
     except (OSError, IOError) as exc:
         # Mid-iteration failures are the dominant case — a USB unplug
-        # while we're parked in ``read_loop`` raises OSError.
+        # while we're parked in ``poll`` raises OSError.
         raise ScannerDeviceLost(
             f'mid-stream device error on {device_path}: '
             f'{type(exc).__name__}: {exc}'

@@ -209,17 +209,22 @@ def test_open_raises_ScannerDeviceLost_on_open_failure(monkeypatch):
 
 
 def test_open_raises_ScannerDeviceLost_on_mid_stream_oserror(monkeypatch):
-    """The dominant case in production: USB cable jiggle while
-    ``read_loop`` is parked. We surface as ``ScannerDeviceLost``."""
+    """The dominant case in production: USB cable jiggle while the
+    listener is parked. The poll-based loop calls ``device.read()``
+    after select indicates POLLIN; we surface a mid-stream OSError as
+    ``ScannerDeviceLost``."""
+    import os as _os
+
+    # Real pipe fd so select.poll().register() accepts it AND POLLIN
+    # reads predictably. We write a byte so poll returns immediately,
+    # then OSError is raised when the listener calls device.read().
+    r_fd, w_fd = _os.pipe()
+    _os.write(w_fd, b'\x00')
+
     fake_device = MagicMock()
     fake_device.name = 'Symbol Scanner'
-
-    def _broken_read_loop():
-        # Simulate a USB unplug after we've started iterating.
-        raise OSError(19, 'no such device')
-        yield  # pragma: no cover - unreachable
-
-    fake_device.read_loop = _broken_read_loop
+    fake_device.fd = r_fd
+    fake_device.read = MagicMock(side_effect=OSError(19, 'no such device'))
     fake_evdev = types.ModuleType('evdev')
     fake_evdev.InputDevice = MagicMock(return_value=fake_device)
     fake_evdev.list_devices = MagicMock(return_value=[])
@@ -227,8 +232,105 @@ def test_open_raises_ScannerDeviceLost_on_mid_stream_oserror(monkeypatch):
     fake_evdev.categorize = MagicMock()
     monkeypatch.setitem(sys.modules, 'evdev', fake_evdev)
     monkeypatch.setattr('os.path.exists', lambda _p: True)
-    with pytest.raises(ScannerDeviceLost, match='mid-stream device error'):
-        list(open_device_and_stream_barcodes('/dev/input/event0'))
+    try:
+        with pytest.raises(ScannerDeviceLost, match='mid-stream device error'):
+            list(open_device_and_stream_barcodes('/dev/input/event0'))
+    finally:
+        _os.close(r_fd)
+        try:
+            _os.close(w_fd)
+        except OSError:
+            pass
+
+
+def test_open_raises_ScannerDeviceLost_on_silent_inode_change(monkeypatch):
+    """BT-scanner stale-fd watchdog (2026-05-03 follow-up): when the
+    kernel re-binds the same eventN path to a new uhid Sysfs node
+    during a BT sleep/wake cycle, the device fd silently goes stale
+    while the listener is parked in ``select.poll``. The watchdog
+    re-stats the path on every poll-timeout and raises
+    :class:`ScannerDeviceLost` when the inode changes — that's the only
+    reliable signal short of a udev MONITOR socket. Without it, every
+    BT idle-disconnect drops scans on the floor for the duration of the
+    backoff window."""
+    import os as _os
+    from server.barcode import hid_listener as hid
+
+    # Real pipe so poll.register() works, but we never write to it —
+    # poll will time out, triggering the inode re-stat path.
+    r_fd, w_fd = _os.pipe()
+
+    fake_device = MagicMock()
+    fake_device.name = 'ScanAvengerHID'
+    fake_device.fd = r_fd
+
+    fake_evdev = types.ModuleType('evdev')
+    fake_evdev.InputDevice = MagicMock(return_value=fake_device)
+    fake_evdev.list_devices = MagicMock(return_value=[])
+    fake_evdev.ecodes = types.SimpleNamespace(EV_KEY=1)
+    fake_evdev.categorize = MagicMock()
+    monkeypatch.setitem(sys.modules, 'evdev', fake_evdev)
+
+    # Speed up the test — drop poll timeout to 50ms.
+    monkeypatch.setattr(hid, '_POLL_TIMEOUT_MS', 50)
+    monkeypatch.setattr('os.path.exists', lambda _p: True)
+
+    # First os.stat call (at open time) returns inode A; later calls
+    # (during the poll-timeout watchdog) return inode B — simulating
+    # the kernel re-bind that the user just observed live.
+    inode_seq = iter([
+        types.SimpleNamespace(st_ino=111),  # open-time snapshot
+        types.SimpleNamespace(st_ino=222),  # post-rebind
+    ])
+
+    def _fake_stat(_path):
+        return next(inode_seq)
+
+    monkeypatch.setattr('os.stat', _fake_stat)
+
+    try:
+        with pytest.raises(ScannerDeviceLost, match='silent re-bind detected'):
+            list(open_device_and_stream_barcodes('/dev/input/event0'))
+    finally:
+        _os.close(r_fd)
+        _os.close(w_fd)
+
+
+def test_open_raises_ScannerDeviceLost_on_pollhup(monkeypatch):
+    """Companion to the inode-change watchdog: when the kernel removes
+    the input node entirely (USB unplug, BT layer crash), poll returns
+    POLLHUP/POLLERR without a timeout. We surface that as
+    :class:`ScannerDeviceLost` so the wrapper rediscovers."""
+    import os as _os
+    from server.barcode import hid_listener as hid
+
+    # Pipe whose write end is closed before poll runs — POLLIN+POLLHUP
+    # fires immediately on Linux.
+    r_fd, w_fd = _os.pipe()
+    _os.close(w_fd)
+
+    fake_device = MagicMock()
+    fake_device.name = 'ScanAvengerHID'
+    fake_device.fd = r_fd
+    fake_device.read = MagicMock(
+        side_effect=AssertionError('device.read should not be called on POLLHUP'),
+    )
+
+    fake_evdev = types.ModuleType('evdev')
+    fake_evdev.InputDevice = MagicMock(return_value=fake_device)
+    fake_evdev.list_devices = MagicMock(return_value=[])
+    fake_evdev.ecodes = types.SimpleNamespace(EV_KEY=1)
+    fake_evdev.categorize = MagicMock()
+    monkeypatch.setitem(sys.modules, 'evdev', fake_evdev)
+    monkeypatch.setattr(hid, '_POLL_TIMEOUT_MS', 50)
+    monkeypatch.setattr('os.path.exists', lambda _p: True)
+    monkeypatch.setattr('os.stat', lambda _p: types.SimpleNamespace(st_ino=1))
+
+    try:
+        with pytest.raises(ScannerDeviceLost, match='HUP/ERR/NVAL'):
+            list(open_device_and_stream_barcodes('/dev/input/event0'))
+    finally:
+        _os.close(r_fd)
 
 
 def test_ScannerDeviceLost_distinct_from_generic_exception():

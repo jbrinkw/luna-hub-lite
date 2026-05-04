@@ -1072,7 +1072,15 @@ def _start_barcode_scanner_thread(
         )
         from .barcode.scanner_loop import ScannerLoop
 
-        backoff = 2.0
+        # BT scanners commonly idle-disconnect every ~30-60s and reconnect
+        # within ~1s of the next trigger press. The watchdog in
+        # ``open_device_and_stream_barcodes`` (poll timeout + inode re-stat)
+        # detects the silent re-bind within ~2s; starting backoff at 0.5s
+        # means the listener is back open before the user finishes their
+        # second scan instead of blocking 2s+ on every disconnect cycle.
+        # The 60s cap still applies for unbounded loss (USB unplug, dead
+        # battery) so we don't burn CPU on hopeless reconnects.
+        backoff = 0.5
         max_backoff = 60.0
 
         def _resolve_device() -> str:
