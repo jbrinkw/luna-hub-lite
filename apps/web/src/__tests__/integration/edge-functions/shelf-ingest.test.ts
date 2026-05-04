@@ -2000,9 +2000,165 @@ describe('shelf-ingest Edge Function', () => {
       const body3 = await res3.json();
       expect(body3.ok).toBe(true);
       expect(body3.certified).toBe(true);
+
+      // Audit A-CRIT-3 (2026-05-04): readback the DB row after the
+      // third write to confirm (a) certified actually stayed true on
+      // disk (not just echoed back from the response) AND (b) no
+      // collateral mutation on the other set-once columns. A regression
+      // that lets the no-op write secretly stomp ``tare_weight_g`` or
+      // ``measured_full_at`` to NULL would not be caught by the
+      // response body alone.
+      const { data: row3 } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .select('certified, tare_weight_g, measured_full_at')
+        .eq('product_id', certProductId)
+        .single();
+      expect(row3.certified).toBe(true);
+      // Tare and measured_full_at were never set on this row in the
+      // test setup; the no-op certified write must NOT have created
+      // collateral non-null values.
+      expect(row3.tare_weight_g).toBeNull();
+      expect(row3.measured_full_at).toBeNull();
     } finally {
       // Cleanup
       await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', certProductId);
+    }
+  });
+
+  it('POST /product-tare end-to-end: uncertified product → certified=true via Pi-shape body', async () => {
+    // Audit B-HIGH-7 (2026-05-04): the user's mental model spans six
+    // steps:
+    //   1. Pi catch-all event arrives.
+    //   2. Orchestrator pass-1 (certified-only) returns UNKNOWN.
+    //   3. Orchestrator pass-2 (uncertified-only) returns confident match.
+    //   4. Dispatch fires ``certified=true`` push.
+    //   5. Cloud ``/shelf-ingest/product-tare`` accepts.
+    //   6. ``chefbyte.products.certified`` flips to ``true`` in the DB.
+    //
+    // Steps 1-3 are covered by the orchestrator tests; step 4 by the
+    // dispatch tests; steps 5-6 by the existing flips-certified test.
+    // This test pins the SEAM between step 4 and step 5: the EXACT
+    // body shape that ``CloudClient.push_product_state`` sends with
+    // ``certified=True`` (no ``tare_g`` / ``tare_weight_g`` keys, just
+    // ``product_id`` + ``certified``) lands the cert flip end-to-end
+    // through the route to the DB.
+    //
+    // A regression in the wire-name contract — e.g. body becomes
+    // ``{product_id, isCertified: true}`` — would silently break the
+    // certify auto-import even though all three slice tests stay green.
+    const { data: prod, error: prodErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'E2E-Pi-Certify',
+        barcode: `SI-CERT-E2E-${Date.now()}`,
+        net_weight_g: 500,
+        servings_per_container: 5,
+        certified: false,
+      })
+      .select('product_id')
+      .single();
+    if (prodErr) throw new Error(`create e2e cert product: ${prodErr.message}`);
+    const e2eProductId = prod.product_id;
+
+    try {
+      // Body shape EXACTLY mirrors what ``CloudClient.push_product_state``
+      // sends when called as ``push_product_state(product_id=X,
+      // certified=True)`` per server/cloud/client.py:548-554. Keys
+      // explicitly NOT included: tare_weight_g, measured_full_at —
+      // proves the route accepts a certified-only update.
+      const piBody = {
+        product_id: e2eProductId,
+        certified: true,
+      };
+      const res = await fetch(`${BASE_URL}/product-tare`, {
+        method: 'POST',
+        headers: authHeaders(importKey),
+        body: JSON.stringify(piBody),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      expect(body.product_id).toBe(e2eProductId);
+      expect(body.certified).toBe(true);
+
+      // DB readback (step 6 of the user's mental model): the row
+      // actually flipped to certified=true.
+      const { data: row } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .select('certified, tare_weight_g, measured_full_at')
+        .eq('product_id', e2eProductId)
+        .single();
+      expect(row.certified).toBe(true);
+      // Pi sent only certified=true; tare and measured_full_at must
+      // remain at their initial values (NULL since this is a fresh
+      // product with no LiveTrack capture history).
+      expect(row.tare_weight_g).toBeNull();
+      expect(row.measured_full_at).toBeNull();
+    } finally {
+      await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', e2eProductId);
+    }
+  });
+
+  it('POST /product-tare with certified=false on an uncertified row leaves it false', async () => {
+    // Audit A-CRIT-2 (2026-05-04): mutation guard for the inverted
+    // set-once filter. The existing "false → true → false → true" test
+    // never exercises the cold path: ``existing.certified === false``
+    // AND request ``certified === false`` → the row MUST stay false.
+    //
+    // A typo regression — e.g. ``updates.certified === true`` →
+    // ``updates.certified !== undefined``, or ``!existing.certified``
+    // inverted, or ``filtered.certified = true`` →
+    // ``filtered.certified = updates.certified`` — would silently flip
+    // ``false → true`` on a Pi-side push of ``certified=false``. None
+    // of the existing subtests catch any of those mutations because
+    // every other test starts from a row where ``certified=true`` is
+    // already the intended end state.
+    const { data: prod, error: prodErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Stays-Uncertified',
+        barcode: `SI-CERT-FALSE-${Date.now()}`,
+        net_weight_g: 500,
+        servings_per_container: 5,
+        certified: false,
+      })
+      .select('product_id')
+      .single();
+    if (prodErr) throw new Error(`create stays-uncertified product: ${prodErr.message}`);
+    const stayProductId = prod.product_id;
+
+    try {
+      const res = await fetch(`${BASE_URL}/product-tare`, {
+        method: 'POST',
+        headers: authHeaders(importKey),
+        body: JSON.stringify({
+          product_id: stayProductId,
+          certified: false,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      // Response echoes the existing (still-false) row state.
+      expect(body.certified).toBe(false);
+
+      const { data: row } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .select('certified')
+        .eq('product_id', stayProductId)
+        .single();
+      // DB readback: row MUST stay false. The set-once filter must
+      // NOT silently promote false→true on a false-payload write.
+      expect(row.certified).toBe(false);
+    } finally {
+      await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', stayProductId);
     }
   });
 

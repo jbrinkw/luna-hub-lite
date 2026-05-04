@@ -127,6 +127,25 @@ def _run_pass(
             exc_info=True,
         )
 
+    # Lifecycle row: classifier_prompt_prepared per pass. Restores the
+    # observability hook the legacy single-pass `classify_event` provided
+    # (round-2 audit N-MED-1, 2026-05-04). Operators correlate per-pass
+    # prompt hashes with eventual classification outcomes for triage.
+    # ``prompt_variant`` follows the existing taxonomy ("catch_all" was
+    # the legacy single-pass label; now it's "catch_all_pass1" /
+    # "catch_all_pass2" so audit-log filters can distinguish the passes).
+    from .classify import _lc as _classify_lc, _prompt_hash
+    _classify_lc(
+        getattr(event, "event_id", None),
+        actor="classifier",
+        reason_code="classifier_prompt_prepared",
+        payload={
+            "prompt_hash": _prompt_hash(payload),
+            "pool_size": len(pool),
+            "prompt_variant": pass_label,
+        },
+    )
+
     # Resolve client lazily — same shape as classify_event uses, so
     # tests can inject a fake via ctx.anthropic_client. We import here
     # to avoid a top-level cycle (anthropic_client → models →
@@ -154,7 +173,7 @@ def _run_pass(
             meta={
                 "model": call_result.model,
                 "usage": call_result.usage,
-                f"catch_all_{pass_label}_raw_text": call_result.text,
+                f"{pass_label}_raw_text": call_result.text,
             },
         )
     except MalformedClassifierOutput:
@@ -248,10 +267,17 @@ def classify_catch_all_with_fallback(
             event, ctx, pool1,
             instruction_note=pass1_note,
             model=model,
-            pass_label="pass1",
+            pass_label="catch_all_pass1",
         )
 
     # If pass-1 produced a confident, in-pool match — accept and stop.
+    # Telemetry: preserve the raw pass-1 id even when the orchestrator
+    # rejects the result (hallucinated or low-confidence) so the dispatch
+    # path's audit trail can show "pass-1 said X but we ignored it".
+    pass1_raw_item_id = pass1.item_id if pass1 is not None else None
+    pass1_raw_conf = (
+        float(pass1.confidence or 0.0) if pass1 is not None else 0.0
+    )
     if pass1 is not None and not _is_unknown_or_low(pass1):
         if _is_in_pool(pass1, pool1):
             return _stamp_meta(
@@ -261,11 +287,27 @@ def classify_catch_all_with_fallback(
                 catch_all_pass1_item_id=pass1.item_id,
                 catch_all_pass1_confidence=float(pass1.confidence or 0.0),
             )
-        # Hallucinated id — treat as low-confidence so we still try pass-2.
+        # Audit 1-HIGH-1 (2026-05-04): replace the hallucinated result
+        # with an explicit UNKNOWN. The raw id is already captured above
+        # in ``pass1_raw_item_id`` for telemetry, but ``pass1`` itself
+        # MUST NOT carry the out-of-pool id any further — otherwise the
+        # later "fallback base" branch (when pass-2 also misses) would
+        # surface the hallucinated id as the final ``item_id``, and
+        # downstream ``_classify_recorded_event`` would mark the event
+        # "classified" on confidence alone while the pool-membership
+        # guard skips lot mutation. Fail closed by collapsing to UNKNOWN.
         logger.warning(
             "catch_all_fallback: pass-1 returned out-of-pool id %r; "
-            "treating as low-confidence and continuing to pass-2",
+            "collapsing to UNKNOWN before pass-2 fallback",
             pass1.item_id,
+        )
+        pass1 = ClassificationResult.unknown(
+            reasoning=(
+                f"catch-all pass-1 hallucinated out-of-pool id "
+                f"{pass1.item_id!r}; rejected by pool-membership guard"
+            ),
+            candidate_pool_used=tuple(pool1),
+            meta=dict(pass1.meta or {}),
         )
 
     # ----- Pass 2 ------------------------------------------------------
@@ -276,13 +318,16 @@ def classify_catch_all_with_fallback(
         # because its pool was also empty). ``catch_all_pass`` is
         # stamped to 2 so operators can see the second pass was at
         # least *considered* — even though we never spent an API call.
+        # Audit 1-HIGH-1: ``pass1_raw_item_id`` carries the original
+        # pass-1 id (before any collapse-to-UNKNOWN), so the telemetry
+        # accurately reflects what the model actually returned.
         if pass1 is not None:
             return _stamp_meta(
                 pass1,
                 catch_all_pass=2,
                 needs_certify=False,
-                catch_all_pass1_item_id=pass1.item_id,
-                catch_all_pass1_confidence=float(pass1.confidence or 0.0),
+                catch_all_pass1_item_id=pass1_raw_item_id,
+                catch_all_pass1_confidence=pass1_raw_conf,
                 catch_all_pass2_item_id=None,
                 catch_all_pass2_confidence=0.0,
             )
@@ -317,10 +362,15 @@ def classify_catch_all_with_fallback(
         event, ctx, pool2,
         instruction_note=pass2_note,
         model=model,
-        pass_label="pass2",
+        pass_label="catch_all_pass2",
     )
-    pass1_item_id = pass1.item_id if pass1 is not None else None
-    pass1_conf = float(pass1.confidence or 0.0) if pass1 is not None else 0.0
+    # Audit 1-HIGH-1: capture the raw pass-2 id BEFORE any collapse-to-
+    # UNKNOWN so the telemetry can show "pass-2 said Y but we ignored it"
+    # alongside the pass-1 raw id captured above.
+    pass2_raw_item_id = pass2.item_id if pass2 is not None else None
+    pass2_raw_conf = (
+        float(pass2.confidence or 0.0) if pass2 is not None else 0.0
+    )
 
     if pass2 is not None and not _is_unknown_or_low(pass2):
         if _is_in_pool(pass2, pool2):
@@ -328,15 +378,29 @@ def classify_catch_all_with_fallback(
                 pass2,
                 catch_all_pass=2,
                 needs_certify=True,
-                catch_all_pass1_item_id=pass1_item_id,
-                catch_all_pass1_confidence=pass1_conf,
+                catch_all_pass1_item_id=pass1_raw_item_id,
+                catch_all_pass1_confidence=pass1_raw_conf,
                 catch_all_pass2_item_id=pass2.item_id,
                 catch_all_pass2_confidence=float(pass2.confidence or 0.0),
             )
+        # Audit 1-HIGH-1 (2026-05-04): collapse the hallucinated pass-2
+        # result to UNKNOWN before it can leak into the fallback base
+        # below. Same rationale as the pass-1 handler — downstream code
+        # uses ``item_id`` to gate apply behaviour, and we MUST NOT
+        # surface an out-of-pool id no matter how confident the model
+        # was. Raw id stays in ``pass2_raw_item_id`` for telemetry.
         logger.warning(
             "catch_all_fallback: pass-2 returned out-of-pool id %r; "
-            "falling back to UNKNOWN",
+            "collapsing to UNKNOWN before fallback base selection",
             pass2.item_id,
+        )
+        pass2 = ClassificationResult.unknown(
+            reasoning=(
+                f"catch-all pass-2 hallucinated out-of-pool id "
+                f"{pass2.item_id!r}; rejected by pool-membership guard"
+            ),
+            candidate_pool_used=tuple(pool2),
+            meta=dict(pass2.meta or {}),
         )
 
     # Both passes failed — return pass-1's UNKNOWN-shaped result with
@@ -347,16 +411,14 @@ def classify_catch_all_with_fallback(
         candidate_pool_used=tuple(pool1 or []),
         meta={},
     )
-    pass2_item_id = pass2.item_id if pass2 is not None else None
-    pass2_conf = float(pass2.confidence or 0.0) if pass2 is not None else 0.0
     return _stamp_meta(
         base,
         catch_all_pass=2,
         needs_certify=False,
-        catch_all_pass1_item_id=pass1_item_id,
-        catch_all_pass1_confidence=pass1_conf,
-        catch_all_pass2_item_id=pass2_item_id,
-        catch_all_pass2_confidence=pass2_conf,
+        catch_all_pass1_item_id=pass1_raw_item_id,
+        catch_all_pass1_confidence=pass1_raw_conf,
+        catch_all_pass2_item_id=pass2_raw_item_id,
+        catch_all_pass2_confidence=pass2_raw_conf,
     )
 
 

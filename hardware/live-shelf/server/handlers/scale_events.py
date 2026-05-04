@@ -2557,48 +2557,14 @@ class ScaleHandler:
                 event_id, cloud_lot_id,
             )
 
-        # Catch-all auto-import — certified flag stamp (two-pass
-        # classification, 2026-05-03). When pass-2 (uncertified-only)
-        # was the pass that produced this match — meaning the model
-        # confidently identified the placed item against the user's
-        # uncertified inventory — push ``certified=true`` to cloud so
-        # the product graduates to LiveTrack-tracked. The
-        # ``meta["needs_certify"]`` flag is stamped by
-        # ``classify_catch_all_with_fallback`` exclusively for the
-        # pass-2-wins branch. Set-once is enforced cloud-side at
-        # /shelf-ingest/product-tare (uncertified→certified transition
-        # only; once true, stays true).
-        try:
-            meta = (
-                classification.get("meta")
-                if isinstance(classification, dict)
-                else getattr(classification, "meta", None)
-            )
-            if isinstance(meta, dict) and meta.get("needs_certify") is True:
-                self._lc_event(
-                    event_id,
-                    actor="catch_all_auto_import",
-                    reason_code=ReasonCode.CERTIFY_AUTO_IMPORT,
-                    payload={
-                        "product_id": str(product_id),
-                        "catch_all_pass": meta.get("catch_all_pass"),
-                        "pass2_item_id": meta.get(
-                            "catch_all_pass2_item_id"
-                        ),
-                        "pass2_confidence": meta.get(
-                            "catch_all_pass2_confidence"
-                        ),
-                    },
-                )
-                self._push_product_state_to_cloud(
-                    str(product_id), certified=True,
-                )
-        except Exception:  # pragma: no cover — never block dispatch
-            log.exception(
-                "catch_all_auto_import: certify push failed "
-                "(non-fatal) for event %s lot %s",
-                event_id, cloud_lot_id,
-            )
+        # NB: certify-flag stamp moved AFTER the FIRST emit succeeds
+        # (audit A-CRIT-1, 2026-05-04). Earlier the block fired here —
+        # before ``emit_catch_all_first_measurement`` ran — which meant a
+        # transient cloud-emit failure left ``certified=true``
+        # permanently flipped (set-once, no rollback) on a product whose
+        # FIRST event was never actually applied. The push now lives in
+        # the FIRST-measurement success path below so we never certify
+        # ahead of the cloud-side acceptance.
 
         # Branch 2: SECOND measurement — picked lot already in-flight
         # on catch-all from a prior FIRST event.
@@ -2782,6 +2748,95 @@ class ScaleHandler:
             pickup_event_id=str(event_id),
             in_flight_since=event_ts,
         )
+
+        # Catch-all auto-import — certified flag stamp (two-pass
+        # classification, 2026-05-03; ordering hardened 2026-05-04).
+        # When pass-2 (uncertified-only) was the pass that produced this
+        # match — meaning the model confidently identified the placed
+        # item against the user's uncertified inventory — push
+        # ``certified=true`` to cloud so the product graduates to
+        # LiveTrack-tracked. The ``meta["needs_certify"]`` flag is
+        # stamped by ``classify_catch_all_with_fallback`` exclusively
+        # for the pass-2-wins branch.
+        #
+        # Set-once is enforced cloud-side at /shelf-ingest/product-tare
+        # (uncertified→certified transition only; once true, stays
+        # true). The push runs only AFTER the FIRST emit has succeeded
+        # so a transient cloud failure earlier in the dispatch can
+        # never leave ``certified=true`` permanently flipped on a
+        # product whose FIRST event was never actually applied.
+        #
+        # Round-2 audit (MED-A, 2026-05-04): certify is gated on
+        # ``tare_weight_g`` being non-NULL on the local mirror at this
+        # point in the dispatch. The tare auto-import block ABOVE may
+        # have just pushed a tare for a previously-tare-less product,
+        # but that push is fire-and-forget (cloud push is non-fatal,
+        # local mirror only refreshes via the product-sync poller).
+        # Allowing ``certified=true`` to land before ``tare_weight_g``
+        # leaves a "certified but tare-less" cloud row, which the
+        # live-shelf classifier's certified-tracked filter would treat
+        # as ready for active use even though the LiveTrack apply path
+        # has no tare to subtract from. Defer certify until the next
+        # catch-all event after tare has propagated locally.
+        try:
+            meta = (
+                classification.get("meta")
+                if isinstance(classification, dict)
+                else getattr(classification, "meta", None)
+            )
+            if isinstance(meta, dict) and meta.get("needs_certify") is True:
+                # Re-fetch the product since the tare auto-import block
+                # above may have updated the local mirror in the same
+                # transaction. ``current_tare`` will be NULL only when
+                # neither pre-existing nor newly-pushed tare is known
+                # on the Pi side.
+                try:
+                    product = storage_repo.get_product(
+                        self._conn, str(product_id),
+                    )
+                    current_tare = (
+                        getattr(product, "tare_weight_g", None)
+                        if product is not None else None
+                    )
+                except Exception:  # pragma: no cover - defensive
+                    current_tare = None
+                if current_tare is None:
+                    log.info(
+                        "catch_all_auto_import: certify push DEFERRED "
+                        "for product %s — tare_weight_g still NULL on "
+                        "the local mirror; will retry on the next "
+                        "catch-all event after tare propagates. "
+                        "(event %s lot %s, pass2_conf=%s)",
+                        product_id, event_id, cloud_lot_id,
+                        meta.get("catch_all_pass2_confidence"),
+                    )
+                else:
+                    self._lc_event(
+                        event_id,
+                        actor="catch_all_auto_import",
+                        reason_code=ReasonCode.CERTIFY_AUTO_IMPORT,
+                        payload={
+                            "product_id": str(product_id),
+                            "catch_all_pass": meta.get("catch_all_pass"),
+                            "pass2_item_id": meta.get(
+                                "catch_all_pass2_item_id"
+                            ),
+                            "pass2_confidence": meta.get(
+                                "catch_all_pass2_confidence"
+                            ),
+                            "tare_weight_g_at_certify": float(current_tare),
+                        },
+                    )
+                    self._push_product_state_to_cloud(
+                        str(product_id), certified=True,
+                    )
+        except Exception:  # pragma: no cover — never block dispatch
+            log.exception(
+                "catch_all_auto_import: certify push failed "
+                "(non-fatal) for event %s lot %s",
+                event_id, cloud_lot_id,
+            )
+
         log.info(
             "catch_all FIRST measurement: lot %s product %s "
             "measured=%.1fg (Pi event %s stamped as pickup_event_id)",

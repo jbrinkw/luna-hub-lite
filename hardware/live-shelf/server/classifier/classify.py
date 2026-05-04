@@ -376,7 +376,27 @@ def _build_pool(event: ScaleEvent, ctx: ClassifierContext) -> list[Candidate]:
 
     if event.direction == "add":
         if shelf_id == "catch_all":
-            return pool_for_catch_all(event.delta_g, ctx)
+            # Audit 1-LOW-1 (2026-05-04): defense-in-depth.
+            # Catch-all ADD events MUST route through
+            # ``classify_catch_all_with_fallback`` (the two-pass
+            # orchestrator) — never through the legacy single-pool
+            # path. The dispatcher in
+            # :file:`handlers/scale_events.py` wraps this raise in a
+            # broad ``except Exception`` that downgrades to a
+            # ``CLASSIFIER_THREW`` lifecycle row + error writeback
+            # (see ``_classify_recorded_event`` ~line 5858), so the
+            # operational signature is "loudly logged" rather than
+            # "process-killing". The point of the raise is to keep a
+            # future refactor that accidentally re-routes catch-all
+            # ADD through ``classify_event`` from silently using the
+            # single-pool legacy path. REMOVE on catch-all keeps the
+            # existing ``pool_for_remove`` behaviour (catch-all REMOVEs
+            # are rare and don't need the two-pass treatment).
+            raise RuntimeError(
+                "catch-all ADD events must route through "
+                "classify_catch_all_with_fallback — see "
+                "scale_events.py:5843"
+            )
         return pool_for_add(event.delta_g, ctx)
     if event.direction == "remove":
         return pool_for_remove(event.delta_g, ctx)

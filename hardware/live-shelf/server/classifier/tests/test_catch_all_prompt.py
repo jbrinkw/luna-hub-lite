@@ -385,17 +385,21 @@ def _ok_response(item_id: str = "lot_1") -> str:
 
 
 class TestCatchAllDispatcherRouting:
-    def test_catch_all_shelf_id_routes_to_catch_all_prompt(
+    def test_catch_all_add_via_classify_event_raises_runtime_error(
         self, after_frame_path
     ):
-        """``ctx.shelf_id == 'catch_all'`` must select the catch-all
-        prompt. The recording client captures whatever system prompt
-        the dispatcher actually sent.
+        """Audit 1-LOW-1 (2026-05-04): catch-all ADD events MUST route
+        through ``classify_catch_all_with_fallback`` — never through
+        ``classify_event``'s legacy single-pool path.
 
-        Mutation guard: deleting the ``getattr(ctx, 'shelf_id') ==
-        'catch_all'`` branch in classify.classify_event routes through
-        build_messages_payload — the recorded system prompt becomes
-        SYSTEM_PROMPT and this test flips.
+        Pre-fix shape: this test verified ``classify_event`` routed
+        catch-all ADD events through the catch-all prompt builder.
+        Post-fix the legacy path is gone — the dispatcher in
+        :file:`scale_events.py` calls the orchestrator directly. This
+        test now pins the loud failure: any future refactor that sends
+        a catch-all ADD through ``classify_event`` raises immediately.
+        Catch-all routing for the orchestrator path is covered by
+        :file:`server/classifier/tests/test_catch_all_fallback.py`.
         """
         in_flight_lot = LotCandidate(
             lot_id="lot_1",
@@ -416,21 +420,13 @@ class TestCatchAllDispatcherRouting:
         )
         event = _catch_all_event(after_frame_path)
 
-        result = classify_event(event, ctx)
-
-        assert client.calls == 1
-        sent_system = client.last_payload["system"]
-        # System block format may be list-of-blocks (cache on) or string.
-        sent_text = (
-            sent_system[0]["text"] if isinstance(sent_system, list)
-            else sent_system
+        with pytest.raises(
+            RuntimeError, match="catch-all ADD events must route through",
+        ):
+            classify_event(event, ctx)
+        assert client.calls == 0, (
+            "raise must short-circuit before any Anthropic call"
         )
-        assert sent_text == CATCH_ALL_SYSTEM_PROMPT, (
-            "ctx.shelf_id='catch_all' must route through "
-            "build_catch_all_messages_payload — the dispatcher leaked "
-            "the shelf prompt into the catch-all path."
-        )
-        assert result.item_id == "lot_1"
 
     def test_live_shelf_id_routes_to_shelf_prompt(self, after_frame_path):
         """The shelf path must NOT regress — catch-all routing only
@@ -480,15 +476,24 @@ class TestCatchAllDispatcherRouting:
             "leaked into the shelf path."
         )
 
-    def test_dispatcher_lifecycle_logs_prompt_variant(self, after_frame_path):
-        """The classifier_prompt_prepared lifecycle event payload must
+    def test_dispatcher_lifecycle_logs_prompt_variant_for_shelf(self, after_frame_path):
+        """The ``classifier_prompt_prepared`` lifecycle event payload must
         carry ``prompt_variant`` so operators triaging classifier
         regressions can tell at a glance whether a given event went
         through the shelf or catch-all prompt path.
 
+        Audit 1-LOW-1 (2026-05-04): catch-all ADD now routes through
+        the orchestrator (NOT ``classify_event``), so this test pins
+        the lifecycle telemetry on the SHELF path — the only remaining
+        ``classify_event`` consumer that touches this lifecycle hook.
+
         Mutation guard: removing the ``prompt_variant`` key from the
-        lifecycle payload makes the post-condition fail.
+        ``classifier_prompt_prepared`` lifecycle payload makes the
+        post-condition fail.
         """
+        from server.classifier.tests.test_classify import (
+            FakeClient, StubSource, _lot,
+        )
         import server.classifier.classify as classify_mod
 
         captured: list[dict[str, Any]] = []
@@ -503,22 +508,23 @@ class TestCatchAllDispatcherRouting:
                 }
             )
 
-        in_flight_lot = LotCandidate(
-            lot_id="lot_1",
-            product_id="prod_coke",
-            name="Coke Can",
-            brand=None,
-            expected_weight_g=355.0,
-            container_type="can",
-            status="in_flight",
-            reference_image_paths=(),
+        before = Path(after_frame_path).parent / "before.jpg"
+        before.write_bytes(_TINY_JPEG)
+        event = ScaleEvent(
+            event_id="evt_shelf_lc",
+            session_id="sesn_lc",
+            ts="2026-04-28T12:00:00.000Z",
+            delta_g=-340.0,
+            before_weight_g=2000.0,
+            after_weight_g=1660.0,
+            direction="remove",
+            before_frame_path=str(before),
+            after_frame_path=after_frame_path,
         )
-        source = _CatchAllStubSource(in_flight=[in_flight_lot])
-        client = _RecordingClient(_ok_response("lot_1"))
-        ctx = ClassifierContext(
-            source=source, anthropic_client=client, shelf_id="catch_all",
-        )
-        event = _catch_all_event(after_frame_path)
+        source = StubSource(on_shelf=[_lot("L1", name="Ketchup", weight=340)])
+        client = FakeClient([_ok_response("L1")])
+        # No shelf_id → routes through the shelf prompt path.
+        ctx = ClassifierContext(source=source, anthropic_client=client)
 
         prev_sink = classify_mod._LIFECYCLE_SINK
         classify_mod.set_lifecycle_sink(_sink)
@@ -532,4 +538,4 @@ class TestCatchAllDispatcherRouting:
             if c["reason_code"] == "classifier_prompt_prepared"
         ]
         assert prepared, "expected a classifier_prompt_prepared lc event"
-        assert prepared[0]["payload"].get("prompt_variant") == "catch_all"
+        assert prepared[0]["payload"].get("prompt_variant") == "shelf"

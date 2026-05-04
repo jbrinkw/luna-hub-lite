@@ -358,6 +358,183 @@ def test_classifier_runs_normally_after_catalog_is_fetched(frame_paths):
     assert result.meta.get("cold_start") is not True
 
 
+# ---------------------------------------------------------------------------
+# Audit C-MED-1 (2026-05-04): cloud-side certified-filter projection tests.
+#
+# ``_build_catch_all_user_inventory_lots(certified_filter=...)`` projects
+# the catalog through the certified flag for the two-pass classifier:
+#   * pass-1 reads ``get_catch_all_certified_user_inventory_lots`` →
+#     filter=True  → only certified products
+#   * pass-2 reads ``get_catch_all_uncertified_user_inventory_lots`` →
+#     filter=False → only uncertified (or NULL/missing) products.
+#
+# Mutation guard: dropping the ``if certified_filter and not is_cert:
+# continue`` line at cloud_candidate_source.py:377 would silently let
+# uncertified lots leak into pass-1's pool — pass-1 would then match
+# uncertified products with no certify push, defeating the entire
+# two-pass feature.
+# ---------------------------------------------------------------------------
+
+
+def _seed_catalog_source(
+    *,
+    products: list[dict],
+    stock: list[dict],
+) -> CloudCandidateSource:
+    """Build a CloudCandidateSource with the catalog pre-populated.
+
+    Bypasses the network refresh path so the projection methods can be
+    exercised in isolation. The client mock would never be hit anyway —
+    these tests only exercise the in-memory catalog → LotCandidate map.
+    """
+    payload = {
+        "products": products,
+        "stock": stock,
+        "pairings": [],
+        "locations": [],
+    }
+    src = CloudCandidateSource(_make_client(payload=payload))
+    src.refresh()
+    return src
+
+
+def test_catch_all_certified_filters_uncertified_products():
+    """Pass-1 source returns ONLY lots whose product has certified=true.
+
+    Pass-2 source returns ONLY lots whose product is uncertified
+    (certified=false). Mixed catalog → both projections are disjoint
+    and exhaustive.
+
+    A regression that drops the certified_filter branch — letting all
+    qty>0 lots flow into both pools — would defeat the two-pass design:
+    pass-1 would happily match uncertified products, no certify push
+    would fire, and the user's product would never graduate from
+    LiveTrack-tracked.
+    """
+    products = [
+        {
+            "product_id": "p-cert",
+            "name": "Cert Item",
+            "certified": True,
+            "net_weight_g": 500,
+        },
+        {
+            "product_id": "p-uncert",
+            "name": "Uncert Item",
+            "certified": False,
+            "net_weight_g": 500,
+        },
+    ]
+    stock = [
+        {"product_id": "p-cert", "lot_id": "L-C", "qty_containers": 1.0},
+        {"product_id": "p-uncert", "lot_id": "L-U", "qty_containers": 1.0},
+    ]
+    src = _seed_catalog_source(products=products, stock=stock)
+
+    cert_lots = list(src.get_catch_all_certified_user_inventory_lots())
+    assert {lot.lot_id for lot in cert_lots} == {"L-C"}, (
+        "pass-1 source must return ONLY lots whose product is certified"
+    )
+
+    uncert_lots = list(src.get_catch_all_uncertified_user_inventory_lots())
+    assert {lot.lot_id for lot in uncert_lots} == {"L-U"}, (
+        "pass-2 source must return ONLY lots whose product is uncertified"
+    )
+
+    # Sanity: the unfiltered call returns BOTH (back-compat with the
+    # legacy single-pool catch-all flow).
+    all_lots = list(src.get_catch_all_user_inventory_lots())
+    assert {lot.lot_id for lot in all_lots} == {"L-C", "L-U"}
+
+
+def test_catch_all_certified_handles_string_certified_column():
+    """Legacy SQLite shadow stores ``certified`` as the string ``'1'`` / ``'0'``.
+
+    The cloud catalog's ``products.certified`` is a real boolean over
+    JSON, but the local-mirror tables and a few legacy projections
+    still emit string flags. The coercion at
+    :file:`cloud_candidate_source.py:373-374` handles both.
+
+    Mutation guard: dropping the str branch would make ``'0'`` evaluate
+    truthy via ``bool('0') == True`` and silently let an uncertified-as-
+    string-zero product land in the certified pool.
+    """
+    products = [
+        {
+            "product_id": "p-zero",
+            "name": "String-Zero-Cert",
+            "certified": "0",  # string '0' → uncertified
+            "net_weight_g": 500,
+        },
+        {
+            "product_id": "p-one",
+            "name": "String-One-Cert",
+            "certified": "1",  # string '1' → certified
+            "net_weight_g": 500,
+        },
+        {
+            "product_id": "p-true",
+            "name": "String-true-Cert",
+            "certified": "true",  # string 'true' → certified
+            "net_weight_g": 500,
+        },
+    ]
+    stock = [
+        {"product_id": "p-zero", "lot_id": "L-zero", "qty_containers": 1.0},
+        {"product_id": "p-one", "lot_id": "L-one", "qty_containers": 1.0},
+        {"product_id": "p-true", "lot_id": "L-true", "qty_containers": 1.0},
+    ]
+    src = _seed_catalog_source(products=products, stock=stock)
+
+    cert_lots = list(src.get_catch_all_certified_user_inventory_lots())
+    assert {lot.lot_id for lot in cert_lots} == {"L-one", "L-true"}, (
+        "string-cert-column: '1' and 'true' must be treated as certified"
+    )
+
+    uncert_lots = list(src.get_catch_all_uncertified_user_inventory_lots())
+    assert {lot.lot_id for lot in uncert_lots} == {"L-zero"}, (
+        "string-cert-column: '0' MUST be treated as uncertified — "
+        "regression that drops the str-coercion branch would let "
+        "bool('0')==True silently leak '0'-flagged products into the "
+        "certified pool"
+    )
+
+
+def test_catch_all_uncertified_includes_missing_and_null_certified():
+    """Products with ``certified`` missing or None → treat as uncertified.
+
+    Catch-all auto-import (pass-2) is the certify writer; products that
+    haven't been touched yet have ``certified`` missing or NULL. They
+    must surface in pass-2's pool so the AI can match against them and
+    trigger the certify auto-import.
+    """
+    products = [
+        {"product_id": "p-missing", "name": "Missing", "net_weight_g": 500},
+        {
+            "product_id": "p-null",
+            "name": "Null",
+            "certified": None,
+            "net_weight_g": 500,
+        },
+    ]
+    stock = [
+        {"product_id": "p-missing", "lot_id": "L-missing", "qty_containers": 1.0},
+        {"product_id": "p-null", "lot_id": "L-null", "qty_containers": 1.0},
+    ]
+    src = _seed_catalog_source(products=products, stock=stock)
+
+    cert_lots = list(src.get_catch_all_certified_user_inventory_lots())
+    assert cert_lots == [], (
+        "missing/null certified must NOT land in pass-1's certified pool"
+    )
+
+    uncert_lots = list(src.get_catch_all_uncertified_user_inventory_lots())
+    assert {lot.lot_id for lot in uncert_lots} == {"L-missing", "L-null"}, (
+        "missing/null certified must surface in pass-2's pool so the "
+        "two-pass auto-certify can graduate them via the certify push"
+    )
+
+
 def test_legacy_source_without_has_catalog_does_not_trip_guard(frame_paths):
     """Sources that don't expose ``has_catalog()`` (legacy sqlite path)
     must skip the cold-start guard entirely — preserving today's behaviour

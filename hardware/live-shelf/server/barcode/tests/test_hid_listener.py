@@ -9,6 +9,7 @@ import pytest
 
 from server.barcode.hid_listener import (
     ScannerDeviceLost,
+    _check_inode_match,
     accumulate_keys_to_barcode,
     discover_barcode_device,
     open_device_and_stream_barcodes,
@@ -342,3 +343,178 @@ def test_ScannerDeviceLost_distinct_from_generic_exception():
     # legitimate errors when caught.
     assert not issubclass(ScannerDeviceLost, OSError)
     assert not issubclass(ScannerDeviceLost, RuntimeError)
+
+
+# ---------------------------------------------------------------------------
+# Audit 1-MED-1 + B-HIGH-5: inode-watchdog helper unit tests.
+#
+# ``_check_inode_match`` is the pure helper extracted from the listener
+# loop so the watchdog logic can be exercised directly. The iterator-
+# based tests above cover the integration shape; these cover the corner
+# cases that are awkward to hit through the iterator (recovery from
+# initial-stat-failure, false-positive on healthy idle).
+# ---------------------------------------------------------------------------
+
+
+def test_check_inode_match_happy_path_returns_baseline_unchanged(monkeypatch):
+    """Healthy scanner, idle but same inode → helper returns the same
+    baseline and DOES NOT raise.
+
+    Audit B-HIGH-5: the dominant production path is "scanner is healthy,
+    nobody is scanning right now, the same inode resolves on every tick".
+    A regression that inverts the inode comparison would manifest as
+    spurious ``ScannerDeviceLost`` on healthy idle.
+    """
+    monkeypatch.setattr(
+        'os.stat', lambda _p: types.SimpleNamespace(st_ino=42),
+    )
+    # Multiple ticks all return the same inode → never raises and
+    # always returns the original baseline.
+    for _ in range(5):
+        result = _check_inode_match('/dev/input/event0', 42)
+        assert result == 42, (
+            "watchdog must not advance the baseline when the inode is "
+            "stable — a moving baseline would mask a genuine re-bind"
+        )
+
+
+def test_check_inode_match_raises_on_inode_change(monkeypatch):
+    """Audit baseline: helper raises ScannerDeviceLost when the inode
+    changes from the original baseline. Mirrors the iterator-based
+    test; pinned here so a refactor that drops the helper-level guard
+    fails loudly even before the integration test catches it."""
+    monkeypatch.setattr(
+        'os.stat', lambda _p: types.SimpleNamespace(st_ino=999),
+    )
+    with pytest.raises(ScannerDeviceLost, match='silent re-bind detected'):
+        _check_inode_match('/dev/input/event0', 42)
+
+
+def test_check_inode_match_raises_on_stat_failure_after_baseline(monkeypatch):
+    """When stat raises mid-watchdog (with a baseline already armed),
+    surface as ScannerDeviceLost — the device just vanished and the
+    iterator loop should rediscover."""
+    def _fake_stat(_path):
+        raise OSError(2, 'no such file')
+
+    monkeypatch.setattr('os.stat', _fake_stat)
+    with pytest.raises(ScannerDeviceLost, match='stat failed during read'):
+        _check_inode_match('/dev/input/event0', 42)
+
+
+def test_check_inode_match_recovers_baseline_on_first_successful_stat(monkeypatch):
+    """Audit 1-MED-1: when ``original_inode is None`` (open-time stat
+    failed) the helper retries on every call. The first successful
+    stat establishes the baseline and returns it; subsequent matching
+    stats don't raise; an inode change AFTER recovery DOES raise.
+
+    Pre-fix: ``original_inode = None`` was set once at open and never
+    revisited, so a transient open-time stat failure silently disabled
+    the watchdog forever.
+    """
+    # Stat raises on the first call; returns inode 42 on the second
+    # and beyond. Mirrors the "kernel-permission flap" race during
+    # device enumeration.
+    call_count = {'n': 0}
+
+    def _fake_stat(_path):
+        call_count['n'] += 1
+        if call_count['n'] == 1:
+            raise OSError(13, 'permission denied')
+        return types.SimpleNamespace(st_ino=42)
+
+    monkeypatch.setattr('os.stat', _fake_stat)
+
+    # First call: stat raises → helper returns None (still disarmed).
+    result1 = _check_inode_match('/dev/input/event0', None)
+    assert result1 is None, (
+        "stat-fail recovery: helper must return None when stat is "
+        "still failing so the caller knows the watchdog is not yet "
+        "armed"
+    )
+    # Second call: stat succeeds → helper returns the new baseline.
+    result2 = _check_inode_match('/dev/input/event0', None)
+    assert result2 == 42, (
+        "stat-fail recovery: a successful retry must establish the "
+        "baseline so subsequent comparisons can detect re-binds"
+    )
+    # Third call: stat returns the same inode → no raise.
+    result3 = _check_inode_match('/dev/input/event0', 42)
+    assert result3 == 42
+
+    # Fourth call: stat returns a DIFFERENT inode → raise.
+    # Replace the stat patch to simulate a kernel re-bind AFTER the
+    # watchdog recovered.
+    monkeypatch.setattr(
+        'os.stat', lambda _p: types.SimpleNamespace(st_ino=99),
+    )
+    with pytest.raises(ScannerDeviceLost, match='42 -> 99'):
+        _check_inode_match('/dev/input/event0', 42)
+
+
+def test_open_recovers_when_initial_stat_fails(monkeypatch):
+    """Audit 1-MED-1 integration: the listener's open-time stat fails
+    once → ``original_inode = None`` initially. After ONE poll-timeout
+    iteration, the helper retries the stat and recovers the baseline.
+    Subsequent matching stats don't raise; an inode change after
+    recovery DOES raise (proves the watchdog is now armed).
+
+    Pre-fix shape: a transient stat failure at open silently disabled
+    the inode-mismatch check forever. Today's code retries on every
+    poll-timeout until stat succeeds.
+    """
+    import os as _os
+    from server.barcode import hid_listener as hid
+
+    r_fd, w_fd = _os.pipe()
+    fake_device = MagicMock()
+    fake_device.name = 'ScanAvengerHID'
+    fake_device.fd = r_fd
+    fake_device.read = MagicMock(
+        side_effect=AssertionError(
+            'device.read should not be called on poll-timeout path'
+        ),
+    )
+
+    fake_evdev = types.ModuleType('evdev')
+    fake_evdev.InputDevice = MagicMock(return_value=fake_device)
+    fake_evdev.list_devices = MagicMock(return_value=[])
+    fake_evdev.ecodes = types.SimpleNamespace(EV_KEY=1)
+    fake_evdev.categorize = MagicMock()
+    monkeypatch.setitem(sys.modules, 'evdev', fake_evdev)
+    monkeypatch.setattr(hid, '_POLL_TIMEOUT_MS', 50)
+    monkeypatch.setattr('os.path.exists', lambda _p: True)
+
+    # Stat schedule:
+    #   call 1 (open-time): raise OSError → original_inode stays None
+    #   call 2 (first poll-timeout): return inode 42 → helper recovers
+    #   call 3 (second poll-timeout): return inode 99 → MUST raise
+    stat_calls = {'n': 0}
+
+    def _fake_stat(_path):
+        stat_calls['n'] += 1
+        n = stat_calls['n']
+        if n == 1:
+            raise OSError(13, 'permission denied (transient)')
+        if n == 2:
+            return types.SimpleNamespace(st_ino=42)
+        return types.SimpleNamespace(st_ino=99)
+
+    monkeypatch.setattr('os.stat', _fake_stat)
+
+    try:
+        with pytest.raises(ScannerDeviceLost, match='42 -> 99'):
+            list(open_device_and_stream_barcodes('/dev/input/event0'))
+        # Sanity: the watchdog actually traversed the recovery path —
+        # we expect at least 3 stat calls (open-time fail + recovery +
+        # re-bind detection).
+        assert stat_calls['n'] >= 3, (
+            "expected open-time stat + recovery + re-bind detection "
+            f"(got {stat_calls['n']} stat calls)"
+        )
+    finally:
+        _os.close(r_fd)
+        try:
+            _os.close(w_fd)
+        except OSError:
+            pass

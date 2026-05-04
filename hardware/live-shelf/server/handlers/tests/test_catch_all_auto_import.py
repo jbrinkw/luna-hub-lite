@@ -989,3 +989,150 @@ def test_catch_all_does_not_push_certified_when_meta_missing(tmp_path):
     assert cert_calls == [], (
         "missing meta block MUST be treated as 'no certify request'"
     )
+
+
+def test_catch_all_does_not_push_certified_when_first_emit_fails(tmp_path):
+    """Audit A-CRIT-1 (2026-05-04): order of operations.
+
+    The certify auto-import push MUST NOT fire when the FIRST measurement
+    cloud emit returned None (transient cloud failure). Pre-fix, the
+    certify block ran BEFORE the FIRST emit guard — a failed emit could
+    leave ``certified=true`` permanently flipped on a product whose
+    FIRST event was never actually applied cloud-side.
+
+    Post-fix order: emit_catch_all_first_measurement → success guard →
+    writethrough mirror → certify push. A None return from the FIRST
+    emit short-circuits the whole dispatch (returns False) before
+    reaching the certify block.
+
+    Mutation guard: re-ordering the certify block before the FIRST emit
+    guard would make this assertion fail — the certify push would land
+    even though the FIRST emit fell through.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    # Force the FIRST emit to return None — simulates a transient
+    # cloud failure (network timeout, 5xx, sweeper-pending response).
+    handler._cloud_emitter.emit_catch_all_first_measurement = MagicMock(
+        return_value=None,
+    )
+    # Tare already set so the existing TARE_AUTO_IMPORT block is a no-op.
+    _seed_product(conn, product_id="prod-fail", tare=25.0, net=500.0)
+    _seed_cloud_lot(conn, lot_id="LOT-FAIL", product_id="prod-fail")
+
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-FAIL",
+            "reasoning": "cloud transient failure — needs_certify path",
+            "meta": {
+                "catch_all_pass": 2,
+                "needs_certify": True,
+                "catch_all_pass1_item_id": "UNKNOWN",
+                "catch_all_pass1_confidence": 0.1,
+                "catch_all_pass2_item_id": "LOT-FAIL",
+                "catch_all_pass2_confidence": 0.92,
+            },
+        },
+        delta_g=275.0,  # mid-bottle, outside the measured_full window
+        event_ts="2026-05-03T18:00:00.000Z",
+        event_id="evt-fail",
+        session_id="sess-fail",
+    )
+
+    # Fail-closed semantics: cloud emit failure must NOT mark handled.
+    assert handled is False, (
+        "fail-closed: emit_catch_all_first_measurement returning None "
+        "must short-circuit the dispatch (return False)"
+    )
+
+    # The certify push MUST NOT have fired — otherwise certified=true
+    # would now be permanently flipped on a product whose FIRST event
+    # was never applied cloud-side.
+    cert_calls = [
+        c for c in cloud.product_state_calls if c.get("certified") is True
+    ]
+    assert cert_calls == [], (
+        "BUG: certified=true was pushed even though the FIRST emit "
+        "failed. The certify side-effect now permanently tags a "
+        "product against an event that was never actually applied."
+    )
+
+    # Lifecycle row also must NOT have fired — operator audit must not
+    # show a CERTIFY_AUTO_IMPORT row for an event that never landed.
+    rows = conn.execute(
+        "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
+        (ReasonCode.CERTIFY_AUTO_IMPORT,),
+    ).fetchall()
+    assert rows == [], (
+        "no CERTIFY_AUTO_IMPORT lifecycle row when FIRST emit fails"
+    )
+
+
+def test_catch_all_defers_certified_when_tare_is_null(tmp_path):
+    """Round-2 audit MED-A (2026-05-04): the certify push must NOT fire
+    when ``tare_weight_g`` is still NULL on the local mirror, even with
+    ``meta.needs_certify=True``.
+
+    Allowing ``certified=true`` to land before ``tare_weight_g`` leaves a
+    "certified but tare-less" cloud row, which the live-shelf classifier's
+    certified-tracked filter would treat as ready for active use even
+    though the LiveTrack apply path has no tare to subtract from. Defer
+    until the next catch-all event after tare propagates locally.
+
+    Mutation guard: dropping the ``current_tare is None`` gate in
+    ``_dispatch_catch_all_add`` makes this test fail.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    # Tare deliberately NULL — the product is in inventory but never
+    # had its tare measured. Pass-2 confidently picked it; the certify
+    # push should DEFER until tare lands.
+    _seed_product(
+        conn, product_id="prod-no-tare", tare=None, net=500.0,
+        barcode="HRN-NO-TARE",
+    )
+    _seed_cloud_lot(conn, lot_id="LOT-NO-TARE", product_id="prod-no-tare")
+
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-NO-TARE",
+            "reasoning": "pass-2 win on tare-less product",
+            "meta": {
+                "catch_all_pass": 2,
+                "needs_certify": True,
+                "catch_all_pass1_item_id": "UNKNOWN",
+                "catch_all_pass1_confidence": 0.1,
+                "catch_all_pass2_item_id": "LOT-NO-TARE",
+                "catch_all_pass2_confidence": 0.94,
+            },
+        },
+        # Reading too low to trigger the measured_full_at stamp (which
+        # would also conditionally update tare via the AI estimate). The
+        # tare-less branch keeps tare NULL through this dispatch.
+        delta_g=275.0,
+        event_ts="2026-05-04T01:00:00.000Z",
+        event_id="evt-defer-cert-1",
+        session_id="sess-defer-cert-1",
+    )
+    assert handled is True
+
+    # No certify push fired — deferred because tare is NULL.
+    cert_calls = [
+        c for c in cloud.product_state_calls if c.get("certified") is True
+    ]
+    assert cert_calls == [], (
+        "BUG: certify push fired even though tare_weight_g is NULL on the "
+        "local mirror; this would leave a 'certified but tare-less' "
+        "cloud row that breaks live-shelf classifier readiness assumptions"
+    )
+
+    # Lifecycle: NO CERTIFY_AUTO_IMPORT row (deferred branch logs at INFO
+    # level only — the audit row is reserved for the actual flip).
+    rows = conn.execute(
+        "SELECT actor, reason_code "
+        "FROM event_lifecycle WHERE reason_code = ?",
+        (ReasonCode.CERTIFY_AUTO_IMPORT,),
+    ).fetchall()
+    assert rows == [], (
+        "no CERTIFY_AUTO_IMPORT lifecycle row when certify is deferred"
+    )

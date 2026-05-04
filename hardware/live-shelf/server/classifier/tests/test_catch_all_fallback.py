@@ -214,6 +214,18 @@ class TestPass1Wins:
         assert result.meta.get("catch_all_pass1_item_id") == "lot-cert-1"
         # Pass-2 was NOT consulted.
         assert source.calls["uncertified"] == 0
+        # Audit B-HIGH-1 (2026-05-04): pass-2 fields MUST BE ABSENT
+        # when pass-1 wins. The orchestrator's deliberate non-stamping
+        # of pass-2 telemetry on pass-1 wins is the implicit signal
+        # downstream operators use to read "this was a pass-1 win,
+        # certify side effect didn't fire". A regression that
+        # always-stamps pass-2 fields (e.g. None) would muddy the
+        # audit trail and make "why did certify fire?" harder.
+        assert "catch_all_pass2_item_id" not in result.meta, (
+            "pass-1 win must NOT stamp pass-2 telemetry — operators "
+            "rely on the absence of pass-2 fields to identify pass-1 wins"
+        )
+        assert "catch_all_pass2_confidence" not in result.meta
 
 
 class TestPass2Wins:
@@ -462,3 +474,240 @@ class TestPass1Hallucination:
         assert len(client.calls) == 2
         assert result.meta.get("catch_all_pass") == 2
         assert result.meta.get("needs_certify") is True
+
+    def test_pass1_hallucinated_id_collapses_to_unknown_when_pass2_misses(
+        self, frame_paths,
+    ) -> None:
+        """Audit 1-HIGH-1 (2026-05-04): pass-1 high-conf hallucination
+        → orchestrator MUST return UNKNOWN as the final ``item_id`` even
+        when pass-2 also fails.
+
+        Pre-fix: ``pass1`` was preserved as the fallback base when both
+        passes missed, so the hallucinated id leaked downstream. The
+        ``_classify_recorded_event`` reader would mark the event
+        "classified" on confidence alone, while the pool-membership
+        guard skipped lot mutation — yielding a classified-but-unapplied
+        event with no review row.
+
+        Post-fix: the hallucinated id collapses to UNKNOWN before the
+        fallback base selection, but stays in
+        ``meta['catch_all_pass1_item_id']`` for operator audit.
+        """
+        before, after = frame_paths
+        client = _FakeClient(
+            [
+                _resp("lot-fake-not-in-pool", confidence=0.95),
+                _resp(UNKNOWN_CANDIDATE_ID, confidence=0.1, action="unknown"),
+            ]
+        )
+        source = _CatchAllSource(
+            certified=[_lot("lot-cert-real", weight_g=600.0)],
+            uncertified=[_lot("lot-uncert-real", weight_g=600.0)],
+        )
+        ctx = ClassifierContext(
+            source=source, anthropic_client=client, shelf_id="catch_all",
+        )
+
+        result = classify_catch_all_with_fallback(
+            _add_event(before, after), ctx,
+        )
+
+        # Final item_id MUST NOT be the hallucinated id. Downstream
+        # apply paths read this — leaking the hallucinated id is the
+        # exact bug the audit identified.
+        assert result.item_id == UNKNOWN_CANDIDATE_ID, (
+            "BUG: pass-1 hallucinated id leaked through to the final "
+            "result. The orchestrator must collapse out-of-pool pass-1 "
+            "ids to UNKNOWN before the fallback base selection."
+        )
+        assert result.action == "unknown"
+        # Telemetry: the raw hallucinated id must STILL be visible so
+        # operators can see "pass-1 said X (we rejected it)".
+        assert result.meta.get("catch_all_pass1_item_id") == "lot-fake-not-in-pool", (
+            "audit trail: the hallucinated id must be preserved in "
+            "meta['catch_all_pass1_item_id'] even though the result "
+            "collapsed to UNKNOWN"
+        )
+        assert result.meta.get("catch_all_pass1_confidence") == pytest.approx(0.95)
+        assert result.meta.get("catch_all_pass") == 2
+        assert result.meta.get("needs_certify") is False
+        # Both passes fired (pass-2 was given a chance after the pass-1
+        # hallucination collapsed to UNKNOWN).
+        assert len(client.calls) == 2
+
+    def test_pass2_hallucinated_id_does_not_leak_with_pass1_unknown(
+        self, frame_paths,
+    ) -> None:
+        """Audit 1-HIGH-1 mirror: pass-2 hallucination must collapse too.
+
+        Companion to the pass-1 test above. When pass-1 returns UNKNOWN
+        (legitimately) and pass-2 returns a high-confidence out-of-pool
+        id, the orchestrator must collapse pass-2's hallucinated result
+        to UNKNOWN before the fallback base selection. Pre-fix, the
+        warning was logged but ``pass2`` itself remained set to the
+        out-of-pool result — though the existing code used ``base = pass1``
+        in the both-failed branch, so the leak was less severe than the
+        pass-1 case. We pin both shapes for defense in depth.
+        """
+        before, after = frame_paths
+        client = _FakeClient(
+            [
+                _resp(UNKNOWN_CANDIDATE_ID, confidence=0.1, action="unknown"),
+                _resp("lot-fake-pass2", confidence=0.93),
+            ]
+        )
+        source = _CatchAllSource(
+            certified=[_lot("lot-cert-real", weight_g=600.0)],
+            uncertified=[_lot("lot-uncert-real", weight_g=600.0)],
+        )
+        ctx = ClassifierContext(
+            source=source, anthropic_client=client, shelf_id="catch_all",
+        )
+
+        result = classify_catch_all_with_fallback(
+            _add_event(before, after), ctx,
+        )
+
+        assert result.item_id == UNKNOWN_CANDIDATE_ID
+        # Pass-2 raw id stamped for telemetry.
+        assert result.meta.get("catch_all_pass2_item_id") == "lot-fake-pass2"
+        assert result.meta.get("catch_all_pass2_confidence") == pytest.approx(0.93)
+        assert result.meta.get("catch_all_pass") == 2
+        assert result.meta.get("needs_certify") is False
+
+    def test_orchestrator_emits_classifier_prompt_prepared_per_pass(
+        self, frame_paths,
+    ) -> None:
+        """Round-2 audit N-MED-1 (2026-05-04): the orchestrator must
+        emit a ``classifier_prompt_prepared`` lifecycle row for every
+        pass it runs, restoring the observability hook the legacy
+        single-pass ``classify_event`` used to provide.
+
+        Operators correlate per-pass prompt hashes with eventual
+        classification outcomes for triage. Pre-fix, catch-all ADD
+        events emitted ZERO prompt-prepared rows because the orchestrator
+        bypassed ``classify.py`` entirely.
+
+        Mutation guard: removing the ``_classify_lc(... reason_code=
+        "classifier_prompt_prepared")`` call from ``_run_pass`` makes
+        this test fail. Renaming the variant labels also fails it
+        (audit-log filters depend on the per-pass distinction).
+        """
+        before, after = frame_paths
+        # Pass-1 UNKNOWN drives a real pass-2 call so we get TWO
+        # prompt_prepared rows. The cert/uncert pools both have lots
+        # so neither pass short-circuits on len(pool)<=1.
+        client = _FakeClient(
+            [
+                _resp(UNKNOWN_CANDIDATE_ID, confidence=0.1, action="unknown"),
+                _resp("lot-uncert-1", confidence=0.92),
+            ]
+        )
+        source = _CatchAllSource(
+            certified=[_lot("lot-cert-1", weight_g=600.0)],
+            uncertified=[_lot("lot-uncert-1", weight_g=600.0)],
+        )
+        ctx = ClassifierContext(
+            source=source, anthropic_client=client, shelf_id="catch_all",
+        )
+
+        captured: list[dict] = []
+
+        def _sink(event_id, *, actor, reason_code, payload=None):
+            captured.append({
+                "event_id": event_id,
+                "actor": actor,
+                "reason_code": reason_code,
+                "payload": payload or {},
+            })
+
+        import server.classifier.classify as classify_mod
+        prev_sink = classify_mod._LIFECYCLE_SINK
+        classify_mod.set_lifecycle_sink(_sink)
+        try:
+            classify_catch_all_with_fallback(
+                _add_event(before, after, delta=600.0), ctx,
+            )
+        finally:
+            classify_mod.set_lifecycle_sink(prev_sink)
+
+        prepared = [
+            c for c in captured
+            if c["reason_code"] == "classifier_prompt_prepared"
+        ]
+        assert len(prepared) == 2, (
+            "expected one classifier_prompt_prepared row per pass; "
+            f"got {len(prepared)}"
+        )
+        variants = [p["payload"].get("prompt_variant") for p in prepared]
+        assert variants == ["catch_all_pass1", "catch_all_pass2"], (
+            "prompt_variant labels must distinguish the two passes "
+            "(operators rely on this for audit-log filters)"
+        )
+        # Both rows carry pool_size + prompt_hash, mirroring the
+        # legacy classify_event payload shape.
+        for row in prepared:
+            assert isinstance(row["payload"].get("pool_size"), int)
+            assert row["payload"].get("pool_size") > 0
+            assert isinstance(row["payload"].get("prompt_hash"), str)
+            assert len(row["payload"]["prompt_hash"]) > 0
+
+    def test_pass1_hallucination_with_empty_pass2_preserves_raw_id_in_meta(
+        self, frame_paths,
+    ) -> None:
+        """Round-2 audit N-MED-2 (2026-05-04): pass-1 returns a
+        high-confidence id NOT in pass-1's pool AND the user has no
+        uncertified inventory (pass-2 pool is sentinel-only) → the
+        orchestrator MUST short-circuit on the empty pass-2 pool and
+        return UNKNOWN with the hallucinated id preserved in meta for
+        operator audit ("why did certify NOT fire — was it a
+        hallucination or a clean UNKNOWN?").
+
+        Pre-fix risk: dropping the ``pass1_raw_item_id`` capture in the
+        empty-pass-2 short-circuit branch (catch_all_fallback.py) would
+        silently lose the hallucination signal in this combination.
+        Existing tests run pass-2 OR have a legitimate pass-1 UNKNOWN —
+        neither covers this seam.
+        """
+        before, after = frame_paths
+        # Pass-1 confidently hallucinates an id NOT in the pass-1 pool.
+        client = _FakeClient(
+            [
+                _resp("lot-fake-not-in-pool", confidence=0.95),
+            ]
+        )
+        # Certified inventory exists (so pass-1 has real candidates),
+        # but NO uncertified inventory → pass-2 pool is sentinel-only
+        # → orchestrator short-circuits without a second API call.
+        source = _CatchAllSource(
+            certified=[_lot("lot-cert-1", weight_g=600.0)],
+            uncertified=[],
+        )
+        ctx = ClassifierContext(
+            source=source, anthropic_client=client, shelf_id="catch_all",
+        )
+
+        result = classify_catch_all_with_fallback(
+            _add_event(before, after, delta=600.0), ctx,
+        )
+
+        # Outcome: UNKNOWN result (the hallucinated id never leaked).
+        assert result.item_id == UNKNOWN_CANDIDATE_ID
+        # Only ONE API call (pass-1) — pass-2 short-circuited.
+        assert len(client.calls) == 1
+        # Telemetry: pass-1 raw id preserved so operators can see WHY
+        # the orchestrator returned UNKNOWN. This is the core
+        # mutation-guard for N-MED-2 — dropping the ``pass1_raw_item_id``
+        # capture in the empty-pass-2 short-circuit branch breaks this.
+        assert result.meta.get("catch_all_pass1_item_id") == "lot-fake-not-in-pool"
+        assert result.meta.get("catch_all_pass1_confidence") == pytest.approx(0.95)
+        # ``catch_all_pass = 2`` per the orchestrator's "pass-2 was at
+        # least considered" contract; pass-2 telemetry is None/0.0 to
+        # signal "considered but didn't run" (vs "ran and matched
+        # nothing", which would be a non-None item_id with confidence 0).
+        assert result.meta.get("catch_all_pass") == 2
+        assert result.meta.get("catch_all_pass2_item_id") is None
+        assert result.meta.get("catch_all_pass2_confidence") == 0.0
+        # No certify push downstream — the result is UNKNOWN, not a
+        # confident pass-2 win.
+        assert result.meta.get("needs_certify") is False

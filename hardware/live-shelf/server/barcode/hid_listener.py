@@ -75,6 +75,62 @@ IGNORED_KEYS = {'KEY_LEFTSHIFT', 'KEY_RIGHTSHIFT',
 _POLL_TIMEOUT_MS = 2000
 
 
+def _check_inode_match(
+    device_path: str,
+    original_inode: Optional[int],
+) -> Optional[int]:
+    """Pure helper for the BT-rebind watchdog.
+
+    Returns the (possibly newly-recovered) baseline inode that the
+    caller should track going forward, or raises
+    :class:`ScannerDeviceLost` if a silent re-bind was detected or the
+    path vanished.
+
+    Three cases:
+
+      1. ``original_inode is None``: the open-time stat raised; we try
+         to establish a fresh baseline. On success we return the new
+         inode — the watchdog is now armed. On stat failure we return
+         ``None`` so the caller can retry on the next timeout.
+      2. ``original_inode`` is set, current stat matches: return
+         ``original_inode`` unchanged — happy path, no re-bind.
+      3. ``original_inode`` is set, stat fails or returns a different
+         inode: raise :class:`ScannerDeviceLost`.
+
+    The path-existence check is intentionally OUTSIDE this helper so
+    the listener can raise its own descriptive error without ambiguity.
+
+    Audit B-HIGH-5 (2026-05-04): the iterator-based test for the
+    happy-path (idle scanner, same inode, no false-positive raise) is
+    fiddly to write end-to-end because the listener blocks in
+    ``select.poll``. Pulling the inode logic out into a pure helper
+    lets the watchdog be tested directly without driving the whole
+    listener loop.
+    """
+    if original_inode is None:
+        # Recovery path: open-time stat raised; try again. On success
+        # the caller arms the watchdog with this baseline; on failure
+        # we return None to signal "retry next timeout".
+        try:
+            return os.stat(device_path).st_ino
+        except OSError:
+            return None
+    try:
+        current_inode = os.stat(device_path).st_ino
+    except OSError as exc:
+        raise ScannerDeviceLost(
+            f'stat failed during read on {device_path}: '
+            f'{type(exc).__name__}: {exc}'
+        ) from exc
+    if current_inode != original_inode:
+        raise ScannerDeviceLost(
+            f'silent re-bind detected on {device_path}: '
+            f'inode {original_inode} -> {current_inode} '
+            '(BT scanner sleep/wake or USB hot-plug)'
+        )
+    return original_inode
+
+
 def accumulate_keys_to_barcode(keys: Iterable[str]) -> str:
     """Convert a sequence of evdev key names to a barcode string.
 
@@ -138,6 +194,13 @@ def open_device_and_stream_barcodes(device_path: str) -> Iterator[str]:
     # signal short of a udev MONITOR socket. The check fires only on
     # poll-timeout (no events for ``_POLL_TIMEOUT_MS``), so it's a no-op
     # in the common case where the scanner is actively typing.
+    #
+    # Audit 1-MED-1 (2026-05-04): when the open-time stat fails (rare —
+    # device race during enumeration, kernel-permission flap), we leave
+    # ``original_inode`` as None and the poll-timeout loop below retries
+    # the stat on every tick. Without this retry, a transient stat
+    # failure at startup would silently disable the watchdog forever —
+    # exactly the BT-rebind case the watchdog was built to catch.
     try:
         original_inode = os.stat(device_path).st_ino
     except OSError:
@@ -158,20 +221,17 @@ def open_device_and_stream_barcodes(device_path: str) -> Iterator[str]:
                     raise ScannerDeviceLost(
                         f'device path vanished during read: {device_path}'
                     )
-                if original_inode is not None:
-                    try:
-                        current_inode = os.stat(device_path).st_ino
-                    except OSError as exc:
-                        raise ScannerDeviceLost(
-                            f'stat failed during read on {device_path}: '
-                            f'{type(exc).__name__}: {exc}'
-                        ) from exc
-                    if current_inode != original_inode:
-                        raise ScannerDeviceLost(
-                            f'silent re-bind detected on {device_path}: '
-                            f'inode {original_inode} -> {current_inode} '
-                            '(BT scanner sleep/wake or USB hot-plug)'
-                        )
+                # Audit 1-MED-1 + B-HIGH-5: helper handles both the
+                # recovery case (open-time stat failed; try again now
+                # that the kernel has settled) and the normal compare.
+                # On a recovery iteration we just establish the new
+                # baseline and skip comparison this tick (there's
+                # nothing to compare against). On the normal path the
+                # helper returns the same baseline or raises on a
+                # re-bind / vanished path.
+                original_inode = _check_inode_match(
+                    device_path, original_inode,
+                )
                 continue
             for fd, flags in ready:
                 if flags & (select.POLLHUP | select.POLLERR | select.POLLNVAL):

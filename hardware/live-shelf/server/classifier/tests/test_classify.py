@@ -491,6 +491,59 @@ class TestClassifyEvent:
         classify_event(event, ctx, model="claude-haiku-4-5")
         assert client.calls[0]["model"] == "claude-haiku-4-5"
 
+    def test_catch_all_add_raises_runtime_error(self, frame_paths):
+        """Audit 1-LOW-1 (2026-05-04): defense-in-depth.
+
+        Catch-all ADD events MUST route through
+        ``classify_catch_all_with_fallback`` (the two-pass orchestrator)
+        — never through ``classify_event``'s legacy single-pool path.
+        The dispatcher in :file:`handlers/scale_events.py` was updated
+        to use the orchestrator; this test pins a loud failure if a
+        future refactor accidentally re-routes a catch-all ADD here.
+
+        Mutation guard: a regression that drops the raise and falls
+        back to ``pool_for_catch_all`` would silently re-introduce the
+        single-pool path — pass-2 (uncertified pool) would never run
+        and certify auto-import would never fire.
+        """
+        before, after = frame_paths
+        client = FakeClient([])  # never called — we expect the raise
+        source = StubSource()
+        ctx = ClassifierContext(
+            source=source,
+            anthropic_client=client,
+            shelf_id="catch_all",
+        )
+        event = _event(before, after, direction="add", delta=450.0)
+
+        with pytest.raises(RuntimeError, match="catch-all ADD events must route through"):
+            classify_event(event, ctx)
+        assert client.calls == [], (
+            "raise must short-circuit before any Anthropic call"
+        )
+
+    def test_catch_all_remove_keeps_legacy_path(self, frame_paths):
+        """Audit 1-LOW-1 companion: catch-all REMOVE events still flow
+        through ``classify_event`` → ``pool_for_remove`` (the legacy
+        single-pool path is correct for REMOVE).
+        """
+        before, after = frame_paths
+        # An empty REMOVE pool resolves to UNKNOWN without calling the
+        # API — proves the path is reached without raising.
+        client = FakeClient([])
+        source = StubSource()
+        ctx = ClassifierContext(
+            source=source,
+            anthropic_client=client,
+            shelf_id="catch_all",
+        )
+        event = _event(before, after, direction="remove", delta=-450.0)
+
+        # Should NOT raise — REMOVE on catch-all uses the legacy path.
+        # Empty pool short-circuits to UNKNOWN before any Anthropic call.
+        result = classify_event(event, ctx)
+        assert result.item_id == UNKNOWN_CANDIDATE_ID
+
 
 # --- Cold-start guard (deep-audit findings #6 + #7) -----------------------
 
