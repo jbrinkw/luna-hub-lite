@@ -1462,6 +1462,83 @@ def list_user_inventory_lots_qty_gt_zero(
     return [tuple(r) for r in rows]
 
 
+def list_user_inventory_lots_qty_gt_zero_certified(
+    conn: sqlite3.Connection,
+) -> list[tuple[Any, ...]]:
+    """Two-pass catch-all classification — pass-1 source.
+
+    Same shape as :func:`list_user_inventory_lots_qty_gt_zero` but
+    restricted to lots whose product has ``certified = 1`` — i.e. the
+    user has already calibrated this SKU through LiveTrack. Used by
+    :func:`pool_for_catch_all_pass1` so the first classification pass
+    only matches against trusted, already-tracked inventory.
+
+    See :func:`list_user_inventory_lots_qty_gt_zero` for column shape
+    and ordering rationale (FEFO, ``in_flight_kind != 'catch_all'``,
+    soft-delete exclusion).
+    """
+    rows = conn.execute(
+        """
+        SELECT cl.lot_id, cl.product_id, cl.qty_containers,
+               cl.in_flight_since, cl.pickup_event_id, cl.created_at,
+               p.name AS p_name, p.brand AS p_brand,
+               p.net_weight_g AS p_net_weight_g,
+               p.gross_weight_g AS p_gross_weight_g,
+               p.container_type AS p_container_type,
+               p.tare_weight_g AS p_tare_weight_g
+          FROM cloud_lots cl
+          JOIN products p ON p.product_id = cl.product_id
+         WHERE cl.qty_containers > 0
+           AND cl.deleted_at IS NULL
+           AND p.deleted_at IS NULL
+           AND p.certified = 1
+           AND (cl.in_flight_kind IS NULL OR cl.in_flight_kind <> 'catch_all')
+         ORDER BY (cl.created_at IS NULL), cl.created_at ASC
+        """
+    ).fetchall()
+    return [tuple(r) for r in rows]
+
+
+def list_user_inventory_lots_qty_gt_zero_uncertified(
+    conn: sqlite3.Connection,
+) -> list[tuple[Any, ...]]:
+    """Two-pass catch-all classification — pass-2 source.
+
+    Same shape as :func:`list_user_inventory_lots_qty_gt_zero` but
+    restricted to lots whose product is NOT certified (``certified = 0``
+    OR NULL). Used by :func:`pool_for_catch_all_pass2` when pass-1
+    against the certified inventory yields UNKNOWN / low confidence,
+    so the model can still match against products the user owns but
+    hasn't yet promoted via LiveTrack — and the auto-import block in
+    the dispatch path can flip ``certified=true`` on a confident pass-2
+    win.
+
+    NULL-safe ``p.certified`` predicate matches the legacy default
+    ``certified = 0`` from :file:`storage/schema.sql:28` while staying
+    correct against future migrations that ever NULL out the column.
+    """
+    rows = conn.execute(
+        """
+        SELECT cl.lot_id, cl.product_id, cl.qty_containers,
+               cl.in_flight_since, cl.pickup_event_id, cl.created_at,
+               p.name AS p_name, p.brand AS p_brand,
+               p.net_weight_g AS p_net_weight_g,
+               p.gross_weight_g AS p_gross_weight_g,
+               p.container_type AS p_container_type,
+               p.tare_weight_g AS p_tare_weight_g
+          FROM cloud_lots cl
+          JOIN products p ON p.product_id = cl.product_id
+         WHERE cl.qty_containers > 0
+           AND cl.deleted_at IS NULL
+           AND p.deleted_at IS NULL
+           AND (p.certified IS NULL OR p.certified = 0)
+           AND (cl.in_flight_kind IS NULL OR cl.in_flight_kind <> 'catch_all')
+         ORDER BY (cl.created_at IS NULL), cl.created_at ASC
+        """
+    ).fetchall()
+    return [tuple(r) for r in rows]
+
+
 # ---------------------------------------------------------------------------
 # sessions
 # ---------------------------------------------------------------------------

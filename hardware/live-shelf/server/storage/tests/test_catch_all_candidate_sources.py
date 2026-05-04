@@ -317,3 +317,135 @@ def test_certified_not_on_shelf_null_created_at_sorts_last(conn):
     ids = [r[0] for r in rows]
     # NEW (timestamped) sorts first; LEGACY (NULL created_at) last.
     assert ids.index("L_NEW") < ids.index("L_LEGACY")
+
+
+# ----------------------------------------------------------------------
+# Two-pass catch-all classification (2026-05-03):
+#   list_user_inventory_lots_qty_gt_zero_certified
+#   list_user_inventory_lots_qty_gt_zero_uncertified
+# ----------------------------------------------------------------------
+
+
+def test_user_inventory_certified_excludes_uncertified_products(conn):
+    """The certified variant returns ONLY lots whose product has certified=1."""
+    _seed_product(conn, "P_CERT", certified=1)
+    _seed_product(conn, "P_UNCERT", certified=0)
+    _seed_cloud_lot(conn, lot_id="L_CERT", product_id="P_CERT")
+    _seed_cloud_lot(conn, lot_id="L_UNCERT", product_id="P_UNCERT")
+
+    rows = storage_repo.list_user_inventory_lots_qty_gt_zero_certified(conn)
+    ids = [r[0] for r in rows]
+    assert "L_CERT" in ids
+    assert "L_UNCERT" not in ids, (
+        "list_user_inventory_lots_qty_gt_zero_certified must NOT return "
+        "lots whose product is uncertified"
+    )
+
+
+def test_user_inventory_uncertified_excludes_certified_products(conn):
+    """The uncertified variant returns ONLY lots whose product is NOT certified."""
+    _seed_product(conn, "P_CERT", certified=1)
+    _seed_product(conn, "P_UNCERT", certified=0)
+    _seed_cloud_lot(conn, lot_id="L_CERT", product_id="P_CERT")
+    _seed_cloud_lot(conn, lot_id="L_UNCERT", product_id="P_UNCERT")
+
+    rows = storage_repo.list_user_inventory_lots_qty_gt_zero_uncertified(conn)
+    ids = [r[0] for r in rows]
+    assert "L_UNCERT" in ids
+    assert "L_CERT" not in ids, (
+        "list_user_inventory_lots_qty_gt_zero_uncertified must NOT return "
+        "lots whose product is certified"
+    )
+
+
+def test_user_inventory_uncertified_predicate_is_null_safe(conn):
+    """NULL ``products.certified`` is treated as uncertified.
+
+    Defense-in-depth against future migrations that NULL out the
+    ``certified`` column. The schema's NOT NULL constraint prevents us
+    from inserting a NULL through the normal API; we exercise the NULL
+    branch by dropping and re-creating the column without the
+    constraint, then writing a NULL row.
+
+    Mutation guard: dropping the ``IS NULL`` clause from the
+    uncertified query (e.g. ``WHERE p.certified = 0``) makes the
+    NULL-row L_NULL silently disappear from the result, failing the
+    membership assertion.
+    """
+    _seed_product(conn, "P_NULLCERT", certified=0)
+    # Bypass the NOT NULL constraint via PRAGMA — sqlite3 lets us
+    # disable foreign keys but not NOT NULL, so we use the schema-
+    # rebuild trick: drop the column and re-add it nullable. This
+    # mutates the test's connection only.
+    with conn:
+        conn.execute("ALTER TABLE products RENAME COLUMN certified TO _old_cert")
+        conn.execute("ALTER TABLE products ADD COLUMN certified INTEGER")
+        conn.execute("UPDATE products SET certified = _old_cert")
+        conn.execute(
+            "UPDATE products SET certified = NULL WHERE product_id = ?",
+            ("P_NULLCERT",),
+        )
+    _seed_cloud_lot(conn, lot_id="L_NULL", product_id="P_NULLCERT")
+
+    rows = storage_repo.list_user_inventory_lots_qty_gt_zero_uncertified(conn)
+    ids = [r[0] for r in rows]
+    assert "L_NULL" in ids, (
+        "NULL certified must be treated as uncertified — the predicate "
+        "uses (certified IS NULL OR certified = 0)"
+    )
+
+    rows = storage_repo.list_user_inventory_lots_qty_gt_zero_certified(conn)
+    ids = [r[0] for r in rows]
+    assert "L_NULL" not in ids, (
+        "NULL certified must NOT count as certified"
+    )
+
+
+def test_user_inventory_certified_split_excludes_in_flight_catch_all(conn):
+    """Both variants exclude in_flight_kind='catch_all' (Tier 1's territory)."""
+    _seed_product(conn, "P_C", certified=1)
+    _seed_product(conn, "P_U", certified=0)
+    _seed_cloud_lot(
+        conn, lot_id="L_C_IF", product_id="P_C",
+        in_flight_kind="catch_all", in_flight_since="2026-04-27T10:00Z",
+    )
+    _seed_cloud_lot(
+        conn, lot_id="L_U_IF", product_id="P_U",
+        in_flight_kind="catch_all", in_flight_since="2026-04-27T10:00Z",
+    )
+
+    cert = [r[0] for r in
+            storage_repo.list_user_inventory_lots_qty_gt_zero_certified(conn)]
+    uncert = [r[0] for r in
+              storage_repo.list_user_inventory_lots_qty_gt_zero_uncertified(conn)]
+    assert "L_C_IF" not in cert, (
+        "in_flight_kind='catch_all' is owned by Tier 1; certified split "
+        "must exclude it to keep tiers disjoint"
+    )
+    assert "L_U_IF" not in uncert
+
+
+def test_user_inventory_certified_split_excludes_zero_qty(conn):
+    """Both variants share the qty>0 invariant from the parent helper."""
+    _seed_product(conn, "P_C", certified=1)
+    _seed_product(conn, "P_U", certified=0)
+    _seed_cloud_lot(conn, lot_id="L_C_EMPTY", product_id="P_C", qty=0.0)
+    _seed_cloud_lot(conn, lot_id="L_U_EMPTY", product_id="P_U", qty=0.0)
+
+    assert storage_repo.list_user_inventory_lots_qty_gt_zero_certified(conn) == []
+    assert storage_repo.list_user_inventory_lots_qty_gt_zero_uncertified(conn) == []
+
+
+def test_user_inventory_certified_split_returns_extended_tuple_shape(conn):
+    """Both variants return the 12-column shape (with tare_weight_g appended).
+
+    The adapter unpacks 12 columns; if the SELECT list ever drifts, the
+    adapter ValueError is louder than a silent misread.
+    """
+    _seed_product(conn, "P_C", certified=1)
+    _seed_cloud_lot(conn, lot_id="L_C", product_id="P_C")
+    rows = storage_repo.list_user_inventory_lots_qty_gt_zero_certified(conn)
+    assert len(rows) == 1
+    assert len(rows[0]) == 12, (
+        f"expected 12-column tuple shape, got {len(rows[0])} columns"
+    )

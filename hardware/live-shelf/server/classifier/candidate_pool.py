@@ -499,107 +499,47 @@ def pool_for_add(
     return _ensure_sentinel_last(truncated)
 
 
-def pool_for_catch_all(
+def _pool_for_catch_all(
     delta_g: float,
     ctx: ClassifierContext,
     *,
+    in_flight_lots: list[LotCandidate],
+    inventory_lots: list[LotCandidate],
     top_n: int | None = None,
 ) -> list[Candidate]:
-    """Assemble the catch-all delta-capture candidate pool.
+    """Build a catch-all candidate pool from explicit lot lists.
 
-    **2026-04-27 single-pool design (decisions.md, CATCH_ALL_SCALE_PLAN.md
-    §"Final confirmed model"):** the catch-all scale runs a delta-capture
-    state machine where the FIRST event measures the placed item and the
-    SECOND event records consumption against the snapshotted pickup weight.
-    Both events draw from ONE pool — composition does not change between
-    first and second; the runtime branching at apply time decides whether
-    to emit ``catch_all_first_measurement`` or ``catch_all_second_measurement``
-    based on whether the picked lot is already in-flight on catch-all.
+    Shared assembly + rank + truncation step used by all three public
+    catch-all pool builders (legacy single-pool, two-pass pass-1,
+    two-pass pass-2). Callers fetch their own lot lists from the
+    :class:`CandidateSource` via the appropriate getters and pass them
+    in here — keeps the dedupe/ranking logic in one place.
 
-    Pool composition (in tier order):
-
-    1. ``in_flight`` lots — every lot currently mid-measurement on the
-       catch-all (``cloud_lots.in_flight_kind='catch_all'``). Multiple
-       can coexist. Picking one of these triggers the SECOND event in
-       the apply path.
-    2. ``inventory_only`` lots — every qty>0 user-inventory lot
-       (catch-all auto-import, 2026-05-02). Includes uncertified
-       products; ordered FEFO by ``cloud_lots.created_at ASC``.
-       Picking one of these triggers the FIRST event in the apply
-       path; if the picked product has no tare yet, the apply path
-       writes one from the AI's ``estimated_tare_g`` (set-once).
-       Sourced via ``CandidateSource.get_catch_all_user_inventory_lots``.
-    3. UNKNOWN sentinel.
-
-    Live-shelf branches (``recently_out``, ``top_up_target``,
-    ``catalog_not_on_shelf``, ``inventory_only``) are intentionally NOT
-    queried here. Catch-all is its own state machine; bleeding in
-    live-shelf-specific inventory sources would let a lot mid-pickup-
-    on-the-live-shelf get incorrectly resolved as a catch-all event.
-
-    Lot-level: the apply path uses ``candidate_id`` as a lot_id, NOT a
-    product_id (unlike the live_shelf pool which collapses by product).
-    Pi's catch-all dispatch uses the picked lot's ``in_flight_kind``
-    state to route first-vs-second-event semantics; routing by product
-    would lose the discriminator needed for that decision.
-
-    Args:
-        delta_g: Positive scale delta in grams (the placed item's mass).
-        ctx: Classifier context carrying the :class:`CandidateSource`.
-        top_n: Optional override for the pool cap.
+    Lot dedupe by ``lot_id``: when both lists name the same lot, Tier 1
+    (``in_flight``) wins because it precedes Tier 2 in iteration order.
     """
-    source: CandidateSource = ctx.source
     observed_abs = abs(delta_g)
     limit = top_n if top_n is not None else ctx.pool_top_n
-
-    # Tier 1 — lots currently in-flight on the catch-all. Held as
-    # ``LotCandidate`` so the rebuild loop below can read the
-    # ``tare_weight_g`` / ``net_weight_g`` fields directly from the
-    # source row without round-tripping through ``_from_lot``.
-    get_in_flight = getattr(source, "get_catch_all_in_flight_lots", None)
-    in_flight_lots: list[LotCandidate] = []
-    if callable(get_in_flight):
-        try:
-            in_flight_lots = list(get_in_flight())
-        except Exception:  # noqa: BLE001 — never crash the pool builder
-            in_flight_lots = []
-
-    # Tier 2 — every qty>0 cloud_lots row for the user (catch-all
-    # auto-import, 2026-05-02). Widened from the prior
-    # certified-not-on-any-shelf scope; uncertified products with
-    # inventory are now first-class candidates and the apply path
-    # writes tare from the AI estimate when the picked product has
-    # none. FEFO-ordered (oldest created_at first) at the source query.
-    get_inventory = getattr(source, "get_catch_all_user_inventory_lots", None)
-    inventory_lots: list[LotCandidate] = []
-    if callable(get_inventory):
-        try:
-            inventory_lots = list(get_inventory())
-        except Exception:  # noqa: BLE001
-            inventory_lots = []
 
     rebuilt: list[Candidate] = []
     seen_lot_ids: set[str] = set()
     # **2026-04-28 (Codex finding MEDIUM-5):** Tier 1 (in-flight) and
     # Tier 2 (inventory-only) are now strictly disjoint at the source
-    # query (Tier 2 excludes ``in_flight_kind = 'catch_all'``), but we
-    # also dedupe by lot_id here as a belt-and-braces guard. If a
-    # future repo refactor re-introduces overlap, the first
-    # occurrence wins (Tier 1 in-flight always precedes Tier 2 in the
-    # iteration order below) and the duplicate is silently dropped
-    # before ranking + truncation, so a single lot can never crowd out
-    # real options or appear twice in the prompt.
+    # query, but we also dedupe by lot_id here as a belt-and-braces
+    # guard. If a future repo refactor re-introduces overlap, the
+    # first occurrence wins (Tier 1 in-flight always precedes Tier 2
+    # in the iteration order below) and the duplicate is silently
+    # dropped before ranking + truncation, so a single lot can never
+    # crowd out real options or appear twice in the prompt.
     #
     # Catch-all auto-import (2026-05-02, Task 5): the Tier 2
     # ``LotCandidate`` carries ``tare_weight_g`` + ``net_weight_g``
-    # (populated by ``get_catch_all_user_inventory_lots``). Tier 1
-    # in-flight ``LotCandidate``s don't populate them — defaults to
-    # ``None`` — so they never get the auto-import flag (correct:
-    # in-flight items are mid-measurement, not mid-import). The flag
-    # is set iff source carried a non-None ``net_weight_g`` AND
-    # ``tare_weight_g`` is None. The ``getattr`` defensive lookup
-    # keeps legacy stubs / pre-Task-5 source paths working when they
-    # haven't been re-generated against the widened ``LotCandidate``.
+    # (populated by the inventory-fetcher). Tier 1 in-flight
+    # ``LotCandidate``s don't populate them — defaults to ``None``
+    # — so they never get the auto-import flag (correct: in-flight
+    # items are mid-measurement, not mid-import). The flag is set
+    # iff source carried a non-None ``net_weight_g`` AND
+    # ``tare_weight_g`` is None.
     for tier_tag, src_c in (
         [("in_flight", lot) for lot in in_flight_lots]
         + [("inventory_only", lot) for lot in inventory_lots]
@@ -629,12 +569,168 @@ def pool_for_catch_all(
             )
         )
 
-    # No product-collapse: catch-all pool is lot-keyed (each lot has its
-    # own state machine). Rank within the (in_flight, inventory_only)
-    # tiers and append the UNKNOWN sentinel.
+    # No product-collapse: catch-all pool is lot-keyed (each lot has
+    # its own state machine). Rank within the (in_flight,
+    # inventory_only) tiers and append the UNKNOWN sentinel.
     ranked = _rank_candidates(rebuilt, observed_abs)
     truncated = ranked[: max(0, limit - 1)]
     return _ensure_sentinel_last(truncated)
+
+
+def _safe_get_lots(
+    source: CandidateSource, method_name: str
+) -> list[LotCandidate]:
+    """Best-effort fetch of lot candidates from a source method.
+
+    Returns ``[]`` for sources that don't implement ``method_name`` and
+    swallows fetcher exceptions so a misbehaving DB never crashes the
+    pool builder. Used by all three catch-all pool builders to dispatch
+    Tier 1 / Tier 2 fetches uniformly.
+    """
+    fetcher = getattr(source, method_name, None)
+    if not callable(fetcher):
+        return []
+    try:
+        return list(fetcher())
+    except Exception:  # noqa: BLE001 — never crash the pool builder
+        return []
+
+
+def pool_for_catch_all(
+    delta_g: float,
+    ctx: ClassifierContext,
+    *,
+    top_n: int | None = None,
+) -> list[Candidate]:
+    """Assemble the legacy single-pool catch-all candidate set.
+
+    .. deprecated:: 2026-05-03
+        Use :func:`pool_for_catch_all_pass1` and
+        :func:`pool_for_catch_all_pass2` for new call sites — the
+        catch-all dispatch path now classifies in two passes (certified
+        first, uncertified fallback). This builder is kept for backward
+        compatibility with existing tests and any callers that still
+        want the single widened pool. Live-shelf code is unaffected.
+
+    **2026-04-27 single-pool design (decisions.md, CATCH_ALL_SCALE_PLAN.md
+    §"Final confirmed model"):** the catch-all scale runs a delta-capture
+    state machine where the FIRST event measures the placed item and the
+    SECOND event records consumption against the snapshotted pickup weight.
+    Both events draw from ONE pool — composition does not change between
+    first and second; the runtime branching at apply time decides whether
+    to emit ``catch_all_first_measurement`` or ``catch_all_second_measurement``
+    based on whether the picked lot is already in-flight on catch-all.
+
+    Pool composition (in tier order):
+
+    1. ``in_flight`` lots — every lot currently mid-measurement on the
+       catch-all (``cloud_lots.in_flight_kind='catch_all'``). Multiple
+       can coexist. Picking one of these triggers the SECOND event in
+       the apply path.
+    2. ``inventory_only`` lots — every qty>0 user-inventory lot
+       (catch-all auto-import, 2026-05-02). Includes uncertified
+       products; ordered FEFO by ``cloud_lots.created_at ASC``.
+       Picking one of these triggers the FIRST event in the apply
+       path; if the picked product has no tare yet, the apply path
+       writes one from the AI's ``estimated_tare_g`` (set-once).
+       Sourced via ``CandidateSource.get_catch_all_user_inventory_lots``.
+    3. UNKNOWN sentinel.
+
+    Args:
+        delta_g: Positive scale delta in grams (the placed item's mass).
+        ctx: Classifier context carrying the :class:`CandidateSource`.
+        top_n: Optional override for the pool cap.
+    """
+    source: CandidateSource = ctx.source
+    in_flight_lots = _safe_get_lots(source, "get_catch_all_in_flight_lots")
+    inventory_lots = _safe_get_lots(
+        source, "get_catch_all_user_inventory_lots"
+    )
+    return _pool_for_catch_all(
+        delta_g, ctx,
+        in_flight_lots=in_flight_lots,
+        inventory_lots=inventory_lots,
+        top_n=top_n,
+    )
+
+
+def pool_for_catch_all_pass1(
+    delta_g: float,
+    ctx: ClassifierContext,
+    *,
+    top_n: int | None = None,
+) -> list[Candidate]:
+    """Two-pass catch-all classification — pass-1 (certified-only).
+
+    Pool composition:
+
+    1. ``in_flight`` lots — every lot currently mid-measurement on the
+       catch-all, regardless of certification (these are already
+       calibrated and being measured RIGHT NOW; restricting to
+       certified would silently drop active sessions if a user ever
+       toggled certified back to false mid-flow).
+    2. ``inventory_only`` lots — every qty>0 user-inventory lot whose
+       product has ``certified=true``. Sourced via
+       ``CandidateSource.get_catch_all_certified_user_inventory_lots``.
+    3. UNKNOWN sentinel.
+
+    Used by :func:`classify_catch_all_with_fallback` for its first
+    classification pass. The model is told to match against trusted
+    LiveTrack inventory; if it returns UNKNOWN / low confidence the
+    orchestrator runs pass-2 against the uncertified pool below.
+    """
+    source: CandidateSource = ctx.source
+    in_flight_lots = _safe_get_lots(source, "get_catch_all_in_flight_lots")
+    inventory_lots = _safe_get_lots(
+        source, "get_catch_all_certified_user_inventory_lots"
+    )
+    return _pool_for_catch_all(
+        delta_g, ctx,
+        in_flight_lots=in_flight_lots,
+        inventory_lots=inventory_lots,
+        top_n=top_n,
+    )
+
+
+def pool_for_catch_all_pass2(
+    delta_g: float,
+    ctx: ClassifierContext,
+    *,
+    top_n: int | None = None,
+) -> list[Candidate]:
+    """Two-pass catch-all classification — pass-2 (uncertified-only).
+
+    Pool composition:
+
+    1. ``inventory_only`` lots — every qty>0 user-inventory lot whose
+       product is NOT certified (``certified IS NULL OR certified=0``).
+       Sourced via
+       ``CandidateSource.get_catch_all_uncertified_user_inventory_lots``.
+    2. UNKNOWN sentinel.
+
+    NO Tier 1 (in_flight): the in-flight tier is exclusively pass-1's
+    territory. By the time we reach pass-2 we've already concluded
+    pass-1 had no confident match — and an in-flight lot would have
+    matched there if it was a real candidate. Including it in pass-2
+    would also blur the certify-on-pass-2-match signal: in-flight lots
+    are by definition already certified, so they wouldn't trigger the
+    auto-certify push anyway.
+
+    Used by :func:`classify_catch_all_with_fallback` as the fallback
+    pass; a confident match here triggers the dispatch path's
+    ``certified=true`` push to ``/shelf-ingest/product-tare`` so the
+    user's product graduates to LiveTrack-tracked.
+    """
+    source: CandidateSource = ctx.source
+    inventory_lots = _safe_get_lots(
+        source, "get_catch_all_uncertified_user_inventory_lots"
+    )
+    return _pool_for_catch_all(
+        delta_g, ctx,
+        in_flight_lots=[],
+        inventory_lots=inventory_lots,
+        top_n=top_n,
+    )
 
 
 def pool_for_remove(

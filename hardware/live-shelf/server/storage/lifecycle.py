@@ -98,6 +98,12 @@ class ReasonCode:
     TARE_AUTO_IMPORT = "TARE_AUTO_IMPORT"
     TARE_AUTO_FROM_EMPTY = "TARE_AUTO_FROM_EMPTY"
     MEASURED_FULL_AUTO = "MEASURED_FULL_AUTO"
+    # Two-pass catch-all classification: emitted when pass-2
+    # (uncertified-only) wins and the dispatch path pushes
+    # ``certified=true`` to cloud /shelf-ingest/product-tare. Sibling
+    # to TARE_AUTO_IMPORT and MEASURED_FULL_AUTO; same set-once
+    # cloud-side semantics.
+    CERTIFY_AUTO_IMPORT = "CERTIFY_AUTO_IMPORT"
 
     # -- usage_log (USAGE_LOG_PLAN.md) ------------------------------------
     # Emitted whenever a usage_log row is written (or the write is

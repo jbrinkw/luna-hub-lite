@@ -316,5 +316,113 @@ class CloudCandidateSource:
             )
         return out
 
+    # -- Catch-all delta-capture pool sources -----------------------------
+    #
+    # The cloud catalog mirrors ``stock_lots`` rows (one per non-depleted
+    # lot) into ``catalog.stock`` and the ``products`` row alongside in
+    # ``catalog.products``. The catch-all pool is lot-keyed (each lot has
+    # its own state machine on the Pi); we project every qty>0 stock row
+    # to a :class:`LotCandidate`. The two-pass classification (pass-1
+    # certified, pass-2 uncertified) splits this projection on the joined
+    # product's ``certified`` column (cloud catalog already returns
+    # ``certified`` per :file:`supabase/functions/shelf-ingest/index.ts:266`).
+
+    def _build_catch_all_user_inventory_lots(
+        self,
+        *,
+        certified_filter: Optional[bool],
+    ) -> list[LotCandidate]:
+        """Project ``catalog.stock`` rows to catch-all :class:`LotCandidate`.
+
+        ``certified_filter`` selects which subset to return:
+
+          * ``None``     — every qty>0 lot (parity with the local
+                            adapter's :meth:`get_catch_all_user_inventory_lots`).
+          * ``True``    — only lots whose product has ``certified=true``
+                            (pass-1 source).
+          * ``False``  — only lots whose product is uncertified
+                            (``certified=false`` OR missing — pass-2
+                            source).
+
+        We do NOT filter on ``in_flight_kind`` here — the cloud catalog
+        already excludes already-in-flight lots from the
+        ``catalog.stock`` snapshot at fetch time; if a future revision
+        ever surfaces them, the pool builder's lot-id dedupe still
+        keeps Tier 1 / Tier 2 disjoint.
+        """
+        catalog = self._catalog
+        if catalog is None:
+            return []
+        products_by_id: dict[str, dict] = {
+            p["product_id"]: p for p in catalog.products if "product_id" in p
+        }
+        out: list[LotCandidate] = []
+        for row in catalog.stock:
+            qty = _as_float(row.get("qty_containers")) or 0.0
+            if qty <= 0:
+                continue
+            product = products_by_id.get(row.get("product_id"))
+            if product is None:
+                continue
+            if certified_filter is not None:
+                # Cloud emits ``certified`` as a boolean column. Coerce
+                # truthy/falsy (Python's bool semantics handle ``True``,
+                # ``1``, ``"1"`` — but not ``"0"``, hence the explicit
+                # int-string normalisation for legacy SQLite shadows).
+                raw = product.get("certified")
+                if isinstance(raw, str):
+                    is_cert = raw.lower() in {"1", "true"}
+                else:
+                    is_cert = bool(raw)
+                if certified_filter and not is_cert:
+                    continue
+                if (not certified_filter) and is_cert:
+                    continue
+            lot_id = (
+                row.get("lot_id")
+                or row.get("stock_id")
+                or f"{row.get('product_id')}:{row.get('expires_on','')}"
+            )
+            out.append(
+                LotCandidate(
+                    lot_id=str(lot_id),
+                    product_id=str(product["product_id"]),
+                    name=str(product.get("name", "")),
+                    brand=product.get("brand"),
+                    expected_weight_g=_as_float(product.get("gross_weight_g"))
+                    or _as_float(product.get("net_weight_g")),
+                    container_type=product.get("container_type"),
+                    # Status sentinel: borrow "out" — same convention as
+                    # the local adapter (lot is logically off the live
+                    # shelf since catch-all lots have no shelf binding).
+                    status="out",
+                    reference_image_paths=(),
+                    tare_weight_g=_as_float(product.get("tare_weight_g")),
+                    net_weight_g=_as_float(product.get("net_weight_g")),
+                )
+            )
+        return out
+
+    def get_catch_all_user_inventory_lots(self) -> Sequence[LotCandidate]:
+        """Cloud-mirror version of the local adapter's same-named method.
+
+        Backstop for the legacy single-pass catch-all flow (kept for
+        backwards-compat with :func:`pool_for_catch_all`). Two-pass
+        classification uses the certified/uncertified variants below.
+        """
+        return self._build_catch_all_user_inventory_lots(certified_filter=None)
+
+    def get_catch_all_certified_user_inventory_lots(
+        self,
+    ) -> Sequence[LotCandidate]:
+        """Two-pass catch-all — pass-1 source from the cloud catalog."""
+        return self._build_catch_all_user_inventory_lots(certified_filter=True)
+
+    def get_catch_all_uncertified_user_inventory_lots(
+        self,
+    ) -> Sequence[LotCandidate]:
+        """Two-pass catch-all — pass-2 source from the cloud catalog."""
+        return self._build_catch_all_user_inventory_lots(certified_filter=False)
+
 
 __all__ = ["CloudCandidateSource"]

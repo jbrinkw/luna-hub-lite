@@ -507,31 +507,49 @@ class CloudClient:
         product_id: str,
         tare_g: Optional[float] = None,
         measured_full_at: Optional[str] = None,
+        certified: Optional[bool] = None,
     ) -> dict:
-        """Push tare and/or measured_full_at to ``/shelf-ingest/product-tare``.
+        """Push tare, measured_full_at and/or certified to ``/shelf-ingest/product-tare``.
 
-        Both fields are optional but at least one must be provided. The
-        cloud route enforces set-once semantics on its side (see Task 2's
-        ``/shelf-ingest/product-tare`` SELECT-then-conditional-UPDATE):
-        existing non-NULL fields are not overwritten, so retries on
+        All three fields are optional but at least one must be
+        provided. The cloud route enforces set-once semantics on its
+        side (see Task 2's ``/shelf-ingest/product-tare``
+        SELECT-then-conditional-UPDATE): existing non-NULL /
+        already-true fields are not overwritten, so retries on
         transient errors are safe.
+
+        ``certified`` semantics:
+          * ``True``  — request the cloud flip ``products.certified``
+                        from false/NULL → true. Set-once; never reverses.
+          * ``False`` / ``None`` — omitted from the body (callers don't
+                        UNcertify from the Pi side; the catch-all auto-
+                        import is the only certify writer).
 
         Used by:
           * Catch-all auto-import (Task 8) — sends ``tare_g`` only.
-          * In-flight pickup full-cup capture (Task 9 — pending) — sends
-            ``measured_full_at`` only.
-          * Calibration completion (Task 10 — pending) — may send both.
+          * In-flight pickup full-cup capture (Task 9 — pending) —
+            sends ``measured_full_at`` only.
+          * Calibration completion (Task 10 — pending) — may send both
+            tare and measured_full_at.
+          * Two-pass catch-all classification (2026-05-03) — sends
+            ``certified=True`` when pass-2 (uncertified-only) is the
+            pass that produced the match.
 
         Raises :class:`CloudError` on any non-2xx — callers swallow it
         per fire-and-forget semantics. The local row is authoritative;
         the push is best-effort propagation.
         """
-        if tare_g is None and measured_full_at is None:
+        if tare_g is None and measured_full_at is None and certified is not True:
             # Nothing to send — caller bug, but don't make a useless round trip.
+            # Note ``certified is not True`` (not ``certified is None``):
+            # an explicit ``False`` is also a no-op since we never push
+            # uncertify from the Pi.
             return {}
         body: dict[str, Any] = {"product_id": product_id}
         if tare_g is not None:
             body["tare_weight_g"] = float(tare_g)
         if measured_full_at is not None:
             body["measured_full_at"] = measured_full_at
+        if certified is True:
+            body["certified"] = True
         return self.post("/product-tare", body)

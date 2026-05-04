@@ -34,6 +34,7 @@ from .. import shelves as shelf_registry
 from ..camera import session_capture
 from ..camera.daemon import CameraDaemon, now_iso_utc_ms, parse_iso_utc
 from ..camera.extract import FrameNotAvailableError, frame_at_with
+from ..classifier.catch_all_fallback import classify_catch_all_with_fallback
 from ..classifier.classify import classify_event
 from ..classifier.fallback import classify_event_with_fallback
 from ..classifier.models import (
@@ -625,8 +626,9 @@ class ScaleHandler:
         *,
         tare_g: Optional[float] = None,
         measured_full_at: Optional[str] = None,
+        certified: Optional[bool] = None,
     ) -> None:
-        """Push tare and/or measured_full_at to cloud /shelf-ingest/product-tare.
+        """Push tare, measured_full_at and/or certified to cloud /shelf-ingest/product-tare.
 
         Per the CATCH_ALL_TARE_CAPTURE_PLAN cloud resolution: local
         writes are authoritative and synchronous; cloud push is
@@ -636,15 +638,18 @@ class ScaleHandler:
         is a silent no-op — useful for the legacy / tests / cloud-
         disabled paths.
 
-        Both fields are optional but at least one must be provided. The
-        cloud route enforces set-once semantics: existing non-NULL
-        fields are NOT overwritten, so retries on transient errors are
-        safe. Used by:
+        At least one field must be provided. The cloud route enforces
+        set-once semantics: existing non-NULL / already-true fields are
+        NOT overwritten, so retries on transient errors are safe. Used
+        by:
           * catch-all auto-import (Task 8) — ``tare_g`` only;
-          * in-flight pickup full-cup capture (Task 9, pending);
-          * calibration completion (Task 10, pending).
+          * in-flight pickup full-cup capture (Task 9, pending) —
+            ``measured_full_at`` only;
+          * calibration completion (Task 10, pending) — may send both;
+          * two-pass catch-all classification (2026-05-03) —
+            ``certified=True`` when pass-2 (uncertified-only) wins.
         """
-        if tare_g is None and measured_full_at is None:
+        if tare_g is None and measured_full_at is None and certified is not True:
             return
         client = self._cloud_client
         if client is None:
@@ -662,6 +667,8 @@ class ScaleHandler:
                 kwargs["tare_g"] = float(tare_g)
             if measured_full_at is not None:
                 kwargs["measured_full_at"] = measured_full_at
+            if certified is True:
+                kwargs["certified"] = True
             push(**kwargs)
         except Exception:  # noqa: BLE001 — must never raise
             log.warning(
@@ -2546,6 +2553,49 @@ class ScaleHandler:
         except Exception:  # pragma: no cover — never block dispatch
             log.exception(
                 "catch_all_auto_import: measured_full stamp failed "
+                "(non-fatal) for event %s lot %s",
+                event_id, cloud_lot_id,
+            )
+
+        # Catch-all auto-import — certified flag stamp (two-pass
+        # classification, 2026-05-03). When pass-2 (uncertified-only)
+        # was the pass that produced this match — meaning the model
+        # confidently identified the placed item against the user's
+        # uncertified inventory — push ``certified=true`` to cloud so
+        # the product graduates to LiveTrack-tracked. The
+        # ``meta["needs_certify"]`` flag is stamped by
+        # ``classify_catch_all_with_fallback`` exclusively for the
+        # pass-2-wins branch. Set-once is enforced cloud-side at
+        # /shelf-ingest/product-tare (uncertified→certified transition
+        # only; once true, stays true).
+        try:
+            meta = (
+                classification.get("meta")
+                if isinstance(classification, dict)
+                else getattr(classification, "meta", None)
+            )
+            if isinstance(meta, dict) and meta.get("needs_certify") is True:
+                self._lc_event(
+                    event_id,
+                    actor="catch_all_auto_import",
+                    reason_code=ReasonCode.CERTIFY_AUTO_IMPORT,
+                    payload={
+                        "product_id": str(product_id),
+                        "catch_all_pass": meta.get("catch_all_pass"),
+                        "pass2_item_id": meta.get(
+                            "catch_all_pass2_item_id"
+                        ),
+                        "pass2_confidence": meta.get(
+                            "catch_all_pass2_confidence"
+                        ),
+                    },
+                )
+                self._push_product_state_to_cloud(
+                    str(product_id), certified=True,
+                )
+        except Exception:  # pragma: no cover — never block dispatch
+            log.exception(
+                "catch_all_auto_import: certify push failed "
                 "(non-fatal) for event %s lot %s",
                 event_id, cloud_lot_id,
             )
@@ -5790,7 +5840,16 @@ class ScaleHandler:
             _fallback_enabled = False
 
         try:
-            if _fallback_enabled:
+            if event_shelf_id == "catch_all" and direction == "add":
+                # Catch-all ADD events run a dedicated two-pass
+                # classifier: pass-1 against certified inventory only,
+                # pass-2 against uncertified inventory only. A
+                # confident pass-2 win triggers the dispatch path's
+                # auto-import of ``certified=true`` to cloud (set-once
+                # via /shelf-ingest/product-tare). Live-shelf events
+                # and catch-all REMOVEs go through the existing path.
+                result = classify_catch_all_with_fallback(cls_event, ctx)
+            elif _fallback_enabled:
                 result = classify_event_with_fallback(
                     cls_event, ctx, fallback_enabled=True,
                 )

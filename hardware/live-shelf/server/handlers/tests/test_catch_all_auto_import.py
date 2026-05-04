@@ -24,6 +24,7 @@ Mutation guard: removing the auto-import block from
 
 from __future__ import annotations
 
+import json
 import sys
 import threading
 from pathlib import Path
@@ -81,12 +82,14 @@ class _RecordingCloudClient:
         product_id: str,
         tare_g: float | None = None,
         measured_full_at: str | None = None,
+        certified: bool | None = None,
     ) -> dict:
         self.product_state_calls.append(
             {
                 "product_id": product_id,
                 "tare_g": tare_g,
                 "measured_full_at": measured_full_at,
+                "certified": certified,
             }
         )
         return {"ok": True}
@@ -828,4 +831,161 @@ def test_measured_full_pi_guard_short_circuits_when_attribute_present(
     ).fetchall()
     assert rows == [], (
         "no MEASURED_FULL_AUTO lifecycle row when the Pi guard fires"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Layer 8 (two-pass catch-all classification, 2026-05-03):
+# ``meta["needs_certify"] == True`` triggers a certify auto-import push.
+# ---------------------------------------------------------------------------
+
+
+def test_catch_all_pushes_certified_when_needs_certify_meta_true(tmp_path):
+    """Pass-2 wins (meta.needs_certify=True) → dispatch pushes certified=true.
+
+    The two-pass classifier stamps ``meta["needs_certify"]=True`` on the
+    classification result when pass-2 (uncertified-only) produced the
+    match. The dispatch path reads that flag and fires a third push to
+    ``CloudClient.push_product_state`` with ``certified=True``, plus a
+    ``CERTIFY_AUTO_IMPORT`` lifecycle row for operator audit.
+
+    Mutation guard: removing the certify auto-import block from
+    ``_dispatch_catch_all_add`` makes the assertion on the
+    ``certified=True`` push call fail.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    # Tare already set so the existing TARE_AUTO_IMPORT block is a no-op.
+    # The MEASURED_FULL_AUTO block also won't fire because the reading is
+    # well below the 5%-of-net tolerance band.
+    _seed_product(conn, product_id="prod-pass2", tare=25.0, net=500.0)
+    _seed_cloud_lot(conn, lot_id="LOT-PASS2", product_id="prod-pass2")
+
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-PASS2",
+            "reasoning": "two-pass classifier matched against uncertified",
+            "meta": {
+                "catch_all_pass": 2,
+                "needs_certify": True,
+                "catch_all_pass1_item_id": "UNKNOWN",
+                "catch_all_pass1_confidence": 0.1,
+                "catch_all_pass2_item_id": "LOT-PASS2",
+                "catch_all_pass2_confidence": 0.92,
+            },
+        },
+        delta_g=275.0,  # mid-bottle — outside the measured_full window
+        event_ts="2026-05-03T18:00:00.000Z",
+        event_id="evt-certify-1",
+        session_id="sess-certify-1",
+    )
+    assert handled is True
+
+    # Exactly one certify push fired with the expected payload.
+    cert_calls = [
+        c for c in cloud.product_state_calls if c.get("certified") is True
+    ]
+    assert len(cert_calls) == 1, (
+        "expected exactly one push_product_state with certified=True"
+    )
+    assert cert_calls[0]["product_id"] == "prod-pass2"
+    # Tare and measured_full_at MUST be None — this push is exclusively
+    # the certify flag (pass-2 may not have estimated tare; the existing
+    # tare-set rules handle that path independently).
+    assert cert_calls[0].get("tare_g") is None
+    assert cert_calls[0].get("measured_full_at") is None
+
+    # Lifecycle row: one CERTIFY_AUTO_IMPORT, payload carries the audit
+    # trail so operators can correlate the cert flip with which pass-2
+    # call produced it.
+    rows = conn.execute(
+        "SELECT actor, reason_code, payload_json "
+        "FROM event_lifecycle WHERE reason_code = ?",
+        (ReasonCode.CERTIFY_AUTO_IMPORT,),
+    ).fetchall()
+    assert len(rows) == 1
+    assert rows[0][0] == "catch_all_auto_import"
+    payload = json.loads(rows[0][2])
+    assert payload["product_id"] == "prod-pass2"
+    assert payload["catch_all_pass"] == 2
+    assert payload["pass2_item_id"] == "LOT-PASS2"
+    assert payload["pass2_confidence"] == pytest.approx(0.92)
+
+
+def test_catch_all_does_not_push_certified_when_needs_certify_false(tmp_path):
+    """Pass-1 wins (meta.needs_certify=False) → no certify push.
+
+    When the standard pass-1 (certified-only) path matched, the product
+    was ALREADY certified; pushing certified=true again would be a wasted
+    round trip. Dispatch path leaves the flag untouched.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    _seed_product(conn, product_id="prod-pass1", tare=25.0, net=500.0)
+    _seed_cloud_lot(conn, lot_id="LOT-PASS1", product_id="prod-pass1")
+
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-PASS1",
+            "reasoning": "pass-1 confident hit",
+            "meta": {
+                "catch_all_pass": 1,
+                "needs_certify": False,
+                "catch_all_pass1_item_id": "LOT-PASS1",
+                "catch_all_pass1_confidence": 0.95,
+            },
+        },
+        delta_g=275.0,
+        event_ts="2026-05-03T18:00:00.000Z",
+        event_id="evt-certify-2",
+        session_id="sess-certify-2",
+    )
+    assert handled is True
+
+    cert_calls = [
+        c for c in cloud.product_state_calls if c.get("certified") is True
+    ]
+    assert cert_calls == [], (
+        "needs_certify=False MUST NOT trigger a certify push"
+    )
+    rows = conn.execute(
+        "SELECT 1 FROM event_lifecycle WHERE reason_code = ?",
+        (ReasonCode.CERTIFY_AUTO_IMPORT,),
+    ).fetchall()
+    assert rows == [], (
+        "no CERTIFY_AUTO_IMPORT lifecycle row when pass-1 wins"
+    )
+
+
+def test_catch_all_does_not_push_certified_when_meta_missing(tmp_path):
+    """Classification with no meta block → no certify push.
+
+    Backwards compatibility: dispatch path tolerates the legacy
+    single-pass classification shape (no meta, or meta without the
+    ``needs_certify`` field) — it just skips the cert auto-import block.
+    Critical for any caller that hasn't migrated to the two-pass
+    orchestrator.
+    """
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    _seed_product(conn, product_id="prod-legacy", tare=25.0, net=500.0)
+    _seed_cloud_lot(conn, lot_id="LOT-LEGACY", product_id="prod-legacy")
+
+    handled = handler._dispatch_catch_all_add(
+        classification={
+            "item_id": "LOT-LEGACY",
+            "reasoning": "legacy single-pass classification, no meta",
+        },
+        delta_g=275.0,
+        event_ts="2026-05-03T18:00:00.000Z",
+        event_id="evt-certify-3",
+        session_id="sess-certify-3",
+    )
+    assert handled is True
+
+    cert_calls = [
+        c for c in cloud.product_state_calls if c.get("certified") is True
+    ]
+    assert cert_calls == [], (
+        "missing meta block MUST be treated as 'no certify request'"
     )

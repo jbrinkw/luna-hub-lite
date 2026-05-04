@@ -371,48 +371,98 @@ class RepoCandidateSource:
             rows = storage_repo.list_user_inventory_lots_qty_gt_zero(
                 self._conn
             )
-            out: list[LotCandidate] = []
-            for row in rows:
-                # ``p_tare`` (products.tare_weight_g) is unpacked here
-                # so the LotCandidate carries it through to the pool
-                # builder, which uses it (paired with p_net) to flip
-                # ``Candidate.needs_tare_estimate`` for AI tare
-                # estimation when the product has no captured tare yet
-                # (Task 5, catch-all auto-import).
-                (
-                    lot_id, product_id, _qty, _ifsince, _pkid, _created,
-                    p_name, p_brand, p_net, p_gross, p_container, p_tare,
-                ) = row
-                if not product_id or not p_name:
-                    # Orphan: cloud_lots has a product_id but no products
-                    # row is mirrored locally. Skip — without product
-                    # metadata we can't build a usable candidate.
-                    continue
-                out.append(
-                    LotCandidate(
-                        lot_id=str(lot_id),
-                        product_id=str(product_id),
-                        name=str(p_name),
-                        brand=p_brand,
-                        expected_weight_g=p_gross or p_net,
-                        container_type=p_container,
-                        # No "off-shelf inventory" status in the
-                        # LotCandidate enum — borrow ``out`` (closest
-                        # match: lot is logically off any shelf). Tier
-                        # ranking is driven by why_candidate set in
-                        # candidate_pool, not status.
-                        status="out",
-                        reference_image_paths=self._absolute_refs(
-                            str(product_id)
-                        ),
-                        # Catch-all auto-import (Task 5): thread
-                        # tare/net so the pool builder can flag
-                        # candidates with no tare captured.
-                        tare_weight_g=p_tare,
-                        net_weight_g=p_net,
-                    )
+            return self._build_lots_from_user_inventory_rows(rows)
+
+    def get_catch_all_certified_user_inventory_lots(
+        self,
+    ) -> Sequence[LotCandidate]:
+        """Two-pass catch-all classification — pass-1 source.
+
+        Returns the certified (``products.certified = 1``) subset of
+        :meth:`get_catch_all_user_inventory_lots`. Pass-1 ranks against
+        ONLY this subset so the model's first attempt sticks to
+        trusted, already-LiveTrack-promoted inventory. The pool builder
+        :func:`pool_for_catch_all_pass1` consumes this directly.
+        """
+        with self._db_lock:
+            rows = storage_repo.list_user_inventory_lots_qty_gt_zero_certified(
+                self._conn
+            )
+            return self._build_lots_from_user_inventory_rows(rows)
+
+    def get_catch_all_uncertified_user_inventory_lots(
+        self,
+    ) -> Sequence[LotCandidate]:
+        """Two-pass catch-all classification — pass-2 source.
+
+        Returns the uncertified (``products.certified IS NULL OR = 0``)
+        subset of :meth:`get_catch_all_user_inventory_lots`. Used by
+        :func:`pool_for_catch_all_pass2` so the fallback pass classifies
+        against products the user owns but has not yet promoted via
+        LiveTrack. A confident pass-2 hit triggers the dispatch path's
+        certify auto-import (writes ``products.certified = true``
+        through ``/shelf-ingest/product-tare``).
+        """
+        with self._db_lock:
+            rows = storage_repo.list_user_inventory_lots_qty_gt_zero_uncertified(
+                self._conn
+            )
+            return self._build_lots_from_user_inventory_rows(rows)
+
+    def _build_lots_from_user_inventory_rows(
+        self, rows: list[Any]
+    ) -> list[LotCandidate]:
+        """Shared LotCandidate projection for the user-inventory queries.
+
+        Backs :meth:`get_catch_all_user_inventory_lots`,
+        :meth:`get_catch_all_certified_user_inventory_lots`, and
+        :meth:`get_catch_all_uncertified_user_inventory_lots` — all
+        three queries return the same 12-column tuple shape (cloud_lots
+        joined to products with ``tare_weight_g`` appended). Caller
+        MUST hold ``self._db_lock`` (every call site is inside the
+        lock) — this helper does NOT acquire it.
+        """
+        out: list[LotCandidate] = []
+        for row in rows:
+            # ``p_tare`` (products.tare_weight_g) is unpacked here
+            # so the LotCandidate carries it through to the pool
+            # builder, which uses it (paired with p_net) to flip
+            # ``Candidate.needs_tare_estimate`` for AI tare
+            # estimation when the product has no captured tare yet.
+            (
+                lot_id, product_id, _qty, _ifsince, _pkid, _created,
+                p_name, p_brand, p_net, p_gross, p_container, p_tare,
+            ) = row
+            if not product_id or not p_name:
+                # Orphan: cloud_lots has a product_id but no products
+                # row is mirrored locally. Skip — without product
+                # metadata we can't build a usable candidate.
+                continue
+            out.append(
+                LotCandidate(
+                    lot_id=str(lot_id),
+                    product_id=str(product_id),
+                    name=str(p_name),
+                    brand=p_brand,
+                    expected_weight_g=p_gross or p_net,
+                    container_type=p_container,
+                    # No "off-shelf inventory" status in the
+                    # LotCandidate enum — borrow ``out`` (closest
+                    # match: lot is logically off any shelf). Tier
+                    # ranking is driven by why_candidate set in
+                    # candidate_pool, not status.
+                    status="out",
+                    reference_image_paths=self._absolute_refs(
+                        str(product_id)
+                    ),
+                    # Catch-all auto-import: thread tare/net so the
+                    # pool builder can flag candidates with no tare
+                    # captured.
+                    tare_weight_g=p_tare,
+                    net_weight_g=p_net,
                 )
-            return out
+            )
+        return out
 
     def get_certified_livetrack_tracked(self) -> Sequence[ProductCandidate]:
         """Fallback pool — all certified LiveTrack-tracked products.

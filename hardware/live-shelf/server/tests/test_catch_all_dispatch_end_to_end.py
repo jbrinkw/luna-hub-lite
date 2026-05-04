@@ -287,18 +287,23 @@ def test_catch_all_event_drives_dispatch_through_full_pipeline(tmp_path: Path):
 
     handler = _make_handler(conn, tmp_path, catch_all_camera=daemon)
 
-    # Patch ``classify_event`` at the SDK boundary so we don't need
-    # the candidate-pool builder or a real Anthropic key. Everything
+    # Patch the classifier at the SDK boundary so we don't need the
+    # candidate-pool builder or a real Anthropic key. Everything
     # downstream of the classifier (apply path, dispatch, cloud emit)
-    # runs unmodified — that's what we're testing.
+    # runs unmodified — that's what we're testing. Catch-all ADDs
+    # route through ``classify_catch_all_with_fallback`` (the
+    # two-pass orchestrator); we patch both names so a future revert
+    # to the single-pass routing keeps this test green.
     from server.classifier.models import ScaleEvent as _SE  # noqa: F401
 
-    def _stub_classify_event(event, ctx):
+    def _stub_classify(event, ctx, *args, **kwargs):
         # Build a ClassificationResult — the production code reads
         # ``item_id``, ``confidence``, ``meta``, ``candidate_pool_used``,
         # and ``multi_match`` from this. We supply a high-confidence
         # pick that includes the target lot in the candidate pool so
-        # the hallucination guard accepts it.
+        # the hallucination guard accepts it. ``*args, **kwargs`` covers
+        # the orchestrator's ``model=`` keyword while still accepting
+        # the legacy ``classify_event(event, ctx)`` signature.
         from server.classifier.models import (
             Candidate, ClassificationResult,
         )
@@ -343,8 +348,11 @@ def test_catch_all_event_drives_dispatch_through_full_pipeline(tmp_path: Path):
         return before_src, after_src, None
 
     with patch(
+        "server.handlers.scale_events.classify_catch_all_with_fallback",
+        side_effect=_stub_classify,
+    ), patch(
         "server.handlers.scale_events.classify_event",
-        side_effect=_stub_classify_event,
+        side_effect=_stub_classify,
     ), patch.object(
         ScaleHandler,
         "_capture_frames",

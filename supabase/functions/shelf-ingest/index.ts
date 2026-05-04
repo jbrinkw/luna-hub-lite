@@ -1515,7 +1515,7 @@ async function insertErroredScanTransaction(
 }
 
 /**
- * Apply Pi-captured tare-weight and/or measured_full_at to a products row.
+ * Apply Pi-captured tare-weight, measured_full_at, and/or certified flag to a products row.
  *
  * Called by the Pi after:
  *   1. The catch-all scale tare-capture interceptor fires
@@ -1524,9 +1524,14 @@ async function insertErroredScanTransaction(
  *   2. The catch-all auto-import dispatch (Task 9 of catch-all-livetrack
  *      auto-import plan) — pushes `measured_full_at` when scale ≈
  *      tare + net_weight_g, optionally alongside tare on first capture.
+ *   3. The two-pass catch-all classification (2026-05-03) — pushes
+ *      `certified=true` when pass-2 (uncertified-only) is the pass
+ *      that produced the match, graduating the product to LiveTrack-
+ *      tracked.
  *
  * Set-once enforcement: each field is only written when its column is
- * currently NULL on the row. Defense-in-depth — the Pi already guards
+ * currently NULL (`tare_weight_g`, `measured_full_at`) or false / NULL
+ * (`certified`) on the row. Defense-in-depth — the Pi already guards
  * before dispatch, but transient retries (Pi → cloud) could otherwise
  * overwrite a user-corrected value. RLS via .eq('user_id', userId).
  *
@@ -1540,10 +1545,14 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
     return jsonResponse({ error: 'product_id required' }, 400);
   }
 
-  // Normalise inputs — both fields are optional but at least one must
+  // Normalise inputs — every field is optional but at least one must
   // be supplied or this call is a no-op (surface as 400 to make Pi-side
   // bugs loud).
-  const updates: { tare_weight_g?: number; measured_full_at?: string } = {};
+  const updates: {
+    tare_weight_g?: number;
+    measured_full_at?: string;
+    certified?: boolean;
+  } = {};
 
   if (body?.tare_weight_g !== undefined && body?.tare_weight_g !== null) {
     const tare = typeof body.tare_weight_g === 'number' ? body.tare_weight_g : Number(body.tare_weight_g);
@@ -1560,20 +1569,31 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
     updates.measured_full_at = body.measured_full_at;
   }
 
+  if (body?.certified !== undefined && body?.certified !== null) {
+    if (typeof body.certified !== 'boolean') {
+      return jsonResponse({ error: 'certified must be a boolean' }, 400);
+    }
+    updates.certified = body.certified;
+  }
+
   if (Object.keys(updates).length === 0) {
-    return jsonResponse({ error: 'tare_weight_g or measured_full_at is required' }, 400);
+    return jsonResponse({ error: 'tare_weight_g, measured_full_at, or certified is required' }, 400);
   }
 
   const userId = device.user_id;
 
   // Set-once: read current values; only write fields whose column is
-  // NULL. Preserves the user's "no overwrite after set" rule even if
-  // the Pi re-pushes (idempotent retries are common in fire-and-forget
-  // callers).
+  // NULL (or false, for `certified`). Preserves the user's "no
+  // overwrite after set" rule even if the Pi re-pushes (idempotent
+  // retries are common in fire-and-forget callers). For `certified`
+  // we never write `false` — the Pi-side push only ever sends `true`,
+  // and a later `false` from the Pi would be a downgrade we don't
+  // honour (cloud is the only place a user can manually un-certify
+  // via the web UI).
   const { data: existing, error: existingErr } = await supabase
     .schema('chefbyte')
     .from('products')
-    .select('tare_weight_g, measured_full_at')
+    .select('tare_weight_g, measured_full_at, certified')
     .eq('product_id', productId)
     .eq('user_id', userId)
     .maybeSingle();
@@ -1589,6 +1609,12 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
   if (updates.measured_full_at !== undefined && existing.measured_full_at === null) {
     filtered.measured_full_at = updates.measured_full_at;
   }
+  if (updates.certified !== undefined && updates.certified === true && !existing.certified) {
+    // Set-once: only allow uncertified→certified. Once true, stays
+    // true — even an explicit `false` from the Pi is dropped (the
+    // Pi never UNcertifies; only the web UI does).
+    filtered.certified = true;
+  }
 
   // All requested fields already set — no-op success so Pi retries
   // don't surface as errors. Echo back the existing row state.
@@ -1598,6 +1624,7 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
       product_id: productId,
       tare_weight_g: existing.tare_weight_g,
       measured_full_at: existing.measured_full_at,
+      certified: existing.certified ?? false,
       skipped: 'all requested fields already set (set-once)',
     });
   }
@@ -1608,7 +1635,7 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
     .update(filtered)
     .eq('product_id', productId)
     .eq('user_id', userId)
-    .select('product_id, tare_weight_g, measured_full_at')
+    .select('product_id, tare_weight_g, measured_full_at, certified')
     .maybeSingle();
   if (updErr) throw updErr;
   if (!updated) {
@@ -1619,6 +1646,7 @@ async function handleProductTare(supabase: SupabaseClient, device: Device, body:
     product_id: updated.product_id,
     tare_weight_g: updated.tare_weight_g,
     measured_full_at: updated.measured_full_at,
+    certified: updated.certified ?? false,
   });
 }
 

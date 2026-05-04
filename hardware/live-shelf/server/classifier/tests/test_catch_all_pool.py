@@ -481,3 +481,162 @@ def test_pool_for_catch_all_in_flight_lots_never_flagged_for_tare():
     # net_weight_g defaults to None for in-flight lots — the cloud
     # adapter doesn't populate it for Tier 1.
     assert pick.net_weight_g is None
+
+
+# ----------------------------------------------------------------------
+# Two-pass catch-all classification (2026-05-03): pool_for_catch_all_pass1
+# (certified-only inventory + in-flight) and pool_for_catch_all_pass2
+# (uncertified-only inventory, no in-flight).
+# ----------------------------------------------------------------------
+
+
+from server.classifier.candidate_pool import (  # noqa: E402
+    pool_for_catch_all_pass1,
+    pool_for_catch_all_pass2,
+)
+
+
+class _TwoPassStubSource:
+    """Source that exposes the certified/uncertified split methods.
+
+    Pass-1 reads ``get_catch_all_certified_user_inventory_lots`` +
+    ``get_catch_all_in_flight_lots``; pass-2 reads only
+    ``get_catch_all_uncertified_user_inventory_lots``.
+    """
+
+    def __init__(self, *, in_flight=(), certified=(), uncertified=()):
+        self._in_flight = in_flight
+        self._certified = certified
+        self._uncertified = uncertified
+
+    def get_catch_all_in_flight_lots(self):
+        return self._in_flight
+
+    def get_catch_all_certified_user_inventory_lots(self):
+        return self._certified
+
+    def get_catch_all_uncertified_user_inventory_lots(self):
+        return self._uncertified
+
+    # Live-shelf surface — must never fire from the catch-all builders.
+    def get_on_shelf_lots(self, shelf_id=None):
+        return []
+
+    def get_recently_out_lots(self, window_seconds, shelf_id=None):
+        return []
+
+    def get_in_flight_lots(self, max_age_seconds=None, shelf_id=None):
+        return []
+
+    def get_certified_not_on_shelf(self):
+        return []
+
+
+def test_pass1_includes_in_flight_and_certified_only():
+    """pass-1 surfaces in-flight catch-all lots + certified inventory.
+
+    Lock-in: an uncertified inventory lot exposed via
+    ``get_catch_all_uncertified_user_inventory_lots`` must NOT leak
+    into pass-1's pool, even though it would have appeared in the
+    legacy single-pool ``pool_for_catch_all``.
+    """
+    src = _TwoPassStubSource(
+        in_flight=[_lot("lot-mid", 350.0, name="Mid", status="in_flight")],
+        certified=[_lot("lot-cert", 500.0, name="Olive Oil")],
+        uncertified=[_lot("lot-uncert", 600.0, name="Pasta Box")],
+    )
+    ctx = ClassifierContext(source=src, shelf_id="catch_all")
+    pool = pool_for_catch_all_pass1(delta_g=500.0, ctx=ctx)
+    ids = [c.candidate_id for c in pool]
+    assert "lot-mid" in ids, "in-flight lots belong in pass-1"
+    assert "lot-cert" in ids, "certified inventory belongs in pass-1"
+    assert "lot-uncert" not in ids, (
+        "pass-1 must NOT include uncertified inventory — that is "
+        "pass-2's territory"
+    )
+    # Sentinel still last.
+    assert ids[-1] == UNKNOWN_CANDIDATE_ID
+
+
+def test_pass2_includes_only_uncertified_inventory():
+    """pass-2 surfaces ONLY uncertified inventory (no in-flight, no certified).
+
+    The pool keeps the auto-import semantic: a confident pass-2 hit is
+    a green light to graduate the matched product to LiveTrack-tracked.
+    Including in-flight lots here would blur that signal (they're
+    already certified).
+    """
+    src = _TwoPassStubSource(
+        in_flight=[_lot("lot-mid", 350.0, name="Mid", status="in_flight")],
+        certified=[_lot("lot-cert", 500.0, name="Olive Oil")],
+        uncertified=[_lot("lot-uncert", 600.0, name="Pasta Box")],
+    )
+    ctx = ClassifierContext(source=src, shelf_id="catch_all")
+    pool = pool_for_catch_all_pass2(delta_g=600.0, ctx=ctx)
+    ids = [c.candidate_id for c in pool]
+    assert "lot-uncert" in ids, "pass-2 must include uncertified inventory"
+    assert "lot-cert" not in ids, "pass-2 must NOT include certified inventory"
+    assert "lot-mid" not in ids, "pass-2 must NOT include in-flight lots"
+    assert ids[-1] == UNKNOWN_CANDIDATE_ID
+
+
+def test_pass1_empty_when_no_certified_inventory():
+    """Pass-1 with NO certified inventory and NO in-flight is just UNKNOWN.
+
+    Forces pass-2 to be the only avenue when the user hasn't promoted
+    anything to LiveTrack yet.
+    """
+    src = _TwoPassStubSource(uncertified=[_lot("lot-x", 100.0)])
+    ctx = ClassifierContext(source=src, shelf_id="catch_all")
+    pool = pool_for_catch_all_pass1(delta_g=100.0, ctx=ctx)
+    assert [c.candidate_id for c in pool] == [UNKNOWN_CANDIDATE_ID]
+
+
+def test_pass2_empty_when_no_uncertified_inventory():
+    """Pass-2 with NO uncertified inventory is just UNKNOWN.
+
+    Even with certified inventory + in-flight available, pass-2 stays
+    empty because those tiers belong to pass-1 only.
+    """
+    src = _TwoPassStubSource(
+        in_flight=[_lot("lot-mid", 100.0, status="in_flight")],
+        certified=[_lot("lot-cert", 100.0)],
+    )
+    ctx = ClassifierContext(source=src, shelf_id="catch_all")
+    pool = pool_for_catch_all_pass2(delta_g=100.0, ctx=ctx)
+    assert [c.candidate_id for c in pool] == [UNKNOWN_CANDIDATE_ID]
+
+
+def test_pass1_in_flight_outranks_certified():
+    """In-flight items rank above plain certified inventory in pass-1.
+
+    Same tier-rank semantics as the legacy single-pool builder.
+    """
+    src = _TwoPassStubSource(
+        in_flight=[_lot("IF", 300.0, status="in_flight")],
+        certified=[_lot("CERT", 300.0)],
+    )
+    ctx = ClassifierContext(source=src, shelf_id="catch_all")
+    pool = pool_for_catch_all_pass1(delta_g=300.0, ctx=ctx)
+    real = [c.candidate_id for c in pool if c.candidate_id != UNKNOWN_CANDIDATE_ID]
+    assert real.index("IF") < real.index("CERT")
+
+
+def test_pass2_threads_tare_state_for_uncertified():
+    """Uncertified inventory in pass-2 still carries
+    ``needs_tare_estimate`` so the existing tare auto-import on a
+    pass-2 win works correctly (uncertified products typically have
+    no captured tare).
+    """
+    no_tare = _lot(
+        "lot-untared",
+        500.0,
+        tare_weight_g=None,
+        net_weight_g=500.0,
+    )
+    src = _TwoPassStubSource(uncertified=[no_tare])
+    ctx = ClassifierContext(source=src, shelf_id="catch_all")
+    pool = pool_for_catch_all_pass2(delta_g=500.0, ctx=ctx)
+    pick = next(c for c in pool if c.candidate_id == "lot-untared")
+    assert pick.needs_tare_estimate is True
+    assert pick.net_weight_g == 500.0

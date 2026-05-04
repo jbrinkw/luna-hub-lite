@@ -1910,6 +1910,116 @@ describe('shelf-ingest Edge Function', () => {
     expect(body.error).toMatch(/iso/i);
   });
 
+  // ─── /product-tare: certified flag set-once (two-pass classification) ─
+  //
+  // 2026-05-03 two-pass catch-all classification. When the Pi's
+  // catch-all classifier matches against the user's UNCERTIFIED
+  // inventory (pass-2), the dispatch path pushes ``certified=true`` to
+  // /product-tare so the product graduates to LiveTrack-tracked. Cloud
+  // must accept the optional field AND enforce set-once: once true,
+  // never reverses (a stray ``false`` from the Pi side is ignored).
+
+  it('POST /product-tare flips certified false → true and is set-once after', async () => {
+    // Fresh uncertified product so the cert flip actually lands.
+    const { data: prod, error: prodErr } = await (adminClient as any)
+      .schema('chefbyte')
+      .from('products')
+      .insert({
+        user_id: userId,
+        name: 'Uncertified-Then-Certified',
+        barcode: `SI-CERT-${Date.now()}`,
+        net_weight_g: 500,
+        servings_per_container: 5,
+        certified: false,
+      })
+      .select('product_id')
+      .single();
+    if (prodErr) throw new Error(`create cert product: ${prodErr.message}`);
+    const certProductId = prod.product_id;
+
+    try {
+      // First write: certified=true flips false → true.
+      const res = await fetch(`${BASE_URL}/product-tare`, {
+        method: 'POST',
+        headers: authHeaders(importKey),
+        body: JSON.stringify({
+          product_id: certProductId,
+          certified: true,
+        }),
+      });
+      expect(res.status).toBe(200);
+      const body = await res.json();
+      expect(body.ok).toBe(true);
+      expect(body.product_id).toBe(certProductId);
+      expect(body.certified).toBe(true);
+
+      const { data: row1 } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .select('certified')
+        .eq('product_id', certProductId)
+        .single();
+      expect(row1.certified).toBe(true);
+
+      // Second write: certified=false MUST be ignored — the Pi never
+      // un-certifies, and cloud's set-once guard treats the request
+      // as a no-op (200 with the existing row state echoed back).
+      const res2 = await fetch(`${BASE_URL}/product-tare`, {
+        method: 'POST',
+        headers: authHeaders(importKey),
+        body: JSON.stringify({
+          product_id: certProductId,
+          certified: false,
+        }),
+      });
+      expect(res2.status).toBe(200);
+      const body2 = await res2.json();
+      expect(body2.ok).toBe(true);
+      // Row remains certified=true.
+      expect(body2.certified).toBe(true);
+
+      const { data: row2 } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('products')
+        .select('certified')
+        .eq('product_id', certProductId)
+        .single();
+      expect(row2.certified).toBe(true);
+
+      // Third write: certified=true again — set-once means no-op
+      // success (already true), still 200.
+      const res3 = await fetch(`${BASE_URL}/product-tare`, {
+        method: 'POST',
+        headers: authHeaders(importKey),
+        body: JSON.stringify({
+          product_id: certProductId,
+          certified: true,
+        }),
+      });
+      expect(res3.status).toBe(200);
+      const body3 = await res3.json();
+      expect(body3.ok).toBe(true);
+      expect(body3.certified).toBe(true);
+    } finally {
+      // Cleanup
+      await (adminClient as any).schema('chefbyte').from('products').delete().eq('product_id', certProductId);
+    }
+  });
+
+  it('POST /product-tare with non-boolean certified returns 400', async () => {
+    const res = await fetch(`${BASE_URL}/product-tare`, {
+      method: 'POST',
+      headers: authHeaders(importKey),
+      body: JSON.stringify({
+        product_id: productId,
+        certified: 'not-a-boolean',
+      }),
+    });
+    expect(res.status).toBe(400);
+    const body = await res.json();
+    expect(body.error).toMatch(/boolean/i);
+  });
+
   // ─── /scanner-state: browser-JWT mode persistence ──────────────────
   //
   // Task 4 of the Pi USB scanner forwarder plan: the web ScannerPage

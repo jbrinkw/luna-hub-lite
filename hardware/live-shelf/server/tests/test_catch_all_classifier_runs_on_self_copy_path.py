@@ -236,10 +236,13 @@ def test_catch_all_classifier_runs_on_self_copy_path(tmp_path: Path):
 
     classify_calls: list[tuple[Any, Any]] = []
 
-    def _stub_classify_event(event, ctx):
+    def _stub_classify(event, ctx, *args, **kwargs):
         # Record the call so we can prove the classifier actually ran
         # — i.e. ``_capture_frames`` returned successfully and didn't
-        # short-circuit with the SameFileError.
+        # short-circuit with the SameFileError. Signature is permissive
+        # because catch-all events now route through
+        # ``classify_catch_all_with_fallback`` (kwargs include
+        # ``model``); live-shelf events still hit ``classify_event``.
         classify_calls.append((event, ctx))
         from server.classifier.models import (
             Candidate, ClassificationResult,
@@ -272,10 +275,20 @@ def test_catch_all_classifier_runs_on_self_copy_path(tmp_path: Path):
     # The same-file guard inside the real implementation is what
     # this test pins. If it gets reverted, the classifier never
     # runs and ``classify_calls`` stays empty.
+    #
+    # Catch-all ADDs route through
+    # ``classify_catch_all_with_fallback`` (the two-pass
+    # orchestrator); patching ``classify_event`` alone wouldn't be hit.
+    # Patch both names — ``classify_event`` covers any future revert
+    # to the legacy single-pass routing, and the orchestrator name is
+    # what the current production path calls for catch-all ADDs.
     with patch(
+        "server.handlers.scale_events.classify_catch_all_with_fallback",
+        side_effect=_stub_classify,
+    ) as mock_classify, patch(
         "server.handlers.scale_events.classify_event",
-        side_effect=_stub_classify_event,
-    ) as mock_classify:
+        side_effect=_stub_classify,
+    ):
         resp, status = handler.handle_scale_event({
             "ts": timestamps[15],
             "device_id": "scale-02",
@@ -315,9 +328,9 @@ def test_catch_all_classifier_runs_on_self_copy_path(tmp_path: Path):
         # If the bug returns in a different shape (e.g. the helper
         # silently swallows the error), this catches it.
         assert mock_classify.called, (
-            "classify_event was never invoked — _capture_frames "
-            "short-circuited before reaching the classifier. "
-            "Same-file guard regression."
+            "classify_catch_all_with_fallback was never invoked — "
+            "_capture_frames short-circuited before reaching the "
+            "classifier. Same-file guard regression."
         )
         assert len(classify_calls) == 1, (
             f"expected exactly 1 classifier call, got {len(classify_calls)}"
