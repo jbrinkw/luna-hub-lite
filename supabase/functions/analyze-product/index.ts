@@ -453,11 +453,36 @@ Deno.serve(async (req) => {
     // Validate and sanitize placeholder_candidates. Accept only well-formed
     // entries (product_id must be a non-empty string, name must be a string).
     // Invalid entries are silently dropped — a partial list is better than 400.
-    const rawCandidates: PlaceholderCandidate[] = Array.isArray(placeholder_candidates)
+    let rawCandidates: PlaceholderCandidate[] = Array.isArray(placeholder_candidates)
       ? (placeholder_candidates as any[]).filter(
           (c) => c && typeof c.product_id === 'string' && c.product_id.length > 0 && typeof c.name === 'string',
         )
       : [];
+
+    // Service-role caller (Pi USB forwarder) didn't supply candidates —
+    // fetch them server-side so the LLM can still match a placeholder. The
+    // web ScannerPage curates and forwards its own list to avoid an extra
+    // round-trip; the service-role caller has no UI and no local cache, so
+    // the function fetches on its behalf. Without this, every Pi USB scan
+    // of a barcode whose product was previously added on the web as a
+    // placeholder (no barcode, used in recipes/meal plans/food logs)
+    // would mint a DUPLICATE product, leaving the placeholder orphaned
+    // with FK refs that silently diverge from the new lot.
+    if (isServiceRoleCall && rawCandidates.length === 0) {
+      const { data: phRows } = await (supabase as any)
+        .schema('chefbyte')
+        .from('products')
+        .select('product_id, name, description')
+        .eq('user_id', userId)
+        .eq('is_placeholder', true)
+        .is('deleted_at', null);
+      if (Array.isArray(phRows)) {
+        rawCandidates = phRows.filter(
+          (c: any) => c && typeof c.product_id === 'string' && c.product_id.length > 0 && typeof c.name === 'string',
+        );
+      }
+    }
+
     // Build a set of valid ids for post-response hallucination check.
     const candidateIds = new Set<string>(rawCandidates.map((c) => c.product_id));
 
@@ -619,8 +644,7 @@ Deno.serve(async (req) => {
     let autoCreatedProductId: string | null = null;
     let autoCreateError: string | null = null;
     if (isServiceRoleCall && suggestion) {
-      const productPayload: Record<string, unknown> = {
-        user_id: userId,
+      const productFields: Record<string, unknown> = {
         barcode: barcodeStr,
         name: (suggestion as any).name,
         servings_per_container: (suggestion as any).servings_per_container ?? 1,
@@ -638,34 +662,61 @@ Deno.serve(async (req) => {
         display_by_weight: (suggestion as any).display_by_weight ?? false,
         description: (suggestion as any).description ?? null,
       };
-      // Service-role path bypasses RLS, but products has a unique partial
-      // index on (user_id, barcode) WHERE deleted_at IS NULL — a race
-      // between two concurrent Pi scans would still be safe (the second
-      // INSERT would 23505 and we re-query).
-      const { data: inserted, error: insErr } = await (supabase as any)
-        .schema('chefbyte')
-        .from('products')
-        .insert(productPayload)
-        .select('product_id')
-        .single();
-      if (insErr) {
-        // Most likely cause: unique-constraint clash from a concurrent
-        // insert. Re-query so the caller still gets a product_id.
-        console.warn('analyze-product: auto-insert failed, re-querying', insErr.message);
-        const { data: requeried } = await (supabase as any)
+
+      if (matchedPlaceholderId) {
+        // Promote the existing placeholder row in place. Mirrors the web
+        // ScannerPage upgrade path so all FK refs (recipe_ingredients,
+        // meal_plan_entries, food_logs, etc) survive intact rather than
+        // pointing at an orphaned UUID. Without this, every Pi USB scan of
+        // a barcode whose product was previously added on the web as a
+        // placeholder would mint a duplicate row — the user's recipes still
+        // reference the abandoned placeholder, the new lot lives on the
+        // duplicate, and stock/macros silently diverge from reality.
+        const { data: updated, error: updErr } = await (supabase as any)
           .schema('chefbyte')
           .from('products')
-          .select('product_id')
+          .update({ ...productFields, is_placeholder: false })
+          .eq('product_id', matchedPlaceholderId)
           .eq('user_id', userId)
-          .eq('barcode', barcodeStr)
-          .is('deleted_at', null)
+          .select('product_id')
           .maybeSingle();
-        autoCreatedProductId = requeried?.product_id ?? null;
-        if (!autoCreatedProductId) {
-          autoCreateError = insErr.message;
+        if (updErr) {
+          console.warn('analyze-product: placeholder promote failed', updErr.message);
+          autoCreateError = updErr.message;
+        } else {
+          autoCreatedProductId = updated?.product_id ?? null;
         }
       } else {
-        autoCreatedProductId = inserted?.product_id ?? null;
+        // No placeholder match — fresh INSERT. Service-role path bypasses
+        // RLS, but products has a unique partial index on
+        // (user_id, barcode) WHERE deleted_at IS NULL — a race between two
+        // concurrent Pi scans would still be safe (the second INSERT would
+        // 23505 and we re-query).
+        const { data: inserted, error: insErr } = await (supabase as any)
+          .schema('chefbyte')
+          .from('products')
+          .insert({ ...productFields, user_id: userId })
+          .select('product_id')
+          .single();
+        if (insErr) {
+          // Most likely cause: unique-constraint clash from a concurrent
+          // insert. Re-query so the caller still gets a product_id.
+          console.warn('analyze-product: auto-insert failed, re-querying', insErr.message);
+          const { data: requeried } = await (supabase as any)
+            .schema('chefbyte')
+            .from('products')
+            .select('product_id')
+            .eq('user_id', userId)
+            .eq('barcode', barcodeStr)
+            .is('deleted_at', null)
+            .maybeSingle();
+          autoCreatedProductId = requeried?.product_id ?? null;
+          if (!autoCreatedProductId) {
+            autoCreateError = insErr.message;
+          }
+        } else {
+          autoCreatedProductId = inserted?.product_id ?? null;
+        }
       }
     }
 
