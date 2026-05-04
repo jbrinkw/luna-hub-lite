@@ -940,4 +940,89 @@ describe('Scanner pipeline E2E (real Supabase, no mocks)', () => {
       await ctx.cleanup();
     }
   }, 30_000);
+
+  it('Pi-style purchase merges into existing lot on the second scan (no merge-key collision)', async () => {
+    // Bug regression — user-reported 2026-05-03:
+    //   chefbyte.scan_transactions for the Pi USB user shows repeated
+    //   ``duplicate key value violates unique constraint
+    //   "stock_lots_merge_key"`` errors. Every purchase scan after the
+    //   first one of the same product on the same day was failing.
+    //
+    // Root cause: ``private.execute_scan_action``'s purchase branch did
+    // an unconditional INSERT into chefbyte.stock_lots. The web
+    // ScannerPage avoids this by collapsing repeat purchases on the
+    // client; the Pi USB pipeline ships every scan straight to
+    // execute_scan_action, so the second one collided with the
+    // ``stock_lots_merge_key`` UNIQUE INDEX
+    // (user_id, product_id, location_id, COALESCE(expires_on, '9999-12-31')).
+    //
+    // Fix: ``ON CONFLICT … DO UPDATE`` mirroring the canonical merge
+    // pattern from ``private.recompute_remaining_stock`` /
+    // ``private.unmark_meal_done``. Two scans with the same product
+    // tuple now collapse into one lot whose qty_containers is the sum.
+    //
+    // The contract this test pins:
+    //   1. Both POSTs return 200 with status='applied'.
+    //   2. Exactly ONE stock_lots row exists for this user + product
+    //      (the second scan merged into the first, did not insert a
+    //      duplicate, and did not error on the unique index).
+    //   3. That lot's qty_containers = sum of the two scans (1 + 1 = 2).
+    //   4. Both scan_transactions rows reference the SAME applied_lot_id
+    //      so void semantics still target the correct lot. (Note: void
+    //      of a merged lot is documented as "destroys the merged lot
+    //      entirely" — same web ScannerPage caveat. Out of scope here.)
+    //
+    // Mutation-killer: revert execute_scan_action's purchase branch to
+    // the pre-fix INSERT-only form and the second POST will return
+    // status='errored' with error_msg containing 'stock_lots_merge_key'.
+    const ctx = await provisionScannerUser('pipe-merge');
+    try {
+      const barcode = 'PIPE-MERGE-' + randomBytes(4).toString('hex').toUpperCase();
+      await createTestProduct(ctx.userId, barcode, 'Merge-Regression Product');
+
+      // First scan: mints a lot.
+      const r1 = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, pi_event_id: 'merge-1-' + crypto.randomUUID() }),
+      });
+      expect(r1.status).toBe(200);
+      const b1 = await r1.json();
+      expect(b1.status).toBe('applied');
+      const lot1 = b1.applied_lot_id;
+      expect(typeof lot1).toBe('string');
+
+      // Second scan: same product, same default location (no client-side
+      // merge — the Pi sends each scan untouched). Pre-fix this returned
+      // status='errored' with stock_lots_merge_key in the error_msg.
+      const r2 = await fetch(`${BASE_URL}/barcode-scan`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-api-key': ctx.importKey },
+        body: JSON.stringify({ barcode, pi_event_id: 'merge-2-' + crypto.randomUUID() }),
+      });
+      expect(r2.status).toBe(200);
+      const b2 = await r2.json();
+      expect(b2.status).toBe('applied');
+      // Diagnostic — surface the exact bug shape on regression.
+      if (b2.status !== 'applied') {
+        console.error('[merge regression]', JSON.stringify(b2, null, 2));
+      }
+      expect(b2.error_msg ?? null).toBeNull();
+
+      // Both scans must reference the SAME lot — no duplicate row.
+      expect(b2.applied_lot_id).toBe(lot1);
+
+      // ─── Service-role readback: exactly ONE lot exists, qty=2.
+      const { data: lots } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id, qty_containers')
+        .eq('user_id', ctx.userId);
+      expect(lots ?? []).toHaveLength(1);
+      expect(Number(lots[0].qty_containers)).toBe(2);
+      expect(lots[0].lot_id).toBe(lot1);
+    } finally {
+      await ctx.cleanup();
+    }
+  }, 30_000);
 });
