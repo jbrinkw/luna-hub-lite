@@ -350,3 +350,179 @@ class TestKnownPiEventIds:
             assert len(calls[2]) == 50
             # Union: first id of each chunk.
             assert out == {"uuid-0", "uuid-200", "uuid-400"}
+
+
+# ---------------------------------------------------------------------------
+# push_product_state wire-name pinning (audit B-HIGH-2, 2026-05-04)
+#
+# The Pi-side ``CloudClient.push_product_state`` accepts a Python ``tare_g``
+# kwarg but the cloud route at ``/shelf-ingest/product-tare`` reads
+# ``tare_weight_g`` off the wire body. Other tests in this codebase capture
+# only the kwarg names (via a recording stub), so a regression that renames
+# the kwarg to match the wire (``tare_weight_g``) — or drops the
+# kwarg→body translation entirely — would break production while leaving
+# those recording-stub tests green. This block exercises the REAL method
+# with a fake ``requests.Session`` and asserts the body shape directly.
+# ---------------------------------------------------------------------------
+
+
+class TestPushProductStateBodyShape:
+    """Wire-shape tests for :meth:`CloudClient.push_product_state`.
+
+    These pin the kwarg → body field translation. The body field names
+    are the contract with the cloud edge function; the kwarg names are
+    the contract with the Pi callers. They differ on purpose:
+    ``tare_g`` → ``tare_weight_g``. Drift on either side is a bug.
+    """
+
+    def test_pushes_tare_weight_g_field_on_wire_when_tare_g_kwarg_passed(
+        self,
+    ):
+        """Kwarg ``tare_g`` lands as wire body field ``tare_weight_g``.
+
+        Mutation guard: renaming the kwarg to ``tare_weight_g`` (matching
+        the wire) — or removing the explicit assignment to the wire
+        ``tare_weight_g`` key — flips this assertion.
+        """
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.post.return_value = _response(json_body={"ok": True})
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            client.push_product_state(
+                product_id="prod-abc",
+                tare_g=42.5,
+            )
+            kwargs = session.post.call_args.kwargs
+            body = kwargs["json"]
+            assert body["product_id"] == "prod-abc"
+            # The wire field MUST be ``tare_weight_g``, not ``tare_g``.
+            assert body["tare_weight_g"] == pytest.approx(42.5), (
+                "wire body field must be ``tare_weight_g`` — the cloud "
+                "edge function reads that key off the request body"
+            )
+            assert "tare_g" not in body, (
+                "kwarg name must not leak through to the wire body — the "
+                "cloud route does not recognise ``tare_g``"
+            )
+            # ``measured_full_at`` and ``certified`` were NOT passed —
+            # they MUST NOT appear on the wire (set-once: omitting a
+            # field is the only way to leave the cloud row unchanged).
+            assert "measured_full_at" not in body
+            assert "certified" not in body
+
+    def test_pushes_measured_full_at_when_passed(self):
+        """``measured_full_at`` kwarg lands on the wire under the same
+        name (no rename).
+        """
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.post.return_value = _response(json_body={"ok": True})
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            client.push_product_state(
+                product_id="prod-full",
+                measured_full_at="2026-05-04T18:00:00.000Z",
+            )
+            body = session.post.call_args.kwargs["json"]
+            assert body["product_id"] == "prod-full"
+            assert body["measured_full_at"] == "2026-05-04T18:00:00.000Z"
+            assert "tare_weight_g" not in body
+            assert "certified" not in body
+
+    def test_pushes_certified_only_when_explicitly_true(self):
+        """``certified=True`` lands on the wire as ``certified: true``.
+        ``certified=False`` and ``certified=None`` MUST be omitted from
+        the body — the Pi never UNcertifies a product, and ``False``
+        is documented as a no-op (matches the docstring contract).
+        """
+        # certified=True → present.
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.post.return_value = _response(json_body={"ok": True})
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            client.push_product_state(
+                product_id="prod-cert",
+                tare_g=10.0,
+                certified=True,
+            )
+            body = session.post.call_args.kwargs["json"]
+            assert body["certified"] is True
+            assert body["tare_weight_g"] == pytest.approx(10.0)
+
+        # certified=False → omitted (and the call still goes out because
+        # ``tare_g`` carries it).
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.post.return_value = _response(json_body={"ok": True})
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            client.push_product_state(
+                product_id="prod-cert",
+                tare_g=10.0,
+                certified=False,
+            )
+            body = session.post.call_args.kwargs["json"]
+            assert "certified" not in body, (
+                "``certified=False`` is documented as a no-op for the "
+                "certify field — must not land on the wire"
+            )
+
+        # certified=None → omitted (default).
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.post.return_value = _response(json_body={"ok": True})
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            client.push_product_state(
+                product_id="prod-cert",
+                tare_g=10.0,
+                certified=None,
+            )
+            body = session.post.call_args.kwargs["json"]
+            assert "certified" not in body
+
+    def test_no_unexpected_keys_on_full_payload(self):
+        """When all three optional fields are passed, the body carries
+        EXACTLY ``{product_id, tare_weight_g, measured_full_at, certified}``
+        — nothing else. A regression that adds spurious fields (e.g. a
+        cleartext ``api_key`` echo, an internal ``user_id``) would fail
+        this assertion immediately.
+        """
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            session.post.return_value = _response(json_body={"ok": True})
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            client.push_product_state(
+                product_id="prod-all",
+                tare_g=25.0,
+                measured_full_at="2026-05-04T18:00:00.000Z",
+                certified=True,
+            )
+            body = session.post.call_args.kwargs["json"]
+            assert set(body.keys()) == {
+                "product_id",
+                "tare_weight_g",
+                "measured_full_at",
+                "certified",
+            }
+            # And the route is /product-tare on the same shelf-ingest
+            # base URL — the catch-all auto-import block depends on
+            # this routing.
+            called_url = session.post.call_args.args[0]
+            assert called_url.endswith("/product-tare")
+
+    def test_no_round_trip_when_all_optional_fields_omitted(self):
+        """``push_product_state(product_id=...)`` with no other kwargs
+        is a caller bug; the client must short-circuit instead of
+        spending a useless network call.
+        """
+        with patch("server.cloud.client.requests.Session") as SessionCls:
+            session = SessionCls.return_value
+            session.headers = {}
+            client = CloudClient("https://x.y/shelf-ingest", "k")
+            out = client.push_product_state(product_id="prod-empty")
+            assert out == {}
+            session.post.assert_not_called()

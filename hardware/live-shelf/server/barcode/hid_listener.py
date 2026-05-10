@@ -75,6 +75,40 @@ IGNORED_KEYS = {'KEY_LEFTSHIFT', 'KEY_RIGHTSHIFT',
 _POLL_TIMEOUT_MS = 2000
 
 
+def _check_poll_flags(
+    device_path: str,
+    flags: int,
+) -> Optional[ScannerDeviceLost]:
+    """Pure helper for the poll-flags fault-detection branch.
+
+    Returns a constructed (but un-raised) :class:`ScannerDeviceLost`
+    instance when ``flags`` includes any of POLLHUP / POLLERR /
+    POLLNVAL — the three "the kernel just removed the fd" signals. The
+    caller raises it. Returns ``None`` for healthy flag sets so the loop
+    keeps reading.
+
+    Audit B-HIGH-6 (2026-05-04): pulled out of the listener loop so all
+    three failure flags can be exercised in a unit test without driving
+    the full evdev iterator. POLLHUP is reproducible via a closed-write-end
+    pipe; POLLERR / POLLNVAL are reachable via specific kernel races but
+    NOT plausibly fakeable on a real fd from userspace, so the
+    integration test can only realistically cover POLLHUP. Testing the
+    helper directly closes the gap.
+
+    The flag set is intentionally narrow: POLLIN means "data is available
+    to read" — that's the happy path, not a failure — and is filtered
+    out by the bitmask. POLLPRI / POLLRDHUP aren't checked because the
+    listener doesn't ask for them in ``poller.register``.
+    """
+    bad = select.POLLHUP | select.POLLERR | select.POLLNVAL
+    if flags & bad:
+        return ScannerDeviceLost(
+            f'poll detected HUP/ERR/NVAL on {device_path} '
+            f'(flags={flags})'
+        )
+    return None
+
+
 def _check_inode_match(
     device_path: str,
     original_inode: Optional[int],
@@ -234,11 +268,13 @@ def open_device_and_stream_barcodes(device_path: str) -> Iterator[str]:
                 )
                 continue
             for fd, flags in ready:
-                if flags & (select.POLLHUP | select.POLLERR | select.POLLNVAL):
-                    raise ScannerDeviceLost(
-                        f'poll detected HUP/ERR/NVAL on {device_path} '
-                        f'(flags={flags})'
-                    )
+                # Audit B-HIGH-6: pure helper handles the POLLHUP /
+                # POLLERR / POLLNVAL bitmask check so all three flags
+                # can be unit-tested directly (POLLERR + POLLNVAL are
+                # not plausibly fakeable on a real fd from userspace).
+                fault = _check_poll_flags(device_path, flags)
+                if fault is not None:
+                    raise fault
             for event in device.read():
                 if event.type != evdev.ecodes.EV_KEY:
                     continue

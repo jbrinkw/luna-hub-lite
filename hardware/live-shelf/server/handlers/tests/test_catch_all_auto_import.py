@@ -1136,3 +1136,262 @@ def test_catch_all_defers_certified_when_tare_is_null(tmp_path):
     assert rows == [], (
         "no CERTIFY_AUTO_IMPORT lifecycle row when certify is deferred"
     )
+
+
+# ---------------------------------------------------------------------------
+# Layer 9 (audit C-MED-2, 2026-05-04): orchestrator-output → dispatch seam.
+#
+# All certify-push tests above hand-craft ``meta["needs_certify"]=True``
+# on the dispatch input. None of them exercise the SEAM between the
+# orchestrator's stamping (``catch_all_fallback.classify_catch_all_with_fallback``)
+# and the dispatcher's reading (``_dispatch_catch_all_add``). A field-rename
+# regression at that seam — e.g. the orchestrator stamping
+# ``need_certify`` (typo) or the dispatcher reading
+# ``catch_all_pass2_winner`` instead of ``needs_certify`` — would be
+# invisible in every existing test. This block runs the REAL orchestrator
+# with a fake Anthropic client scripted to UNKNOWN→pass-2-hit, converts
+# the result via ``_classification_to_dict`` (the production helper at
+# scale_events.py:6499), and feeds it into ``_dispatch_catch_all_add``
+# unchanged.
+# ---------------------------------------------------------------------------
+
+
+_TINY_JPEG = bytes.fromhex(
+    "FFD8FFE000104A4649460001010000480048000000FFD9"
+)
+
+
+class _ScriptedClassifierClient:
+    """Fake Anthropic client for the catch-all orchestrator.
+
+    Mirrors ``_FakeClient`` in ``test_catch_all_fallback.py`` — replies in
+    order with pre-baked JSON strings parsed by ``parse_response``. This
+    lets the REAL orchestrator run pass-1 + pass-2 without touching the
+    network.
+    """
+
+    def __init__(self, responses: list[str]) -> None:
+        self._responses = list(responses)
+        self.calls: list[dict] = []
+
+    def send(self, payload, *, model=None):
+        from server.classifier.anthropic_client import ClassifierCallResult
+
+        self.calls.append({"payload": payload, "model": model})
+        if not self._responses:
+            raise AssertionError(
+                "ScriptedClassifierClient: out of scripted responses"
+            )
+        nxt = self._responses.pop(0)
+        return ClassifierCallResult(
+            text=nxt,
+            model=model or "claude-sonnet-4-6",
+            usage={"input_tokens": 100, "output_tokens": 20},
+            raw=None,
+        )
+
+
+class _OrchestratorCandidateSource:
+    """CandidateSource wired with the catch-all-specific lot getters.
+
+    ``_NullCandidateSource`` (used by the rest of this file) returns
+    empty lists for every method, which is fine for tests that hand-feed
+    classifications. For the orchestrator-driven seam test we actually
+    need a populated pass-2 pool so the orchestrator can pick a lot.
+    """
+
+    def __init__(
+        self,
+        *,
+        in_flight=None,
+        certified=None,
+        uncertified=None,
+    ):
+        self._in_flight = list(in_flight or ())
+        self._certified = list(certified or ())
+        self._uncertified = list(uncertified or ())
+
+    # Live-shelf surface — never used here.
+    def get_on_shelf_lots(self, shelf_id=None):
+        return []
+
+    def get_recently_out_lots(self, window_seconds, shelf_id=None):
+        return []
+
+    def get_in_flight_lots(self, max_age_seconds=None, shelf_id=None):
+        return []
+
+    def get_certified_not_on_shelf(self):
+        return []
+
+    # Catch-all surface — consulted by the orchestrator pass-1/pass-2.
+    def get_catch_all_in_flight_lots(self):
+        return list(self._in_flight)
+
+    def get_catch_all_certified_user_inventory_lots(self):
+        return list(self._certified)
+
+    def get_catch_all_uncertified_user_inventory_lots(self):
+        return list(self._uncertified)
+
+
+def test_catch_all_dispatch_reads_orchestrator_stamped_meta(tmp_path):
+    """End-to-end seam: REAL orchestrator output → ``_classification_to_dict`` →
+    ``_dispatch_catch_all_add`` → certify push fires.
+
+    Pins the field names that flow between the orchestrator (which
+    stamps ``meta["needs_certify"]=True`` on a pass-2 win) and the
+    dispatch reader (which gates the certify auto-import on the same
+    field). Existing tests build the meta dict by hand on the dispatch
+    input — they would silently pass even if the orchestrator started
+    stamping ``need_certify`` (typo) or the dispatcher started reading
+    ``catch_all_pass2_winner``. This test fails immediately on either
+    rename.
+
+    Mutation guards:
+      * Renaming ``meta["needs_certify"]`` in
+        ``catch_all_fallback._stamp_meta`` (or the dispatch reader's
+        key lookup) → ``cert_calls`` is empty.
+      * Dropping ``_classification_to_dict``'s ``meta`` passthrough
+        (e.g. its scrubber starts dropping non-``raw_response`` keys)
+        → certify never fires because the dispatcher never sees the flag.
+      * Renaming ``catch_all_pass2_*`` audit fields on either side →
+        the lifecycle row payload becomes empty / mis-keyed and the
+        payload assertions fail.
+    """
+    from server.classifier.candidate_pool import UNKNOWN_SENTINEL  # noqa: F401
+    from server.classifier.catch_all_fallback import (
+        classify_catch_all_with_fallback,
+    )
+    from server.classifier.models import (
+        ClassifierContext, LotCandidate, ScaleEvent,
+    )
+    from server.handlers.scale_events import _classification_to_dict
+
+    # --- Test fixtures ----------------------------------------------------
+    cloud = _RecordingCloudClient()
+    handler, conn = _make_handler(tmp_path, cloud_client=cloud)
+    # Tare ALREADY set so the certify-defer-on-null-tare gate (round-2
+    # audit MED-A) doesn't intercept us. The seam under test is meta
+    # passthrough; we deliberately bypass the tare-deferral path.
+    _seed_product(
+        conn, product_id="prod-uncert", tare=25.0, net=500.0,
+        barcode="HRN-UNCERT",
+    )
+    _seed_cloud_lot(conn, lot_id="LOT-UNCERT", product_id="prod-uncert")
+
+    # Frames the prompt builder reads via PIL (catch-all is single-frame
+    # by design; we only need a real after-frame).
+    after_path = tmp_path / "after.jpg"
+    after_path.write_bytes(_TINY_JPEG)
+    before_path = tmp_path / "before.jpg"
+    before_path.write_bytes(_TINY_JPEG)
+
+    # Real orchestrator inputs: a pass-1 pool that's empty (no certified
+    # inventory, no in-flight) so pass-1 short-circuits without an API
+    # call, and a populated pass-2 pool so pass-2 can match.
+    pass2_lot = LotCandidate(
+        lot_id="LOT-UNCERT",
+        product_id="prod-uncert",
+        name="Uncertified Item",
+        brand=None,
+        expected_weight_g=600.0,
+        container_type="bottle",
+        status="out",
+        reference_image_paths=(),
+    )
+
+    # Script the model: pass-1 won't be called (empty pool short-circuits);
+    # pass-2 returns a high-confidence in-pool match.
+    client = _ScriptedClassifierClient(
+        [
+            json.dumps(
+                {
+                    "item_id": "LOT-UNCERT",
+                    "action": "added",
+                    "confidence": 0.94,
+                    "reasoning": "matches the bottle visual",
+                }
+            ),
+        ]
+    )
+
+    source = _OrchestratorCandidateSource(uncertified=[pass2_lot])
+    ctx = ClassifierContext(
+        source=source,
+        anthropic_client=client,
+        shelf_id="catch_all",
+    )
+    event = ScaleEvent(
+        event_id="evt-seam-1",
+        session_id="sess-seam-1",
+        ts="2026-05-04T18:00:00.000Z",
+        delta_g=275.0,
+        before_weight_g=0.0,
+        after_weight_g=275.0,
+        direction="add",
+        before_frame_path=str(before_path),
+        after_frame_path=str(after_path),
+    )
+
+    # --- Run the REAL orchestrator ---------------------------------------
+    result = classify_catch_all_with_fallback(event, ctx)
+
+    # Orchestrator sanity: pass-2 won, needs_certify stamped True.
+    assert result.item_id == "LOT-UNCERT"
+    assert result.meta.get("needs_certify") is True, (
+        "orchestrator must stamp needs_certify=True on a pass-2 win — "
+        "this is the field the dispatcher reads"
+    )
+    assert result.meta.get("catch_all_pass") == 2
+
+    # --- Convert via the production helper -------------------------------
+    classification_dict = _classification_to_dict(result)
+    # The seam contract: meta carries through asdict() unchanged.
+    assert classification_dict["meta"].get("needs_certify") is True, (
+        "_classification_to_dict must passthrough meta['needs_certify'] "
+        "— the scrubber only drops 'raw_response', no other keys"
+    )
+    assert classification_dict["meta"].get("catch_all_pass") == 2
+    assert classification_dict["meta"].get("catch_all_pass2_item_id") == (
+        "LOT-UNCERT"
+    )
+
+    # --- Feed the orchestrator dict into the dispatch unchanged ----------
+    handled = handler._dispatch_catch_all_add(
+        classification=classification_dict,
+        delta_g=275.0,  # mid-bottle — outside the measured_full window
+        event_ts="2026-05-04T18:00:00.000Z",
+        event_id="evt-seam-1",
+        session_id="sess-seam-1",
+    )
+    assert handled is True
+
+    # --- Pin the seam ----------------------------------------------------
+    cert_calls = [
+        c for c in cloud.product_state_calls if c.get("certified") is True
+    ]
+    assert len(cert_calls) == 1, (
+        "SEAM BUG: orchestrator stamped meta.needs_certify=True but the "
+        "dispatcher did not fire the certify push. The field name on one "
+        "side has drifted from the other. Inspect:\n"
+        "  catch_all_fallback._stamp_meta — key it stamps\n"
+        "  scale_events._dispatch_catch_all_add — key it reads"
+    )
+    assert cert_calls[0]["product_id"] == "prod-uncert"
+
+    # The lifecycle audit row carries pass-2 telemetry pulled from the
+    # orchestrator's meta. A renamed audit key (``catch_all_pass2_item_id``
+    # → ``pass2_item_id`` on the orchestrator side) would zero this out.
+    rows = conn.execute(
+        "SELECT payload_json FROM event_lifecycle WHERE reason_code = ?",
+        (ReasonCode.CERTIFY_AUTO_IMPORT,),
+    ).fetchall()
+    assert len(rows) == 1
+    payload = json.loads(rows[0][0])
+    assert payload["pass2_item_id"] == "LOT-UNCERT", (
+        "lifecycle pass2_item_id must round-trip from "
+        "meta['catch_all_pass2_item_id'] — a rename on either side "
+        "breaks the audit trail"
+    )
+    assert payload["pass2_confidence"] == pytest.approx(0.94)

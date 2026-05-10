@@ -367,16 +367,40 @@ def test_user_inventory_uncertified_predicate_is_null_safe(conn):
     branch by dropping and re-creating the column without the
     constraint, then writing a NULL row.
 
+    Why the schema-mutate trick (audit D-LOW-2 clarification, 2026-05-04):
+        SQLite has no PRAGMA to disable NOT NULL constraints, and
+        ``sqlite3`` re-validates ``NOT NULL`` on every UPDATE — so a raw
+        ``UPDATE products SET certified = NULL`` against the production
+        schema would raise. Three options exist:
+
+          (a) Initialise the test's connection with a custom schema that
+              allows NULL on ``certified`` for THIS test only — adds an
+              entire fixture branch and obscures the mutation guard
+              the test is designed to expose.
+          (b) Use a temporary attached database — requires a second DB
+              file lifecycle on tmpfs and breaks the conn fixture
+              contract.
+          (c) Use the schema-rebuild trick (DROP COLUMN + ADD COLUMN
+              without NOT NULL) — keeps the test self-contained and
+              localised to the rows it needs to mutate.
+
+        We picked (c). The trade-off: the trick depends on the column's
+        name being ``certified`` and stays brittle if a future migration
+        renames it. We assert the rebuild landed correctly so a
+        rename-without-migrating-this-test fails LOUDLY (with a clear
+        assertion message) instead of cryptically (a NULL that quietly
+        becomes 0 on the rebuilt column).
+
     Mutation guard: dropping the ``IS NULL`` clause from the
     uncertified query (e.g. ``WHERE p.certified = 0``) makes the
     NULL-row L_NULL silently disappear from the result, failing the
     membership assertion.
     """
     _seed_product(conn, "P_NULLCERT", certified=0)
-    # Bypass the NOT NULL constraint via PRAGMA — sqlite3 lets us
-    # disable foreign keys but not NOT NULL, so we use the schema-
-    # rebuild trick: drop the column and re-add it nullable. This
-    # mutates the test's connection only.
+    # Bypass the NOT NULL constraint via the schema-rebuild trick —
+    # see the docstring above for the rationale. SQLite's
+    # ``sqlite3`` driver lets us disable foreign keys but not NOT
+    # NULL, so this is the cleanest in-test workaround.
     with conn:
         conn.execute("ALTER TABLE products RENAME COLUMN certified TO _old_cert")
         conn.execute("ALTER TABLE products ADD COLUMN certified INTEGER")
@@ -385,6 +409,36 @@ def test_user_inventory_uncertified_predicate_is_null_safe(conn):
             "UPDATE products SET certified = NULL WHERE product_id = ?",
             ("P_NULLCERT",),
         )
+    # Schema-mutate landing assertion: confirms the ALTER actually
+    # produced a nullable ``certified`` column. A future migration that
+    # renames the column or adds a CHECK constraint would silently
+    # break the rebuild trick — this assertion catches that with a
+    # clear message instead of a cryptic test failure downstream.
+    cols = {row[1]: row[3] for row in conn.execute("PRAGMA table_info(products)")}
+    assert "certified" in cols, (
+        "schema-rebuild trick failed: ``certified`` column is missing "
+        "after ADD COLUMN. A future migration probably renamed it — "
+        "update this test's column-rebuild block to match the new name "
+        "or rework the test to use a custom schema fixture."
+    )
+    assert cols["certified"] == 0, (
+        "schema-rebuild trick failed: ``certified`` column is NOT NULL "
+        "after rebuild (PRAGMA table_info notnull=1). The ADD COLUMN "
+        "INTEGER (without NOT NULL) should have produced a nullable "
+        "column. Inspect the schema ALTER block above."
+    )
+    # Confirm the NULL actually landed for the row we want to test.
+    null_count = conn.execute(
+        "SELECT COUNT(*) FROM products "
+        "WHERE product_id = ? AND certified IS NULL",
+        ("P_NULLCERT",),
+    ).fetchone()[0]
+    assert null_count == 1, (
+        "schema-rebuild trick failed: the row we tried to NULL out is "
+        "not actually NULL after the UPDATE. The rebuild may have "
+        "back-filled defaults — re-inspect the ALTER sequence."
+    )
+
     _seed_cloud_lot(conn, lot_id="L_NULL", product_id="P_NULLCERT")
 
     rows = storage_repo.list_user_inventory_lots_qty_gt_zero_uncertified(conn)

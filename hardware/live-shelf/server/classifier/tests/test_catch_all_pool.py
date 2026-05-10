@@ -640,3 +640,100 @@ def test_pass2_threads_tare_state_for_uncertified():
     pick = next(c for c in pool if c.candidate_id == "lot-untared")
     assert pick.needs_tare_estimate is True
     assert pick.net_weight_g == 500.0
+
+
+# ----------------------------------------------------------------------
+# Audit D-LOW-3 (2026-05-04): getattr fallback path for tare/net fields.
+#
+# ``_pool_for_catch_all`` reads ``tare_weight_g`` / ``net_weight_g`` from
+# each source candidate via ``getattr(src_c, "...", None)``. The default
+# ``None`` keeps the pool builder safe against source shapes that don't
+# carry those fields — e.g. legacy adapters, partial mocks, or future
+# refactors that split the LotCandidate hierarchy. Existing tests use
+# the dataclass which always has the field (just ``None``); none
+# exercise the path where the attribute is genuinely absent.
+# ----------------------------------------------------------------------
+
+
+def test_pool_handles_lot_shape_without_tare_or_net_attributes():
+    """A source candidate whose dataclass shape DOES NOT carry
+    ``tare_weight_g`` or ``net_weight_g`` must NOT crash the pool
+    builder. Both fields fall back to ``None`` via the getattr default
+    and the resulting Candidate has ``needs_tare_estimate=False``.
+
+    Mutation guard: removing the ``getattr(..., None)`` defaults on
+    candidate_pool.py:553-555 (e.g. ``src_c.tare_weight_g`` direct
+    attribute access) makes this test fail with AttributeError when
+    the pool builder iterates over the partial-shape candidate.
+
+    The test uses a minimal stub class with a ``__getattr__`` that
+    raises AttributeError for the two fields under test — this
+    accurately models what the helper would see with a "true"
+    legacy adapter that pre-dates the auto-import field additions.
+    """
+    from server.classifier.candidate_pool import _pool_for_catch_all
+
+    # Minimal stub class with the LotCandidate-compatible interface but
+    # WITHOUT the tare_weight_g / net_weight_g attributes. We do this
+    # by overriding ``__getattribute__`` so the two fields raise
+    # AttributeError (which getattr(default=None) catches). All other
+    # fields the pool builder reads (lot_id, product_id, name, brand,
+    # expected_weight_g, container_type, reference_image_paths) are
+    # populated normally.
+    class _PartialShapeLot:
+        """Mimics a legacy LotCandidate without the tare/net fields."""
+
+        def __init__(self, lot_id):
+            self.lot_id = lot_id
+            self.product_id = f"p-{lot_id}"
+            self.name = f"Legacy Lot {lot_id}"
+            self.brand = None
+            self.expected_weight_g = 500.0
+            self.container_type = "bottle"
+            self.reference_image_paths = ()
+
+        # The pool builder accesses tare_weight_g / net_weight_g via
+        # getattr() with a None default. Raising AttributeError here
+        # forces the default to fire — that's the exact path D-LOW-3
+        # is pinning.
+        def __getattr__(self, name):
+            if name in {"tare_weight_g", "net_weight_g"}:
+                raise AttributeError(
+                    f"_PartialShapeLot intentionally omits {name}"
+                )
+            raise AttributeError(name)
+
+    legacy = _PartialShapeLot("LEGACY-1")
+    ctx = ClassifierContext(source=_CatchAllStubSource())
+
+    # Direct call into _pool_for_catch_all — bypasses the public
+    # builders' source-method dispatch so we can hand-feed the partial
+    # shape without wiring up a custom source method.
+    pool = _pool_for_catch_all(
+        delta_g=500.0,
+        ctx=ctx,
+        in_flight_lots=[],
+        inventory_lots=[legacy],
+        top_n=10,
+    )
+
+    pick = next(
+        (c for c in pool if c.candidate_id == "LEGACY-1"), None,
+    )
+    assert pick is not None, (
+        "pool builder must not crash on a partial-shape source "
+        "candidate — the LEGACY-1 lot should land in the pool"
+    )
+    # Both fields fall back to None via the getattr default.
+    assert pick.net_weight_g is None, (
+        "missing net_weight_g attribute must default to None"
+    )
+    # ``needs_tare_estimate`` is computed as ``tare is None and net is
+    # not None``. With BOTH None the flag is False (we have no anchor
+    # weight to estimate against). Pin so a regression that flips the
+    # logic would surface here.
+    assert pick.needs_tare_estimate is False, (
+        "with both tare_weight_g and net_weight_g absent, the AI has "
+        "no anchor weight to estimate against — needs_tare_estimate "
+        "must be False (no auto-import attempt for this lot)"
+    )

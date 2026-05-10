@@ -10,6 +10,7 @@ import pytest
 from server.barcode.hid_listener import (
     ScannerDeviceLost,
     _check_inode_match,
+    _check_poll_flags,
     accumulate_keys_to_barcode,
     discover_barcode_device,
     open_device_and_stream_barcodes,
@@ -518,3 +519,103 @@ def test_open_recovers_when_initial_stat_fails(monkeypatch):
             _os.close(w_fd)
         except OSError:
             pass
+
+
+# ---------------------------------------------------------------------------
+# Audit B-HIGH-6 (2026-05-04): poll-flag fault-detection helper unit tests.
+#
+# The integration test ``test_open_raises_ScannerDeviceLost_on_pollhup``
+# can only realistically exercise POLLHUP (via a closed-write-end pipe).
+# POLLERR and POLLNVAL fire on specific kernel races (mid-read fd error,
+# fd closed underneath poll) that aren't plausibly fakeable on a real
+# fd from userspace. Pulling the bitmask check into a pure helper lets
+# every flag — and the flag combinations — be exercised directly.
+#
+# Mirrors the round-1 ``_check_inode_match`` extraction.
+# ---------------------------------------------------------------------------
+
+
+import select  # noqa: E402  (must be after the test-imports above)
+
+
+@pytest.mark.parametrize(
+    "flag,label",
+    [
+        (select.POLLHUP, "POLLHUP"),
+        (select.POLLERR, "POLLERR"),
+        (select.POLLNVAL, "POLLNVAL"),
+    ],
+)
+def test_check_poll_flags_returns_scanner_device_lost_for_each_fault_flag(
+    flag, label,
+):
+    """Each of POLLHUP / POLLERR / POLLNVAL produces a constructed
+    :class:`ScannerDeviceLost` carrying the flag value.
+
+    The integration test only covers POLLHUP. This pinning ensures the
+    other two paths — which are only reachable on specific kernel
+    races — won't silently regress out of the bitmask.
+
+    Mutation guard: dropping any of the three flag constants from the
+    helper's bitmask makes the assertion for that flag fail.
+    """
+    fault = _check_poll_flags('/dev/input/event0', flag)
+    assert isinstance(fault, ScannerDeviceLost), (
+        f"{label} must produce a ScannerDeviceLost; got {fault!r}"
+    )
+    msg = str(fault)
+    assert 'HUP/ERR/NVAL' in msg, (
+        "error message must mention all three flag names so operators "
+        "reading logs don't have to look up which flag triggered the "
+        "watchdog"
+    )
+    assert f'flags={flag}' in msg, (
+        f"flag value {flag} must round-trip into the error message for "
+        "post-incident triage"
+    )
+    assert '/dev/input/event0' in msg
+
+
+def test_check_poll_flags_returns_none_for_pollin_only():
+    """The happy path: POLLIN means "data ready to read". MUST NOT
+    produce a ScannerDeviceLost — the listener loop reads the data and
+    keeps going.
+
+    Mutation guard: a regression that adds POLLIN to the bitmask (or
+    drops the bitmask filter entirely) would make every keystroke event
+    trigger a spurious device-lost restart.
+    """
+    fault = _check_poll_flags('/dev/input/event0', select.POLLIN)
+    assert fault is None, (
+        "POLLIN is the healthy 'data ready' signal — the helper must "
+        "not treat it as a fault"
+    )
+
+
+def test_check_poll_flags_detects_fault_when_pollin_also_set():
+    """Combined flag set: POLLIN | POLLHUP fires both bits.
+
+    On Linux a closed-write-end pipe with bytes still buffered presents
+    POLLIN | POLLHUP simultaneously — the listener must treat it as a
+    fault even though POLLIN is also set, because the next ``read()``
+    will return EOF and any subsequent reads block forever.
+
+    Mutation guard: a wrong masking expression like ``flags == POLLHUP``
+    (equality instead of bitwise AND) would miss this combined case.
+    """
+    fault = _check_poll_flags(
+        '/dev/input/event0', select.POLLIN | select.POLLHUP,
+    )
+    assert isinstance(fault, ScannerDeviceLost), (
+        "POLLIN | POLLHUP must surface as a fault even with POLLIN set "
+        "— the read end is doomed once HUP appears"
+    )
+
+
+def test_check_poll_flags_returns_none_for_zero():
+    """Defensive: if poll wakes us up with no flag bits set (shouldn't
+    happen, but handle gracefully) we must NOT raise — the loop just
+    skips and re-polls. A regression that flipped the comparison
+    (``not (flags & bad)``) would raise on every healthy iteration.
+    """
+    assert _check_poll_flags('/dev/input/event0', 0) is None

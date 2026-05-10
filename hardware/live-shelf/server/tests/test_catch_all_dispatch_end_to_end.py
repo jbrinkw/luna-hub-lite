@@ -333,19 +333,16 @@ def test_catch_all_event_drives_dispatch_through_full_pipeline(tmp_path: Path):
 
     real_emitter = handler._cloud_emitter
 
-    # Patch ``_capture_frames`` to be a no-op pass-through. The
-    # production helper does a defensive shutil.copyfile to clone
-    # the daemon-written frames into the event dir; for catch-all
-    # the inline capture path ALREADY wrote to the event dir, so
-    # the copy is asked to copy a file onto itself and raises
-    # ``SameFileError``. That's a separate bug (tracked elsewhere);
-    # for THIS test we want to exercise the dispatch chain
-    # downstream of frame capture, not the copy itself.
-    def _passthrough_capture_frames(self, event_id, before_src, after_src):
-        # Mirror the production return shape: (before_final, after_final, err)
-        # — passing through whatever paths the catch-all inline path
-        # already wrote.
-        return before_src, after_src, None
+    # Audit C-MED-5 (2026-05-04): the ``_capture_frames`` passthrough
+    # patch was added to bypass a same-file copy bug — the production
+    # helper called ``shutil.copyfile`` with src == dst when the
+    # catch-all fast-path had already written the frame to the event
+    # dir. That bug was fixed in scale_events.py:1186 (resolve()-
+    # equality short-circuit) and pinned by
+    # test_catch_all_classifier_runs_on_self_copy_path.py. The
+    # passthrough is now dead — removing it lets the REAL
+    # ``_capture_frames`` run, which is what production does and what
+    # the end-to-end mutation guards should pin.
 
     with patch(
         "server.handlers.scale_events.classify_catch_all_with_fallback",
@@ -353,10 +350,6 @@ def test_catch_all_event_drives_dispatch_through_full_pipeline(tmp_path: Path):
     ), patch(
         "server.handlers.scale_events.classify_event",
         side_effect=_stub_classify,
-    ), patch.object(
-        ScaleHandler,
-        "_capture_frames",
-        _passthrough_capture_frames,
     ), patch.object(
         real_emitter,
         "emit_catch_all_first_measurement",
