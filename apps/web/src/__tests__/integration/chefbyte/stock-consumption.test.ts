@@ -241,12 +241,16 @@ describe('ChefByte stock consumption (consume_product RPC)', () => {
     // Stock remaining should be 0 (all lots deleted)
     expect(Number(data.stock_remaining)).toBeCloseTo(0, 1);
 
-    // Verify all lots are gone (fully consumed lots are deleted)
+    // Verify all lots are logically gone (fully consumed lots are soft-deleted
+    // by the G1 stock_lots_no_hard_delete trigger — qty=0 + deleted_at=now()).
+    // Production callers filter `deleted_at IS NULL`, so the test mirrors
+    // that contract: no live rows visible to the user.
     const { data: lots, error: lotsError } = await chef
       .from('stock_lots')
       .select('lot_id')
       .eq('product_id', productId)
-      .eq('user_id', userId);
+      .eq('user_id', userId)
+      .is('deleted_at', null);
     expect(lotsError).toBeNull();
     expect(lots).toHaveLength(0);
 

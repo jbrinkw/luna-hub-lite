@@ -25,7 +25,10 @@
  * Test matrix (5 cases, named A–E):
  *   A. INSERT on stock_lots → cache key invalidated
  *   B. UPDATE on stock_lots → cache key invalidated
- *   C. DELETE on stock_lots → cache key invalidated
+ *   C. Client DELETE on stock_lots → cache key invalidated.
+ *      Post-G1 the DELETE is converted to a soft-delete UPDATE by the
+ *      stock_lots_no_hard_delete trigger; the test subscribes with
+ *      event: '*' so either signal triggers invalidation.
  *   D. Unsubscribe then mutate → cache NOT invalidated (cleanup check)
  *   E. Two subs to same key, one removed → other still invalidates
  */
@@ -305,10 +308,21 @@ describe('Realtime invalidation harness — postgres_changes → QueryClient.inv
     });
 
     try {
+      // Unique expires_on per test avoids the stock_lots_merge_key unique
+      // index conflict — the G1 trigger soft-deletes rows on cleanup
+      // (qty=0 + deleted_at=now()) but the unique index spans tombstones,
+      // so repeated NULL-expires_on inserts under the same product+location
+      // collide across tests.
       const { data: inserted, error } = await (adminClient as any)
         .schema('chefbyte')
         .from('stock_lots')
-        .insert({ user_id: userId, product_id: productId, location_id: locationId, qty_containers: 1 })
+        .insert({
+          user_id: userId,
+          product_id: productId,
+          location_id: locationId,
+          qty_containers: 1,
+          expires_on: '2099-01-01',
+        })
         .select('lot_id')
         .single();
       expect(error).toBeNull();
@@ -324,10 +338,18 @@ describe('Realtime invalidation harness — postgres_changes → QueryClient.inv
   // ─── Case B: UPDATE → cache key invalidated ─────────────────────────
 
   it('B: UPDATE on chefbyte.stock_lots invalidates the query key', async () => {
+    // Unique expires_on per test — see Case A for rationale (G1 soft-delete +
+    // merge-key collision across tombstones).
     const { data: seeded, error: seedErr } = await (adminClient as any)
       .schema('chefbyte')
       .from('stock_lots')
-      .insert({ user_id: userId, product_id: productId, location_id: locationId, qty_containers: 2 })
+      .insert({
+        user_id: userId,
+        product_id: productId,
+        location_id: locationId,
+        qty_containers: 2,
+        expires_on: '2099-01-02',
+      })
       .select('lot_id')
       .single();
     expect(seedErr).toBeNull();
@@ -377,22 +399,42 @@ describe('Realtime invalidation harness — postgres_changes → QueryClient.inv
   // sufficient for unfiltered DELETE subscriptions). This probes the
   // "DELETE event → invalidateQueries" path end-to-end.
 
-  it('C: DELETE on chefbyte.stock_lots invalidates the query key (unfiltered subscription)', async () => {
+  // ─── Case C: DELETE → cache key invalidated (post-G1 = soft-delete UPDATE)
+  //
+  // POST-G1 NOTE (stock_lots_no_hard_delete migration, 2026-05-15): the
+  // BEFORE-DELETE trigger on chefbyte.stock_lots converts every DELETE
+  // into an UPDATE (qty=0 + deleted_at=now()) so the Pi's snapshot poller
+  // sees a tombstone via the updated_at bump. As a result, a `.delete()`
+  // call no longer emits a postgres_changes DELETE event — it emits an
+  // UPDATE event. We subscribe with `event: '*'` (the default in
+  // subscribeAndInvalidate) so either signal triggers invalidation. The
+  // intent of this test is "DELETE-by-user → cache invalidated," which
+  // still holds end-to-end.
+  it('C: client-issued DELETE on chefbyte.stock_lots invalidates the query key', async () => {
+    // Unique expires_on per test — see Case A.
     const { data: seeded, error: seedErr } = await (adminClient as any)
       .schema('chefbyte')
       .from('stock_lots')
-      .insert({ user_id: userId, product_id: productId, location_id: locationId, qty_containers: 1 })
+      .insert({
+        user_id: userId,
+        product_id: productId,
+        location_id: locationId,
+        qty_containers: 1,
+        expires_on: '2099-01-03',
+      })
       .select('lot_id')
       .single();
     expect(seedErr).toBeNull();
-    // Test deletes this row itself — do NOT push to insertedLotIds cleanup.
+    // Test soft-deletes this row itself via the trigger; cleanup is best-effort.
+    insertedLotIds.push(seeded.lot_id);
 
     const queryClient = makeQueryClient();
     const queryKey = ['stockLots', userId, 'delete'];
     queryClient.setQueryData(queryKey, []);
 
-    // No filter: unfiltered DELETE subscriptions work even without
-    // REPLICA IDENTITY FULL because Realtime only needs the PK to route them.
+    // No filter: kept from the original test for parity. With the G1
+    // trigger the event arrives as UPDATE rather than DELETE, but
+    // `event: '*'` catches both.
     const cleanup = await subscribeAndInvalidate({
       client: subscriberClient,
       channelName: `rt-inv-delete-${crypto.randomUUID()}`,
@@ -439,10 +481,17 @@ describe('Realtime invalidation harness — postgres_changes → QueryClient.inv
     cleanup();
     await new Promise((r) => setTimeout(r, 300)); // allow ACK to settle
 
+    // Unique expires_on per test — see Case A.
     const { data: inserted, error: insertErr } = await (adminClient as any)
       .schema('chefbyte')
       .from('stock_lots')
-      .insert({ user_id: userId, product_id: productId, location_id: locationId, qty_containers: 1 })
+      .insert({
+        user_id: userId,
+        product_id: productId,
+        location_id: locationId,
+        qty_containers: 1,
+        expires_on: '2099-01-04',
+      })
       .select('lot_id')
       .single();
     expect(insertErr).toBeNull();
@@ -492,10 +541,17 @@ describe('Realtime invalidation harness — postgres_changes → QueryClient.inv
     expect(queryClient.getQueryState(queryKey)?.isInvalidated).toBeFalsy();
 
     try {
+      // Unique expires_on per test — see Case A.
       const { data: inserted, error: insertErr } = await (adminClient as any)
         .schema('chefbyte')
         .from('stock_lots')
-        .insert({ user_id: userId, product_id: productId, location_id: locationId, qty_containers: 1 })
+        .insert({
+          user_id: userId,
+          product_id: productId,
+          location_id: locationId,
+          qty_containers: 1,
+          expires_on: '2099-01-05',
+        })
         .select('lot_id')
         .single();
       expect(insertErr).toBeNull();

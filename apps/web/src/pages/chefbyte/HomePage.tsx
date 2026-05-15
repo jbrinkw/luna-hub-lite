@@ -335,7 +335,13 @@ export function HomePage() {
           .eq('user_id', userId!)
           .eq('logical_date', today),
         // 10. All stock lots — also fetch expires_on for the expired-count card.
-        chefbyte().from('stock_lots').select('product_id, qty_containers, expires_on').eq('user_id', userId!),
+        // Excludes soft-deleted tombstones (G1 migration: stock_lots DELETE → UPDATE
+        // qty=0, deleted_at=now()) so stale rows don't inflate stock totals.
+        chefbyte()
+          .from('stock_lots')
+          .select('product_id, qty_containers, expires_on')
+          .eq('user_id', userId!)
+          .is('deleted_at', null),
       ]);
 
       // Check for errors

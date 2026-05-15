@@ -358,12 +358,19 @@ describe('ChefByte ScannerPage queries', () => {
       .single();
     expect(lot).not.toBeNull();
 
-    // Undo: delete the stock lot (EXACT pattern from ScannerPage undoScan)
+    // Undo: delete the stock lot (EXACT pattern from ScannerPage undoScan).
+    // The G1 trigger converts the DELETE into a soft-delete (qty=0,
+    // deleted_at=now()) so the row is logically gone but still exists.
     const deleteResult = await chefbyte(ctx.client).from('stock_lots').delete().eq('lot_id', lot!.lot_id);
     expect(deleteResult.error).toBeNull();
 
-    // Verify deleted
-    const { data: after } = await chefbyte(ctx.client).from('stock_lots').select('lot_id').eq('lot_id', lot!.lot_id);
+    // Verify logically deleted — mirror production reads (filter on
+    // deleted_at IS NULL). Production users see zero live rows.
+    const { data: after } = await chefbyte(ctx.client)
+      .from('stock_lots')
+      .select('lot_id')
+      .eq('lot_id', lot!.lot_id)
+      .is('deleted_at', null);
     expect(after!.length).toBe(0);
   });
 

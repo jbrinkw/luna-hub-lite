@@ -254,10 +254,15 @@ export function SettingsPage() {
 
   const deleteLocationMutation = useMutation({
     mutationFn: async (locationId: string) => {
+      // Excludes soft-deleted tombstones (G1 migration) — a tombstoned lot
+      // is logically gone and must not block location deletion. The trigger
+      // sets qty_containers=0 + deleted_at=now() so the row's spendable
+      // stock is zero.
       const { count } = await chefbyte()
         .from('stock_lots')
         .select('*', { count: 'exact', head: true })
-        .eq('location_id', locationId);
+        .eq('location_id', locationId)
+        .is('deleted_at', null);
       if (count && count > 0) {
         throw new Error('Cannot delete location with existing stock. Move stock first.');
       }

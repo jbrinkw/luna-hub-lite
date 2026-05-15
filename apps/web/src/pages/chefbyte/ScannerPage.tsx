@@ -1276,9 +1276,13 @@ export function ScannerPage() {
         // we'd previously been treating both that error and a real RLS
         // failure as "no row, fall through to insert", which masked
         // legitimate failures.
+        // Include tombstoned rows (deleted_at IS NOT NULL): the unique index
+        // `stock_lots_merge_key` covers all rows, so an INSERT would conflict
+        // with a surviving tombstone. We revive the tombstone by clearing
+        // deleted_at and resetting qty when matched.
         let existingQuery = chefbyte()
           .from('stock_lots')
-          .select('lot_id, qty_containers')
+          .select('lot_id, qty_containers, deleted_at')
           .eq('user_id', user.id)
           .eq('product_id', product.product_id)
           .eq('location_id', locId);
@@ -1298,10 +1302,17 @@ export function ScannerPage() {
           // would silently concatenate (e.g. "0.000" + 1 = "0.0001"). Even when
           // PostgREST returns numeric we want the explicit Number() so unit
           // tests and integration tests can't drift around the JS coercion rules.
+          const isTombstone = (existingLot as any).deleted_at != null;
           const currentQty = Number((existingLot as any).qty_containers) || 0;
+          // Revived tombstones: reset qty to the new value rather than
+          // adding to the (zeroed) qty, and clear deleted_at.
+          const updatePayload: Record<string, unknown> = {
+            qty_containers: isTombstone ? qty : currentQty + qty,
+          };
+          if (isTombstone) updatePayload.deleted_at = null;
           const { data: updated, error: updErr } = await chefbyte()
             .from('stock_lots')
-            .update({ qty_containers: currentQty + qty })
+            .update(updatePayload)
             .eq('lot_id', (existingLot as any).lot_id)
             .select('lot_id')
             .single();

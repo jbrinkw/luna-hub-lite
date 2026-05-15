@@ -439,6 +439,8 @@ export function ScalesTab() {
       let resolvedLotId: string | null = null;
       if (productId) {
         // Tier 1: live_scale-sourced, qty>0, FEFO.
+        // Excludes tombstones (G1 migration) — a tombstoned lot is logically
+        // gone and must not be selected as a pairing candidate.
         const { data: tier1, error: t1err } = await chefbyte()
           .from('stock_lots')
           .select('lot_id')
@@ -446,6 +448,7 @@ export function ScalesTab() {
           .eq('product_id', productId)
           .eq('last_update_source', 'live_scale')
           .gt('qty_containers', 0)
+          .is('deleted_at', null)
           .order('expires_on', { ascending: true, nullsFirst: false })
           .order('last_update_ts', { ascending: true, nullsFirst: false })
           .limit(1)
@@ -462,6 +465,7 @@ export function ScalesTab() {
             .eq('product_id', productId)
             .is('in_flight_since', null)
             .gt('qty_containers', 0)
+            .is('deleted_at', null)
             .order('expires_on', { ascending: true, nullsFirst: false })
             .order('last_update_ts', { ascending: true, nullsFirst: false })
             .limit(1)
@@ -478,6 +482,7 @@ export function ScalesTab() {
             .eq('user_id', user!.id)
             .eq('product_id', productId)
             .gt('qty_containers', 0)
+            .is('deleted_at', null)
             .order('expires_on', { ascending: true, nullsFirst: false })
             .order('last_update_ts', { ascending: true, nullsFirst: false })
             .limit(1)
@@ -493,6 +498,7 @@ export function ScalesTab() {
             .select('lot_id')
             .eq('user_id', user!.id)
             .eq('product_id', productId)
+            .is('deleted_at', null)
             .order('expires_on', { ascending: true, nullsFirst: false })
             .order('last_update_ts', { ascending: true, nullsFirst: false })
             .limit(1)

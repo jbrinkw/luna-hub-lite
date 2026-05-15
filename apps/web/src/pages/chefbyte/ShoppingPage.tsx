@@ -428,11 +428,14 @@ export function ShoppingPage() {
 
     if (!prods || prods.length === 0) return;
 
-    // Get all stock lots to calculate current stock
+    // Get all stock lots to calculate current stock. Excludes soft-deleted
+    // tombstones (G1 migration) so stale rows don't suppress the below-min
+    // import; a tombstoned lot represents zero spendable stock.
     const { data: stockLots } = await chefbyte()
       .from('stock_lots')
       .select('product_id, qty_containers')
-      .eq('user_id', user.id);
+      .eq('user_id', user.id)
+      .is('deleted_at', null);
 
     // Calculate current stock per product
     const stockByProduct = new Map<string, number>();

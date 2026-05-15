@@ -203,11 +203,15 @@ async function readInventoryForProduct(chef: any, userId: string, productId: str
   expect(products).toHaveLength(1);
   const spc = Number(products![0].servings_per_container);
 
+  // Mirror the production InventoryPage query — filter out soft-deleted
+  // tombstones (G1 migration: stock_lots DELETE → UPDATE qty=0,
+  // deleted_at=now()) so the test sees what the user sees.
   const { data: lots, error: lErr } = await chef
     .from('stock_lots')
     .select('lot_id,product_id,qty_containers,expires_on,locations:location_id(name)')
     .eq('user_id', userId)
-    .eq('product_id', productId);
+    .eq('product_id', productId)
+    .is('deleted_at', null);
   expect(lErr).toBeNull();
 
   const totalContainers = (lots ?? []).reduce((acc: number, l: any) => acc + Number(l.qty_containers), 0);

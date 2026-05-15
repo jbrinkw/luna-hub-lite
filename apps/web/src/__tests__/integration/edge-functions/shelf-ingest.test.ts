@@ -2833,13 +2833,16 @@ describe('shelf-ingest Edge Function', () => {
       expect(voidBody.ok).toBe(true);
       expect(voidBody.transaction_id).toBe(transactionId);
 
-      // The stock_lot was deleted.
+      // The stock_lot was logically deleted (G1 trigger converts DELETE →
+      // soft-delete; row stays with qty=0 + deleted_at=now()). Mirror
+      // production reads by filtering deleted_at IS NULL.
       const { data: lotsAfter } = await (adminClient as any)
         .schema('chefbyte')
         .from('stock_lots')
         .select('lot_id')
         .eq('user_id', ctx.userId)
-        .eq('product_id', prod.product_id);
+        .eq('product_id', prod.product_id)
+        .is('deleted_at', null);
       expect(lotsAfter).toHaveLength(0);
 
       // The audit row flipped to voided.
@@ -2850,9 +2853,20 @@ describe('shelf-ingest Edge Function', () => {
         .eq('transaction_id', transactionId)
         .single();
       expect(tx.status).toBe('voided');
-      // applied_lot_id reflects the FK ON DELETE SET NULL behaviour now
-      // that the lot row is gone.
-      expect(tx.applied_lot_id).toBeNull();
+      // POST-G1: the BEFORE-DELETE trigger on stock_lots converts the void's
+      // DELETE into a soft-delete UPDATE (qty=0 + deleted_at=now()), so the
+      // referenced lot row still exists and the FK ON DELETE SET NULL never
+      // fires — applied_lot_id remains set. Verify the referenced lot is in
+      // fact tombstoned (qty=0, deleted_at not null).
+      expect(tx.applied_lot_id).not.toBeNull();
+      const { data: tombstoned } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id, qty_containers, deleted_at')
+        .eq('lot_id', tx.applied_lot_id)
+        .single();
+      expect(Number(tombstoned.qty_containers)).toBe(0);
+      expect(tombstoned.deleted_at).not.toBeNull();
     } finally {
       await ctx.cleanup();
     }

@@ -236,13 +236,16 @@ describe('Scanner pipeline E2E (real Supabase, no mocks)', () => {
       expect(voidBody.transaction_id).toBe(transactionId);
 
       // ─── Step 7: Verify side-effect is reversed — the stock_lot is
-      // gone and the audit row is flipped to 'voided'.
+      // logically gone (G1 trigger converts DELETE → soft-delete with
+      // qty=0 + deleted_at=now()) and the audit row is flipped to 'voided'.
+      // Filter on deleted_at IS NULL to mirror production reads.
       const { data: lotsAfter } = await (adminClient as any)
         .schema('chefbyte')
         .from('stock_lots')
         .select('lot_id')
         .eq('user_id', ctx.userId)
-        .eq('product_id', productId);
+        .eq('product_id', productId)
+        .is('deleted_at', null);
       expect(lotsAfter).toHaveLength(0);
 
       const { data: txAfter } = await (adminClient as any)
@@ -252,9 +255,21 @@ describe('Scanner pipeline E2E (real Supabase, no mocks)', () => {
         .eq('transaction_id', transactionId)
         .single();
       expect(txAfter.status).toBe('voided');
-      // FK ON DELETE SET NULL on applied_lot_id — confirms the cascade
-      // wired through cleanly.
-      expect(txAfter.applied_lot_id).toBeNull();
+      // POST-G1: the BEFORE-DELETE trigger on stock_lots converts the void's
+      // DELETE into a soft-delete UPDATE (qty=0 + deleted_at=now()), so the
+      // referenced lot row still exists and the FK ON DELETE SET NULL never
+      // fires — applied_lot_id remains set. Verify the referenced lot is in
+      // fact tombstoned (qty=0, deleted_at not null) so the audit linkage is
+      // still pointing at a "reversed" lot.
+      expect(txAfter.applied_lot_id).not.toBeNull();
+      const { data: tombstoned } = await (adminClient as any)
+        .schema('chefbyte')
+        .from('stock_lots')
+        .select('lot_id, qty_containers, deleted_at')
+        .eq('lot_id', txAfter.applied_lot_id)
+        .single();
+      expect(Number(tombstoned.qty_containers)).toBe(0);
+      expect(tombstoned.deleted_at).not.toBeNull();
     } finally {
       await ctx.cleanup();
     }

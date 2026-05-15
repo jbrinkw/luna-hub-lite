@@ -870,6 +870,15 @@ describe('ChefByte HomePage queries', () => {
     // still see the original stock_lots (chicken + rice + eggs + peas).
     // Without this, the "stock_lots for badges" test below fails because
     // we wiped everything at the top of this block.
+    //
+    // POST-G1 NOTE: the BEFORE-DELETE trigger on stock_lots converts every
+    // DELETE into a soft-delete (qty=0 + deleted_at=now()), leaving the row
+    // in place. Because the stock_lots_merge_key unique index covers ALL
+    // rows (including tombstones), a naive re-insert at the same
+    // (user, product, location, COALESCE(expires_on, '9999-12-31')) key
+    // collides. Earlier tests (e.g. unmark_meal_done) may have left
+    // tombstoned chicken lots at NULL expires_on, so the reseed below uses
+    // unique future expires_on values to dodge the merge-key conflict.
     await chef.from('stock_lots').delete().eq('user_id', ctx.userId);
     await chef.from('stock_lots').insert([
       {
@@ -877,18 +886,21 @@ describe('ChefByte HomePage queries', () => {
         product_id: seeds.productMap['Great Value Boneless Skinless Chicken Breasts'],
         location_id: locId,
         qty_containers: 3,
+        expires_on: '2099-08-01',
       },
       {
         user_id: ctx.userId,
         product_id: seeds.productMap['Great Value Long Grain Brown Rice'],
         location_id: locId,
         qty_containers: 2,
+        expires_on: '2099-08-02',
       },
       {
         user_id: ctx.userId,
         product_id: seeds.productMap['Great Value Large White Eggs'],
         location_id: locId,
         qty_containers: 0.5,
+        expires_on: '2099-08-03',
       },
     ]);
   });
@@ -986,10 +998,13 @@ describe('ChefByte HomePage queries', () => {
   //   .from('stock_lots').select('product_id, qty_containers').eq('user_id', userId)
   // -------------------------------------------------------------------
   it('stock_lots query for all user products returns qty_containers for badge computation', async () => {
+    // Mirror production HomePage query — exclude soft-deleted tombstones
+    // (G1 migration) so prior tests' leftover rows can't inflate counts.
     const result = await chefbyte(ctx.client)
       .from('stock_lots')
       .select('product_id, qty_containers')
-      .eq('user_id', ctx.userId);
+      .eq('user_id', ctx.userId)
+      .is('deleted_at', null);
 
     const data = assertQuerySucceeds(result, 'stock lots for badges') as any[];
     expect(Array.isArray(data)).toBe(true);

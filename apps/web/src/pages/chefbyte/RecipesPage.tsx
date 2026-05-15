@@ -392,7 +392,11 @@ export function RecipesPage() {
           )
           .eq('user_id', user!.id)
           .order('name'),
-        chefbyte().from('stock_lots').select('product_id, qty_containers, expires_on').eq('user_id', user!.id),
+        chefbyte()
+          .from('stock_lots')
+          .select('product_id, qty_containers, expires_on')
+          .eq('user_id', user!.id)
+          .is('deleted_at', null),
       ]);
 
       if (recipeRes.error) throw recipeRes.error;

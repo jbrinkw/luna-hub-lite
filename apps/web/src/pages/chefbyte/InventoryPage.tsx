@@ -508,7 +508,8 @@ export function InventoryPage() {
         .select(
           'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,in_flight_kind,last_observed_weight_g,last_observed_at,locations:location_id(name),products:product_id(name,servings_per_container,visual_unit_label,visual_units_per_serving,display_by_weight,net_weight_g)',
         )
-        .eq('user_id', user!.id);
+        .eq('user_id', user!.id)
+        .is('deleted_at', null);
       if (error) throw error;
       return (data ?? []) as StockLot[];
     },
@@ -948,10 +949,14 @@ export function InventoryPage() {
 
       const resolvedExpiry = expiresOn || null;
 
-      // Build query to find existing lot with same product/location/expiry
+      // Build query to find existing lot with same product/location/expiry.
+      // We deliberately include tombstoned rows (deleted_at IS NOT NULL) here:
+      // the stock_lots_merge_key unique index covers ALL rows, so an INSERT
+      // would conflict with a surviving tombstone — instead we revive the
+      // tombstone by clearing deleted_at and setting the new qty.
       let query = chefbyte()
         .from('stock_lots')
-        .select('lot_id, qty_containers')
+        .select('lot_id, qty_containers, deleted_at')
         .eq('user_id', user.id)
         .eq('product_id', productId)
         .eq('location_id', locationId);
@@ -965,11 +970,14 @@ export function InventoryPage() {
       const { data: existing } = await query.limit(1).maybeSingle();
 
       if (existing) {
-        // Merge into existing lot
-        const { error: err } = await chefbyte()
-          .from('stock_lots')
-          .update({ qty_containers: Number(existing.qty_containers) + qtyContainers })
-          .eq('lot_id', existing.lot_id);
+        // Merge into existing lot. If the row was tombstoned (G1 migration),
+        // revive it by clearing deleted_at and resetting qty to the new value
+        // rather than adding to the (zeroed) qty.
+        const isTombstone = (existing as any).deleted_at != null;
+        const newQty = isTombstone ? qtyContainers : Number(existing.qty_containers) + qtyContainers;
+        const updatePayload: Record<string, unknown> = { qty_containers: newQty };
+        if (isTombstone) updatePayload.deleted_at = null;
+        const { error: err } = await chefbyte().from('stock_lots').update(updatePayload).eq('lot_id', existing.lot_id);
         if (err) throw err;
       } else {
         // Create new lot
