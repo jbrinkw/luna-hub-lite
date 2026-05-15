@@ -54,6 +54,16 @@ interface StockLot {
    */
   in_flight_since: string | null;
   /**
+   * Which physical scale the current in-flight pickup originated from.
+   * Paired with ``in_flight_since`` — non-null iff ``in_flight_since`` is.
+   * Used to gate the "catch-all" source pill so it surfaces ONLY when the
+   * lot is CURRENTLY in flight on the catch-all scale (NOT when the lot's
+   * historical ``last_update_source`` happens to be ``'catch_all'``).
+   * Possible values mirror ``chefbyte.stock_lots.in_flight_kind`` in DB:
+   * ``'live_shelf' | 'live_scale' | 'catch_all' | null``.
+   */
+  in_flight_kind: 'live_shelf' | 'live_scale' | 'catch_all' | null;
+  /**
    * Most recent gram-level weight observation streamed from the Pi via
    * the live_weight_sync flow (live_shelf + live_scale lots only —
    * catch_all uses pickup_weight_g). NULL when the lot has never been
@@ -193,7 +203,7 @@ export function pickEarliestInFlight(lots: ReadonlyArray<{ in_flight_since: stri
 }
 
 /**
- * Whether a lot's `last_update_source` should produce a visible pill in the
+ * Whether a lot's source should produce a visible pill in the
  * lots-view table. Mirrors `pickLatestAutomatedSource`'s gate so the per-row
  * lots view and the per-product grouped view agree on what counts as a
  * tracked source. Manual + null are always hidden; `live_scale` requires the
@@ -205,9 +215,32 @@ export function shouldShowLotSourcePill(
   source: 'manual' | 'live_shelf' | 'live_scale' | 'catch_all' | null,
   productId: string,
   liveScalePairedProductIds: ReadonlySet<string>,
+  /**
+   * Current in-flight context for THIS specific lot. The catch-all pill is
+   * gated on a CURRENT in-flight pickup originating from the catch-all
+   * scale — `last_update_source='catch_all'` alone is historical (the lot
+   * was last touched by a catch-all event at some point in the past) and
+   * must NOT light up the pill. The pill should vanish the instant the
+   * in-flight pickup resolves (returned / consumed / discarded).
+   *
+   * Defaults to `{kind: null, since: null}` so existing callers that don't
+   * carry in-flight context (legacy tests / fixtures) get the safe-by-default
+   * behaviour: catch-all rows render NO pill unless explicitly proven
+   * in-flight on the catch-all.
+   */
+  inFlight: { kind: 'live_shelf' | 'live_scale' | 'catch_all' | null; since: string | null } = {
+    kind: null,
+    since: null,
+  },
 ): source is 'live_shelf' | 'live_scale' | 'catch_all' {
   if (!source || source === 'manual') return false;
   if (source === 'live_scale' && !liveScalePairedProductIds.has(productId)) return false;
+  if (source === 'catch_all') {
+    // Catch-all pill is reserved for lots that are CURRENTLY in flight on
+    // the catch-all. Historical `last_update_source='catch_all'` does NOT
+    // count — those lots were merely TOUCHED by a catch-all event once.
+    return inFlight.kind === 'catch_all' && inFlight.since !== null;
+  }
   return true;
 }
 
@@ -273,9 +306,21 @@ export function isLotOnScale(
  * require the product be present in `liveScalePairedProductIds`, which is the
  * live truth-source from `chefbyte.scale_pairings WHERE kind='live_scale'`.
  *
- * When a lot's tag is `live_scale` but the product is no longer paired, the
- * lot is skipped (treated as if its tag were null) so a still-valid older
- * `live_shelf` or `catch_all` tag on a sibling lot can still surface.
+ * `catch_all` is special-cased the same way: the badge means "a lot of this
+ * product is CURRENTLY in flight on the catch-all scale," not "a catch-all
+ * event ever touched a lot of this product." `last_update_source='catch_all'`
+ * is a per-lot historical audit marker that persists forever after the
+ * in-flight pickup resolves (returned to shelf / consumed / discarded). To
+ * surface the pill we must additionally see the SAME lot carry
+ * `in_flight_kind='catch_all'` AND `in_flight_since IS NOT NULL` — i.e. the
+ * lot is RIGHT NOW off the catch-all and not yet reconciled. The moment the
+ * pickup is closed out the cloud function nulls both fields and the badge
+ * disappears.
+ *
+ * When a lot's tag is `live_scale` but the product is no longer paired
+ * (or `catch_all` but the lot is not currently in-flight on the catch-all),
+ * the lot is skipped (treated as if its tag were null) so a still-valid older
+ * `live_shelf` tag on a sibling lot can still surface.
  *
  * `productId` is only consulted to look up the paired-set; pass any string
  * (including the empty string) when calling with a lot collection where every
@@ -285,6 +330,14 @@ export function pickLatestAutomatedSource(
   lots: ReadonlyArray<{
     last_update_source: 'manual' | 'live_shelf' | 'live_scale' | 'catch_all' | null;
     last_update_ts: string | null;
+    /**
+     * Optional — when omitted, catch_all rows are conservatively suppressed
+     * (safe-by-default: a caller that doesn't supply in-flight context can't
+     * prove the lot is currently on the catch-all). Required to make
+     * catch_all surface.
+     */
+    in_flight_kind?: 'live_shelf' | 'live_scale' | 'catch_all' | null;
+    in_flight_since?: string | null;
   }>,
   productId: string = '',
   liveScalePairedProductIds: ReadonlySet<string> = new Set(),
@@ -302,6 +355,15 @@ export function pickLatestAutomatedSource(
     // scale shows the "live scale" pill indefinitely after the pairing is
     // removed — see fix(chefbyte/inventory) commit history.
     if (l.last_update_source === 'live_scale' && !liveScalePaired) continue;
+    // Suppress catch_all tags unless the SAME lot is currently in-flight on
+    // the catch-all (in_flight_kind='catch_all' AND in_flight_since IS NOT
+    // NULL). `last_update_source='catch_all'` alone is historical — a lot
+    // that was once tare-captured / classified by the catch-all should NOT
+    // keep showing the pill forever. The pill must vanish the moment the
+    // pickup resolves (cloud nulls in_flight_kind + in_flight_since).
+    if (l.last_update_source === 'catch_all' && !(l.in_flight_kind === 'catch_all' && l.in_flight_since != null)) {
+      continue;
+    }
     if (!l.last_update_ts) {
       if (latestSource === null) latestSource = l.last_update_source;
       continue;
@@ -444,7 +506,7 @@ export function InventoryPage() {
       const { data, error } = await chefbyte()
         .from('stock_lots')
         .select(
-          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,last_observed_weight_g,last_observed_at,locations:location_id(name),products:product_id(name,servings_per_container,visual_unit_label,visual_units_per_serving,display_by_weight,net_weight_g)',
+          'lot_id,product_id,qty_containers,expires_on,last_update_source,last_update_ts,in_flight_since,in_flight_kind,last_observed_weight_g,last_observed_at,locations:location_id(name),products:product_id(name,servings_per_container,visual_unit_label,visual_units_per_serving,display_by_weight,net_weight_g)',
         )
         .eq('user_id', user!.id);
       if (error) throw error;
@@ -1830,8 +1892,16 @@ export function InventoryPage() {
                           On Scale
                         </span>
                       )}
-                      {/* Source pill — informational about last automated source. */}
-                      {shouldShowLotSourcePill(lot.last_update_source, lot.product_id, liveScalePairedProductIds) && (
+                      {/* Source pill — informational about last automated
+                          source. Catch-all is additionally gated on the
+                          CURRENT in-flight context (kind + since): a lot
+                          whose `last_update_source` is 'catch_all' but is
+                          no longer in flight on the catch-all is historical
+                          and gets no pill. */}
+                      {shouldShowLotSourcePill(lot.last_update_source, lot.product_id, liveScalePairedProductIds, {
+                        kind: lot.in_flight_kind,
+                        since: lot.in_flight_since,
+                      }) && (
                         <span
                           data-testid={`lot-source-pill-${lot.lot_id}`}
                           className={`inline-flex items-center shrink-0 rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${sourcePillCls(lot.last_update_source as NonNullable<GroupedProduct['latestSource']>)}`}
@@ -1975,6 +2045,7 @@ export function InventoryPage() {
                               lot.last_update_source,
                               lot.product_id,
                               liveScalePairedProductIds,
+                              { kind: lot.in_flight_kind, since: lot.in_flight_since },
                             ) && (
                               <span
                                 data-testid={`lot-source-pill-${lot.lot_id}`}

@@ -166,11 +166,18 @@ describe('pickLatestAutomatedSource', () => {
     // (e.g. flipped to <) would pick the oldest lot's source instead.
     // The product must be passed as paired so the live_scale row isn't
     // suppressed by the post-2026-04-27 stale-tag gate.
+    // catch_all row carries in-flight context so it can compete (the
+    // post-2026-05-15 gate strips historical catch_all rows).
     const res = pickLatestAutomatedSource(
       [
         { last_update_source: 'live_shelf', last_update_ts: '2026-01-01T00:00:00Z' },
         { last_update_source: 'live_scale', last_update_ts: '2026-04-01T00:00:00Z' },
-        { last_update_source: 'catch_all', last_update_ts: '2026-02-15T00:00:00Z' },
+        {
+          last_update_source: 'catch_all',
+          last_update_ts: '2026-02-15T00:00:00Z',
+          in_flight_kind: 'catch_all',
+          in_flight_since: '2026-02-15T00:00:00Z',
+        },
       ],
       'p1',
       new Set(['p1']),
@@ -183,16 +190,29 @@ describe('pickLatestAutomatedSource', () => {
     // The ts-less fallback only "sticks" when no ts-bearing lot has ever
     // been seen. If a mutation swapped the precedence, a stale legacy
     // row with null ts would overwrite a fresh live_shelf tag.
+    // Catch_all row is currently in-flight on the catch-all so it's
+    // eligible to compete (without that gate it'd be stripped first).
     const res = pickLatestAutomatedSource([
       { last_update_source: 'live_shelf', last_update_ts: '2026-04-01T00:00:00Z' },
-      { last_update_source: 'catch_all', last_update_ts: null }, // legacy row
+      {
+        last_update_source: 'catch_all',
+        last_update_ts: null,
+        in_flight_kind: 'catch_all',
+        in_flight_since: '2026-04-02T00:00:00Z',
+      },
     ]);
     expect(res.latestSource).toBe('live_shelf');
   });
 
   it('falls back to a ts-less automated source when NO ts-carrying source exists', () => {
+    // Catch_all surfacing requires CURRENT in-flight on the catch-all.
     const res = pickLatestAutomatedSource([
-      { last_update_source: 'catch_all', last_update_ts: null },
+      {
+        last_update_source: 'catch_all',
+        last_update_ts: null,
+        in_flight_kind: 'catch_all',
+        in_flight_since: '2026-04-01T00:00:01Z',
+      },
       { last_update_source: 'manual', last_update_ts: '2026-04-01T00:00:00Z' },
     ]);
     expect(res.latestSource).toBe('catch_all');
@@ -260,16 +280,106 @@ describe('pickLatestAutomatedSource', () => {
     expect(res.latestSourceTs).toBe('2026-04-26T00:00:00Z');
   });
 
-  it('does NOT suppress live_shelf or catch_all when the product is unpaired', () => {
-    // Defence against a mutation that broadens the gate beyond live_scale.
-    // Only live_scale is per-product; the other two are device-level so the
-    // paired-set check must never apply to them.
+  it('does NOT suppress live_shelf when the product is unpaired', () => {
+    // Defence against a mutation that broadens the live_scale paired-set
+    // gate to live_shelf. live_shelf is a device-level source so the
+    // paired-set check must never apply to it.
     const res = pickLatestAutomatedSource(
-      [{ last_update_source: 'catch_all', last_update_ts: '2026-04-27T00:00:00Z' }],
+      [{ last_update_source: 'live_shelf', last_update_ts: '2026-04-27T00:00:00Z' }],
       'product-id',
-      new Set(), // empty paired set — must NOT suppress catch_all
+      new Set(), // empty paired set — must NOT suppress live_shelf
     );
+    expect(res.latestSource).toBe('live_shelf');
+  });
+
+  // -----------------------------------------------------------------------
+  // catch_all gating against current in-flight state (2026-05-15 rule).
+  // `last_update_source='catch_all'` is HISTORICAL — the column records
+  // "this lot was last touched by a catch-all event at some point in the
+  // past" and that signal persists forever. The pill must only surface
+  // when the SAME lot is currently in flight on the catch-all
+  // (`in_flight_kind='catch_all'` AND `in_flight_since IS NOT NULL`).
+  // The pill must vanish the moment the pickup resolves
+  // (returned / consumed / discarded → cloud nulls both fields).
+  // -----------------------------------------------------------------------
+
+  it('surfaces catch_all when the lot is CURRENTLY in flight on the catch-all', () => {
+    // The positive case: lot is right now off the catch-all and not yet
+    // reconciled. Pill should fire.
+    const res = pickLatestAutomatedSource([
+      {
+        last_update_source: 'catch_all',
+        last_update_ts: '2026-05-15T12:00:00Z',
+        in_flight_kind: 'catch_all',
+        in_flight_since: '2026-05-15T12:00:00Z',
+      },
+    ]);
     expect(res.latestSource).toBe('catch_all');
+    expect(res.latestSourceTs).toBe('2026-05-15T12:00:00Z');
+  });
+
+  it('SUPPRESSES catch_all when last_update_source=catch_all but in_flight_since IS NULL (historical row)', () => {
+    // The load-bearing bug fix: a lot was once catch-all-touched (e.g.
+    // tare-captured weeks ago) and now sits quietly on the shelf. The
+    // pill must NOT fire — `last_update_source='catch_all'` alone is a
+    // historical audit marker. Mutation: dropping the in_flight_since
+    // check would resurrect the bug (pill stays lit forever).
+    const res = pickLatestAutomatedSource([
+      {
+        last_update_source: 'catch_all',
+        last_update_ts: '2026-04-01T00:00:00Z',
+        in_flight_kind: null,
+        in_flight_since: null,
+      },
+    ]);
+    expect(res.latestSource).toBeNull();
+    expect(res.latestSourceTs).toBeNull();
+  });
+
+  it('SUPPRESSES catch_all when the lot is in flight on a DIFFERENT kind (e.g. live_shelf)', () => {
+    // Edge case: a lot can be in_flight from a live_shelf pickup AND its
+    // last_update_source can still be 'catch_all' (e.g. tare was captured
+    // on the catch-all, then the bottle was placed on the live shelf and
+    // is now picked up off it). The catch-all pill must NOT fire — the
+    // CURRENT pickup didn't come from the catch-all. Mutation: ignoring
+    // in_flight_kind would surface catch_all whenever the lot is in flight
+    // for ANY reason.
+    const res = pickLatestAutomatedSource([
+      {
+        last_update_source: 'catch_all',
+        last_update_ts: '2026-05-15T12:00:00Z',
+        in_flight_kind: 'live_shelf',
+        in_flight_since: '2026-05-15T12:00:00Z',
+      },
+    ]);
+    expect(res.latestSource).toBeNull();
+  });
+
+  it('falls back to a still-valid live_shelf tag when historical catch_all is suppressed', () => {
+    // Parallels the live_scale fall-through test: when the catch_all gate
+    // rejects a historical row, sibling lots with other automated tags
+    // must still surface.
+    const res = pickLatestAutomatedSource([
+      {
+        last_update_source: 'catch_all', // historical (no current in-flight)
+        last_update_ts: '2026-04-01T00:00:00Z',
+        in_flight_kind: null,
+        in_flight_since: null,
+      },
+      { last_update_source: 'live_shelf', last_update_ts: '2026-04-26T00:00:00Z' },
+    ]);
+    expect(res.latestSource).toBe('live_shelf');
+    expect(res.latestSourceTs).toBe('2026-04-26T00:00:00Z');
+  });
+
+  it('default args (no in_flight context) treat every catch_all tag as historical → suppressed', () => {
+    // Backwards-compat sanity check on default-arg behavior. Callers that
+    // don't pass per-lot in_flight_kind/in_flight_since get strict gating
+    // (catch_all hidden) — safe-by-default, mirroring the live_scale gate.
+    const res = pickLatestAutomatedSource([
+      { last_update_source: 'catch_all', last_update_ts: '2026-05-15T00:00:00Z' },
+    ]);
+    expect(res.latestSource).toBeNull();
   });
 
   it('default args: empty paired set treats every live_scale tag as stale', () => {
@@ -296,10 +406,8 @@ describe('shouldShowLotSourcePill', () => {
     expect(shouldShowLotSourcePill('manual', 'p', new Set())).toBe(false);
   });
 
-  it('shows live_shelf and catch_all unconditionally', () => {
-    // Device-level sources are not gated by per-product pairings.
+  it('shows live_shelf unconditionally (device-level source, not per-product)', () => {
     expect(shouldShowLotSourcePill('live_shelf', 'p', new Set())).toBe(true);
-    expect(shouldShowLotSourcePill('catch_all', 'p', new Set())).toBe(true);
   });
 
   it('hides live_scale when product is NOT in the paired set', () => {
@@ -311,5 +419,59 @@ describe('shouldShowLotSourcePill', () => {
 
   it('shows live_scale when product IS in the paired set', () => {
     expect(shouldShowLotSourcePill('live_scale', 'product-choco-milk', new Set(['product-choco-milk']))).toBe(true);
+  });
+
+  // -----------------------------------------------------------------------
+  // catch_all per-lot gating (2026-05-15 rule). Mirrors the
+  // pickLatestAutomatedSource gate — see the docstring there for the full
+  // rationale. The pill must surface ONLY when the SAME lot is CURRENTLY
+  // in flight on the catch-all (in_flight_kind='catch_all' AND
+  // in_flight_since IS NOT NULL).
+  // -----------------------------------------------------------------------
+
+  it('shows catch_all when the lot is currently in flight on the catch-all', () => {
+    // Positive case: in_flight_kind + in_flight_since both prove the lot
+    // is RIGHT NOW off the catch-all. Pill MUST fire.
+    expect(
+      shouldShowLotSourcePill('catch_all', 'p', new Set(), {
+        kind: 'catch_all',
+        since: '2026-05-15T12:00:00Z',
+      }),
+    ).toBe(true);
+  });
+
+  it('HIDES catch_all when last_update_source=catch_all but in_flight_since IS NULL (historical row)', () => {
+    // Load-bearing bug fix: the lot was once touched by a catch-all event
+    // (e.g. tare capture weeks ago) but is no longer in flight. Pill MUST
+    // NOT fire. Mutation: dropping the in_flight_since check would
+    // resurrect the "pill stays lit forever" bug.
+    expect(
+      shouldShowLotSourcePill('catch_all', 'p', new Set(), {
+        kind: null,
+        since: null,
+      }),
+    ).toBe(false);
+  });
+
+  it('HIDES catch_all when the lot is in flight on a DIFFERENT kind (e.g. live_shelf)', () => {
+    // Edge case: lot is in_flight from a live_shelf pickup, but
+    // last_update_source is still 'catch_all' (e.g. tare was captured on
+    // the catch-all, bottle now lives on the shelf, just picked up off
+    // shelf). Catch-all pill MUST NOT fire — the CURRENT pickup didn't
+    // come from the catch-all. Mutation: ignoring in_flight_kind would
+    // surface catch_all whenever the lot is in flight for ANY reason.
+    expect(
+      shouldShowLotSourcePill('catch_all', 'p', new Set(), {
+        kind: 'live_shelf',
+        since: '2026-05-15T12:00:00Z',
+      }),
+    ).toBe(false);
+  });
+
+  it('default in-flight arg (omitted) treats every catch_all as historical → hidden', () => {
+    // Backwards-compat sanity: callers that don't pass the in_flight arg
+    // get safe-by-default behaviour. Mirrors the live_scale default-arg
+    // test above.
+    expect(shouldShowLotSourcePill('catch_all', 'p', new Set())).toBe(false);
   });
 });
