@@ -95,6 +95,7 @@ def _scenario(ctx: HarnessContext) -> None:
         cloud_emitter=ctx.pi_emitter,
         cloud_client=ctx.pi_cloud_client,
     )
+    ctx.track_scale_handler(handler)
 
     # FIRST event (350g placed).
     first_pi_event_id = "11111111-1111-1111-1111-111111111101"

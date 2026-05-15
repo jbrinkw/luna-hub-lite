@@ -186,6 +186,12 @@ def _catch_all_frames_captured(ctx: HarnessContext) -> None:
         cloud_client=ctx.pi_cloud_client,
         catch_all_camera=cam,
     )
+    # ``handle_scale_event`` spawns daemon reconciler threads. Track
+    # them so ``ctx.teardown()`` stops them before closing the SQLite
+    # connection — otherwise a still-running reconciler SIGSEGVs on
+    # its next write (CPython "daemon thread mid-write to closed conn"
+    # failure mode that the verify:full chain reliably triggers).
+    ctx.track_scale_handler(handler)
 
     # 3. Fire a catch_all refill event. scale-02 is the catch-all
     # device_id in DEFAULT_REGISTRY.

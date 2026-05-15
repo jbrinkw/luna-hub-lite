@@ -184,6 +184,7 @@ def _catch_all_empty_container_logout(ctx: HarnessContext) -> None:
         cloud_emitter=ctx.pi_emitter,
         cloud_client=ctx.pi_cloud_client,
     )
+    ctx.track_scale_handler(handler)
 
     # 4. Open a catch-all session + record an ADD event with placed
     # weight = tare + 5g (= 30g, inside the 30g window). Then call the

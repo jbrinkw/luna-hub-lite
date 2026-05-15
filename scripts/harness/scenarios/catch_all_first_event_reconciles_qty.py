@@ -103,6 +103,7 @@ def _scenario(ctx: HarnessContext) -> None:
         cloud_emitter=ctx.pi_emitter,
         cloud_client=ctx.pi_cloud_client,
     )
+    ctx.track_scale_handler(handler)
 
     # 3. Invoke the dispatch directly with a synthesized classification
     # picking the cloud lot. Pi event_id will be stamped onto cloud

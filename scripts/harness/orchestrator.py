@@ -209,6 +209,15 @@ class HarnessContext:
         self._pi_product_sync_poller: Optional[ProductSyncPoller] = None
         self._pi_lot_snapshot_poller: Optional[LotSnapshotPoller] = None
         self._pi_db_lock = threading.RLock()
+        # Scenarios that construct their own ScaleHandler (not via
+        # ``build_pi_scale_handler``) call ``track_scale_handler(h)`` so
+        # ``teardown()`` can ``.stop()`` them before closing the SQLite
+        # connection. Without this, the daemon reconciler threads spawned
+        # by ``handler.handle_scale_event`` outlive the scenario and
+        # SIGSEGV on the next process's first write (CPython "daemon
+        # thread mid-write to closed conn" failure mode). Standalone
+        # harness runs got lucky; the verify:full chain reliably hit it.
+        self._tracked_scale_handlers: list[ScaleHandler] = []
 
     # ------------------------------------------------------------------
     # Assertion API
@@ -630,8 +639,39 @@ class HarnessContext:
     # Cleanup
     # ------------------------------------------------------------------
 
+    def track_scale_handler(self, handler: ScaleHandler) -> ScaleHandler:
+        """Register a locally-constructed ScaleHandler so ``teardown``
+        can stop its daemon threads before closing the Pi SQLite conn.
+
+        Returns the handler so callers can chain:
+        ``handler = ctx.track_scale_handler(ScaleHandler(...))``.
+        """
+        self._tracked_scale_handlers.append(handler)
+        return handler
+
     def teardown(self) -> None:
-        """Delete the test cloud user (cascades to devices, sessions, lots)."""
+        """Delete the test cloud user (cascades to devices, sessions, lots).
+
+        Order matters: stop ScaleHandler daemon threads FIRST so they
+        can't race the SQLite close below. ``handle_scale_event`` may
+        have spawned a reconciler thread that's still executing — if
+        we close the conn while it's mid-write, CPython segfaults
+        (often on the next Python process, not this one, because the
+        thread holds a sqlite3 module-level handle).
+        """
+        for h in (
+            *self._tracked_scale_handlers,
+            self._pi_scale_handler,
+        ):
+            if h is None:
+                continue
+            try:
+                h.stop()
+            except Exception:  # noqa: BLE001 — teardown best-effort
+                log.warning("teardown: ScaleHandler.stop raised", exc_info=True)
+        self._tracked_scale_handlers.clear()
+        self._pi_scale_handler = None
+
         if self.user_id:
             try:
                 with self.db.cursor() as cur:
