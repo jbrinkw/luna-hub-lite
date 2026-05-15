@@ -900,3 +900,225 @@ def test_live_scale_branch_passes_through_scale_pairings_lot_id(conn):
     assert kwargs["kind"] == "live_scale"
     assert kwargs["scale_id"] == "scale-milk-prod"
     assert kwargs["observed_weight_g"] == pytest.approx(1800.0)
+
+
+# ---------------------------------------------------------------------------
+# G5 (MED, 2026-05-15) — ambiguous cloud_lots collapse
+# ---------------------------------------------------------------------------
+#
+# Before G5: when a product has >1 active cloud_lots (e.g. two cartons of
+# milk), the live_shelf branch's `LIMIT 1` inner subquery collapses every
+# Pi `lots` row for that product onto the SAME cloud_lot_id. Throttle
+# memory is keyed by cloud_lot_id, so only one of the two Pi weights
+# actually streams; the other is dropped silently and
+# `last_observed_weight_g` flaps unpredictably between cartons.
+#
+# Fix: detect products with >1 active cloud_lots (qty>0, not deleted) per
+# tick, skip ALL Pi lots for those products, log a WARNING with the
+# product_id + cloud_lots count + the Pi lot_ids that would have collapsed,
+# and bump `last_tick_stats['skipped_ambiguous_count']` so /healthz can
+# alarm. Option (a): conservative — never invent a fake "total weight"
+# across distinct physical cartons.
+
+
+def test_ambiguous_cloud_lots_skip_emission_and_log_and_count(conn, caplog):
+    """Two cloud_lots for same product + 2 Pi lots with current_weight_g.
+    Poller must emit nothing, log a WARNING naming the product + count +
+    the Pi lot_ids that would have collapsed, and bump
+    `skipped_ambiguous_count` by 1 (one product, not two lots).
+    """
+    pid = _seed_product(conn, name="MILK-AMBIG")
+    # Two cloud_lots — same product, both active (qty>0).
+    cloud_lot_a = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"
+    cloud_lot_b = "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=1.0, lot_id=cloud_lot_a,
+        created_at="2026-05-01T00:00:00Z",
+    )
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=1.0, lot_id=cloud_lot_b,
+        created_at="2026-05-02T00:00:00Z",
+    )
+    # Two Pi lots — both observing weight on the live shelf.
+    pi_lot_1 = "11111111-cafe-cafe-cafe-111111111111"
+    pi_lot_2 = "22222222-cafe-cafe-cafe-222222222222"
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+        "shelf_id) VALUES (?, ?, 'on_shelf', 1800.0, 'live_shelf')",
+        (pi_lot_1, pid),
+    )
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+        "shelf_id) VALUES (?, ?, 'on_shelf', 1750.0, 'live_shelf')",
+        (pi_lot_2, pid),
+    )
+    conn.commit()
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    with caplog.at_level("WARNING", logger="server.cloud.weight_sync_poller"):
+        n = poller.tick_once()
+
+    assert n == 0
+    emitter.emit_live_weight_sync.assert_not_called()
+    stats = poller.last_tick_stats
+    # One PRODUCT was ambiguous — even though two Pi lots would have
+    # collapsed, the operator's mental model is per-product.
+    assert stats["skipped_ambiguous_count"] == 1, stats
+    assert stats["emitted"] == 0
+    # WARNING must surface the product + the collapse candidates so the
+    # operator can act.
+    warn_msgs = [
+        rec.getMessage()
+        for rec in caplog.records
+        if rec.levelname == "WARNING"
+    ]
+    assert any(pid in m for m in warn_msgs), warn_msgs
+    # Both Pi lot_ids must appear in the warning so operator sees what
+    # would have collapsed.
+    joined = " ".join(warn_msgs)
+    assert pi_lot_1 in joined
+    assert pi_lot_2 in joined
+    # The count of cloud_lots must be surfaced too ("2 active cloud_lots").
+    assert "2" in joined
+
+
+def test_single_cloud_lot_still_emits_regression(conn):
+    """Regression: the G5 fix must not break the happy path. One
+    cloud_lot + one Pi lot → emit normally."""
+    pid = _seed_product(conn, name="HAPPY-PATH")
+    pi_lot_id = _seed_lot(
+        conn,
+        product_id=pid,
+        shelf_id="live_shelf",
+        current_weight_g=500.0,
+    )
+    cloud_lot_id = conn.execute(
+        "SELECT lot_id FROM cloud_lots WHERE product_id = ?", (pid,),
+    ).fetchone()["lot_id"]
+    assert cloud_lot_id != pi_lot_id
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    n = poller.tick_once()
+
+    assert n == 1
+    stats = poller.last_tick_stats
+    assert stats["skipped_ambiguous_count"] == 0, stats
+    assert stats["emitted"] == 1
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["pi_lot_id"] == cloud_lot_id
+    assert kwargs["observed_weight_g"] == pytest.approx(500.0)
+
+
+def test_mixed_batch_unambiguous_product_still_emits(conn, caplog):
+    """Product A (1 cloud_lot) + Product B (2 cloud_lots) in same tick.
+    Must emit for A and skip+log for B."""
+    pid_a = _seed_product(conn, name="A-OK")
+    pid_b = _seed_product(conn, name="B-AMBIG")
+    # Product A: one cloud_lot, one Pi lot.
+    cloud_a = "aaaaaaaa-aaaa-aaaa-aaaa-000000000001"
+    pi_a = "11111111-1111-1111-1111-aaaaaaaa0001"
+    _seed_cloud_lot(
+        conn, product_id=pid_a, qty_containers=1.0, lot_id=cloud_a,
+    )
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+        "shelf_id) VALUES (?, ?, 'on_shelf', 240.0, 'live_shelf')",
+        (pi_a, pid_a),
+    )
+    # Product B: two cloud_lots, two Pi lots (the bug case).
+    cloud_b1 = "bbbbbbbb-bbbb-bbbb-bbbb-000000000001"
+    cloud_b2 = "bbbbbbbb-bbbb-bbbb-bbbb-000000000002"
+    pi_b1 = "22222222-2222-2222-2222-bbbbbbbb0001"
+    pi_b2 = "22222222-2222-2222-2222-bbbbbbbb0002"
+    _seed_cloud_lot(
+        conn, product_id=pid_b, qty_containers=1.0, lot_id=cloud_b1,
+        created_at="2026-05-01T00:00:00Z",
+    )
+    _seed_cloud_lot(
+        conn, product_id=pid_b, qty_containers=1.0, lot_id=cloud_b2,
+        created_at="2026-05-02T00:00:00Z",
+    )
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+        "shelf_id) VALUES (?, ?, 'on_shelf', 1800.0, 'live_shelf')",
+        (pi_b1, pid_b),
+    )
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, current_weight_g, "
+        "shelf_id) VALUES (?, ?, 'on_shelf', 1700.0, 'live_shelf')",
+        (pi_b2, pid_b),
+    )
+    conn.commit()
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    with caplog.at_level("WARNING", logger="server.cloud.weight_sync_poller"):
+        n = poller.tick_once()
+
+    # Exactly one emit — product A only.
+    assert n == 1
+    assert emitter.emit_live_weight_sync.call_count == 1
+    kwargs = emitter.emit_live_weight_sync.call_args.kwargs
+    assert kwargs["pi_lot_id"] == cloud_a, (
+        "must emit for A's cloud_lot, not B's"
+    )
+    assert kwargs["observed_weight_g"] == pytest.approx(240.0)
+    # Stats: one ambiguous product (B), one emit (A).
+    stats = poller.last_tick_stats
+    assert stats["skipped_ambiguous_count"] == 1, stats
+    assert stats["emitted"] == 1
+    # WARNING must name product B (not product A).
+    warn_msgs = [
+        rec.getMessage()
+        for rec in caplog.records
+        if rec.levelname == "WARNING"
+    ]
+    joined = " ".join(warn_msgs)
+    assert pid_b in joined
+    assert pid_a not in joined, (
+        f"product A is unambiguous and must not appear in any WARNING: {warn_msgs}"
+    )
+
+
+def test_ambiguous_cloud_lots_with_no_active_pi_lot_does_not_emit(conn):
+    """Edge case: product has 2 cloud_lots but no Pi `lots` row currently
+    observing weight (or only rows excluded by the upstream JOIN — e.g.
+    status='out'). Result: no emission attempted, no candidates to skip,
+    skipped_ambiguous_count is still counted as 1 (the product IS
+    ambiguous regardless of whether any Pi lot is currently observing).
+
+    The point of this test is to confirm the SQL doesn't somehow conjure
+    an emit when the upstream JOIN already excludes everything, AND that
+    the ambiguous-skip path is harmless when there's nothing to skip.
+    """
+    pid = _seed_product(conn, name="NOBODY-HOME")
+    # Two cloud_lots, both active.
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=1.0,
+        lot_id="cccccccc-cccc-cccc-cccc-000000000001",
+        created_at="2026-05-01T00:00:00Z",
+    )
+    _seed_cloud_lot(
+        conn, product_id=pid, qty_containers=1.0,
+        lot_id="cccccccc-cccc-cccc-cccc-000000000002",
+        created_at="2026-05-02T00:00:00Z",
+    )
+    # Pi lot exists but is 'out' — excluded by SQL.
+    _seed_lot(
+        conn,
+        product_id=pid,
+        shelf_id="live_shelf",
+        status="out",
+        current_weight_g=0.0,
+        seed_cloud_mirror=False,
+    )
+    poller, emitter = _make_poller(conn, clock=_ManualClock())
+
+    n = poller.tick_once()
+
+    assert n == 0
+    emitter.emit_live_weight_sync.assert_not_called()
+    # Product is ambiguous even though no candidate would emit; the
+    # ambiguity detector runs on cloud_lots irrespective of Pi state so
+    # /healthz can still surface the operator-action condition.
+    stats = poller.last_tick_stats
+    assert stats["skipped_ambiguous_count"] == 1, stats

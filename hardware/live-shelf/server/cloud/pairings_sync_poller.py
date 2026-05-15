@@ -10,7 +10,7 @@ shelf kind). Until 2026-04-28 that table was empty on every boot; commit
 written by the LiveTrack Import wizard never reached the Pi until reboot,
 and even then only via the seed path — which left ``product_id`` NULL.
 
-This poller closes that gap. Once a minute it re-pulls
+This poller closes that gap. Every 5 minutes it re-pulls
 ``GET /catalog`` (same endpoint the classifier already drains every
 event), extracts the ``pairings`` list — which the edge function
 already filters server-side to THIS Pi's ``device_id`` via the x-api-key
@@ -60,6 +60,11 @@ the poller has run recently, and so a Pi restart doesn't have to log
 "first ever sync" — but the next tick after a restart still does a
 full reconcile (cheap: 3 rows).
 
+The 5-minute cadence (vs the historical 60s) reflects the fact that
+pairings change ~once per week in normal operation and the un-pair
+propagation latency budget is comfortably above 5 minutes. See the
+``POLL_INTERVAL_S`` constant below for the full rationale.
+
 Resilience
 ----------
 Mirrors the ``LotSnapshotPoller`` patterns 1:1:
@@ -89,7 +94,15 @@ log = logging.getLogger(__name__)
 
 # Poll cadences (seconds). Module-level so tests can pin tiny values
 # without monkey-patching the class.
-POLL_INTERVAL_S = 60.0
+#
+# Bumped from 60s → 300s (Gap G8): pairings change ~once per week in
+# normal operation, and ``/catalog`` has no useful ``updated_since``
+# filter for the pairings field (the cloud-side
+# ``last_heartbeat_ts > X`` predicate is empty for the unpaired-scale
+# rows we still want to track). At 60s we were burning ~1.4K invocations
+# per day reading 3 rows; 300s is still well under the operator-noticeable
+# threshold for un-pair propagation while cutting cost ~80%.
+POLL_INTERVAL_S = 300.0
 INITIAL_BACKOFF_S = 1.0
 MAX_BACKOFF_S = 30.0
 
@@ -343,10 +356,29 @@ class PairingsSyncPoller(threading.Thread):
 
                 # DELETE Pi rows the cloud no longer has. Cloud is source
                 # of truth — un-pair in cloud must reflect on Pi.
+                #
+                # Gap G6: before deleting, flip any in-flight Pi ``lots``
+                # whose pickup originated on the about-to-be-deleted
+                # scale to ``status = 'lost'``. Without this step,
+                # downstream pollers (e.g. ``event_overrides_poller``'s
+                # ``_apply_lot_states`` join via ``pickup_event_id``)
+                # silently break when the pairing row vanishes mid-
+                # workflow. We mark ``'lost'`` rather than ``'out'``
+                # because we genuinely don't know what happened to the
+                # item — the operator review path is the right place to
+                # decide. The CHECK invariant on ``lots`` requires
+                # ``in_flight_since`` to be cleared simultaneously with
+                # the status flip, otherwise the row would refuse to
+                # update.
                 for device_id in pi_existing.keys():
                     if device_id in cloud_rows:
                         continue
+                    pi_pairing = pi_existing[device_id]
                     try:
+                        orphans = self._flip_orphaned_in_flight_lots(
+                            device_id, pi_pairing
+                        )
+                        applied += orphans
                         cur = self._conn.execute(
                             "DELETE FROM scale_pairings WHERE device_id = ?",
                             (device_id,),
@@ -367,6 +399,94 @@ class PairingsSyncPoller(threading.Thread):
                         continue
 
         return applied
+
+    def _flip_orphaned_in_flight_lots(
+        self,
+        device_id: str,
+        pi_pairing: sqlite3.Row,
+    ) -> int:
+        """Mark in-flight lots whose pickup came from ``device_id`` as 'lost'.
+
+        Runs inside the same transaction as the pairing delete (caller's
+        ``with self._conn`` block). Strategy:
+
+        1. **Preferred — join via ``scale_events``**: if the Pi has a
+           ``scale_events`` table (the canonical local event log keyed
+           by ``device_id``), select every ``event_id`` recorded by the
+           outgoing scale and flip ``lots.status='in_flight'`` rows whose
+           ``pickup_event_id`` is in that set. Most precise: it picks up
+           in-flight items even when the pairing's ``product_id`` has
+           been re-assigned mid-workflow.
+
+        2. **Fallback — product scope**: if ``scale_events`` is missing
+           (very old DB, or some test fixtures), fall back to flipping
+           in-flight rows whose ``product_id`` matches the deleted
+           pairing's ``product_id``. Less precise but still correct for
+           the common case (un-pair scale-03 → flip its bound product's
+           in-flight rows).
+
+        Both branches clear ``in_flight_since`` + ``pickup_event_id``
+        in the same UPDATE to satisfy the ``lots`` CHECK invariant
+        (``(status='in_flight') = (in_flight_since IS NOT NULL)``).
+
+        Returns the count of lots flipped (for the ``applied`` counter
+        + log line).
+        """
+        # Probe for the events table once. ``PRAGMA table_info`` is cheap
+        # and returns zero rows for a missing table.
+        has_events = bool(
+            self._conn.execute(
+                "PRAGMA table_info(scale_events)"
+            ).fetchall()
+        )
+
+        if has_events:
+            cur = self._conn.execute(
+                """
+                UPDATE lots
+                   SET status = 'lost',
+                       in_flight_since = NULL,
+                       pickup_event_id = NULL,
+                       last_seen_at = datetime('now')
+                 WHERE status = 'in_flight'
+                   AND pickup_event_id IN (
+                     SELECT event_id FROM scale_events
+                      WHERE device_id = ?
+                   )
+                """,
+                (device_id,),
+            )
+        else:
+            # Fallback: scope by the deleted pairing's product_id. If the
+            # pairing had no product attached, there's nothing to clean
+            # up under this strategy.
+            product_id = pi_pairing["product_id"]
+            if product_id is None:
+                return 0
+            cur = self._conn.execute(
+                """
+                UPDATE lots
+                   SET status = 'lost',
+                       in_flight_since = NULL,
+                       pickup_event_id = NULL,
+                       last_seen_at = datetime('now')
+                 WHERE status = 'in_flight'
+                   AND product_id = ?
+                """,
+                (product_id,),
+            )
+
+        flipped = cur.rowcount or 0
+        if flipped > 0:
+            log.info(
+                "pairings_sync: flipped %d orphaned in-flight lot(s) to "
+                "'lost' (scale=%s, product=%s, strategy=%s)",
+                flipped,
+                device_id,
+                pi_pairing["product_id"],
+                "events_join" if has_events else "product_fallback",
+            )
+        return flipped
 
     def _upsert_one(
         self,

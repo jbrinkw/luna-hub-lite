@@ -29,6 +29,7 @@ if str(_ROOT) not in sys.path:
 
 from server.cloud.catalog import Catalog  # noqa: E402
 from server.cloud.client import CloudError  # noqa: E402
+from server.cloud import product_sync_poller as psp  # noqa: E402
 from server.cloud.product_sync_poller import ProductSyncPoller  # noqa: E402
 from server.storage.migrations import apply_migrations  # noqa: E402
 
@@ -370,6 +371,131 @@ def test_tombstone_only_window_advances_watermark(conn, tmp_path):
     assert state["high_watermark"] == "2026-04-21T15:00:00Z"
 
 
+def test_state_write_oserror_reverts_in_memory_state_and_keeps_backoff(
+    conn, tmp_path, monkeypatch,
+):
+    """Audit gap G4: if ``_state.write`` raises ``OSError`` (disk full,
+    read-only mount, fsync error), the tick must revert the in-memory
+    ``self._state`` to its prior value AND NOT reset ``self._backoff_s``
+    to ``INITIAL_BACKOFF_S``.
+
+    Without this, the next tick would use the advanced in-memory
+    watermark and refuse to re-fetch the rows the cloud just returned;
+    on Pi reboot, the on-disk file is stale so the gap is permanent.
+
+    Verifies:
+      (a) ``self._state.high_watermark`` rolls back to the prior value.
+      (b) ``self._backoff_s`` is NOT reset to ``INITIAL_BACKOFF_S``
+          (stays at whatever it was — elevated or initial — but the
+          critical contract is "no reset on persist failure").
+      (c) The on-disk file is unchanged (atomic write — rename never
+          happened) so the next tick + reboot both refetch the same
+          window.
+      (d) The next tick re-issues the SAME fetch (``updated_since`` ==
+          prior watermark), confirming the rollback restored the cursor.
+    """
+    state_path = tmp_path / "last_product_sync.json"
+    state_path.write_text(
+        json.dumps({"version": 1, "high_watermark": "2026-04-21T08:00:00Z"})
+    )
+    original_mtime = state_path.stat().st_mtime_ns
+
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=Catalog(
+            products=[_product("p1", updated_at="2026-04-21T12:00:00Z")],
+        )
+    )
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path, fetch_catalog_fn=fake_fetch,
+    )
+
+    # Pin a sentinel backoff value distinct from INITIAL_BACKOFF_S so
+    # we can prove the reset didn't fire. Simulating "prior tick errored"
+    # by bumping backoff manually before this tick runs.
+    elevated_backoff = psp.INITIAL_BACKOFF_S * 4.0
+    poller._backoff_s = elevated_backoff  # noqa: SLF001 - direct access for test
+
+    # Mock _SyncState.write to raise OSError as if the disk were full.
+    # Patch on the class so the new _SyncState instance built inside
+    # tick_once picks up the failing write.
+    monkeypatch.setattr(
+        psp._SyncState, "write",
+        MagicMock(side_effect=OSError(28, "No space left on device")),
+    )
+
+    count = poller.tick_once()
+
+    # The upsert still ran — count reflects rows written to SQLite.
+    # The bug isn't about upserts; it's about the watermark cursor.
+    assert count == 1
+
+    # (a) In-memory state rolled back to the prior watermark.
+    assert poller.high_watermark == "2026-04-21T08:00:00Z", (
+        "in-memory state must revert on state.write OSError"
+    )
+
+    # (b) Backoff was NOT reset to INITIAL_BACKOFF_S.
+    assert poller._backoff_s != psp.INITIAL_BACKOFF_S, (  # noqa: SLF001
+        "backoff must not reset when persist fails"
+    )
+    assert poller._backoff_s == elevated_backoff, (  # noqa: SLF001
+        "backoff should stay at its prior elevated value"
+    )
+
+    # (c) On-disk file untouched (atomic rename never happened).
+    assert state_path.stat().st_mtime_ns == original_mtime
+    on_disk = json.loads(state_path.read_text())
+    assert on_disk["high_watermark"] == "2026-04-21T08:00:00Z"
+
+    # (d) Next tick re-fetches the SAME window — the cursor was rolled
+    # back, so updated_since is the prior watermark, not the advanced one.
+    # Drop the write-failure patch so the recovery path can succeed.
+    monkeypatch.undo()
+    fake_fetch.reset_mock()
+    fake_fetch.return_value = Catalog(
+        products=[_product("p1", updated_at="2026-04-21T12:00:00Z")],
+    )
+    poller.tick_once()
+    fake_fetch.assert_called_once_with(
+        client, updated_since="2026-04-21T08:00:00Z",
+    )
+
+
+def test_state_write_success_resets_backoff_after_persist(conn, tmp_path):
+    """Regression / sanity for the G4 reorder: on the happy path, a
+    successful persist resets the backoff to ``INITIAL_BACKOFF_S``
+    AFTER the state file is written. Mirrors
+    ``test_first_tick_sends_updated_since_none_and_persists_watermark``
+    but pins the persist-before-reset ordering explicitly.
+    """
+    state_path = tmp_path / "last_product_sync.json"
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=Catalog(
+            products=[_product("p1", updated_at="2026-04-21T12:00:00Z")],
+        )
+    )
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path, fetch_catalog_fn=fake_fetch,
+    )
+    # Simulate a prior errored tick so we can prove the reset fired.
+    poller._backoff_s = psp.INITIAL_BACKOFF_S * 8.0  # noqa: SLF001
+
+    count = poller.tick_once()
+
+    assert count == 1
+    # Backoff reset to INITIAL_BACKOFF_S — the run loop will sleep the
+    # normal 30s cadence next iteration.
+    assert poller._backoff_s == psp.INITIAL_BACKOFF_S  # noqa: SLF001
+    # Watermark advanced AND persisted (we got here so the write didn't
+    # raise, confirming reset-after-persist ordering).
+    assert poller.high_watermark == "2026-04-21T12:00:00Z"
+    assert state_path.exists()
+    on_disk = json.loads(state_path.read_text())
+    assert on_disk["high_watermark"] == "2026-04-21T12:00:00Z"
+
+
 def test_unreadable_state_file_degrades_to_full_resync(conn, tmp_path, caplog):
     """A corrupt state file must not crash the poller — falls back to
     ``updated_since=None`` and rewrites the file on next success."""
@@ -391,3 +517,137 @@ def test_unreadable_state_file_degrades_to_full_resync(conn, tmp_path, caplog):
     fake_fetch.assert_called_once_with(client, updated_since=None)
     state = json.loads(state_path.read_text())
     assert state["high_watermark"] == "2026-04-21T15:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# Gap G10: cold-start ordering — products_synced Event signaling
+# ---------------------------------------------------------------------------
+
+
+def test_g10_products_synced_event_set_on_first_successful_tick(conn, tmp_path):
+    """A non-empty successful tick must latch the cold-start Event so
+    waiters (event_overrides, lot_snapshot) unblock."""
+    import threading as _threading
+
+    state_path = tmp_path / "last_product_sync.json"
+    products_synced = _threading.Event()
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=Catalog(
+            products=[_product("px", updated_at="2026-05-15T12:00:00Z")],
+        )
+    )
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path,
+        fetch_catalog_fn=fake_fetch,
+        products_synced_event=products_synced,
+    )
+    assert not products_synced.is_set()  # precondition
+    poller.tick_once()
+    assert products_synced.is_set(), (
+        "products_synced Event must be set after first successful tick"
+    )
+
+
+def test_g10_products_synced_event_set_on_empty_delta_tick(conn, tmp_path):
+    """An empty-delta (no new rows) tick still counts as success — the
+    Event must latch so we don't wedge waiters when product_sync has no
+    work to do at boot."""
+    import threading as _threading
+
+    state_path = tmp_path / "last_product_sync.json"
+    products_synced = _threading.Event()
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value=Catalog(products=[]))
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path,
+        fetch_catalog_fn=fake_fetch,
+        products_synced_event=products_synced,
+    )
+    count = poller.tick_once()
+    assert count == 0
+    assert products_synced.is_set(), (
+        "products_synced must latch on an empty-delta tick too — otherwise"
+        " a Pi with no recent product changes would never unblock waiters"
+    )
+
+
+def test_g10_products_synced_event_NOT_set_on_failing_tick(conn, tmp_path):
+    """If the cloud fetch fails (CloudError), waiters MUST stay blocked so
+    they take the timeout path with a WARNING instead of unblocking on a
+    poller that never actually saw any data."""
+    import threading as _threading
+
+    from server.cloud.client import CloudError
+
+    state_path = tmp_path / "last_product_sync.json"
+    products_synced = _threading.Event()
+    client = MagicMock()
+    fake_fetch = MagicMock(side_effect=CloudError(500, b"upstream is down"))
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path,
+        fetch_catalog_fn=fake_fetch,
+        products_synced_event=products_synced,
+    )
+    poller.tick_once()
+    assert not products_synced.is_set(), (
+        "products_synced must NOT latch on fetch failure — waiters should"
+        " time out and proceed with TRANSIENT classification instead of"
+        " unblocking against an empty Pi mirror"
+    )
+
+
+def test_g10_event_none_works_for_backcompat(conn, tmp_path):
+    """Callers that don't pass an Event keep the old behavior — no
+    AttributeError, no NoneType .set() crash."""
+    state_path = tmp_path / "last_product_sync.json"
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=Catalog(
+            products=[_product("px", updated_at="2026-05-15T12:00:00Z")],
+        )
+    )
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path,
+        fetch_catalog_fn=fake_fetch,
+        # products_synced_event omitted intentionally
+    )
+    # Should not raise.
+    poller.tick_once()
+
+
+def test_g10_products_synced_event_NOT_set_if_state_write_fails(
+    conn, tmp_path, monkeypatch,
+):
+    """Reviewer coverage gap: the Event must latch AFTER state.write
+    succeeds, never before. If state.write raises OSError and the Event
+    is still latched, downstream waiters (event_overrides, lot_snapshot)
+    unblock against a Pi mirror whose watermark wasn't persisted — on
+    reboot the gap is permanent. This pins the persist-before-signal
+    ordering."""
+    import threading as _threading
+
+    state_path = tmp_path / "last_product_sync.json"
+    products_synced = _threading.Event()
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=Catalog(
+            products=[_product("px", updated_at="2026-05-15T12:00:00Z")],
+        )
+    )
+    poller = ProductSyncPoller(
+        client, conn, state_path=state_path,
+        fetch_catalog_fn=fake_fetch,
+        products_synced_event=products_synced,
+    )
+
+    # Force state.write to fail mid-tick.
+    def boom(self, path):  # noqa: ARG001
+        raise OSError(28, "No space left on device")
+    monkeypatch.setattr(psp._SyncState, "write", boom)
+
+    poller.tick_once()
+    assert not products_synced.is_set(), (
+        "products_synced must NOT latch when state.write fails — "
+        "otherwise waiters unblock against a Pi mirror that didn't persist"
+    )

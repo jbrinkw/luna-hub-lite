@@ -211,6 +211,8 @@ class LotSnapshotPoller(threading.Thread):
         fetch_snapshot_fn: Optional[Callable[..., Any]] = None,
         settings_cache: Optional[ClassifierSettingsCache] = None,
         fetch_settings_fn: Optional[Callable[..., Any]] = None,
+        products_synced_event: Optional[threading.Event] = None,
+        products_synced_wait_s: float = 5.0,
     ) -> None:
         super().__init__(daemon=True, name=self.name)
         self._client = client
@@ -229,6 +231,16 @@ class LotSnapshotPoller(threading.Thread):
         # callers that don't wire the cache).
         self._settings_cache = settings_cache
         self._fetch_settings = fetch_settings_fn or _default_fetch_settings
+        # Gap G10: cold-start ordering. Block our first ``tick_once``
+        # for up to ``products_synced_wait_s`` on the shared Event so
+        # ``product_sync_poller`` has a chance to mirror products
+        # before any incoming lot references them. If the timeout
+        # expires we proceed anyway — the apply path is already
+        # tolerant of FK gaps (rows with unknown product_id skip
+        # cleanly), the wait just keeps the boot-time log noise down.
+        self._products_synced = products_synced_event
+        self._products_synced_wait_s = float(products_synced_wait_s)
+        self._products_synced_wait_done = False
 
     # ------------------------------------------------------------------
     # Public control
@@ -253,6 +265,27 @@ class LotSnapshotPoller(threading.Thread):
         thread. Each failure advances the backoff counter so the run
         loop sleeps longer on the next tick.
         """
+        # Gap G10: on the very first tick, give product_sync a head
+        # start so we don't race it on Pi boot. Same shape as in
+        # event_overrides_poller.tick_once — wait at most once.
+        if (
+            self._products_synced is not None
+            and not self._products_synced_wait_done
+        ):
+            if self._products_synced.wait(
+                timeout=self._products_synced_wait_s,
+            ):
+                log.info(
+                    "lot_snapshot: products_synced signaled, proceeding",
+                )
+            else:
+                log.warning(
+                    "lot_snapshot: products_synced wait expired after "
+                    "%.1fs; proceeding anyway",
+                    self._products_synced_wait_s,
+                )
+            self._products_synced_wait_done = True
+
         try:
             payload = self._fetch_snapshot(
                 self._client, updated_since=self._state.high_watermark,
@@ -315,21 +348,41 @@ class LotSnapshotPoller(threading.Thread):
                 )
                 continue
 
-        # Success = reset backoff. Persist the watermark only if it
-        # advanced; an empty delta leaves the file untouched to avoid
-        # disk churn. Matches ProductSyncPoller's write semantics.
-        self._backoff_s = INITIAL_BACKOFF_S
+        # Success path: persist watermark BEFORE resetting backoff so
+        # that an OSError on _state.write (disk-full, read-only mount,
+        # fsync error) leaves the in-memory state at its prior value AND
+        # keeps the backoff elevated. Audit gap G4: previously the
+        # in-memory state was advanced first, so a failed write left the
+        # poller with an advanced watermark that the next tick used to
+        # skip the rows the cloud just returned — and on Pi reboot, the
+        # on-disk file was stale and the gap became permanent.
+        #
+        # Order now:
+        #   applied → persist (state.write) → reset backoff
+        # If persist raises, in-memory state is reverted to prior so the
+        # next tick refetches the same range, and backoff stays elevated
+        # so the retry cadence remains tight.
+        persist_succeeded = True
         if max_updated_at != self._state.high_watermark:
+            prior_state = self._state
             self._state = _SyncState(high_watermark=max_updated_at)
             try:
                 self._state.write(self._state_path)
             except OSError:
+                # Revert in-memory state so the next tick refetches the
+                # same range, and leave backoff at its prior elevated
+                # value so we retry quickly.
+                self._state = prior_state
+                persist_succeeded = False
                 log.warning(
                     "lot_snapshot: failed to persist state to %s; "
-                    "next boot will re-sync from prior watermark",
+                    "reverting in-memory watermark — next tick will "
+                    "re-fetch the same range",
                     self._state_path,
                     exc_info=True,
                 )
+        if persist_succeeded:
+            self._backoff_s = INITIAL_BACKOFF_S
 
         log.info(
             "lot_snapshot: synced %d lot(s), %d mutation(s) "
@@ -430,75 +483,23 @@ class LotSnapshotPoller(threading.Thread):
                     # state machine recovers. Otherwise an in_flight Pi
                     # lot stays in_flight forever while the cloud
                     # considers the lot deleted.
-                    #
-                    # Mapping order (preferred first):
-                    #   1. ``cloud_lots.pickup_event_id`` ↔
-                    #      ``lots.pickup_event_id`` — exact link for
-                    #      catch-all in-flight lots.
-                    #   2. Fallback by (product_id, status='in_flight')
-                    #      heuristic — covers the case where the
-                    #      pickup_event_id link is missing on legacy
-                    #      live-shelf lots.
-                    cl_row = self._conn.execute(
-                        "SELECT pickup_event_id, product_id "
-                        "  FROM cloud_lots WHERE lot_id = ?",
-                        (lot_id,),
-                    ).fetchone()
-                    cl_pickup_event_id: Optional[str] = None
-                    cl_product_id: Optional[str] = None
-                    if cl_row is not None:
-                        cl_pickup_event_id = (
-                            cl_row["pickup_event_id"]
-                            if hasattr(cl_row, "__getitem__") else cl_row[0]
-                        )
-                        cl_product_id = (
-                            cl_row["product_id"]
-                            if hasattr(cl_row, "__getitem__") else cl_row[1]
-                        )
-
-                    pi_lot_id: Optional[str] = None
-                    if isinstance(cl_pickup_event_id, str) and cl_pickup_event_id:
-                        pi_row = self._conn.execute(
-                            "SELECT lot_id FROM lots "
-                            " WHERE pickup_event_id = ? "
-                            "   AND status IN ('on_shelf','in_flight') "
-                            " ORDER BY last_seen_at DESC LIMIT 1",
-                            (cl_pickup_event_id,),
-                        ).fetchone()
-                        if pi_row is not None:
-                            pi_lot_id = (
-                                pi_row["lot_id"]
-                                if hasattr(pi_row, "__getitem__") else pi_row[0]
-                            )
-                    if pi_lot_id is None and isinstance(cl_product_id, str) and cl_product_id:
-                        # Heuristic fallback: in_flight Pi lot for the
-                        # product. We narrow to in_flight because that's
-                        # the dangerous state — an on_shelf lot that the
-                        # cloud thinks is gone is a separate drift
-                        # symptom and shouldn't be auto-flagged from
-                        # this path.
-                        pi_row = self._conn.execute(
-                            "SELECT lot_id FROM lots "
-                            " WHERE product_id = ? "
-                            "   AND status = 'in_flight' "
-                            " ORDER BY in_flight_since DESC LIMIT 1",
-                            (cl_product_id,),
-                        ).fetchone()
-                        if pi_row is not None:
-                            pi_lot_id = (
-                                pi_row["lot_id"]
-                                if hasattr(pi_row, "__getitem__") else pi_row[0]
-                            )
-
+                    pi_lot_id = self._find_pi_lot_for_cloud_lot(lot_id)
                     if pi_lot_id is not None:
-                        # Flag the Pi lot to ``lost`` and clear the
+                        # Flag the Pi lot to ``lost`` and clear ALL the
                         # in-flight columns to satisfy the (status =
                         # 'in_flight') ↔ (in_flight_since IS NOT NULL)
-                        # invariant CHECK.
+                        # invariant CHECK. Also clear ``pickup_event_id``
+                        # — it's only meaningful while the lot is
+                        # mid-pickup; leaving it on a ``lost`` row poisons
+                        # downstream joins (event_overrides_poller uses
+                        # pickup_event_id to resolve "which Pi lot does
+                        # this cloud event refer to" and would match the
+                        # stale 'lost' row).
                         self._conn.execute(
                             "UPDATE lots "
                             "   SET status = 'lost', "
                             "       in_flight_since = NULL, "
+                            "       pickup_event_id = NULL, "
                             "       last_seen_at = datetime('now') "
                             " WHERE lot_id = ?",
                             (pi_lot_id,),
@@ -515,6 +516,68 @@ class LotSnapshotPoller(threading.Thread):
                         (lot_id,),
                     )
                     return cur.rowcount > 0
+
+                # Audit gap G2: cloud-side `catch_all_in_flight_reaper`
+                # clears `in_flight_since / in_flight_kind /
+                # pickup_event_id` on stale lots after the 6h TTL. The
+                # row is NOT tombstoned — only the markers are cleared
+                # and `updated_at` bumps. Detect that transition
+                # (existing row has in_flight_since set, incoming row
+                # has it NULL) BEFORE the upsert mutates the cloud_lots
+                # mirror, and flip the matching Pi `lots` row from
+                # 'in_flight' → 'out' (NOT 'lost' — the reaper did not
+                # decide it was consumed; 'out' = cleanly resolved
+                # off-shelf). Without this, the cloud resolves the lot
+                # but the Pi `lots` row stays at 'in_flight' forever
+                # (chocolate-milk-stuck-in-flight-for-11-days
+                # symptom).
+                inbound_in_flight_since = lot.get("in_flight_since")
+                if inbound_in_flight_since is None:
+                    existing = self._conn.execute(
+                        "SELECT in_flight_since FROM cloud_lots "
+                        " WHERE lot_id = ?",
+                        (lot_id,),
+                    ).fetchone()
+                    prior_in_flight_since: Optional[str] = None
+                    if existing is not None:
+                        prior_in_flight_since = (
+                            existing["in_flight_since"]
+                            if hasattr(existing, "__getitem__") else existing[0]
+                        )
+                    if (
+                        isinstance(prior_in_flight_since, str)
+                        and prior_in_flight_since
+                    ):
+                        # Reaper-signature transition. Look up the
+                        # matching Pi `lots` row using the same lookup
+                        # the tombstone branch uses, and flip it from
+                        # 'in_flight' → 'out'.
+                        pi_lot_id = self._find_pi_lot_for_cloud_lot(lot_id)
+                        if pi_lot_id is not None:
+                            self._conn.execute(
+                                "UPDATE lots "
+                                "   SET status = 'out', "
+                                "       in_flight_since = NULL, "
+                                "       pickup_event_id = NULL, "
+                                "       last_seen_at = datetime('now'), "
+                                "       last_out_at = datetime('now') "
+                                " WHERE lot_id = ? "
+                                "   AND status = 'in_flight'",
+                                (pi_lot_id,),
+                            )
+                            log.info(
+                                "lot_snapshot: cloud in_flight cleared "
+                                "for lot %s (prior in_flight_since=%s) "
+                                "— flipped Pi lot %s 'in_flight' → 'out'",
+                                lot_id, prior_in_flight_since, pi_lot_id,
+                            )
+                        else:
+                            log.debug(
+                                "lot_snapshot: cloud in_flight cleared "
+                                "for lot %s but no matching Pi lots row "
+                                "found (already cleaned up?)",
+                                lot_id,
+                            )
 
                 # Coerce qty_containers to a float if numeric; leave
                 # other optional fields verbatim (SQLite tolerates None
@@ -560,6 +623,75 @@ class LotSnapshotPoller(threading.Thread):
                     values,
                 )
                 return True
+
+    def _find_pi_lot_for_cloud_lot(self, lot_id: str) -> Optional[str]:
+        """Find the Pi-local ``lots.lot_id`` that maps to a cloud lot.
+
+        Shared by the tombstone branch (cloud row hard-deleted → flag
+        Pi 'lost') and the in_flight-clear branch (cloud reaper cleared
+        markers → flip Pi 'in_flight' → 'out'). The mirror row is read
+        BEFORE the upsert overwrites it, so ``cloud_lots`` still has
+        the prior pickup_event_id / product_id when this is called.
+
+        Mapping order (preferred first):
+          1. ``cloud_lots.pickup_event_id`` ↔ ``lots.pickup_event_id`` —
+             exact link for catch-all in-flight lots.
+          2. Fallback by (product_id, status='in_flight') — covers the
+             case where the pickup_event_id link is missing on legacy
+             live-shelf lots.
+
+        Returns the Pi ``lots.lot_id`` if found, else ``None``.
+        Callers must hold ``self._db_lock`` if one is configured.
+        """
+        cl_row = self._conn.execute(
+            "SELECT pickup_event_id, product_id "
+            "  FROM cloud_lots WHERE lot_id = ?",
+            (lot_id,),
+        ).fetchone()
+        if cl_row is None:
+            return None
+        cl_pickup_event_id = (
+            cl_row["pickup_event_id"]
+            if hasattr(cl_row, "__getitem__") else cl_row[0]
+        )
+        cl_product_id = (
+            cl_row["product_id"]
+            if hasattr(cl_row, "__getitem__") else cl_row[1]
+        )
+
+        if isinstance(cl_pickup_event_id, str) and cl_pickup_event_id:
+            pi_row = self._conn.execute(
+                "SELECT lot_id FROM lots "
+                " WHERE pickup_event_id = ? "
+                "   AND status IN ('on_shelf','in_flight') "
+                " ORDER BY last_seen_at DESC LIMIT 1",
+                (cl_pickup_event_id,),
+            ).fetchone()
+            if pi_row is not None:
+                return (
+                    pi_row["lot_id"]
+                    if hasattr(pi_row, "__getitem__") else pi_row[0]
+                )
+
+        if isinstance(cl_product_id, str) and cl_product_id:
+            # Heuristic fallback: in_flight Pi lot for the product.
+            # Narrowed to in_flight — the dangerous state — an on_shelf
+            # lot that the cloud thinks is gone is a separate drift
+            # symptom and shouldn't be auto-flagged from this path.
+            pi_row = self._conn.execute(
+                "SELECT lot_id FROM lots "
+                " WHERE product_id = ? "
+                "   AND status = 'in_flight' "
+                " ORDER BY in_flight_since DESC LIMIT 1",
+                (cl_product_id,),
+            ).fetchone()
+            if pi_row is not None:
+                return (
+                    pi_row["lot_id"]
+                    if hasattr(pi_row, "__getitem__") else pi_row[0]
+                )
+
+        return None
 
     def _next_backoff(self) -> float:
         """Return + advance the backoff duration for an errored tick.

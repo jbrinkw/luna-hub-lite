@@ -31,9 +31,11 @@ _ROOT = Path(__file__).resolve().parents[3]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from server.cloud import pairings_sync_poller as _psp_module  # noqa: E402
 from server.cloud.catalog import Catalog  # noqa: E402
 from server.cloud.client import CloudError  # noqa: E402
 from server.cloud.pairings_sync_poller import (  # noqa: E402
+    POLL_INTERVAL_S,
     PairingsSyncPoller,
     _SHELF_KIND_TRANSLATION,
 )
@@ -423,3 +425,295 @@ def test_malformed_payload_does_not_raise(conn, tmp_path):
 
     applied = poller.tick_once()
     assert applied == 0
+
+
+# ---------------------------------------------------------------------------
+# Gap G6 — un-pair must flip orphaned in-flight lots to 'lost'
+# ---------------------------------------------------------------------------
+
+
+def _seed_event(
+    conn: sqlite3.Connection,
+    event_id: str,
+    device_id: str,
+    *,
+    ts: str = "2026-05-15T10:00:00Z",
+) -> None:
+    """Minimal scale_events row so the events-join orphan strategy fires.
+
+    Only the columns required for the join (event_id, device_id) carry
+    interesting values; the rest get whatever defaults / dummies the
+    schema demands (delta_g, before/after weights, direction, ts).
+    """
+    conn.execute(
+        """
+        INSERT INTO scale_events (
+            event_id, ts, device_id,
+            delta_g, before_weight_g, after_weight_g, direction
+        ) VALUES (?, ?, ?, 0.0, 0.0, 0.0, 'noise')
+        """,
+        (event_id, ts, device_id),
+    )
+    conn.commit()
+
+
+def _seed_in_flight_lot(
+    conn: sqlite3.Connection,
+    lot_id: str,
+    product_id: str,
+    *,
+    pickup_event_id: str | None = None,
+    in_flight_since: str = "2026-05-15T09:55:00Z",
+) -> None:
+    """Seed a lot in 'in_flight' status, honoring the paired CHECK
+    constraint (status='in_flight' ⇔ in_flight_since IS NOT NULL).
+    """
+    conn.execute(
+        """
+        INSERT INTO lots (
+            lot_id, product_id, status,
+            in_flight_since, pickup_event_id
+        ) VALUES (?, ?, 'in_flight', ?, ?)
+        """,
+        (lot_id, product_id, in_flight_since, pickup_event_id),
+    )
+    conn.commit()
+
+
+def test_g6_unpair_flips_orphaned_in_flight_lots_via_events_join(conn, tmp_path):
+    """Gap G6 primary path: operator un-pairs scale-03 in cloud. Pi
+    has an in-flight lot whose ``pickup_event_id`` was emitted by that
+    very scale. The poller must:
+
+      (a) delete the local pairing row, AND
+      (b) flip the orphaned lot to ``status='lost'``,
+      (c) clear ``in_flight_since`` + ``pickup_event_id`` to satisfy
+          the lots CHECK invariant.
+
+    The events-join strategy is preferred when ``scale_events`` exists
+    locally — it's the most precise way to attribute a lot to its
+    origin scale.
+    """
+    _seed_product(conn, "prod-A")
+
+    # Seed Pi pairing for the about-to-be-deleted scale.
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id) "
+        "VALUES ('scale-03', 'single_item', 'prod-A')"
+    )
+    conn.commit()
+
+    # Seed the scale_events row whose event_id will be referenced by
+    # the in-flight lot, AND an unrelated event on a DIFFERENT scale to
+    # prove the join is scoped correctly.
+    _seed_event(conn, "evt-from-scale-03", "scale-03")
+    _seed_event(conn, "evt-from-scale-01", "scale-01")
+
+    # In-flight lot picked up by scale-03 (will be flipped to 'lost').
+    _seed_in_flight_lot(
+        conn, "lot-orphan", "prod-A",
+        pickup_event_id="evt-from-scale-03",
+    )
+
+    # Cloud returns NO pairings → scale-03 will be un-paired.
+    fake = MagicMock(return_value=_catalog())
+    poller = PairingsSyncPoller(
+        MagicMock(), conn,
+        state_path=tmp_path / "state.json",
+        fetch_catalog_fn=fake,
+    )
+
+    applied = poller.tick_once()
+
+    # Pairing row gone.
+    assert _read_pairing(conn, "scale-03") is None
+    # Orphaned lot flipped.
+    lot_row = conn.execute(
+        "SELECT status, in_flight_since, pickup_event_id, last_seen_at "
+        "FROM lots WHERE lot_id = 'lot-orphan'"
+    ).fetchone()
+    assert lot_row is not None
+    assert lot_row["status"] == "lost"
+    assert lot_row["in_flight_since"] is None, (
+        "in_flight_since must be cleared so the CHECK invariant "
+        "(status='in_flight') = (in_flight_since IS NOT NULL) holds"
+    )
+    assert lot_row["pickup_event_id"] is None, (
+        "pickup_event_id must be cleared so downstream pollers don't "
+        "still try to join via the orphaned event reference"
+    )
+    assert lot_row["last_seen_at"] is not None
+
+    # Applied counter = 1 flip + 1 delete.
+    assert applied == 2
+
+
+def test_g6_active_pairing_does_not_touch_in_flight_lots(conn, tmp_path):
+    """Gap G6 negative path: when the cloud STILL returns the pairing,
+    the in-flight lot must remain in 'in_flight'. The orphan-flip code
+    must only run on the un-pair (delete) branch.
+    """
+    _seed_product(conn, "prod-A")
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id) "
+        "VALUES ('scale-03', 'single_item', 'prod-A')"
+    )
+    conn.commit()
+    _seed_event(conn, "evt-1", "scale-03")
+    _seed_in_flight_lot(
+        conn, "lot-still-flying", "prod-A", pickup_event_id="evt-1",
+    )
+
+    # Cloud STILL returns scale-03 → no un-pair, no flip.
+    fake = MagicMock(
+        return_value=_catalog(
+            _pairing("scale-03", "live_scale", product_id="prod-A"),
+        )
+    )
+    poller = PairingsSyncPoller(
+        MagicMock(), conn,
+        state_path=tmp_path / "state.json",
+        fetch_catalog_fn=fake,
+    )
+
+    poller.tick_once()
+
+    lot_row = conn.execute(
+        "SELECT status, in_flight_since, pickup_event_id "
+        "FROM lots WHERE lot_id = 'lot-still-flying'"
+    ).fetchone()
+    assert lot_row["status"] == "in_flight", (
+        "active pairings must NOT trigger any orphan cleanup"
+    )
+    assert lot_row["in_flight_since"] is not None
+    assert lot_row["pickup_event_id"] == "evt-1"
+
+
+def test_g6_already_out_lot_untouched_on_unpair(conn, tmp_path):
+    """Gap G6 status-precondition: a lot already in status='out' must
+    NOT be re-flagged to 'lost' just because its scale got un-paired.
+    The orphan flip is gated on ``status='in_flight'`` specifically;
+    'out' rows already had their lifecycle resolved.
+    """
+    _seed_product(conn, "prod-A")
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id) "
+        "VALUES ('scale-03', 'single_item', 'prod-A')"
+    )
+    conn.commit()
+    _seed_event(conn, "evt-out", "scale-03")
+    # 'out' status → in_flight_since must be NULL per the CHECK; also
+    # pickup_event_id is incidental for 'out' rows but we seed it
+    # anyway to mimic a real post-removal row (the column is allowed
+    # to retain its origin event_id when status flips away).
+    conn.execute(
+        """
+        INSERT INTO lots (
+            lot_id, product_id, status, last_out_at, pickup_event_id
+        ) VALUES ('lot-out', 'prod-A', 'out', '2026-05-15T08:00:00Z', 'evt-out')
+        """
+    )
+    conn.commit()
+
+    # Un-pair: cloud returns nothing.
+    fake = MagicMock(return_value=_catalog())
+    poller = PairingsSyncPoller(
+        MagicMock(), conn,
+        state_path=tmp_path / "state.json",
+        fetch_catalog_fn=fake,
+    )
+
+    poller.tick_once()
+
+    lot_row = conn.execute(
+        "SELECT status, last_out_at, pickup_event_id "
+        "FROM lots WHERE lot_id = 'lot-out'"
+    ).fetchone()
+    assert lot_row["status"] == "out", (
+        "lots already resolved to 'out' must NOT be re-flagged 'lost' "
+        "on un-pair — status precondition guards this"
+    )
+    assert lot_row["last_out_at"] == "2026-05-15T08:00:00Z", (
+        "untouched-row invariants must hold (last_out_at preserved)"
+    )
+    assert lot_row["pickup_event_id"] == "evt-out", (
+        "pickup_event_id must NOT be cleared on non-in_flight rows"
+    )
+
+
+def test_g6_fallback_to_product_scope_when_scale_events_missing(
+    conn, tmp_path,
+):
+    """Gap G6 fallback path: if the local DB has no ``scale_events``
+    table (very old fixture / minimal install per the audit note), the
+    poller must fall back to scoping by the deleted pairing's
+    ``product_id``. This preserves the cleanup behaviour for the
+    common case (un-pair scale → flip its bound product's in-flights)
+    without requiring the events log.
+    """
+    _seed_product(conn, "prod-A")
+    _seed_product(conn, "prod-B")
+    conn.execute(
+        "INSERT INTO scale_pairings (device_id, shelf_id, product_id) "
+        "VALUES ('scale-03', 'single_item', 'prod-A')"
+    )
+    conn.commit()
+
+    # In-flight lots: one of the un-paired product (gets flipped),
+    # one of a DIFFERENT product (must be untouched — proves the
+    # scoping works).
+    _seed_in_flight_lot(conn, "lot-A", "prod-A")
+    _seed_in_flight_lot(conn, "lot-B", "prod-B")
+
+    # Drop scale_events to force the fallback branch. Indexes + FKs
+    # referencing it must go first; raw DROP is fine because in tests
+    # nothing else has been seeded that points into scale_events.
+    conn.execute("DROP INDEX IF EXISTS idx_scale_events_session")
+    conn.execute("DROP INDEX IF EXISTS idx_scale_events_ts")
+    conn.execute("DROP INDEX IF EXISTS idx_scale_events_shelf")
+    conn.execute("DROP TABLE scale_events")
+    conn.commit()
+
+    fake = MagicMock(return_value=_catalog())
+    poller = PairingsSyncPoller(
+        MagicMock(), conn,
+        state_path=tmp_path / "state.json",
+        fetch_catalog_fn=fake,
+    )
+
+    poller.tick_once()
+
+    lot_a = conn.execute(
+        "SELECT status, in_flight_since FROM lots WHERE lot_id = 'lot-A'"
+    ).fetchone()
+    lot_b = conn.execute(
+        "SELECT status, in_flight_since FROM lots WHERE lot_id = 'lot-B'"
+    ).fetchone()
+
+    assert lot_a["status"] == "lost"
+    assert lot_a["in_flight_since"] is None
+    assert lot_b["status"] == "in_flight", (
+        "product-scoped fallback must not touch lots of OTHER products"
+    )
+    assert lot_b["in_flight_since"] is not None
+
+
+# ---------------------------------------------------------------------------
+# Gap G8 — poll cadence bumped 60s → 300s
+# ---------------------------------------------------------------------------
+
+
+def test_g8_poll_interval_constant_is_300_seconds():
+    """Gap G8 regression guard: the module-level cadence must be 300s
+    (5 minutes), not the historical 60s. Pairings change ~once per
+    week, so 5-min responsiveness is fine and saves ~80% of this
+    poller's invocations on the cloud's /catalog endpoint.
+
+    Trivial-looking test, but it catches a future "I forgot why we
+    changed this" revert — and pairs with the explanatory comment on
+    the constant itself.
+    """
+    assert POLL_INTERVAL_S == 300.0
+    # Also assert the module's binding matches the re-export to guard
+    # against a stale ``from X import Y`` shadow.
+    assert _psp_module.POLL_INTERVAL_S == 300.0

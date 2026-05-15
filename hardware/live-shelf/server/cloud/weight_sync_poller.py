@@ -204,7 +204,27 @@ class WeightSyncPoller(threading.Thread):
             clock.monotonic if clock is not None else time.monotonic
         )
         # Per-lot last-emit memory. Keyed by lot_id string.
+        #
+        # Note on stale keys after ambiguity collapse: when a product's
+        # cloud_lots set collapses from 2→1 (e.g. one is consumed +
+        # tombstoned), any throttle-memory entry keyed by the dropped
+        # cloud_lot_id becomes stale. We deliberately don't GC it —
+        # entries naturally fall out as new emissions overwrite or as
+        # the process restarts. The memory cost (one float + one float
+        # per dead lot_id) is negligible.
         self._memory: dict[str, _EmitMemory] = {}
+
+        # Last-tick observability counters, surfaced via :attr:`last_tick_stats`
+        # for /healthz. ``skipped_ambiguous_count`` counts PRODUCTS (not
+        # Pi lots) skipped because >1 active cloud_lots matched on a given
+        # tick (G5 fix, 2026-05-15) — operator action required: consolidate
+        # the cloud lots, pair them to separate scales, or accept degraded
+        # live-weight tracking for that product.
+        self._last_tick_stats: dict[str, int] = {
+            "candidates": 0,
+            "emitted": 0,
+            "skipped_ambiguous_count": 0,
+        }
 
     # ------------------------------------------------------------------
     # Public control
@@ -213,12 +233,34 @@ class WeightSyncPoller(threading.Thread):
     def stop(self) -> None:
         self._shutdown.set()
 
+    @property
+    def last_tick_stats(self) -> Mapping[str, int]:
+        """Read-only view of the last tick's counters (for /healthz).
+
+        Keys:
+          * ``candidates`` — number of rows returned from the candidate fetch
+            (after ambiguity-skip + dedup, before throttle gates).
+          * ``emitted`` — number of events actually emitted on the last tick.
+          * ``skipped_ambiguous_count`` — number of PRODUCTS (not lots)
+            skipped because >1 active cloud_lots matched. See G5 (2026-05-15).
+        """
+        return dict(self._last_tick_stats)
+
     def tick_once(self) -> int:
         """Run one scan pass. Returns the number of events emitted.
 
         Idempotent under exceptions — a sqlite error mid-scan logs and
         returns the partial count. Safe to call from tests.
         """
+        # Reset tick counters at the top so callers (and /healthz) see
+        # the latest tick in isolation. We always set these even on the
+        # short-circuit path so a disabled emitter doesn't leave stale
+        # numbers visible.
+        self._last_tick_stats = {
+            "candidates": 0,
+            "emitted": 0,
+            "skipped_ambiguous_count": 0,
+        }
         if not self._emitter.enabled:
             return 0
         try:
@@ -228,6 +270,7 @@ class WeightSyncPoller(threading.Thread):
                 "weight_sync: candidate fetch failed", exc_info=True,
             )
             return 0
+        self._last_tick_stats["candidates"] = len(rows)
         emitted = 0
         now_mono = float(self._clock_monotonic())
         for row in rows:
@@ -239,6 +282,7 @@ class WeightSyncPoller(threading.Thread):
                     "weight_sync: emit failed for lot %s",
                     row.get("lot_id"), exc_info=True,
                 )
+        self._last_tick_stats["emitted"] = emitted
         return emitted
 
     # ------------------------------------------------------------------
@@ -317,6 +361,7 @@ class WeightSyncPoller(threading.Thread):
         # firing a payload that's guaranteed to fail).
         live_shelf_sql = """
             SELECT l.lot_id AS pi_local_lot_id,
+                   l.product_id,
                    cl.lot_id AS cloud_lot_id,
                    l.shelf_id,
                    l.current_weight_g,
@@ -339,11 +384,32 @@ class WeightSyncPoller(threading.Thread):
                AND l.current_weight_g IS NOT NULL
                AND l.status IN ('on_shelf', 'in_flight')
         """
+        # G5 (MED, 2026-05-15): the live_shelf branch collapses multiple
+        # Pi `lots` rows for the same product onto a single cloud_lot_id
+        # (the LIMIT 1 in the inner subquery). When there are >1 active
+        # cloud_lots for a product, every Pi lot's row collapses onto
+        # the SAME cloud_lot_id — throttle memory holds one slot per
+        # cloud_lot_id, so emissions thrash unpredictably between the
+        # cartons and `last_observed_weight_g` flaps. We can't tell
+        # which physical carton owns which weight, so the safe move is
+        # to skip ALL Pi lots for an ambiguous product and surface the
+        # condition (operator must consolidate the lots, pair them to
+        # separate scales, or accept degraded weight tracking).
+        ambiguous_sql = """
+            SELECT product_id, COUNT(*) AS n
+              FROM cloud_lots
+             WHERE deleted_at IS NULL
+               AND qty_containers > 0
+             GROUP BY product_id
+            HAVING COUNT(*) > 1
+        """
         # New branch: live_scale lots that ONLY exist in scale_pairings
         # (the production case — live_scale lifecycle never creates a
         # lots row). Joined with runtime heartbeat state in Python.
+        # ``product_id`` is included so the G5 ambiguity-skip filter
+        # below can evaluate this branch too.
         live_scale_sql = """
-            SELECT sp.lot_id, 'single_item' AS shelf_id,
+            SELECT sp.lot_id, sp.product_id, 'single_item' AS shelf_id,
                    NULL AS current_weight_g, sp.device_id
               FROM scale_pairings sp
              WHERE sp.shelf_id = 'single_item'
@@ -357,6 +423,9 @@ class WeightSyncPoller(threading.Thread):
                 scale_rows = [
                     dict(r) for r in self._conn.execute(live_scale_sql).fetchall()
                 ]
+                ambiguous_rows = [
+                    dict(r) for r in self._conn.execute(ambiguous_sql).fetchall()
+                ]
         else:
             shelf_raw = [
                 dict(r) for r in self._conn.execute(live_shelf_sql).fetchall()
@@ -364,6 +433,83 @@ class WeightSyncPoller(threading.Thread):
             scale_rows = [
                 dict(r) for r in self._conn.execute(live_scale_sql).fetchall()
             ]
+            ambiguous_rows = [
+                dict(r) for r in self._conn.execute(ambiguous_sql).fetchall()
+            ]
+
+        # Build the ambiguous-product set + per-product cloud_lots count
+        # for the warning. Tracks PRODUCTS not lots — operator's mental
+        # model is per-product.
+        ambiguous_products: dict[str, int] = {}
+        for r in ambiguous_rows:
+            pid = r.get("product_id")
+            n = r.get("n")
+            if isinstance(pid, str) and pid and isinstance(n, int):
+                ambiguous_products[pid] = n
+
+        # Skip + log ambiguous products. Group the Pi lot_ids that
+        # WOULD have been collapsed under each product, so the WARNING
+        # gives operators a concrete list to consolidate.
+        if ambiguous_products:
+            ambiguous_pi_lots: dict[str, list[str]] = {}
+            kept_shelf: list[dict] = []
+            for r in shelf_raw:
+                product_id = r.get("product_id")
+                if isinstance(product_id, str) and product_id in ambiguous_products:
+                    pi_local = r.get("pi_local_lot_id")
+                    if isinstance(pi_local, str) and pi_local:
+                        ambiguous_pi_lots.setdefault(product_id, []).append(
+                            pi_local,
+                        )
+                    continue
+                kept_shelf.append(r)
+            shelf_raw = kept_shelf
+            for product_id, pi_lots in ambiguous_pi_lots.items():
+                log.warning(
+                    "weight_sync: skipping product_id=%s — %d active "
+                    "cloud_lots match; Pi lot_ids that would collapse: %s. "
+                    "Operator action: consolidate cloud lots, pair to "
+                    "separate scales, or accept degraded weight tracking.",
+                    product_id,
+                    ambiguous_products[product_id],
+                    pi_lots,
+                )
+            # Also skip live_scale pairings whose product is in the
+            # ambiguous set. (The pairings branch doesn't itself collapse
+            # — pairings.lot_id is already the cloud_lot_id — but
+            # emitting weight for a product where the cloud's lot
+            # identity is ambiguous would be inconsistent with the
+            # shelf-branch decision and equally misleading.) Only log
+            # an additional WARNING if this is a scale-only ambiguous
+            # product (no shelf rows already named it) to avoid noise.
+            if scale_rows:
+                kept_scale: list[dict] = []
+                ambig_scale_pi_lots: dict[str, list[str]] = {}
+                for r in scale_rows:
+                    sp_pid = r.get("product_id")
+                    if isinstance(sp_pid, str) and sp_pid in ambiguous_products:
+                        lot_id = r.get("lot_id")
+                        if isinstance(lot_id, str) and lot_id:
+                            ambig_scale_pi_lots.setdefault(sp_pid, []).append(
+                                lot_id,
+                            )
+                        continue
+                    kept_scale.append(r)
+                scale_rows = kept_scale
+                for product_id, lot_ids in ambig_scale_pi_lots.items():
+                    if product_id not in ambiguous_pi_lots:
+                        log.warning(
+                            "weight_sync: skipping pairing(s) for "
+                            "product_id=%s — %d active cloud_lots match; "
+                            "lot_ids: %s.",
+                            product_id,
+                            ambiguous_products[product_id],
+                            lot_ids,
+                        )
+            # Count one tick stat per ambiguous PRODUCT (not per lot).
+            self._last_tick_stats["skipped_ambiguous_count"] = len(
+                ambiguous_products,
+            )
 
         # Normalize the shelf branch: the SQL returns the cloud lot_id
         # under ``cloud_lot_id`` (resolved via cloud_lots JOIN). Promote

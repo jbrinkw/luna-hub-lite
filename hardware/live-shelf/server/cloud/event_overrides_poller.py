@@ -1,3 +1,29 @@
+# Watermark policy:
+#   This poller advances its high-watermark over the prefix of rows that
+#   either apply cleanly OR fail with a PERMANENT skip reason. It freezes
+#   on the first TRANSIENT skip so the next tick retries the same row
+#   from the same watermark.
+#
+#   PERMANENT skip reasons (advance past them, loudly):
+#     * malformed payload — missing/invalid required fields
+#     * no matching cloud lot in payload AND no product fallback works
+#     * product has zero/null net_weight_g — containers→grams impossible
+#     * invalid qty_containers in cloud lot
+#     * "product missing on Pi" once we've seen it skipped on
+#       ``_PERMANENT_MISS_THRESHOLD`` consecutive ticks (≈ 2.5min default)
+#       — product_sync has had ample time to catch up and hasn't
+#
+#   TRANSIENT skip reasons (freeze watermark; retry next tick):
+#     * "product missing on Pi" for the first few ticks (mirror catching up)
+#     * no active Pi lot found for the resolved cloud lot (legacy
+#       heuristic-only path; future placement re-materializes it)
+#     * ambiguous fallback (G3): >1 active Pi lot for the product but
+#       resolved_lot_id missed — wait for mirror to catch up
+#
+#   Sibling poller (review_sync_poller.py) has a SIMPLER policy because
+#   its apply failures are all local-DB-state issues: it advances over
+#   ALL returned rows and surfaces failures via WARNING logs only.
+#
 """Background thread that pulls cloud event_overrides deltas every 30s.
 
 When a user edits a shelf event via the cloud's /chef/events UI (or a
@@ -91,7 +117,7 @@ import sqlite3
 import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Literal, Optional, Union
 
 from .client import CloudError
 
@@ -106,6 +132,21 @@ MAX_BACKOFF_S = 30.0
 
 # State file schema version — bumped if we ever reshape the payload.
 _STATE_SCHEMA_VERSION = 1
+
+# Gap G7: classification of skip reasons. PERMANENT skips advance the
+# watermark (retrying won't help); TRANSIENT skips freeze it (retry on
+# next tick).
+SkipReason = Literal["PERMANENT", "TRANSIENT"]
+
+# Gap G7: after this many consecutive ticks where an override is skipped
+# because its product_id doesn't exist on the Pi, we promote the skip
+# from TRANSIENT (mirror catching up) to PERMANENT (product genuinely
+# missing — likely deleted in cloud and properly tombstoned). At the
+# default 30s tick cadence, 5 ticks ≈ 2.5 minutes — long enough for
+# product_sync to have run a full cycle and confirmed the product is
+# absent. Keeps the implementation per-override (no coupling to the
+# product_sync poller's watermark).
+_PERMANENT_MISS_THRESHOLD = 5
 
 
 def _default_fetch_overrides(
@@ -204,6 +245,8 @@ class EventOverridesPoller(threading.Thread):
         poll_interval_s: float = POLL_INTERVAL_S,
         shutdown_event: Optional[threading.Event] = None,
         fetch_overrides_fn: Optional[Callable[..., Any]] = None,
+        products_synced_event: Optional[threading.Event] = None,
+        products_synced_wait_s: float = 5.0,
     ) -> None:
         super().__init__(daemon=True, name=self.name)
         self._client = client
@@ -215,6 +258,27 @@ class EventOverridesPoller(threading.Thread):
         self._fetch_overrides = fetch_overrides_fn or _default_fetch_overrides
         self._backoff_s: float = INITIAL_BACKOFF_S
         self._state = _SyncState.from_file(self._state_path)
+        # Gap G7: per-override consecutive-miss counter. Keyed by
+        # override_id (stable across ticks) so we can promote
+        # "product missing on Pi" from TRANSIENT to PERMANENT after
+        # _PERMANENT_MISS_THRESHOLD consecutive ticks. Cleared whenever
+        # an override either applies or hits a different skip reason.
+        # In-memory only (cleared on poller restart) — a restart resets
+        # the grace window, which is fine: we'd rather give product_sync
+        # extra time on every fresh boot than risk losing a real edit.
+        self._product_miss_counts: dict[str, int] = {}
+        # Gap G3: counter for ambiguous-fallback skips so /healthz can
+        # surface them. Cumulative since process start.
+        self._skipped_ambiguous_count: int = 0
+        # Gap G10: cold-start ordering. Block our first ``tick_once``
+        # for up to ``products_synced_wait_s`` on the shared Event so
+        # ``product_sync_poller`` has a chance to hydrate the products
+        # table before we hit the "prod_row is None" skip path en
+        # masse. If the timeout expires we proceed anyway — the new
+        # TRANSIENT classification (G7) handles the residual races.
+        self._products_synced = products_synced_event
+        self._products_synced_wait_s = float(products_synced_wait_s)
+        self._products_synced_wait_done = False
 
     # ------------------------------------------------------------------
     # Public control
@@ -227,6 +291,14 @@ class EventOverridesPoller(threading.Thread):
     def high_watermark(self) -> Optional[str]:
         return self._state.high_watermark
 
+    @property
+    def skipped_ambiguous_count(self) -> int:
+        """Gap G3: cumulative count of overrides skipped because >1
+        active Pi lot exists for the product and no resolved_lot_id
+        link could be established. /healthz surfaces this so operators
+        can see when an override is being held back."""
+        return self._skipped_ambiguous_count
+
     def tick_once(self) -> int:
         """Run exactly one sync cycle.
 
@@ -234,6 +306,30 @@ class EventOverridesPoller(threading.Thread):
         apply errors we log + bump backoff and return 0 — the next tick
         retries the same watermark.
         """
+        # Gap G10: on the very first tick, give product_sync a head
+        # start so we don't race it on Pi boot. We wait at most once,
+        # then never again — by tick N>1 product_sync has either
+        # succeeded (Event latched) or repeatedly failed (a second
+        # 5s sleep won't help).
+        if (
+            self._products_synced is not None
+            and not self._products_synced_wait_done
+        ):
+            if self._products_synced.wait(
+                timeout=self._products_synced_wait_s,
+            ):
+                log.info(
+                    "event_overrides: products_synced signaled, proceeding",
+                )
+            else:
+                log.warning(
+                    "event_overrides: products_synced wait expired after "
+                    "%.1fs; proceeding anyway (TRANSIENT skip will retry "
+                    "missing products)",
+                    self._products_synced_wait_s,
+                )
+            self._products_synced_wait_done = True
+
         try:
             payload = self._fetch_overrides(
                 self._client, updated_since=self._state.high_watermark,
@@ -265,19 +361,20 @@ class EventOverridesPoller(threading.Thread):
         overrides = overrides_raw if isinstance(overrides_raw, list) else []
         lots = lots_raw if isinstance(lots_raw, list) else []
 
-        # Apply each cloud lot state to the Pi's local lots table. Returns
-        # ``(count, status_map)`` where status_map[override_key] is True
-        # iff the override was successfully applied. Used below to advance
-        # the watermark only over the prefix of consecutively-applied
-        # overrides (audit finding #4).
-        applied, applied_status = self._apply_lot_states(lots, overrides)
+        # Apply each cloud lot state to the Pi's local lots table.
+        # Returns ``(count, outcomes)`` where outcomes[override_key] is
+        # one of:
+        #   * ("APPLIED", None) — row applied, advance past it
+        #   * ("SKIPPED", "PERMANENT") — retry won't help, advance past it
+        #   * ("SKIPPED", "TRANSIENT") — freeze watermark, retry next tick
+        # Gap G7: classifying skips lets us avoid stalling forever on a
+        # single permanent-skip row.
+        applied, outcomes = self._apply_lot_states(lots, overrides)
 
-        # Advance the watermark over the prefix of consecutively-applied
-        # overrides in chronological order. The first SKIP (missing
-        # product, zero net_weight_g, no Pi lot, no matching cloud lot in
-        # payload) freezes the watermark at the override immediately
-        # before it. The next tick re-fetches starting from the failed
-        # override so a transient Pi-side miss doesn't lose it.
+        # Advance the watermark over the prefix of rows that EITHER
+        # applied OR failed with a PERMANENT skip reason. Freeze on the
+        # first TRANSIENT skip so the next tick retries the same row.
+        # Per the top-of-file watermark policy block.
         max_updated_at: Optional[str] = self._state.high_watermark
         sorted_overrides = sorted(
             (o for o in overrides if isinstance(o, dict)),
@@ -288,13 +385,26 @@ class EventOverridesPoller(threading.Thread):
             if not (isinstance(ts, str) and ts):
                 # No timestamp → can't advance even if applied.
                 break
-            if not applied_status.get(self._override_key(override), False):
-                # First non-applied override freezes the watermark.
+            outcome = outcomes.get(self._override_key(override))
+            if outcome is None:
+                # Defensive: should never happen — every override is
+                # entered into the outcomes map. Treat as TRANSIENT.
                 break
+            status, reason = outcome
+            if status == "SKIPPED" and reason == "TRANSIENT":
+                # First TRANSIENT skip freezes the watermark.
+                break
+            # APPLIED or PERMANENT-skip → advance past this row.
             if max_updated_at is None or ts > max_updated_at:
                 max_updated_at = ts
 
-        self._backoff_s = INITIAL_BACKOFF_S
+        # Gap G4: hold off resetting backoff until AFTER state.write
+        # succeeds. If the write raises, we revert in-memory state and
+        # leave backoff elevated so the next tick treats this as a
+        # partial failure (don't pound the cloud + don't lose the
+        # cursor on disk).
+        prior_state = self._state
+        wrote_state = True
         if max_updated_at != self._state.high_watermark:
             self._state = _SyncState(high_watermark=max_updated_at)
             try:
@@ -302,9 +412,18 @@ class EventOverridesPoller(threading.Thread):
             except OSError:
                 log.warning(
                     "event_overrides: failed to persist state to %s; "
-                    "next boot will re-sync from prior watermark",
+                    "reverting in-memory watermark and leaving backoff "
+                    "elevated for next tick",
                     self._state_path, exc_info=True,
                 )
+                # Revert: keep the prior watermark in memory so the
+                # next tick re-fetches from the same point AND has the
+                # in-memory state agree with what's on disk.
+                self._state = prior_state
+                wrote_state = False
+
+        if wrote_state:
+            self._backoff_s = INITIAL_BACKOFF_S
 
         log.info(
             "event_overrides: synced %d override(s), updated %d lot(s) "
@@ -340,7 +459,7 @@ class EventOverridesPoller(threading.Thread):
         self,
         lots: list[dict],
         overrides: list[dict],
-    ) -> tuple[int, dict[str, bool]]:
+    ) -> tuple[int, dict[str, tuple[str, Optional[SkipReason]]]]:
         """Write cloud-side lot state into the Pi's ``lots`` table.
 
         Strategy (audit findings #2 + #9):
@@ -363,24 +482,42 @@ class EventOverridesPoller(threading.Thread):
           * Fallback: when ``resolved_lot_id`` is missing in the override
             payload (legacy edge function) we fall back to the old
             heuristic so old payloads still apply.
+          * Gap G3: the legacy fallback is UNSAFE when multiple active
+            Pi lots exist for the same product (e.g., two cartons of
+            milk). We refuse to apply in that case and classify the skip
+            as TRANSIENT — once the cloud_lots mirror catches up or the
+            user resolves the ambiguity, the override can apply with the
+            resolved_lot_id path.
 
-        Returns ``(count, status_map)``. ``status_map`` is keyed by
-        ``_override_key(override)`` and carries True iff the
-        corresponding override was successfully applied — the caller
-        uses this to decide which prefix of overrides advances the
-        watermark (audit finding #4).
+        Returns ``(count, outcomes)``. ``outcomes`` is keyed by
+        ``_override_key(override)`` and carries a tuple
+        ``(status, reason)`` where:
+          * ``status == "APPLIED"`` and ``reason is None`` — row applied
+          * ``status == "SKIPPED"`` and ``reason == "PERMANENT"`` — retry
+            won't help; the caller advances the watermark past it
+          * ``status == "SKIPPED"`` and ``reason == "TRANSIENT"`` — retry
+            on the next tick may succeed; the caller freezes the
+            watermark
+
+        See top-of-file watermark policy block for the full rule set.
         """
-        # Initialize per-override apply status. Default False so any
-        # override we never reach (skipped lot, missing key) freezes
-        # the watermark at the previous successful row.
-        status: dict[str, bool] = {}
+        # Initialize per-override outcome. Default TRANSIENT-skip so any
+        # override we never reach (defensive) freezes the watermark — we
+        # only promote to APPLIED or PERMANENT after an explicit decision.
+        outcomes: dict[str, tuple[str, Optional[SkipReason]]] = {}
         for override in overrides:
             if not isinstance(override, dict):
                 continue
-            status[self._override_key(override)] = False
+            outcomes[self._override_key(override)] = ("SKIPPED", "TRANSIENT")
 
         if not lots:
-            return 0, status
+            # G7: zero-lots payload is a legitimate (empty) batch
+            # observation; defer miss-count cleanup to the apply path
+            # below (which is skipped here). Return early; the caller
+            # treats all-TRANSIENT outcomes as "freeze watermark", which
+            # is the right thing — without lots[] we couldn't apply
+            # anything anyway and the next tick should retry.
+            return 0, outcomes
 
         # Index cloud lots by resolved_lot_id (preferred direct lookup) and
         # also by product_id (legacy fallback for payloads where the
@@ -397,6 +534,10 @@ class EventOverridesPoller(threading.Thread):
             if isinstance(pid, str) and pid:
                 by_product_fallback.setdefault(pid, []).append(lot)
 
+        # Track which override_ids hit "product missing on Pi" this tick
+        # so we can prune counters for overrides that recovered.
+        miss_hits_this_tick: set[str] = set()
+
         applied_count = 0
         lock = self._db_lock if self._db_lock is not None else _NullLock()
         with lock:
@@ -405,11 +546,13 @@ class EventOverridesPoller(threading.Thread):
                     if not isinstance(override, dict):
                         continue
                     key = self._override_key(override)
+                    override_id = override.get("override_id")
                     resolved_lot_id = override.get("resolved_lot_id")
                     product_id = override.get("product_id")
 
                     # Pick the cloud lot row for this override.
                     cloud_lot: Optional[dict] = None
+                    used_product_fallback = False
                     if isinstance(resolved_lot_id, str) and resolved_lot_id:
                         cloud_lot = by_resolved_lot.get(resolved_lot_id)
                     if cloud_lot is None and isinstance(product_id, str):
@@ -418,25 +561,33 @@ class EventOverridesPoller(threading.Thread):
                         candidates = by_product_fallback.get(product_id) or []
                         if candidates:
                             cloud_lot = candidates[-1]
+                            used_product_fallback = True
                     if cloud_lot is None:
-                        log.info(
-                            "event_overrides: override %s has no matching "
-                            "lot in payload (resolved_lot_id=%s, "
-                            "product_id=%s) — skip",
-                            override.get("override_id"),
-                            resolved_lot_id, product_id,
+                        # G7 PERMANENT: cloud endpoint always emits the
+                        # post-reconcile lot row alongside its override;
+                        # if it's missing the cloud either tombstoned
+                        # the lot or never had one. Retrying won't fix.
+                        log.warning(
+                            "event_overrides: override %s has no "
+                            "matching lot in payload "
+                            "(resolved_lot_id=%s, product_id=%s) — "
+                            "skip PERMANENT",
+                            override_id, resolved_lot_id, product_id,
                         )
+                        outcomes[key] = ("SKIPPED", "PERMANENT")
                         continue
 
                     cloud_product_id = (
                         cloud_lot.get("product_id") or product_id
                     )
                     if not isinstance(cloud_product_id, str) or not cloud_product_id:
+                        # G7 PERMANENT: structurally malformed.
                         log.warning(
                             "event_overrides: cloud lot %r missing "
-                            "product_id — skip",
+                            "product_id — skip PERMANENT",
                             cloud_lot.get("lot_id"),
                         )
+                        outcomes[key] = ("SKIPPED", "PERMANENT")
                         continue
 
                     # Pull product net_weight_g for containers→grams math.
@@ -446,13 +597,45 @@ class EventOverridesPoller(threading.Thread):
                         (cloud_product_id,),
                     ).fetchone()
                     if prod_row is None:
-                        log.warning(
-                            "event_overrides: lot state for unknown "
-                            "product_id=%s — skip; next product-sync "
-                            "tick should hydrate it",
-                            cloud_product_id,
-                        )
+                        # G7: "product missing on Pi" is ambiguous —
+                        # could be "deleted in cloud, tombstoned" OR
+                        # "Pi product_sync hasn't caught up yet". The
+                        # poller can't tell. We use a per-override
+                        # consecutive-miss counter: classify TRANSIENT
+                        # for the first _PERMANENT_MISS_THRESHOLD ticks
+                        # (giving product_sync time to hydrate), then
+                        # promote to PERMANENT.
+                        if isinstance(override_id, str) and override_id:
+                            misses = self._product_miss_counts.get(
+                                override_id, 0,
+                            ) + 1
+                            self._product_miss_counts[override_id] = misses
+                            miss_hits_this_tick.add(override_id)
+                        else:
+                            # No override_id to track — treat as TRANSIENT
+                            # (safer to retry than to silently lose it).
+                            misses = 1
+                        if misses >= _PERMANENT_MISS_THRESHOLD:
+                            log.warning(
+                                "event_overrides: product_id=%s missing "
+                                "on Pi after %d consecutive ticks — "
+                                "skip PERMANENT (override_id=%s); "
+                                "product likely deleted in cloud",
+                                cloud_product_id, misses, override_id,
+                            )
+                            outcomes[key] = ("SKIPPED", "PERMANENT")
+                        else:
+                            log.info(
+                                "event_overrides: product_id=%s not yet "
+                                "on Pi (miss %d/%d, override_id=%s) — "
+                                "skip TRANSIENT; product_sync may "
+                                "catch up next tick",
+                                cloud_product_id, misses,
+                                _PERMANENT_MISS_THRESHOLD, override_id,
+                            )
+                            outcomes[key] = ("SKIPPED", "TRANSIENT")
                         continue
+
                     net_g = (
                         prod_row["net_weight_g"]
                         if hasattr(prod_row, "__getitem__") else prod_row[0]
@@ -462,12 +645,17 @@ class EventOverridesPoller(threading.Thread):
                     except (TypeError, ValueError):
                         net_g_f = None
                     if net_g_f is None or net_g_f <= 0:
+                        # G7 PERMANENT: product has no weight
+                        # calibration; the cloud's qty_containers can't
+                        # be applied mechanically and the next tick
+                        # won't fix that.
                         log.warning(
                             "event_overrides: product_id=%s has no/zero "
-                            "net_weight_g — cannot convert qty_containers "
-                            "to grams; skip",
+                            "net_weight_g — cannot convert "
+                            "qty_containers to grams; skip PERMANENT",
                             cloud_product_id,
                         )
+                        outcomes[key] = ("SKIPPED", "PERMANENT")
                         continue
 
                     # Resolve the Pi lot. Preferred path: cloud_lots row
@@ -505,8 +693,40 @@ class EventOverridesPoller(threading.Thread):
                                         else lot_row[0]
                                     )
                     if pi_lot_id is None:
-                        # Legacy fallback: pick the most-recently-used
-                        # active Pi lot for the product.
+                        # Legacy fallback path. Gap G3: BEFORE picking
+                        # the most-recently-used lot, count how many
+                        # active Pi lots exist for this product. If >1,
+                        # we can't safely pick one — the override might
+                        # target a different lot than the most-recent.
+                        # Refuse to mutate and classify as TRANSIENT so
+                        # the next tick retries once the cloud_lots
+                        # mirror catches up with the resolved_lot_id
+                        # link.
+                        active_count_row = self._conn.execute(
+                            "SELECT COUNT(*) FROM lots "
+                            " WHERE product_id = ? "
+                            "   AND status IN ('on_shelf','in_flight')",
+                            (cloud_product_id,),
+                        ).fetchone()
+                        active_count = (
+                            active_count_row[0]
+                            if active_count_row is not None else 0
+                        )
+                        if active_count > 1:
+                            self._skipped_ambiguous_count += 1
+                            log.warning(
+                                "event_overrides: AMBIGUOUS fallback "
+                                "for override_id=%s product_id=%s — "
+                                "%d active Pi lots exist and "
+                                "resolved_lot_id=%s did not link to "
+                                "any; refusing to mutate the wrong "
+                                "lot — skip TRANSIENT",
+                                override_id, cloud_product_id,
+                                active_count, resolved_lot_id,
+                            )
+                            outcomes[key] = ("SKIPPED", "TRANSIENT")
+                            continue
+                        # Single-lot fallback path is unambiguous.
                         lot_row = self._conn.execute(
                             "SELECT lot_id FROM lots "
                             " WHERE product_id = ? "
@@ -521,14 +741,19 @@ class EventOverridesPoller(threading.Thread):
                                 else lot_row[0]
                             )
                     if pi_lot_id is None:
+                        # No active Pi lot at all (zero, not >1). The
+                        # override applies to a lot the Pi never saw.
+                        # TRANSIENT — a future placement may
+                        # re-materialize it.
                         log.info(
                             "event_overrides: no active Pi lot for "
                             "resolved_lot_id=%s product_id=%s — cloud "
                             "override applies to a lot the Pi never "
-                            "saw; skip (state will re-materialize on "
-                            "next placement)",
+                            "saw; skip TRANSIENT (state will "
+                            "re-materialize on next placement)",
                             resolved_lot_id, cloud_product_id,
                         )
+                        outcomes[key] = ("SKIPPED", "TRANSIENT")
                         continue
 
                     qty_raw = cloud_lot.get("qty_containers")
@@ -537,11 +762,14 @@ class EventOverridesPoller(threading.Thread):
                     except (TypeError, ValueError):
                         qty_f = None
                     if qty_f is None or qty_f < 0:
+                        # G7 PERMANENT: malformed payload value doesn't
+                        # fix itself by retrying.
                         log.warning(
                             "event_overrides: invalid qty_containers=%r "
-                            "for lot %s — skip",
+                            "for lot %s — skip PERMANENT",
                             qty_raw, pi_lot_id,
                         )
+                        outcomes[key] = ("SKIPPED", "PERMANENT")
                         continue
 
                     new_weight_g = qty_f * net_g_f
@@ -585,16 +813,25 @@ class EventOverridesPoller(threading.Thread):
                         update_params,
                     )
                     applied_count += 1
-                    status[key] = True
+                    outcomes[key] = ("APPLIED", None)
                     log.info(
                         "event_overrides: lot %s (product=%s, "
-                        "resolved_lot_id=%s) current_weight_g → %.2fg "
-                        "from cloud qty_containers=%.3f",
+                        "resolved_lot_id=%s%s) current_weight_g → "
+                        "%.2fg from cloud qty_containers=%.3f",
                         pi_lot_id, cloud_product_id, resolved_lot_id,
+                        " [via product fallback]"
+                        if used_product_fallback else "",
                         new_weight_g, qty_f,
                     )
 
-        return applied_count, status
+        # G7: prune product-miss counters for overrides that recovered
+        # (applied/PERMANENT/different-skip) or vanished from the batch.
+        # Bounds memory across long-running poller lifetimes.
+        for oid in list(self._product_miss_counts.keys()):
+            if oid not in miss_hits_this_tick:
+                self._product_miss_counts.pop(oid, None)
+
+        return applied_count, outcomes
 
     def _next_backoff(self) -> float:
         nxt = min(self._backoff_s * 2.0, MAX_BACKOFF_S)

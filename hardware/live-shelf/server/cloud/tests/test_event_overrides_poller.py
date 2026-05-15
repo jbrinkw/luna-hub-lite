@@ -21,6 +21,7 @@ _ROOT = Path(__file__).resolve().parents[3]
 if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
+from server.cloud import event_overrides_poller as eop_mod  # noqa: E402
 from server.cloud.client import CloudError  # noqa: E402
 from server.cloud.event_overrides_poller import EventOverridesPoller  # noqa: E402
 from server.storage.migrations import apply_migrations  # noqa: E402
@@ -702,3 +703,625 @@ def test_legacy_payload_without_resolved_lot_id_falls_back_to_heuristic(
         "SELECT current_weight_g FROM lots WHERE lot_id = ?", (lot_id,),
     ).fetchone()
     assert row["current_weight_g"] == pytest.approx(0.75 * 400.0)
+
+
+# ---------------------------------------------------------------------------
+# Gap G3 + G4 + G7 + G9 — direct regression coverage.
+# ---------------------------------------------------------------------------
+
+
+def test_g3_ambiguous_fallback_skips_without_mutating_either_lot(
+    conn, tmp_path, caplog,
+):
+    """Gap G3: when the resolved_lot_id lookup misses (no cloud_lots
+    mirror row) AND >1 active Pi lot exists for the product, the
+    fallback must REFUSE to apply — otherwise it picks the wrong lot
+    and silently mutates it.
+
+    Asserts: NEITHER lot is touched, WARNING logged, watermark NOT
+    advanced (TRANSIENT skip), and the /healthz ambiguous-skip counter
+    increments.
+    """
+    # Two active in-flight Pi lots for the same product. The cloud
+    # sends an override with a resolved_lot_id that has NO cloud_lots
+    # mirror row (G3 trigger).
+    conn.execute(
+        """
+        INSERT INTO products (
+            product_id, name, net_weight_g, certified,
+            created_at, updated_at
+        ) VALUES ('prod-multi', 'Multi-lot', 800.0, 1,
+                  datetime('now'), datetime('now'))
+        """,
+    )
+    conn.commit()
+    lot_a = _seed_pi_lot(
+        conn, product_id="prod-multi", pickup_event_id="pi-evt-A",
+        status="in_flight", current_weight_g=600.0,
+        last_seen_at="2026-04-26T09:00:00Z",
+    )
+    lot_b = _seed_pi_lot(
+        conn, product_id="prod-multi", pickup_event_id="pi-evt-B",
+        status="in_flight", current_weight_g=400.0,
+        last_seen_at="2026-04-26T11:00:00Z",  # would win the legacy heuristic
+    )
+    # NO cloud_lots mirror row for "cloud-lot-unhydrated".
+
+    state_path = tmp_path / "last_overrides_sync.json"
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=_override_payload(
+            "evt-amb", "prod-multi", "cloud-lot-unhydrated", 0.25,
+            updated_at="2026-04-26T12:00:00Z",
+        ),
+    )
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+
+    with caplog.at_level("WARNING"):
+        applied = poller.tick_once()
+
+    assert applied == 0
+    # NEITHER lot is mutated. The wrong-lot rewrite was the G3 bug.
+    # Verify weight AND last_seen_at — a regression that silently
+    # stamped last_seen_at without changing weight would still mutate
+    # state we care about.
+    row_a = conn.execute(
+        "SELECT current_weight_g, last_seen_at FROM lots WHERE lot_id = ?",
+        (lot_a,),
+    ).fetchone()
+    row_b = conn.execute(
+        "SELECT current_weight_g, last_seen_at FROM lots WHERE lot_id = ?",
+        (lot_b,),
+    ).fetchone()
+    assert row_a["current_weight_g"] == pytest.approx(600.0)
+    assert row_b["current_weight_g"] == pytest.approx(400.0)
+    assert row_a["last_seen_at"] == "2026-04-26T09:00:00Z"
+    assert row_b["last_seen_at"] == "2026-04-26T11:00:00Z"
+
+    # Watermark NOT advanced — ambiguous is TRANSIENT.
+    assert poller.high_watermark is None
+
+    # WARNING logged with override_id + product.
+    matching = [
+        r for r in caplog.records
+        if r.levelname == "WARNING" and "AMBIGUOUS" in r.getMessage()
+    ]
+    assert matching, "expected an AMBIGUOUS WARNING log"
+    msg = matching[0].getMessage()
+    assert "prod-multi" in msg
+    assert "evt-amb" in msg or "override_id" in msg
+
+    # /healthz counter incremented.
+    assert poller.skipped_ambiguous_count == 1
+
+
+def test_g3_single_lot_fallback_still_applies(conn, tmp_path):
+    """Gap G3: when only ONE active Pi lot exists for the product,
+    the fallback is unambiguous and should apply as before.
+
+    This is the safe case the G3 fix must NOT regress — the audit
+    only flagged the >1 case.
+    """
+    # Product + exactly one in_flight Pi lot. No cloud_lots mirror
+    # row (forces the fallback path).
+    conn.execute(
+        """
+        INSERT INTO products (
+            product_id, name, net_weight_g, certified,
+            created_at, updated_at
+        ) VALUES ('prod-solo', 'Solo', 1000.0, 1,
+                  datetime('now'), datetime('now'))
+        """,
+    )
+    conn.commit()
+    pi_lot = _seed_pi_lot(
+        conn, product_id="prod-solo", pickup_event_id="pi-evt-solo",
+        status="in_flight", current_weight_g=1000.0,
+    )
+
+    state_path = tmp_path / "last_overrides_sync.json"
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=_override_payload(
+            "evt-solo", "prod-solo", "cloud-lot-unhydrated-solo", 0.4,
+            updated_at="2026-04-26T13:00:00Z",
+        ),
+    )
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+    applied = poller.tick_once()
+
+    assert applied == 1
+    # 0.4 * 1000 = 400g.
+    row = conn.execute(
+        "SELECT current_weight_g FROM lots WHERE lot_id = ?", (pi_lot,),
+    ).fetchone()
+    assert row["current_weight_g"] == pytest.approx(400.0)
+    # Watermark advanced — clean apply.
+    assert poller.high_watermark == "2026-04-26T13:00:00Z"
+    # /healthz counter untouched.
+    assert poller.skipped_ambiguous_count == 0
+
+
+def test_g7_permanent_skip_zero_net_weight_advances_watermark(
+    conn, tmp_path, caplog,
+):
+    """Gap G7: a row with PERMANENT-skip reason (zero/null
+    net_weight_g) must advance the watermark — otherwise the cursor
+    freezes forever on a row no retry will ever apply."""
+    conn.execute(
+        """
+        INSERT INTO products (
+            product_id, name, net_weight_g, certified,
+            created_at, updated_at
+        ) VALUES ('prod-nonet', 'NoNet', NULL, 1,
+                  datetime('now'), datetime('now'))
+        """,
+    )
+    lot_id = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO lots (
+            lot_id, product_id, status, current_weight_g, shelf_id
+        ) VALUES (?, 'prod-nonet', 'on_shelf', 250.0, 'live_shelf')
+        """,
+        (lot_id,),
+    )
+    conn.commit()
+
+    state_path = tmp_path / "last_overrides_sync.json"
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=_override_payload(
+            "evt-nonet", "prod-nonet", "cloud-lot-nonet", 0.5,
+            updated_at="2026-04-26T14:00:00Z",
+        ),
+    )
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+    with caplog.at_level("WARNING"):
+        applied = poller.tick_once()
+
+    assert applied == 0
+    # G7: PERMANENT skips must advance the watermark.
+    assert poller.high_watermark == "2026-04-26T14:00:00Z"
+    # The lot's weight is untouched (apply was skipped).
+    row = conn.execute(
+        "SELECT current_weight_g FROM lots WHERE lot_id = ?", (lot_id,),
+    ).fetchone()
+    assert row["current_weight_g"] == pytest.approx(250.0)
+    # PERMANENT logged loudly.
+    assert any(
+        r.levelname == "WARNING" and "PERMANENT" in r.getMessage()
+        for r in caplog.records
+    )
+
+
+def test_g7_missing_product_is_transient_then_promoted_permanent(
+    conn, tmp_path, caplog, monkeypatch,
+):
+    """Gap G7: a row whose product_id doesn't exist on the Pi can mean
+    either (a) cloud product_sync hasn't caught up yet or (b) the
+    product was genuinely deleted in cloud. The poller can't tell from
+    inside, so it classifies the skip as TRANSIENT for the first few
+    consecutive ticks (giving product_sync time to hydrate), then
+    promotes to PERMANENT.
+
+    This test pins both halves: TRANSIENT freezes the watermark on
+    early ticks, PERMANENT advances it after the threshold.
+    """
+    # Pin the threshold low for the test (default is 5).
+    monkeypatch.setattr(eop_mod, "_PERMANENT_MISS_THRESHOLD", 3)
+
+    state_path = tmp_path / "last_overrides_sync.json"
+    payload = _override_payload(
+        "evt-ghost", "prod-ghost", "cloud-lot-ghost", 1.0,
+        updated_at="2026-04-26T15:00:00Z",
+    )
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value=payload)
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+
+    # Ticks 1 + 2: TRANSIENT — watermark frozen.
+    assert poller.tick_once() == 0
+    assert poller.high_watermark is None
+    assert poller.tick_once() == 0
+    assert poller.high_watermark is None
+
+    # Tick 3: promoted to PERMANENT — watermark advances.
+    with caplog.at_level("WARNING"):
+        assert poller.tick_once() == 0
+    assert poller.high_watermark == "2026-04-26T15:00:00Z"
+
+    # PERMANENT WARNING logged with the override_id + product_id.
+    promote_logs = [
+        r for r in caplog.records
+        if r.levelname == "WARNING"
+        and "missing on Pi" in r.getMessage()
+        and "PERMANENT" in r.getMessage()
+    ]
+    assert promote_logs, "expected a PERMANENT promotion WARNING"
+    assert "prod-ghost" in promote_logs[0].getMessage()
+
+
+def test_g7_state_write_oserror_reverts_state_and_leaves_backoff_elevated(
+    conn, tmp_path, monkeypatch, caplog,
+):
+    """Gap G4 (sibling to G2 G4): if state.write raises OSError after
+    a successful apply, the in-memory state must revert to the prior
+    watermark AND backoff must NOT reset (stay elevated). Otherwise
+    the next tick would loop on the stale in-memory cursor while disk
+    sees nothing — silently losing the override on next boot.
+    """
+    lot_id = _seed_product_and_lot(conn, net_weight_g=1000.0)
+    state_path = tmp_path / "last_overrides_sync.json"
+    # Prime state with a known prior watermark so we can detect a revert.
+    state_path.write_text(
+        json.dumps({"version": 1, "high_watermark": "2026-04-26T08:00:00Z"})
+    )
+
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=_override_payload(
+            "evt-oserr", "prod-1", "cloud-lot-oserr", 0.5,
+            updated_at="2026-04-26T16:00:00Z",
+        ),
+    )
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+    # Force-elevate the backoff so we can detect that it's left alone.
+    poller._backoff_s = 8.0  # noqa: SLF001
+
+    # Monkey-patch _SyncState.write to raise OSError on the apply path.
+    def boom(self, path):  # noqa: ARG001
+        raise OSError("simulated disk full")
+    monkeypatch.setattr(eop_mod._SyncState, "write", boom)
+
+    with caplog.at_level("WARNING"):
+        applied = poller.tick_once()
+
+    # The DB row was still updated (lot weight reflects the apply); the
+    # failure was purely on persisting the watermark.
+    assert applied == 1
+    row = conn.execute(
+        "SELECT current_weight_g FROM lots WHERE lot_id = ?", (lot_id,),
+    ).fetchone()
+    assert row["current_weight_g"] == pytest.approx(500.0)
+
+    # G4: in-memory state REVERTED to the prior watermark so disk and
+    # memory agree.
+    assert poller.high_watermark == "2026-04-26T08:00:00Z"
+
+    # G4: backoff is left elevated (NOT reset to INITIAL_BACKOFF_S).
+    assert poller._backoff_s == 8.0  # noqa: SLF001
+
+    # A WARNING was emitted noting the revert.
+    assert any(
+        r.levelname == "WARNING"
+        and "reverting" in r.getMessage().lower()
+        for r in caplog.records
+    )
+
+
+def test_g4_successful_state_write_resets_backoff(conn, tmp_path):
+    """Companion to the G4 OSError test: on the success path, backoff
+    DOES reset. This pins the ordering — reset happens AFTER state.write
+    completes, not before.
+    """
+    _ = _seed_product_and_lot(conn, net_weight_g=1000.0)
+    state_path = tmp_path / "last_overrides_sync.json"
+
+    client = MagicMock()
+    fake_fetch = MagicMock(
+        return_value=_override_payload(
+            "evt-ok", "prod-1", "cloud-lot-ok", 0.5,
+            updated_at="2026-04-26T17:00:00Z",
+        ),
+    )
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+    poller._backoff_s = 16.0  # noqa: SLF001 - start elevated
+    poller.tick_once()
+
+    # Successful write → backoff reset, watermark advanced.
+    assert poller._backoff_s == 1.0  # noqa: SLF001 - INITIAL_BACKOFF_S
+    assert poller.high_watermark == "2026-04-26T17:00:00Z"
+
+
+def test_g7_mixed_batch_permanent_in_middle_does_not_freeze_chain(
+    conn, tmp_path,
+):
+    """Gap G7 + G9 convergence: a batch with [APPLIED, PERMANENT,
+    APPLIED] (chronological) must advance the watermark all the way
+    to the last row — the PERMANENT in the middle must NOT freeze it.
+
+    Pre-G7 this was the bug: any skip (regardless of cause) froze the
+    cursor on the first non-applied row.
+    """
+    # Two products that apply cleanly + one with zero net_weight_g
+    # (PERMANENT skip) sandwiched between them.
+    _seed_product_and_lot(conn, product_id="prod-mid-a", net_weight_g=400.0)
+    _seed_product_and_lot(conn, product_id="prod-mid-c", net_weight_g=600.0)
+    # Product with NULL net_weight_g + matching lot → PERMANENT skip.
+    conn.execute(
+        """
+        INSERT INTO products (
+            product_id, name, net_weight_g, certified,
+            created_at, updated_at
+        ) VALUES ('prod-mid-b', 'NoNet', NULL, 1,
+                  datetime('now'), datetime('now'))
+        """,
+    )
+    lot_b = str(uuid.uuid4())
+    conn.execute(
+        """
+        INSERT INTO lots (
+            lot_id, product_id, status, current_weight_g, shelf_id
+        ) VALUES (?, 'prod-mid-b', 'on_shelf', 100.0, 'live_shelf')
+        """,
+        (lot_b,),
+    )
+    conn.commit()
+
+    # Build a payload with three rows in chronological order.
+    payload = {
+        "overrides": [
+            {
+                "override_id": "o-a", "client_event_id": "ea",
+                "updated_at": "2026-04-26T18:00:00Z",
+                "stock_qty_override": None,
+                "event_kind_override": None,
+                "is_voided": False, "macro_logging_enabled": True,
+                "resolved_lot_id": "cloud-lot-a",
+                "product_id": "prod-mid-a", "pi_event_id": None,
+            },
+            {
+                "override_id": "o-b", "client_event_id": "eb",
+                "updated_at": "2026-04-26T18:01:00Z",
+                "stock_qty_override": None,
+                "event_kind_override": None,
+                "is_voided": False, "macro_logging_enabled": True,
+                "resolved_lot_id": "cloud-lot-b",
+                "product_id": "prod-mid-b", "pi_event_id": None,
+            },
+            {
+                "override_id": "o-c", "client_event_id": "ec",
+                "updated_at": "2026-04-26T18:02:00Z",
+                "stock_qty_override": None,
+                "event_kind_override": None,
+                "is_voided": False, "macro_logging_enabled": True,
+                "resolved_lot_id": "cloud-lot-c",
+                "product_id": "prod-mid-c", "pi_event_id": None,
+            },
+        ],
+        "lots": [
+            {"lot_id": "cloud-lot-a", "product_id": "prod-mid-a",
+             "qty_containers": 0.5, "last_update_source": "manual",
+             "last_update_ts": "2026-04-26T18:00:00Z"},
+            {"lot_id": "cloud-lot-b", "product_id": "prod-mid-b",
+             "qty_containers": 0.5, "last_update_source": "manual",
+             "last_update_ts": "2026-04-26T18:01:00Z"},
+            {"lot_id": "cloud-lot-c", "product_id": "prod-mid-c",
+             "qty_containers": 0.5, "last_update_source": "manual",
+             "last_update_ts": "2026-04-26T18:02:00Z"},
+        ],
+    }
+    state_path = tmp_path / "last_overrides_sync.json"
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value=payload)
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+    applied = poller.tick_once()
+
+    # Two rows applied (A + C); the middle row was PERMANENT-skipped.
+    assert applied == 2
+    # Critical: watermark advanced PAST the PERMANENT row to row C's
+    # timestamp. Pre-G7 this would have frozen at A's timestamp.
+    assert poller.high_watermark == "2026-04-26T18:02:00Z"
+
+
+def test_g7_transient_in_middle_freezes_at_that_row(conn, tmp_path):
+    """Companion to the mixed-batch test: a TRANSIENT skip in the
+    middle of an ordered batch MUST freeze the watermark at the row
+    BEFORE the TRANSIENT — even if rows after it would apply cleanly.
+
+    This pins the policy: transient = freeze, permanent = advance,
+    even within a single batch.
+    """
+    # Three products: A applies, B causes TRANSIENT (no lot at all for
+    # product), C would apply.
+    _seed_product_and_lot(conn, product_id="prod-t-a", net_weight_g=400.0)
+    # B: product exists, NO lot → TRANSIENT (no active Pi lot).
+    conn.execute(
+        """
+        INSERT INTO products (
+            product_id, name, net_weight_g, certified,
+            created_at, updated_at
+        ) VALUES ('prod-t-b', 'B', 500.0, 1,
+                  datetime('now'), datetime('now'))
+        """,
+    )
+    conn.commit()
+    _seed_product_and_lot(conn, product_id="prod-t-c", net_weight_g=600.0)
+
+    payload = {
+        "overrides": [
+            {
+                "override_id": "o-ta", "client_event_id": "eta",
+                "updated_at": "2026-04-26T19:00:00Z",
+                "stock_qty_override": None,
+                "event_kind_override": None,
+                "is_voided": False, "macro_logging_enabled": True,
+                "resolved_lot_id": "cloud-lot-ta",
+                "product_id": "prod-t-a", "pi_event_id": None,
+            },
+            {
+                "override_id": "o-tb", "client_event_id": "etb",
+                "updated_at": "2026-04-26T19:01:00Z",
+                "stock_qty_override": None,
+                "event_kind_override": None,
+                "is_voided": False, "macro_logging_enabled": True,
+                "resolved_lot_id": "cloud-lot-tb",
+                "product_id": "prod-t-b", "pi_event_id": None,
+            },
+            {
+                "override_id": "o-tc", "client_event_id": "etc",
+                "updated_at": "2026-04-26T19:02:00Z",
+                "stock_qty_override": None,
+                "event_kind_override": None,
+                "is_voided": False, "macro_logging_enabled": True,
+                "resolved_lot_id": "cloud-lot-tc",
+                "product_id": "prod-t-c", "pi_event_id": None,
+            },
+        ],
+        "lots": [
+            {"lot_id": "cloud-lot-ta", "product_id": "prod-t-a",
+             "qty_containers": 0.5, "last_update_source": "manual",
+             "last_update_ts": "2026-04-26T19:00:00Z"},
+            {"lot_id": "cloud-lot-tb", "product_id": "prod-t-b",
+             "qty_containers": 0.5, "last_update_source": "manual",
+             "last_update_ts": "2026-04-26T19:01:00Z"},
+            {"lot_id": "cloud-lot-tc", "product_id": "prod-t-c",
+             "qty_containers": 0.5, "last_update_source": "manual",
+             "last_update_ts": "2026-04-26T19:02:00Z"},
+        ],
+    }
+    state_path = tmp_path / "last_overrides_sync.json"
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value=payload)
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+    )
+    applied = poller.tick_once()
+
+    # Only A applied; B was TRANSIENT (no lot), C never got a chance
+    # because the watermark logic stops at the first TRANSIENT.
+    # NOTE: the apply loop processes all three rows — C does apply to
+    # its lot — but the watermark only advances over the prefix UP TO
+    # the first TRANSIENT, so the cursor freezes at A.
+    assert applied == 2  # A and C apply mechanically
+    # Watermark frozen at A's timestamp (the last APPLIED before B's
+    # TRANSIENT skip).
+    assert poller.high_watermark == "2026-04-26T19:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# Gap G10: cold-start ordering — wait on products_synced Event
+# ---------------------------------------------------------------------------
+
+
+def test_g10_proceeds_immediately_when_event_already_set(conn, tmp_path):
+    """If product_sync has already latched the Event before our first
+    tick (the common case under steady-state operation), we proceed
+    without burning any wait time."""
+    import threading as _threading
+    import time as _time
+
+    _ = _seed_product_and_lot(conn)
+    state_path = tmp_path / "last_overrides_sync.json"
+    products_synced = _threading.Event()
+    products_synced.set()  # latched before tick fires
+
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value={"overrides": [], "lots": []})
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+        products_synced_event=products_synced,
+        products_synced_wait_s=10.0,  # would block tick for 10s if Event unset
+    )
+    t0 = _time.monotonic()
+    poller.tick_once()
+    elapsed = _time.monotonic() - t0
+    assert elapsed < 1.0, (
+        f"tick should have proceeded immediately; took {elapsed:.2f}s"
+    )
+    fake_fetch.assert_called_once()
+
+
+def test_g10_times_out_and_proceeds_with_warning(conn, tmp_path, caplog):
+    """If product_sync never latches the Event (failed boot fetch), we
+    log a WARNING and proceed after the configured timeout — the
+    TRANSIENT classification (G7) handles the residual races."""
+    import logging as _logging
+    import threading as _threading
+
+    _ = _seed_product_and_lot(conn)
+    state_path = tmp_path / "last_overrides_sync.json"
+    products_synced = _threading.Event()  # NEVER set
+
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value={"overrides": [], "lots": []})
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+        products_synced_event=products_synced,
+        products_synced_wait_s=0.05,  # 50ms test timeout
+    )
+    with caplog.at_level(_logging.WARNING, logger="server.cloud.event_overrides_poller"):
+        poller.tick_once()
+    fake_fetch.assert_called_once()
+    assert any(
+        "products_synced wait expired" in rec.message for rec in caplog.records
+    ), "WARNING about expired wait must be logged"
+
+
+def test_g10_waits_only_on_first_tick(conn, tmp_path):
+    """Second tick must NOT re-wait — by then either product_sync has
+    succeeded or it never will, and a second 5s sleep won't help."""
+    import threading as _threading
+    import time as _time
+
+    _ = _seed_product_and_lot(conn)
+    state_path = tmp_path / "last_overrides_sync.json"
+    products_synced = _threading.Event()  # NEVER set
+
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value={"overrides": [], "lots": []})
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+        products_synced_event=products_synced,
+        products_synced_wait_s=0.05,
+    )
+    # First tick — waits, then proceeds (>=50ms elapsed).
+    poller.tick_once()
+    # Second tick — must NOT wait.
+    t0 = _time.monotonic()
+    poller.tick_once()
+    elapsed = _time.monotonic() - t0
+    assert elapsed < 0.04, (
+        f"second tick must not wait; took {elapsed*1000:.0f}ms"
+    )
+
+
+def test_g10_no_event_passed_works_for_backcompat(conn, tmp_path):
+    """Callers that don't wire the Event (tests, old call sites) still
+    work — no wait, no AttributeError."""
+    _ = _seed_product_and_lot(conn)
+    state_path = tmp_path / "last_overrides_sync.json"
+    client = MagicMock()
+    fake_fetch = MagicMock(return_value={"overrides": [], "lots": []})
+    poller = EventOverridesPoller(
+        client, conn, state_path=state_path,
+        fetch_overrides_fn=fake_fetch,
+        # products_synced_event omitted
+    )
+    poller.tick_once()

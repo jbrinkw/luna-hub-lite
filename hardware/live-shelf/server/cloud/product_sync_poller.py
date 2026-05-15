@@ -147,6 +147,7 @@ class ProductSyncPoller(threading.Thread):
         poll_interval_s: float = POLL_INTERVAL_S,
         shutdown_event: Optional[threading.Event] = None,
         fetch_catalog_fn: Optional[Callable[..., Any]] = None,
+        products_synced_event: Optional[threading.Event] = None,
     ) -> None:
         super().__init__(daemon=True, name=self.name)
         self._client = client
@@ -163,6 +164,13 @@ class ProductSyncPoller(threading.Thread):
         # Load existing state eagerly so ``tick_once`` callers (tests)
         # see the correct watermark on the first run.
         self._state = _SyncState.from_file(self._state_path)
+        # Gap G10: cross-poller cold-start coordination. Other pollers
+        # (event_overrides, lot_snapshot) reference products that this
+        # poller mirrors locally. They wait up to ~5s on this Event
+        # before their first fetch so we don't race them into
+        # "product missing" skips on Pi boot. Set on every successful
+        # tick (idempotent — Event.set() is a no-op once latched).
+        self._products_synced = products_synced_event
 
     # ------------------------------------------------------------------
     # Public control
@@ -248,21 +256,52 @@ class ProductSyncPoller(threading.Thread):
                 if max_updated_at is None or row_ts > max_updated_at:
                     max_updated_at = row_ts
 
-        # Success = reset backoff. Persist the watermark ONLY if it
-        # advanced; an empty delta (count==0, max unchanged) leaves the
-        # file untouched so we don't churn disk.
-        self._backoff_s = INITIAL_BACKOFF_S
+        # Persist the watermark ONLY if it advanced; an empty delta
+        # (count==0, max unchanged) leaves the file untouched so we
+        # don't churn disk.
+        #
+        # Audit gap G4: order is `applied → persist → reset backoff`.
+        # If state.write raises (disk-full / RO mount / fsync error),
+        # revert the in-memory ``self._state`` to its prior value AND
+        # keep the backoff at its elevated value. Otherwise:
+        #   * The next tick would use the advanced in-memory watermark
+        #     and refuse to re-fetch the rows the cloud just returned.
+        #   * On Pi reboot, the on-disk file is stale and the gap is
+        #     permanent.
+        # Saving the prior state to a local before mutating means the
+        # OSError path restores both the watermark and the backoff
+        # exactly as if this tick had never advanced anything.
         if max_updated_at != self._state.high_watermark:
+            prior_state = self._state
             self._state = _SyncState(high_watermark=max_updated_at)
             try:
                 self._state.write(self._state_path)
             except OSError:
+                # Persistence failed — roll back the in-memory advance
+                # so the next tick re-fetches the same window. Leave
+                # the backoff untouched (the early-return below skips
+                # the reset) so the run loop throttles its retry pace.
+                self._state = prior_state
                 log.warning(
                     "product_sync: failed to persist state to %s; "
-                    "next boot will re-sync from prior watermark",
+                    "reverting in-memory watermark and keeping backoff "
+                    "elevated so the next tick retries the same window",
                     self._state_path,
                     exc_info=True,
                 )
+                return count
+
+        # Success (or no-op tick): reset backoff. We only reach this
+        # after the watermark either didn't move (no rows / empty delta)
+        # OR moved AND was successfully persisted to disk.
+        self._backoff_s = INITIAL_BACKOFF_S
+
+        # Gap G10: signal cold-start waiters. Set on every successful
+        # tick so a later subscriber that started waiting AFTER the
+        # first tick already fired still completes immediately. Calling
+        # ``set()`` on a latched Event is a cheap no-op.
+        if self._products_synced is not None:
+            self._products_synced.set()
 
         log.info(
             "product_sync: synced %d product(s) (Δ since %s)",

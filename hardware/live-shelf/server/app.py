@@ -2616,6 +2616,14 @@ def create_app(
                     "import-arm interception disabled",
                 )
 
+            # Gap G10: cold-start coordination Event. ``product_sync``
+            # sets this after its first successful tick; ``event_overrides``
+            # and ``lot_snapshot`` wait on it (≤5s) before their first
+            # fetch so a freshly-booted Pi doesn't fire those pollers
+            # against an empty Pi-local products table. Failures of any
+            # poller don't deadlock the others — the wait has a timeout.
+            products_synced_event: "threading.Event" = threading.Event()
+
             # Product catalog delta-sync poller. Pulls rows touched in
             # cloud ``chefbyte.products`` since the last high-watermark
             # every 30s, so new products imported via the LiveTrack
@@ -2629,6 +2637,7 @@ def create_app(
                     conn,
                     state_path=cfg.data_root / "last_product_sync.json",
                     db_lock=db_lock,
+                    products_synced_event=products_synced_event,
                 )
                 product_sync_poller.start()
                 cloud_pollers_started.append(product_sync_poller)
@@ -2654,6 +2663,7 @@ def create_app(
                     conn,
                     state_path=cfg.data_root / "last_overrides_sync.json",
                     db_lock=db_lock,
+                    products_synced_event=products_synced_event,
                 )
                 event_overrides_poller.start()
                 cloud_pollers_started.append(event_overrides_poller)
@@ -2688,6 +2698,7 @@ def create_app(
                     state_path=cfg.data_root / "last_lot_sync.json",
                     db_lock=db_lock,
                     settings_cache=_settings_cache,
+                    products_synced_event=products_synced_event,
                 )
                 lot_snapshot_poller.start()
                 cloud_pollers_started.append(lot_snapshot_poller)
@@ -2719,7 +2730,7 @@ def create_app(
                 )
                 pairings_sync_poller.start()
                 cloud_pollers_started.append(pairings_sync_poller)
-                log.info("pairings-sync poller started (interval=60s)")
+                log.info("pairings-sync poller started (interval=300s)")
             except Exception:  # pragma: no cover - defensive
                 log.exception(
                     "failed to start pairings-sync poller; "

@@ -27,7 +27,7 @@ import sqlite3
 import sys
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -36,7 +36,11 @@ if str(_ROOT) not in sys.path:
     sys.path.insert(0, str(_ROOT))
 
 from server.cloud.client import CloudError  # noqa: E402
-from server.cloud.lot_snapshot_poller import LotSnapshotPoller  # noqa: E402
+from server.cloud.lot_snapshot_poller import (  # noqa: E402
+    INITIAL_BACKOFF_S,
+    LotSnapshotPoller,
+    _SyncState,
+)
 from server.cloud.settings_cache import ClassifierSettings, ClassifierSettingsCache  # noqa: E402
 from server.storage.migrations import apply_migrations  # noqa: E402
 
@@ -375,3 +379,383 @@ def test_settings_cache_kept_on_settings_fetch_error(conn, tmp_path):
 
     # Cache retains its previous value
     assert cache.get().chefbyte_classifier_fallback_enabled is True
+
+
+# ---------------------------------------------------------------------------
+# Audit gap G2 — cloud catch-all reaper clears in_flight on a live row
+# (NOT a tombstone), Pi `lots.status='in_flight'` must flip to 'out'.
+# ---------------------------------------------------------------------------
+
+
+def _seed_inflight_pi_and_cloud(
+    conn: sqlite3.Connection,
+    *,
+    cloud_lot_id: str,
+    product_id: str = "prod-A",
+    pickup_event_id: str | None = None,
+    prior_in_flight_since: str = "2026-04-20T10:00:00Z",
+) -> tuple[str, str]:
+    """Helper: seed a Pi `lots` row in 'in_flight' + matching cloud_lots row.
+
+    Returns ``(pi_lot_id, pickup_event_id)`` for downstream assertions.
+    """
+    conn.execute(
+        "INSERT OR IGNORE INTO products (product_id, name, net_weight_g) "
+        "VALUES (?, ?, ?)",
+        (product_id, "Test Product", 100.0),
+    )
+    pi_lot_id = str(uuid.uuid4())
+    pe_id = pickup_event_id or str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, in_flight_since, "
+        "                  pickup_event_id) "
+        "VALUES (?, ?, 'in_flight', datetime('now'), ?)",
+        (pi_lot_id, product_id, pe_id),
+    )
+    conn.execute(
+        """
+        INSERT INTO cloud_lots (lot_id, product_id, qty_containers,
+                                in_flight_since, in_flight_kind,
+                                pickup_event_id, updated_at)
+        VALUES (?, ?, 1.0, ?, 'catch_all', ?, ?)
+        """,
+        (cloud_lot_id, product_id, prior_in_flight_since, pe_id,
+         prior_in_flight_since),
+    )
+    conn.commit()
+    return pi_lot_id, pe_id
+
+
+def test_g2_inflight_clear_flips_pi_lot_to_out(conn, tmp_path):
+    """Cloud reaper clears in_flight_since on a live (non-tombstoned) cloud lot.
+
+    The Pi `lots` row that maps to this cloud lot via pickup_event_id is
+    currently 'in_flight'. After processing the inbound update, that Pi
+    row must flip to status='out' with in_flight_since=NULL and
+    pickup_event_id=NULL. The cloud_lots mirror must reflect the cleared
+    markers too (in_flight_since IS NULL on the upserted row).
+    """
+    cloud_lot_id = "cloud-lot-reaped"
+    pi_lot_id, _pe_id = _seed_inflight_pi_and_cloud(
+        conn, cloud_lot_id=cloud_lot_id,
+        prior_in_flight_since="2026-04-20T10:00:00Z",
+    )
+
+    # Inbound update: in_flight_since cleared, deleted_at NULL (NOT a
+    # tombstone), updated_at bumped (the reaper signature).
+    reaped = _lot(
+        cloud_lot_id,
+        updated_at="2026-04-28T06:00:00Z",
+        deleted_at=None,
+    )
+    # _lot already sets in_flight_since=None and in_flight_kind=None and
+    # pickup_event_id=None — exactly what the reaper writes.
+    assert reaped["in_flight_since"] is None
+    assert reaped["pickup_event_id"] is None
+
+    fetch = MagicMock(return_value=_payload(reaped))
+    p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
+    applied = p.tick_once()
+
+    assert applied == 1
+    pi_row = conn.execute(
+        "SELECT status, in_flight_since, pickup_event_id "
+        "  FROM lots WHERE lot_id = ?",
+        (pi_lot_id,),
+    ).fetchone()
+    assert pi_row is not None
+    # Note: NOT 'lost' — the reaper didn't decide the lot was consumed;
+    # 'out' means cleanly resolved off-shelf.
+    assert pi_row["status"] == "out"
+    assert pi_row["in_flight_since"] is None
+    assert pi_row["pickup_event_id"] is None
+
+    # And the cloud_lots mirror reflects the cleared markers.
+    cl_row = conn.execute(
+        "SELECT in_flight_since FROM cloud_lots WHERE lot_id = ?",
+        (cloud_lot_id,),
+    ).fetchone()
+    assert cl_row is not None
+    assert cl_row["in_flight_since"] is None
+
+
+def test_g2_inflight_clear_no_matching_pi_row_still_upserts(conn, tmp_path):
+    """Reaper signature with no matching Pi `lots` row: no exception,
+    cloud_lots mirror still updates."""
+    cloud_lot_id = "cloud-lot-no-pi"
+    # Seed only the cloud_lots row — no corresponding Pi `lots` row.
+    conn.execute(
+        """
+        INSERT INTO cloud_lots (lot_id, product_id, qty_containers,
+                                in_flight_since, in_flight_kind,
+                                pickup_event_id, updated_at)
+        VALUES (?, 'prod-orphan', 1.0, '2026-04-20T10:00:00Z',
+                'catch_all', 'pe-orphan', '2026-04-20T10:00:00Z')
+        """,
+        (cloud_lot_id,),
+    )
+    conn.commit()
+
+    reaped = _lot(
+        cloud_lot_id,
+        product_id="prod-orphan",
+        updated_at="2026-04-28T06:00:00Z",
+    )
+    fetch = MagicMock(return_value=_payload(reaped))
+    p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
+
+    # Must not raise.
+    applied = p.tick_once()
+
+    assert applied == 1
+    cl_row = conn.execute(
+        "SELECT in_flight_since, updated_at FROM cloud_lots WHERE lot_id = ?",
+        (cloud_lot_id,),
+    ).fetchone()
+    assert cl_row is not None
+    assert cl_row["in_flight_since"] is None
+    assert cl_row["updated_at"] == "2026-04-28T06:00:00Z"
+
+    # Pi `lots` row count for the orphan product must remain ZERO — the
+    # in_flight-clear handler must NOT mint a phantom Pi lot when no
+    # matching row exists. (Reviewer coverage gap: original test only
+    # asserted "no exception"; this pins the negative observation.)
+    pi_count = conn.execute(
+        "SELECT COUNT(*) AS n FROM lots WHERE product_id = 'prod-orphan'",
+    ).fetchone()["n"]
+    assert pi_count == 0, (
+        f"orphan-cloud-lot path minted {pi_count} Pi lots — should be 0"
+    )
+
+
+def test_g2_only_triggers_on_actual_transition_not_first_insert(conn, tmp_path):
+    """Sanity: a brand-new cloud lot with in_flight_since=NULL must NOT
+    trigger the flip path — there's no prior in_flight state to clear.
+
+    If the detection code had a bug where it fired on EVERY row with
+    in_flight_since=NULL (rather than only on the transition from
+    not-NULL → NULL), it would falsely flip any existing in_flight Pi
+    lot that happened to share a product_id with this new cloud row.
+    """
+    # Seed a Pi in_flight lot for prod-A (no matching cloud_lots row
+    # yet — first time we see this product from cloud).
+    conn.execute(
+        "INSERT OR IGNORE INTO products (product_id, name, net_weight_g) "
+        "VALUES (?, ?, ?)",
+        ("prod-A", "Test Product", 100.0),
+    )
+    pi_lot_id = str(uuid.uuid4())
+    conn.execute(
+        "INSERT INTO lots (lot_id, product_id, status, in_flight_since, "
+        "                  pickup_event_id) "
+        "VALUES (?, 'prod-A', 'in_flight', datetime('now'), 'pe-existing')",
+        (pi_lot_id,),
+    )
+    conn.commit()
+
+    # A brand-new cloud lot for the same product — in_flight_since=NULL
+    # from the start (not a clear-transition; just a new live row).
+    fresh = _lot("cloud-fresh", product_id="prod-A",
+                 updated_at="2026-04-28T06:00:00Z")
+    fetch = MagicMock(return_value=_payload(fresh))
+    p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
+    p.tick_once()
+
+    # Pi lot must NOT have been flipped — no transition occurred.
+    pi_row = conn.execute(
+        "SELECT status FROM lots WHERE lot_id = ?", (pi_lot_id,),
+    ).fetchone()
+    assert pi_row["status"] == "in_flight"
+
+
+def test_g2_tombstone_path_still_flags_lost(conn, tmp_path):
+    """Regression: the refactor that extracted the Pi-lot lookup helper
+    must not have broken the tombstone-flags-lost behavior."""
+    cloud_lot_id = "cloud-lot-tomb"
+    pi_lot_id, _pe_id = _seed_inflight_pi_and_cloud(
+        conn, cloud_lot_id=cloud_lot_id,
+    )
+
+    dead = _lot(
+        cloud_lot_id,
+        updated_at="2026-04-28T06:00:00Z",
+        deleted_at="2026-04-28T06:00:00Z",
+    )
+    fetch = MagicMock(return_value=_payload(dead))
+    p = _poller(MagicMock(), conn, tmp_path / "s.json", fetch_fn=fetch)
+    p.tick_once()
+
+    pi_row = conn.execute(
+        "SELECT status, in_flight_since, pickup_event_id "
+        "FROM lots WHERE lot_id = ?",
+        (pi_lot_id,),
+    ).fetchone()
+    # Tombstone path still uses 'lost' (not 'out') — that's the
+    # cloud-deleted-the-lot signal vs reaper-resolved-it.
+    assert pi_row["status"] == "lost"
+    # Lots CHECK invariant: (status='in_flight') == (in_flight_since IS NOT NULL).
+    # Flipping status away from 'in_flight' MUST also clear the marker —
+    # otherwise the row violates its own constraint. (Reviewer coverage
+    # gap: original test only asserted status, not the markers.)
+    assert pi_row["in_flight_since"] is None
+    assert pi_row["pickup_event_id"] is None
+
+
+# ---------------------------------------------------------------------------
+# Audit gap G4 — state.write OSError must revert in-memory watermark and
+# NOT reset backoff (so the next tick refetches the same range with the
+# already-elevated retry cadence).
+# ---------------------------------------------------------------------------
+
+
+def test_g4_state_write_oserror_reverts_in_memory_state(conn, tmp_path):
+    """If `_state.write` raises OSError on a successful fetch+apply, the
+    in-memory watermark must revert to its prior value AND the backoff
+    must NOT be reset to INITIAL_BACKOFF_S — so the next tick refetches
+    the same range with the already-elevated retry cadence.
+    """
+    state_path = tmp_path / "s.json"
+    lot = _lot("lot-1", updated_at="2026-04-21T12:00:00Z")
+    fetch = MagicMock(return_value=_payload(lot))
+    p = _poller(MagicMock(), conn, state_path, fetch_fn=fetch)
+
+    # Simulate prior failed-tick backoff state: pretend a previous tick
+    # already advanced backoff once (so we can assert it's NOT clobbered
+    # back to INITIAL_BACKOFF_S on this failed-persist tick).
+    elevated = INITIAL_BACKOFF_S * 4
+    p._backoff_s = elevated
+    prior_watermark = p._state.high_watermark  # None on first run
+    assert prior_watermark is None
+
+    # Now make _SyncState.write blow up on every call.
+    with patch.object(_SyncState, "write",
+                      side_effect=OSError("disk full")):
+        p.tick_once()
+
+    # (a) In-memory watermark reverted to prior (None here).
+    assert p.high_watermark == prior_watermark
+    # (b) Backoff NOT reset — preserved at its elevated value.
+    assert p._backoff_s == elevated
+    # (c) On-disk state file was never successfully written.
+    assert not state_path.exists()
+
+    # (d) Next tick: same fetch returns same data — the cloud's
+    # in-memory state is reverted, so `updated_since` is still the prior
+    # watermark (None) and the same rows come back. cloud_lots already
+    # has the row from the first apply (in-memory tx committed), so this
+    # is an upsert — but the watermark advance + persist is the path we
+    # care about.
+    fetch.reset_mock()
+    # Allow persist to succeed this time.
+    p.tick_once()
+    # The second tick should have called fetch with the SAME
+    # updated_since the first tick used (prior watermark).
+    assert fetch.call_args_list[-1] == (
+        (p._client,), {"updated_since": prior_watermark}
+    )
+    # And the watermark is now persisted (backoff reset path took over).
+    assert p.high_watermark == "2026-04-21T12:00:00Z"
+    assert p._backoff_s == INITIAL_BACKOFF_S
+
+
+def test_g4_state_write_success_resets_backoff_after_persist(conn, tmp_path):
+    """Happy path regression: state.write succeeds → backoff resets to
+    INITIAL_BACKOFF_S and the on-disk file matches the in-memory state.
+    Pins that the reorder didn't break the success path."""
+    state_path = tmp_path / "s.json"
+    lot = _lot("lot-1", updated_at="2026-04-21T12:00:00Z")
+    fetch = MagicMock(return_value=_payload(lot))
+    p = _poller(MagicMock(), conn, state_path, fetch_fn=fetch)
+
+    # Seed an elevated backoff to prove the reset actually fires.
+    p._backoff_s = INITIAL_BACKOFF_S * 4
+
+    applied = p.tick_once()
+
+    assert applied == 1
+    assert p._backoff_s == INITIAL_BACKOFF_S
+    assert p.high_watermark == "2026-04-21T12:00:00Z"
+    assert state_path.exists()
+    saved = json.loads(state_path.read_text())
+    assert saved["high_watermark"] == "2026-04-21T12:00:00Z"
+
+
+# ---------------------------------------------------------------------------
+# Gap G10: cold-start ordering — wait on products_synced Event
+# ---------------------------------------------------------------------------
+
+
+def test_g10_proceeds_immediately_when_event_already_set(conn, tmp_path):
+    """Already-latched Event → no blocking on first tick."""
+    import threading as _threading
+    import time as _time
+
+    products_synced = _threading.Event()
+    products_synced.set()
+    fetch = MagicMock(return_value=_payload())
+    p = LotSnapshotPoller(
+        MagicMock(), conn, state_path=tmp_path / "s.json",
+        fetch_snapshot_fn=fetch,
+        products_synced_event=products_synced,
+        products_synced_wait_s=10.0,  # would block 10s if Event unset
+    )
+    t0 = _time.monotonic()
+    p.tick_once()
+    elapsed = _time.monotonic() - t0
+    assert elapsed < 1.0, f"tick should not block; took {elapsed:.2f}s"
+    fetch.assert_called_once()
+
+
+def test_g10_times_out_and_proceeds_with_warning(conn, tmp_path, caplog):
+    """Unset Event → timeout → WARNING + proceed."""
+    import logging as _logging
+    import threading as _threading
+
+    products_synced = _threading.Event()  # NEVER set
+    fetch = MagicMock(return_value=_payload())
+    p = LotSnapshotPoller(
+        MagicMock(), conn, state_path=tmp_path / "s.json",
+        fetch_snapshot_fn=fetch,
+        products_synced_event=products_synced,
+        products_synced_wait_s=0.05,
+    )
+    with caplog.at_level(_logging.WARNING, logger="server.cloud.lot_snapshot_poller"):
+        p.tick_once()
+    fetch.assert_called_once()
+    assert any(
+        "products_synced wait expired" in rec.message for rec in caplog.records
+    )
+
+
+def test_g10_waits_only_on_first_tick(conn, tmp_path):
+    """Second tick must not re-wait — saves a 5s sleep per tick forever."""
+    import threading as _threading
+    import time as _time
+
+    products_synced = _threading.Event()  # NEVER set
+    fetch = MagicMock(return_value=_payload())
+    p = LotSnapshotPoller(
+        MagicMock(), conn, state_path=tmp_path / "s.json",
+        fetch_snapshot_fn=fetch,
+        products_synced_event=products_synced,
+        products_synced_wait_s=0.05,
+    )
+    p.tick_once()  # waits 50ms, proceeds
+    t0 = _time.monotonic()
+    p.tick_once()
+    elapsed = _time.monotonic() - t0
+    assert elapsed < 0.04, (
+        f"second tick must not re-wait; took {elapsed*1000:.0f}ms"
+    )
+
+
+def test_g10_no_event_passed_works_for_backcompat(conn, tmp_path):
+    """Old callers (no Event) still work — sanity test for the optional
+    constructor argument shape."""
+    fetch = MagicMock(return_value=_payload())
+    p = LotSnapshotPoller(
+        MagicMock(), conn, state_path=tmp_path / "s.json",
+        fetch_snapshot_fn=fetch,
+        # products_synced_event omitted
+    )
+    p.tick_once()

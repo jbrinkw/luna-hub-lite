@@ -1,3 +1,22 @@
+# Watermark policy:
+#   This poller advances its high-watermark over ALL rows returned by
+#   the cloud, regardless of whether the local apply succeeded. Apply
+#   failures here are all local-DB-state issues:
+#     * pi_review_id refers to a row that doesn't exist locally — the
+#       Pi DB was wiped after the resolution was made; nothing to do
+#     * invalid status payload — malformed row, retrying won't help
+#     * local row already resolved — idempotent no-op
+#   None of these are recoverable by retrying on the next tick, so we
+#   surface them via WARNING logs and keep moving.
+#
+#   This is INTENTIONALLY DIFFERENT from
+#   ``event_overrides_poller.py``, which classifies skips into
+#   TRANSIENT (freeze watermark) vs PERMANENT (advance) — there the
+#   apply path can be blocked on legitimately transient state (cloud
+#   mirror not hydrated, product_sync still catching up, ambiguous lot
+#   fallback), so a smarter advance policy is worth the complexity.
+#   Review resolutions don't have that property.
+#
 """Pull cloud review_queue resolutions back to the Pi.
 
 Sync-audit finding #5 (path A): the cloud /chef/reviews UI lets the user
